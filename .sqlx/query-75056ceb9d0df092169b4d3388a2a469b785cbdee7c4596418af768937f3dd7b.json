@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO devices (id, label)\nVALUES (?, ?)\nON CONFLICT (id) DO UPDATE SET label = excluded.label;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "75056ceb9d0df092169b4d3388a2a469b785cbdee7c4596418af768937f3dd7b"
+}

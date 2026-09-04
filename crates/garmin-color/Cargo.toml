@@ -1,0 +1,17 @@
+[package]
+name = "garmin-color"
+description = "Backend-neutral Garmin Toolkit color vocabulary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cint.workspace = true
+palette.workspace = true
+thiserror.workspace = true

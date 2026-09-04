@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT CAST(foreign_keys AS INTEGER) AS foreign_keys\nFROM pragma_foreign_keys;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "foreign_keys",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "566e2ef083dc775a9955f96a54bccf97117ac1ef1978d8eaa6f397f74ebb1d5c"
+}

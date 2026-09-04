@@ -1,0 +1,81 @@
+[graph]
+all-features = true
+targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
+
+[advisories]
+version = 2
+ignore = []
+
+[licenses]
+version = 2
+allow = [
+    "AGPL-3.0-or-later",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.93
+private = { ignore = false }
+
+# The pinned crate bundles Unicode v3 text but declares the older SPDX identifier.
+[[licenses.clarify]]
+crate = "finl_unicode@1.4.0"
+expression = "(MIT OR Apache-2.0) AND Unicode-3.0"
+license-files = [
+    { path = "LICENSE-MIT", hash = 0x386ca1bc },
+    { path = "LICENSE-APACHE", hash = 0xb5518783 },
+    { path = "LICENSE-UNICODE", hash = 0x3475d800 },
+]
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+allow-wildcard-paths = true
+skip = [
+    { crate = "base64@0.23.1", reason = "Map unlocks and FormatJS use base64 0.23; other dependencies use 0.22" },
+    { crate = "bitflags@1.3.2", reason = "egui's SVG renderer uses png 0.17; the rest of the graph uses bitflags 2" },
+    { crate = "block-buffer@0.12.1", reason = "FormatJS uses SHA-2 0.11 while SQLx uses SHA-2 0.10" },
+    { crate = "calloop@0.13.0", reason = "winit and clipboard integration use adjacent Wayland client stacks" },
+    { crate = "calloop-wayland-source@0.3.0", reason = "winit and clipboard integration use adjacent Wayland stacks" },
+    { crate = "cpufeatures@0.2.17", reason = "SQLx uses cpufeatures 0.2 while BLAKE3 uses 0.3" },
+    { crate = "crypto-common@0.2.2", reason = "FormatJS uses SHA-2 0.11 while SQLx uses SHA-2 0.10" },
+    { crate = "darling@0.20.11", reason = "Remoc uses custom_debug 0.6; har and Ratatui use newer Darling releases" },
+    { crate = "darling_core@0.20.11", reason = "Remoc uses custom_debug 0.6; har and Ratatui use newer Darling releases" },
+    { crate = "darling_macro@0.20.11", reason = "Remoc uses custom_debug 0.6; har and Ratatui use newer Darling releases" },
+    { crate = "digest@0.11.3", reason = "FormatJS uses SHA-2 0.11 while SQLx uses SHA-2 0.10" },
+    { crate = "getrandom@0.3.4", reason = "egui and UUID generation use adjacent getrandom releases" },
+    { crate = "hashbrown@0.16.1", reason = "SQLx and Ratatui use adjacent hashbrown releases" },
+    { crate = "itertools@0.14.0", reason = "Ratatui and egui require adjacent itertools releases" },
+    { crate = "kurbo@0.11.3", reason = "egui's SVG renderer and painter use adjacent kurbo releases" },
+    { crate = "linux-raw-sys@0.4.15", reason = "the Wayland stack and nusb use adjacent rustix generations" },
+    { crate = "miniz_oxide@0.8.9", reason = "png and flate2 use adjacent miniz_oxide releases" },
+    { crate = "png@0.17.16", reason = "egui SVG and avatar imports use adjacent png releases" },
+    { crate = "pollster@0.4.0", reason = "rfd and eframe use adjacent pollster releases" },
+    { crate = "quick-xml@0.41.0", reason = "Wayland generation uses quick-xml 0.41; Garmin XML uses 0.42" },
+    { crate = "rustc-hash@1.1.0", reason = "wgpu and type-map use adjacent rustc-hash releases" },
+    { crate = "rustix@0.38.44", reason = "the Wayland stack and nusb use adjacent rustix generations" },
+    { crate = "sha2@0.11.0", reason = "FormatJS and toolkit verification use adjacent SHA-2 releases" },
+    { crate = "smithay-client-toolkit@0.19.2", reason = "winit and clipboard use adjacent Wayland client stacks" },
+    { crate = "syn@2.0.119", reason = "platform and SQLx macros use syn 2 while current derives use syn 3" },
+    { crate = "thiserror@1.0.69", reason = "the older Wayland client stack still uses thiserror 1" },
+    { crate = "thiserror-impl@1.0.69", reason = "the older Wayland client stack still uses thiserror 1" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# The released reporter still pins unicode-width 0.1; upstream uses the workspace's 0.2 line.
+allow-git = ["https://github.com/zkat/miette"]

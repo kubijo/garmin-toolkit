@@ -1,0 +1,62 @@
+[package]
+name = "garmin-gallery"
+description = "Development gallery for Garmin Toolkit terminal screens"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-or-later"
+
+[package.metadata.cargo-machete]
+# Build-time scene discovery hides these direct dependencies.
+ignored = ["garmin-color", "garmin-i18n"]
+
+[lib]
+path = "lib.rs"
+crate-type = ["dylib"]
+
+[[bin]]
+name = "gallery"
+path = "main.rs"
+
+[dependencies]
+crossterm = "=0.29.0"
+gallery = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.9.0", features = ["extras-svg"] }
+garmin-cli-tui = { path = "../../apps/garmin-cli/tui", features = ["gallery"] }
+garmin-color = { path = "../../crates/garmin-color" }
+garmin-i18n = { path = "../../crates/garmin-i18n" }
+garmin-progress = { path = "../../crates/garmin-progress" }
+garmin-ui = { path = "../../crates/garmin-ui" }
+nerd_font = "=0.3.1"
+num-traits = "=0.2.19"
+parley_ratatui = "=0.3.4"
+pollster = "=0.4.0"
+ratatui = "=0.30.2"
+
+[build-dependencies]
+gallery-build = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.9.0", package = "gallery-build" }
+
+[dev-dependencies]
+egui_kittest = { version = "=0.36.1", features = ["eframe"] }
+
+[workspace]
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+allow_attributes = "forbid"
+allow_attributes_without_reason = "forbid"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"

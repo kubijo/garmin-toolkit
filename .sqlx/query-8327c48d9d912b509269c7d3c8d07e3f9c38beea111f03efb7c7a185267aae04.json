@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO artifacts (id, digest, media_type)\nVALUES (?, ?, ?)\nON CONFLICT DO UPDATE SET id = excluded.id\nWHERE artifacts.digest = excluded.digest\nAND artifacts.media_type = excluded.media_type\nRETURNING id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "artifacts",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8327c48d9d912b509269c7d3c8d07e3f9c38beea111f03efb7c7a185267aae04"
+}

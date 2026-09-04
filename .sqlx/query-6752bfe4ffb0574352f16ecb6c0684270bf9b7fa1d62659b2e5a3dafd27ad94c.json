@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    (SELECT count(*) FROM artifact_blobs) AS blob_count,\n    (SELECT count(*) FROM artifacts) AS artifact_count,\n    (SELECT count(*) FROM acquisitions) AS acquisition_count,\n    (SELECT count(*) FROM observations) AS observation_count,\n    (SELECT count(*) FROM association_groups) AS association_count,\n    (\n        SELECT count(*)\n        FROM association_group_members\n    ) AS association_member_count;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "blob_count",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "artifact_count",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "acquisition_count",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "observation_count",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "association_count",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "association_member_count",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6752bfe4ffb0574352f16ecb6c0684270bf9b7fa1d62659b2e5a3dafd27ad94c"
+}

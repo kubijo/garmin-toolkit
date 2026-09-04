@@ -1,0 +1,3 @@
+[tool.sqlfluff.core]
+dialect = "sqlite"
+templater = "raw"

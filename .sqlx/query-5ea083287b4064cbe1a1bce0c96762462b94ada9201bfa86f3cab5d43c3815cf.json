@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO fit_creator_diagnostics (\n    observation_id,\n    manufacturer_id,\n    product_id,\n    serial_number,\n    product_name,\n    software_version_hundredths\n)\nVALUES (?, ?, ?, ?, ?, ?)\nON CONFLICT DO UPDATE SET observation_id = excluded.observation_id\nWHERE fit_creator_diagnostics.manufacturer_id = excluded.manufacturer_id\nAND fit_creator_diagnostics.product_id IS excluded.product_id\nAND fit_creator_diagnostics.serial_number IS excluded.serial_number\nAND fit_creator_diagnostics.product_name IS excluded.product_name\nAND fit_creator_diagnostics.software_version_hundredths\nIS excluded.software_version_hundredths\nRETURNING observation_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "observation_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "fit_creator_diagnostics",
+            "name": "observation_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5ea083287b4064cbe1a1bce0c96762462b94ada9201bfa86f3cab5d43c3815cf"
+}

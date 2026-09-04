@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO artifact_blobs (digest, byte_count, bytes)\nVALUES (?, ?, ?)\nON CONFLICT DO UPDATE SET digest = excluded.digest\nWHERE artifact_blobs.byte_count = excluded.byte_count\nAND artifact_blobs.bytes = excluded.bytes\nRETURNING digest;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "digest",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "artifact_blobs",
+            "name": "digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5976f38591376950b6186ff9297747157fb814a72aa2cc2782ecfaaa8f4bd67e"
+}

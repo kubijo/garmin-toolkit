@@ -1,0 +1,42 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    (\n        SELECT count(*)\n        FROM activity_laps\n        WHERE observation_id = ?\n    ) AS lap_count,\n    (\n        SELECT count(*)\n        FROM fit_creator_diagnostics\n        WHERE observation_id = ?\n    ) AS creator_count,\n    (\n        SELECT count(*)\n        FROM activity_track_points\n        WHERE observation_id = ?\n    ) AS track_point_count,\n    (\n        SELECT count(*)\n        FROM activity_timer_events\n        WHERE observation_id = ?\n    ) AS timer_event_count;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "lap_count",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "creator_count",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "track_point_count",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "timer_event_count",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b0d42377d2fa77f566a4d01fd0e8b5b9cba612f2570462abd18e4886694b74cf"
+}

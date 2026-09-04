@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT count(*) AS transformation_count\nFROM normalization_transformations\nWHERE normalization_run_id = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "transformation_count",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6a12082407748c6e3224849f26d2e5f918d4a05461ccce41f2b3b0b78d07c166"
+}

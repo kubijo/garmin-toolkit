@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    latitude_degrees,\n    longitude_degrees,\n    elevation_m\nFROM route_plan_points\nWHERE revision_id = ?\nORDER BY position\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "latitude_degrees",
+        "ordinal": 0,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "route_plan_points",
+            "name": "latitude_degrees"
+          }
+        }
+      },
+      {
+        "name": "longitude_degrees",
+        "ordinal": 1,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "route_plan_points",
+            "name": "longitude_degrees"
+          }
+        }
+      },
+      {
+        "name": "elevation_m",
+        "ordinal": 2,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "route_plan_points",
+            "name": "elevation_m"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "43f23ccf03373af6c71bca14aba549807bca55cf5cc3e34c5a2edd8a5e28145a"
+}

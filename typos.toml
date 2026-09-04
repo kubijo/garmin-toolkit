@@ -1,0 +1,12 @@
+[default.extend-words]
+HASS = "HASS"
+ratatui = "ratatui"
+
+[files]
+extend-exclude = []
+ignore-hidden = true
+ignore-files = true
+ignore-dot = true
+ignore-vcs = true
+ignore-global = true
+ignore-parent = true

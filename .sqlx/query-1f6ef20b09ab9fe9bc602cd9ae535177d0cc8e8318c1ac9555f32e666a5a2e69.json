@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM fit_creator_diagnostics\nWHERE observation_id = ?;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1f6ef20b09ab9fe9bc602cd9ae535177d0cc8e8318c1ac9555f32e666a5a2e69"
+}

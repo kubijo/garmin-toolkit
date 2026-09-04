@@ -1,0 +1,51 @@
+out = "../../.tmp/progress-gallery"
+size = "1920x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = false
+
+[[shot]]
+name = "concurrent-80x24"
+frames = 10
+scene = "progress::Concurrent files"
+knobs = { "terminal size" = "80 × 24" }
+
+[[shot]]
+name = "concurrent-100x30"
+frames = 10
+scene = "progress::Concurrent files"
+knobs = { "terminal size" = "100 × 30" }
+
+[[shot]]
+name = "concurrent-140x40"
+frames = 10
+scene = "progress::Concurrent files"
+knobs = { "terminal size" = "140 × 40" }
+
+[[shot]]
+name = "overflow-80x24"
+frames = 10
+scene = "progress::Active files overflow"
+knobs = { "terminal size" = "80 × 24" }
+
+[[shot]]
+name = "overflow-100x30"
+frames = 10
+scene = "progress::Active files overflow"
+knobs = { "terminal size" = "100 × 30" }
+
+[[shot]]
+name = "overflow-140x40"
+frames = 10
+scene = "progress::Active files overflow"
+knobs = { "terminal size" = "140 × 40" }
+
+[[shot]]
+name = "concurrent-later"
+scene = "progress::Concurrent files"
+frames = 90
+
+[[shot]]
+name = "completion-80x24"
+scene = "outcomes::Completion"
+knobs = { "terminal size" = "80 × 24" }

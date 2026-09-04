@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO normalization_runs (\n    id,\n    acquisition_id,\n    artifact_id,\n    owner_id,\n    parser_name,\n    parser_version,\n    schema_version,\n    outcome,\n    failure\n)\nVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\nON CONFLICT DO UPDATE SET id = excluded.id\nWHERE normalization_runs.acquisition_id = excluded.acquisition_id\nAND normalization_runs.artifact_id = excluded.artifact_id\nAND normalization_runs.owner_id = excluded.owner_id\nAND normalization_runs.parser_name = excluded.parser_name\nAND normalization_runs.parser_version = excluded.parser_version\nAND normalization_runs.schema_version = excluded.schema_version\nAND normalization_runs.outcome = excluded.outcome\nAND normalization_runs.failure IS excluded.failure\nRETURNING id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalization_runs",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fd034751a8becd7bffeb176d35fed22d21e0fc39718afce21973554e718c28fb"
+}

@@ -1,0 +1,185 @@
+out = "../../.tmp/gallery"
+size = "1920x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "device-selection"
+scene = "devices::Device selection"
+
+[[shot]]
+name = "no-devices"
+scene = "devices::No devices"
+
+[[shot]]
+name = "contact-garmin"
+scene = "screens::Contact garmin"
+
+[[shot]]
+name = "loading-components"
+scene = "screens::Loading components"
+
+[[shot]]
+name = "map-selection"
+scene = "screens::Map selection"
+
+[[shot]]
+name = "dry-run-confirmation"
+scene = "modes::Dry run confirmation"
+
+[[shot]]
+name = "dry-run-download"
+scene = "modes::Dry run download"
+
+[[shot]]
+name = "dry-run-authorize"
+scene = "modes::Dry run authorize"
+
+[[shot]]
+name = "dry-run-completion"
+scene = "modes::Dry run completion"
+
+[[shot]]
+name = "mock-confirmation"
+scene = "modes::Mock confirmation"
+
+[[shot]]
+name = "error-download-server-unavailable"
+scene = "errors::Download server unavailable"
+
+[[shot]]
+name = "error-download-request-rejected"
+scene = "errors::Download request rejected"
+
+[[shot]]
+name = "error-downloaded-file-incomplete"
+scene = "errors::Downloaded file incomplete"
+
+[[shot]]
+name = "error-downloaded-file-corrupt"
+scene = "errors::Downloaded file corrupt"
+
+[[shot]]
+name = "error-invalid-garmin-response"
+scene = "errors::Invalid garmin response"
+
+[[shot]]
+name = "error-garmin-service-unavailable"
+scene = "errors::Garmin service unavailable"
+
+[[shot]]
+name = "error-device-upload-failed"
+scene = "errors::Device upload failed"
+
+[[shot]]
+name = "error-device-verification-failed"
+scene = "errors::Device verification failed"
+
+[[shot]]
+name = "error-device-cleanup-failed"
+scene = "errors::Device cleanup failed"
+
+[[shot]]
+name = "error-mounted-device-operation-failed"
+scene = "errors::Mounted device operation failed"
+
+[[shot]]
+name = "error-removal-target-changed"
+scene = "errors::Removal target changed"
+
+[[shot]]
+name = "error-removal-rollback-failed"
+scene = "errors::Removal rollback failed"
+
+[[shot]]
+name = "error-removal-recovery-failed"
+scene = "errors::Removal recovery failed"
+
+[[shot]]
+name = "error-unexpected-failure"
+scene = "errors::Unexpected failure"
+
+[[shot]]
+name = "update-confirmation"
+scene = "screens::Update confirmation"
+
+[[shot]]
+name = "pipeline-probe-confirmation"
+scene = "screens::Pipeline probe confirmation"
+
+[[shot]]
+name = "removal-confirmation"
+scene = "removal::Confirmation"
+
+[[shot]]
+name = "removal-backup"
+scene = "removal::Backup"
+
+[[shot]]
+name = "removal-commit"
+scene = "removal::Commit"
+
+[[shot]]
+name = "removal-complete"
+scene = "removal::Complete"
+
+[[shot]]
+name = "removal-recovery-complete"
+scene = "removal::Recovery complete"
+
+[[shot]]
+name = "download"
+scene = "progress::Download"
+
+[[shot]]
+name = "backup"
+scene = "progress::Backup"
+
+[[shot]]
+name = "verify"
+scene = "progress::Verify"
+
+[[shot]]
+name = "authorize"
+scene = "progress::Authorize"
+
+[[shot]]
+name = "stage"
+scene = "progress::Stage"
+
+[[shot]]
+name = "commit"
+scene = "progress::Commit"
+
+[[shot]]
+name = "cleanup"
+scene = "progress::Cleanup"
+
+[[shot]]
+name = "pipeline-complete"
+scene = "progress::Pipeline complete"
+
+[[shot]]
+name = "link-benchmark"
+scene = "progress::Link benchmark"
+
+[[shot]]
+name = "link-benchmark-complete"
+scene = "progress::Link benchmark complete"
+
+[[shot]]
+name = "link-benchmark-finalize"
+scene = "progress::Link benchmark finalize"
+
+[[shot]]
+name = "link-benchmark-recovery"
+scene = "progress::Link benchmark recovery"
+
+[[shot]]
+name = "abort-confirmation"
+scene = "outcomes::Abort confirmation"
+
+[[shot]]
+name = "completion"
+scene = "outcomes::Completion"

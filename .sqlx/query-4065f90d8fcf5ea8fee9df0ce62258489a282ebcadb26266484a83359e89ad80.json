@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO users (\n    id,\n    role,\n    display_name,\n    accent_rgba,\n    avatar_artifact_id,\n    unit_system,\n    language,\n    theme\n)\nSELECT\n    ? AS id,\n    ? AS role,\n    ? AS display_name,\n    ? AS accent_rgba,\n    ? AS avatar_artifact_id,\n    ? AS unit_system,\n    ? AS language,\n    ? AS theme\nWHERE\n    ? IS NULL OR EXISTS (\n        SELECT 1\n        FROM profile_avatars\n        WHERE\n            profile_avatars.owner_id = ?\n            AND profile_avatars.original_artifact_id = ?\n    )\nON CONFLICT (id) DO UPDATE SET\n    role = excluded.role,\n    display_name = excluded.display_name,\n    accent_rgba = excluded.accent_rgba,\n    avatar_artifact_id = excluded.avatar_artifact_id,\n    unit_system = excluded.unit_system,\n    language = excluded.language,\n    theme = excluded.theme\nRETURNING id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4065f90d8fcf5ea8fee9df0ce62258489a282ebcadb26266484a83359e89ad80"
+}

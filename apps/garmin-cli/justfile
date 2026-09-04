@@ -1,0 +1,11 @@
+import '../../infra/just/common.just'
+
+set no-exit-message
+
+# Run the production CLI against real Garmin services and devices.
+run *args:
+    @just in-shell nix run {{ flake }}#garmin-cli -- "$@"
+
+# Run the CLI with disposable device and service adapters.
+demo *args:
+    @just in-shell nix run {{ flake }}#garmin-cli -- mock demo "$@"

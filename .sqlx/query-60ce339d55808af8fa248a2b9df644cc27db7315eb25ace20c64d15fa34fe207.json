@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO profile_avatars (\n    owner_id,\n    acquisition_id,\n    original_artifact_id,\n    thumbnail_artifact_id,\n    original_width,\n    original_height\n)\nVALUES (?, ?, ?, ?, ?, ?)\nON CONFLICT DO UPDATE SET owner_id = excluded.owner_id\nWHERE profile_avatars.acquisition_id = excluded.acquisition_id\nAND profile_avatars.original_artifact_id = excluded.original_artifact_id\nAND profile_avatars.thumbnail_artifact_id = excluded.thumbnail_artifact_id\nAND profile_avatars.original_width = excluded.original_width\nAND profile_avatars.original_height = excluded.original_height\nRETURNING owner_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "owner_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "profile_avatars",
+            "name": "owner_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "60ce339d55808af8fa248a2b9df644cc27db7315eb25ace20c64d15fa34fe207"
+}

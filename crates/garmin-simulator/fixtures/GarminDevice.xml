@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Device xmlns="http://www.garmin.com/xmlschemas/GarminDevice/v2">
+  <Model>
+    <PartNumber>006-BMOCK-00</PartNumber>
+    <SoftwareVersion>100</SoftwareVersion>
+    <Description>Garmin CLI Mock Device</Description>
+  </Model>
+  <Id>42</Id>
+  <MassStorageMode>
+    <DataType>
+      <Name>FIT_TYPE_4</Name>
+      <File>
+        <Specification>
+          <Identifier>FIT</Identifier>
+        </Specification>
+        <Location>
+          <Path>GARMIN/ACTIVITY</Path>
+          <FileExtension>FIT</FileExtension>
+        </Location>
+        <TransferDirection>OutputFromUnit</TransferDirection>
+      </File>
+    </DataType>
+  </MassStorageMode>
+</Device>

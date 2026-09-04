@@ -1,0 +1,25 @@
+# AI
+.agents
+.codex
+.claude
+
+# Local temp
+.tmp/
+
+# Build artifacts
+target/
+/result
+/result-*
+/dist/
+
+# Local environment and editor artifacts
+.direnv/
+.DS_Store
+*.log
+*.pyc
+**/*#
+*~
+
+# Device material can contain unit IDs and map unlocks.
+*.gma
+*.unl

@@ -1,0 +1,35 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    (\n        SELECT COUNT(*)\n        FROM route_plan_points\n        WHERE revision_id = ?\n    ) AS point_count,\n    (\n        SELECT COUNT(*)\n        FROM route_plan_cues\n        WHERE revision_id = ?\n    ) AS cue_count,\n    (\n        SELECT COUNT(*)\n        FROM route_plan_transformations\n        WHERE revision_id = ?\n    ) AS transformation_count\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "point_count",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "cue_count",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "transformation_count",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "36639eb8119e7180e6dfbace49594c82477c4c63ca5d0d0e5d60105d217b79a3"
+}

@@ -1,0 +1,105 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    route_plans.id AS plan_id,\n    route_plans.owner_id,\n    route_plan_heads.revision_id,\n    route_plan_revisions.created_at,\n    route_plan_revisions.name,\n    route_plan_revisions.sport,\n    route_plan_revisions.shape,\n    COUNT(route_plan_points.position) AS point_count\nFROM route_plans\nINNER JOIN route_plan_heads\n    ON route_plans.id = route_plan_heads.plan_id\nINNER JOIN route_plan_revisions\n    ON\n        route_plan_heads.revision_id = route_plan_revisions.id\n        AND route_plans.id = route_plan_revisions.plan_id\nINNER JOIN route_plan_points\n    ON route_plan_revisions.id = route_plan_points.revision_id\nWHERE route_plans.owner_id = ?\nGROUP BY route_plans.id, route_plan_heads.revision_id\nORDER BY route_plan_revisions.created_at DESC, route_plans.id DESC\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "plan_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plans",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "owner_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plans",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "name": "revision_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_heads",
+            "name": "revision_id"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "sport",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "sport"
+          }
+        }
+      },
+      {
+        "name": "shape",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "shape"
+          }
+        }
+      },
+      {
+        "name": "point_count",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "760a7a0ca5f0966e041e66f77c4667d45ffbb87da75b87589b49a8496b2c47b7"
+}

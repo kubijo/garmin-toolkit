@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    profile_avatars.original_artifact_id,\n    profile_avatars.thumbnail_artifact_id,\n    profile_avatars.original_width,\n    profile_avatars.original_height,\n    artifact_blobs.bytes AS thumbnail_bytes\nFROM users\nINNER JOIN profile_avatars\n    ON\n        users.id = profile_avatars.owner_id\n        AND users.avatar_artifact_id = profile_avatars.original_artifact_id\nINNER JOIN artifacts\n    ON profile_avatars.thumbnail_artifact_id = artifacts.id\nINNER JOIN artifact_blobs\n    ON artifacts.digest = artifact_blobs.digest\nWHERE users.id = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "original_artifact_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "profile_avatars",
+            "name": "original_artifact_id"
+          }
+        }
+      },
+      {
+        "name": "thumbnail_artifact_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "profile_avatars",
+            "name": "thumbnail_artifact_id"
+          }
+        }
+      },
+      {
+        "name": "original_width",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "profile_avatars",
+            "name": "original_width"
+          }
+        }
+      },
+      {
+        "name": "original_height",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "profile_avatars",
+            "name": "original_height"
+          }
+        }
+      },
+      {
+        "name": "thumbnail_bytes",
+        "ordinal": 4,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "artifact_blobs",
+            "name": "bytes"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "497dc45c70c48a9b54366f1843bc18ee58e92ca9af211202d262c31cdfc2c88c"
+}

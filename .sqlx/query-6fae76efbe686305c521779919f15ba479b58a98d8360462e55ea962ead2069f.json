@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT acquired_at\nFROM acquisitions\nWHERE owner_id = ? AND operation_id = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "acquired_at",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "acquired_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6fae76efbe686305c521779919f15ba479b58a98d8360462e55ea962ead2069f"
+}

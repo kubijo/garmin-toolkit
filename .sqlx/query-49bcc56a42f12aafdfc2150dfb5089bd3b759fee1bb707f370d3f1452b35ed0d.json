@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO activity_laps (\n    observation_id,\n    position,\n    start_ms,\n    end_ms,\n    elapsed_ms,\n    timer_ms,\n    distance_mm,\n    energy_kcal,\n    ascent_mm,\n    descent_mm,\n    average_speed_mm_s,\n    maximum_speed_mm_s,\n    average_heart_rate_bpm,\n    maximum_heart_rate_bpm,\n    average_cadence_rpm,\n    maximum_cadence_rpm,\n    average_power_w,\n    maximum_power_w\n)\nVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\nON CONFLICT DO UPDATE SET observation_id = excluded.observation_id\nWHERE activity_laps.start_ms = excluded.start_ms\nAND activity_laps.end_ms = excluded.end_ms\nAND activity_laps.elapsed_ms = excluded.elapsed_ms\nAND activity_laps.timer_ms = excluded.timer_ms\nAND activity_laps.distance_mm IS excluded.distance_mm\nAND activity_laps.energy_kcal IS excluded.energy_kcal\nAND activity_laps.ascent_mm IS excluded.ascent_mm\nAND activity_laps.descent_mm IS excluded.descent_mm\nAND activity_laps.average_speed_mm_s IS excluded.average_speed_mm_s\nAND activity_laps.maximum_speed_mm_s IS excluded.maximum_speed_mm_s\nAND activity_laps.average_heart_rate_bpm IS excluded.average_heart_rate_bpm\nAND activity_laps.maximum_heart_rate_bpm IS excluded.maximum_heart_rate_bpm\nAND activity_laps.average_cadence_rpm IS excluded.average_cadence_rpm\nAND activity_laps.maximum_cadence_rpm IS excluded.maximum_cadence_rpm\nAND activity_laps.average_power_w IS excluded.average_power_w\nAND activity_laps.maximum_power_w IS excluded.maximum_power_w\nRETURNING observation_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "observation_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "observation_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 18
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "49bcc56a42f12aafdfc2150dfb5089bd3b759fee1bb707f370d3f1452b35ed0d"
+}

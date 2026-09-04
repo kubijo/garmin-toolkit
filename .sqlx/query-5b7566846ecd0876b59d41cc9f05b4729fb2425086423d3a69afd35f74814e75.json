@@ -1,0 +1,134 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    timestamp_ms,\n    latitude_degrees,\n    longitude_degrees,\n    elevation_m,\n    distance_mm,\n    speed_mm_s,\n    heart_rate_bpm,\n    cadence_rpm,\n    power_w,\n    temperature_millicelsius\nFROM activity_track_points\nWHERE observation_id = ?\nORDER BY position;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "timestamp_ms",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_track_points",
+            "name": "timestamp_ms"
+          }
+        }
+      },
+      {
+        "name": "latitude_degrees",
+        "ordinal": 1,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "activity_track_points",
+            "name": "latitude_degrees"
+          }
+        }
+      },
+      {
+        "name": "longitude_degrees",
+        "ordinal": 2,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "activity_track_points",
+            "name": "longitude_degrees"
+          }
+        }
+      },
+      {
+        "name": "elevation_m",
+        "ordinal": 3,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "activity_track_points",
+            "name": "elevation_m"
+          }
+        }
+      },
+      {
+        "name": "distance_mm",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_track_points",
+            "name": "distance_mm"
+          }
+        }
+      },
+      {
+        "name": "speed_mm_s",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_track_points",
+            "name": "speed_mm_s"
+          }
+        }
+      },
+      {
+        "name": "heart_rate_bpm",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_track_points",
+            "name": "heart_rate_bpm"
+          }
+        }
+      },
+      {
+        "name": "cadence_rpm",
+        "ordinal": 7,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "activity_track_points",
+            "name": "cadence_rpm"
+          }
+        }
+      },
+      {
+        "name": "power_w",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_track_points",
+            "name": "power_w"
+          }
+        }
+      },
+      {
+        "name": "temperature_millicelsius",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_track_points",
+            "name": "temperature_millicelsius"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5b7566846ecd0876b59d41cc9f05b4729fb2425086423d3a69afd35f74814e75"
+}

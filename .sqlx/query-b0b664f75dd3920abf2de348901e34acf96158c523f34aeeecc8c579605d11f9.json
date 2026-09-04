@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE route_plan_heads\nSET revision_id = ?\nWHERE\n    plan_id = ?\n    AND revision_id = ?\n    AND EXISTS (\n        SELECT 1\n        FROM route_plans\n        WHERE\n            route_plans.id = route_plan_heads.plan_id\n            AND route_plans.owner_id = ?\n    )\nRETURNING plan_id\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "plan_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_heads",
+            "name": "plan_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b0b664f75dd3920abf2de348901e34acf96158c523f34aeeecc8c579605d11f9"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO acquisitions (\n    id,\n    operation_id,\n    artifact_id,\n    owner_id,\n    source_id,\n    source_identity,\n    acquired_at\n)\nVALUES (?, ?, ?, ?, ?, ?, ?)\nON CONFLICT DO UPDATE SET id = excluded.id\nWHERE acquisitions.id = excluded.id\nAND acquisitions.operation_id = excluded.operation_id\nAND acquisitions.artifact_id = excluded.artifact_id\nAND acquisitions.owner_id = excluded.owner_id\nAND acquisitions.source_id = excluded.source_id\nAND acquisitions.source_identity = excluded.source_identity\nAND acquisitions.acquired_at = excluded.acquired_at\nRETURNING id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "950bd069f63da581d87d927d488821548f49a61b62f2c5010b42dcf932d40c20"
+}

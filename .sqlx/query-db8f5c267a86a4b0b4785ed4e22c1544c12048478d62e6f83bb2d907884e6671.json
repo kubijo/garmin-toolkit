@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT CAST(journal_mode AS TEXT) AS journal_mode\nFROM pragma_journal_mode;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "journal_mode",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "db8f5c267a86a4b0b4785ed4e22c1544c12048478d62e6f83bb2d907884e6671"
+}

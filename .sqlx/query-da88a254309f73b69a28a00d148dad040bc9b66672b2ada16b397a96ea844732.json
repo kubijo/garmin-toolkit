@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE observations\nSET fingerprint_digest = zeroblob(32)\nWHERE id = ?;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "da88a254309f73b69a28a00d148dad040bc9b66672b2ada16b397a96ea844732"
+}

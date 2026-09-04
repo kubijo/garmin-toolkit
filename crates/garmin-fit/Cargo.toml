@@ -1,0 +1,22 @@
+[package]
+name = "garmin-fit"
+description = "FIT preservation and parsing boundary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+test-fixtures = []
+
+[dependencies]
+embedded-io-adapters.workspace = true
+geographiclib-rs.workspace = true
+garmin-model.workspace = true
+rustyfit.workspace = true
+thiserror.workspace = true

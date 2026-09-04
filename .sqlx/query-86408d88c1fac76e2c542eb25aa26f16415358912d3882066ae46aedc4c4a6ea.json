@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO route_plan_points (\n    revision_id,\n    position,\n    latitude_degrees,\n    longitude_degrees,\n    elevation_m\n)\nVALUES (?, ?, ?, ?, ?)\nON CONFLICT (revision_id, position) DO UPDATE SET\n    revision_id = excluded.revision_id\nWHERE route_plan_points.latitude_degrees = excluded.latitude_degrees\nAND route_plan_points.longitude_degrees = excluded.longitude_degrees\nAND route_plan_points.elevation_m IS excluded.elevation_m\nRETURNING position\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "position",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "route_plan_points",
+            "name": "position"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "86408d88c1fac76e2c542eb25aa26f16415358912d3882066ae46aedc4c4a6ea"
+}

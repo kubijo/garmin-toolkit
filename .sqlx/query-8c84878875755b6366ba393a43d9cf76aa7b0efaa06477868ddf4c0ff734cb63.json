@@ -1,0 +1,35 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    (SELECT count(*) FROM artifact_blobs) AS blob_count,\n    (\n        SELECT count(*)\n        FROM normalization_runs\n        WHERE outcome = 'failed'\n    ) AS failed_count,\n    (SELECT count(*) FROM observations) AS observation_count;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "blob_count",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "failed_count",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "observation_count",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8c84878875755b6366ba393a43d9cf76aa7b0efaa06477868ddf4c0ff734cb63"
+}

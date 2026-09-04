@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE users\nSET avatar_artifact_id = ?\nWHERE\n    id = ?\n    AND EXISTS (\n        SELECT 1\n        FROM profile_avatars\n        WHERE\n            profile_avatars.owner_id = users.id\n            AND profile_avatars.original_artifact_id = ?\n    )\nRETURNING id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8542e2a42269524bb2359418026e59a0c1dcb1bbf33a9e07b6738bb7f6251cc8"
+}

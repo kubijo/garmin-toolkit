@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO route_plans (id, owner_id)\nVALUES (?, ?)\nON CONFLICT (id) DO UPDATE SET id = excluded.id\nWHERE route_plans.owner_id = excluded.owner_id\nRETURNING id\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plans",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "81c208e8e545d209e0064baca6c905c2b178a63998bfbdef87db13e49d8709f5"
+}

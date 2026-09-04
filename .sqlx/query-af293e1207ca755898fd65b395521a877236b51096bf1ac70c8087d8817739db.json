@@ -1,0 +1,146 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    route_plans.id AS plan_id,\n    route_plans.owner_id,\n    route_plan_heads.revision_id,\n    route_plan_revisions.previous_revision_id,\n    route_plan_revisions.created_at,\n    route_plan_revisions.name,\n    route_plan_revisions.sport,\n    route_plan_revisions.shape,\n    route_plan_revisions.source_kind,\n    route_plan_revisions.source_artifact_id,\n    route_plan_revisions.source_revision_id\nFROM route_plans\nINNER JOIN route_plan_heads\n    ON route_plans.id = route_plan_heads.plan_id\nINNER JOIN route_plan_revisions\n    ON\n        route_plan_heads.revision_id = route_plan_revisions.id\n        AND route_plans.id = route_plan_revisions.plan_id\nWHERE route_plans.owner_id = ? AND route_plans.id = ?\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "plan_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plans",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "owner_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plans",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "name": "revision_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_heads",
+            "name": "revision_id"
+          }
+        }
+      },
+      {
+        "name": "previous_revision_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "previous_revision_id"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "sport",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "sport"
+          }
+        }
+      },
+      {
+        "name": "shape",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "shape"
+          }
+        }
+      },
+      {
+        "name": "source_kind",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "source_kind"
+          }
+        }
+      },
+      {
+        "name": "source_artifact_id",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "source_artifact_id"
+          }
+        }
+      },
+      {
+        "name": "source_revision_id",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "source_revision_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "af293e1207ca755898fd65b395521a877236b51096bf1ac70c8087d8817739db"
+}

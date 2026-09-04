@@ -1,0 +1,40 @@
+[package]
+name = "garmin-desktop"
+description = "Native Garmin Toolkit desktop application"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+demo = ["dep:garmin-fixtures"]
+
+[lints]
+workspace = true
+
+[dependencies]
+byte-unit.workspace = true
+blake3.workspace = true
+eframe = { workspace = true, features = ["default_fonts", "persistence", "wayland", "wgpu", "x11"] }
+futures-lite.workspace = true
+garmin-color.workspace = true
+garmin-device.workspace = true
+garmin-fixtures = { workspace = true, optional = true }
+garmin-i18n.workspace = true
+garmin-importer.workspace = true
+garmin-model.workspace = true
+garmin-services.workspace = true
+garmin-storage.workspace = true
+garmin-ui.workspace = true
+rfd.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+garmin-fit = { workspace = true, features = ["test-fixtures"] }
+quick-xml.workspace = true
+serde.workspace = true
+tempfile.workspace = true

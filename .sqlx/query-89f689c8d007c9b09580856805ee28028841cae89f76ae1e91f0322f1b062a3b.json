@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    timestamp_ms,\n    state\nFROM activity_timer_events\nWHERE observation_id = ?\nORDER BY position;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "timestamp_ms",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_timer_events",
+            "name": "timestamp_ms"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "activity_timer_events",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "89f689c8d007c9b09580856805ee28028841cae89f76ae1e91f0322f1b062a3b"
+}

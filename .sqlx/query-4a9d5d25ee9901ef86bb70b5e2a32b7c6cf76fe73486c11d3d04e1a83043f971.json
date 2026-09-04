@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO route_plan_revisions (\n    id,\n    plan_id,\n    previous_revision_id,\n    created_at,\n    name,\n    sport,\n    shape,\n    source_kind,\n    source_artifact_id,\n    source_revision_id\n)\nVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\nON CONFLICT (id) DO UPDATE SET id = excluded.id\nWHERE route_plan_revisions.plan_id = excluded.plan_id\nAND route_plan_revisions.previous_revision_id\nIS excluded.previous_revision_id\nAND route_plan_revisions.created_at = excluded.created_at\nAND route_plan_revisions.name = excluded.name\nAND route_plan_revisions.sport = excluded.sport\nAND route_plan_revisions.shape = excluded.shape\nAND route_plan_revisions.source_kind = excluded.source_kind\nAND route_plan_revisions.source_artifact_id IS excluded.source_artifact_id\nAND route_plan_revisions.source_revision_id IS excluded.source_revision_id\nRETURNING id\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4a9d5d25ee9901ef86bb70b5e2a32b7c6cf76fe73486c11d3d04e1a83043f971"
+}

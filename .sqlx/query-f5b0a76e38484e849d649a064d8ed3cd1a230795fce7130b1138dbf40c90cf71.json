@@ -1,0 +1,362 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    activity_projections.observation_id,\n    observations.owner_id,\n    observations.fingerprint_schema_name,\n    observations.fingerprint_schema_version,\n    observations.fingerprint_digest,\n    activity_projections.normalization_run_id,\n    activity_projections.sequence_position,\n    activity_projections.sport,\n    activity_projections.start_ms,\n    activity_projections.end_ms,\n    activity_projections.elapsed_ms,\n    activity_projections.timer_ms,\n    activity_projections.distance_mm,\n    activity_projections.energy_kcal,\n    activity_projections.ascent_mm,\n    activity_projections.descent_mm,\n    activity_projections.average_speed_mm_s,\n    activity_projections.maximum_speed_mm_s,\n    activity_projections.average_heart_rate_bpm,\n    activity_projections.maximum_heart_rate_bpm,\n    activity_projections.average_cadence_rpm,\n    activity_projections.maximum_cadence_rpm,\n    activity_projections.average_power_w,\n    activity_projections.maximum_power_w,\n    fit_creator_diagnostics.manufacturer_id,\n    fit_creator_diagnostics.product_id,\n    fit_creator_diagnostics.serial_number,\n    fit_creator_diagnostics.product_name,\n    fit_creator_diagnostics.software_version_hundredths\nFROM activity_projections\nINNER JOIN observations\n    ON activity_projections.observation_id = observations.id\nLEFT OUTER JOIN fit_creator_diagnostics\n    ON\n        activity_projections.observation_id\n        = fit_creator_diagnostics.observation_id\nWHERE observations.owner_id = ?\nORDER BY\n    activity_projections.start_ms DESC,\n    activity_projections.observation_id ASC;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "observation_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "observation_id"
+          }
+        }
+      },
+      {
+        "name": "owner_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "observations",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "name": "fingerprint_schema_name",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "observations",
+            "name": "fingerprint_schema_name"
+          }
+        }
+      },
+      {
+        "name": "fingerprint_schema_version",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "observations",
+            "name": "fingerprint_schema_version"
+          }
+        }
+      },
+      {
+        "name": "fingerprint_digest",
+        "ordinal": 4,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "observations",
+            "name": "fingerprint_digest"
+          }
+        }
+      },
+      {
+        "name": "normalization_run_id",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "normalization_run_id"
+          }
+        }
+      },
+      {
+        "name": "sequence_position",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "sequence_position"
+          }
+        }
+      },
+      {
+        "name": "sport",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "sport"
+          }
+        }
+      },
+      {
+        "name": "start_ms",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "start_ms"
+          }
+        }
+      },
+      {
+        "name": "end_ms",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "end_ms"
+          }
+        }
+      },
+      {
+        "name": "elapsed_ms",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "elapsed_ms"
+          }
+        }
+      },
+      {
+        "name": "timer_ms",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "timer_ms"
+          }
+        }
+      },
+      {
+        "name": "distance_mm",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "distance_mm"
+          }
+        }
+      },
+      {
+        "name": "energy_kcal",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "energy_kcal"
+          }
+        }
+      },
+      {
+        "name": "ascent_mm",
+        "ordinal": 14,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "ascent_mm"
+          }
+        }
+      },
+      {
+        "name": "descent_mm",
+        "ordinal": 15,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "descent_mm"
+          }
+        }
+      },
+      {
+        "name": "average_speed_mm_s",
+        "ordinal": 16,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "average_speed_mm_s"
+          }
+        }
+      },
+      {
+        "name": "maximum_speed_mm_s",
+        "ordinal": 17,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "maximum_speed_mm_s"
+          }
+        }
+      },
+      {
+        "name": "average_heart_rate_bpm",
+        "ordinal": 18,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "average_heart_rate_bpm"
+          }
+        }
+      },
+      {
+        "name": "maximum_heart_rate_bpm",
+        "ordinal": 19,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "maximum_heart_rate_bpm"
+          }
+        }
+      },
+      {
+        "name": "average_cadence_rpm",
+        "ordinal": 20,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "average_cadence_rpm"
+          }
+        }
+      },
+      {
+        "name": "maximum_cadence_rpm",
+        "ordinal": 21,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "maximum_cadence_rpm"
+          }
+        }
+      },
+      {
+        "name": "average_power_w",
+        "ordinal": 22,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "average_power_w"
+          }
+        }
+      },
+      {
+        "name": "maximum_power_w",
+        "ordinal": 23,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "maximum_power_w"
+          }
+        }
+      },
+      {
+        "name": "manufacturer_id",
+        "ordinal": 24,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "fit_creator_diagnostics",
+            "name": "manufacturer_id"
+          }
+        }
+      },
+      {
+        "name": "product_id",
+        "ordinal": 25,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "fit_creator_diagnostics",
+            "name": "product_id"
+          }
+        }
+      },
+      {
+        "name": "serial_number",
+        "ordinal": 26,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "fit_creator_diagnostics",
+            "name": "serial_number"
+          }
+        }
+      },
+      {
+        "name": "product_name",
+        "ordinal": 27,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "fit_creator_diagnostics",
+            "name": "product_name"
+          }
+        }
+      },
+      {
+        "name": "software_version_hundredths",
+        "ordinal": 28,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "fit_creator_diagnostics",
+            "name": "software_version_hundredths"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f5b0a76e38484e849d649a064d8ed3cd1a230795fce7130b1138dbf40c90cf71"
+}

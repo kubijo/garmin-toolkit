@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO association_group_members (\n    association_group_id,\n    observation_id,\n    owner_id,\n    kind\n)\nSELECT\n    ? AS association_group_id,\n    id,\n    owner_id,\n    kind\nFROM observations\nWHERE\n    owner_id = ?\n    AND kind = ?\n    AND fingerprint_schema_name = ?\n    AND fingerprint_schema_version = ?\n    AND fingerprint_digest = ?\nON CONFLICT DO NOTHING;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "2e6a8ae50a1294fb92ad3a75c0084e4d419114070e3fdd06c2977ba894734ed5"
+}

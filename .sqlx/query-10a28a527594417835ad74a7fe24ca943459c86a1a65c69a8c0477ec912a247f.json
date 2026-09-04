@@ -1,0 +1,206 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    start_ms,\n    end_ms,\n    elapsed_ms,\n    timer_ms,\n    distance_mm,\n    energy_kcal,\n    ascent_mm,\n    descent_mm,\n    average_speed_mm_s,\n    maximum_speed_mm_s,\n    average_heart_rate_bpm,\n    maximum_heart_rate_bpm,\n    average_cadence_rpm,\n    maximum_cadence_rpm,\n    average_power_w,\n    maximum_power_w\nFROM activity_laps\nWHERE observation_id = ?\nORDER BY position;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "start_ms",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "start_ms"
+          }
+        }
+      },
+      {
+        "name": "end_ms",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "end_ms"
+          }
+        }
+      },
+      {
+        "name": "elapsed_ms",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "elapsed_ms"
+          }
+        }
+      },
+      {
+        "name": "timer_ms",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "timer_ms"
+          }
+        }
+      },
+      {
+        "name": "distance_mm",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "distance_mm"
+          }
+        }
+      },
+      {
+        "name": "energy_kcal",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "energy_kcal"
+          }
+        }
+      },
+      {
+        "name": "ascent_mm",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "ascent_mm"
+          }
+        }
+      },
+      {
+        "name": "descent_mm",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "descent_mm"
+          }
+        }
+      },
+      {
+        "name": "average_speed_mm_s",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "average_speed_mm_s"
+          }
+        }
+      },
+      {
+        "name": "maximum_speed_mm_s",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "maximum_speed_mm_s"
+          }
+        }
+      },
+      {
+        "name": "average_heart_rate_bpm",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "average_heart_rate_bpm"
+          }
+        }
+      },
+      {
+        "name": "maximum_heart_rate_bpm",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "maximum_heart_rate_bpm"
+          }
+        }
+      },
+      {
+        "name": "average_cadence_rpm",
+        "ordinal": 12,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "average_cadence_rpm"
+          }
+        }
+      },
+      {
+        "name": "maximum_cadence_rpm",
+        "ordinal": 13,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "maximum_cadence_rpm"
+          }
+        }
+      },
+      {
+        "name": "average_power_w",
+        "ordinal": 14,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "average_power_w"
+          }
+        }
+      },
+      {
+        "name": "maximum_power_w",
+        "ordinal": 15,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "activity_laps",
+            "name": "maximum_power_w"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "10a28a527594417835ad74a7fe24ca943459c86a1a65c69a8c0477ec912a247f"
+}

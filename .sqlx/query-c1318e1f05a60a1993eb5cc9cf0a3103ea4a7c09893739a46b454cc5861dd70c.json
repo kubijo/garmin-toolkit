@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT artifact_blobs.bytes\nFROM artifacts\nINNER JOIN artifact_blobs ON artifacts.digest = artifact_blobs.digest\nWHERE artifacts.id = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "bytes",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "artifact_blobs",
+            "name": "bytes"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c1318e1f05a60a1993eb5cc9cf0a3103ea4a7c09893739a46b454cc5861dd70c"
+}

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    component_name,\n    component_version\nFROM route_plan_transformations\nWHERE revision_id = ?\nORDER BY position\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "component_name",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_transformations",
+            "name": "component_name"
+          }
+        }
+      },
+      {
+        "name": "component_version",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_transformations",
+            "name": "component_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "07dce20d9098ef6aa4d73312e382193dc3e3757e490f5ef6e55e4934087d282d"
+}

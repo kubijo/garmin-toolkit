@@ -1,0 +1,14 @@
+import '../../infra/just/common.just'
+
+# Run the selected deployment mode against a caller-owned base directory.
+run mode data_base:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case {{ quote(mode) }} in
+        production) package=garmin-hass ;;
+        demo) package=garmin-hass-demo ;;
+        *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
+    esac
+
+    exec env GARMIN_TOOLKIT_HASS_DATA_BASE={{ quote(data_base) }} nix run "{{ flake }}#${package}"

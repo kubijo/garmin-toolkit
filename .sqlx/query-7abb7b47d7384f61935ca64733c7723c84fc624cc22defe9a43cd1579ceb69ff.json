@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT CAST(timeout AS INTEGER) AS timeout\nFROM pragma_busy_timeout;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "timeout",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7abb7b47d7384f61935ca64733c7723c84fc624cc22defe9a43cd1579ceb69ff"
+}

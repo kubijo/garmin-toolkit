@@ -1,0 +1,17 @@
+[package]
+name = "garmin-service-api"
+description = "Typed client-host contracts for Garmin Toolkit applications"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+garmin-model.workspace = true
+remoc.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

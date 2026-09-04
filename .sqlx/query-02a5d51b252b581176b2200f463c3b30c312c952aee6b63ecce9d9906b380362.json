@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO activity_track_points (\n    observation_id,\n    position,\n    timestamp_ms,\n    latitude_degrees,\n    longitude_degrees,\n    elevation_m,\n    distance_mm,\n    speed_mm_s,\n    heart_rate_bpm,\n    cadence_rpm,\n    power_w,\n    temperature_millicelsius\n)\nVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\nON CONFLICT DO UPDATE SET observation_id = excluded.observation_id\nWHERE activity_track_points.timestamp_ms = excluded.timestamp_ms\nAND activity_track_points.latitude_degrees IS excluded.latitude_degrees\nAND activity_track_points.longitude_degrees IS excluded.longitude_degrees\nAND activity_track_points.elevation_m IS excluded.elevation_m\nAND activity_track_points.distance_mm IS excluded.distance_mm\nAND activity_track_points.speed_mm_s IS excluded.speed_mm_s\nAND activity_track_points.heart_rate_bpm IS excluded.heart_rate_bpm\nAND activity_track_points.cadence_rpm IS excluded.cadence_rpm\nAND activity_track_points.power_w IS excluded.power_w\nAND activity_track_points.temperature_millicelsius\nIS excluded.temperature_millicelsius\nRETURNING observation_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "observation_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "activity_track_points",
+            "name": "observation_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "02a5d51b252b581176b2200f463c3b30c312c952aee6b63ecce9d9906b380362"
+}

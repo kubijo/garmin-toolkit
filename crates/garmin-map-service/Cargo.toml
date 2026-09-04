@@ -1,0 +1,36 @@
+[package]
+name = "garmin-map-service"
+description = "Garmin map catalog and authorization service adapter"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+bytes.workspace = true
+futures-util.workspace = true
+garmin-capture.workspace = true
+garmin-model.workspace = true
+hex.workspace = true
+md-5.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+garmin-device.workspace = true
+indoc.workspace = true
+quick-xml.workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["md-5"]
+
+[lints]
+workspace = true

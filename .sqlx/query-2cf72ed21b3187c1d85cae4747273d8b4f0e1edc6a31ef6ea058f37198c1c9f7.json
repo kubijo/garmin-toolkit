@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO activity_timer_events (\n    observation_id,\n    position,\n    timestamp_ms,\n    state\n)\nVALUES (?, ?, ?, ?)\nON CONFLICT DO UPDATE SET observation_id = excluded.observation_id\nWHERE activity_timer_events.timestamp_ms = excluded.timestamp_ms\nAND activity_timer_events.state = excluded.state\nRETURNING observation_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "observation_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "activity_timer_events",
+            "name": "observation_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2cf72ed21b3187c1d85cae4747273d8b4f0e1edc6a31ef6ea058f37198c1c9f7"
+}

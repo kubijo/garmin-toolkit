@@ -1,0 +1,98 @@
+{
+  "maps": [
+    {
+      "release": "2099.10",
+      "displayName": "Mock Cycle Map Europe",
+      "mapType": "Cycling",
+      "filesToRemove": [
+        "Garmin/Mock/europe-old.img"
+      ],
+      "installOptions": [
+        {
+          "identifier": {
+            "regionPartNumber": "006-D9001-00"
+          },
+          "displayName": "Europe",
+          "isPreferred": true,
+          "files": [
+            {
+              "partNumber": "MOCK-europe.img",
+              "fileName": "europe.img",
+              "dataType": "MockMap",
+              "deliverableOptions": [
+                {
+                  "md5": "{{EUROPE_MD5}}",
+                  "sizeInBytes": 12000000,
+                  "type": "Full",
+                  "url": "{{BASE_URL}}downloads/europe.img"
+                }
+              ],
+              "externalFileName": "Garmin/Mock/europe.img"
+            },
+            {
+              "partNumber": "MOCK-europe-routing.img",
+              "fileName": "europe-routing.img",
+              "dataType": "MockMap",
+              "deliverableOptions": [
+                {
+                  "md5": "{{EUROPE_ROUTING_MD5}}",
+                  "sizeInBytes": 10000000,
+                  "type": "Full",
+                  "url": "{{BASE_URL}}downloads/europe-routing.img"
+                }
+              ],
+              "externalFileName": "Garmin/Mock/europe-routing.img"
+            }
+          ]
+        }
+      ],
+      "isReinstall": true,
+      "canUninstall": true,
+      "installationState": 1,
+      "geographicRegion": "Europe"
+    }
+  ],
+  "filesToRemove": [
+    "Garmin/Mock/global-old.img"
+  ],
+  "directoriesToRemove": [],
+  "bundledMaps": [
+    {
+      "release": "2099.20",
+      "displayName": "Mock Trail Map",
+      "mapType": "Trails",
+      "filesToRemove": [
+        "Garmin/Mock/trails-old.img"
+      ],
+      "installOptions": [
+        {
+          "identifier": {
+            "regionPartNumber": "006-D9002-00"
+          },
+          "displayName": "Worldwide trails",
+          "isPreferred": true,
+          "files": [
+            {
+              "partNumber": "MOCK-trails.img",
+              "fileName": "trails.img",
+              "dataType": "MockMap",
+              "deliverableOptions": [
+                {
+                  "md5": "{{TRAILS_MD5}}",
+                  "sizeInBytes": 8000000,
+                  "type": "Full",
+                  "url": "{{BASE_URL}}downloads/trails.img"
+                }
+              ],
+              "externalFileName": "Garmin/Mock/trails.img"
+            }
+          ]
+        }
+      ],
+      "isReinstall": false,
+      "canUninstall": true,
+      "installationState": 0,
+      "geographicRegion": "Worldwide"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+[package]
+name = "garmin-services"
+description = "Shared Garmin Toolkit application services"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+garmin-capture.workspace = true
+garmin-device.workspace = true
+garmin-map-service.workspace = true
+garmin-progress.workspace = true
+garmin-simulator.workspace = true
+garmin-update.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+garmin-fit.workspace = true
+garmin-gpx.workspace = true
+garmin-importer.workspace = true
+garmin-model.workspace = true
+garmin-route.workspace = true
+garmin-storage.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+garmin-fixtures.workspace = true
+garmin-fit = { workspace = true, features = ["test-fixtures"] }
+futures-lite.workspace = true
+tempfile.workspace = true

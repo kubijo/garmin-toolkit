@@ -1,0 +1,101 @@
+out = "../../.tmp/capacity-gallery"
+size = "1920x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = false
+
+[[shot]]
+name = "reading-storage"
+scene = "screens::Reading storage"
+knobs = { "terminal size" = "80 × 24" }
+frames = 10
+
+[[shot]]
+name = "tui-capacity-80"
+scene = "screens::Storage capacity"
+knobs = { "terminal size" = "80 × 24" }
+frames = 10
+
+[[shot]]
+name = "tui-capacity-140"
+scene = "screens::Storage capacity"
+knobs = { "terminal size" = "140 × 40" }
+frames = 10
+
+[[shot]]
+name = "tui-unavailable"
+scene = "screens::Storage unavailable"
+knobs = { "terminal size" = "80 × 24" }
+frames = 10
+
+[[shot]]
+name = "tui-refresh-failed"
+scene = "screens::Storage refresh failed"
+knobs = { "terminal size" = "80 × 24" }
+frames = 10
+
+[[shot]]
+name = "tui-long-storage"
+scene = "screens::Long Storage Metadata"
+knobs = { "terminal size" = "80 × 24" }
+frames = 10
+
+[[shot]]
+name = "tui-progress"
+scene = "progress::Download"
+knobs = { "terminal size" = "80 × 24" }
+frames = 10
+
+[[shot]]
+name = "tui-complete"
+scene = "outcomes::Completion"
+knobs = { "terminal size" = "80 × 24" }
+frames = 10
+
+[[shot]]
+name = "tui-recovery-complete"
+scene = "progress::Update recovery complete"
+knobs = { "terminal size" = "80 × 24" }
+frames = 10
+
+[[shot]]
+name = "gui-capacity-wide"
+scene = "capacity::Multiple storages"
+knobs = { "width" = "720" }
+
+[[shot]]
+name = "gui-capacity-narrow"
+scene = "capacity::Multiple storages"
+knobs = { "width" = "360" }
+
+[[shot]]
+name = "gui-unavailable"
+scene = "capacity::Unavailable"
+knobs = { "width" = "360" }
+
+[[shot]]
+name = "gui-long-storage"
+scene = "capacity::Long Metadata"
+knobs = { "width" = "360" }
+
+[[shot]]
+name = "gui-device-host-connecting"
+scene = "device_collection::Connecting"
+
+[[shot]]
+name = "gui-device-host-empty"
+scene = "device_collection::Empty"
+
+[[shot]]
+name = "gui-device-host-failure"
+scene = "device_collection::Failure"
+
+[[shot]]
+name = "capacity-error"
+scene = "errors::Storage check failed"
+knobs = { "terminal size" = "80 × 24" }
+
+[[shot]]
+name = "recovery-blocked"
+scene = "errors::Recovery evidence mismatch"
+knobs = { "terminal size" = "80 × 24" }

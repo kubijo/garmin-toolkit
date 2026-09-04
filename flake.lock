@@ -1,0 +1,376 @@
+{
+  "nodes": {
+    "crane": {
+      "locked": {
+        "lastModified": 1788465171,
+        "narHash": "sha256-Y1/TTVXjYXGF068IThQH9fPSZ0SIE74PABlUxnWTUH0=",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "eb35abda9f232cc6610b1d1e3200d15c49b7ac54",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ipetkov",
+        "repo": "crane",
+        "type": "github"
+      }
+    },
+    "crane-portable": {
+      "inputs": {
+        "nixpkgs": [
+          "desktop",
+          "nixpkgs-portable"
+        ]
+      },
+      "locked": {
+        "lastModified": 1714842444,
+        "narHash": "sha256-z4HeSYtEdYxKurrbxCMb8v/I1LYDHR/aFrZtGtgUgHw=",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "c5ee4371eea1728ef04bb09c79577c84d5e67a48",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ipetkov",
+        "ref": "v0.16.6",
+        "repo": "crane",
+        "type": "github"
+      }
+    },
+    "desktop": {
+      "inputs": {
+        "crane": [
+          "crane"
+        ],
+        "crane-portable": "crane-portable",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "nixpkgs-portable": "nixpkgs-portable",
+        "rust-overlay": [
+          "rust-overlay"
+        ]
+      },
+      "locked": {
+        "path": "./apps/garmin-desktop",
+        "type": "path"
+      },
+      "original": {
+        "path": "./apps/garmin-desktop",
+        "type": "path"
+      },
+      "parent": []
+    },
+    "fenix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-analyzer-src": "rust-analyzer-src"
+      },
+      "locked": {
+        "lastModified": 1788865058,
+        "narHash": "sha256-ZkvwEHlSa46BkODMEwHCEh9hlUC2igneJ+noEUn9ww4=",
+        "owner": "nix-community",
+        "repo": "fenix",
+        "rev": "9efa138447c5773995d98d9aafa9eba4982aceab",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "fenix",
+        "type": "github"
+      }
+    },
+    "flake-utils": {
+      "inputs": {
+        "systems": "systems"
+      },
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "gallery": {
+      "inputs": {
+        "crane": [
+          "crane"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": [
+          "rust-overlay"
+        ]
+      },
+      "locked": {
+        "path": "./infra/gallery",
+        "type": "path"
+      },
+      "original": {
+        "path": "./infra/gallery",
+        "type": "path"
+      },
+      "parent": []
+    },
+    "gritql-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1774843698,
+        "narHash": "sha256-/rftecZn0eH4tx07jJEf6ycEOrqpSAj+9st8c8+ySvU=",
+        "owner": "biomejs",
+        "repo": "gritql",
+        "rev": "dbe8faba29a3a7008805aa431534742070002933",
+        "type": "github"
+      },
+      "original": {
+        "owner": "biomejs",
+        "ref": "v0.0.3",
+        "repo": "gritql",
+        "type": "github"
+      }
+    },
+    "hass": {
+      "inputs": {
+        "crane": [
+          "crane"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": [
+          "rust-overlay"
+        ]
+      },
+      "locked": {
+        "path": "./apps/garmin-hass",
+        "type": "path"
+      },
+      "original": {
+        "path": "./apps/garmin-hass",
+        "type": "path"
+      },
+      "parent": []
+    },
+    "nix-gritql": {
+      "inputs": {
+        "gritql-src": "gritql-src",
+        "nixpkgs-pinned": [
+          "nix-tools",
+          "nixpkgs-pinned"
+        ],
+        "tree-sitter-facade-src": "tree-sitter-facade-src",
+        "tree-sitter-gritql-src": "tree-sitter-gritql-src",
+        "web-tree-sitter-src": "web-tree-sitter-src"
+      },
+      "locked": {
+        "lastModified": 1788859106,
+        "narHash": "sha256-ZIOXYadKm4uB5S5Ga0VCrhfhF3D579YiYtU2VEjGlMA=",
+        "owner": "kubijo",
+        "repo": "nix-gritql",
+        "rev": "a7dd64d332f5339653d79797a2e3ed3598452269",
+        "type": "github"
+      },
+      "original": {
+        "owner": "kubijo",
+        "ref": "v0.5.0",
+        "repo": "nix-gritql",
+        "type": "github"
+      }
+    },
+    "nix-tools": {
+      "inputs": {
+        "nix-gritql": "nix-gritql",
+        "nixpkgs-pinned": "nixpkgs-pinned"
+      },
+      "locked": {
+        "lastModified": 1788866936,
+        "narHash": "sha256-uoEI+8mq8Q1AgbB+QKEKOUHafNj2Gl3SH6Ik8KqzOwo=",
+        "owner": "kubijo",
+        "repo": "nix-tools",
+        "rev": "6f826ac80ca775e99b4f3be5858a83d5a140ab17",
+        "type": "github"
+      },
+      "original": {
+        "owner": "kubijo",
+        "repo": "nix-tools",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1788752844,
+        "narHash": "sha256-VaWGJ6+cIYN2erfSecbRV+4ljI185Ty2wUrXyvQbgOw=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "dc5d91f840324650bac8c379428c7037a416959a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs-pinned": {
+      "locked": {
+        "lastModified": 1788608636,
+        "narHash": "sha256-RqeFOwW329f4i1f5QlJgQYwgEZvxIHJsUYlzIBxsKsY=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "0af3d1402dec3fc7e93635e511d1f7428c89cebf",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs-portable": {
+      "locked": {
+        "lastModified": 1720535198,
+        "narHash": "sha256-zwVvxrdIzralnSbcpghA92tWu2DV2lwv89xZc8MTrbg=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "205fd4226592cc83fd4c0885a3e4c9c400efabb5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "release-23.11",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "crane": "crane",
+        "desktop": "desktop",
+        "fenix": "fenix",
+        "flake-utils": "flake-utils",
+        "gallery": "gallery",
+        "hass": "hass",
+        "nix-tools": "nix-tools",
+        "nixpkgs": "nixpkgs",
+        "rust-overlay": "rust-overlay"
+      }
+    },
+    "rust-analyzer-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1788794694,
+        "narHash": "sha256-FROpcpM2ELawfxhW8cWuz8m3dp/0EFAFCiK+AbNw95w=",
+        "owner": "rust-lang",
+        "repo": "rust-analyzer",
+        "rev": "48d839420745124e85140234ce783ccd90dab24e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "rust-lang",
+        "ref": "nightly",
+        "repo": "rust-analyzer",
+        "type": "github"
+      }
+    },
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1788851328,
+        "narHash": "sha256-YOwlUD0Lt/3SulKhZ7z0Jmgbq/DWh8SjnGwUlFSw+YM=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "6ae57a71bcb0bebc7a66cc2bd76942c4cf649167",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    },
+    "tree-sitter-facade-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1712338157,
+        "narHash": "sha256-nFvQK1NYEIuIwYp1oqGWRM0l2kqdumLTEJADmaocEdw=",
+        "owner": "getgrit",
+        "repo": "tree-sitter-facade",
+        "rev": "a26c147cea7049a5d2c42006499371b346b52648",
+        "type": "github"
+      },
+      "original": {
+        "owner": "getgrit",
+        "repo": "tree-sitter-facade",
+        "rev": "a26c147cea7049a5d2c42006499371b346b52648",
+        "type": "github"
+      }
+    },
+    "tree-sitter-gritql-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1736264979,
+        "narHash": "sha256-nfEvwujjELM7l7MmN/HG4X/zQNZN67mezI1Hn9YxMgM=",
+        "owner": "getgrit",
+        "repo": "tree-sitter-gritql",
+        "rev": "f9d98660bd7ae78c9211cb52e295bcd6531a8121",
+        "type": "github"
+      },
+      "original": {
+        "owner": "getgrit",
+        "repo": "tree-sitter-gritql",
+        "rev": "f9d98660bd7ae78c9211cb52e295bcd6531a8121",
+        "type": "github"
+      }
+    },
+    "web-tree-sitter-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1684939404,
+        "narHash": "sha256-0HBMN6mSdkVc0XVIr3LvY3npPfFn/tKUuXczUUtwR88=",
+        "owner": "getgrit",
+        "repo": "web-tree-sitter",
+        "rev": "9a01e452ec7288851405722e13aca08d9d90b6b1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "getgrit",
+        "repo": "web-tree-sitter",
+        "rev": "9a01e452ec7288851405722e13aca08d9d90b6b1",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

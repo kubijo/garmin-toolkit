@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT CAST(integrity_check AS TEXT) AS report\nFROM pragma_integrity_check;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "report",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "287b176db70946e96bf17772f256d52151bdcd5fa853e86464d31229deec03fa"
+}

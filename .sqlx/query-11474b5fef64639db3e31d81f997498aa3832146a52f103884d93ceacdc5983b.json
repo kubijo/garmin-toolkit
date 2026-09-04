@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO activity_projections (\n    observation_id,\n    normalization_run_id,\n    sequence_position,\n    sport,\n    start_ms,\n    end_ms,\n    elapsed_ms,\n    timer_ms,\n    distance_mm,\n    energy_kcal,\n    ascent_mm,\n    descent_mm,\n    average_speed_mm_s,\n    maximum_speed_mm_s,\n    average_heart_rate_bpm,\n    maximum_heart_rate_bpm,\n    average_cadence_rpm,\n    maximum_cadence_rpm,\n    average_power_w,\n    maximum_power_w\n)\nVALUES (\n    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n)\nON CONFLICT DO UPDATE SET observation_id = activity_projections.observation_id\nWHERE activity_projections.observation_id = excluded.observation_id\nAND activity_projections.normalization_run_id = excluded.normalization_run_id\nAND activity_projections.sequence_position = excluded.sequence_position\nAND activity_projections.sport = excluded.sport\nAND activity_projections.start_ms = excluded.start_ms\nAND activity_projections.end_ms = excluded.end_ms\nAND activity_projections.elapsed_ms = excluded.elapsed_ms\nAND activity_projections.timer_ms = excluded.timer_ms\nAND activity_projections.distance_mm IS excluded.distance_mm\nAND activity_projections.energy_kcal IS excluded.energy_kcal\nAND activity_projections.ascent_mm IS excluded.ascent_mm\nAND activity_projections.descent_mm IS excluded.descent_mm\nAND activity_projections.average_speed_mm_s IS excluded.average_speed_mm_s\nAND activity_projections.maximum_speed_mm_s IS excluded.maximum_speed_mm_s\nAND activity_projections.average_heart_rate_bpm\nIS excluded.average_heart_rate_bpm\nAND activity_projections.maximum_heart_rate_bpm\nIS excluded.maximum_heart_rate_bpm\nAND activity_projections.average_cadence_rpm IS excluded.average_cadence_rpm\nAND activity_projections.maximum_cadence_rpm IS excluded.maximum_cadence_rpm\nAND activity_projections.average_power_w IS excluded.average_power_w\nAND activity_projections.maximum_power_w IS excluded.maximum_power_w\nRETURNING observation_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "observation_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "observation_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 20
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "11474b5fef64639db3e31d81f997498aa3832146a52f103884d93ceacdc5983b"
+}

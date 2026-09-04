@@ -1,0 +1,18 @@
+[package]
+name = "garmin-gpx"
+description = "GPX adapter for route plans"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+geo-types.workspace = true
+gpx-format.workspace = true
+garmin-model.workspace = true
+thiserror.workspace = true

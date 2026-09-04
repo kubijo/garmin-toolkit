@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO observations (\n    id,\n    owner_id,\n    normalization_run_id,\n    normalization_outcome,\n    kind,\n    observed_at,\n    fingerprint_schema_name,\n    fingerprint_schema_version,\n    fingerprint_digest\n)\nVALUES (?, ?, ?, 'succeeded', ?, ?, ?, ?, ?)\nON CONFLICT DO UPDATE SET id = excluded.id\nWHERE observations.owner_id = excluded.owner_id\nAND observations.normalization_run_id = excluded.normalization_run_id\nAND observations.normalization_outcome = excluded.normalization_outcome\nAND observations.kind = excluded.kind\nAND observations.observed_at IS excluded.observed_at\nAND observations.fingerprint_schema_name = excluded.fingerprint_schema_name\nAND observations.fingerprint_schema_version\n= excluded.fingerprint_schema_version\nAND observations.fingerprint_digest = excluded.fingerprint_digest\nRETURNING id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "observations",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "334f7a4ec4edf04d3dac317e8382af82a5553a4b2efd12d98fc3b6cd250c0dbd"
+}

@@ -1,0 +1,40 @@
+import '../../infra/just/common.just'
+
+# Run production data or an isolated, deterministic demo corpus.
+run mode:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case {{ quote(mode) }} in
+        production) features=() ;;
+        demo) features=(--features demo) ;;
+        *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
+    esac
+
+    exec just in-shell cargo run --locked -p garmin-desktop "${features[@]}"
+
+# Write the selected AppImage to dist.
+appimage mode:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case {{ quote(mode) }} in
+        production) app=desktop-appimage ;;
+        demo) app=desktop-demo-appimage ;;
+        *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
+    esac
+
+    exec just in-shell nix run "{{ flake }}#${app}"
+
+# Build the selected Flatpak bundle into dist.
+flatpak mode:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case {{ quote(mode) }} in
+        production) app=desktop-flatpak ;;
+        demo) app=desktop-demo-flatpak ;;
+        *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
+    esac
+
+    exec just in-shell nix run "{{ flake }}#${app}"

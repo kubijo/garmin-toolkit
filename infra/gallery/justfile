@@ -1,0 +1,50 @@
+import '../just/common.just'
+
+export CARGO_TARGET_DIR := repository_root / "target/gallery"
+
+# Run the native gallery from the current development environment.
+run:
+    cargo run --locked --manifest-path Cargo.toml
+
+# Run the native gallery with scene hot reload.
+hot:
+    cargo run --locked --manifest-path Cargo.toml -- --hot
+
+# Type-check the gallery and every discovered scene.
+check:
+    cargo check --locked --manifest-path Cargo.toml --all-features
+
+# Lint the gallery host, adapter, and every discovered scene.
+lint:
+    cargo clippy --locked --manifest-path Cargo.toml --all-targets --all-features -- --deny warnings
+
+# Link the gallery host and reloadable scene library.
+build:
+    cargo build --locked --manifest-path Cargo.toml --all-features
+
+# Render one scene without opening a window.
+render SCENE OUT SIZE='1280x720':
+    WGPU_BACKEND=vulkan cargo run --quiet --locked \
+        --manifest-path Cargo.toml --all-features -- \
+        --scene "{{ SCENE }}" --render "{{ OUT }}" --size {{ SIZE }}
+
+# Render the maintained capture recipe without opening a window.
+capture FILE='capture.toml' OUT='':
+    WGPU_BACKEND=vulkan cargo run --quiet --locked \
+        --manifest-path Cargo.toml --all-features -- \
+        --capture "{{ FILE }}" {{ if OUT == '' { '' } else { '--out "' + OUT + '"' } }}
+
+# Reproduce the maintained capture inside the pinned Nix environment.
+capture-nix FILE='capture.toml' OUT='':
+    WGPU_BACKEND=vulkan nix develop --command cargo run --quiet --locked \
+        --manifest-path Cargo.toml --all-features -- \
+        --capture "{{ FILE }}" {{ if OUT == '' { '' } else { '--out "' + OUT + '"' } }}
+
+# Build the isolated gallery and its lints through Nix.
+ci:
+    nix build -L {{ flake }}#checks.{{ arch() }}-linux.gallery
+
+# List a scene's configurable capture values.
+knobs SCENE:
+    cargo run --quiet --locked --manifest-path Cargo.toml --all-features -- \
+        --scene "{{ SCENE }}" --list-knobs

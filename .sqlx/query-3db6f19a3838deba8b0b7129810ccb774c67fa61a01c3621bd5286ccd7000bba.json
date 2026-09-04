@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO route_plan_heads (plan_id, revision_id)\nVALUES (?, ?)\nON CONFLICT (plan_id) DO UPDATE SET plan_id = excluded.plan_id\nWHERE route_plan_heads.revision_id = excluded.revision_id\nRETURNING plan_id\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "plan_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_heads",
+            "name": "plan_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3db6f19a3838deba8b0b7129810ccb774c67fa61a01c3621bd5286ccd7000bba"
+}

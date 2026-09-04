@@ -1,0 +1,28 @@
+[package]
+name = "garmin-ui"
+description = "Shared Garmin Toolkit egui components"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+garmin-brand.workspace = true
+cint.workspace = true
+garmin-color.workspace = true
+egui.workspace = true
+egui_extras.workspace = true
+garmin-i18n.workspace = true
+
+[build-dependencies]
+phosphor-svgs.workspace = true
+usvg.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+usvg.workspace = true

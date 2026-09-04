@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO normalization_transformations (\n    normalization_run_id,\n    position,\n    component_name,\n    component_version\n)\nVALUES (?, ?, ?, ?)\nON CONFLICT DO UPDATE SET normalization_run_id = excluded.normalization_run_id\nWHERE normalization_transformations.component_name = excluded.component_name\nAND normalization_transformations.component_version = excluded.component_version\nRETURNING normalization_run_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "normalization_run_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalization_transformations",
+            "name": "normalization_run_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "de42c3d20a1e0ac09a1c484cb8bb037bbb225dac6d55c5c8b33970822a9e6e65"
+}

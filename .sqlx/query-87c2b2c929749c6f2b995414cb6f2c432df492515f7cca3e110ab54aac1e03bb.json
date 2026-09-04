@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT count(DISTINCT normalization_runs.artifact_id) AS artifact_count\nFROM observations\nINNER JOIN normalization_runs\n    ON observations.normalization_run_id = normalization_runs.id\nWHERE\n    observations.owner_id = ?\n    AND observations.kind = ?\n    AND observations.fingerprint_schema_name = ?\n    AND observations.fingerprint_schema_version = ?\n    AND observations.fingerprint_digest = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "artifact_count",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "87c2b2c929749c6f2b995414cb6f2c432df492515f7cca3e110ab54aac1e03bb"
+}

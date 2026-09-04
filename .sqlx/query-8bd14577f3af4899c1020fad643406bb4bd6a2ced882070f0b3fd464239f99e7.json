@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    point_position,\n    instruction AS cue_text\nFROM route_plan_cues\nWHERE revision_id = ?\nORDER BY position\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "point_position",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "route_plan_cues",
+            "name": "point_position"
+          }
+        }
+      },
+      {
+        "name": "cue_text",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_cues",
+            "name": "instruction"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "8bd14577f3af4899c1020fad643406bb4bd6a2ced882070f0b3fd464239f99e7"
+}

@@ -1,0 +1,20 @@
+id = "fit-development-activities-v1"
+purpose = "Small activity corpus for development and integration tests"
+origin = "synthetic"
+generator = "garmin-fit::fixture::ActivityCase"
+generator_revision = 1
+license = "AGPL-3.0-or-later"
+publication_approved = true
+committed_inputs = []
+expected_profiles = 3
+expected_activities = 6
+expected_sports = ["running", "cycling"]
+
+cases = [
+    "2026-05-28-morning-run.fit",
+    "2026-05-29-commute-ride.fit",
+    "2026-05-30-tempo-run.fit",
+    "2026-05-31-endurance-ride.fit",
+    "2026-06-01-trail-run.fit",
+    "2026-06-02-recovery-ride.fit",
+]

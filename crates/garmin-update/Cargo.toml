@@ -1,0 +1,40 @@
+[package]
+name = "garmin-update"
+description = "Garmin map planning, transfer, installation, removal, and recovery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+byte-unit.workspace = true
+futures-util.workspace = true
+fs2.workspace = true
+garmin-capture.workspace = true
+garmin-device.workspace = true
+garmin-model.workspace = true
+garmin-progress.workspace = true
+hex.workspace = true
+md-5.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tempfile.workspace = true
+url.workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["md-5"]
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+mtp-rs = { workspace = true, features = ["virtual-device"] }

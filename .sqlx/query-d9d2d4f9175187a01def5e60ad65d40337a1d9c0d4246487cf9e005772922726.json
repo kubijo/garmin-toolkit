@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT count(*) AS observation_count\nFROM observations\nWHERE normalization_run_id = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "observation_count",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d9d2d4f9175187a01def5e60ad65d40337a1d9c0d4246487cf9e005772922726"
+}

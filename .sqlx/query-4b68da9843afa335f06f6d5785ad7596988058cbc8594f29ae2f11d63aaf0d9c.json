@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO sources (id, owner_id, label, device_id)\nVALUES (?, ?, ?, ?)\nON CONFLICT (id) DO UPDATE SET\n    label = excluded.label,\n    device_id = excluded.device_id\nWHERE sources.owner_id = excluded.owner_id\nRETURNING id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sources",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4b68da9843afa335f06f6d5785ad7596988058cbc8594f29ae2f11d63aaf0d9c"
+}

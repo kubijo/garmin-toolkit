@@ -1,0 +1,411 @@
+{
+  "+20FW7RyTg": {
+    "source": "Devices",
+    "translation": "Zařízení"
+  },
+  "+TYpDCZs6N": {
+    "source": "{storage} · read-only",
+    "translation": "{storage} · pouze pro čtení"
+  },
+  "+yIILNGqKd": {
+    "source": "Unit system",
+    "translation": "Systém jednotek"
+  },
+  "/2YcdaMCfi": {
+    "source": "Abort and quit",
+    "translation": "Přerušit a ukončit"
+  },
+  "/P2gshr7DR": {
+    "source": "Create a profile",
+    "translation": "Vytvořit profil"
+  },
+  "0L2D2d+keZ": {
+    "source": "Could not read storage usage: {reason}",
+    "translation": "Využití úložiště se nepodařilo načíst: {reason}"
+  },
+  "2pKpen+DsT": {
+    "source": "Unfinished work will be discarded.",
+    "translation": "Nedokončená práce bude zahozena."
+  },
+  "3cc4CtJM5h": {
+    "source": "Light",
+    "translation": "Světlý"
+  },
+  "47FYwba+bI": {
+    "source": "Cancel",
+    "translation": "Zrušit"
+  },
+  "5Nx15rN9Jh": {
+    "source": "Supported transfers",
+    "translation": "Podporované přenosy"
+  },
+  "5xO27ptJCW": {
+    "source": "{files} accepted · {duplicates} already imported · {rejected} rejected · {failed} failed",
+    "translation": "Přijato: {files} · již importováno: {duplicates} · odmítnuto: {rejected} · selhalo: {failed}"
+  },
+  "6YJCPwQgG6": {
+    "source": "Active time",
+    "translation": "Aktivní čas"
+  },
+  "6zPEQVewuh": {
+    "source": "Toggle navigation",
+    "translation": "Přepnout navigaci"
+  },
+  "7SCSGnhmrs": {
+    "source": "{count, plural, one {# file was already imported} other {# files were already imported}}",
+    "translation": "{count, plural, one {# soubor již byl importován} few {# soubory již byly importovány} other {# souborů již bylo importováno}}"
+  },
+  "7c1rdZ/WFp": {
+    "source": "Open its device page to inspect or manage it.",
+    "translation": "Otevřete stránku zařízení pro kontrolu nebo správu."
+  },
+  "8PBYrouiJt": {
+    "source": "Could not inspect {device}",
+    "translation": "Zařízení {device} se nepodařilo zkontrolovat",
+    "description": "Notification title after device inspection failed"
+  },
+  "8naCTgLvDw": {
+    "source": "No activities yet",
+    "translation": "Zatím nejsou žádné aktivity"
+  },
+  "9Vo+vfuznH": {
+    "source": "Could not inspect the device",
+    "translation": "Zařízení se nepodařilo zkontrolovat"
+  },
+  "9guGC68d/z": {
+    "source": "{count, plural, one {# activity imported} other {# activities imported}}",
+    "translation": "{count, plural, one {Importována # aktivita} few {Importovány # aktivity} other {Importováno # aktivit}}"
+  },
+  "BQVAnsVPgA": {
+    "source": "{device} inspected",
+    "translation": "Zařízení {device} zkontrolováno",
+    "description": "Notification title after device metadata was read"
+  },
+  "BT5QRLHwc9": {
+    "source": "Choose a profile",
+    "translation": "Vyberte profil"
+  },
+  "CipUCXGBNH": {
+    "source": "Profile settings",
+    "translation": "Nastavení profilu"
+  },
+  "D8jUm2X056": {
+    "source": "Save picture",
+    "translation": "Uložit obrázek"
+  },
+  "DDI5VFrNgZ": {
+    "source": "Minimize window",
+    "translation": "Minimalizovat okno"
+  },
+  "E/tWlnBAWb": {
+    "source": "{device} connected",
+    "translation": "Připojeno: {device}",
+    "description": "Notification title for a newly attached device"
+  },
+  "I9Vq88kNSi": {
+    "source": "Choose files",
+    "translation": "Vybrat soubory"
+  },
+  "IZFEUgrg25": {
+    "source": "Ready",
+    "translation": "Připraveno"
+  },
+  "IpSH3za6Sw": {
+    "source": "Average heart rate",
+    "translation": "Průměrný tep"
+  },
+  "Jyd5Id0dLi": {
+    "source": "Saving profile picture",
+    "translation": "Ukládání profilového obrázku"
+  },
+  "K09WxxEly8": {
+    "source": "Workouts",
+    "translation": "Tréninky"
+  },
+  "KA+rHePuzc": {
+    "source": "Software {version}",
+    "translation": "Software {version}"
+  },
+  "KX0OMbmhrp": {
+    "source": "Scanning selected files",
+    "translation": "Prohledávání vybraných souborů"
+  },
+  "KsSM9j0UnR": {
+    "source": "Import FIT activities",
+    "translation": "Import aktivit FIT"
+  },
+  "L9pY09lqmU": {
+    "source": "Ascent",
+    "translation": "Stoupání"
+  },
+  "MchMxikYDL": {
+    "source": "Release to import these files",
+    "translation": "Uvolněním soubory importujete"
+  },
+  "NXI/XLSYwc": {
+    "source": "Auto",
+    "translation": "Automaticky"
+  },
+  "Nyz15F0iCV": {
+    "source": "Profiles keep each person's activities and devices separate.",
+    "translation": "Profily oddělují aktivity a zařízení jednotlivých uživatelů."
+  },
+  "O9GTIcAimZ": {
+    "source": "Profile picture",
+    "translation": "Profilový obrázek"
+  },
+  "OBj/y+t/su": {
+    "source": "The following work is still in progress:",
+    "translation": "Stále probíhá:"
+  },
+  "OnM1xpU1Dm": {
+    "source": "{used} used · {free} free · {total} total",
+    "translation": "Využito {used} · volno {free} · celkem {total}"
+  },
+  "Oxh6x98DVg": {
+    "source": "No recorded path",
+    "translation": "Žádná zaznamenaná trasa"
+  },
+  "P8JC58mIGs": {
+    "source": "Distance",
+    "translation": "Vzdálenost"
+  },
+  "PDrL46F0ih": {
+    "source": "Importing FIT activities",
+    "translation": "Import aktivit FIT"
+  },
+  "Pe0ogRZhIF": {
+    "source": "Theme",
+    "translation": "Motiv"
+  },
+  "PlBReUqqzW": {
+    "source": "Log out",
+    "translation": "Odhlásit se"
+  },
+  "R85gsW8HY9": {
+    "source": "Courses",
+    "translation": "Trasy"
+  },
+  "SK8Xs6V2H2": {
+    "source": "No profiles yet",
+    "translation": "Zatím nejsou žádné profily"
+  },
+  "TUETJX66Cz": {
+    "source": "Controls displayed distances and elevations.",
+    "translation": "Určuje zobrazované jednotky vzdálenosti a převýšení."
+  },
+  "UHN1MSUDa5": {
+    "source": "Drop FIT files or folders here",
+    "translation": "Přetáhněte sem soubory FIT nebo složky"
+  },
+  "USry3FHE68": {
+    "source": "Attached devices",
+    "translation": "Připojená zařízení"
+  },
+  "UmEsZFg5nO": {
+    "source": "Activities",
+    "translation": "Aktivity"
+  },
+  "UoQU07Hvrw": {
+    "source": "Imperial",
+    "translation": "Imperiální"
+  },
+  "UzL8sI5f+p": {
+    "source": "Creating a profile",
+    "translation": "Vytváření profilu"
+  },
+  "Vb8LCCmC9T": {
+    "source": "Inspection failed",
+    "translation": "Kontrola selhala"
+  },
+  "VzzYJkHnLP": {
+    "source": "Create",
+    "translation": "Vytvořit"
+  },
+  "WUV28A6Pf2": {
+    "source": "Saving…",
+    "translation": "Ukládání…"
+  },
+  "XAEXJz69Uc": {
+    "source": "Choose a picture",
+    "translation": "Vybrat obrázek"
+  },
+  "Y3RUQioeek": {
+    "source": "{start} · {source}",
+    "translation": "{start} · {source}"
+  },
+  "YJG5oUjsVT": {
+    "source": "Keep working",
+    "translation": "Pokračovat v práci"
+  },
+  "YjjTU9NztP": {
+    "source": "Choose a folder",
+    "translation": "Vybrat složku"
+  },
+  "Yu4I6owcSr": {
+    "source": "Read and write",
+    "translation": "Čtení a zápis"
+  },
+  "Yywr4PzZIV": {
+    "source": "Restore window",
+    "translation": "Obnovit okno"
+  },
+  "ZFiARsGk5n": {
+    "source": "Connecting to the device host…",
+    "translation": "Připojování ke službě zařízení…"
+  },
+  "b0bewtUePz": {
+    "source": "New profile draft",
+    "translation": "Rozepsaný nový profil"
+  },
+  "bEMKFgf45M": {
+    "source": "Not inspected",
+    "translation": "Nezkontrolováno"
+  },
+  "cREnQVyDOw": {
+    "source": "Choose a profile before importing files",
+    "translation": "Před importem souborů vyberte profil"
+  },
+  "dLVFc+8uRc": {
+    "source": "Loading profiles",
+    "translation": "Načítání profilů"
+  },
+  "eLrXv7EkrC": {
+    "source": "Inspecting…",
+    "translation": "Kontrola…"
+  },
+  "f9m4vqwE6j": {
+    "source": "Device ID",
+    "translation": "ID zařízení"
+  },
+  "fXUG9PNxn9": {
+    "source": "Loading profiles and activities",
+    "translation": "Načítání profilů a aktivit"
+  },
+  "filwqDWORF": {
+    "source": "Read",
+    "translation": "Čtení"
+  },
+  "gDrPgQ9mp+": {
+    "source": "Device details read",
+    "translation": "Údaje zařízení načteny"
+  },
+  "gW0s9WcVME": {
+    "source": "No Garmin devices are connected.",
+    "translation": "Není připojeno žádné zařízení Garmin."
+  },
+  "iZrhOoD6s9": {
+    "source": "{summary} · {problem}",
+    "translation": "{summary} · {problem}"
+  },
+  "iwVTNwbNx0": {
+    "source": "Select an activity",
+    "translation": "Vyberte aktivitu"
+  },
+  "k2veDAJW1p": {
+    "source": "Write",
+    "translation": "Zápis"
+  },
+  "k4QYEqieDw": {
+    "source": "View device",
+    "translation": "Zobrazit zařízení"
+  },
+  "kAFbQQ+fb5": {
+    "source": "Abort current work and quit?",
+    "translation": "Přerušit aktuální práci a ukončit aplikaci?"
+  },
+  "nDyaq/M7Oj": {
+    "source": "Running",
+    "translation": "Běh"
+  },
+  "nLM15TLExb": {
+    "source": "Cycling",
+    "translation": "Cyklistika"
+  },
+  "nqX6jB2HAe": {
+    "source": "{count, plural, one {# activity} other {# activities}}",
+    "translation": "{count, plural, one {# aktivita} few {# aktivity} other {# aktivit}}",
+    "description": "FormatJS plural validation fixture"
+  },
+  "oCuR/y9780": {
+    "source": "Read device details",
+    "translation": "Načíst údaje zařízení"
+  },
+  "oNH4AWD5A+": {
+    "source": "Close window",
+    "translation": "Zavřít okno"
+  },
+  "oe6bR7M83V": {
+    "source": "The selected activity no longer exists",
+    "translation": "Vybraná aktivita již neexistuje"
+  },
+  "oxpz0TpIVD": {
+    "source": "Enter a profile name",
+    "translation": "Zadejte název profilu"
+  },
+  "r3C4x/VaV9": {
+    "source": "Software",
+    "translation": "Software"
+  },
+  "rQUSqe6JcA": {
+    "source": "Creating…",
+    "translation": "Vytváření…"
+  },
+  "s+n2ku34AK": {
+    "source": "Profile name",
+    "translation": "Název profilu"
+  },
+  "tOdNiYuuag": {
+    "source": "Dark",
+    "translation": "Tmavý"
+  },
+  "tzMNF3jWoU": {
+    "source": "Status",
+    "translation": "Stav"
+  },
+  "uUkib+hyP2": {
+    "source": "Drag to reposition. Scroll or use the slider to zoom.",
+    "translation": "Přetažením změňte výřez. Posouváním nebo jezdcem upravte přiblížení."
+  },
+  "uqBy7yud/k": {
+    "source": "Enter a name",
+    "translation": "Zadejte název"
+  },
+  "uuI2//1pSe": {
+    "source": "Inspecting {device}",
+    "translation": "Kontrola zařízení {device}",
+    "description": "Active operation shown while reading a connected device manifest"
+  },
+  "vTaAcZ298j": {
+    "source": "Profile picture crop",
+    "translation": "Výřez profilového obrázku"
+  },
+  "wKFKwGsbrz": {
+    "source": "Adjust profile picture",
+    "translation": "Upravit profilový obrázek"
+  },
+  "wQDYIPImFE": {
+    "source": "Maximize window",
+    "translation": "Maximalizovat okno"
+  },
+  "xlL9emwsYC": {
+    "source": "{completed} of {total} files",
+    "translation": "{completed} z {total} souborů"
+  },
+  "y1Z3orIe9Z": {
+    "source": "Language",
+    "translation": "Jazyk"
+  },
+  "yBaILMpvgy": {
+    "source": "Saving profile settings",
+    "translation": "Ukládání nastavení profilu"
+  },
+  "yMbKjuDH/n": {
+    "source": "Zoom",
+    "translation": "Přiblížení"
+  },
+  "yypztrtvnt": {
+    "source": "Metric",
+    "translation": "Metrický"
+  }
+}

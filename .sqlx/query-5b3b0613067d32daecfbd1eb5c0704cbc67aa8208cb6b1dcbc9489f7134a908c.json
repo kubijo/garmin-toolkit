@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO association_groups (\n    id,\n    owner_id,\n    kind,\n    basis,\n    fingerprint_schema_name,\n    fingerprint_schema_version,\n    fingerprint_digest\n)\nVALUES (?, ?, ?, 'equal_fingerprint', ?, ?, ?)\nON CONFLICT (\n    owner_id,\n    kind,\n    fingerprint_schema_name,\n    fingerprint_schema_version,\n    fingerprint_digest\n) WHERE basis = 'equal_fingerprint'\nDO UPDATE SET id = association_groups.id\nRETURNING id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "association_groups",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5b3b0613067d32daecfbd1eb5c0704cbc67aa8208cb6b1dcbc9489f7134a908c"
+}

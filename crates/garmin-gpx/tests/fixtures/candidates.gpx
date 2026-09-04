@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="Garmin Toolkit test">
+  <metadata>
+    <name>Fallback route</name>
+  </metadata>
+  <trk>
+    <name>Morning loop</name>
+    <trkseg>
+      <trkpt lat="50.0755" lon="14.4378">
+        <ele>205.5</ele>
+      </trkpt>
+      <trkpt lat="50.0810" lon="14.4510"/>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="50.0900" lon="14.4480"/>
+      <trkpt lat="50.0940" lon="14.4290"/>
+    </trkseg>
+  </trk>
+  <trk>
+    <name>Incomplete track</name>
+    <trkseg>
+      <trkpt lat="50.0800" lon="14.4300"/>
+    </trkseg>
+  </trk>
+  <rte>
+    <name>Control points</name>
+    <rtept lat="50.0840" lon="14.4190"/>
+    <rtept lat="50.0780" lon="14.4250"/>
+  </rte>
+</gpx>

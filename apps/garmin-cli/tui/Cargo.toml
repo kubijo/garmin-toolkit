@@ -1,0 +1,27 @@
+[package]
+name = "garmin-cli-tui"
+description = "Ratatui frontend owned by garmin-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+gallery = []
+
+[dependencies]
+anyhow.workspace = true
+byte-unit.workspace = true
+crossterm.workspace = true
+garmin-device.workspace = true
+garmin-progress.workspace = true
+garmin-update.workspace = true
+indoc.workspace = true
+ratatui.workspace = true
+ratatui-interact.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true
