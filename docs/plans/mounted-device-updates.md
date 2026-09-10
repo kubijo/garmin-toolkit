@@ -1,31 +1,25 @@
 # Production CLI map maintenance
 
-[Automated behavior and virtual evidence](../research/device-capacity-and-recovery.md) are durable. Earlier
-[hardware results](../research/usb-sync.md#map-maintenance-evidence) do not establish complete upgrades, post-reboot
-acceptance, or interrupted recovery. The shared loading-screen and explicit recovery-backup policy contracts are
-implemented and documented; they are no longer plan work.
+The shared update engine, recovery policy, and progress UI are implemented. Automated evidence lives in
+[device capacity and recovery](../research/device-capacity-and-recovery.md). Hardware evidence remains incomplete.
 
-## Later clients
+## Current recovery
 
-Desktop and HASS map controls belong to [shared interface workflows](shared-interface-workflows.md). Do not expose their
-mutation controls before this plan's boundary proof passes.
+The [fēnix `t03` transaction](../research/fenix-t03-incident.md) has all 18 writes at their planned sizes. Resume its
+retained capture to finish six removals and commit; do not create a new plan or redownload a map.
 
-## Remaining consented hardware proof
+The production TUI detects portable device state after device selection. It offers recovery or a proven clear before
+contacting Garmin. A host receipt covers failure before portable state publication. Cross-host recovery still requires
+payload reacquisition from recorded download identities.
 
-1. Close the raw fēnix transfer boundary. Re-run a packet-aligned 256 MB disposable probe to confirm the final-short-
-   transfer correction, benchmark whole-object and partial reads, and prove or reject device-side move. Do not trade
-   away an independently verified recovery backup. This stage is not complete until the probe is uploaded, read back,
-   hash-verified, removed, and its receipt cleared on physical hardware.
-2. Capture a small, explicitly approved fēnix 8 Solar upgrade through its system-owned mount. Retain verified backups
-   when the selected policy requires them, and retain evidence of an explicit opt-out otherwise.
-3. Inspect the committed journal and readback. After safe disconnect/restart, confirm the selected map is recognized and
-   unaffected components remain available.
-4. With separate consent, interrupt a disposable transaction on the fēnix and recover it through the production CLI.
-   Verify reconnect, cleanup or restoration, retained evidence, and a safe retry.
-5. Repeat the upgrade, restart, acceptance, and disposable recovery proof on Edge 1050.
-6. Record device, firmware, host adapter, revision, component, and outcome in [USB evidence](../research/usb-sync.md).
-   Keep raw captures local.
+## Hardware proof remaining
 
-Delete this plan only after its black-box boundary matrix passes and both devices have upgrade, post-restart acceptance,
-and recovery evidence. Move any unsupported capability to a named follow-up rather than treating simulated success as
-hardware proof.
+1. Complete the 256 MB disposable fēnix link probe: upload, read back, hash, remove, and clear its receipt.
+2. Complete a small fēnix 8 Solar update, inspect the journal and destination metadata, disconnect safely, and confirm
+   firmware acceptance.
+3. Interrupt and recover a disposable fēnix transaction through the production TUI.
+4. Repeat update, restart, acceptance, and recovery on Edge 1050.
+5. Record hardware, firmware, adapter, revision, component, and outcome in [USB evidence](../research/usb-sync.md). Keep
+   raw captures local.
+
+Delete this plan only after both devices have black-box update, restart, and interrupted-recovery evidence.

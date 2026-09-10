@@ -3,9 +3,9 @@
 use super::Shadow;
 use async_trait::async_trait;
 use garmin_device::{
-    DeviceInventory, DevicePathState, DeviceStateSnapshot, MountedMtpBackupProgress,
+    DeviceInventory, DevicePathStatus, DeviceStateSnapshot, MountedMtpBackupProgress,
     MountedMtpUploadProgress, SafeRelativePath, StorageCapacity,
-    storage::{BackupDestination, DeviceIoError, DeviceRead, DeviceWrite},
+    storage::{BackupDestination, DeviceDirectoryEntry, DeviceIoError, DeviceRead, DeviceWrite},
 };
 use std::path::Path;
 
@@ -49,7 +49,7 @@ impl DeviceRead for Shadow {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-    ) -> Result<(DevicePathState, Option<u64>), DeviceIoError> {
+    ) -> Result<DevicePathStatus, DeviceIoError> {
         self.registered.device().inspect(storage, path).await
     }
     async fn backup(
@@ -77,10 +77,64 @@ impl DeviceRead for Shadow {
             .verify(storage, path, size, sha256)
             .await
     }
+
+    async fn read_bounded_file(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        limit: u64,
+    ) -> Result<Option<Vec<u8>>, DeviceIoError> {
+        self.registered
+            .device()
+            .read_bounded_file(storage, path, limit)
+            .await
+    }
+
+    async fn list_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> Result<Vec<DeviceDirectoryEntry>, DeviceIoError> {
+        self.registered.device().list_directory(storage, path).await
+    }
 }
 
 #[async_trait]
 impl DeviceWrite for Shadow {
+    async fn ensure_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> Result<(), DeviceIoError> {
+        self.registered
+            .device()
+            .ensure_directory(storage, path)
+            .await
+    }
+
+    async fn create_verified_file(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        bytes: &[u8],
+    ) -> Result<(), DeviceIoError> {
+        self.registered
+            .device()
+            .create_verified_file(storage, path, bytes)
+            .await
+    }
+
+    async fn remove_empty_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> Result<(), DeviceIoError> {
+        self.registered
+            .device()
+            .remove_empty_directory(storage, path)
+            .await
+    }
+
     async fn delete(
         &self,
         storage: &str,
@@ -93,7 +147,7 @@ impl DeviceWrite for Shadow {
             .delete(storage, path, size, sha256)
             .await
     }
-    async fn delete_unverified(
+    async fn delete_size_checked(
         &self,
         storage: &str,
         path: &SafeRelativePath,
@@ -101,7 +155,7 @@ impl DeviceWrite for Shadow {
     ) -> Result<(), DeviceIoError> {
         self.registered
             .device()
-            .delete_unverified(storage, path, size)
+            .delete_size_checked(storage, path, size)
             .await
     }
     async fn upload(

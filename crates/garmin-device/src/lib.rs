@@ -17,8 +17,8 @@ mod system;
 pub(crate) mod test_support;
 
 pub use domain::{
-    DeviceInventory, DeviceManifest, DevicePathInspection, DevicePathState, DeviceSummary,
-    PathSafetyError, SafeRelativePath, TransportKind,
+    DeviceInventory, DeviceManifest, DevicePathInspection, DevicePathState, DevicePathStatus,
+    DeviceSummary, PathSafetyError, SafeRelativePath, TransportKind,
 };
 pub use manifest::{ManifestError, parse_manifest};
 pub use mass_storage::{
@@ -31,11 +31,11 @@ pub use mtp::{
     mtp_usb_reset_known_ineffective, open_mtp, reset_mtp_transport,
 };
 pub use state::{DeviceStateSnapshot, DeviceStorageState, StorageCapacity, filesystem_capacity};
-pub use storage::BackupDestination;
+pub use storage::{BackupDestination, DeviceDirectoryEntry};
 pub use system::{
     GarminUsbDevice, MountedMtpBackupProgress, MountedMtpCandidate, MountedMtpDevice,
-    MountedMtpDeviceAdapter, MountedMtpError, MountedMtpMonitor, MountedMtpProbeFailure,
-    MountedMtpUploadProgress, discover_garmin_usb_sysfs, discover_mounted_mtp,
+    MountedMtpError, MountedMtpMonitor, MountedMtpProbeFailure, MountedMtpUploadProgress,
+    MountedMtpVerifyProgress, discover_garmin_usb_sysfs, discover_mounted_mtp,
 };
 
 use serde::{Deserialize, Serialize};

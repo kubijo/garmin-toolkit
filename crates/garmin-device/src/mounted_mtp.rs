@@ -1,42 +1,414 @@
 use crate::manifest::{MAX_MANIFEST_BYTES, ManifestError, parse_manifest};
 use crate::storage::BackupDestination;
-use crate::system::{MountedMtpBackupProgress, MountedMtpProbeFailure, MountedMtpUploadProgress};
+use crate::storage::DeviceDirectoryEntry;
+use crate::system::{
+    MountedMtpBackupProgress, MountedMtpProbeFailure, MountedMtpUploadProgress,
+    MountedMtpVerifyProgress,
+};
 use crate::{
     DeviceInventory, DeviceManifest, DevicePathInspection, DevicePathState, SafeRelativePath,
     TransportKind,
 };
 use crate::{DeviceProbeReport, UploadCompletion};
-use garmin_progress::{OperationStage, ProgressReporter};
+use garmin_progress::{CancellationToken, OperationStage, ProgressReporter};
 use gio::prelude::{CancellableExt, FileEnumeratorExt, FileExt, InputStreamExtManual};
 use gio::{File, FileCopyFlags, FileType};
 use sha2::{Digest, Sha256};
 use std::fs::File as StdFile;
-use std::io::Read as _;
+use std::io::{Read as _, Write as _};
 use std::path::Path;
-use std::time::Instant;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use uuid::Uuid;
 
 const CHILD_ATTRIBUTES: &str = "standard::name,standard::type,standard::size";
+const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(40);
+const REQUIRED_CLEANUP_TIMEOUT: Duration = Duration::from_secs(30);
+
+struct CancellableWatcher {
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl CancellableWatcher {
+    fn new(cancellation: CancellationToken, cancellable: &gio::Cancellable) -> Self {
+        Self::new_with_timeout(cancellation, cancellable, None)
+    }
+
+    fn with_timeout(
+        cancellation: CancellationToken,
+        cancellable: &gio::Cancellable,
+        timeout: Duration,
+    ) -> Self {
+        Self::new_with_timeout(cancellation, cancellable, Some(timeout))
+    }
+
+    fn new_with_timeout(
+        cancellation: CancellationToken,
+        cancellable: &gio::Cancellable,
+        timeout: Option<Duration>,
+    ) -> Self {
+        if cancellation.is_cancelled() {
+            cancellable.cancel();
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = Arc::clone(&stop);
+        let cancellable = cancellable.clone();
+        let worker = thread::spawn(move || {
+            let started = Instant::now();
+            while !worker_stop.load(Ordering::Acquire) {
+                if cancellation.is_cancelled()
+                    || timeout.is_some_and(|timeout| started.elapsed() >= timeout)
+                {
+                    cancellable.cancel();
+                    break;
+                }
+                thread::park_timeout(CANCELLATION_POLL_INTERVAL);
+            }
+        });
+        Self {
+            stop,
+            worker: Some(worker),
+        }
+    }
+}
+
+impl Drop for CancellableWatcher {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            worker.thread().unpark();
+            let _ = worker.join();
+        }
+    }
+}
+
+fn cancellation_result<T>(
+    result: Result<T, MountedMtpError>,
+    progress: &ProgressReporter,
+) -> Result<T, MountedMtpError> {
+    if progress.is_cancelled() {
+        Err(MountedMtpError::Cancelled)
+    } else {
+        result
+    }
+}
+
+fn run_cancellable<T>(
+    progress: &ProgressReporter,
+    operation: impl FnOnce(&gio::Cancellable) -> Result<T, MountedMtpError>,
+) -> Result<T, MountedMtpError> {
+    let cancellable = gio::Cancellable::new();
+    let _cancellation = CancellableWatcher::new(progress.cancellation_token(), &cancellable);
+    cancellation_result(operation(&cancellable), progress)
+}
 
 pub async fn mounted_device_state(
     mount_id: &str,
 ) -> Result<crate::DeviceStateSnapshot, MountedMtpError> {
+    mounted_device_state_with_progress(mount_id, &ProgressReporter::default()).await
+}
+
+pub async fn mounted_device_state_with_progress(
+    mount_id: &str,
+    progress: &ProgressReporter,
+) -> Result<crate::DeviceStateSnapshot, MountedMtpError> {
     let mount_id = mount_id.to_owned();
-    tokio::task::spawn_blocking(move || mounted_device_state_blocking(&mount_id))
-        .await
-        .map_err(MountedMtpError::Task)?
+    let progress = progress.clone();
+    tokio::task::spawn_blocking(move || {
+        run_cancellable(&progress, |cancellable| {
+            mounted_device_state_blocking_with_cancellable(&mount_id, Some(cancellable))
+        })
+    })
+    .await
+    .map_err(MountedMtpError::Task)?
+}
+
+pub async fn read_bounded_mounted_mtp_file(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+    limit: u64,
+) -> Result<Option<Vec<u8>>, MountedMtpError> {
+    let mount_id = mount_id.to_owned();
+    let storage_id = storage_id.to_owned();
+    let path = path.clone();
+    tokio::task::spawn_blocking(move || {
+        let root = mounted_root(&mount_id)?;
+        let storage = storage_for_id_with_cancellable(&root, &storage_id, None)?;
+        read_bounded_mounted_file(&storage, &path, limit)
+    })
+    .await
+    .map_err(MountedMtpError::Task)?
+}
+
+fn read_bounded_mounted_file(
+    storage: &File,
+    path: &SafeRelativePath,
+    limit: u64,
+) -> Result<Option<Vec<u8>>, MountedMtpError> {
+    let (parent, name) = match mounted_parent_with_cancellable(storage, path, None) {
+        Ok(parent) => parent,
+        Err(MountedMtpError::RemovalObjectState {
+            state: DevicePathState::Missing,
+            ..
+        }) => return Ok(None),
+        Err(MountedMtpError::RemovalObjectState { state, .. }) => {
+            return Err(MountedMtpError::MetadataPathState {
+                path: path.clone(),
+                state,
+            });
+        }
+        Err(error) => return Err(error),
+    };
+    let file = match child_metadata_with_cancellable(&parent, &name, None)? {
+        ChildMetadata::Missing => return Ok(None),
+        ChildMetadata::Ambiguous => {
+            return Err(MountedMtpError::MetadataPathState {
+                path: path.clone(),
+                state: DevicePathState::Ambiguous,
+            });
+        }
+        ChildMetadata::Unique {
+            file,
+            file_type: FileType::Regular,
+            size,
+        } => {
+            let size =
+                u64::try_from(size).map_err(|_| MountedMtpError::NegativeObjectSize(size))?;
+            if size > limit {
+                return Err(MountedMtpError::MetadataTooLarge {
+                    path: path.clone(),
+                    limit,
+                    size,
+                });
+            }
+            file
+        }
+        ChildMetadata::Unique { .. } => {
+            return Err(MountedMtpError::MetadataPathState {
+                path: path.clone(),
+                state: DevicePathState::Other,
+            });
+        }
+    };
+    let stream = file.read(gio::Cancellable::NONE)?;
+    let mut bytes = Vec::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let count = stream.read(&mut buffer, gio::Cancellable::NONE)?;
+        if count == 0 {
+            break;
+        }
+        if u64::try_from(bytes.len().saturating_add(count)).unwrap_or(u64::MAX) > limit {
+            return Err(MountedMtpError::MetadataTooLarge {
+                path: path.clone(),
+                limit,
+                size: u64::try_from(bytes.len().saturating_add(count)).unwrap_or(u64::MAX),
+            });
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+    }
+    Ok(Some(bytes))
+}
+
+pub async fn list_mounted_mtp_directory(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+) -> Result<Vec<DeviceDirectoryEntry>, MountedMtpError> {
+    let mount_id = mount_id.to_owned();
+    let storage_id = storage_id.to_owned();
+    let path = path.clone();
+    tokio::task::spawn_blocking(move || {
+        let root = mounted_root(&mount_id)?;
+        let storage = storage_for_id_with_cancellable(&root, &storage_id, None)?;
+        let directory = mounted_directory_with_cancellable(&storage, &path, None)?;
+        let enumerator = directory.enumerate_children(
+            CHILD_ATTRIBUTES,
+            gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+            gio::Cancellable::NONE,
+        )?;
+        let mut names = std::collections::BTreeSet::new();
+        let mut entries = Vec::new();
+        while let Some(info) = enumerator.next_file(gio::Cancellable::NONE)? {
+            let name = info.name().to_string_lossy().into_owned();
+            if !names.insert(name.to_ascii_lowercase()) {
+                return Err(MountedMtpError::MetadataPathState {
+                    path,
+                    state: DevicePathState::Ambiguous,
+                });
+            }
+            let (state, size) = match info.file_type() {
+                FileType::Regular => (
+                    DevicePathState::RegularFile,
+                    Some(
+                        u64::try_from(info.size())
+                            .map_err(|_| MountedMtpError::NegativeObjectSize(info.size()))?,
+                    ),
+                ),
+                FileType::Directory => (DevicePathState::Directory, None),
+                _ => (DevicePathState::Other, None),
+            };
+            entries.push(DeviceDirectoryEntry { name, state, size });
+        }
+        entries.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(entries)
+    })
+    .await
+    .map_err(MountedMtpError::Task)?
+}
+
+pub async fn ensure_mounted_mtp_directory(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+) -> Result<(), MountedMtpError> {
+    let mount_id = mount_id.to_owned();
+    let storage_id = storage_id.to_owned();
+    let path = path.clone();
+    tokio::task::spawn_blocking(move || {
+        let root = mounted_root(&mount_id)?;
+        let mut parent = storage_for_id_with_cancellable(&root, &storage_id, None)?;
+        for component in path.as_path().components() {
+            let name = component.as_os_str().to_string_lossy().into_owned();
+            parent = match child_metadata_with_cancellable(&parent, &name, None)? {
+                ChildMetadata::Unique {
+                    file,
+                    file_type: FileType::Directory,
+                    ..
+                } => file,
+                ChildMetadata::Missing => {
+                    let directory = parent.child(&name);
+                    directory.make_directory(gio::Cancellable::NONE)?;
+                    match child_metadata_with_cancellable(&parent, &name, None)? {
+                        ChildMetadata::Unique {
+                            file,
+                            file_type: FileType::Directory,
+                            ..
+                        } => file,
+                        ChildMetadata::Ambiguous => {
+                            return Err(MountedMtpError::MetadataPathState {
+                                path,
+                                state: DevicePathState::Ambiguous,
+                            });
+                        }
+                        _ => {
+                            return Err(MountedMtpError::MetadataPathState {
+                                path,
+                                state: DevicePathState::Other,
+                            });
+                        }
+                    }
+                }
+                ChildMetadata::Ambiguous => {
+                    return Err(MountedMtpError::MetadataPathState {
+                        path,
+                        state: DevicePathState::Ambiguous,
+                    });
+                }
+                ChildMetadata::Unique { .. } => {
+                    return Err(MountedMtpError::MetadataPathState {
+                        path,
+                        state: DevicePathState::Other,
+                    });
+                }
+            };
+        }
+        Ok(())
+    })
+    .await
+    .map_err(MountedMtpError::Task)?
+}
+
+pub async fn create_verified_mounted_mtp_file(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+    bytes: &[u8],
+) -> Result<(), MountedMtpError> {
+    let mount_id = mount_id.to_owned();
+    let storage_id = storage_id.to_owned();
+    let path = path.clone();
+    let bytes = bytes.to_vec();
+    tokio::task::spawn_blocking(move || {
+        let mut temporary = tempfile::NamedTempFile::new()?;
+        temporary.write_all(&bytes)?;
+        temporary.flush()?;
+        temporary.as_file().sync_all()?;
+        let sha256 = hex::encode(Sha256::digest(&bytes));
+        let size = u64::try_from(bytes.len()).map_err(|_| MountedMtpError::MetadataTooLarge {
+            path: path.clone(),
+            limit: u64::MAX,
+            size: u64::MAX,
+        })?;
+        let root = mounted_root(&mount_id)?;
+        let storage = storage_for_id_with_cancellable(&root, &storage_id, None)?;
+        upload_to_storage_blocking(
+            &storage,
+            &path,
+            temporary.path(),
+            size,
+            &sha256,
+            &MountedMtpUploadProgress {
+                reporter: ProgressReporter::default(),
+                completed_before: 0,
+                total: size,
+            },
+        )
+    })
+    .await
+    .map_err(MountedMtpError::Task)?
+}
+
+pub async fn remove_empty_mounted_mtp_directory(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+) -> Result<(), MountedMtpError> {
+    let mount_id = mount_id.to_owned();
+    let storage_id = storage_id.to_owned();
+    let path = path.clone();
+    tokio::task::spawn_blocking(move || {
+        let root = mounted_root(&mount_id)?;
+        let storage = storage_for_id_with_cancellable(&root, &storage_id, None)?;
+        let directory = mounted_directory_with_cancellable(&storage, &path, None)?;
+        directory.delete(gio::Cancellable::NONE)?;
+        if directory.query_exists(gio::Cancellable::NONE) {
+            return Err(MountedMtpError::MetadataPathState {
+                path,
+                state: DevicePathState::Directory,
+            });
+        }
+        Ok(())
+    })
+    .await
+    .map_err(MountedMtpError::Task)?
 }
 
 pub(super) fn mounted_device_state_blocking(
     mount_id: &str,
 ) -> Result<crate::DeviceStateSnapshot, MountedMtpError> {
+    mounted_device_state_blocking_with_cancellable(mount_id, None)
+}
+
+fn mounted_device_state_blocking_with_cancellable(
+    mount_id: &str,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<crate::DeviceStateSnapshot, MountedMtpError> {
     let root = mounted_root(mount_id)?;
     let mut storages = Vec::new();
-    for (index, storage) in storage_roots(&root)?.into_iter().enumerate() {
+    for (index, storage) in storage_roots_with_cancellable(&root, cancellable)?
+        .into_iter()
+        .enumerate()
+    {
         let info = storage.query_filesystem_info(
             "filesystem::size,filesystem::free,filesystem::readonly",
-            gio::Cancellable::NONE,
+            cancellable,
         );
         let (capacity, writable) = match info {
             Ok(info) => {
@@ -59,7 +431,7 @@ pub(super) fn mounted_device_state_blocking(
         };
         storages.push(crate::DeviceStorageState {
             id: mount_id_for_uri(&storage.uri()),
-            label: storage_label(&storage, index),
+            label: storage_label_with_cancellable(&storage, index, cancellable),
             capacity,
             writable,
         });
@@ -163,6 +535,14 @@ fn inspect_mounted_path(
     storage: &File,
     relative: &SafeRelativePath,
 ) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+    inspect_mounted_path_with_cancellable(storage, relative, None)
+}
+
+fn inspect_mounted_path_with_cancellable(
+    storage: &File,
+    relative: &SafeRelativePath,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
     let components = relative
         .as_path()
         .components()
@@ -170,15 +550,16 @@ fn inspect_mounted_path(
         .collect::<Vec<_>>();
     let mut parent = storage.clone();
     for (index, component) in components.iter().enumerate() {
-        let (child, file_type, size) = match child_metadata(&parent, component)? {
-            ChildMetadata::Missing => return Ok((DevicePathState::Missing, None)),
-            ChildMetadata::Ambiguous => return Ok((DevicePathState::Ambiguous, None)),
-            ChildMetadata::Unique {
-                file,
-                file_type,
-                size,
-            } => (file, file_type, size),
-        };
+        let (child, file_type, size) =
+            match child_metadata_with_cancellable(&parent, component, cancellable)? {
+                ChildMetadata::Missing => return Ok((DevicePathState::Missing, None)),
+                ChildMetadata::Ambiguous => return Ok((DevicePathState::Ambiguous, None)),
+                ChildMetadata::Unique {
+                    file,
+                    file_type,
+                    size,
+                } => (file, file_type, size),
+            };
         let is_last = index + 1 == components.len();
         if !is_last && file_type != FileType::Directory {
             return Ok((DevicePathState::Other, None));
@@ -199,14 +580,18 @@ fn inspect_mounted_path(
     Ok((DevicePathState::Other, None))
 }
 
-fn child_metadata(parent: &File, expected: &str) -> Result<ChildMetadata, MountedMtpError> {
+fn child_metadata_with_cancellable(
+    parent: &File,
+    expected: &str,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<ChildMetadata, MountedMtpError> {
     let enumerator = parent.enumerate_children(
         CHILD_ATTRIBUTES,
         gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
-        gio::Cancellable::NONE,
+        cancellable,
     )?;
     let mut found = None;
-    while let Some(info) = enumerator.next_file(gio::Cancellable::NONE)? {
+    while let Some(info) = enumerator.next_file(cancellable)? {
         if info.name().to_string_lossy().eq_ignore_ascii_case(expected) {
             if found.is_some() {
                 return Ok(ChildMetadata::Ambiguous);
@@ -278,14 +663,15 @@ pub async fn backup_mounted_mtp_object(
     let storage_id = storage_id.to_owned();
     let path = path.clone();
     tokio::task::spawn_blocking(move || {
-        backup_mounted_mtp_object_blocking(
+        let result = backup_mounted_mtp_object_blocking(
             &mount_id,
             &storage_id,
             &path,
             expected_size,
             destination,
             &progress,
-        )
+        );
+        cancellation_result(result, &progress.reporter)
     })
     .await
     .map_err(MountedMtpError::Task)?
@@ -300,13 +686,31 @@ pub async fn inspect_mounted_mtp_object(
     storage_id: &str,
     path: &SafeRelativePath,
 ) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+    inspect_mounted_mtp_object_with_progress(
+        mount_id,
+        storage_id,
+        path,
+        &ProgressReporter::default(),
+    )
+    .await
+}
+
+pub async fn inspect_mounted_mtp_object_with_progress(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+    progress: &ProgressReporter,
+) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
     let mount_id = mount_id.to_owned();
     let storage_id = storage_id.to_owned();
     let path = path.clone();
+    let progress = progress.clone();
     tokio::task::spawn_blocking(move || {
-        let root = mounted_root(&mount_id)?;
-        let storage = storage_for_id(&root, &storage_id)?;
-        inspect_mounted_path(&storage, &path)
+        run_cancellable(&progress, |cancellable| {
+            let root = mounted_root(&mount_id)?;
+            let storage = storage_for_id_with_cancellable(&root, &storage_id, Some(cancellable))?;
+            inspect_mounted_path_with_cancellable(&storage, &path, Some(cancellable))
+        })
     })
     .await
     .map_err(MountedMtpError::Task)?
@@ -320,7 +724,16 @@ fn backup_mounted_mtp_object_blocking(
     destination: BackupDestination,
     progress: &MountedMtpBackupProgress,
 ) -> Result<String, MountedMtpError> {
-    let source = mounted_regular_file(mount_id, storage_id, path, expected_size)?;
+    let cancellable = gio::Cancellable::new();
+    let _cancellation =
+        CancellableWatcher::new(progress.reporter.cancellation_token(), &cancellable);
+    let source = mounted_regular_file_with_cancellable(
+        mount_id,
+        storage_id,
+        path,
+        expected_size,
+        Some(&cancellable),
+    )?;
     let (destination_path, reserved) = destination.into_parts();
     if reserved.metadata()?.len() != 0 {
         return Err(MountedMtpError::BackupSinkVerification(path.clone()));
@@ -328,10 +741,6 @@ fn backup_mounted_mtp_object_blocking(
     drop(reserved);
     std::fs::remove_file(&destination_path)?;
     let destination = File::for_path(&destination_path);
-    let cancellable = gio::Cancellable::new();
-    if progress.reporter.is_cancelled() {
-        cancellable.cancel();
-    }
     let callback_cancellable = cancellable.clone();
     let mut copy_progress = |current: i64, _total: i64| {
         if progress.reporter.is_cancelled() {
@@ -377,28 +786,57 @@ pub async fn delete_mounted_mtp_object(
     expected_size: u64,
     expected_sha256: &str,
 ) -> Result<(), MountedMtpError> {
+    delete_mounted_mtp_object_with_progress(
+        mount_id,
+        storage_id,
+        path,
+        expected_size,
+        expected_sha256,
+        &ProgressReporter::default(),
+    )
+    .await
+}
+
+pub async fn delete_mounted_mtp_object_with_progress(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+    expected_size: u64,
+    expected_sha256: &str,
+    progress: &ProgressReporter,
+) -> Result<(), MountedMtpError> {
     let mount_id = mount_id.to_owned();
     let storage_id = storage_id.to_owned();
     let path = path.clone();
     let expected_sha256 = expected_sha256.to_owned();
+    let progress = progress.clone();
     tokio::task::spawn_blocking(move || {
-        let target = mounted_regular_file(&mount_id, &storage_id, &path, expected_size)?;
-        let (actual_size, actual_sha256) = hash_mounted_file(&target)?;
-        if actual_size != expected_size {
-            return Err(MountedMtpError::RemovalObjectSize {
-                path: path.clone(),
-                expected: expected_size,
-                actual: actual_size,
-            });
-        }
-        if actual_sha256 != expected_sha256 {
-            return Err(MountedMtpError::RemovalObjectChecksum(path.clone()));
-        }
-        target.delete(gio::Cancellable::NONE)?;
-        if target.query_exists(gio::Cancellable::NONE) {
-            return Err(MountedMtpError::RemovalObjectNotRemoved(path));
-        }
-        Ok(())
+        run_cancellable(&progress, |cancellable| {
+            let target = mounted_regular_file_with_cancellable(
+                &mount_id,
+                &storage_id,
+                &path,
+                expected_size,
+                Some(cancellable),
+            )?;
+            let (actual_size, actual_sha256) =
+                hash_mounted_file_with_progress(&target, Some(&progress), |_| {})?;
+            if actual_size != expected_size {
+                return Err(MountedMtpError::RemovalObjectSize {
+                    path: path.clone(),
+                    expected: expected_size,
+                    actual: actual_size,
+                });
+            }
+            if actual_sha256 != expected_sha256 {
+                return Err(MountedMtpError::RemovalObjectChecksum(path.clone()));
+            }
+            target.delete(Some(cancellable))?;
+            if target.query_exists(Some(cancellable)) {
+                return Err(MountedMtpError::RemovalObjectNotRemoved(path.clone()));
+            }
+            Ok(())
+        })
     })
     .await
     .map_err(MountedMtpError::Task)?
@@ -408,30 +846,56 @@ pub async fn delete_mounted_mtp_object(
 /// # Errors
 /// Unsafe paths, changed sizes, deletion failures, and objects that remain
 /// visible after deletion return [`MountedMtpError`].
-pub async fn delete_unverified_mounted_mtp_object(
+pub async fn delete_size_checked_mounted_mtp_object(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
     expected_size: u64,
 ) -> Result<(), MountedMtpError> {
+    delete_size_checked_mounted_mtp_object_with_progress(
+        mount_id,
+        storage_id,
+        path,
+        expected_size,
+        &ProgressReporter::default(),
+    )
+    .await
+}
+
+pub async fn delete_size_checked_mounted_mtp_object_with_progress(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+    expected_size: u64,
+    progress: &ProgressReporter,
+) -> Result<(), MountedMtpError> {
     let mount_id = mount_id.to_owned();
     let storage_id = storage_id.to_owned();
     let path = path.clone();
+    let progress = progress.clone();
     tokio::task::spawn_blocking(move || {
-        let target = mounted_regular_file(&mount_id, &storage_id, &path, expected_size)?;
-        target.delete(gio::Cancellable::NONE)?;
-        if target.query_exists(gio::Cancellable::NONE) {
-            return Err(MountedMtpError::RemovalObjectNotRemoved(path));
-        }
-        Ok(())
+        run_cancellable(&progress, |cancellable| {
+            let target = mounted_regular_file_with_cancellable(
+                &mount_id,
+                &storage_id,
+                &path,
+                expected_size,
+                Some(cancellable),
+            )?;
+            target.delete(Some(cancellable))?;
+            if target.query_exists(Some(cancellable)) {
+                return Err(MountedMtpError::RemovalObjectNotRemoved(path.clone()));
+            }
+            Ok(())
+        })
     })
     .await
     .map_err(MountedMtpError::Task)?
 }
 
-/// Verify one mounted-MTP object against its expected size and SHA-256.
+/// Verify a mounted-MTP object's size and SHA-256.
 /// # Errors
-/// [`MountedMtpError`] if the object changed or cannot be read.
+/// The object must be readable and match.
 pub async fn verify_mounted_mtp_object(
     mount_id: &str,
     storage_id: &str,
@@ -439,24 +903,62 @@ pub async fn verify_mounted_mtp_object(
     expected_size: u64,
     expected_sha256: &str,
 ) -> Result<(), MountedMtpError> {
+    verify_mounted_mtp_object_with_progress(
+        mount_id,
+        storage_id,
+        path,
+        expected_size,
+        expected_sha256,
+        MountedMtpVerifyProgress {
+            reporter: ProgressReporter::default(),
+            completed_before: 0,
+            total: expected_size,
+        },
+    )
+    .await
+}
+
+/// Verify with cancellable read progress.
+/// # Errors
+/// The object must be readable and match; cancellation also fails.
+pub async fn verify_mounted_mtp_object_with_progress(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+    expected_size: u64,
+    expected_sha256: &str,
+    progress: MountedMtpVerifyProgress,
+) -> Result<(), MountedMtpError> {
     let mount_id = mount_id.to_owned();
     let storage_id = storage_id.to_owned();
     let path = path.clone();
     let expected_sha256 = expected_sha256.to_owned();
     tokio::task::spawn_blocking(move || {
-        let target = mounted_regular_file(&mount_id, &storage_id, &path, expected_size)?;
-        let (actual_size, actual_sha256) = hash_mounted_file(&target)?;
-        if actual_size != expected_size {
-            return Err(MountedMtpError::RemovalObjectSize {
-                path: path.clone(),
-                expected: expected_size,
-                actual: actual_size,
-            });
-        }
-        if actual_sha256 != expected_sha256 {
-            return Err(MountedMtpError::RemovalObjectChecksum(path));
-        }
-        Ok(())
+        let reporter = progress.reporter.clone();
+        run_cancellable(&reporter, |cancellable| {
+            let target = mounted_regular_file_with_cancellable(
+                &mount_id,
+                &storage_id,
+                &path,
+                expected_size,
+                Some(cancellable),
+            )?;
+            let (actual_size, actual_sha256) =
+                hash_mounted_file_with_progress(&target, Some(&progress.reporter), |current| {
+                    progress.advanced(&path, current);
+                })?;
+            if actual_size != expected_size {
+                return Err(MountedMtpError::RemovalObjectSize {
+                    path: path.clone(),
+                    expected: expected_size,
+                    actual: actual_size,
+                });
+            }
+            if actual_sha256 != expected_sha256 {
+                return Err(MountedMtpError::RemovalObjectChecksum(path.clone()));
+            }
+            Ok(())
+        })
     })
     .await
     .map_err(MountedMtpError::Task)?
@@ -464,8 +966,7 @@ pub async fn verify_mounted_mtp_object(
 
 /// Restore one exact mounted-MTP object from a verified local backup.
 /// # Errors
-/// [`MountedMtpError`] if the backup is invalid, the destination
-/// already exists, upload fails, or restored verification fails.
+/// Backup, destination, upload, and metadata failures are returned.
 pub async fn restore_mounted_mtp_object(
     mount_id: &str,
     storage_id: &str,
@@ -474,31 +975,54 @@ pub async fn restore_mounted_mtp_object(
     backup: &Path,
     expected_sha256: &str,
 ) -> Result<(), MountedMtpError> {
+    restore_mounted_mtp_object_with_progress(
+        mount_id,
+        storage_id,
+        path,
+        expected_size,
+        backup,
+        expected_sha256,
+        &ProgressReporter::default(),
+    )
+    .await
+}
+
+pub async fn restore_mounted_mtp_object_with_progress(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+    expected_size: u64,
+    backup: &Path,
+    expected_sha256: &str,
+    progress: &ProgressReporter,
+) -> Result<(), MountedMtpError> {
     let mount_id = mount_id.to_owned();
     let storage_id = storage_id.to_owned();
     let path = path.clone();
     let backup = backup.to_owned();
     let expected_sha256 = expected_sha256.to_owned();
+    let progress = progress.clone();
     tokio::task::spawn_blocking(move || {
-        restore_mounted_mtp_object_blocking(
-            &mount_id,
-            &storage_id,
-            &path,
-            expected_size,
-            &backup,
-            &expected_sha256,
-        )
+        run_cancellable(&progress, |cancellable| {
+            restore_mounted_mtp_object_blocking_with_cancellable(
+                &mount_id,
+                &storage_id,
+                &path,
+                expected_size,
+                &backup,
+                &expected_sha256,
+                Some(cancellable),
+                Some(&progress),
+            )
+        })
     })
     .await
     .map_err(MountedMtpError::Task)?
 }
 
-/// Upload one verified local file to an absent mounted-MTP destination.
-///
-/// Checks the source before copying, then reads and verifies the device object.
-/// A failed upload is removed when possible.
+/// Upload a locally verified file, finalize it, and check destination metadata.
 /// # Errors
-/// Source change, existing destination, copy failure, or failed readback.
+/// Source, destination, copy, or metadata failure.
 pub async fn upload_mounted_mtp_object(
     mount_id: &str,
     storage_id: &str,
@@ -514,7 +1038,7 @@ pub async fn upload_mounted_mtp_object(
     let source = source.to_owned();
     let expected_sha256 = expected_sha256.to_owned();
     tokio::task::spawn_blocking(move || {
-        upload_mounted_mtp_object_blocking(
+        let result = upload_mounted_mtp_object_blocking(
             &mount_id,
             &storage_id,
             &path,
@@ -522,7 +1046,8 @@ pub async fn upload_mounted_mtp_object(
             expected_size,
             &expected_sha256,
             &progress,
-        )
+        );
+        cancellation_result(result, &progress.reporter)
     })
     .await
     .map_err(MountedMtpError::Task)?
@@ -537,8 +1062,11 @@ fn upload_mounted_mtp_object_blocking(
     expected_sha256: &str,
     progress: &MountedMtpUploadProgress,
 ) -> Result<(), MountedMtpError> {
+    let cancellable = gio::Cancellable::new();
+    let _cancellation =
+        CancellableWatcher::new(progress.reporter.cancellation_token(), &cancellable);
     let root = mounted_root(mount_id)?;
-    let storage = storage_for_id(&root, storage_id)?;
+    let storage = storage_for_id_with_cancellable(&root, storage_id, Some(&cancellable))?;
     upload_to_storage_blocking(
         &storage,
         path,
@@ -557,21 +1085,49 @@ fn upload_to_storage_blocking(
     expected_sha256: &str,
     progress: &MountedMtpUploadProgress,
 ) -> Result<(), MountedMtpError> {
-    let (source_size, source_sha256) = hash_local_file(source)?;
+    let (source_size, source_sha256) =
+        hash_local_file_with_cancellation(source, Some(&progress.reporter))?;
     if source_size != expected_size || source_sha256 != expected_sha256 {
         return Err(MountedMtpError::UploadSourceVerification(source.to_owned()));
     }
-    let (parent, name) = mounted_parent(storage, path)?;
+    let cancellable = gio::Cancellable::new();
+    let _cancellation =
+        CancellableWatcher::new(progress.reporter.cancellation_token(), &cancellable);
+    let (parent, name) = mounted_parent_with_cancellable(storage, path, Some(&cancellable))?;
     let destination = parent.child(name);
-    if destination.query_exists(gio::Cancellable::NONE) {
+    if destination.query_exists(Some(&cancellable)) {
         return Err(MountedMtpError::UploadDestinationExists(path.clone()));
     }
 
-    let cancellable = gio::Cancellable::new();
-    if progress.reporter.is_cancelled() {
-        cancellable.cancel();
+    copy_upload_to_device(&destination, path, source, expected_size, progress)?;
+    if let Err(error) = verify_uploaded_object_metadata(&destination, path, expected_size, progress)
+    {
+        progress.reporter.failed(
+            OperationStage::DeviceVerify,
+            "Uploaded file metadata check failed",
+        );
+        return Err(cleanup_failed_upload(
+            &destination,
+            path,
+            error,
+            &progress.reporter,
+        ));
     }
+    Ok(())
+}
+
+fn copy_upload_to_device(
+    destination: &File,
+    path: &SafeRelativePath,
+    source: &Path,
+    expected_size: u64,
+    progress: &MountedMtpUploadProgress,
+) -> Result<(), MountedMtpError> {
+    let cancellable = gio::Cancellable::new();
+    let _cancellation =
+        CancellableWatcher::new(progress.reporter.cancellation_token(), &cancellable);
     let callback_cancellable = cancellable.clone();
+    let mut payload_sent = false;
     let mut copy_progress = |current: i64, _total: i64| {
         if progress.reporter.is_cancelled() {
             callback_cancellable.cancel();
@@ -584,15 +1140,32 @@ fn upload_to_storage_blocking(
                 progress.completed_before.saturating_add(current),
                 Some(progress.total),
             );
+            if current >= expected_size && !payload_sent {
+                payload_sent = true;
+                progress.reporter.started_with_path(
+                    OperationStage::DeviceFinalize,
+                    "Waiting for the desktop MTP mount to finalize the upload",
+                    path.to_string(),
+                    None,
+                );
+            }
         }
     };
     if let Err(upload) = File::for_path(source).copy(
-        &destination,
+        destination,
         FileCopyFlags::NONE,
         Some(&cancellable),
         Some(&mut copy_progress),
     ) {
-        let cleanup = discard_partial_probe(&destination);
+        let cleanup = discard_partial_object(destination, &path.to_string(), &progress.reporter);
+        progress.reporter.failed(
+            if payload_sent {
+                OperationStage::DeviceFinalize
+            } else {
+                OperationStage::Commit
+            },
+            "Desktop MTP upload failed",
+        );
         if progress.reporter.is_cancelled() && cleanup.is_ok() {
             return Err(MountedMtpError::Cancelled);
         }
@@ -602,101 +1175,154 @@ fn upload_to_storage_blocking(
         };
     }
 
-    let verification = (|| {
-        let info = destination.query_info(
-            "standard::type,standard::size",
-            gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
-            gio::Cancellable::NONE,
-        )?;
-        if info.file_type() != FileType::Regular {
-            return Err(MountedMtpError::UploadVerification(path.clone()));
-        }
-        let reported_size = u64::try_from(info.size())
-            .map_err(|_| MountedMtpError::NegativeObjectSize(info.size()))?;
-        if reported_size != expected_size {
-            return Err(MountedMtpError::UploadVerification(path.clone()));
-        }
-        let (actual_size, actual_sha256) = hash_mounted_file(&destination)?;
-        if actual_size != expected_size || actual_sha256 != expected_sha256 {
-            return Err(MountedMtpError::UploadVerification(path.clone()));
-        }
-        Ok(())
-    })();
-    if let Err(error) = verification {
-        return Err(cleanup_failed_upload(&destination, error));
+    if !payload_sent {
+        progress.reporter.started_with_path(
+            OperationStage::DeviceFinalize,
+            "Waiting for the desktop MTP mount to finalize the upload",
+            path.to_string(),
+            None,
+        );
     }
+    progress.reporter.completed_with_path(
+        OperationStage::DeviceFinalize,
+        "Desktop MTP upload finalized",
+        path.to_string(),
+        1,
+        Some(1),
+    );
     Ok(())
 }
 
-fn cleanup_failed_upload(destination: &File, operation: MountedMtpError) -> MountedMtpError {
-    if !destination.query_exists(gio::Cancellable::NONE) {
-        return operation;
+fn verify_uploaded_object_metadata(
+    destination: &File,
+    path: &SafeRelativePath,
+    expected_size: u64,
+    progress: &MountedMtpUploadProgress,
+) -> Result<(), MountedMtpError> {
+    progress.reporter.started_operations_with_path(
+        OperationStage::DeviceVerify,
+        "Checking uploaded file path and size",
+        path.to_string(),
+        Some(1),
+    );
+    let cancellable = gio::Cancellable::new();
+    let _cancellation =
+        CancellableWatcher::new(progress.reporter.cancellation_token(), &cancellable);
+    let info = destination.query_info(
+        "standard::type,standard::size",
+        gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+        Some(&cancellable),
+    )?;
+    if info.file_type() != FileType::Regular {
+        return Err(MountedMtpError::UploadMetadata(path.clone()));
     }
-    match destination.delete(gio::Cancellable::NONE) {
+    let reported_size =
+        u64::try_from(info.size()).map_err(|_| MountedMtpError::NegativeObjectSize(info.size()))?;
+    if reported_size != expected_size {
+        return Err(MountedMtpError::UploadMetadata(path.clone()));
+    }
+    progress.reporter.completed_operations_with_path(
+        OperationStage::DeviceVerify,
+        "Uploaded file path and size checked",
+        path.to_string(),
+        1,
+        Some(1),
+    );
+    Ok(())
+}
+
+fn cleanup_failed_upload(
+    destination: &File,
+    path: &SafeRelativePath,
+    operation: MountedMtpError,
+    progress: &ProgressReporter,
+) -> MountedMtpError {
+    match discard_partial_object(destination, &path.to_string(), progress) {
         Ok(()) => operation,
-        Err(cleanup) => MountedMtpError::UploadVerificationCleanup {
+        Err(cleanup) => MountedMtpError::UploadMetadataCleanup {
             operation: operation.to_string(),
             cleanup,
         },
     }
 }
 
-fn restore_mounted_mtp_object_blocking(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one exact restore contract plus its cancellation context"
+)]
+fn restore_mounted_mtp_object_blocking_with_cancellable(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
     expected_size: u64,
     backup: &Path,
     expected_sha256: &str,
+    cancellable: Option<&gio::Cancellable>,
+    progress: Option<&ProgressReporter>,
 ) -> Result<(), MountedMtpError> {
-    let (backup_size, backup_sha256) = hash_local_file(backup)?;
+    let (backup_size, backup_sha256) = hash_local_file_with_cancellation(backup, progress)?;
     if backup_size != expected_size || backup_sha256 != expected_sha256 {
         return Err(MountedMtpError::BackupVerification(backup.to_owned()));
     }
     let root = mounted_root(mount_id)?;
-    let storage = storage_for_id(&root, storage_id)?;
-    let (parent, name) = mounted_parent(&storage, path)?;
+    let storage = storage_for_id_with_cancellable(&root, storage_id, cancellable)?;
+    let (parent, name) = mounted_parent_with_cancellable(&storage, path, cancellable)?;
     let destination = parent.child(name);
-    if destination.query_exists(gio::Cancellable::NONE) {
+    if destination.query_exists(cancellable) {
         return Err(MountedMtpError::RemovalRestoreExists(path.clone()));
     }
-    if let Err(upload) = File::for_path(backup).copy(
-        &destination,
-        FileCopyFlags::NONE,
-        gio::Cancellable::NONE,
-        None,
-    ) {
+    if let Err(upload) =
+        File::for_path(backup).copy(&destination, FileCopyFlags::NONE, cancellable, None)
+    {
         return Err(cleanup_failed_restore(
             &destination,
+            path,
             MountedMtpError::Gio(upload),
+            progress,
         ));
     }
-    let verification = (|| {
-        let restored = mounted_regular_file(mount_id, storage_id, path, expected_size)?;
-        let (actual, restored_sha256) = hash_mounted_file(&restored)?;
-        if actual != expected_size {
-            return Err(MountedMtpError::RemovalObjectSize {
-                path: path.clone(),
-                expected: expected_size,
-                actual,
-            });
+    let metadata_check = (|| {
+        if let Some(progress) = progress {
+            progress.started_operations_with_path(
+                OperationStage::DeviceVerify,
+                "Checking restored file path and size",
+                path.to_string(),
+                Some(1),
+            );
         }
-        if restored_sha256 != expected_sha256 {
-            return Err(MountedMtpError::RemovalRestoreChecksum(path.clone()));
+        mounted_regular_file_with_cancellable(
+            mount_id,
+            storage_id,
+            path,
+            expected_size,
+            cancellable,
+        )?;
+        if let Some(progress) = progress {
+            progress.completed_operations_with_path(
+                OperationStage::DeviceVerify,
+                "Restored file path and size checked",
+                path.to_string(),
+                1,
+                Some(1),
+            );
         }
         Ok(())
     })();
-    if let Err(error) = verification {
-        return Err(cleanup_failed_restore(&destination, error));
+    if let Err(error) = metadata_check {
+        return Err(cleanup_failed_restore(&destination, path, error, progress));
     }
     Ok(())
 }
 
-fn cleanup_failed_restore(destination: &File, operation: MountedMtpError) -> MountedMtpError {
-    if !destination.query_exists(gio::Cancellable::NONE) {
-        return operation;
-    }
-    match destination.delete(gio::Cancellable::NONE) {
+fn cleanup_failed_restore(
+    destination: &File,
+    path: &SafeRelativePath,
+    operation: MountedMtpError,
+    progress: Option<&ProgressReporter>,
+) -> MountedMtpError {
+    let default_progress = ProgressReporter::default();
+    let progress = progress.unwrap_or(&default_progress);
+    match discard_partial_object(destination, &path.to_string(), progress) {
         Ok(()) => operation,
         Err(cleanup) => MountedMtpError::RemovalRestoreCleanup {
             operation: operation.to_string(),
@@ -705,16 +1331,17 @@ fn cleanup_failed_restore(destination: &File, operation: MountedMtpError) -> Mou
     }
 }
 
-fn mounted_regular_file(
+fn mounted_regular_file_with_cancellable(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
     expected_size: u64,
+    cancellable: Option<&gio::Cancellable>,
 ) -> Result<File, MountedMtpError> {
     let root = mounted_root(mount_id)?;
-    let storage = storage_for_id(&root, storage_id)?;
-    let (parent, name) = mounted_parent(&storage, path)?;
-    match child_metadata(&parent, &name)? {
+    let storage = storage_for_id_with_cancellable(&root, storage_id, cancellable)?;
+    let (parent, name) = mounted_parent_with_cancellable(&storage, path, cancellable)?;
+    match child_metadata_with_cancellable(&parent, &name, cancellable)? {
         ChildMetadata::Unique {
             file,
             file_type: FileType::Regular,
@@ -746,17 +1373,22 @@ fn mounted_regular_file(
     }
 }
 
-fn storage_for_id(root: &File, storage_id: &str) -> Result<File, MountedMtpError> {
-    garmin_storages(root)?
+fn storage_for_id_with_cancellable(
+    root: &File,
+    storage_id: &str,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<File, MountedMtpError> {
+    garmin_storages_with_cancellable(root, cancellable)?
         .into_iter()
         .map(|(storage, _)| storage)
         .find(|storage| mount_id_for_uri(&storage.uri()) == storage_id)
         .ok_or_else(|| MountedMtpError::StorageNotFound(storage_id.to_owned()))
 }
 
-fn mounted_parent(
+fn mounted_parent_with_cancellable(
     storage: &File,
     path: &SafeRelativePath,
+    cancellable: Option<&gio::Cancellable>,
 ) -> Result<(File, String), MountedMtpError> {
     let mut components = path
         .as_path()
@@ -771,7 +1403,7 @@ fn mounted_parent(
         })?;
     let mut parent = storage.clone();
     for component in components {
-        parent = match child_metadata(&parent, &component)? {
+        parent = match child_metadata_with_cancellable(&parent, &component, cancellable)? {
             ChildMetadata::Unique {
                 file,
                 file_type: FileType::Directory,
@@ -800,7 +1432,51 @@ fn mounted_parent(
     Ok((parent, name))
 }
 
+fn mounted_directory_with_cancellable(
+    storage: &File,
+    path: &SafeRelativePath,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<File, MountedMtpError> {
+    let mut directory = storage.clone();
+    for component in path.as_path().components() {
+        let name = component.as_os_str().to_string_lossy();
+        directory = match child_metadata_with_cancellable(&directory, &name, cancellable)? {
+            ChildMetadata::Unique {
+                file,
+                file_type: FileType::Directory,
+                ..
+            } => file,
+            ChildMetadata::Missing => {
+                return Err(MountedMtpError::MetadataPathState {
+                    path: path.clone(),
+                    state: DevicePathState::Missing,
+                });
+            }
+            ChildMetadata::Ambiguous => {
+                return Err(MountedMtpError::MetadataPathState {
+                    path: path.clone(),
+                    state: DevicePathState::Ambiguous,
+                });
+            }
+            ChildMetadata::Unique { .. } => {
+                return Err(MountedMtpError::MetadataPathState {
+                    path: path.clone(),
+                    state: DevicePathState::Other,
+                });
+            }
+        };
+    }
+    Ok(directory)
+}
+
 fn hash_local_file(path: &Path) -> Result<(u64, String), MountedMtpError> {
+    hash_local_file_with_cancellation(path, None)
+}
+
+fn hash_local_file_with_cancellation(
+    path: &Path,
+    progress: Option<&ProgressReporter>,
+) -> Result<(u64, String), MountedMtpError> {
     if !std::fs::symlink_metadata(path)?.file_type().is_file() {
         return Err(MountedMtpError::BackupVerification(path.to_owned()));
     }
@@ -808,14 +1484,20 @@ fn hash_local_file(path: &Path) -> Result<(u64, String), MountedMtpError> {
     if !file.metadata()?.is_file() {
         return Err(MountedMtpError::BackupVerification(path.to_owned()));
     }
-    hash_local_reader(&mut file)
+    hash_local_reader(&mut file, progress)
 }
 
-fn hash_local_reader(file: &mut StdFile) -> Result<(u64, String), MountedMtpError> {
+fn hash_local_reader(
+    file: &mut StdFile,
+    progress: Option<&ProgressReporter>,
+) -> Result<(u64, String), MountedMtpError> {
     let mut size = 0_u64;
     let mut hash = Sha256::new();
     let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
+        if progress.is_some_and(ProgressReporter::is_cancelled) {
+            return Err(MountedMtpError::Cancelled);
+        }
         let count = file.read(&mut buffer)?;
         if count == 0 {
             break;
@@ -825,16 +1507,39 @@ fn hash_local_reader(file: &mut StdFile) -> Result<(u64, String), MountedMtpErro
             .ok_or(MountedMtpError::SizeOverflow)?;
         hash.update(&buffer[..count]);
     }
+    if progress.is_some_and(ProgressReporter::is_cancelled) {
+        return Err(MountedMtpError::Cancelled);
+    }
     Ok((size, hex::encode(hash.finalize())))
 }
 
-fn hash_mounted_file(file: &File) -> Result<(u64, String), MountedMtpError> {
-    let stream = file.read(gio::Cancellable::NONE)?;
+fn hash_mounted_file_with_progress(
+    file: &File,
+    progress: Option<&ProgressReporter>,
+    mut report: impl FnMut(u64),
+) -> Result<(u64, String), MountedMtpError> {
+    if progress.is_some_and(ProgressReporter::is_cancelled) {
+        return Err(MountedMtpError::Cancelled);
+    }
+    let cancellable = gio::Cancellable::new();
+    let _cancellation = progress
+        .map(|progress| CancellableWatcher::new(progress.cancellation_token(), &cancellable));
+    let stream = file.read(Some(&cancellable))?;
     let mut size = 0_u64;
     let mut hash = Sha256::new();
     let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
-        let count = stream.read(&mut buffer, gio::Cancellable::NONE)?;
+        if progress.is_some_and(ProgressReporter::is_cancelled) {
+            cancellable.cancel();
+            return Err(MountedMtpError::Cancelled);
+        }
+        let count = match stream.read(&mut buffer, Some(&cancellable)) {
+            Ok(count) => count,
+            Err(_) if progress.is_some_and(ProgressReporter::is_cancelled) => {
+                return Err(MountedMtpError::Cancelled);
+            }
+            Err(error) => return Err(error.into()),
+        };
         if count == 0 {
             break;
         }
@@ -842,6 +1547,7 @@ fn hash_mounted_file(file: &File) -> Result<(u64, String), MountedMtpError> {
             .checked_add(u64::try_from(count).map_err(|_| MountedMtpError::SizeOverflow)?)
             .ok_or(MountedMtpError::SizeOverflow)?;
         hash.update(&buffer[..count]);
+        report(size);
     }
     Ok((size, hex::encode(hash.finalize())))
 }
@@ -888,7 +1594,11 @@ fn probe_mounted_mtp_file_blocking(
         match verify_probe_file(&destination, &readback, bytes, &expected_sha256, progress) {
             Ok(elapsed) => elapsed,
             Err(operation) => {
-                return match discard_partial_probe(&destination) {
+                let destination_name = destination.basename().map_or_else(
+                    || "temporary probe".into(),
+                    |name| name.to_string_lossy().into_owned(),
+                );
+                return match discard_partial_object(&destination, &destination_name, progress) {
                     Ok(()) => Err(operation),
                     Err(cleanup) => Err(MountedMtpError::ProbeVerificationCleanup {
                         operation: operation.to_string(),
@@ -964,7 +1674,11 @@ fn upload_probe_file(
         Some(&cancellable),
         Some(&mut copy_progress),
     ) {
-        let cleanup = discard_partial_probe(destination);
+        let destination_name = destination.basename().map_or_else(
+            || "temporary probe".into(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let cleanup = discard_partial_object(destination, &destination_name, progress);
         progress.failed(
             if payload_elapsed.is_some() {
                 OperationStage::DeviceFinalize
@@ -1015,13 +1729,56 @@ fn upload_probe_file(
     Ok((payload_elapsed, finalize_elapsed))
 }
 
-fn discard_partial_probe(destination: &File) -> Result<(), gio::glib::Error> {
-    match destination.delete(gio::Cancellable::NONE) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind::<gio::IOErrorEnum>() == Some(gio::IOErrorEnum::NotFound) => {
+fn discard_partial_object(
+    destination: &File,
+    path: &str,
+    progress: &ProgressReporter,
+) -> Result<(), gio::glib::Error> {
+    let cleanup = progress
+        .clone()
+        .for_required_cleanup()
+        .for_item(format!("discard-partial:{path}"));
+    cleanup.started_operations_with_path(
+        OperationStage::Cleanup,
+        "Removing incomplete device upload",
+        path,
+        Some(1),
+    );
+    let cancellable = gio::Cancellable::new();
+    let _deadline = CancellableWatcher::with_timeout(
+        cleanup.cancellation_token(),
+        &cancellable,
+        REQUIRED_CLEANUP_TIMEOUT,
+    );
+    match destination.delete(Some(&cancellable)) {
+        Ok(()) => {
+            cleanup.completed_operations_with_path(
+                OperationStage::Cleanup,
+                "Removed incomplete device upload",
+                path,
+                1,
+                Some(1),
+            );
             Ok(())
         }
-        Err(error) => Err(error),
+        Err(error) if error.kind::<gio::IOErrorEnum>() == Some(gio::IOErrorEnum::NotFound) => {
+            cleanup.completed_operations_with_path(
+                OperationStage::Cleanup,
+                "No incomplete device upload remained",
+                path,
+                1,
+                Some(1),
+            );
+            Ok(())
+        }
+        Err(error) => {
+            cleanup.failed_with_path(
+                OperationStage::Cleanup,
+                "Incomplete device upload cleanup failed or timed out",
+                path,
+            );
+            Err(error)
+        }
     }
 }
 
@@ -1140,23 +1897,33 @@ fn delete_probe_file(
     destination: &File,
     progress: &ProgressReporter,
 ) -> Result<std::time::Duration, MountedMtpError> {
-    progress.started(
+    let cleanup = progress.clone().for_required_cleanup();
+    cleanup.started(
         OperationStage::Delete,
         "Removing disposable device object",
         Some(1),
     );
     let deletion_started = Instant::now();
-    if let Err(error) = destination.delete(gio::Cancellable::NONE) {
-        progress.failed(OperationStage::Delete, "Disposable object deletion failed");
+    let cancellable = gio::Cancellable::new();
+    let _deadline = CancellableWatcher::with_timeout(
+        cleanup.cancellation_token(),
+        &cancellable,
+        REQUIRED_CLEANUP_TIMEOUT,
+    );
+    if let Err(error) = destination.delete(Some(&cancellable)) {
+        cleanup.failed(
+            OperationStage::Delete,
+            "Disposable object deletion failed or timed out",
+        );
         return Err(error.into());
     }
-    let removed = !destination.query_exists(gio::Cancellable::NONE);
+    let removed = !destination.query_exists(Some(&cancellable));
     let deletion_elapsed = deletion_started.elapsed();
     if !removed {
-        progress.failed(OperationStage::Delete, "Disposable object still exists");
+        cleanup.failed(OperationStage::Delete, "Disposable object still exists");
         return Err(MountedMtpError::ProbeNotRemoved);
     }
-    progress.completed(
+    cleanup.completed(
         OperationStage::Delete,
         "Disposable object removed",
         1,
@@ -1181,23 +1948,39 @@ fn garmin_directories(root: &File) -> Result<Vec<File>, MountedMtpError> {
 }
 
 fn garmin_storages(root: &File) -> Result<Vec<(File, File)>, MountedMtpError> {
-    storage_roots(root)?
+    garmin_storages_with_cancellable(root, None)
+}
+
+fn garmin_storages_with_cancellable(
+    root: &File,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<Vec<(File, File)>, MountedMtpError> {
+    storage_roots_with_cancellable(root, cancellable)?
         .into_iter()
-        .filter_map(
-            |storage| match child_named(&storage, "Garmin", FileType::Directory) {
+        .filter_map(|storage| {
+            match child_named_with_cancellable(&storage, "Garmin", FileType::Directory, cancellable)
+            {
                 Ok(Some(garmin)) => Some(Ok((storage, garmin))),
                 Ok(None) => None,
                 Err(error) => Some(Err(error)),
-            },
-        )
+            }
+        })
         .collect()
 }
 
+#[cfg(test)]
 fn storage_roots(root: &File) -> Result<Vec<File>, MountedMtpError> {
-    if child_named(root, "Garmin", FileType::Directory)?.is_some() {
+    storage_roots_with_cancellable(root, None)
+}
+
+fn storage_roots_with_cancellable(
+    root: &File,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<Vec<File>, MountedMtpError> {
+    if child_named_with_cancellable(root, "Garmin", FileType::Directory, cancellable)?.is_some() {
         return Ok(vec![root.clone()]);
     }
-    let children = child_directories(root)?;
+    let children = child_directories_with_cancellable(root, cancellable)?;
     Ok(if children.is_empty() {
         vec![root.clone()]
     } else {
@@ -1206,11 +1989,19 @@ fn storage_roots(root: &File) -> Result<Vec<File>, MountedMtpError> {
 }
 
 fn storage_label(storage: &File, index: usize) -> String {
+    storage_label_with_cancellable(storage, index, None)
+}
+
+fn storage_label_with_cancellable(
+    storage: &File,
+    index: usize,
+    cancellable: Option<&gio::Cancellable>,
+) -> String {
     storage
         .query_info(
             "standard::display-name",
             gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
-            gio::Cancellable::NONE,
+            cancellable,
         )
         .ok()
         .map(|info| info.display_name().to_string())
@@ -1242,14 +2033,17 @@ pub(crate) fn mount_id_for_uri(uri: &str) -> String {
     hex::encode(&digest[..8])
 }
 
-fn child_directories(parent: &File) -> Result<Vec<File>, MountedMtpError> {
+fn child_directories_with_cancellable(
+    parent: &File,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<Vec<File>, MountedMtpError> {
     let enumerator = parent.enumerate_children(
         CHILD_ATTRIBUTES,
         gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
-        gio::Cancellable::NONE,
+        cancellable,
     )?;
     let mut directories = Vec::new();
-    while let Some(info) = enumerator.next_file(gio::Cancellable::NONE)? {
+    while let Some(info) = enumerator.next_file(cancellable)? {
         if info.file_type() == FileType::Directory {
             directories.push(enumerator.child(&info));
         }
@@ -1263,12 +2057,21 @@ fn child_named(
     expected: &str,
     expected_type: FileType,
 ) -> Result<Option<File>, MountedMtpError> {
+    child_named_with_cancellable(parent, expected, expected_type, None)
+}
+
+fn child_named_with_cancellable(
+    parent: &File,
+    expected: &str,
+    expected_type: FileType,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<Option<File>, MountedMtpError> {
     let enumerator = parent.enumerate_children(
         CHILD_ATTRIBUTES,
         gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
-        gio::Cancellable::NONE,
+        cancellable,
     )?;
-    while let Some(info) = enumerator.next_file(gio::Cancellable::NONE)? {
+    while let Some(info) = enumerator.next_file(cancellable)? {
         if info.file_type() == expected_type
             && info.name().to_string_lossy().eq_ignore_ascii_case(expected)
         {
@@ -1301,6 +2104,17 @@ pub enum MountedMtpError {
     Gio(#[from] gio::glib::Error),
     #[error("mounted MTP device {0} is no longer available")]
     NotFound(String),
+    #[error("mounted MTP metadata path {path} has unsafe state {state:?}")]
+    MetadataPathState {
+        path: SafeRelativePath,
+        state: DevicePathState,
+    },
+    #[error("mounted MTP metadata file {path} is {size} bytes; limit is {limit} bytes")]
+    MetadataTooLarge {
+        path: SafeRelativePath,
+        limit: u64,
+        size: u64,
+    },
     #[error("GarminDevice.xml was not found on the mounted MTP device")]
     ManifestMissing,
     #[error("multiple GarminDevice.xml files occupied canonical locations")]
@@ -1369,8 +2183,6 @@ pub enum MountedMtpError {
     RemovalObjectNotRemoved(SafeRelativePath),
     #[error("refusing to overwrite an object while restoring {0}")]
     RemovalRestoreExists(SafeRelativePath),
-    #[error("restored mounted MTP object {0} failed checksum verification")]
-    RemovalRestoreChecksum(SafeRelativePath),
     #[error("restoration failed ({operation}); partial-object cleanup failed ({cleanup})")]
     RemovalRestoreCleanup {
         operation: String,
@@ -1389,10 +2201,12 @@ pub enum MountedMtpError {
         upload: gio::glib::Error,
         cleanup: gio::glib::Error,
     },
-    #[error("uploaded mounted MTP object {0} failed read-back verification")]
-    UploadVerification(SafeRelativePath),
-    #[error("upload verification failed ({operation}); invalid-object cleanup failed ({cleanup})")]
-    UploadVerificationCleanup {
+    #[error("uploaded mounted MTP object {0} has invalid destination metadata")]
+    UploadMetadata(SafeRelativePath),
+    #[error(
+        "upload metadata check failed ({operation}); invalid-object cleanup failed ({cleanup})"
+    )]
+    UploadMetadataCleanup {
         operation: String,
         cleanup: gio::glib::Error,
     },
@@ -1442,12 +2256,14 @@ impl MountedMtpError {
 #[cfg(test)]
 mod tests {
     use super::{
-        MountedMtpError, MountedMtpUploadProgress, mount_id_for_uri, storage_roots,
-        upload_probe_file, upload_to_storage_blocking, verify_probe_file,
+        CancellableWatcher, MountedMtpError, MountedMtpUploadProgress, cleanup_failed_upload,
+        hash_mounted_file_with_progress, mount_id_for_uri, read_bounded_mounted_file,
+        storage_roots, upload_probe_file, upload_to_storage_blocking, verify_probe_file,
     };
     use crate::SafeRelativePath;
     use garmin_progress::{OperationStage, ProgressReporter, ProgressState};
     use gio::File;
+    use gio::prelude::CancellableExt;
     use gio::prelude::FileExt as _;
     use sha2::{Digest as _, Sha256};
 
@@ -1473,7 +2289,65 @@ mod tests {
     }
 
     #[test]
-    fn uploads_and_reads_back_a_verified_object() {
+    fn bounded_read_treats_a_missing_parent_directory_as_an_absent_file() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = SafeRelativePath::parse("GARMIN-TOOLKIT/manifest.toml").unwrap();
+
+        let bytes = read_bounded_mounted_file(&File::for_path(fixture.path()), &path, 1024)
+            .expect("missing metadata is not an unsafe object");
+
+        assert_eq!(bytes, None);
+    }
+
+    #[test]
+    fn mounted_hash_stops_when_verification_is_cancelled() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("map.img");
+        std::fs::write(&path, b"verified map payload").unwrap();
+        let progress = ProgressReporter::default();
+        progress.cancellation_token().cancel();
+
+        let result =
+            hash_mounted_file_with_progress(&File::for_path(path), Some(&progress), |_| {});
+
+        assert!(matches!(result, Err(MountedMtpError::Cancelled)));
+    }
+
+    #[test]
+    fn cancellation_watcher_interrupts_a_blocked_gio_operation() {
+        let progress = ProgressReporter::default();
+        let cancellation = progress.cancellation_token();
+        let cancellable = gio::Cancellable::new();
+        let _watcher = CancellableWatcher::new(cancellation.clone(), &cancellable);
+
+        cancellation.cancel();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while !cancellable.is_cancelled() && std::time::Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+
+        assert!(cancellable.is_cancelled());
+    }
+
+    #[test]
+    fn cancellation_watcher_enforces_a_cleanup_deadline() {
+        let cancellable = gio::Cancellable::new();
+        let _watcher = CancellableWatcher::with_timeout(
+            ProgressReporter::default().cancellation_token(),
+            &cancellable,
+            std::time::Duration::from_millis(1),
+        );
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while !cancellable.is_cancelled() && std::time::Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+
+        assert!(cancellable.is_cancelled());
+    }
+
+    #[test]
+    fn uploads_a_locally_verified_object_and_checks_device_metadata() {
         let fixture = tempfile::tempdir().unwrap();
         let storage = fixture.path().join("storage");
         let source = fixture.path().join("source.img");
@@ -1481,6 +2355,7 @@ mod tests {
         std::fs::write(&source, b"verified map payload").unwrap();
         let path = SafeRelativePath::parse("Garmin/map.img").unwrap();
         let sha256 = hex::encode(Sha256::digest(b"verified map payload"));
+        let (progress, receiver) = ProgressReporter::channel();
 
         upload_to_storage_blocking(
             &File::for_path(&storage),
@@ -1489,7 +2364,7 @@ mod tests {
             20,
             &sha256,
             &MountedMtpUploadProgress {
-                reporter: ProgressReporter::default(),
+                reporter: progress,
                 completed_before: 0,
                 total: 20,
             },
@@ -1500,6 +2375,59 @@ mod tests {
             std::fs::read(storage.join("Garmin/map.img")).unwrap(),
             b"verified map payload"
         );
+        let events = receiver.try_iter().collect::<Vec<_>>();
+        let position = |stage, state| {
+            events
+                .iter()
+                .position(|event| event.stage == stage && event.state == state)
+                .unwrap()
+        };
+        let finalize_started = position(OperationStage::DeviceFinalize, ProgressState::Started);
+        let finalize_completed = position(OperationStage::DeviceFinalize, ProgressState::Completed);
+        let verify_completed = position(OperationStage::DeviceVerify, ProgressState::Completed);
+        assert!(finalize_started < finalize_completed);
+        assert!(finalize_completed < verify_completed);
+        assert_eq!(
+            events[verify_completed].unit,
+            garmin_progress::ProgressUnit::Operations
+        );
+        assert_eq!(
+            events[verify_completed].label,
+            "Uploaded file path and size checked"
+        );
+    }
+
+    #[test]
+    fn failed_upload_cleanup_removes_the_object_and_reports_progress() {
+        let fixture = tempfile::tempdir().unwrap();
+        let storage = fixture.path().join("storage");
+        std::fs::create_dir_all(storage.join("Garmin")).unwrap();
+        std::fs::write(storage.join("Garmin/map.img"), b"invalid map payload").unwrap();
+        let path = SafeRelativePath::parse("Garmin/map.img").unwrap();
+        let (progress, receiver) = ProgressReporter::channel();
+
+        let result = cleanup_failed_upload(
+            &File::for_path(storage.join("Garmin/map.img")),
+            &path,
+            MountedMtpError::UploadMetadata(path.clone()),
+            &progress,
+        );
+
+        assert!(matches!(result, MountedMtpError::UploadMetadata(_)));
+        assert!(!storage.join("Garmin/map.img").exists());
+        let events = receiver.try_iter().collect::<Vec<_>>();
+        assert!(events.iter().any(|event| {
+            event.stage == OperationStage::Cleanup
+                && event.state == ProgressState::Started
+                && event.label == "Removing incomplete device upload"
+                && event.path.as_deref() == Some("Garmin/map.img")
+        }));
+        assert!(events.iter().any(|event| {
+            event.stage == OperationStage::Cleanup
+                && event.state == ProgressState::Completed
+                && event.label == "Removed incomplete device upload"
+                && event.path.as_deref() == Some("Garmin/map.img")
+        }));
     }
 
     #[test]

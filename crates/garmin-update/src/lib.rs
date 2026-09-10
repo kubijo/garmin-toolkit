@@ -1,6 +1,7 @@
 //! Deterministic map planning, transfer, mutation, and recovery.
 
 mod backup;
+mod device_state;
 mod download;
 mod install;
 mod mounted_install;
@@ -9,6 +10,10 @@ mod removal;
 pub mod space;
 
 pub use backup::{BackupError, BackupFile, BackupReport, backup_mass_storage};
+pub use device_state::{
+    DEVICE_STATE_MAGIC, DEVICE_STATE_VERSION, DeviceIdentityState, DeviceStateError,
+    DeviceTransactionKind, DeviceTransactionStore, PortableTransaction,
+};
 pub use download::{
     ArtifactCacheSummary, DownloadError, DownloadProgress, DownloadUrlAuthorizer, Downloader,
     inspect_artifact_cache,
@@ -19,8 +24,8 @@ pub use install::{
 };
 pub use mounted_install::{
     MountedInstallError, MountedMtpPreflight, MountedUpdateRecoveryOutcome,
-    MountedUpdateRecoveryReport, apply_mounted_mtp_with_progress, preflight_mounted_mtp_update,
-    recover_mounted_mtp_update,
+    MountedUpdateRecoveryReport, UnprotectedMutationEvidence, apply_mounted_mtp_with_progress,
+    preflight_mounted_mtp_update, recover_mounted_mtp_update,
 };
 pub use plan::{
     BackupPolicy, DownloadSpec, UPDATE_PLAN_SCHEMA_VERSION, UpdatePlan, UpdatePlanError,

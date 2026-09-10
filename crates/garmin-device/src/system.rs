@@ -25,11 +25,18 @@ mod sysfs;
 mod implementation {
     pub use super::mounted_catalog::{MountedMtpCandidate, MountedMtpMonitor};
     pub use super::mounted_mtp::{
-        MountedMtpError, backup_mounted_mtp_object, delete_mounted_mtp_object,
-        delete_unverified_mounted_mtp_object, discover_mounted_mtp, inspect_mounted_mtp_object,
-        inventory_mounted_mtp, mounted_device_state, open_mounted_mtp,
-        primary_mounted_mtp_storage_id, probe_mounted_mtp_file, restore_mounted_mtp_object,
+        MountedMtpError, backup_mounted_mtp_object, create_verified_mounted_mtp_file,
+        delete_mounted_mtp_object, delete_mounted_mtp_object_with_progress,
+        delete_size_checked_mounted_mtp_object,
+        delete_size_checked_mounted_mtp_object_with_progress, discover_mounted_mtp,
+        ensure_mounted_mtp_directory, inspect_mounted_mtp_object,
+        inspect_mounted_mtp_object_with_progress, inventory_mounted_mtp,
+        list_mounted_mtp_directory, mounted_device_state, mounted_device_state_with_progress,
+        open_mounted_mtp, primary_mounted_mtp_storage_id, probe_mounted_mtp_file,
+        read_bounded_mounted_mtp_file, remove_empty_mounted_mtp_directory,
+        restore_mounted_mtp_object, restore_mounted_mtp_object_with_progress,
         upload_mounted_mtp_object, verify_mounted_mtp_object,
+        verify_mounted_mtp_object_with_progress,
     };
     pub use super::sysfs::{GarminUsbDevice, discover_garmin_usb_sysfs};
 }
@@ -101,6 +108,25 @@ pub struct MountedMtpUploadProgress {
     pub total: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct MountedMtpVerifyProgress {
+    pub reporter: ProgressReporter,
+    pub completed_before: u64,
+    pub total: u64,
+}
+
+impl MountedMtpVerifyProgress {
+    pub fn advanced(&self, path: &SafeRelativePath, completed: u64) {
+        self.reporter.advanced_with_path(
+            OperationStage::DeviceVerify,
+            "Verifying existing device file",
+            path.to_string(),
+            self.completed_before.saturating_add(completed),
+            Some(self.total),
+        );
+    }
+}
+
 /// Structured details for a disposable mounted-MTP probe failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MountedMtpProbeFailure {
@@ -126,6 +152,16 @@ impl MountedMtpDevice {
         implementation::mounted_device_state(&self.mount_id).await
     }
 
+    /// Read capacity with cancellation.
+    /// # Errors
+    /// Mount, listing, and cancellation failures are returned.
+    pub async fn state_snapshot_with_progress(
+        &self,
+        progress: &ProgressReporter,
+    ) -> Result<crate::DeviceStateSnapshot, MountedMtpError> {
+        implementation::mounted_device_state_with_progress(&self.mount_id, progress).await
+    }
+
     #[must_use]
     pub fn new(mount_id: impl Into<String>) -> Self {
         Self {
@@ -139,102 +175,26 @@ impl MountedMtpDevice {
     }
 }
 
-/// Platform-neutral operations supplied by the host mounted-MTP adapter.
-#[expect(
-    async_fn_in_trait,
-    reason = "the adapter is an internal generic contract and is not object-safe"
-)]
-pub trait MountedMtpDeviceAdapter {
-    async fn open(&self) -> Result<DeviceManifest, MountedMtpError>;
-
-    async fn inventory(
-        &self,
-        paths: &[SafeRelativePath],
-    ) -> Result<DeviceInventory, MountedMtpError>;
-
-    async fn primary_storage_id(&self) -> Result<String, MountedMtpError>;
-
-    async fn inspect(
-        &self,
-        storage_id: &str,
-        path: &SafeRelativePath,
-    ) -> Result<(DevicePathState, Option<u64>), MountedMtpError>;
-
-    async fn backup(
-        &self,
-        storage_id: &str,
-        path: &SafeRelativePath,
-        expected_size: u64,
-        destination: BackupDestination,
-        progress: MountedMtpBackupProgress,
-    ) -> Result<String, MountedMtpError>;
-
-    async fn delete(
-        &self,
-        storage_id: &str,
-        path: &SafeRelativePath,
-        expected_size: u64,
-        expected_sha256: &str,
-    ) -> Result<(), MountedMtpError>;
-
-    async fn delete_unverified(
-        &self,
-        storage_id: &str,
-        path: &SafeRelativePath,
-        expected_size: u64,
-    ) -> Result<(), MountedMtpError>;
-
-    async fn verify(
-        &self,
-        storage_id: &str,
-        path: &SafeRelativePath,
-        expected_size: u64,
-        expected_sha256: &str,
-    ) -> Result<(), MountedMtpError>;
-
-    async fn restore(
-        &self,
-        storage_id: &str,
-        path: &SafeRelativePath,
-        expected_size: u64,
-        backup: &Path,
-        expected_sha256: &str,
-    ) -> Result<(), MountedMtpError>;
-
-    async fn upload(
-        &self,
-        storage_id: &str,
-        path: &SafeRelativePath,
-        source: &Path,
-        expected_size: u64,
-        expected_sha256: &str,
-        progress: MountedMtpUploadProgress,
-    ) -> Result<(), MountedMtpError>;
-
-    async fn probe(
-        &self,
-        source: &Path,
-        progress: &ProgressReporter,
-    ) -> Result<DeviceProbeReport, MountedMtpError>;
-}
-
-impl MountedMtpDeviceAdapter for MountedMtpDevice {
-    async fn open(&self) -> Result<DeviceManifest, MountedMtpError> {
+impl MountedMtpDevice {
+    /// Read `GarminDevice.xml`.
+    /// # Errors
+    /// The mount and manifest must be valid.
+    pub async fn open(&self) -> Result<DeviceManifest, MountedMtpError> {
         implementation::open_mounted_mtp(&self.mount_id).await
     }
 
-    async fn inventory(
+    pub(crate) async fn backend_inventory(
         &self,
         paths: &[SafeRelativePath],
     ) -> Result<DeviceInventory, MountedMtpError> {
         implementation::inventory_mounted_mtp(&self.mount_id, paths).await
     }
 
-    async fn primary_storage_id(&self) -> Result<String, MountedMtpError> {
+    pub(crate) async fn backend_primary_storage_id(&self) -> Result<String, MountedMtpError> {
         implementation::primary_mounted_mtp_storage_id(&self.mount_id).await
     }
 
-    async fn inspect(
+    pub(crate) async fn backend_inspect(
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
@@ -242,7 +202,65 @@ impl MountedMtpDeviceAdapter for MountedMtpDevice {
         implementation::inspect_mounted_mtp_object(&self.mount_id, storage_id, path).await
     }
 
-    async fn backup(
+    pub(crate) async fn backend_inspect_with_progress(
+        &self,
+        storage_id: &str,
+        path: &SafeRelativePath,
+        progress: &ProgressReporter,
+    ) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+        implementation::inspect_mounted_mtp_object_with_progress(
+            &self.mount_id,
+            storage_id,
+            path,
+            progress,
+        )
+        .await
+    }
+
+    pub(crate) async fn backend_read_bounded_file(
+        &self,
+        storage_id: &str,
+        path: &SafeRelativePath,
+        limit: u64,
+    ) -> Result<Option<Vec<u8>>, MountedMtpError> {
+        implementation::read_bounded_mounted_mtp_file(&self.mount_id, storage_id, path, limit).await
+    }
+
+    pub(crate) async fn backend_list_directory(
+        &self,
+        storage_id: &str,
+        path: &SafeRelativePath,
+    ) -> Result<Vec<crate::storage::DeviceDirectoryEntry>, MountedMtpError> {
+        implementation::list_mounted_mtp_directory(&self.mount_id, storage_id, path).await
+    }
+
+    pub(crate) async fn backend_ensure_directory(
+        &self,
+        storage_id: &str,
+        path: &SafeRelativePath,
+    ) -> Result<(), MountedMtpError> {
+        implementation::ensure_mounted_mtp_directory(&self.mount_id, storage_id, path).await
+    }
+
+    pub(crate) async fn backend_create_verified_file(
+        &self,
+        storage_id: &str,
+        path: &SafeRelativePath,
+        bytes: &[u8],
+    ) -> Result<(), MountedMtpError> {
+        implementation::create_verified_mounted_mtp_file(&self.mount_id, storage_id, path, bytes)
+            .await
+    }
+
+    pub(crate) async fn backend_remove_empty_directory(
+        &self,
+        storage_id: &str,
+        path: &SafeRelativePath,
+    ) -> Result<(), MountedMtpError> {
+        implementation::remove_empty_mounted_mtp_directory(&self.mount_id, storage_id, path).await
+    }
+
+    pub(crate) async fn backend_backup(
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
@@ -261,7 +279,7 @@ impl MountedMtpDeviceAdapter for MountedMtpDevice {
         .await
     }
 
-    async fn delete(
+    pub(crate) async fn backend_delete(
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
@@ -278,13 +296,32 @@ impl MountedMtpDeviceAdapter for MountedMtpDevice {
         .await
     }
 
-    async fn delete_unverified(
+    pub(crate) async fn backend_delete_with_progress(
+        &self,
+        storage_id: &str,
+        path: &SafeRelativePath,
+        expected_size: u64,
+        expected_sha256: &str,
+        progress: &ProgressReporter,
+    ) -> Result<(), MountedMtpError> {
+        implementation::delete_mounted_mtp_object_with_progress(
+            &self.mount_id,
+            storage_id,
+            path,
+            expected_size,
+            expected_sha256,
+            progress,
+        )
+        .await
+    }
+
+    pub(crate) async fn backend_delete_size_checked(
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
         expected_size: u64,
     ) -> Result<(), MountedMtpError> {
-        implementation::delete_unverified_mounted_mtp_object(
+        implementation::delete_size_checked_mounted_mtp_object(
             &self.mount_id,
             storage_id,
             path,
@@ -293,7 +330,24 @@ impl MountedMtpDeviceAdapter for MountedMtpDevice {
         .await
     }
 
-    async fn verify(
+    pub(crate) async fn backend_delete_size_checked_with_progress(
+        &self,
+        storage_id: &str,
+        path: &SafeRelativePath,
+        expected_size: u64,
+        progress: &ProgressReporter,
+    ) -> Result<(), MountedMtpError> {
+        implementation::delete_size_checked_mounted_mtp_object_with_progress(
+            &self.mount_id,
+            storage_id,
+            path,
+            expected_size,
+            progress,
+        )
+        .await
+    }
+
+    pub(crate) async fn backend_verify(
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
@@ -310,7 +364,26 @@ impl MountedMtpDeviceAdapter for MountedMtpDevice {
         .await
     }
 
-    async fn restore(
+    pub(crate) async fn backend_verify_with_progress(
+        &self,
+        storage_id: &str,
+        path: &SafeRelativePath,
+        expected_size: u64,
+        expected_sha256: &str,
+        progress: MountedMtpVerifyProgress,
+    ) -> Result<(), MountedMtpError> {
+        implementation::verify_mounted_mtp_object_with_progress(
+            &self.mount_id,
+            storage_id,
+            path,
+            expected_size,
+            expected_sha256,
+            progress,
+        )
+        .await
+    }
+
+    pub(crate) async fn backend_restore(
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
@@ -329,7 +402,28 @@ impl MountedMtpDeviceAdapter for MountedMtpDevice {
         .await
     }
 
-    async fn upload(
+    pub(crate) async fn backend_restore_with_progress(
+        &self,
+        storage_id: &str,
+        path: &SafeRelativePath,
+        expected_size: u64,
+        backup: &Path,
+        expected_sha256: &str,
+        progress: &ProgressReporter,
+    ) -> Result<(), MountedMtpError> {
+        implementation::restore_mounted_mtp_object_with_progress(
+            &self.mount_id,
+            storage_id,
+            path,
+            expected_size,
+            backup,
+            expected_sha256,
+            progress,
+        )
+        .await
+    }
+
+    pub(crate) async fn backend_upload(
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
@@ -350,7 +444,7 @@ impl MountedMtpDeviceAdapter for MountedMtpDevice {
         .await
     }
 
-    async fn probe(
+    pub(crate) async fn backend_probe(
         &self,
         source: &Path,
         progress: &ProgressReporter,

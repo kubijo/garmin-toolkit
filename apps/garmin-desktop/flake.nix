@@ -44,12 +44,12 @@
           portableToolchain = pkgsPortable.rust-bin.stable."1.98.0".default;
           craneLibPortable = (crane-portable.mkLib pkgsPortable).overrideToolchain portableToolchain;
           productionIdentity = {
-            id = "io.github.kubijo.GarminToolkit";
+            id = "io.kubijo.GarminToolkit";
             name = "Garmin Toolkit";
             slug = "garmin-toolkit";
           };
           demoIdentity = {
-            id = "io.github.kubijo.GarminToolkit.Demo";
+            id = "io.kubijo.GarminToolkit.Demo";
             name = "Garmin Toolkit Demo";
             slug = "garmin-toolkit-demo";
           };
@@ -110,7 +110,7 @@
                   project_license = "AGPL-3.0-or-later";
                   description.p = "Import, inspect, and manage Garmin activity data without a mandatory cloud service.";
                   developer = {
-                    "@id" = "io.github.kubijo";
+                    "@id" = "io.kubijo";
                     name = "kubijo";
                   };
                   url = {

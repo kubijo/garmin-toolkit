@@ -1,6 +1,11 @@
-use std::time::{Duration, Instant};
+use std::collections::VecDeque;
+use std::time::{Duration, Instant, SystemTime};
 
-use garmin_progress::{OperationStage, ProgressEvent, ProgressScope, ProgressState, ProgressUnit};
+use garmin_progress::{
+    OperationStage, ProgressEvent, ProgressEventKind, ProgressScope, ProgressState, ProgressUnit,
+};
+
+const MAX_HISTORY_ENTRIES: usize = 2_048;
 
 #[derive(Debug, Clone)]
 pub(super) struct StageView {
@@ -11,8 +16,11 @@ pub(super) struct StageView {
     pub completed: u64,
     pub total: Option<u64>,
     pub started_at: Option<Instant>,
+    pub started_recorded_at: Option<SystemTime>,
     pub updated_at: Option<Instant>,
+    pub updated_recorded_at: Option<SystemTime>,
     pub elapsed: Option<Duration>,
+    pub aggregate_owned: bool,
 }
 
 impl Default for StageView {
@@ -25,8 +33,11 @@ impl Default for StageView {
             completed: 0,
             total: None,
             started_at: None,
+            started_recorded_at: None,
             updated_at: None,
+            updated_recorded_at: None,
             elapsed: None,
+            aggregate_owned: false,
         }
     }
 }
@@ -41,17 +52,22 @@ impl StageView {
         self.total = event.total;
         let now = Instant::now();
         self.updated_at = Some(now);
+        self.updated_recorded_at = Some(event.recorded_at);
         match event.state {
             ProgressState::Started => {
                 self.started_at = Some(now);
+                self.started_recorded_at = Some(event.recorded_at);
                 self.elapsed = None;
             }
             ProgressState::Advanced if self.started_at.is_none() => {
                 self.started_at = Some(now);
+                self.started_recorded_at = Some(event.recorded_at);
                 self.elapsed = None;
             }
             ProgressState::Completed | ProgressState::Failed => {
-                self.elapsed = self.started_at.map(|started| started.elapsed());
+                self.elapsed = self
+                    .started_recorded_at
+                    .and_then(|started| event.recorded_at.duration_since(started).ok());
             }
             ProgressState::Advanced => {}
         }
@@ -69,8 +85,11 @@ impl StageView {
 pub(super) struct OperationView {
     pub stage: Option<OperationStage>,
     pub state: Option<ProgressState>,
+    pub kind: ProgressEventKind,
     pub label: String,
     pub path: Option<String>,
+    pub recorded_at: Option<SystemTime>,
+    pub duration: Option<Duration>,
 }
 
 impl OperationView {
@@ -78,8 +97,11 @@ impl OperationView {
         Self {
             stage: None,
             state: None,
+            kind: ProgressEventKind::Generic,
             label: label.into(),
             path: None,
+            recorded_at: None,
+            duration: None,
         }
     }
 
@@ -87,9 +109,17 @@ impl OperationView {
         Self {
             stage: Some(event.stage),
             state: Some(event.state),
+            kind: event.kind,
             label: event.label.clone(),
             path: event.path.clone(),
+            recorded_at: Some(event.recorded_at),
+            duration: None,
         }
+    }
+
+    fn recorded(mut self, duration: Option<Duration>) -> Self {
+        self.duration = duration;
+        self
     }
 
     pub fn completed(label: impl Into<String>) -> Self {
@@ -97,6 +127,22 @@ impl OperationView {
             state: Some(ProgressState::Completed),
             ..Self::initial(label)
         }
+    }
+
+    pub fn is_cached_verification(&self) -> bool {
+        self.kind == ProgressEventKind::CachedChecksumVerified
+            && self.state == Some(ProgressState::Completed)
+            && self.path.is_some()
+    }
+
+    pub fn is_cached_download(&self) -> bool {
+        self.kind == ProgressEventKind::CachedDownload
+            && self.state == Some(ProgressState::Completed)
+            && self.path.is_some()
+    }
+
+    fn continues_history_row(&self, previous: &Self) -> bool {
+        self.is_cached_verification() && previous.is_cached_download() && self.path == previous.path
     }
 }
 
@@ -110,7 +156,8 @@ pub(super) struct ItemView {
 pub(super) struct ProgressModel {
     pub stages: Vec<(OperationStage, StageView)>,
     pub current: OperationView,
-    pub history: Vec<OperationView>,
+    pub history: VecDeque<OperationView>,
+    pub history_rows_added: usize,
     items: Vec<ItemView>,
 }
 
@@ -122,7 +169,8 @@ impl ProgressModel {
                 .map(|stage| (*stage, StageView::default()))
                 .collect(),
             current: OperationView::initial(initial),
-            history: Vec::new(),
+            history: VecDeque::new(),
+            history_rows_added: 0,
             items: Vec::new(),
         }
     }
@@ -157,6 +205,7 @@ impl ProgressModel {
             label.clone_into(&mut view.label);
             view.completed = 0;
             view.total = None;
+            view.aggregate_owned = true;
         }
     }
 
@@ -166,19 +215,25 @@ impl ProgressModel {
     }
 
     pub fn apply(&mut self, event: &ProgressEvent) {
-        let Some((_, stage)) = self
+        let Some(stage_index) = self
             .stages
-            .iter_mut()
-            .find(|(stage, _)| *stage == event.stage)
+            .iter()
+            .position(|(stage, _)| *stage == event.stage)
         else {
+            if terminal(event.state) {
+                self.push_history(OperationView::from_event(event).recorded(None));
+            }
             return;
         };
         match &event.scope {
             ProgressScope::Stage => {
+                let stage = &mut self.stages[stage_index].1;
+                stage.aggregate_owned = true;
                 stage.apply(event);
                 self.current = OperationView::from_event(event);
                 if terminal(event.state) {
-                    self.history.push(self.current.clone());
+                    let history = self.current.clone().recorded(stage.elapsed);
+                    self.push_history(history);
                     for item in &mut self.items {
                         if item.stage == event.stage && item.view.is_active() {
                             item.view.state = Some(event.state);
@@ -186,7 +241,12 @@ impl ProgressModel {
                     }
                 }
             }
-            ProgressScope::Item { id } => self.apply_item(id, event),
+            ProgressScope::Item { id } => {
+                if !self.stages[stage_index].1.aggregate_owned {
+                    self.stages[stage_index].1.apply(event);
+                }
+                self.apply_item(id, event);
+            }
         }
     }
 
@@ -216,10 +276,32 @@ impl ProgressModel {
         item.view.apply(event);
         item.view.path.clone_from(&path);
         if terminal(event.state) || diagnostic_changed {
-            self.history.push(OperationView {
-                path,
-                ..OperationView::from_event(event)
+            let duration = item.view.elapsed.or_else(|| {
+                item.view
+                    .started_recorded_at
+                    .and_then(|started| event.recorded_at.duration_since(started).ok())
             });
+            self.push_history(
+                OperationView {
+                    path,
+                    ..OperationView::from_event(event)
+                }
+                .recorded(duration),
+            );
+        }
+    }
+
+    fn push_history(&mut self, operation: OperationView) {
+        let continues_row = self
+            .history
+            .back()
+            .is_some_and(|previous| operation.continues_history_row(previous));
+        if self.history.len() >= MAX_HISTORY_ENTRIES {
+            self.history.pop_front();
+        }
+        self.history.push_back(operation);
+        if !continues_row {
+            self.history_rows_added = self.history_rows_added.saturating_add(1);
         }
     }
 }
@@ -232,6 +314,128 @@ const fn terminal(state: ProgressState) -> bool {
 mod tests {
     use super::*;
     use garmin_progress::ProgressReporter;
+    use std::time::UNIX_EPOCH;
+
+    fn event_at(
+        recorded_at: SystemTime,
+        stage: OperationStage,
+        progress_state: ProgressState,
+        label: &str,
+    ) -> ProgressEvent {
+        ProgressEvent {
+            recorded_at,
+            scope: ProgressScope::Stage,
+            stage,
+            state: progress_state,
+            kind: ProgressEventKind::Generic,
+            unit: stage.progress_unit(),
+            label: label.to_owned(),
+            path: None,
+            completed: u64::from(progress_state == ProgressState::Completed),
+            total: Some(1),
+        }
+    }
+
+    #[test]
+    fn history_uses_producer_event_time_and_duration() {
+        let started = UNIX_EPOCH + Duration::from_secs(1_000);
+        let completed = started + Duration::from_secs(7);
+        let mut model = ProgressModel::new(&[OperationStage::Commit], "Preparing");
+
+        model.apply(&event_at(
+            started,
+            OperationStage::Commit,
+            ProgressState::Started,
+            "Writing",
+        ));
+        model.apply(&event_at(
+            completed,
+            OperationStage::Commit,
+            ProgressState::Completed,
+            "Written",
+        ));
+
+        assert_eq!(model.history.len(), 1);
+        assert_eq!(model.history[0].recorded_at, Some(completed));
+        assert_eq!(model.history[0].duration, Some(Duration::from_secs(7)));
+    }
+
+    #[test]
+    fn history_discards_oldest_entries_at_the_retention_limit() {
+        let mut model = ProgressModel::new(&[], "Preparing");
+        for index in 0..=MAX_HISTORY_ENTRIES {
+            model.apply(&ProgressEvent {
+                label: index.to_string(),
+                ..event_at(
+                    UNIX_EPOCH + Duration::from_secs(index as u64),
+                    OperationStage::Inspect,
+                    ProgressState::Completed,
+                    "unused",
+                )
+            });
+        }
+
+        assert_eq!(model.history.len(), MAX_HISTORY_ENTRIES);
+        assert_eq!(model.history.front().unwrap().label, "1");
+        assert_eq!(
+            model.history.back().unwrap().label,
+            MAX_HISTORY_ENTRIES.to_string()
+        );
+    }
+
+    #[test]
+    fn cached_download_and_verification_count_as_one_history_row() {
+        let (progress, receiver) = ProgressReporter::channel();
+        let mut model = ProgressModel::new(
+            &[OperationStage::Download, OperationStage::Verify],
+            "Starting",
+        );
+        progress
+            .clone()
+            .with_event_kind(ProgressEventKind::CachedDownload)
+            .for_item("cached-map")
+            .completed_with_path(
+                OperationStage::Download,
+                "Already cached",
+                "Garmin/map.img",
+                10,
+                Some(10),
+            );
+        progress
+            .with_event_kind(ProgressEventKind::CachedChecksumVerified)
+            .for_item("cached-map")
+            .completed_with_path(
+                OperationStage::Verify,
+                "Cached MD5 verified",
+                "Garmin/map.img",
+                10,
+                Some(10),
+            );
+        for event in receiver.try_iter() {
+            model.apply(&event);
+        }
+
+        assert_eq!(model.history.len(), 2);
+        assert_eq!(model.history_rows_added, 1);
+    }
+
+    #[test]
+    fn terminal_untracked_events_are_kept_as_history_only_rows() {
+        let mut model = ProgressModel::new(&[OperationStage::Commit], "Preparing");
+        let snapshot = event_at(
+            UNIX_EPOCH + Duration::from_secs(2_000),
+            OperationStage::Inspect,
+            ProgressState::Completed,
+            "Storage snapshot — Internal: 875 MB free of 31 GB",
+        );
+
+        model.apply(&snapshot);
+
+        assert_eq!(model.stages.len(), 1);
+        assert_eq!(model.history.len(), 1);
+        assert_eq!(model.history[0].stage, Some(OperationStage::Inspect));
+        assert!(model.history[0].label.starts_with("Storage snapshot"));
+    }
 
     #[test]
     fn initial_completion_resolves_a_known_skipped_stage_without_timing_noise() {
@@ -366,8 +570,39 @@ mod tests {
             ["second"]
         );
         assert_eq!(
-            model.history.last().unwrap().path.as_deref(),
+            model.history.back().unwrap().path.as_deref(),
             Some("Garmin/first.img")
         );
+    }
+
+    #[test]
+    fn terminal_reclamation_is_retained_with_path_time_and_duration() {
+        let (progress, receiver) = ProgressReporter::channel();
+        let removal = progress.for_item("recovery-remove:Garmin/obsolete.img");
+        let mut model = ProgressModel::new(&[OperationStage::Commit], "Preparing");
+        removal.started_with_path(
+            OperationStage::Commit,
+            "Removing obsolete file",
+            "Garmin/obsolete.img",
+            Some(8_000_000),
+        );
+        removal.completed_with_path(
+            OperationStage::Commit,
+            "Removed obsolete file; reclaimed 8.00 MB; free 875.36 MB → 883.36 MB",
+            "Garmin/obsolete.img",
+            8_000_000,
+            Some(8_000_000),
+        );
+        for event in receiver.try_iter() {
+            model.apply(&event);
+        }
+
+        assert_eq!(model.history.len(), 1);
+        let entry = &model.history[0];
+        assert_eq!(entry.state, Some(ProgressState::Completed));
+        assert_eq!(entry.path.as_deref(), Some("Garmin/obsolete.img"));
+        assert!(entry.label.contains("free 875.36 MB → 883.36 MB"));
+        assert!(entry.recorded_at.is_some());
+        assert!(entry.duration.is_some());
     }
 }

@@ -6,10 +6,10 @@ use crate::{
     UPDATE_PROGRESS_TITLE, UPDATE_RECOVERY_COMPLETE, UPDATE_RECOVERY_STAGES, UPDATE_STAGES,
 };
 use garmin_progress::{
-    OperationStage, ProgressEvent, ProgressReporter, ProgressState, ProgressUnit,
+    OperationStage, ProgressEvent, ProgressEventKind, ProgressReporter, ProgressState, ProgressUnit,
 };
 use ratatui::{Frame, layout::Rect};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 pub(super) fn render_stage(
     frame: &mut ratatui::Frame<'_>,
@@ -21,11 +21,13 @@ pub(super) fn render_stage(
     if active == OperationStage::Backup {
         for state in [ProgressState::Started, ProgressState::Advanced] {
             model.apply(&ProgressEvent {
+                recorded_at: SystemTime::now(),
                 scope: garmin_progress::ProgressScope::Item {
                     id: "backup:internal:Garmin/D6184140A.img".to_owned(),
                 },
                 stage: OperationStage::Backup,
                 state,
+                kind: ProgressEventKind::default(),
                 unit: ProgressUnit::Bytes,
                 label: "Backing up device file".to_owned(),
                 path: Some("Garmin/D6184140A.img".to_owned()),
@@ -76,9 +78,11 @@ fn progress_fixture(
     for (index, stage) in stages[..=active_index].iter().copied().enumerate() {
         let (label, path, total) = details(stage);
         model.apply(&ProgressEvent {
+            recorded_at: SystemTime::now(),
             scope: garmin_progress::ProgressScope::Stage,
             stage,
             state: ProgressState::Started,
+            kind: ProgressEventKind::default(),
             unit: preview_progress_unit(stage),
             label: label.to_owned(),
             path: path.map(str::to_owned),
@@ -91,9 +95,11 @@ fn progress_fixture(
             ProgressState::Completed
         };
         model.apply(&ProgressEvent {
+            recorded_at: SystemTime::now(),
             scope: garmin_progress::ProgressScope::Stage,
             stage,
             state,
+            kind: ProgressEventKind::default(),
             unit: preview_progress_unit(stage),
             label: label.to_owned(),
             path: path.map(str::to_owned),
@@ -110,7 +116,24 @@ fn progress_fixture(
     if let Some(message) = completion {
         model.current = OperationView::completed(message);
     }
+    stabilize_history(&mut model);
     model
+}
+
+fn stabilize_history(model: &mut ProgressModel) {
+    for (index, operation) in model.history.iter_mut().enumerate() {
+        operation.recorded_at = Some(
+            std::time::UNIX_EPOCH
+                + Duration::from_secs(45_296 + u64::try_from(index).unwrap_or(u64::MAX)),
+        );
+        operation.duration = operation.stage.and_then(|stage| {
+            model
+                .stages
+                .iter()
+                .find(|(candidate, _)| *candidate == stage)
+                .and_then(|(_, view)| view.elapsed)
+        });
+    }
 }
 
 pub(super) fn render_removal(
@@ -196,9 +219,11 @@ pub(super) fn render_pipeline_complete_preview(
         let (label, path, total) = pipeline_preview_stage_details(*stage);
         for state in [ProgressState::Started, ProgressState::Completed] {
             model.apply(&ProgressEvent {
+                recorded_at: SystemTime::now(),
                 scope: garmin_progress::ProgressScope::Stage,
                 stage: *stage,
                 state,
+                kind: ProgressEventKind::default(),
                 unit: stage.progress_unit(),
                 label: label.to_owned(),
                 path: path.map(str::to_owned),
@@ -219,6 +244,7 @@ pub(super) fn render_pipeline_complete_preview(
             _ => view.elapsed,
         };
     }
+    stabilize_history(&mut model);
     model.current = OperationView::completed(PIPELINE_PROBE_COMPLETE);
     preview.render_progress(
         frame,
@@ -279,6 +305,9 @@ pub(super) fn render_link_benchmark_complete_preview(
 
 fn set_link_benchmark_timings(model: &mut ProgressModel, reading: bool) {
     for (stage, view) in &mut model.stages {
+        if *stage == OperationStage::DeviceVerify {
+            view.unit = ProgressUnit::Bytes;
+        }
         view.elapsed = match stage {
             OperationStage::Upload => Some(Duration::from_millis(16_170)),
             OperationStage::DeviceFinalize => Some(Duration::from_millis(30)),
@@ -318,6 +347,7 @@ fn set_link_benchmark_timings(model: &mut ProgressModel, reading: bool) {
     if reading {
         "Reading MTP object back".clone_into(&mut model.current.label);
     }
+    stabilize_history(model);
 }
 
 pub(super) fn render_link_benchmark_finalize_preview(
@@ -341,9 +371,11 @@ pub(super) fn render_link_benchmark_finalize_preview(
     }
     if recovering {
         model.apply(&ProgressEvent {
+            recorded_at: SystemTime::now(),
             scope: garmin_progress::ProgressScope::Stage,
             stage: OperationStage::DeviceFinalize,
             state: ProgressState::Advanced,
+            kind: ProgressEventKind::default(),
             unit: ProgressUnit::Operations,
             label: "Response timed out; reopening the device in 5 seconds".to_owned(),
             path: None,
@@ -363,7 +395,7 @@ pub(super) fn render_link_benchmark_finalize_preview(
 }
 
 const fn preview_progress_unit(stage: OperationStage) -> ProgressUnit {
-    if matches!(stage, OperationStage::Commit) {
+    if matches!(stage, OperationStage::Commit | OperationStage::DeviceVerify) {
         ProgressUnit::Operations
     } else {
         stage.progress_unit()
@@ -437,7 +469,7 @@ fn preview_stage_details(stage: OperationStage) -> (&'static str, Option<&'stati
         OperationStage::DeviceFinalize => {
             ("Waiting for the device to finalize the upload", None, 1)
         }
-        OperationStage::DeviceVerify => ("Read back and SHA-256 verified", None, 12_000_000),
+        OperationStage::DeviceVerify => ("Uploaded file path and size checked", None, 1),
         OperationStage::Delete => ("Disposable object removed", None, 1),
     }
 }
@@ -452,7 +484,7 @@ fn removal_preview_stage_details(
             12_012_000,
         ),
         OperationStage::Commit => (
-            "Removed and verified device file",
+            "Removed size-checked device file",
             Some("Garmin/Mock/example.sid"),
             2,
         ),
@@ -466,7 +498,7 @@ fn removal_recovery_preview_stage_details(
 ) -> (&'static str, Option<&'static str>, u64) {
     match stage {
         OperationStage::Cleanup => (
-            "Verified recovered device file",
+            "Recovered device path and size checked",
             Some("Garmin/Mock/removal.img"),
             2,
         ),
@@ -478,6 +510,7 @@ fn update_recovery_preview_stage_details(
     stage: OperationStage,
 ) -> (&'static str, Option<&'static str>, u64) {
     match stage {
+        OperationStage::DeviceVerify => ("Current device file paths and sizes checked", None, 3),
         OperationStage::Cleanup => ("Mounted MTP update rolled back", None, 1),
         _ => preview_stage_details(stage),
     }

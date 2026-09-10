@@ -1003,14 +1003,20 @@ async fn cached_download(
         permissions.set_readonly(true);
         tokio::fs::set_permissions(final_path, permissions).await?;
     }
-    progress.completed_with_path(
+    let cached_download = progress
+        .clone()
+        .with_event_kind(garmin_progress::ProgressEventKind::CachedDownload);
+    cached_download.completed_with_path(
         OperationStage::Download,
         "Already cached",
         spec.destination.as_path().display().to_string(),
         spec.size,
         Some(spec.size),
     );
-    progress.completed_with_path(
+    let cached_verification = progress
+        .clone()
+        .with_event_kind(garmin_progress::ProgressEventKind::CachedChecksumVerified);
+    cached_verification.completed_with_path(
         OperationStage::Verify,
         "Cached MD5 verified",
         spec.destination.as_path().display().to_string(),

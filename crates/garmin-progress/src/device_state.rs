@@ -11,11 +11,14 @@ pub type DeviceStateUpdate = Result<DeviceStateSnapshot, String>;
 pub(super) struct DeviceStateTracker(Arc<Mutex<Option<DeviceStateUpdate>>>);
 
 impl DeviceStateTracker {
-    pub fn set(&self, state: DeviceStateUpdate) {
-        *self
+    pub fn set(&self, state: DeviceStateUpdate) -> bool {
+        let mut latest = self
             .0
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(state);
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let changed = latest.as_ref() != Some(&state);
+        *latest = Some(state);
+        changed
     }
 
     fn latest(&self) -> Option<DeviceStateUpdate> {

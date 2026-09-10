@@ -21,7 +21,6 @@ lib.fileset.toSource {
       (workspaceSrc + "/crates/garmin-i18n/translations")
       (workspaceSrc + "/crates/garmin-simulator/fixtures")
       (workspaceSrc + "/crates/garmin-ui/assets")
-      (workspaceSrc + "/crates/garmin-update/tests/fixtures")
       (workspaceSrc + "/apps/garmin-hass/web/index.html")
       (workspaceSrc + "/apps/garmin-hass/web/initializer.js")
       (lib.fileset.maybeMissing (workspaceSrc + "/.sqlx"))

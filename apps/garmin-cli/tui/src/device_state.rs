@@ -1,7 +1,7 @@
 use garmin_device::{DeviceStateSnapshot, StorageCapacity};
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Style},
     widgets::{Gauge, Paragraph, Wrap},
 };
@@ -57,13 +57,23 @@ pub(super) fn render(
             frame.render_widget(
                 Gauge::default()
                     .percent(percent)
-                    .gauge_style(Style::default().fg(Color::Cyan).bg(Color::DarkGray))
-                    .label(format!(
-                        "{} used / {} total · {} free",
-                        super::decimal_bytes(used),
-                        super::decimal_bytes(total),
-                        super::decimal_bytes(free)
-                    )),
+                    .gauge_style(
+                        Style::default()
+                            .fg(Color::Rgb(37, 88, 78))
+                            .bg(Color::Rgb(43, 46, 50)),
+                    )
+                    .label(" ".repeat(usize::from(detail.width))),
+                detail,
+            );
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "{} used / {} total · {} free",
+                    super::decimal_bytes(used),
+                    super::decimal_bytes(total),
+                    super::decimal_bytes(free)
+                ))
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Rgb(215, 224, 220))),
                 detail,
             );
         } else {

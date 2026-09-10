@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use crate::attachments;
 use crate::storage::BackupDestination;
-use crate::system::{MountedMtpBackupProgress, MountedMtpUploadProgress};
+use crate::system::{MountedMtpBackupProgress, MountedMtpUploadProgress, MountedMtpVerifyProgress};
 use crate::{
     DeviceInventory, DeviceManifest, DevicePathState, DeviceProbeReport, SafeRelativePath,
 };
@@ -107,6 +107,13 @@ pub async fn mounted_device_state(
     unsupported().await
 }
 
+pub async fn mounted_device_state_with_progress(
+    _mount_id: &str,
+    _progress: &ProgressReporter,
+) -> Result<crate::DeviceStateSnapshot, MountedMtpError> {
+    unsupported().await
+}
+
 pub async fn inventory_mounted_mtp(
     _mount_id: &str,
     _paths: &[SafeRelativePath],
@@ -123,6 +130,57 @@ pub async fn inspect_mounted_mtp_object(
     _storage_id: &str,
     _path: &SafeRelativePath,
 ) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+    unsupported().await
+}
+
+pub async fn inspect_mounted_mtp_object_with_progress(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+    _progress: &ProgressReporter,
+) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+    unsupported().await
+}
+
+pub async fn read_bounded_mounted_mtp_file(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+    _limit: u64,
+) -> Result<Option<Vec<u8>>, MountedMtpError> {
+    unsupported().await
+}
+
+pub async fn list_mounted_mtp_directory(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+) -> Result<Vec<crate::storage::DeviceDirectoryEntry>, MountedMtpError> {
+    unsupported().await
+}
+
+pub async fn ensure_mounted_mtp_directory(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+) -> Result<(), MountedMtpError> {
+    unsupported().await
+}
+
+pub async fn create_verified_mounted_mtp_file(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+    _bytes: &[u8],
+) -> Result<(), MountedMtpError> {
+    unsupported().await
+}
+
+pub async fn remove_empty_mounted_mtp_directory(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+) -> Result<(), MountedMtpError> {
     unsupported().await
 }
 
@@ -147,11 +205,32 @@ pub async fn delete_mounted_mtp_object(
     unsupported().await
 }
 
-pub async fn delete_unverified_mounted_mtp_object(
+pub async fn delete_mounted_mtp_object_with_progress(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
     _expected_size: u64,
+    _expected_sha256: &str,
+    _progress: &ProgressReporter,
+) -> Result<(), MountedMtpError> {
+    unsupported().await
+}
+
+pub async fn delete_size_checked_mounted_mtp_object(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+    _expected_size: u64,
+) -> Result<(), MountedMtpError> {
+    unsupported().await
+}
+
+pub async fn delete_size_checked_mounted_mtp_object_with_progress(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+    _expected_size: u64,
+    _progress: &ProgressReporter,
 ) -> Result<(), MountedMtpError> {
     unsupported().await
 }
@@ -166,6 +245,17 @@ pub async fn verify_mounted_mtp_object(
     unsupported().await
 }
 
+pub async fn verify_mounted_mtp_object_with_progress(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+    _expected_size: u64,
+    _expected_sha256: &str,
+    _progress: MountedMtpVerifyProgress,
+) -> Result<(), MountedMtpError> {
+    unsupported().await
+}
+
 pub async fn restore_mounted_mtp_object(
     _mount_id: &str,
     _storage_id: &str,
@@ -173,6 +263,18 @@ pub async fn restore_mounted_mtp_object(
     _expected_size: u64,
     _backup: &Path,
     _expected_sha256: &str,
+) -> Result<(), MountedMtpError> {
+    unsupported().await
+}
+
+pub async fn restore_mounted_mtp_object_with_progress(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+    _expected_size: u64,
+    _backup: &Path,
+    _expected_sha256: &str,
+    _progress: &ProgressReporter,
 ) -> Result<(), MountedMtpError> {
     unsupported().await
 }

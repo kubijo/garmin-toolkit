@@ -8,8 +8,7 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 use url::Url;
 
-const LEGACY_UPDATE_PLAN_SCHEMA_VERSION: u32 = 1;
-pub const UPDATE_PLAN_SCHEMA_VERSION: u32 = 2;
+pub const UPDATE_PLAN_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,25 +34,14 @@ pub struct DownloadSpec {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdatePlan {
-    #[serde(default = "initial_schema_version")]
     pub schema_version: u32,
     pub device_digest: String,
     pub downloads: Vec<DownloadSpec>,
     pub files_to_remove: Vec<SafeRelativePath>,
     pub identifiers: Vec<MapInstallIdentifier>,
     pub total_bytes: u64,
-    #[serde(default)]
     pub backup_policy: BackupPolicy,
     pub digest: String,
-}
-
-#[derive(Serialize)]
-struct LegacyPlanDigest<'a> {
-    device_digest: &'a str,
-    downloads: Vec<DownloadDigest<'a>>,
-    files_to_remove: &'a [SafeRelativePath],
-    identifiers: &'a [MapInstallIdentifier],
-    total_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -189,18 +177,10 @@ impl UpdatePlan {
     /// # Errors
     /// Unsupported schemas, inconsistent totals, or a changed digest.
     pub fn validate(&self) -> Result<(), UpdatePlanError> {
-        if !matches!(
-            self.schema_version,
-            LEGACY_UPDATE_PLAN_SCHEMA_VERSION | UPDATE_PLAN_SCHEMA_VERSION
-        ) {
+        if self.schema_version != UPDATE_PLAN_SCHEMA_VERSION {
             return Err(UpdatePlanError::UnsupportedSchemaVersion(
                 self.schema_version,
             ));
-        }
-        if self.schema_version == LEGACY_UPDATE_PLAN_SCHEMA_VERSION
-            && self.backup_policy != BackupPolicy::Verified
-        {
-            return Err(UpdatePlanError::BackupPolicyRequiresCurrentSchema);
         }
         for download in &self.downloads {
             if normalized_md5(&download.md5).as_deref() != Some(download.cache_name.as_str()) {
@@ -261,30 +241,16 @@ impl UpdatePlan {
     }
 
     fn calculated_digest(&self) -> Result<String, UpdatePlanError> {
-        let canonical = if self.schema_version == LEGACY_UPDATE_PLAN_SCHEMA_VERSION {
-            serde_json::to_vec(&LegacyPlanDigest {
-                device_digest: &self.device_digest,
-                downloads: self.download_digests(),
-                files_to_remove: &self.files_to_remove,
-                identifiers: &self.identifiers,
-                total_bytes: self.total_bytes,
-            })?
-        } else {
-            serde_json::to_vec(&PlanDigest {
-                device_digest: &self.device_digest,
-                downloads: self.download_digests(),
-                files_to_remove: &self.files_to_remove,
-                identifiers: &self.identifiers,
-                total_bytes: self.total_bytes,
-                backup_policy: self.backup_policy,
-            })?
-        };
-        Ok(sha256_hex(&canonical)[..32].to_owned())
+        let canonical = serde_json::to_vec(&PlanDigest {
+            device_digest: &self.device_digest,
+            downloads: self.download_digests(),
+            files_to_remove: &self.files_to_remove,
+            identifiers: &self.identifiers,
+            total_bytes: self.total_bytes,
+            backup_policy: self.backup_policy,
+        })?;
+        Ok(sha256_hex(&canonical))
     }
-}
-
-const fn initial_schema_version() -> u32 {
-    LEGACY_UPDATE_PLAN_SCHEMA_VERSION
 }
 
 fn append_map(
@@ -449,8 +415,6 @@ fn sha256_hex(input: &[u8]) -> String {
 pub enum UpdatePlanError {
     #[error("update plan schema {0} is not supported")]
     UnsupportedSchemaVersion(u32),
-    #[error("skipping recovery backups requires the current update-plan schema")]
-    BackupPolicyRequiresCurrentSchema,
     #[error("update plan declares {declared} bytes but contains {calculated} bytes")]
     TotalSizeMismatch { declared: u64, calculated: u64 },
     #[error("update plan digest {declared} does not match {calculated}")]
@@ -499,30 +463,42 @@ mod tests {
     use super::*;
     use garmin_model::map::{MapComponent, MapContent, MapInstallOption};
 
-    const LEGACY_PLAN: &str =
-        include_str!("../tests/fixtures/update-plan-without-schema-version.json");
-
-    #[test]
-    fn validates_a_plan_from_an_older_capture() {
-        let plan: UpdatePlan = serde_json::from_str(LEGACY_PLAN).unwrap();
-
-        assert_eq!(plan.schema_version, LEGACY_UPDATE_PLAN_SCHEMA_VERSION);
-        assert_eq!(plan.backup_policy, BackupPolicy::Verified);
-        assert_eq!(plan.digest, "e4ff7ab725f359f57b7182674ae48579");
-        plan.validate().unwrap();
-
-        let current = serde_json::to_value(plan).unwrap();
-        assert_eq!(current["schema_version"], LEGACY_UPDATE_PLAN_SCHEMA_VERSION);
+    fn plan_fixture() -> UpdatePlan {
+        UpdatePlan::from_response(
+            &MapCatalog {
+                maps: vec![MapComponent {
+                    display_name: "Fixture map".to_owned(),
+                    install_options: vec![MapInstallOption {
+                        is_preferred: true,
+                        files: vec![MapContent {
+                            file_name: "Garmin/map.img".to_owned(),
+                            downloads: vec![MapDownload {
+                                md5: "00".repeat(16),
+                                size_in_bytes: 10,
+                                delivery_type: Some("Full".to_owned()),
+                                url: "https://download.garmin.com/map.img".to_owned(),
+                            }],
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            "device".to_owned(),
+        )
+        .unwrap()
     }
 
     #[test]
     fn backup_policy_changes_the_current_plan_identity() {
-        let legacy: UpdatePlan = serde_json::from_str(LEGACY_PLAN).unwrap();
-        let verified = legacy
+        let plan = plan_fixture();
+        let verified = plan
             .clone()
             .with_backup_policy(BackupPolicy::Verified)
             .unwrap();
-        let skipped = legacy.with_backup_policy(BackupPolicy::Skip).unwrap();
+        let skipped = plan.with_backup_policy(BackupPolicy::Skip).unwrap();
 
         assert_eq!(verified.schema_version, UPDATE_PLAN_SCHEMA_VERSION);
         assert_eq!(skipped.schema_version, UPDATE_PLAN_SCHEMA_VERSION);
@@ -533,7 +509,7 @@ mod tests {
 
     #[test]
     fn rejects_changed_or_unknown_persisted_plans() {
-        let mut plan: UpdatePlan = serde_json::from_str(LEGACY_PLAN).unwrap();
+        let mut plan = plan_fixture();
         plan.total_bytes += 1;
         assert!(matches!(
             plan.validate(),
@@ -550,7 +526,7 @@ mod tests {
 
     #[test]
     fn rejects_cache_names_that_are_not_content_addresses() {
-        let mut plan: UpdatePlan = serde_json::from_str(LEGACY_PLAN).unwrap();
+        let mut plan = plan_fixture();
         plan.downloads[0].cache_name = "friendly-map-name".to_owned();
 
         assert!(matches!(

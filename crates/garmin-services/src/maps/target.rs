@@ -17,6 +17,9 @@ use garmin_update::UpdatePlan;
 #[async_trait]
 pub trait UpdateTarget: Send + Sync {
     fn modifies_device(&self) -> bool;
+    fn writable_device(&self) -> Option<&dyn DeviceWrite> {
+        None
+    }
     async fn state(&self) -> Result<garmin_device::DeviceStateSnapshot>;
     fn fixture_root(&self) -> Option<&Path> {
         None
@@ -41,6 +44,10 @@ pub struct PhysicalTarget(pub Box<dyn DeviceWrite>);
 
 #[async_trait]
 impl UpdateTarget for PhysicalTarget {
+    fn writable_device(&self) -> Option<&dyn DeviceWrite> {
+        Some(self.0.as_ref())
+    }
+
     async fn state(&self) -> Result<garmin_device::DeviceStateSnapshot> {
         Ok(self.0.state().await?)
     }

@@ -14,12 +14,12 @@ use std::{
 use async_trait::async_trait;
 use garmin_capture::SessionCapture;
 use garmin_device::{
-    BackupDestination, DeviceInventory, DevicePathState, DeviceStateSnapshot,
+    BackupDestination, DeviceInventory, DevicePathStatus, DeviceStateSnapshot,
     MountedMtpBackupProgress, MountedMtpUploadProgress, SafeRelativePath,
     storage::{DeviceIoError, DeviceRead, DeviceWrite, MtpStorageDevice},
 };
 use garmin_model::map::MapAuthorization;
-use garmin_progress::ProgressReporter;
+use garmin_progress::{OperationStage, ProgressReporter, ProgressState};
 use garmin_update::{
     DownloadProgress, DownloadSpec, MountedInstallError, MountedUpdateRecoveryOutcome, UpdatePlan,
     apply_mounted_mtp_with_progress, preflight_mounted_mtp_update, recover_mounted_mtp_update,
@@ -41,6 +41,10 @@ const ADDED_MAP_BYTES: &[u8] = b"new optional map";
 const AUTHORIZATION_BYTES: &[u8] = b"authorization payload";
 const WORKER_ROOT_ENV: &str = "GARMIN_UPDATE_CRASH_WORKER_ROOT";
 const WORKER_MODE_ENV: &str = "GARMIN_UPDATE_CRASH_WORKER_MODE";
+const TEST_CAPACITY: u64 = 100_000_000;
+const DEVICE_STATE_HEADROOM: u64 = 16 * 1024 * 1024;
+const DEVICE_STATE_FIXTURE_ALLOWANCE: u64 = 8 * 1024;
+const TEST_DEVICE_DIGEST: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 #[derive(Clone, Copy)]
 enum Fault {
@@ -48,7 +52,7 @@ enum Fault {
     BackupFailure(usize),
     InspectFailure(usize),
     UploadFailure(usize),
-    UploadVerificationFailure(usize),
+    UploadAcceptanceFailure(usize),
     CancelAfterUpload(usize),
     RestoreFailure(usize),
     ChangedBeforeDelete,
@@ -65,6 +69,7 @@ struct TestDevice {
     inspections: AtomicUsize,
     restores: AtomicUsize,
     uploads: AtomicUsize,
+    verifications: AtomicUsize,
     root: PathBuf,
     _temporary: Option<TempDir>,
 }
@@ -135,6 +140,7 @@ impl TestDevice {
             inspections: AtomicUsize::new(0),
             restores: AtomicUsize::new(0),
             uploads: AtomicUsize::new(0),
+            verifications: AtomicUsize::new(0),
             root,
             _temporary: temporary,
         }
@@ -171,7 +177,7 @@ impl DeviceRead for TestDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-    ) -> std::result::Result<(DevicePathState, Option<u64>), DeviceIoError> {
+    ) -> std::result::Result<DevicePathStatus, DeviceIoError> {
         let inspection = self.inspections.fetch_add(1, Ordering::Relaxed) + 1;
         if matches!(self.fault, Fault::InspectFailure(expected) if inspection == expected) {
             return Err(
@@ -203,12 +209,52 @@ impl DeviceRead for TestDevice {
         size: u64,
         sha256: &str,
     ) -> std::result::Result<(), DeviceIoError> {
+        self.verifications.fetch_add(1, Ordering::Relaxed);
         self.adapter.verify(storage, path, size, sha256).await
+    }
+    async fn read_bounded_file(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        limit: u64,
+    ) -> std::result::Result<Option<Vec<u8>>, DeviceIoError> {
+        self.adapter.read_bounded_file(storage, path, limit).await
+    }
+    async fn list_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> std::result::Result<Vec<garmin_device::DeviceDirectoryEntry>, DeviceIoError> {
+        self.adapter.list_directory(storage, path).await
     }
 }
 
 #[async_trait]
 impl DeviceWrite for TestDevice {
+    async fn ensure_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> std::result::Result<(), DeviceIoError> {
+        self.adapter.ensure_directory(storage, path).await
+    }
+    async fn create_verified_file(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        bytes: &[u8],
+    ) -> std::result::Result<(), DeviceIoError> {
+        self.adapter
+            .create_verified_file(storage, path, bytes)
+            .await
+    }
+    async fn remove_empty_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> std::result::Result<(), DeviceIoError> {
+        self.adapter.remove_empty_directory(storage, path).await
+    }
     async fn delete(
         &self,
         storage: &str,
@@ -226,13 +272,21 @@ impl DeviceWrite for TestDevice {
         }
         self.adapter.delete(storage, path, size, sha256).await
     }
-    async fn delete_unverified(
+    async fn delete_size_checked(
         &self,
         storage: &str,
         path: &SafeRelativePath,
         size: u64,
     ) -> std::result::Result<(), DeviceIoError> {
-        self.adapter.delete_unverified(storage, path, size).await
+        if matches!(self.fault, Fault::ChangedBeforeDelete)
+            && path.to_string().eq_ignore_ascii_case("Garmin/map.img")
+        {
+            fs::write(
+                self.root.join("internal").join(path.as_path()),
+                CHANGED_MAP_BYTES,
+            )?;
+        }
+        self.adapter.delete_size_checked(storage, path, size).await
     }
     async fn restore(
         &self,
@@ -285,7 +339,7 @@ impl DeviceWrite for TestDevice {
             Fault::None
             | Fault::BackupFailure(_)
             | Fault::InspectFailure(_)
-            | Fault::UploadVerificationFailure(_)
+            | Fault::UploadAcceptanceFailure(_)
             | Fault::CancelAfterUpload(_)
             | Fault::RestoreFailure(_)
             | Fault::ChangedBeforeDelete
@@ -324,7 +378,7 @@ impl DeviceWrite for TestDevice {
                 .upload(storage, path, source, size, sha256, progress)
                 .await?;
             match self.fault {
-                Fault::UploadVerificationFailure(expected) if upload == expected => {
+                Fault::UploadAcceptanceFailure(expected) if upload == expected => {
                     self.adapter.delete(storage, path, size, sha256).await?;
                     Err(DeviceIoError::Verification(path.to_string()))
                 }
@@ -369,14 +423,15 @@ impl Transaction {
         Ok(Self {
             plan: UpdatePlan {
                 schema_version: garmin_update::UPDATE_PLAN_SCHEMA_VERSION,
-                device_digest: "test-device".to_owned(),
+                device_digest: TEST_DEVICE_DIGEST.to_owned(),
                 downloads: vec![spec],
                 files_to_remove: vec![],
                 identifiers: vec![],
                 total_bytes: REPLACEMENT_MAP_BYTES.len() as u64,
                 backup_policy: garmin_update::BackupPolicy::Verified,
-                digest: "test-plan".to_owned(),
-            },
+                digest: String::new(),
+            }
+            .with_backup_policy(garmin_update::BackupPolicy::Verified)?,
             staged: vec![DownloadProgress {
                 path: source,
                 bytes: REPLACEMENT_MAP_BYTES.len() as u64,
@@ -424,6 +479,13 @@ impl Transaction {
 }
 
 fn multi_file_fixture(fault: Fault) -> Result<(TestDevice, Transaction, MapAuthorization)> {
+    multi_file_fixture_with_capacity(fault, TEST_CAPACITY)
+}
+
+fn multi_file_fixture_with_capacity(
+    fault: Fault,
+    capacity: u64,
+) -> Result<(TestDevice, Transaction, MapAuthorization)> {
     let device_root = tempdir()?;
     TestDevice::prepare(device_root.path())?;
     fs::write(
@@ -437,7 +499,7 @@ fn multi_file_fixture(fault: Fault) -> Result<(TestDevice, Transaction, MapAutho
     let device = TestDevice::attach(
         device_root.path().to_owned(),
         fault,
-        1_000_000,
+        capacity,
         false,
         Some(device_root),
     );
@@ -475,14 +537,15 @@ fn multi_file_fixture(fault: Fault) -> Result<(TestDevice, Transaction, MapAutho
     let transaction = Transaction {
         plan: UpdatePlan {
             schema_version: garmin_update::UPDATE_PLAN_SCHEMA_VERSION,
-            device_digest: "test-device".to_owned(),
+            device_digest: TEST_DEVICE_DIGEST.to_owned(),
             downloads: specs,
             files_to_remove: vec![SafeRelativePath::parse("Garmin/obsolete.img")?],
             identifiers: vec![],
             total_bytes,
             backup_policy: garmin_update::BackupPolicy::Verified,
-            digest: "test-multi-plan".to_owned(),
-        },
+            digest: String::new(),
+        }
+        .with_backup_policy(garmin_update::BackupPolicy::Verified)?,
         staged,
         capture: SessionCapture::create(&transaction_root.path().join("capture"))?,
         _temporary: Some(transaction_root),
@@ -515,7 +578,7 @@ async fn require_absent(device: &TestDevice, path: &str) -> Result {
         device
             .inspect("internal", &SafeRelativePath::parse(path)?)
             .await?,
-        (DevicePathState::Missing, None)
+        DevicePathStatus::Missing
     );
     Ok(())
 }
@@ -563,16 +626,19 @@ async fn verify(device: &TestDevice, bytes: &[u8]) -> Result {
 }
 
 async fn recover(capture: &Path, device: &TestDevice) -> Result<MountedUpdateRecoveryOutcome> {
-    Ok(
-        recover_mounted_mtp_update(capture, "test-device", device, &ProgressReporter::default())
-            .await?
-            .outcome,
+    Ok(recover_mounted_mtp_update(
+        capture,
+        TEST_DEVICE_DIGEST,
+        device,
+        &ProgressReporter::default(),
     )
+    .await?
+    .outcome)
 }
 
 #[tokio::test]
 async fn capacity_rejects_before_mutation_despite_free_space_on_another_volume() -> Result {
-    for (capacity, read_only) in [(20, false), (1_000_000, true)] {
+    for (capacity, read_only) in [(20, false), (TEST_CAPACITY, true)] {
         let device = TestDevice::new(Fault::None, capacity, read_only)?;
         let tx = Transaction::new()?;
         assert!(matches!(
@@ -592,7 +658,7 @@ async fn capacity_rejects_before_mutation_despite_free_space_on_another_volume()
 
 #[tokio::test]
 async fn prepared_marker_collision_prevents_mutation() -> Result {
-    let device = TestDevice::new(Fault::None, 1_000_000, false)?;
+    let device = TestDevice::new(Fault::None, TEST_CAPACITY, false)?;
     let transaction = Transaction::new()?;
     occupy_marker(
         &transaction,
@@ -607,7 +673,7 @@ async fn prepared_marker_collision_prevents_mutation() -> Result {
 
 #[tokio::test]
 async fn committed_marker_collision_rolls_back_device_mutations() -> Result {
-    let device = TestDevice::new(Fault::None, 1_000_000, false)?;
+    let device = TestDevice::new(Fault::None, TEST_CAPACITY, false)?;
     let transaction = Transaction::new()?;
     occupy_marker(&transaction, "mounted-update/transaction/committed.json").await?;
 
@@ -619,7 +685,7 @@ async fn committed_marker_collision_rolls_back_device_mutations() -> Result {
 
 #[tokio::test]
 async fn rollback_marker_collision_preserves_restored_device_state() -> Result {
-    let device = TestDevice::new(Fault::UploadFailure(1), 1_000_000, false)?;
+    let device = TestDevice::new(Fault::UploadFailure(1), TEST_CAPACITY, false)?;
     let transaction = Transaction::new()?;
     occupy_marker(&transaction, "mounted-update/transaction/rolled-back.json").await?;
 
@@ -631,7 +697,7 @@ async fn rollback_marker_collision_preserves_restored_device_state() -> Result {
 
 #[tokio::test]
 async fn rollback_started_marker_collision_preserves_unproven_partial_state() -> Result {
-    let device = TestDevice::new(Fault::UploadFailure(1), 1_000_000, false)?;
+    let device = TestDevice::new(Fault::UploadFailure(1), TEST_CAPACITY, false)?;
     let transaction = Transaction::new()?;
     occupy_marker(
         &transaction,
@@ -651,7 +717,7 @@ async fn rollback_started_marker_collision_preserves_unproven_partial_state() ->
 
 #[tokio::test]
 async fn preflight_then_commit_preserves_backups_and_recovery_keeps_committed_files() -> Result {
-    let device = TestDevice::new(Fault::None, 1_000_000, false)?;
+    let device = TestDevice::new(Fault::None, TEST_CAPACITY, false)?;
     let tx = Transaction::new()?;
     preflight_mounted_mtp_update(
         &tx.plan,
@@ -664,16 +730,22 @@ async fn preflight_then_commit_preserves_backups_and_recovery_keeps_committed_fi
     .await?;
     tx.apply(&device).await?;
     verify(&device, REPLACEMENT_MAP_BYTES).await?;
+    let verifications_before_recovery = device.verifications.load(Ordering::Relaxed);
     assert_eq!(
         recover(tx.capture.root(), &device).await?,
         MountedUpdateRecoveryOutcome::Committed
+    );
+    assert_eq!(
+        device.verifications.load(Ordering::Relaxed),
+        verifications_before_recovery,
+        "committed recovery must reconcile device metadata without content readback"
     );
     Ok(())
 }
 
 #[tokio::test]
 async fn explicitly_skipped_backup_avoids_device_reads_and_records_the_policy() -> Result {
-    let device = TestDevice::new(Fault::None, 1_000_000, false)?;
+    let device = TestDevice::new(Fault::None, TEST_CAPACITY, false)?;
     let mut transaction = Transaction::new()?;
     transaction.plan.backup_policy = garmin_update::BackupPolicy::Skip;
 
@@ -700,8 +772,8 @@ async fn explicitly_skipped_backup_avoids_device_reads_and_records_the_policy() 
 }
 
 #[tokio::test]
-async fn skipped_backup_failure_never_claims_that_rollback_was_possible() -> Result {
-    let device = TestDevice::new(Fault::UploadFailure(1), 1_000_000, false)?;
+async fn skipped_backup_failure_resumes_from_retained_payload() -> Result {
+    let device = TestDevice::new(Fault::UploadFailure(1), TEST_CAPACITY, false)?;
     let mut transaction = Transaction::new()?;
     transaction.plan.backup_policy = garmin_update::BackupPolicy::Skip;
 
@@ -710,6 +782,289 @@ async fn skipped_backup_failure_never_claims_that_rollback_was_possible() -> Res
         Err(MountedInstallError::UnprotectedMutation { .. })
     ));
     assert_eq!(device.backups.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        recover_mounted_mtp_update(
+            transaction.capture.root(),
+            &transaction.plan.device_digest,
+            &device,
+            &ProgressReporter::default(),
+        )
+        .await?
+        .outcome,
+        MountedUpdateRecoveryOutcome::Resumed
+    );
+    verify(&device, REPLACEMENT_MAP_BYTES).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn cancelled_backup_free_recovery_preserves_pending_transaction_evidence() -> Result {
+    let device = TestDevice::new(Fault::UploadFailure(1), TEST_CAPACITY, false)?;
+    let mut transaction = Transaction::new()?;
+    transaction.plan.backup_policy = garmin_update::BackupPolicy::Skip;
+    assert!(transaction.apply(&device).await.is_err());
+    let uploads_before = device.uploads.load(Ordering::Relaxed);
+
+    let progress = ProgressReporter::default();
+    let cancellation = progress.cancellation_token();
+    let progress = progress.observe(move |event| {
+        if event.stage == OperationStage::Verify && event.state == ProgressState::Advanced {
+            cancellation.cancel();
+        }
+    });
+    let recovery = recover_mounted_mtp_update(
+        transaction.capture.root(),
+        &transaction.plan.device_digest,
+        &device,
+        &progress,
+    )
+    .await;
+
+    assert!(matches!(
+        recovery,
+        Err(MountedInstallError::UnprotectedMutation {
+            operation,
+            evidence: garmin_update::UnprotectedMutationEvidence::IntentRecorded {
+                ..
+            },
+        }) if matches!(*operation, MountedInstallError::Cancelled)
+    ));
+    assert_eq!(device.uploads.load(Ordering::Relaxed), uploads_before);
+    Ok(())
+}
+
+#[tokio::test]
+async fn skipped_multi_file_failure_reuses_applied_writes_and_finishes_the_transaction() -> Result {
+    let (device, mut transaction, authorization) = multi_file_fixture(Fault::UploadFailure(3))?;
+    transaction.plan.backup_policy = garmin_update::BackupPolicy::Skip;
+
+    let failure = transaction.apply_with(&device, &authorization).await;
+    assert!(matches!(
+        failure,
+        Err(MountedInstallError::UnprotectedMutation {
+            evidence: garmin_update::UnprotectedMutationEvidence::Applied {
+                applied_operations: 2,
+                total_operations: 5,
+                ..
+            },
+            ..
+        })
+    ));
+
+    let report = recover_mounted_mtp_update(
+        transaction.capture.root(),
+        &transaction.plan.device_digest,
+        &device,
+        &ProgressReporter::default(),
+    )
+    .await?;
+
+    assert_eq!(report.outcome, MountedUpdateRecoveryOutcome::Resumed);
+    assert_eq!(device.uploads.load(Ordering::Relaxed), 5);
+    verify_path(&device, "Garmin/map.img", REPLACEMENT_MAP_BYTES).await?;
+    verify_path(&device, "Garmin/map2.img", SECOND_REPLACEMENT_MAP_BYTES).await?;
+    verify_path(&device, "Garmin/new.img", ADDED_MAP_BYTES).await?;
+    verify_path(&device, "Garmin/unlock.gma", AUTHORIZATION_BYTES).await?;
+    require_absent(&device, "Garmin/obsolete.img").await?;
+    assert!(
+        transaction
+            .capture
+            .root()
+            .join("mounted-update/transaction/committed.json")
+            .is_file()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_free_recovery_distinguishes_an_unstarted_same_size_replacement() -> Result {
+    let (device, mut transaction, authorization) = multi_file_fixture(Fault::UploadFailure(1))?;
+    let replacement = vec![b'x'; SECOND_ORIGINAL_MAP_BYTES.len()];
+    fs::write(&transaction.staged[1].path, &replacement)?;
+    transaction.staged[1].bytes = replacement.len() as u64;
+    transaction.plan.downloads[1].size = replacement.len() as u64;
+    transaction.plan.downloads[1].md5 = hex::encode(Md5::digest(&replacement));
+    transaction.plan.total_bytes = transaction
+        .plan
+        .downloads
+        .iter()
+        .map(|item| item.size)
+        .sum();
+    transaction.plan = transaction
+        .plan
+        .with_backup_policy(garmin_update::BackupPolicy::Skip)?;
+
+    assert!(
+        transaction
+            .apply_with(&device, &authorization)
+            .await
+            .is_err()
+    );
+    let report = recover_mounted_mtp_update(
+        transaction.capture.root(),
+        &transaction.plan.device_digest,
+        &device,
+        &ProgressReporter::default(),
+    )
+    .await?;
+
+    assert_eq!(report.outcome, MountedUpdateRecoveryOutcome::Resumed);
+    verify_path(&device, "Garmin/map2.img", &replacement).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_free_recovery_removes_a_partial_then_reclaims_space_before_uploading() -> Result {
+    let initial_usage = (ORIGINAL_MAP_BYTES.len()
+        + SECOND_ORIGINAL_MAP_BYTES.len()
+        + b"obsolete".len()
+        + b"keep me".len()) as u64;
+    let peak_growth = (REPLACEMENT_MAP_BYTES.len() - ORIGINAL_MAP_BYTES.len()
+        + SECOND_REPLACEMENT_MAP_BYTES.len()
+        - SECOND_ORIGINAL_MAP_BYTES.len()
+        + ADDED_MAP_BYTES.len()
+        + AUTHORIZATION_BYTES.len()) as u64;
+    let (device, mut transaction, authorization) = multi_file_fixture_with_capacity(
+        Fault::UploadFailure(3),
+        initial_usage + peak_growth + DEVICE_STATE_HEADROOM + DEVICE_STATE_FIXTURE_ALLOWANCE,
+    )?;
+    transaction.plan.backup_policy = garmin_update::BackupPolicy::Skip;
+    assert!(
+        transaction
+            .apply_with(&device, &authorization)
+            .await
+            .is_err()
+    );
+    let free = device
+        .state()
+        .await?
+        .storages
+        .into_iter()
+        .find(|storage| storage.id == "internal")
+        .and_then(|storage| storage.capacity.bytes().map(|(_, free)| free))
+        .expect("internal test capacity");
+    let external = vec![b'x'; usize::try_from(free - 20)?];
+    fs::write(device.root.join("internal/Garmin/external.bin"), &external)?;
+
+    let (progress, receiver) = ProgressReporter::channel();
+    let report = recover_mounted_mtp_update(
+        transaction.capture.root(),
+        &transaction.plan.device_digest,
+        &device,
+        &progress,
+    )
+    .await?;
+    let events = receiver.try_iter().collect::<Vec<_>>();
+
+    assert_eq!(report.outcome, MountedUpdateRecoveryOutcome::Resumed);
+    assert!(events.iter().any(|event| {
+        event.state == ProgressState::Started
+            && event.label == "Removing proven incomplete update file"
+            && event.path.as_deref() == Some("Garmin/new.img")
+    }));
+    assert!(events.iter().any(|event| {
+        event.state == ProgressState::Started
+            && event.label == "Removing superseded file to reclaim device space"
+            && event.path.as_deref() == Some("Garmin/obsolete.img")
+    }));
+    assert!(events.iter().any(|event| {
+        event.state == ProgressState::Completed
+            && event
+                .label
+                .starts_with("Removed incomplete update file; reclaimed ")
+            && event.label.contains("; free ")
+            && event.label.contains(" → ")
+            && event.path.as_deref() == Some("Garmin/new.img")
+    }));
+    assert!(events.iter().any(|event| {
+        event.state == ProgressState::Completed
+            && event
+                .label
+                .starts_with("Removed superseded file; reclaimed ")
+            && event.label.contains("; free ")
+            && event.label.contains(" → ")
+            && event.path.as_deref() == Some("Garmin/obsolete.img")
+    }));
+    assert!(events.iter().any(|event| {
+        event.stage == OperationStage::Inspect
+            && event.state == ProgressState::Completed
+            && event.label.starts_with("Storage snapshot — Internal:")
+            && event.label.contains(" free of ")
+    }));
+    let partial_removed = events
+        .iter()
+        .position(|event| event.label == "Removing proven incomplete update file")
+        .expect("partial write removal was reported");
+    let applied_write_checked = events
+        .iter()
+        .position(|event| {
+            event.label == "Existing device path and size match the journal"
+                && event.path.as_deref() == Some("Garmin/map.img")
+        })
+        .expect("an already-applied write was checked against device metadata");
+    let resumed_upload = events
+        .iter()
+        .position(|event| {
+            event.stage == OperationStage::Commit
+                && event.state == ProgressState::Advanced
+                && event.path.as_deref() == Some("Garmin/new.img")
+        })
+        .expect("the missing recovery payload was uploaded");
+    assert!(partial_removed < applied_write_checked);
+    assert!(applied_write_checked < resumed_upload);
+    verify_path(&device, "Garmin/new.img", ADDED_MAP_BYTES).await?;
+    verify_path(&device, "Garmin/unlock.gma", AUTHORIZATION_BYTES).await?;
+    require_absent(&device, "Garmin/obsolete.img").await?;
+    verify_path(&device, "Garmin/external.bin", &external).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_free_recovery_preserves_an_applied_removal_that_reappears() -> Result {
+    let (device, mut transaction, authorization) = multi_file_fixture(Fault::UploadFailure(3))?;
+    transaction.plan.backup_policy = garmin_update::BackupPolicy::Skip;
+    fs::write(
+        device.root.join("internal/Garmin/obsolete-2.img"),
+        b"obsolete two",
+    )?;
+    transaction
+        .plan
+        .files_to_remove
+        .push(SafeRelativePath::parse("Garmin/obsolete-2.img")?);
+    assert!(
+        transaction
+            .apply_with(&device, &authorization)
+            .await
+            .is_err()
+    );
+
+    let progress = ProgressReporter::default();
+    let cancellation = progress.cancellation_token();
+    let progress = progress.observe(move |event| {
+        if event.state == ProgressState::Completed
+            && event.label.starts_with("Removed obsolete file;")
+            && event.path.as_deref() == Some("Garmin/obsolete.img")
+        {
+            cancellation.cancel();
+        }
+    });
+    assert!(matches!(
+        recover_mounted_mtp_update(
+            transaction.capture.root(),
+            &transaction.plan.device_digest,
+            &device,
+            &progress,
+        )
+        .await,
+        Err(MountedInstallError::UnprotectedMutation { .. })
+    ));
+    require_absent(&device, "Garmin/obsolete.img").await?;
+    verify_path(&device, "Garmin/obsolete-2.img", b"obsolete two").await?;
+
+    fs::write(
+        device.root.join("internal/Garmin/obsolete.img"),
+        b"replaced",
+    )?;
     assert!(matches!(
         recover_mounted_mtp_update(
             transaction.capture.root(),
@@ -718,8 +1073,67 @@ async fn skipped_backup_failure_never_claims_that_rollback_was_possible() -> Res
             &ProgressReporter::default(),
         )
         .await,
-        Err(MountedInstallError::RecoveryUnavailable)
+        Err(MountedInstallError::UnprotectedMutation { operation, .. })
+            if matches!(*operation, MountedInstallError::RecoveryEvidence(_))
     ));
+    verify_path(&device, "Garmin/obsolete.img", b"replaced").await?;
+
+    fs::remove_file(device.root.join("internal/Garmin/obsolete.img"))?;
+    assert_eq!(
+        recover_mounted_mtp_update(
+            transaction.capture.root(),
+            &transaction.plan.device_digest,
+            &device,
+            &ProgressReporter::default(),
+        )
+        .await?
+        .outcome,
+        MountedUpdateRecoveryOutcome::Resumed,
+    );
+    require_absent(&device, "Garmin/obsolete-2.img").await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn recovery_accepts_an_applied_file_by_path_and_size_without_readback() -> Result {
+    let (device, mut transaction, authorization) = multi_file_fixture(Fault::UploadFailure(4))?;
+    transaction.plan.backup_policy = garmin_update::BackupPolicy::Skip;
+    assert!(
+        transaction
+            .apply_with(&device, &authorization)
+            .await
+            .is_err()
+    );
+    fs::remove_file(device.root.join("internal/Garmin/unlock.gma"))?;
+    let changed = vec![b'x'; ADDED_MAP_BYTES.len()];
+    fs::write(device.root.join("internal/Garmin/new.img"), &changed)?;
+    let verifications_before_recovery = device.verifications.load(Ordering::Relaxed);
+    let (progress, receiver) = ProgressReporter::channel();
+    let report = recover_mounted_mtp_update(
+        transaction.capture.root(),
+        &transaction.plan.device_digest,
+        &device,
+        &progress,
+    )
+    .await?;
+    let events = receiver.try_iter().collect::<Vec<_>>();
+
+    assert_eq!(report.outcome, MountedUpdateRecoveryOutcome::Resumed);
+    assert!(events.iter().any(|event| {
+        event.state == ProgressState::Completed
+            && event.label == "Existing device path and size match the journal"
+            && event.path.as_deref() == Some("Garmin/new.img")
+    }));
+    assert_eq!(
+        device.verifications.load(Ordering::Relaxed),
+        verifications_before_recovery,
+        "recovery must not read back an applied file whose path and size match"
+    );
+    assert_eq!(
+        fs::read(device.root.join("internal/Garmin/new.img"))?,
+        changed,
+        "same-size contents are intentionally left for the Garmin device to validate"
+    );
     Ok(())
 }
 
@@ -764,10 +1178,10 @@ async fn every_multi_file_upload_failure_restores_the_original_set() -> Result {
 }
 
 #[tokio::test]
-async fn every_multi_file_upload_verification_failure_restores_the_original_set() -> Result {
+async fn every_multi_file_upload_acceptance_failure_restores_the_original_set() -> Result {
     for upload in 1..=4 {
         let (device, transaction, authorization) =
-            multi_file_fixture(Fault::UploadVerificationFailure(upload))?;
+            multi_file_fixture(Fault::UploadAcceptanceFailure(upload))?;
 
         assert!(
             transaction
@@ -859,7 +1273,7 @@ async fn unsupported_authorization_is_rejected_before_mutation() -> Result {
         },
     ];
     for authorization in cases {
-        let device = TestDevice::new(Fault::None, 1_000_000, false)?;
+        let device = TestDevice::new(Fault::None, TEST_CAPACITY, false)?;
         let transaction = Transaction::new()?;
 
         assert!(
@@ -876,7 +1290,7 @@ async fn unsupported_authorization_is_rejected_before_mutation() -> Result {
 
 #[tokio::test]
 async fn partial_upload_error_rolls_back_and_retry_verifies_originals() -> Result {
-    let device = TestDevice::new(Fault::UploadFailure(1), 1_000_000, false)?;
+    let device = TestDevice::new(Fault::UploadFailure(1), TEST_CAPACITY, false)?;
     let tx = Transaction::new()?;
     assert!(tx.apply(&device).await.is_err());
     verify(&device, ORIGINAL_MAP_BYTES).await?;
@@ -888,7 +1302,11 @@ async fn partial_upload_error_rolls_back_and_retry_verifies_originals() -> Resul
 }
 
 async fn interrupted() -> Result<(Arc<TestDevice>, Arc<Transaction>, PathBuf)> {
-    let device = Arc::new(TestDevice::new(Fault::ProcessDeath(1), 1_000_000, false)?);
+    let device = Arc::new(TestDevice::new(
+        Fault::ProcessDeath(1),
+        TEST_CAPACITY,
+        false,
+    )?);
     let tx = Arc::new(Transaction::new()?);
     let worker_device = Arc::clone(&device);
     let worker_tx = Arc::clone(&tx);
@@ -899,7 +1317,7 @@ async fn interrupted() -> Result<(Arc<TestDevice>, Arc<Transaction>, PathBuf)> {
             if device
                 .inspect("internal", &partial)
                 .await
-                .is_ok_and(|(_, size)| size == Some(9))
+                .is_ok_and(|status| status.size() == Some(9))
             {
                 break;
             }
@@ -937,16 +1355,17 @@ async fn task_abort_restores_a_proven_partial_upload() -> Result {
 }
 
 #[tokio::test]
-async fn changed_original_after_backup_is_preserved_and_blocks_recovery() -> Result {
-    let device = TestDevice::new(Fault::ChangedBeforeDelete, 1_000_000, false)?;
+async fn same_size_original_change_after_backup_does_not_force_a_second_device_read() -> Result {
+    let device = TestDevice::new(Fault::ChangedBeforeDelete, TEST_CAPACITY, false)?;
     let transaction = Transaction::new()?;
 
-    assert!(transaction.apply(&device).await.is_err());
+    transaction.apply(&device).await?;
     let map = device.root.join("internal/Garmin/map.img");
-    assert_eq!(fs::read(&map)?, CHANGED_MAP_BYTES);
-
-    assert!(recover(transaction.capture.root(), &device).await.is_err());
-    assert_eq!(fs::read(&map)?, CHANGED_MAP_BYTES);
+    assert_eq!(fs::read(&map)?, REPLACEMENT_MAP_BYTES);
+    assert_eq!(
+        recover(transaction.capture.root(), &device).await?,
+        MountedUpdateRecoveryOutcome::Committed
+    );
     verify_path(&device, "Garmin/untouched.img", b"keep me").await?;
     Ok(())
 }
@@ -959,7 +1378,7 @@ async fn recovery_inspection_disconnect_preserves_state_and_can_be_retried() -> 
     let disconnected = TestDevice::attach(
         owner.root.clone(),
         Fault::InspectFailure(1),
-        1_000_000,
+        TEST_CAPACITY,
         false,
         None,
     );
@@ -968,7 +1387,7 @@ async fn recovery_inspection_disconnect_preserves_state_and_can_be_retried() -> 
     assert_eq!(fs::read(&map)?, partial);
     drop(disconnected);
 
-    let reopened = TestDevice::attach(owner.root.clone(), Fault::None, 1_000_000, false, None);
+    let reopened = TestDevice::attach(owner.root.clone(), Fault::None, TEST_CAPACITY, false, None);
     assert_eq!(
         recover(&capture, &reopened).await?,
         MountedUpdateRecoveryOutcome::Restored
@@ -983,7 +1402,7 @@ async fn recovery_restore_disconnect_can_be_reopened_and_retried() -> Result {
     let disconnected = TestDevice::attach(
         owner.root.clone(),
         Fault::RestoreFailure(1),
-        1_000_000,
+        TEST_CAPACITY,
         false,
         None,
     );
@@ -992,7 +1411,7 @@ async fn recovery_restore_disconnect_can_be_reopened_and_retried() -> Result {
     assert!(!owner.root.join("internal/Garmin/map.img").exists());
     drop(disconnected);
 
-    let reopened = TestDevice::attach(owner.root.clone(), Fault::None, 1_000_000, false, None);
+    let reopened = TestDevice::attach(owner.root.clone(), Fault::None, TEST_CAPACITY, false, None);
     assert_eq!(
         recover(&capture, &reopened).await?,
         MountedUpdateRecoveryOutcome::Restored
@@ -1074,14 +1493,14 @@ async fn process_crash_worker() -> Result {
         } else {
             Fault::ProcessDeath(1)
         },
-        1_000_000,
+        TEST_CAPACITY,
         false,
         None,
     );
     if recovery {
         recover_mounted_mtp_update(
             &root.join("transaction/capture"),
-            "test-device",
+            TEST_DEVICE_DIGEST,
             &device,
             &ProgressReporter::default(),
         )
@@ -1143,7 +1562,7 @@ async fn process_termination_during_commit_and_rollback_is_recoverable() -> Resu
     assert!(matches!(
         recover_mounted_mtp_update(
             &capture,
-            "test-device",
+            TEST_DEVICE_DIGEST,
             &constrained,
             &ProgressReporter::default(),
         )
@@ -1158,7 +1577,7 @@ async fn process_termination_during_commit_and_rollback_is_recoverable() -> Resu
         .join("transaction/capture/mounted-update/transaction/rollback-started.json");
     terminate_worker(root.path(), "recover", &partial, 5, &rollback_started).await?;
 
-    let device = TestDevice::attach(device_root, Fault::None, 1_000_000, false, None);
+    let device = TestDevice::attach(device_root, Fault::None, TEST_CAPACITY, false, None);
     assert_eq!(
         recover(&capture, &device).await?,
         MountedUpdateRecoveryOutcome::Restored

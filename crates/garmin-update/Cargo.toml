@@ -25,9 +25,11 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+toml_edit.workspace = true
 tracing.workspace = true
 tempfile.workspace = true
 url.workspace = true
+uuid.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = ["md-5"]

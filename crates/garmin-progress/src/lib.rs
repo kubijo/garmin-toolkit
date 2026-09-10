@@ -5,6 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
+use std::time::SystemTime;
 
 mod device_state;
 use device_state::DeviceStateTracker;
@@ -68,12 +69,36 @@ pub enum ProgressState {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProgressEventKind {
+    #[default]
+    Generic,
+    CachedDownload,
+    CachedChecksumVerified,
+    StorageSnapshot,
+}
+
+impl ProgressEventKind {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde skip_serializing_if requires a shared-reference predicate"
+    )]
+    const fn is_generic(&self) -> bool {
+        matches!(self, Self::Generic)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProgressEvent {
+    #[serde(default = "SystemTime::now")]
+    pub recorded_at: SystemTime,
     #[serde(default, skip_serializing_if = "ProgressScope::is_stage")]
     pub scope: ProgressScope,
     pub stage: OperationStage,
     pub state: ProgressState,
+    #[serde(default, skip_serializing_if = "ProgressEventKind::is_generic")]
+    pub kind: ProgressEventKind,
     #[serde(default)]
     pub unit: ProgressUnit,
     pub label: String,
@@ -135,6 +160,7 @@ pub struct ProgressReporter {
     sink: Option<Arc<dyn ProgressSink>>,
     cancellation: CancellationToken,
     device_state: DeviceStateTracker,
+    event_kind: ProgressEventKind,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -180,6 +206,7 @@ impl ProgressReporter {
         })
         .with_cancellation(self.cancellation_token());
         child.device_state = self.device_state.clone();
+        child.event_kind = self.event_kind;
         child
     }
 
@@ -192,6 +219,7 @@ impl ProgressReporter {
                 sink: Some(Arc::new(ChannelProgressSink(sender))),
                 cancellation: CancellationToken::default(),
                 device_state: device_state.clone(),
+                event_kind: ProgressEventKind::Generic,
             },
             ProgressReceiver::new(receiver, device_state),
         )
@@ -203,6 +231,7 @@ impl ProgressReporter {
             sink: Some(Arc::new(HandlerProgressSink(handler))),
             cancellation: CancellationToken::default(),
             device_state: DeviceStateTracker::default(),
+            event_kind: ProgressEventKind::Generic,
         }
     }
 
@@ -216,6 +245,7 @@ impl ProgressReporter {
         });
         reporter.cancellation = self.cancellation.clone();
         reporter.device_state = self.device_state.clone();
+        reporter.event_kind = self.event_kind;
         reporter
     }
 
@@ -223,9 +253,28 @@ impl ProgressReporter {
         self.device_state.set(state);
     }
 
+    /// Publish changed device state.
+    #[must_use]
+    pub fn changed_device_state(&self, state: DeviceStateUpdate) -> bool {
+        self.device_state.set(state)
+    }
+
     #[must_use]
     pub fn with_cancellation(mut self, cancellation: CancellationToken) -> Self {
         self.cancellation = cancellation;
+        self
+    }
+
+    #[must_use]
+    pub fn with_event_kind(mut self, event_kind: ProgressEventKind) -> Self {
+        self.event_kind = event_kind;
+        self
+    }
+
+    /// Create an independently cancellable cleanup reporter.
+    #[must_use]
+    pub fn for_required_cleanup(mut self) -> Self {
+        self.cancellation = CancellationToken::default();
         self
     }
 
@@ -277,6 +326,22 @@ impl ProgressReporter {
             label,
             Some(path.into()),
             ProgressAmount::new(stage.progress_unit(), 0, total),
+        );
+    }
+
+    pub fn started_operations_with_path(
+        &self,
+        stage: OperationStage,
+        label: impl Into<String>,
+        path: impl Into<String>,
+        total: Option<u64>,
+    ) {
+        self.report(
+            stage,
+            ProgressState::Started,
+            label,
+            Some(path.into()),
+            ProgressAmount::new(ProgressUnit::Operations, 0, total),
         );
     }
 
@@ -379,12 +444,44 @@ impl ProgressReporter {
         );
     }
 
+    pub fn completed_operations_with_path(
+        &self,
+        stage: OperationStage,
+        label: impl Into<String>,
+        path: impl Into<String>,
+        completed: u64,
+        total: Option<u64>,
+    ) {
+        self.report(
+            stage,
+            ProgressState::Completed,
+            label,
+            Some(path.into()),
+            ProgressAmount::new(ProgressUnit::Operations, completed, total),
+        );
+    }
+
     pub fn failed(&self, stage: OperationStage, label: impl Into<String>) {
         self.report(
             stage,
             ProgressState::Failed,
             label,
             None,
+            ProgressAmount::new(stage.progress_unit(), 0, None),
+        );
+    }
+
+    pub fn failed_with_path(
+        &self,
+        stage: OperationStage,
+        label: impl Into<String>,
+        path: impl Into<String>,
+    ) {
+        self.report(
+            stage,
+            ProgressState::Failed,
+            label,
+            Some(path.into()),
             ProgressAmount::new(stage.progress_unit(), 0, None),
         );
     }
@@ -408,9 +505,11 @@ impl ProgressReporter {
         amount: ProgressAmount,
     ) {
         self.send(ProgressEvent {
+            recorded_at: SystemTime::now(),
             scope: ProgressScope::Stage,
             stage,
             state: progress_state,
+            kind: self.event_kind,
             unit: amount.unit,
             label: label.into(),
             path,

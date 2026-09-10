@@ -8,10 +8,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use garmin_capture::SessionCapture;
 use garmin_device::{
-    BackupDestination, DeviceInventory, DevicePathState, DeviceStateSnapshot,
+    BackupDestination, DeviceInventory, DevicePathStatus, DeviceStateSnapshot,
     MountedMtpBackupProgress, MountedMtpUploadProgress, SafeRelativePath, TransportKind,
     parse_manifest,
-    storage::{DeviceIoError, DeviceRead, DeviceWrite, DirectoryDevice},
+    storage::{DeviceDirectoryEntry, DeviceIoError, DeviceRead, DeviceWrite, DirectoryDevice},
 };
 use garmin_map_service::{ClientIdentity, OmtClient};
 use garmin_progress::{OperationStage, ProgressReporter, ProgressState};
@@ -105,7 +105,7 @@ enum Fault {
     ChangedBeforeDelete,
     DisconnectDuringBackup,
     Upload,
-    Readback,
+    UploadAcceptance,
 }
 
 struct FaultDevice {
@@ -151,7 +151,7 @@ impl DeviceRead for FaultDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-    ) -> Result<(DevicePathState, Option<u64>), DeviceIoError> {
+    ) -> Result<DevicePathStatus, DeviceIoError> {
         self.inner.inspect(storage, path).await
     }
 
@@ -184,10 +184,52 @@ impl DeviceRead for FaultDevice {
     ) -> Result<(), DeviceIoError> {
         self.inner.verify(storage, path, size, sha256).await
     }
+
+    async fn read_bounded_file(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        limit: u64,
+    ) -> Result<Option<Vec<u8>>, DeviceIoError> {
+        self.inner.read_bounded_file(storage, path, limit).await
+    }
+
+    async fn list_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> Result<Vec<DeviceDirectoryEntry>, DeviceIoError> {
+        self.inner.list_directory(storage, path).await
+    }
 }
 
 #[async_trait]
 impl DeviceWrite for FaultDevice {
+    async fn ensure_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> Result<(), DeviceIoError> {
+        self.inner.ensure_directory(storage, path).await
+    }
+
+    async fn create_verified_file(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        bytes: &[u8],
+    ) -> Result<(), DeviceIoError> {
+        self.inner.create_verified_file(storage, path, bytes).await
+    }
+
+    async fn remove_empty_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> Result<(), DeviceIoError> {
+        self.inner.remove_empty_directory(storage, path).await
+    }
+
     async fn delete(
         &self,
         storage: &str,
@@ -206,6 +248,23 @@ impl DeviceWrite for FaultDevice {
         self.inner.delete(storage, path, size, sha256).await
     }
 
+    async fn delete_size_checked(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        size: u64,
+    ) -> Result<(), DeviceIoError> {
+        if matches!(self.fault, Fault::ChangedBeforeDelete)
+            && path
+                .to_string()
+                .eq_ignore_ascii_case("Garmin/Mock/europe.img")
+            && !self.triggered.swap(true, Ordering::SeqCst)
+        {
+            tokio::fs::write(&self.path, b"changed outside the transaction").await?;
+        }
+        self.inner.delete_size_checked(storage, path, size).await
+    }
+
     async fn upload(
         &self,
         storage: &str,
@@ -222,7 +281,7 @@ impl DeviceWrite for FaultDevice {
                         "injected disconnect during upload".to_owned(),
                     ));
                 }
-                Fault::Readback => {
+                Fault::UploadAcceptance => {
                     self.inner
                         .upload(storage, path, source, size, sha256, progress)
                         .await?;
@@ -309,7 +368,7 @@ async fn changed_original_is_preserved_and_other_writes_roll_back() -> Result<()
 
 #[tokio::test]
 async fn physical_failures_restore_device_state_and_retain_diagnostics() -> Result<()> {
-    for fault in [Fault::Upload, Fault::Readback] {
+    for fault in [Fault::Upload, Fault::UploadAcceptance] {
         let fixture = Fixture::new(MockAuthorization::Supported).await?;
         let result = execute_update_plan(fixture.execution(Box::new(PhysicalTarget(Box::new(
             FaultDevice::new(&fixture.device, fault),

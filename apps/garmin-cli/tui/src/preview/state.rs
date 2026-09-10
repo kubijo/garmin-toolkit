@@ -78,6 +78,24 @@ mod tests {
         state.input(&Event::Key(KeyEvent::new(key, KeyModifiers::NONE)))
     }
 
+    fn buffer_text(buffer: &Buffer) -> String {
+        buffer
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect()
+    }
+
+    #[test]
+    fn pending_recovery_preview_shows_both_operator_choices() {
+        let mut state = PreviewState::default();
+        let buffer = render(&mut state, PreviewScreen::PendingRecovery, 0, (80, 24));
+        let text = buffer_text(&buffer);
+
+        assert!(text.contains("Recover now"));
+        assert!(text.contains("Clear state"));
+    }
+
     #[test]
     fn scroll_survives_animation_and_clamps_on_resize_without_leaking() {
         let screen = PreviewScreen::ProgressOverflow;
@@ -93,9 +111,8 @@ mod tests {
         assert_ne!(other.scroll, state.scroll);
 
         render(&mut state, screen, 30, (100, 30));
-        let mut resized = scrolled.clone();
-        resized.active = 3;
-        assert_eq!(state.scroll, resized);
+        assert_eq!(state.scroll.active, 4);
+        assert_ne!(state.scroll, scrolled);
 
         render(&mut state, PreviewScreen::MapSelection, 30, (100, 30));
         assert!(!state.is_interactive());

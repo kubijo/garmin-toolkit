@@ -7,12 +7,12 @@ use ratatui::widgets::{
     Block, Borders, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use super::progress_state::ProgressModel;
+use super::progress_state::{OperationView, ProgressModel};
 use super::{
-    ProgressInput, ProgressPhase, ProgressPresentation, decimal_bytes, operation_text, path_style,
-    progress_metrics, render_progress_footer, render_progress_gauge, stage_name, state_icon,
+    ProgressInput, ProgressPhase, ProgressPresentation, decimal_bytes, history_prefix,
+    operation_line, operation_text, path_style, progress_metrics, render_progress_footer,
+    render_progress_gauge, stage_name, stale_byte_progress, state_icon,
 };
-
 const ACTIVE_MAX_HEIGHT: u16 = 10;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -26,7 +26,8 @@ enum Panel {
 pub(super) struct DashboardScroll {
     pub active: usize,
     history: usize,
-    history_seen: usize,
+    history_lines_seen: usize,
+    history_rows_seen: usize,
     focus: Panel,
 }
 
@@ -134,28 +135,21 @@ impl DashboardScroll {
         .min(view.max_offset());
     }
 
-    fn track_history(&mut self, model: &ProgressModel, width: u16) {
+    fn track_history(&mut self, lines: usize, rows_added: usize) {
         if self.history > 0 {
-            self.history = self.history.saturating_add(
-                model
-                    .history
-                    .iter()
-                    .skip(self.history_seen)
-                    .map(|entry| {
-                        Paragraph::new(operation_text(entry, true))
-                            .wrap(Wrap { trim: false })
-                            .line_count(width)
-                    })
-                    .sum::<usize>(),
-            );
+            let added_rows = rows_added.saturating_sub(self.history_rows_seen);
+            let added_lines = lines.saturating_sub(self.history_lines_seen);
+            self.history = self.history.saturating_add(added_rows.max(added_lines));
         }
-        self.history_seen = model.history.len();
+        self.history_lines_seen = lines;
+        self.history_rows_seen = rows_added;
     }
 }
 
 const fn exit_input(phase: ProgressPhase) -> ProgressInput {
     match phase {
         ProgressPhase::Running => ProgressInput::Abort,
+        ProgressPhase::Cancelling => ProgressInput::Continue,
         ProgressPhase::Complete => ProgressInput::Close,
     }
 }
@@ -168,13 +162,20 @@ pub(super) fn render_progress_dashboard(
     scroll: &mut DashboardScroll,
 ) -> DashboardViewport {
     let complete = presentation.phase == ProgressPhase::Complete;
+    let cancelling = presentation.phase == ProgressPhase::Cancelling;
     if complete {
         scroll.focus = Panel::History;
     }
     let outer = Block::default()
         .title(format!(" {} ", presentation.title))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(if complete { Color::Green } else { Color::Cyan }));
+        .border_style(Style::default().fg(if complete {
+            Color::Green
+        } else if cancelling {
+            Color::Yellow
+        } else {
+            Color::Cyan
+        }));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     let active_count = model.active().count();
@@ -196,16 +197,9 @@ pub(super) fn render_progress_dashboard(
     ])
     .split(inner);
     render_stages(frame, areas[0], model);
-    scroll.track_history(model, inner.width.saturating_sub(4));
-    let history = Paragraph::new(Text::from(
-        model
-            .history
-            .iter()
-            .rev()
-            .flat_map(|entry| operation_text(entry, true).lines)
-            .collect::<Vec<_>>(),
-    ))
-    .wrap(Wrap { trim: false });
+    let history = Paragraph::new(history_text(model.history.iter())).wrap(Wrap { trim: false });
+    let history_lines = history.line_count(inner.width.saturating_sub(4));
+    scroll.track_history(history_lines, model.history_rows_added);
     let viewport = DashboardViewport {
         active: Viewport {
             area: areas[2],
@@ -213,7 +207,7 @@ pub(super) fn render_progress_dashboard(
         },
         history: Viewport {
             area: areas[4],
-            lines: history.line_count(inner.width.saturating_sub(4)),
+            lines: history_lines,
         },
     };
     scroll.active = scroll.active.min(viewport.active.max_offset());
@@ -282,7 +276,9 @@ fn active_text(model: &ProgressModel, complete: bool) -> Text<'static> {
                 Style::default().fg(Color::Gray),
             ));
         }
-        if let Some(updated) = view.updated_at {
+        if stale_byte_progress(view).is_none()
+            && let Some(updated) = view.updated_at
+        {
             let idle = updated.elapsed().as_secs();
             let (label, color) = if idle < 2 {
                 ("receiving".to_owned(), Color::Cyan)
@@ -304,6 +300,42 @@ fn active_text(model: &ProgressModel, complete: bool) -> Text<'static> {
                 path_style(),
             ),
         ]));
+    }
+    Text::from(lines)
+}
+
+fn history_text<'a>(history: impl DoubleEndedIterator<Item = &'a OperationView>) -> Text<'static> {
+    let mut lines = Vec::new();
+    let mut entries = history.rev().peekable();
+    while let Some(entry) = entries.next() {
+        if entry.is_cached_verification()
+            && let Some(download) = entries.peek()
+            && download.is_cached_download()
+            && entry.path == download.path
+        {
+            let download = entries.next().expect("peeked cached download");
+            let path = entry
+                .path
+                .as_ref()
+                .or(download.path.as_ref())
+                .expect("cached file event has a path");
+            let mut combined = entry.clone();
+            combined.duration = match (entry.duration, download.duration) {
+                (Some(verify), Some(download)) => Some(verify.saturating_add(download)),
+                (duration, None) | (None, duration) => duration,
+            };
+            let mut spans = history_prefix(&combined);
+            spans.extend([
+                Span::styled(path.clone(), path_style()),
+                Span::styled(" · ", Style::default().fg(Color::DarkGray)),
+                Span::raw("cached"),
+                Span::styled(" · ", Style::default().fg(Color::DarkGray)),
+                Span::raw("MD5 verified"),
+            ]);
+            lines.push(Line::from(spans));
+            continue;
+        }
+        lines.push(operation_line(entry, true));
     }
     Text::from(lines)
 }
@@ -379,8 +411,10 @@ fn render_panel(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
     use crossterm::event::{KeyEvent, MouseEvent};
-    use garmin_progress::{OperationStage, ProgressReporter};
+    use garmin_progress::{OperationStage, ProgressEventKind, ProgressReporter, ProgressState};
     use ratatui::{Terminal, backend::TestBackend};
 
     fn key(code: KeyCode) -> Event {
@@ -459,6 +493,10 @@ mod tests {
             ProgressInput::Abort
         );
         assert_eq!(
+            scroll.input(&key(KeyCode::Esc), &viewport, ProgressPhase::Cancelling),
+            ProgressInput::Continue
+        );
+        assert_eq!(
             scroll.input(&key(KeyCode::Enter), &viewport, ProgressPhase::Complete),
             ProgressInput::Close
         );
@@ -481,7 +519,8 @@ mod tests {
         }
         let mut scroll = DashboardScroll {
             history: 3,
-            history_seen: model.history.len(),
+            history_lines_seen: model.history.len(),
+            history_rows_seen: model.history_rows_added,
             ..DashboardScroll::default()
         };
         progress.for_item("last").completed_with_path(
@@ -494,10 +533,10 @@ mod tests {
         for event in receiver.try_iter() {
             model.apply(&event);
         }
-        scroll.track_history(&model, 74);
-        assert_eq!(scroll.history, 5);
-        scroll.track_history(&model, 74);
-        assert_eq!(scroll.history, 5);
+        scroll.track_history(model.history.len(), model.history_rows_added);
+        assert_eq!(scroll.history, 4);
+        scroll.track_history(model.history.len(), model.history_rows_added);
+        assert_eq!(scroll.history, 4);
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal
@@ -533,5 +572,40 @@ mod tests {
             })
             .unwrap();
         assert_eq!(scroll.history, 0);
+    }
+
+    #[test]
+    fn cached_download_and_verification_share_one_horizontal_history_row() {
+        let history = [
+            OperationView {
+                stage: Some(OperationStage::Download),
+                state: Some(ProgressState::Completed),
+                kind: ProgressEventKind::CachedDownload,
+                label: "Cache hit".to_owned(),
+                path: Some("Garmin/map.img".to_owned()),
+                recorded_at: Some(std::time::UNIX_EPOCH + Duration::from_secs(45_296)),
+                duration: Some(Duration::from_millis(150)),
+            },
+            OperationView {
+                stage: Some(OperationStage::Verify),
+                state: Some(ProgressState::Completed),
+                kind: ProgressEventKind::CachedChecksumVerified,
+                label: "Digest accepted".to_owned(),
+                path: Some("Garmin/map.img".to_owned()),
+                recorded_at: Some(std::time::UNIX_EPOCH + Duration::from_secs(45_296)),
+                duration: Some(Duration::from_millis(60)),
+            },
+        ];
+
+        let rendered = history_text(history.iter());
+
+        assert_eq!(rendered.lines.len(), 1);
+        assert_eq!(
+            rendered.lines[0].to_string(),
+            format!(
+                "✓ | {} | 00:00.21 | Garmin/map.img · cached · MD5 verified",
+                crate::history_timestamp(Some(std::time::UNIX_EPOCH + Duration::from_secs(45_296)))
+            )
+        );
     }
 }

@@ -1,62 +1,52 @@
 # Device capacity and update recovery
 
-## Implemented contract
+## Contract
 
-`garmin-model::device` represents each storage independently: opaque ID, label, total and free bytes or an explicit
-failure, and known writability. `DeviceRead::state` supplies the model through directory, raw-MTP, and mounted-GIO
-adapters without walking device files. CLI, desktop, and HASS render separate volumes; unavailable capacity never
-becomes a misleading empty bar.
+Each storage exposes identity, label, capacity or an explicit error, and writability. Update paths bind to one storage;
+preflight checks peak demand and backup headroom per affected storage. Capacity refreshes before and after mutations and
+every two seconds during long uploads.
 
-Mounted updates bind every path to one storage before mutation. Preflight checks peak demand per affected volume and
-capture-space headroom. The transaction retains payloads and verified originals, records intent before each write,
-verifies uploaded objects, and records committed or rolled-back state. Recovery rejects a different device, changed
-objects, damaged evidence, ambiguous storage, and insufficient restore space.
+A mounted-MTP artifact completes this lifecycle before the next starts:
 
-Demo and dry-run use the same service and transaction flow through a directory-backed MTP shadow. The shadow preserves
-source capacity metadata, accounts for simulated writes, never shares writable files with the source, and remains in the
-capture for inspection.
+1. verify the local payload size and SHA-256;
+2. copy it and wait for desktop-MTP finalization;
+3. require its exact device path, regular-file type, and size;
+4. record the checkpoint.
 
-The disposable link benchmark also runs through a shared `DeviceLink` boundary. Raw-MTP payload transfer ends at source
-EOF, while device acknowledgement has its own finalization stage. Garmin split transfers reserve one final source byte
-as a short USB transfer, avoiding the missing packet-boundary terminator in `mtp-rs` 0.32.0 without changing content. A
-content-addressed cache holds host artifacts; a durable receipt protects each raw-MTP probe object until verified
-cleanup. After an ambiguous response timeout, bounded attempts reconcile the exact object while retaining the session.
-Reopening is reserved for a disconnected or reset session. A busy reopen is reported as an unidentified interface owner,
-never attributed to a desktop process without evidence.
+The application does not reread complete map files through MTP. Garmin validates map content after disconnect. An
+ambiguous partial file may be prefix-matched to transaction evidence before size-checked deletion.
 
-The HASS host maps attachment data once into the canonical model. Remoc carries that model to the WASM client; no
-transport-specific capacity type exists. [ADR 0040](../decisions/0040-canonical-models-across-service-boundaries.md)
-records and mechanically guards this boundary.
+Verified recovery backups are the default. Skipping them is explicit and part of plan identity. Backup-free recovery
+cannot roll back old content; it verifies retained payloads, reconciles recorded paths and sizes, replaces proven
+partials, completes journal-authorized writes and removals, then commits the original journal.
 
-Update-plan schema version 1 preserves captures written before the version field existed. Its compatibility fixture
-locks the canonical digest, defaulted fields, and current serialization. Unknown versions, changed totals, and changed
-digests fail validation.
+## Portable state
 
-The selected recovery-backup policy is part of that plan identity. Verified backups remain the default. Interactive
-confirmation exposes a default-on backup choice, while automation must pass the policy explicitly. Choosing `skip`
-removes backup reads and retained backup bytes from preflight and execution; progress, completion, journal state,
-errors, and recovery instructions then state that automatic rollback is unavailable and a reinstall may be required.
-Changing the choice changes the plan digest, so an approval for a backed-up update cannot silently authorize an unbacked
-update.
+Before mutation, the CLI writes a bounded, versioned transaction under the visible `GARMIN-TOOLKIT` device directory and
+indexes the richer host capture. Documents carry a magic value, kind, and exact schema version. Owning
+`PortableTransaction` and `DeviceIdentityState` newtypes contain parsing, validation, serialization, and mutation; wire
+structs remain private. Unsupported versions fail closed.
 
-## Evidence
+After device selection, unresolved portable state blocks a new update and offers recovery or proven clear. Clearing
+requires the device to match a committed or untouched transaction. A retained host receipt covers interruption before
+portable publication. Cross-host recovery is not implemented: it still needs the originating retained payloads.
 
-The repository validation gate exercises the workspace, gallery, dependency policy, generated interfaces, and Nix
-packages. A loopback WebSocket test carries inspected capacity through Remoc. Capacity and recovery captures cover both
-TUI fonts, supported terminal sizes, narrow and wide GUI layouts, HASS host states, unavailable capacity, long metadata,
-concurrent work, completion, insufficient space, and blocked recovery.
+## Safety and progress
 
-Directory-backed transaction tests cover per-storage rejection, read-only media, replacement, addition, authorization,
-removal, backup and upload failures, failed readback, cancellation, disconnection, marker collision, process
-termination, partial writes, reopening, and retry. Service-boundary tests run changed-source, unsupported-authorization,
-backup disconnect, upload, readback, cancellation, and wrong-device recovery through production orchestration. They
-assert preserved source state, rollback where safe, capacity evidence, failure diagnostics, and no false completion
-markers. Backup-policy tests additionally prove that an explicit skip performs no backup reads and never claims that
-rollback was available.
+Recovery validates typed checkpoints once. It audits recorded writes before new uploads, removes only journal-authorized
+objects, and records capacity changes. Cancellation after mutation leaves a recoverable failure. Failed-upload cleanup
+and mandatory rollback use independent bounded cancellation.
 
-## Limits
+Aggregate transaction progress and per-file byte progress are separate. Rates and ETAs disappear when samples are stale.
+History rows contain status, completion time, duration, message, and path; repeated cached work is coalesced. Capacity
+polling does not flood history, while mutation snapshots and reclamation remain visible.
 
-This evidence does not prove GIO behavior on every desktop, nested HASS ingress, physical firmware acceptance, or
-recovery after an actual device disconnect. Those remain in [device state](../plans/device-state.md),
-[mounted-device updates](../plans/mounted-device-updates.md), and the
-[HASS watch slice](../plans/hass-watch-vertical-slice.md).
+## Evidence and limits
+
+Tests cover multi-storage capacity, read-only media, backup policy, partial writes, cancellation, disconnection,
+restart, rollback, marker collisions, exact completed-write reuse, failed-upload cleanup, portable-state detection, and
+recovery ordering through production orchestration and directory-backed devices. Demo and dry-run execute the same
+transaction engine against an isolated shadow.
+
+This does not prove every desktop-MTP implementation, physical firmware acceptance, or recovery after a real cable
+disconnect. Those remain in [production CLI map maintenance](../plans/mounted-device-updates.md).

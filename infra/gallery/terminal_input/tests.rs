@@ -224,7 +224,7 @@ fn scaled_wheel_input_changes_only_the_hovered_terminal() {
     for index in 0..2 {
         let mut harness = Harness::new();
         let before: [_; 2] = std::array::from_fn(|i| render(&mut harness.fixture.inputs[i]));
-        let row = row_below(&before[index], "Active files");
+        let row = row_below(&before[index], "History");
         harness.wheel(index, [10, row]);
         assert_ne!(render(&mut harness.fixture.inputs[index]), before[index]);
         assert_eq!(

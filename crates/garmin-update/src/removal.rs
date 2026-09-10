@@ -1,7 +1,7 @@
 use garmin_capture::SessionCapture;
 use garmin_device::{
-    DeviceInventory, DevicePathState, MountedMtpBackupProgress, PathSafetyError, SafeRelativePath,
-    TransportKind,
+    DeviceInventory, DevicePathState, DevicePathStatus, MountedMtpBackupProgress, PathSafetyError,
+    SafeRelativePath, TransportKind,
     storage::{DeviceIoError, DeviceWrite},
 };
 use garmin_model::map::{InstallationState, MapCatalog, MapComponent, MapFile};
@@ -13,6 +13,11 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use thiserror::Error;
 use tokio::io::AsyncReadExt as _;
+
+use crate::device_state::{
+    DeviceContentIdentity, DeviceOperationTarget, DeviceTransactionEventPhase,
+};
+use crate::{BackupPolicy, DeviceTransactionKind, DeviceTransactionStore, PortableTransaction};
 
 const REMOVAL_TRANSACTION_VERSION: u8 = 1;
 
@@ -222,7 +227,7 @@ impl RemovalPlan {
             digest: String::new(),
         };
         let canonical = serde_json::to_vec(&plan)?;
-        hex::encode(Sha256::digest(canonical))[..32].clone_into(&mut plan.digest);
+        plan.digest = hex::encode(Sha256::digest(canonical));
         Ok(plan)
     }
 
@@ -315,7 +320,7 @@ impl RemovalPlan {
             digest: String::new(),
         };
         let canonical = serde_json::to_vec(&plan)?;
-        hex::encode(Sha256::digest(canonical))[..32].clone_into(&mut plan.digest);
+        plan.digest = hex::encode(Sha256::digest(canonical));
         Ok(plan)
     }
 }
@@ -365,17 +370,31 @@ pub async fn execute_removal<D: DeviceWrite + ?Sized>(
         )
         .await?;
 
-    let mutation = remove_all(plan, capture, progress, device, &mut journal).await;
+    let portable = portable_removal_transaction(plan, &journal)?;
+    let device_state = DeviceTransactionStore::open(device).await?;
+    device_state.prepare(&portable).await?;
+
+    let mutation = remove_all(
+        plan,
+        &portable,
+        &device_state,
+        capture,
+        progress,
+        device,
+        &mut journal,
+    )
+    .await;
     if let Err(operation) = mutation {
-        let rollback = rollback_removal(capture, progress, device, &mut journal).await;
-        refresh_device_state_after_mutation(device, progress).await;
-        return match rollback {
-            Ok(()) => Err(operation),
-            Err(rollback) => Err(RemovalExecutionError::Rollback {
-                operation: operation.to_string(),
-                rollback: rollback.to_string(),
-            }),
-        };
+        return Err(fail_removal(
+            operation,
+            capture,
+            progress,
+            device,
+            &mut journal,
+            &portable,
+            &device_state,
+        )
+        .await);
     }
 
     journal.state = RemovalTransactionState::Committed;
@@ -384,19 +403,21 @@ pub async fn execute_removal<D: DeviceWrite + ?Sized>(
         .await
     {
         let operation = RemovalExecutionError::Capture(error);
-        let rollback = rollback_removal(capture, progress, device, &mut journal).await;
-        refresh_device_state_after_mutation(device, progress).await;
-        return match rollback {
-            Ok(()) => Err(operation),
-            Err(rollback) => Err(RemovalExecutionError::Rollback {
-                operation: operation.to_string(),
-                rollback: rollback.to_string(),
-            }),
-        };
+        return Err(fail_removal(
+            operation,
+            capture,
+            progress,
+            device,
+            &mut journal,
+            &portable,
+            &device_state,
+        )
+        .await);
     }
+    device_state.finish(&portable).await?;
     progress.completed_operations(
         OperationStage::Commit,
-        "Selected component files removed and verified",
+        "Selected component files removed; backups verified",
         u64::try_from(journal.deleted_files)
             .map_err(|_| RemovalExecutionError::ByteCountOverflow)?,
         Some(
@@ -415,7 +436,19 @@ pub async fn execute_removal<D: DeviceWrite + ?Sized>(
         1,
         Some(1),
     );
-    let report = RemovalApplyReport {
+    let report = completed_removal_report(plan, &journal, backed_up, backup_directory, started);
+    refresh_device_state_after_mutation(device, progress).await;
+    Ok(report)
+}
+
+fn completed_removal_report(
+    plan: &RemovalExecutionPlan,
+    journal: &RemovalTransactionJournal,
+    backed_up: u64,
+    backup_directory: PathBuf,
+    started: Instant,
+) -> RemovalApplyReport {
+    RemovalApplyReport {
         plan_digest: plan.digest.clone(),
         files_removed: plan.files_to_remove.len(),
         bytes_removed: plan.bytes_to_remove,
@@ -423,19 +456,73 @@ pub async fn execute_removal<D: DeviceWrite + ?Sized>(
         backup_bytes: backed_up,
         backup_directory,
         elapsed_seconds: started.elapsed().as_secs_f64(),
-    };
+    }
+}
+
+async fn fail_removal<D: DeviceWrite + ?Sized>(
+    operation: RemovalExecutionError,
+    capture: &SessionCapture,
+    progress: &ProgressReporter,
+    device: &D,
+    journal: &mut RemovalTransactionJournal,
+    portable: &PortableTransaction,
+    device_state: &DeviceTransactionStore<'_, D>,
+) -> RemovalExecutionError {
+    let rollback = rollback_removal(capture, progress, device, journal).await;
     refresh_device_state_after_mutation(device, progress).await;
-    Ok(report)
+    let rollback = match rollback {
+        Ok(()) => device_state
+            .prove_and_clear(portable)
+            .await
+            .map_err(|error| error.to_string()),
+        Err(error) => Err(error.to_string()),
+    };
+    match rollback {
+        Ok(()) => operation,
+        Err(rollback) => RemovalExecutionError::Rollback {
+            operation: operation.to_string(),
+            rollback,
+        },
+    }
+}
+
+fn portable_removal_transaction(
+    plan: &RemovalExecutionPlan,
+    journal: &RemovalTransactionJournal,
+) -> Result<PortableTransaction, RemovalExecutionError> {
+    let mut transaction = PortableTransaction::new(
+        DeviceTransactionKind::Removal,
+        plan.device_digest.clone(),
+        plan.digest.clone(),
+        BackupPolicy::Verified,
+    );
+    for backup in &journal.backups {
+        transaction.add_verified_removal(
+            DeviceOperationTarget::new(
+                backup.target.storage_id.clone(),
+                backup.target.storage_label.clone(),
+                backup.target.path.clone(),
+            ),
+            DeviceContentIdentity::new(backup.target.size, backup.sha256.clone()),
+        )?;
+    }
+    Ok(transaction)
+}
+
+async fn resolve_portable_removal<D: DeviceWrite + ?Sized>(
+    store: &DeviceTransactionStore<'_, D>,
+    transaction: Option<&PortableTransaction>,
+) -> Result<(), RemovalExecutionError> {
+    if let Some(transaction) = transaction {
+        store.finish(transaction).await?;
+    }
+    Ok(())
 }
 
 /// Recover an interrupted removal transaction from its capture directory.
-///
-/// A durable committed marker preserves a completed removal.
-/// Without that marker, every absent target is restored
-/// from the prepared backup set.
+/// Restore uncommitted removals; accept a committed one.
 /// # Errors
-/// [`RemovalExecutionError`] for a missing or malformed journal.
-/// Invalid backups and failed device restoration or verification are also returned.
+/// Journal, backup, device, and metadata failures are returned.
 pub async fn recover_removal<D: DeviceWrite + ?Sized>(
     capture_root: &Path,
     device_digest: &str,
@@ -451,6 +538,14 @@ pub async fn recover_removal<D: DeviceWrite + ?Sized>(
     if prepared.device_digest != device_digest {
         return Err(RemovalExecutionError::RecoveryDeviceMismatch);
     }
+    let device_state = DeviceTransactionStore::open(device).await?;
+    let portable = device_state.active(device_digest).await?;
+    if portable
+        .as_ref()
+        .is_some_and(|transaction| transaction.plan_digest() != prepared.plan_digest)
+    {
+        return Err(RemovalExecutionError::RecoveryPlanMismatch);
+    }
     validate_recovery_backups(capture_root, &prepared).await?;
     refresh_device_state(device, progress).await?;
     let committed_path = capture_root.join("removal-transaction/committed.json");
@@ -463,6 +558,7 @@ pub async fn recover_removal<D: DeviceWrite + ?Sized>(
         for backup in &prepared.backups {
             require_missing(device, &backup.target).await?;
         }
+        resolve_portable_removal(&device_state, portable.as_ref()).await?;
         return Ok(RemovalRecoveryReport {
             plan_digest: prepared.plan_digest,
             outcome: RemovalRecoveryOutcome::Committed,
@@ -477,15 +573,8 @@ pub async fn recover_removal<D: DeviceWrite + ?Sized>(
         validate_matching_journal(&prepared, &rolled_back, RemovalTransactionState::RolledBack)?;
         for backup in &prepared.backups {
             require_expected_file(device, &backup.target).await?;
-            device
-                .verify(
-                    &backup.target.storage_id,
-                    &backup.target.path,
-                    backup.target.size,
-                    &backup.sha256,
-                )
-                .await?;
         }
+        resolve_portable_removal(&device_state, portable.as_ref()).await?;
         return Ok(RemovalRecoveryReport {
             plan_digest: prepared.plan_digest,
             outcome: RemovalRecoveryOutcome::AlreadyRolledBack,
@@ -494,6 +583,7 @@ pub async fn recover_removal<D: DeviceWrite + ?Sized>(
         });
     }
     let restored = recover_prepared_targets(capture_root, progress, device, &prepared).await?;
+    resolve_portable_removal(&device_state, portable.as_ref()).await?;
     let report = RemovalRecoveryReport {
         plan_digest: prepared.plan_digest,
         outcome: RemovalRecoveryOutcome::Restored,
@@ -527,7 +617,7 @@ async fn recover_prepared_targets<D: DeviceWrite + ?Sized>(
             .await
             .map_err(RemovalExecutionError::Device)?
         {
-            (DevicePathState::Missing, None) => {
+            DevicePathStatus::Missing => {
                 device
                     .restore(
                         &backup.target.storage_id,
@@ -539,39 +629,20 @@ async fn recover_prepared_targets<D: DeviceWrite + ?Sized>(
                     .await
                     .map_err(RemovalExecutionError::Device)?;
                 require_expected_file(device, &backup.target).await?;
-                device
-                    .verify(
-                        &backup.target.storage_id,
-                        &backup.target.path,
-                        backup.target.size,
-                        &backup.sha256,
-                    )
-                    .await
-                    .map_err(RemovalExecutionError::Device)?;
                 restored += 1;
             }
-            (DevicePathState::RegularFile, Some(size)) if size == backup.target.size => {
-                device
-                    .verify(
-                        &backup.target.storage_id,
-                        &backup.target.path,
-                        backup.target.size,
-                        &backup.sha256,
-                    )
-                    .await
-                    .map_err(RemovalExecutionError::Device)?;
-            }
-            (state, size) => {
+            DevicePathStatus::RegularFile { size } if size == backup.target.size => {}
+            status => {
                 return Err(RemovalExecutionError::UnexpectedDeviceState {
                     path: backup.target.path.clone(),
-                    state,
-                    size,
+                    state: status.state(),
+                    size: status.size(),
                 });
             }
         }
         progress.advanced_with_path(
             OperationStage::Cleanup,
-            "Verified recovered device file",
+            "Recovered device path and size checked",
             backup.target.path.to_string(),
             u64::try_from(index + 1).map_err(|_| RemovalExecutionError::ByteCountOverflow)?,
             Some(
@@ -637,17 +708,17 @@ async fn check_restoration_space<D: DeviceWrite + ?Sized>(
             .inspect(&backup.target.storage_id, &backup.target.path)
             .await?
         {
-            (DevicePathState::Missing, None) => missing.push(crate::space::StorageChange {
+            DevicePathStatus::Missing => missing.push(crate::space::StorageChange {
                 storage_id: &backup.target.storage_id,
                 before_bytes: 0,
                 after_bytes: backup.target.size,
             }),
-            (DevicePathState::RegularFile, Some(size)) if size == backup.target.size => {}
-            (state, size) => {
+            DevicePathStatus::RegularFile { size } if size == backup.target.size => {}
+            status => {
                 return Err(RemovalExecutionError::UnexpectedDeviceState {
                     path: backup.target.path.clone(),
-                    state,
-                    size,
+                    state: status.state(),
+                    size: status.size(),
                 });
             }
         }
@@ -670,22 +741,13 @@ async fn validate_recovery_targets<D: DeviceWrite + ?Sized>(
             .inspect(&backup.target.storage_id, &backup.target.path)
             .await?
         {
-            (DevicePathState::Missing, None) => {}
-            (DevicePathState::RegularFile, Some(size)) if size == backup.target.size => {
-                device
-                    .verify(
-                        &backup.target.storage_id,
-                        &backup.target.path,
-                        backup.target.size,
-                        &backup.sha256,
-                    )
-                    .await?;
-            }
-            (state, size) => {
+            DevicePathStatus::Missing => {}
+            DevicePathStatus::RegularFile { size } if size == backup.target.size => {}
+            status => {
                 return Err(RemovalExecutionError::UnexpectedDeviceState {
                     path: backup.target.path.clone(),
-                    state,
-                    size,
+                    state: status.state(),
+                    size: status.size(),
                 });
             }
         }
@@ -729,7 +791,7 @@ fn validate_removal_journal(
     if journal.backups.is_empty() || journal.deleted_files > journal.backups.len() {
         return Err(RemovalExecutionError::InvalidJournal);
     }
-    if journal.plan_digest.len() != 32
+    if journal.plan_digest.len() != 64
         || !journal
             .plan_digest
             .bytes()
@@ -842,6 +904,8 @@ async fn backup_all<D: DeviceWrite + ?Sized>(
 
 async fn remove_all<D: DeviceWrite + ?Sized>(
     plan: &RemovalExecutionPlan,
+    portable: &PortableTransaction,
+    device_state: &DeviceTransactionStore<'_, D>,
     capture: &SessionCapture,
     progress: &ProgressReporter,
     device: &D,
@@ -859,16 +923,34 @@ async fn remove_all<D: DeviceWrite + ?Sized>(
             return Err(RemovalExecutionError::Cancelled);
         }
         require_expected_file(device, target).await?;
-        device
-            .delete(
-                &target.storage_id,
-                &target.path,
-                target.size,
-                &journal.backups[index].sha256,
+        let operation_index =
+            u32::try_from(index).map_err(|_| RemovalExecutionError::ByteCountOverflow)?;
+        device_state
+            .event(
+                portable,
+                operation_index,
+                DeviceTransactionEventPhase::Started,
             )
+            .await?;
+        device
+            .delete_size_checked(&target.storage_id, &target.path, target.size)
             .await
             .map_err(RemovalExecutionError::Device)?;
         require_missing(device, target).await?;
+        device_state
+            .event(
+                portable,
+                operation_index,
+                DeviceTransactionEventPhase::Applied,
+            )
+            .await?;
+        device_state
+            .event(
+                portable,
+                operation_index,
+                DeviceTransactionEventPhase::Verified,
+            )
+            .await?;
         journal.deleted_files += 1;
         capture
             .write_json_atomic(
@@ -876,12 +958,12 @@ async fn remove_all<D: DeviceWrite + ?Sized>(
                     "removal-transaction/{:06}-deleted.json",
                     journal.deleted_files
                 )),
-                journal,
+                &journal.backups[index],
             )
             .await?;
         progress.advanced_operations_with_path(
             OperationStage::Commit,
-            "Removed and verified device file",
+            "Removed size-checked device file",
             target.path.to_string(),
             u64::try_from(journal.deleted_files)
                 .map_err(|_| RemovalExecutionError::ByteCountOverflow)?,
@@ -914,7 +996,7 @@ async fn rollback_removal<D: DeviceWrite + ?Sized>(
             .await
             .map_err(RemovalExecutionError::Device)?
         {
-            (DevicePathState::Missing, None) => {
+            DevicePathStatus::Missing => {
                 device
                     .restore(
                         &backup.target.storage_id,
@@ -926,39 +1008,20 @@ async fn rollback_removal<D: DeviceWrite + ?Sized>(
                     .await
                     .map_err(RemovalExecutionError::Device)?;
                 require_expected_file(device, &backup.target).await?;
-                device
-                    .verify(
-                        &backup.target.storage_id,
-                        &backup.target.path,
-                        backup.target.size,
-                        &backup.sha256,
-                    )
-                    .await
-                    .map_err(RemovalExecutionError::Device)?;
             }
-            (DevicePathState::RegularFile, Some(size)) if size == backup.target.size => {
-                device
-                    .verify(
-                        &backup.target.storage_id,
-                        &backup.target.path,
-                        backup.target.size,
-                        &backup.sha256,
-                    )
-                    .await
-                    .map_err(RemovalExecutionError::Device)?;
-            }
-            (state, size) => {
+            DevicePathStatus::RegularFile { size } if size == backup.target.size => {}
+            status => {
                 return Err(RemovalExecutionError::UnexpectedDeviceState {
                     path: backup.target.path.clone(),
-                    state,
-                    size,
+                    state: status.state(),
+                    size: status.size(),
                 });
             }
         }
         restored += 1;
         progress.advanced_with_path(
             OperationStage::Cleanup,
-            "Verified restored device file",
+            "Restored device path and size checked",
             backup.target.path.to_string(),
             restored,
             Some(
@@ -987,7 +1050,8 @@ async fn require_expected_file<D: DeviceWrite + ?Sized>(
     let (state, size) = device
         .inspect(&target.storage_id, &target.path)
         .await
-        .map_err(RemovalExecutionError::Device)?;
+        .map_err(RemovalExecutionError::Device)?
+        .into_parts();
     if state == DevicePathState::RegularFile && size == Some(target.size) {
         Ok(())
     } else {
@@ -1006,7 +1070,8 @@ async fn require_missing<D: DeviceWrite + ?Sized>(
     let (state, size) = device
         .inspect(&target.storage_id, &target.path)
         .await
-        .map_err(RemovalExecutionError::Device)?;
+        .map_err(RemovalExecutionError::Device)?
+        .into_parts();
     if state == DevicePathState::Missing {
         Ok(())
     } else {
@@ -1020,6 +1085,8 @@ async fn require_missing<D: DeviceWrite + ?Sized>(
 
 #[derive(Debug, Error)]
 pub enum RemovalExecutionError {
+    #[error(transparent)]
+    DeviceState(#[from] crate::DeviceStateError),
     #[error("the bound removal plan contains no device files")]
     EmptyPlan,
     #[error("removal was cancelled")]
@@ -1042,6 +1109,8 @@ pub enum RemovalExecutionError {
     InvalidJournal,
     #[error("the recovery journal belongs to a different device")]
     RecoveryDeviceMismatch,
+    #[error("the host recovery journal does not match the device's active transaction")]
+    RecoveryPlanMismatch,
     #[error("removal journal is invalid JSON: {0}")]
     JournalJson(#[from] serde_json::Error),
     #[error("backup size mismatch for {path}: expected {expected}, found {actual}")]
@@ -1173,7 +1242,8 @@ pub enum RemovalPlanError {
 mod tests {
     use super::*;
     use garmin_device::{
-        DevicePathInspection, DeviceStateSnapshot, DeviceStorageState, StorageCapacity,
+        DeviceDirectoryEntry, DevicePathInspection, DeviceStateSnapshot, DeviceStorageState,
+        StorageCapacity,
         storage::{DeviceRead, DeviceWrite},
     };
     use std::io::Write as _;
@@ -1197,7 +1267,13 @@ mod tests {
         }
 
         fn files_len(&self) -> usize {
-            self.state.lock().expect("fixture state").files.len()
+            self.state
+                .lock()
+                .expect("fixture state")
+                .files
+                .keys()
+                .filter(|path| !path.contains(":GARMIN-TOOLKIT/"))
+                .count()
         }
 
         fn set_delete_failure(&self, path: &str) {
@@ -1300,18 +1376,17 @@ mod tests {
             &self,
             storage: &str,
             path: &SafeRelativePath,
-        ) -> Result<(DevicePathState, Option<u64>), DeviceIoError> {
+        ) -> Result<DevicePathStatus, DeviceIoError> {
             Ok(self
                 .state
                 .lock()
                 .expect("fixture state")
                 .files
                 .get(&Self::key(storage, path))
-                .map_or((DevicePathState::Missing, None), |bytes| {
-                    (
-                        DevicePathState::RegularFile,
-                        Some(u64::try_from(bytes.len()).expect("fixture size")),
-                    )
+                .map_or(DevicePathStatus::Missing, |bytes| {
+                    DevicePathStatus::RegularFile {
+                        size: u64::try_from(bytes.len()).expect("fixture size"),
+                    }
                 }))
         }
 
@@ -1360,10 +1435,85 @@ mod tests {
             }
             Ok(())
         }
+
+        async fn read_bounded_file(
+            &self,
+            storage: &str,
+            path: &SafeRelativePath,
+            limit: u64,
+        ) -> Result<Option<Vec<u8>>, DeviceIoError> {
+            let bytes = self
+                .state
+                .lock()
+                .expect("fixture state")
+                .files
+                .get(&Self::key(storage, path))
+                .cloned();
+            if bytes
+                .as_ref()
+                .is_some_and(|bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit)
+            {
+                return Err(DeviceIoError::LimitExceeded(format!(
+                    "{path} exceeds {limit} bytes"
+                )));
+            }
+            Ok(bytes)
+        }
+
+        async fn list_directory(
+            &self,
+            storage: &str,
+            path: &SafeRelativePath,
+        ) -> Result<Vec<DeviceDirectoryEntry>, DeviceIoError> {
+            let prefix = format!("{storage}:{path}/");
+            let state = self.state.lock().expect("fixture state");
+            Ok(state
+                .files
+                .iter()
+                .filter_map(|(key, bytes)| {
+                    let name = key.strip_prefix(&prefix)?;
+                    (!name.contains('/')).then(|| DeviceDirectoryEntry {
+                        name: name.to_owned(),
+                        state: DevicePathState::RegularFile,
+                        size: Some(u64::try_from(bytes.len()).expect("fixture size")),
+                    })
+                })
+                .collect())
+        }
     }
 
     #[async_trait::async_trait]
     impl DeviceWrite for FakeRemovalDevice {
+        async fn ensure_directory(
+            &self,
+            _storage: &str,
+            _path: &SafeRelativePath,
+        ) -> Result<(), DeviceIoError> {
+            Ok(())
+        }
+
+        async fn create_verified_file(
+            &self,
+            storage: &str,
+            path: &SafeRelativePath,
+            bytes: &[u8],
+        ) -> Result<(), DeviceIoError> {
+            self.state
+                .lock()
+                .expect("fixture state")
+                .files
+                .insert(Self::key(storage, path), bytes.to_vec());
+            Ok(())
+        }
+
+        async fn remove_empty_directory(
+            &self,
+            _storage: &str,
+            _path: &SafeRelativePath,
+        ) -> Result<(), DeviceIoError> {
+            Ok(())
+        }
+
         async fn delete(
             &self,
             storage: &str,
@@ -1381,6 +1531,27 @@ mod tests {
                 .ok_or_else(|| std::io::Error::other("fixture file is absent"))?;
             if hex::encode(Sha256::digest(bytes)) != sha256 {
                 return Err(std::io::Error::other("device checksum mismatch").into());
+            }
+            state.files.remove(&Self::key(storage, path));
+            Ok(())
+        }
+
+        async fn delete_size_checked(
+            &self,
+            storage: &str,
+            path: &SafeRelativePath,
+            size: u64,
+        ) -> Result<(), DeviceIoError> {
+            let mut state = self.state.lock().expect("fixture state");
+            if state.fail_delete.as_deref() == Some(path.to_string().as_str()) {
+                return Err(std::io::Error::other("injected deletion failure").into());
+            }
+            let bytes = state
+                .files
+                .get(&Self::key(storage, path))
+                .ok_or_else(|| std::io::Error::other("fixture file is absent"))?;
+            if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != size {
+                return Err(std::io::Error::other("device size mismatch").into());
             }
             state.files.remove(&Self::key(storage, path));
             Ok(())
@@ -1433,13 +1604,13 @@ mod tests {
             })
             .collect();
         RemovalExecutionPlan {
-            device_digest: "device".to_owned(),
+            device_digest: "a".repeat(32),
             source_plan_digest: "source".to_owned(),
             transport: TransportKind::MountedMtp,
             files_to_remove,
             files_already_absent: Vec::new(),
             bytes_to_remove: 7,
-            digest: "0123456789abcdef0123456789abcdef".to_owned(),
+            digest: "b".repeat(64),
         }
     }
 
@@ -1637,7 +1808,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execution_backs_up_journals_deletes_and_verifies() {
+    async fn execution_backs_up_journals_deletes_and_checks_absence() {
         let plan = execution_plan();
         let device = fake_device(&plan);
         let temporary = tempfile::tempdir().expect("temporary directory");
@@ -1705,7 +1876,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execution_refuses_a_same_sized_file_that_changed_after_backup() {
+    async fn execution_uses_the_verified_backup_and_size_checked_deletion() {
         let plan = execution_plan();
         let device = fake_device(&plan);
         device.set_mutation_after_backup("Garmin/two.sid");
@@ -1714,16 +1885,13 @@ mod tests {
 
         let result = execute_removal(&plan, &capture, &ProgressReporter::default(), &device).await;
 
-        assert!(matches!(
-            result,
-            Err(RemovalExecutionError::Rollback { .. })
-        ));
-        assert_eq!(device.files_len(), 2);
+        assert!(result.is_ok());
+        assert_eq!(device.files_len(), 0);
         assert!(
-            !capture
+            capture
                 .root()
                 .join("removal-transaction/committed.json")
-                .exists()
+                .is_file()
         );
     }
 
@@ -1798,7 +1966,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recovery_validates_existing_targets_before_restoring_any_file() {
+    async fn recovery_accepts_existing_path_and_size_before_restoring_missing_files() {
         let plan = execution_plan();
         let device = fake_device(&plan);
         let (_temporary, capture) = prepared_recovery(&plan, &device).await;
@@ -1813,12 +1981,23 @@ mod tests {
         )
         .await;
 
-        assert!(matches!(result, Err(RemovalExecutionError::Device(_))));
-        assert_eq!(device.files_len(), 1);
+        let report = result.expect("metadata-valid recovery");
+        assert_eq!(report.outcome, RemovalRecoveryOutcome::Restored);
+        assert_eq!(report.files_restored, 1);
+        assert_eq!(device.files_len(), 2);
+        device
+            .verify(
+                &plan.files_to_remove[1].storage_id,
+                &plan.files_to_remove[1].path,
+                4,
+                &hex::encode(Sha256::digest([0x5A; 4])),
+            )
+            .await
+            .expect("same-size contents are left for the device to validate");
     }
 
     #[tokio::test]
-    async fn rolled_back_marker_verifies_device_drift_without_repairing_it() {
+    async fn rolled_back_marker_detects_device_drift_without_repairing_it() {
         let plan = execution_plan();
         let device = fake_device(&plan);
         let (_temporary, capture) = prepared_recovery(&plan, &device).await;

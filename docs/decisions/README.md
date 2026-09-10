@@ -36,7 +36,6 @@ Records preserve decisions, rationale, consequences, and evidence. Supersede the
 - [0033: Garmin Toolkit identity and license](0033-garmin-toolkit-identity-and-license.md)
 - [0034: Application composition and runtime modes](0034-application-composition-and-runtime-modes.md)
 - [0035: Consolidated device boundary](0035-consolidated-device-boundary.md)
-- [0036: Persistent identity compatibility](0036-persistent-identity-compatibility.md)
 - [0037: Single execution path](0037-single-execution-path.md)
 - [0038: Validated interface previews](0038-validated-interface-previews.md)
 - [0039: Virtual devices in demo and dry-run](0039-virtual-device-runtime.md)

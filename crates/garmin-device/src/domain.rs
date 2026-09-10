@@ -37,6 +37,53 @@ pub enum DevicePathState {
     Ambiguous,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DevicePathStatus {
+    Missing,
+    RegularFile { size: u64 },
+    Directory,
+    Other,
+    Ambiguous,
+}
+
+impl DevicePathStatus {
+    #[must_use]
+    pub const fn from_parts(state: DevicePathState, size: Option<u64>) -> Option<Self> {
+        match (state, size) {
+            (DevicePathState::Missing, None) => Some(Self::Missing),
+            (DevicePathState::RegularFile, Some(size)) => Some(Self::RegularFile { size }),
+            (DevicePathState::Directory, None) => Some(Self::Directory),
+            (DevicePathState::Other, None) => Some(Self::Other),
+            (DevicePathState::Ambiguous, None) => Some(Self::Ambiguous),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn state(self) -> DevicePathState {
+        match self {
+            Self::Missing => DevicePathState::Missing,
+            Self::RegularFile { .. } => DevicePathState::RegularFile,
+            Self::Directory => DevicePathState::Directory,
+            Self::Other => DevicePathState::Other,
+            Self::Ambiguous => DevicePathState::Ambiguous,
+        }
+    }
+
+    #[must_use]
+    pub const fn size(self) -> Option<u64> {
+        match self {
+            Self::RegularFile { size } => Some(size),
+            Self::Missing | Self::Directory | Self::Other | Self::Ambiguous => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn into_parts(self) -> (DevicePathState, Option<u64>) {
+        (self.state(), self.size())
+    }
+}
+
 /// Read-only inventory returned by a physical-device adapter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceInventory {

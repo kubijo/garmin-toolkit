@@ -3,10 +3,10 @@
 AppImage and Flatpak target Linux `x86_64` and `aarch64`; only `x86_64` is hardware-tested. Production and demo have
 separate application IDs and platform data:
 
-| Mode       | Application ID                        | AppImage                                 |
-| ---------- | ------------------------------------- | ---------------------------------------- |
-| Production | `io.github.kubijo.GarminToolkit`      | `dist/garmin-toolkit-ARCH.AppImage`      |
-| Demo       | `io.github.kubijo.GarminToolkit.Demo` | `dist/garmin-toolkit-demo-ARCH.AppImage` |
+| Mode       | Application ID                 | AppImage                                 |
+| ---------- | ------------------------------ | ---------------------------------------- |
+| Production | `io.kubijo.GarminToolkit`      | `dist/garmin-toolkit-ARCH.AppImage`      |
+| Demo       | `io.kubijo.GarminToolkit.Demo` | `dist/garmin-toolkit-demo-ARCH.AppImage` |
 
 Flatpak outputs use the application ID with a `.flatpak` suffix. Build them with
 `just desktop::appimage production|demo` or `just desktop::flatpak production|demo`.

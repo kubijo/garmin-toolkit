@@ -17,6 +17,7 @@ pub use state::PreviewState;
 pub enum PreviewScreen {
     DeviceSelection,
     NoDevices,
+    PendingRecovery,
     ContactGarmin,
     LoadingComponents,
     ReadingStorage,
@@ -75,6 +76,7 @@ pub fn render_preview(
     match screen {
         PreviewScreen::DeviceSelection => screens::render_device_preview(frame, area, false),
         PreviewScreen::NoDevices => screens::render_device_preview(frame, area, true),
+        PreviewScreen::PendingRecovery => screens::render_pending_recovery_preview(frame),
         PreviewScreen::ContactGarmin => screens::render_contact_garmin_preview(frame),
         PreviewScreen::LoadingComponents | PreviewScreen::ReadingStorage => {
             render_loading_preview(frame, area, animation_frame, screen);

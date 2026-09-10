@@ -19,6 +19,7 @@ garmin-device.workspace = true
 garmin-progress.workspace = true
 garmin-update.workspace = true
 indoc.workspace = true
+jiff.workspace = true
 ratatui.workspace = true
 ratatui-interact.workspace = true
 tokio.workspace = true

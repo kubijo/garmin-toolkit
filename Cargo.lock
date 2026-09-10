@@ -2248,6 +2248,7 @@ dependencies = [
  "garmin-progress",
  "garmin-update",
  "indoc",
+ "jiff",
  "ratatui",
  "ratatui-interact",
  "tokio",
@@ -2595,8 +2596,10 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "toml_edit",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -7292,6 +7295,7 @@ dependencies = [
  "indexmap 2.14.2",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 

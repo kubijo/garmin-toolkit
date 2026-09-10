@@ -223,7 +223,7 @@ pub struct MapInstallOption {
 }
 
 /// Fields that identify a map installation during authorization.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MapInstallIdentifier {
     pub region_part_number: Option<String>,
     pub map_image_part_number: Option<String>,

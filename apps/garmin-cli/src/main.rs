@@ -1,4 +1,5 @@
 mod diagnostic;
+mod pending_recovery;
 mod pipeline;
 
 use anyhow::{Context, Result, bail};
@@ -7,11 +8,11 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use crossterm::style::{Color as AnsiColor, Stylize as _};
 use garmin_capture::SessionCapture;
 use garmin_cli_tui as tui;
-use garmin_device::storage::DirectoryDevice;
+use garmin_device::storage::{DeviceRead as _, DirectoryDevice};
 use garmin_device::{
     DeviceInventory, DeviceManifest, DeviceProbeReport, DeviceSummary, MountedMtpDevice,
-    MountedMtpDeviceAdapter, MountedMtpProbeFailure, RawMtpSession, SafeRelativePath,
-    TransportKind, discover_garmin_usb_sysfs, discover_mass_storage, discover_mounted_mtp,
+    MountedMtpProbeFailure, RawMtpSession, SafeRelativePath, TransportKind,
+    discover_garmin_usb_sysfs, discover_mass_storage, discover_mounted_mtp,
     discover_mtp_candidates, inventory_mass_storage, inventory_mtp,
     mtp_usb_reset_known_ineffective, open_mass_storage, open_mtp, reset_mtp_transport,
 };
@@ -24,10 +25,12 @@ use garmin_services::maps::{
 };
 use garmin_simulator::require_mock_device_root;
 use garmin_update::{
-    BackupPolicy, RecoveryOutcome, RemovalApplyReport, RemovalPlan, UpdatePlan, execute_removal,
-    recover_mass_storage, recover_removal,
+    BackupPolicy, DeviceTransactionKind, DeviceTransactionStore, RecoveryOutcome,
+    RemovalApplyReport, RemovalPlan, UpdatePlan, execute_removal, recover_mass_storage,
+    recover_removal,
 };
 use indoc::{formatdoc, indoc};
+use pending_recovery::{PendingRecovery, PendingRecoveryKind, PendingRecoveryStore};
 use serde::Serialize;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -537,13 +540,6 @@ fn cancellation_step(error: &anyhow::Error) -> Option<&'static str> {
         return Some("device update");
     }
     if matches!(
-        error.downcast_ref::<garmin_update::MountedInstallError>(),
-        Some(garmin_update::MountedInstallError::Device(source))
-            if source.is_cancelled()
-    ) {
-        return Some("device update");
-    }
-    if matches!(
         error.downcast_ref::<garmin_device::MountedMtpError>(),
         Some(source) if source.is_cancelled()
     ) {
@@ -590,7 +586,7 @@ async fn run_cli(cli: Cli, capture: Option<SessionCapture>) -> Result<()> {
             }
             (Some(_), None) => unreachable!("clap requires --mock-server with --mock-device"),
         },
-        Some(Command::Device { command }) => device(command, cli.json).await,
+        Some(Command::Device { command }) => Box::pin(device(command, cli.json)).await,
         Some(Command::Updates { command }) => {
             let runtime = UpdateRuntime {
                 json: cli.json,
@@ -797,6 +793,11 @@ impl GuidedDeviceAdapter {
             && matches!(manifest.summary.transport, TransportKind::MountedMtp)
     }
 
+    const fn supports_pending_recovery(&self, manifest: &DeviceManifest) -> bool {
+        matches!(self, Self::Production(CommitPolicy::Apply))
+            && matches!(manifest.summary.transport, TransportKind::MountedMtp)
+    }
+
     fn resolve(&self, manifest: &DeviceManifest) -> Result<DeviceUpdateAdapter> {
         if let Self::FixedMassStorage { device } = self {
             return Ok(Box::new(SimulatedTarget {
@@ -849,6 +850,7 @@ async fn interactive_guided_update(config: GuidedUpdate<'_>) -> Result<()> {
     match result {
         Ok(()) => Ok(()),
         Err(error) if cancellation_step(&error).is_some() => Err(error),
+        Err(error) if presented_error(&error).is_some() => Err(error),
         Err(error) => {
             if retain_and_present_update_failure(&mut session, &error, &config.capture).await {
                 Err(PresentedError(error).into())
@@ -865,6 +867,12 @@ async fn interactive_guided_update_flow(
 ) -> Result<()> {
     let manifest = select_guided_device(&config.source, session).await?;
     let device = config.device.resolve(&manifest)?;
+    if config.device.supports_pending_recovery(&manifest) {
+        let writable = device
+            .writable_device()
+            .context("physical update target does not expose its device adapter")?;
+        Box::pin(offer_pending_recovery(&manifest, writable, session)).await?;
+    }
     let state = session.load_device_state(device.state()).await?;
     config
         .capture
@@ -902,6 +910,196 @@ async fn interactive_guided_update_flow(
         .await;
     }
     run_guided_selected_update(None, &response, manifest, client, runtime, session, device).await
+}
+
+async fn offer_pending_recovery(
+    manifest: &DeviceManifest,
+    device: &dyn garmin_device::storage::DeviceWrite,
+    session: &mut tui::Session,
+) -> Result<()> {
+    let device_store = DeviceTransactionStore::open(device).await?;
+    let device_digest = manifest.identity_digest();
+    let transaction = device_store.active(&device_digest).await?;
+    let receipt_store = PendingRecoveryStore::application()?;
+    let active_identity = transaction.as_ref().map(|transaction| {
+        (
+            pending_recovery_kind(transaction.kind()),
+            transaction.plan_digest(),
+        )
+    });
+    let recovery = receipt_store.for_selected_device(&device_digest, active_identity)?;
+    let (kind, plan_digest, actions) = match (transaction.as_ref(), recovery.as_ref()) {
+        (Some(transaction), _) => (
+            pending_recovery_kind(transaction.kind()),
+            transaction.plan_digest(),
+            tui::PendingRecoveryActions::RecoverOrClear,
+        ),
+        (None, Some(recovery)) if recovery.is_prepared()? => (
+            recovery.kind,
+            recovery.plan_digest.as_str(),
+            tui::PendingRecoveryActions::RecoverOnly,
+        ),
+        (None, Some(recovery)) => (
+            recovery.kind,
+            recovery.plan_digest.as_str(),
+            tui::PendingRecoveryActions::DiscardOnly,
+        ),
+        (None, None) => return Ok(()),
+    };
+    let body =
+        pending_recovery_confirmation_body(manifest, kind, plan_digest, recovery.as_ref(), actions);
+    match session.pending_recovery(body, actions)? {
+        tui::PendingRecoveryDecision::Recover => {
+            let recovery = recovery
+                .context("this host has no retained payload for the device's active transaction")?;
+            Box::pin(run_detected_recovery(manifest, session, &recovery)).await?;
+            clear_recovery_notice(&receipt_store, &recovery);
+        }
+        tui::PendingRecoveryDecision::ClearState => {
+            let transaction = transaction
+                .as_ref()
+                .context("host-only recovery receipts cannot clear device state")?;
+            device_store.prove_and_clear(transaction).await?;
+            if let Some(recovery) = recovery {
+                receipt_store.clear(&recovery)?;
+            }
+        }
+        tui::PendingRecoveryDecision::Discard => {
+            let recovery = recovery.context("no interrupted preparation is retained")?;
+            receipt_store.discard_unprepared(&recovery)?;
+        }
+        tui::PendingRecoveryDecision::Cancel => {
+            return Err(tui::Cancelled::new("pending recovery decision").into());
+        }
+    }
+    Ok(())
+}
+
+const fn pending_recovery_kind(kind: DeviceTransactionKind) -> PendingRecoveryKind {
+    match kind {
+        DeviceTransactionKind::Update => PendingRecoveryKind::Update,
+        DeviceTransactionKind::Removal => PendingRecoveryKind::Removal,
+    }
+}
+
+fn clear_recovery_notice(store: &PendingRecoveryStore, recovery: &PendingRecovery) {
+    if let Err(error) = store.clear(recovery) {
+        tracing::warn!(
+            %error,
+            capture = %recovery.transaction.display(),
+            "completed recovery notice could not be cleared"
+        );
+    }
+}
+
+fn pending_recovery_confirmation_body(
+    manifest: &DeviceManifest,
+    kind: PendingRecoveryKind,
+    plan_digest: &str,
+    recovery: Option<&PendingRecovery>,
+    actions: tui::PendingRecoveryActions,
+) -> tui::ConfirmationBody {
+    let recovery_location = recovery.map_or_else(
+        || "Not retained on this host".to_owned(),
+        |recovery| recovery.transaction.display().to_string(),
+    );
+    let operation = match kind {
+        PendingRecoveryKind::Update => "Map update",
+        PendingRecoveryKind::Removal => "Map removal",
+    };
+    let introduction = match actions {
+        tui::PendingRecoveryActions::RecoverOrClear => indoc! {"
+            This device contains an interrupted transaction.
+            Resolve it before another device change."},
+        tui::PendingRecoveryActions::RecoverOnly => indoc! {"
+            This host retained an interrupted transaction.
+            Recover it before another device change."},
+        tui::PendingRecoveryActions::DiscardOnly => indoc! {"
+            The previous operation stopped before device changes began.
+            Discard the attempt to continue."},
+    };
+    let note = match actions {
+        tui::PendingRecoveryActions::RecoverOrClear => indoc! {"
+            Recover finishes the transaction.
+            Clear requires proof that the device is updated or untouched."},
+        tui::PendingRecoveryActions::RecoverOnly => indoc! {"
+        Recover finishes journal-authorized writes and cleanup."},
+        tui::PendingRecoveryActions::DiscardOnly => indoc! {"
+        Discard removes this notice. Cache and capture files remain."},
+    };
+    tui::ConfirmationBody {
+        introduction: ratatui::text::Text::raw(introduction),
+        fields: vec![
+            tui::ConfirmationField::new(
+                "Device",
+                update_confirmation_device(manifest),
+                tui::ConfirmationValueTone::Neutral,
+            ),
+            tui::ConfirmationField::new(
+                "Operation",
+                operation,
+                tui::ConfirmationValueTone::Warning,
+            ),
+            tui::ConfirmationField::new("Plan ID", plan_digest, tui::ConfirmationValueTone::Muted),
+            tui::ConfirmationField::new(
+                "Recovery",
+                recovery_location,
+                tui::ConfirmationValueTone::Path,
+            ),
+        ],
+        note: Some(ratatui::text::Text::raw(note)),
+        confirm_action: match actions {
+            tui::PendingRecoveryActions::DiscardOnly => "discard attempt",
+            _ => "recover now",
+        }
+        .to_owned(),
+    }
+}
+
+async fn run_detected_recovery(
+    manifest: &DeviceManifest,
+    session: &mut tui::Session,
+    recovery: &PendingRecovery,
+) -> Result<()> {
+    let mount_id = manifest
+        .summary
+        .location
+        .strip_prefix("mounted-mtp:")
+        .context("pending recovery requires a desktop-mounted MTP device")?;
+    let result = match recovery.kind {
+        PendingRecoveryKind::Update => Box::pin(run_update_recovery_in_session(
+            session,
+            manifest,
+            mount_id,
+            recovery.transaction.clone(),
+        ))
+        .await
+        .map(|_| ()),
+        PendingRecoveryKind::Removal => run_removal_recovery_in_session(
+            session,
+            manifest,
+            mount_id,
+            recovery.transaction.clone(),
+        )
+        .await
+        .map(|_| ()),
+    };
+    if let Err(error) = &result
+        && cancellation_step(error).is_none()
+    {
+        let failure = match recovery.kind {
+            PendingRecoveryKind::Update => {
+                update_failure_presentation(error, &recovery.transaction)
+            }
+            PendingRecoveryKind::Removal => {
+                removal_recovery_failure_presentation(error, &recovery.transaction)
+            }
+        };
+        if present_failure(session, failure) {
+            return Err(PresentedError(result.expect_err("result is known to be an error")).into());
+        }
+    }
+    result
 }
 
 async fn run_guided_combined_map_actions(
@@ -1262,13 +1460,17 @@ fn mounted_install_failure_presentation(
             body: FailureBody::new(
                 "Automatic rollback could not restore the complete pre-update state.",
                 vec![
-                    FailureField::new("Update", operation, FailureValueTone::Error),
-                    FailureField::new("Rollback", rollback, FailureValueTone::Error),
+                    FailureField::new("Update", operation.to_string(), FailureValueTone::Error),
+                    FailureField::new("Rollback", rollback.to_string(), FailureValueTone::Error),
                 ],
                 capture,
             )
             .with_outcome("Keep this capture and run `device recover-update` before retrying."),
         },
+        garmin_update::MountedInstallError::UnprotectedMutation {
+            operation,
+            evidence,
+        } => unprotected_mutation_failure_presentation(operation, evidence, capture),
         garmin_update::MountedInstallError::UnexpectedDeviceState { path, state, size } => {
             FailurePresentation {
                 title: "Device contents changed",
@@ -1300,6 +1502,13 @@ fn mounted_install_failure_presentation(
             )
             .with_outcome("No device file was changed."),
         },
+        garmin_update::MountedInstallError::UnsafeJournal(_)
+        | garmin_update::MountedInstallError::JournalVersion(_)
+        | garmin_update::MountedInstallError::InvalidJournal
+        | garmin_update::MountedInstallError::RecoveryPlanMismatch
+        | garmin_update::MountedInstallError::JournalJson(_) => {
+            rejected_recovery_evidence_presentation(error, capture)
+        }
         _ => FailurePresentation {
             title: "Update stopped safely",
             body: FailureBody::new(
@@ -1313,6 +1522,107 @@ fn mounted_install_failure_presentation(
             )
             .with_outcome("Device targets were left intact or restored from verified backups."),
         },
+    }
+}
+
+fn rejected_recovery_evidence_presentation(
+    error: &anyhow::Error,
+    capture: &str,
+) -> FailurePresentation {
+    FailurePresentation {
+        title: "Recovery evidence rejected",
+        body: tui::FailureBody::new(
+            "The retained mounted-update transaction cannot be used safely.",
+            vec![tui::FailureField::new(
+                "Reason",
+                error.root_cause().to_string(),
+                tui::FailureValueTone::Error,
+            )],
+            capture,
+        )
+        .with_outcome(
+            "This attempt performed no device operation. The interrupted state remains unresolved.",
+        ),
+    }
+}
+
+fn unprotected_mutation_failure_presentation(
+    operation: &garmin_update::MountedInstallError,
+    evidence: &garmin_update::UnprotectedMutationEvidence,
+    capture: &str,
+) -> FailurePresentation {
+    use tui::{FailureBody, FailureField, FailureValueTone};
+
+    let mutation_fields =
+        |applied_operations: usize, total_operations: usize, failed_target: &Option<String>| {
+            let failed_operations = usize::from(failed_target.is_some());
+            let unstarted = total_operations
+                .saturating_sub(applied_operations)
+                .saturating_sub(failed_operations);
+            let mut fields = vec![FailureField::new(
+                "Applied",
+                format!("{applied_operations} of {total_operations} device operations"),
+                FailureValueTone::Error,
+            )];
+            if let Some(path) = failed_target {
+                fields.push(FailureField::new("Failed at", path, FailureValueTone::Path));
+            }
+            fields.push(FailureField::new(
+                "Unstarted",
+                format!("{unstarted} device operations"),
+                FailureValueTone::Neutral,
+            ));
+            fields
+        };
+    let (title, mut fields) = match evidence {
+        garmin_update::UnprotectedMutationEvidence::IntentRecorded {
+            total_operations,
+            failed_target,
+        } => (
+            "Update incomplete — mutation uncertain",
+            mutation_fields(0, *total_operations, failed_target),
+        ),
+        garmin_update::UnprotectedMutationEvidence::Applied {
+            applied_operations,
+            total_operations,
+            failed_target,
+        } => (
+            "Update incomplete — device changed",
+            mutation_fields(*applied_operations, *total_operations, failed_target),
+        ),
+        garmin_update::UnprotectedMutationEvidence::Unavailable {
+            total_operations,
+            reason,
+        } => (
+            "Update incomplete — evidence unreadable",
+            vec![
+                FailureField::new(
+                    "Planned",
+                    format!("{total_operations} device operations"),
+                    FailureValueTone::Neutral,
+                ),
+                FailureField::new("Evidence", reason, FailureValueTone::Error),
+            ],
+        ),
+    };
+    fields.push(FailureField::new(
+        "Reason",
+        operation.to_string(),
+        FailureValueTone::Error,
+    ));
+    FailurePresentation {
+        title,
+        body: FailureBody::new(
+            match evidence {
+                garmin_update::UnprotectedMutationEvidence::Applied { .. } => "The update stopped after changing the device. Recovery backups were skipped, so automatic rollback is unavailable.",
+                _ => "The update stopped after device mutation became possible. Recovery backups were skipped, so automatic rollback is unavailable.",
+            },
+            fields,
+            capture,
+        )
+        .with_outcome(
+            "Do not start another update. Keep this capture and run `device recover-update` to inspect and resume it.",
+        ),
     }
 }
 
@@ -1832,7 +2142,9 @@ async fn device(command: DeviceCommand, json: bool) -> Result<()> {
             }
         }
         DeviceCommand::Recover(args) => recover_device(args, json).await,
-        DeviceCommand::RecoverUpdate(args) => recover_mounted_update_device(args, json).await,
+        DeviceCommand::RecoverUpdate(args) => {
+            Box::pin(recover_mounted_update_device(args, json)).await
+        }
         DeviceCommand::RecoverRemoval(args) => recover_removal_device(args, json).await,
     }
 }
@@ -1868,17 +2180,61 @@ async fn recover_device(args: RecoverArgs, json: bool) -> Result<()> {
     }
 }
 
+async fn run_update_recovery_in_session(
+    session: &mut tui::Session,
+    manifest: &DeviceManifest,
+    mount_id: &str,
+    transaction: PathBuf,
+) -> Result<garmin_update::MountedUpdateRecoveryReport> {
+    let (progress, receiver) = ProgressReporter::channel();
+    let cancellation = progress.cancellation_token();
+    let recovery = RecoveryExecution {
+        transaction,
+        device_digest: manifest.identity_digest(),
+        device: Box::new(MountedMtpDevice::new(mount_id)),
+        progress,
+    };
+    let task = async { recover_update(recovery).await };
+    Box::pin(session.run_update_recovery_progress(receiver, task, cancellation)).await
+}
+
+async fn run_removal_recovery_in_session(
+    session: &mut tui::Session,
+    manifest: &DeviceManifest,
+    mount_id: &str,
+    transaction: PathBuf,
+) -> Result<garmin_update::RemovalRecoveryReport> {
+    let adapter = MountedMtpDevice::new(mount_id);
+    let (progress, receiver) = ProgressReporter::channel();
+    let cancellation = progress.cancellation_token();
+    let task = async {
+        Ok::<_, anyhow::Error>(
+            recover_removal(
+                &transaction,
+                &manifest.identity_digest(),
+                &progress,
+                &adapter,
+            )
+            .await?,
+        )
+    };
+    session
+        .run_removal_recovery_progress(receiver, task, cancellation)
+        .await
+}
+
 async fn recover_mounted_update_device(args: MountedUpdateRecoveryArgs, json: bool) -> Result<()> {
     let interactive = interactive_confirmation_available(json);
     let mut session = interactive.then(tui::Session::open).transpose()?;
     let target = resolve_optional_target(&args.target, json, session.as_mut()).await?;
     let manifest = inspect_target(&target, session.as_mut()).await?;
     let mount_id = mounted_removal_target(&target)?;
-    let device = MountedMtpDevice::new(mount_id);
+    let pending_store = PendingRecoveryStore::application()?;
+    let pending = pending_store.register_capture(PendingRecoveryKind::Update, &args.transaction)?;
     let body = tui::ConfirmationBody {
         introduction: ratatui::text::Text::raw(indoc! {"
             Inspect the captured transaction.
-            Keep a committed update or restore an interrupted one."}),
+            Keep a committed update, resume a backup-free one, or restore from verified backups."}),
         fields: vec![
             tui::ConfirmationField::new(
                 "Device",
@@ -1903,23 +2259,18 @@ async fn recover_mounted_update_device(args: MountedUpdateRecoveryArgs, json: bo
         session.as_mut(),
     )?;
     let result: Result<_> = if let Some(session) = session.as_mut() {
-        let (progress, receiver) = ProgressReporter::channel();
-        let cancellation = progress.cancellation_token();
-        let recovery = RecoveryExecution {
-            transaction: args.transaction.clone(),
-            device_digest: manifest.identity_digest(),
-            device: Box::new(device),
-            progress,
-        };
-        let task = async { recover_update(recovery).await };
-        session
-            .run_update_recovery_progress(receiver, task, cancellation)
-            .await
+        Box::pin(run_update_recovery_in_session(
+            session,
+            &manifest,
+            mount_id,
+            args.transaction.clone(),
+        ))
+        .await
     } else {
         recover_update(RecoveryExecution {
             transaction: args.transaction.clone(),
             device_digest: manifest.identity_digest(),
-            device: Box::new(device),
+            device: Box::new(MountedMtpDevice::new(mount_id)),
             progress: ProgressReporter::default(),
         })
         .await
@@ -1936,14 +2287,15 @@ async fn recover_mounted_update_device(args: MountedUpdateRecoveryArgs, json: bo
     }
     drop(session);
     let result = result?;
+    clear_recovery_notice(&pending_store, &pending);
     if json {
         emit_json(&result)
     } else if interactive {
         Ok(())
     } else {
         println!(
-            "Recovery {:?}: verified {} transaction objects.",
-            result.outcome, result.files_verified
+            "Recovery {:?}: checked {} transaction objects.",
+            result.outcome, result.files_checked
         );
         Ok(())
     }
@@ -1955,6 +2307,9 @@ async fn recover_removal_device(args: RemovalRecoveryArgs, json: bool) -> Result
     let target = resolve_optional_target(&args.target, json, session.as_mut()).await?;
     let manifest = inspect_target(&target, session.as_mut()).await?;
     let mount_id = mounted_removal_target(&target)?;
+    let pending_store = PendingRecoveryStore::application()?;
+    let pending =
+        pending_store.register_capture(PendingRecoveryKind::Removal, &args.transaction)?;
     let body = tui::ConfirmationBody {
         introduction: ratatui::text::Text::raw(
             "Restore any files missing from the interrupted removal.",
@@ -1982,30 +2337,15 @@ async fn recover_removal_device(args: RemovalRecoveryArgs, json: bool) -> Result
         "Recover files",
         session.as_mut(),
     )?;
-    let adapter = MountedMtpDevice::new(mount_id);
     let result: Result<_> = if let Some(session) = session.as_mut() {
-        let (progress, receiver) = ProgressReporter::channel();
-        let cancellation = progress.cancellation_token();
-        let task = async {
-            Ok::<_, anyhow::Error>(
-                recover_removal(
-                    &args.transaction,
-                    &manifest.identity_digest(),
-                    &progress,
-                    &adapter,
-                )
-                .await?,
-            )
-        };
-        session
-            .run_removal_recovery_progress(receiver, task, cancellation)
+        run_removal_recovery_in_session(session, &manifest, mount_id, args.transaction.clone())
             .await
     } else {
         recover_removal(
             &args.transaction,
             &manifest.identity_digest(),
             &ProgressReporter::default(),
-            &adapter,
+            &MountedMtpDevice::new(mount_id),
         )
         .await
         .map_err(Into::into)
@@ -2022,6 +2362,7 @@ async fn recover_removal_device(args: RemovalRecoveryArgs, json: bool) -> Result
     }
     drop(session);
     let result = result?;
+    clear_recovery_notice(&pending_store, &pending);
     if json {
         emit_json(&result)
     } else if interactive {
@@ -2415,6 +2756,13 @@ async fn execute_removal_report(
     if current.identity_digest() != report.execution_plan.device_digest {
         bail!("the selected device changed after the removal plan was confirmed");
     }
+    let pending_store = PendingRecoveryStore::application()?;
+    let pending = pending_store.register(
+        PendingRecoveryKind::Removal,
+        capture.root(),
+        &report.execution_plan.device_digest,
+        &report.execution_plan.digest,
+    )?;
     let result = if let Some(session) = session {
         let (progress, receiver) = ProgressReporter::channel();
         let cancellation = progress.cancellation_token();
@@ -2435,6 +2783,7 @@ async fn execute_removal_report(
     capture
         .write_json(Path::new("removal-report.json"), &result)
         .await?;
+    clear_recovery_notice(&pending_store, &pending);
     Ok(result)
 }
 
@@ -2622,6 +2971,21 @@ async fn execute_selected_update(
     capture: SessionCapture,
     context: SelectedUpdateContext<'_>,
 ) -> Result<UpdateOutcome> {
+    let pending = if request.device.modifies_device()
+        && request.device.fixture_root().is_none()
+        && context.manifest.summary.transport == TransportKind::MountedMtp
+    {
+        let store = PendingRecoveryStore::application()?;
+        let recovery = store.register(
+            PendingRecoveryKind::Update,
+            capture.root(),
+            &plan.device_digest,
+            &plan.digest,
+        )?;
+        Some((store, recovery))
+    } else {
+        None
+    };
     let SelectedUpdateRequest {
         concurrency,
         device,
@@ -2638,16 +3002,13 @@ async fn execute_selected_update(
         capture,
         device,
     };
-    if let Some(session) = context.session {
+    let result = if let Some(session) = context.session {
         let (screen_progress, receiver) = ProgressReporter::channel();
         let cancellation = screen_progress.cancellation_token();
         execution.progress = screen_progress;
         let backup_policy = execution.plan.backup_policy;
         let task = execute_update_plan(execution);
-        let outcome =
-            Box::pin(session.run_update_progress(receiver, task, cancellation, backup_policy))
-                .await?;
-        Ok(outcome)
+        Box::pin(session.run_update_progress(receiver, task, cancellation, backup_policy)).await
     } else {
         eprintln!(
             "Downloading and verifying {} files…",
@@ -2657,7 +3018,23 @@ async fn execute_selected_update(
             eprintln!("Obtaining device-bound map authorization data…");
         }
         execute_update_plan(execution).await
+    };
+    if let Some((store, recovery)) = pending {
+        if result.is_ok() {
+            clear_recovery_notice(&store, &recovery);
+        } else {
+            match recovery.is_prepared() {
+                Ok(false) => clear_recovery_notice(&store, &recovery),
+                Ok(true) => {}
+                Err(error) => tracing::warn!(
+                    %error,
+                    capture = %recovery.transaction.display(),
+                    "pending update state could not be inspected"
+                ),
+            }
+        }
     }
+    result
 }
 
 fn print_apply_report(
@@ -4020,8 +4397,8 @@ mod tests {
     use super::{
         ApplyArgs, BackupChoice, Cli, ColorChoice, Command, MapSelectionArgs, MockCommand,
         UpdateCommand, UpdatePlanArgs, color_enabled, device_identification, format_bytes,
-        map_choices, mock_command, parse_byte_size, resolve_cache_dir, select_maps,
-        selected_map_actions, should_prompt, tui, write_json,
+        map_choices, mock_command, mounted_install_failure_presentation, parse_byte_size,
+        resolve_cache_dir, select_maps, selected_map_actions, should_prompt, tui, write_json,
     };
     use clap::Parser;
     use garmin_device::{TransportKind, parse_manifest};
@@ -4035,6 +4412,87 @@ mod tests {
         mock_command(MockCommand::Test, true, Some(capture))
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn backup_free_partial_failure_reports_mutation_and_recovery_work() {
+        let mounted = garmin_update::MountedInstallError::UnprotectedMutation {
+            operation: Box::new(garmin_update::MountedInstallError::RecoveryUnavailable),
+            evidence: garmin_update::UnprotectedMutationEvidence::Applied {
+                applied_operations: 12,
+                total_operations: 27,
+                failed_target: Some("Garmin/DB980010A.img".to_owned()),
+            },
+        };
+        let error = anyhow::Error::msg("outer error");
+
+        let presentation = mounted_install_failure_presentation(&mounted, &error, ".tmp/fenix-t03");
+        let body = format!("{:?}", presentation.body);
+
+        assert_eq!(presentation.title, "Update incomplete — device changed");
+        assert!(body.contains("12 of 27 device operations"));
+        assert!(body.contains("Garmin/DB980010A.img"));
+        assert!(body.contains("14 device operations"));
+        assert!(body.contains("run `device recover-update`"));
+        assert!(!body.contains("left intact"));
+    }
+
+    #[test]
+    fn backup_free_intent_only_failure_reports_uncertain_mutation() {
+        let mounted = garmin_update::MountedInstallError::UnprotectedMutation {
+            operation: Box::new(garmin_update::MountedInstallError::Cancelled),
+            evidence: garmin_update::UnprotectedMutationEvidence::IntentRecorded {
+                total_operations: 4,
+                failed_target: Some("Garmin/map.img".to_owned()),
+            },
+        };
+        let error = anyhow::Error::msg("outer error");
+
+        let presentation = mounted_install_failure_presentation(&mounted, &error, ".tmp/capture");
+        let body = format!("{:?}", presentation.body);
+
+        assert_eq!(presentation.title, "Update incomplete — mutation uncertain");
+        assert!(body.contains("0 of 4 device operations"));
+        assert!(body.contains("device mutation became possible"));
+        assert!(!body.contains("left intact"));
+    }
+
+    #[test]
+    fn backup_free_failure_does_not_invent_counts_when_checkpoint_evidence_is_unreadable() {
+        let mounted = garmin_update::MountedInstallError::UnprotectedMutation {
+            operation: Box::new(garmin_update::MountedInstallError::RecoveryUnavailable),
+            evidence: garmin_update::UnprotectedMutationEvidence::Unavailable {
+                total_operations: 27,
+                reason: "mounted update journal is invalid JSON".to_owned(),
+            },
+        };
+        let error = anyhow::Error::msg("outer error");
+
+        let presentation = mounted_install_failure_presentation(&mounted, &error, ".tmp/capture");
+        let body = format!("{:?}", presentation.body);
+
+        assert_eq!(
+            presentation.title,
+            "Update incomplete — evidence unreadable"
+        );
+        assert!(body.contains("27 device operations"));
+        assert!(body.contains("journal is invalid JSON"));
+        assert!(!body.contains("0 of 27"));
+    }
+
+    #[test]
+    fn rejected_recovery_evidence_does_not_claim_device_restoration() {
+        let mounted = garmin_update::MountedInstallError::JournalVersion(3);
+        let error = anyhow::Error::msg("mounted update journal version 3 is unsupported");
+
+        let presentation = mounted_install_failure_presentation(&mounted, &error, ".tmp/fenix-t03");
+        let body = format!("{:?}", presentation.body);
+
+        assert_eq!(presentation.title, "Recovery evidence rejected");
+        assert!(body.contains("performed no device operation"));
+        assert!(body.contains("interrupted state remains unresolved"));
+        assert!(!body.contains("left intact"));
+        assert!(!body.contains("restored"));
     }
 
     #[test]

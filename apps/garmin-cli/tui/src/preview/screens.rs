@@ -1,5 +1,5 @@
 use garmin_device::{DeviceSummary, TransportKind};
-use garmin_progress::{OperationStage, ProgressState};
+use garmin_progress::{OperationStage, ProgressEventKind, ProgressState};
 use indoc::indoc;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::widgets::{ListState, TableState};
@@ -7,11 +7,12 @@ use ratatui_interact::components::{DialogState, PopupDialog};
 
 use crate::{
     AbortBody, ConfirmationBody, MapActionMode, MapChoice, MapChoiceAction, MapVersionTone,
-    OperationView, PIPELINE_PROBE_WRITE_WARNING, SelectedMapAction, abort_dialog_config,
-    confirmation_dialog_config, draw_abort_body, draw_confirmation_body, draw_map_selection,
-    draw_update_confirmation_body, garmin_contact_confirmation_body, removal_confirmation_body,
-    render_abort_footer, render_confirmation_footer, render_device_selection,
-    render_dialog_backdrop, render_update_confirmation_footer, update_confirmation_body,
+    OperationView, PIPELINE_PROBE_WRITE_WARNING, PendingRecoveryActions, SelectedMapAction,
+    abort_dialog_config, confirmation_dialog_config, draw_abort_body, draw_confirmation_body,
+    draw_map_selection, draw_update_confirmation_body, garmin_contact_confirmation_body,
+    pending_recovery_dialog_config, removal_confirmation_body, render_abort_footer,
+    render_confirmation_footer, render_device_selection, render_dialog_backdrop,
+    render_pending_recovery_footer, render_update_confirmation_footer, update_confirmation_body,
     update_device_rows,
 };
 
@@ -32,6 +33,54 @@ pub(super) fn render_contact_garmin_preview(frame: &mut ratatui::Frame<'_>) {
         dialog.render(frame);
     }
     render_confirmation_footer(frame);
+}
+
+pub(super) fn render_pending_recovery_preview(frame: &mut ratatui::Frame<'_>) {
+    let actions = PendingRecoveryActions::RecoverOrClear;
+    let config = pending_recovery_dialog_config(actions);
+    let mut state = DialogState::new(ConfirmationBody {
+        introduction: ratatui::text::Text::raw(indoc! {"
+            An earlier operation for this device did not reach a completed operation report.
+            Recover it before starting another device change."}),
+        fields: vec![
+            crate::ConfirmationField::new(
+                indoc! {"Device"},
+                indoc! {"
+                    fenix 8 - 47mm, Solar (006-B4532-00)
+                    desktop-mounted MTP at mounted-mtp:0e4054edc7e3f331"},
+                crate::ConfirmationValueTone::Neutral,
+            ),
+            crate::ConfirmationField::new(
+                "Operation",
+                "Map update",
+                crate::ConfirmationValueTone::Warning,
+            ),
+            crate::ConfirmationField::new(
+                "Plan ID",
+                "01953ce506d6d6da6c7bfafaf8eafd4e",
+                crate::ConfirmationValueTone::Muted,
+            ),
+            crate::ConfirmationField::new(
+                "Recovery",
+                ".tmp/fenix-t03",
+                crate::ConfirmationValueTone::Path,
+            ),
+        ],
+        note: Some(ratatui::text::Text::raw(indoc! {"
+            Recover reconciles the interrupted transaction.
+            Clear state is allowed only after the device is proven fully updated or untouched."})),
+        confirm_action: "recover now".to_owned(),
+    });
+    for index in 0..config.buttons.len() {
+        state.register_button(index);
+    }
+    state.show();
+    render_dialog_backdrop(frame);
+    {
+        let mut dialog = PopupDialog::new(&config, &mut state, draw_confirmation_body);
+        dialog.render(frame);
+    }
+    render_pending_recovery_footer(frame, actions);
 }
 
 pub(super) fn render_device_preview(frame: &mut ratatui::Frame<'_>, area: Rect, empty: bool) {
@@ -245,8 +294,11 @@ pub(super) fn render_abort_preview(frame: &mut ratatui::Frame<'_>) {
         operation: OperationView {
             stage: Some(OperationStage::Download),
             state: Some(ProgressState::Advanced),
+            kind: ProgressEventKind::default(),
             label: "Downloading Mock Cycle Map Europe".to_owned(),
             path: Some("Garmin/Mock/europe.img".to_owned()),
+            recorded_at: None,
+            duration: None,
         },
     });
     state.register_button(0);

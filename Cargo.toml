@@ -85,7 +85,7 @@ hex = "=0.4.3"
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 indoc = "=2.0.7"
 js-sys = "=0.3.103"
-jiff = { version = "=0.2.35", default-features = false, features = ["std"] }
+jiff = { version = "=0.2.35", default-features = false, features = ["std", "tz-system"] }
 md-5 = "=0.11.0"
 mediatype = "=0.23.0"
 miette = { git = "https://github.com/zkat/miette", rev = "e853bbf9bc78bbe0b225995de54a3108d77dcaf8", default-features = false }
@@ -115,12 +115,13 @@ thiserror = "=2.0.20"
 time = { version = "=0.3.55", features = ["formatting"] }
 tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = "=0.29.0"
+toml_edit = "=0.25.13"
 tower-http = "=0.6.11"
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt"] }
 url = { version = "=2.5.8", features = ["serde"] }
 usvg = { version = "=0.45.1", default-features = false }
-uuid = { version = "=1.26.0", features = ["v4", "v5"] }
+uuid = { version = "=1.26.0", features = ["serde", "v4", "v5"] }
 walkdir = "=2.5.0"
 wasm-bindgen = "=0.2.126"
 wasm-bindgen-futures = "=0.4.76"

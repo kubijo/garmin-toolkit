@@ -12,10 +12,13 @@ use mtp_rs::{ByteRange, MtpDevice, NewObjectInfo, ObjectHandle, ObjectInfo, Stor
 use sha2::{Digest as _, Sha256};
 use tokio::io::{AsyncRead, AsyncWriteExt as _, ReadBuf};
 
-use super::{BackupDestination, DeviceIoError, DeviceRead, DeviceWrite, directory::verify_file};
+use super::{
+    BackupDestination, DeviceDirectoryEntry, DeviceIoError, DeviceRead, DeviceWrite,
+    directory::verify_file,
+};
 use crate::{
-    DeviceInventory, DevicePathInspection, DevicePathState, MountedMtpBackupProgress,
-    MountedMtpUploadProgress, SafeRelativePath, TransportKind,
+    DeviceInventory, DevicePathInspection, DevicePathState, DevicePathStatus,
+    MountedMtpBackupProgress, MountedMtpUploadProgress, SafeRelativePath, TransportKind,
 };
 use garmin_progress::OperationStage;
 
@@ -548,12 +551,15 @@ impl DeviceRead for MtpStorageDevice {
         &self,
         key: &str,
         path: &SafeRelativePath,
-    ) -> Result<(DevicePathState, Option<u64>), DeviceIoError> {
+    ) -> Result<DevicePathStatus, DeviceIoError> {
         let device = self.connect().await?;
         let result = async {
-            Ok(object_state(
-                find(&self.storage(&device, key).await?, path).await?,
-            ))
+            let (state, size) = object_state(find(&self.storage(&device, key).await?, path).await?);
+            DevicePathStatus::from_parts(state, size).ok_or_else(|| {
+                DeviceIoError::Transport(format!(
+                    "raw MTP returned inconsistent path metadata: {state:?}, size {size:?}"
+                ))
+            })
         }
         .await;
         finish(device, result).await
@@ -601,6 +607,76 @@ impl DeviceRead for MtpStorageDevice {
         .await;
         finish(device, result).await
     }
+
+    async fn read_bounded_file(
+        &self,
+        key: &str,
+        path: &SafeRelativePath,
+        limit: u64,
+    ) -> Result<Option<Vec<u8>>, DeviceIoError> {
+        let device = self.connect().await?;
+        let result = async {
+            let storage = self.storage(&device, key).await?;
+            let Some(object) = find(&storage, path).await? else {
+                return Ok(None);
+            };
+            if !object.is_file() {
+                return Err(DeviceIoError::UnsafePath(path.to_string()));
+            }
+            if object.size > limit {
+                return Err(DeviceIoError::LimitExceeded(path.to_string()));
+            }
+            let mut download = storage.download(object.handle, ByteRange::Full).await?;
+            let mut bytes = Vec::with_capacity(usize::try_from(object.size).unwrap_or_default());
+            while let Some(chunk) = download.next_chunk().await {
+                let chunk = chunk?;
+                if u64::try_from(bytes.len().saturating_add(chunk.len())).unwrap_or(u64::MAX)
+                    > limit
+                {
+                    return Err(DeviceIoError::LimitExceeded(path.to_string()));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != object.size {
+                return Err(DeviceIoError::Verification(path.to_string()));
+            }
+            Ok(Some(bytes))
+        }
+        .await;
+        finish(device, result).await
+    }
+
+    async fn list_directory(
+        &self,
+        key: &str,
+        path: &SafeRelativePath,
+    ) -> Result<Vec<DeviceDirectoryEntry>, DeviceIoError> {
+        let device = self.connect().await?;
+        let result = async {
+            let storage = self.storage(&device, key).await?;
+            let directory = find(&storage, path)
+                .await?
+                .filter(ObjectInfo::is_folder)
+                .ok_or_else(|| DeviceIoError::UnsafePath(path.to_string()))?;
+            let mut names = std::collections::BTreeSet::new();
+            let mut entries = Vec::new();
+            for object in storage.list_objects(Some(directory.handle)).await? {
+                if !names.insert(object.filename.to_ascii_lowercase()) {
+                    return Err(DeviceIoError::UnsafePath(path.to_string()));
+                }
+                let (state, size) = object_state(Some(object.clone()));
+                entries.push(DeviceDirectoryEntry {
+                    name: object.filename,
+                    state,
+                    size,
+                });
+            }
+            entries.sort_by(|left, right| left.name.cmp(&right.name));
+            Ok(entries)
+        }
+        .await;
+        finish(device, result).await
+    }
 }
 
 fn object_state(object: Option<ObjectInfo>) -> (DevicePathState, Option<u64>) {
@@ -614,6 +690,90 @@ fn object_state(object: Option<ObjectInfo>) -> (DevicePathState, Option<u64>) {
 
 #[async_trait::async_trait]
 impl DeviceWrite for MtpStorageDevice {
+    async fn ensure_directory(
+        &self,
+        key: &str,
+        path: &SafeRelativePath,
+    ) -> Result<(), DeviceIoError> {
+        let device = self.connect().await?;
+        let result = async {
+            let storage = self.storage(&device, key).await?;
+            let mut parent = None;
+            for part in path.as_path().components() {
+                let name = part.as_os_str().to_string_lossy();
+                parent = Some(match child(&storage, parent, &name).await? {
+                    Some(object) if object.is_folder() => object.handle,
+                    Some(_) => return Err(DeviceIoError::UnsafePath(path.to_string())),
+                    None => storage.create_folder(parent, &name).await?,
+                });
+            }
+            Ok(())
+        }
+        .await;
+        finish(device, result).await
+    }
+
+    async fn create_verified_file(
+        &self,
+        key: &str,
+        path: &SafeRelativePath,
+        bytes: &[u8],
+    ) -> Result<(), DeviceIoError> {
+        let temporary = tempfile::NamedTempFile::new()?;
+        tokio::fs::write(temporary.path(), bytes).await?;
+        let file = tokio::fs::OpenOptions::new()
+            .read(true)
+            .open(temporary.path())
+            .await?;
+        file.sync_all().await?;
+        drop(file);
+        let size = u64::try_from(bytes.len())
+            .map_err(|_| DeviceIoError::LimitExceeded(path.to_string()))?;
+        let sha256 = hex::encode(Sha256::digest(bytes));
+        self.upload(
+            key,
+            path,
+            temporary.path(),
+            size,
+            &sha256,
+            MountedMtpUploadProgress {
+                reporter: garmin_progress::ProgressReporter::default(),
+                completed_before: 0,
+                total: size,
+            },
+        )
+        .await
+    }
+
+    async fn remove_empty_directory(
+        &self,
+        key: &str,
+        path: &SafeRelativePath,
+    ) -> Result<(), DeviceIoError> {
+        let device = self.connect().await?;
+        let result = async {
+            let storage = self.storage(&device, key).await?;
+            let directory = find(&storage, path)
+                .await?
+                .filter(ObjectInfo::is_folder)
+                .ok_or_else(|| DeviceIoError::UnsafePath(path.to_string()))?;
+            if !storage
+                .list_objects(Some(directory.handle))
+                .await?
+                .is_empty()
+            {
+                return Err(DeviceIoError::Occupied(path.to_string()));
+            }
+            storage.delete(directory.handle).await?;
+            if find(&storage, path).await?.is_some() {
+                return Err(DeviceIoError::Verification(path.to_string()));
+            }
+            Ok(())
+        }
+        .await;
+        finish(device, result).await
+    }
+
     async fn delete(
         &self,
         key: &str,
@@ -639,7 +799,7 @@ impl DeviceWrite for MtpStorageDevice {
         .await;
         finish(device, result).await
     }
-    async fn delete_unverified(
+    async fn delete_size_checked(
         &self,
         key: &str,
         path: &SafeRelativePath,

@@ -23,5 +23,5 @@ conservative common license for the combined source.
 ## Consequences
 
 Public artifacts use Garmin Toolkit branding. `garmin-cli` remains the command name because it accurately names that
-application. Release checks retain provenance and license evidence. Persistent identifiers are governed separately by
-ADR 0036 and are not rewritten merely to match branding.
+application. Release checks retain provenance and license evidence. Before the first release, persisted identifiers use
+only the current Garmin Toolkit domains; no compatibility names are retained for development artifacts.

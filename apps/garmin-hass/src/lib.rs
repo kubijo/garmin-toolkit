@@ -22,7 +22,6 @@ pub use mode::DataError;
 const DATA_BASE: &str = "/data";
 const DATABASE_FILE: &str = "storage.sqlite3";
 const DATA_BASE_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_DATA_BASE";
-const LEGACY_DATA_BASE_ENVIRONMENT: &str = "NIMRAG_HASS_DATA_BASE";
 
 /// Prepares the deployment database.
 ///
@@ -51,15 +50,12 @@ pub async fn run() -> Result<(), Error> {
 }
 
 fn deployment_data_root() -> PathBuf {
-    let data_base = configured_data_base(
-        env::var_os(DATA_BASE_ENVIRONMENT).map(PathBuf::from),
-        env::var_os(LEGACY_DATA_BASE_ENVIRONMENT).map(PathBuf::from),
-    );
+    let data_base = configured_data_base(env::var_os(DATA_BASE_ENVIRONMENT).map(PathBuf::from));
     mode::data_root(&data_base)
 }
 
-fn configured_data_base(current: Option<PathBuf>, legacy: Option<PathBuf>) -> PathBuf {
-    current.or(legacy).unwrap_or_else(|| DATA_BASE.into())
+fn configured_data_base(configured: Option<PathBuf>) -> PathBuf {
+    configured.unwrap_or_else(|| DATA_BASE.into())
 }
 
 /// Home Assistant startup failure.
@@ -78,18 +74,15 @@ mod tests {
     use futures_lite::future::block_on;
     use tempfile::tempdir;
 
-    use super::{configured_data_base, prepare_storage};
+    use super::{DATA_BASE, configured_data_base, prepare_storage};
 
     #[test]
-    fn current_data_base_overrides_the_legacy_compatibility_variable() {
+    fn configured_data_base_overrides_the_default() {
         assert_eq!(
-            configured_data_base(Some("current".into()), Some("legacy".into())),
+            configured_data_base(Some("current".into())),
             Path::new("current")
         );
-        assert_eq!(
-            configured_data_base(None, Some("legacy".into())),
-            Path::new("legacy")
-        );
+        assert_eq!(configured_data_base(None), Path::new(DATA_BASE));
     }
 
     #[test]

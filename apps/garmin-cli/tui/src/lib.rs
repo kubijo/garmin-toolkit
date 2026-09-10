@@ -33,7 +33,7 @@ use ratatui_interact::traits::{ContainerAction, EventResult};
 use std::future::Future;
 use std::io;
 use std::io::stdout;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 mod device_state;
 #[cfg(feature = "gallery")]
@@ -49,6 +49,8 @@ use system::close_signal;
 
 type CrosstermTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 const DEVICE_RESCAN_INTERVAL: Duration = Duration::from_secs(2);
+const STALE_BYTE_PROGRESS_AFTER: Duration = Duration::from_secs(10);
+const MIN_RATE_SAMPLE_DURATION: Duration = Duration::from_millis(250);
 pub const LOADING_SPINNER_INTERVAL: Duration = Duration::from_millis(80);
 const LOADING_SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 pub const PIPELINE_PROBE_WRITE_WARNING: &str = indoc! {"
@@ -132,6 +134,7 @@ const UPDATE_STAGES: &[OperationStage] = &[
     OperationStage::Stage,
     OperationStage::Commit,
     OperationStage::DeviceFinalize,
+    OperationStage::DeviceVerify,
     OperationStage::Cleanup,
 ];
 const PIPELINE_PROBE_STAGES: &[OperationStage] = &[
@@ -159,12 +162,18 @@ const REMOVAL_STAGES: &[OperationStage] = &[
     OperationStage::Commit,
     OperationStage::Cleanup,
 ];
-const UPDATE_RECOVERY_STAGES: &[OperationStage] = &[OperationStage::Cleanup];
-const UPDATE_RECOVERY_COMPLETE: &str = "Update recovered. Device state verified.";
+const UPDATE_RECOVERY_STAGES: &[OperationStage] = &[
+    OperationStage::Verify,
+    OperationStage::Commit,
+    OperationStage::DeviceFinalize,
+    OperationStage::DeviceVerify,
+    OperationStage::Cleanup,
+];
+const UPDATE_RECOVERY_COMPLETE: &str = "Update recovered. Device state reconciled.";
 const REMOVAL_COMPLETE: &str =
     "Removal complete. Files removed; verified backups retained in the capture.";
 const REMOVAL_RECOVERY_STAGES: &[OperationStage] = &[OperationStage::Cleanup];
-const REMOVAL_RECOVERY_COMPLETE: &str = "Recovery complete. Every target is present and verified.";
+const REMOVAL_RECOVERY_COMPLETE: &str = "Recovery complete. Every target path and size is present.";
 
 pub struct Session {
     terminal: AppTerminal,
@@ -441,6 +450,35 @@ impl UpdateConfirmationBody {
 pub struct UpdateConfirmationDecision {
     pub confirmed: bool,
     pub backup_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingRecoveryDecision {
+    Recover,
+    ClearState,
+    Discard,
+    Cancel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingRecoveryActions {
+    RecoverOnly,
+    RecoverOrClear,
+    DiscardOnly,
+}
+
+impl PendingRecoveryActions {
+    const fn allows_clear(self) -> bool {
+        matches!(self, Self::RecoverOrClear)
+    }
+
+    const fn allows_recover(self) -> bool {
+        !matches!(self, Self::DiscardOnly)
+    }
+
+    const fn allows_discard(self) -> bool {
+        matches!(self, Self::DiscardOnly)
+    }
 }
 
 impl ConfirmationBody {
@@ -773,6 +811,17 @@ impl Session {
         confirm_label: &str,
     ) -> Result<bool> {
         confirmation_loop(self.terminal(), title, body, confirm_label)
+    }
+
+    /// Choose how to resolve pending recovery.
+    /// # Errors
+    /// Rendering or input failure.
+    pub fn pending_recovery(
+        &mut self,
+        body: ConfirmationBody,
+        actions: PendingRecoveryActions,
+    ) -> Result<PendingRecoveryDecision> {
+        pending_recovery_loop(self.terminal(), body, actions)
     }
 
     /// Displays the update confirmation with its recovery-backup choice.
@@ -1295,6 +1344,74 @@ fn confirmation_loop(
     }
 }
 
+fn pending_recovery_loop(
+    terminal: &mut AppTerminal,
+    body: ConfirmationBody,
+    actions: PendingRecoveryActions,
+) -> Result<PendingRecoveryDecision> {
+    let config = pending_recovery_dialog_config(actions);
+    let mut state = DialogState::new(body);
+    for index in 0..config.buttons.len() {
+        state.register_button(index);
+    }
+    state.show();
+
+    loop {
+        terminal.draw(|frame| {
+            render_dialog_backdrop(frame);
+            {
+                let mut dialog = PopupDialog::new(&config, &mut state, draw_confirmation_body);
+                dialog.render(frame);
+            }
+            render_pending_recovery_footer(frame, actions);
+        })?;
+
+        match event::read()? {
+            Event::Key(key) if is_cancel_key(&key) => {
+                return Ok(PendingRecoveryDecision::Cancel);
+            }
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                let direct = match key.code {
+                    KeyCode::Char('r' | 'R') if actions.allows_recover() => {
+                        Some(PendingRecoveryDecision::Recover)
+                    }
+                    KeyCode::Char('c' | 'C') if actions.allows_clear() => {
+                        Some(PendingRecoveryDecision::ClearState)
+                    }
+                    KeyCode::Char('d' | 'D') if actions.allows_discard() => {
+                        Some(PendingRecoveryDecision::Discard)
+                    }
+                    KeyCode::Left | KeyCode::Up => {
+                        state.focus.prev();
+                        None
+                    }
+                    KeyCode::Right | KeyCode::Down => {
+                        state.focus.next();
+                        None
+                    }
+                    _ => {
+                        let mut dialog = PopupDialog::new(&config, &mut state, |_, _, _| {});
+                        pending_recovery_result(&dialog.handle_key(key))
+                    }
+                };
+                if let Some(decision) = direct {
+                    return Ok(decision);
+                }
+            }
+            Event::Mouse(mouse) => {
+                let screen = Rect::from(terminal.size()?);
+                let mut dialog = PopupDialog::new(&config, &mut state, |_, _, _| {});
+                if let Some(decision) =
+                    pending_recovery_result(&dialog.handle_mouse_with_screen(mouse, screen))
+                {
+                    return Ok(decision);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn update_confirmation_loop(
     terminal: &mut AppTerminal,
     title: &str,
@@ -1475,10 +1592,61 @@ fn confirmation_dialog_config(title: &str, confirm_label: &str) -> DialogConfig 
         ])
 }
 
+fn pending_recovery_dialog_config(actions: PendingRecoveryActions) -> DialogConfig {
+    let (title, buttons) = if actions.allows_clear() {
+        (
+            "Pending device recovery detected",
+            vec![
+                (
+                    "Clear state".to_owned(),
+                    ContainerAction::custom("clear-state"),
+                ),
+                ("Recover now".to_owned(), ContainerAction::Submit),
+            ],
+        )
+    } else if actions.allows_discard() {
+        (
+            "Interrupted preparation detected",
+            vec![(
+                "Discard attempt".to_owned(),
+                ContainerAction::custom("discard"),
+            )],
+        )
+    } else {
+        (
+            "Pending device recovery detected",
+            vec![("Recover now".to_owned(), ContainerAction::Submit)],
+        )
+    };
+    DialogConfig::new(title)
+        .width_percent(88)
+        .height_percent(96)
+        .min_size(58, 22)
+        .max_size(108, 28)
+        .border_color(Color::Yellow)
+        .focused_border_color(Color::Yellow)
+        .close_on_outside_click(false)
+        .buttons(buttons)
+}
+
 fn confirmation_result(result: &EventResult) -> Option<bool> {
     match result {
         EventResult::Action(ContainerAction::Submit) => Some(true),
         EventResult::Action(ContainerAction::Close) => Some(false),
+        _ => None,
+    }
+}
+
+fn pending_recovery_result(result: &EventResult) -> Option<PendingRecoveryDecision> {
+    match result {
+        EventResult::Action(ContainerAction::Submit) => Some(PendingRecoveryDecision::Recover),
+        EventResult::Action(ContainerAction::Custom(action)) if action == "clear-state" => {
+            Some(PendingRecoveryDecision::ClearState)
+        }
+        EventResult::Action(ContainerAction::Custom(action)) if action == "discard" => {
+            Some(PendingRecoveryDecision::Discard)
+        }
+        EventResult::Action(ContainerAction::Close) => Some(PendingRecoveryDecision::Cancel),
         _ => None,
     }
 }
@@ -1647,7 +1815,7 @@ fn render_backup_option(
     let explanation = if backup.checked {
         "Recommended; enables automatic rollback if the update fails."
     } else {
-        "No automatic rollback; reinstall may be required after a failed update."
+        "No automatic rollback; old device files can be identified only by their authorized path and size, and reinstall may be required after a failed update."
     };
     frame.render_widget(
         Paragraph::new(Text::from(vec![
@@ -1742,6 +1910,29 @@ fn render_update_confirmation_footer(frame: &mut ratatui::Frame<'_>) {
             FooterHint::new("Esc", "cancel"),
         ],
     );
+}
+
+fn render_pending_recovery_footer(frame: &mut ratatui::Frame<'_>, actions: PendingRecoveryActions) {
+    let footer_area = screen_footer_area(frame.area());
+    let hints = if actions.allows_clear() {
+        vec![
+            FooterHint::new("←/→/Tab", "action"),
+            FooterHint::new("Enter", "choose"),
+            FooterHint::new("R/C", "recover/clear"),
+            FooterHint::new("Esc", "cancel"),
+        ]
+    } else if actions.allows_discard() {
+        vec![
+            FooterHint::new("Enter or D", "discard attempt"),
+            FooterHint::new("Esc", "cancel"),
+        ]
+    } else {
+        vec![
+            FooterHint::new("Enter or R", "recover"),
+            FooterHint::new("Esc", "cancel"),
+        ]
+    };
+    render_hint_footer(frame, footer_area, &hints);
 }
 
 fn render_abort_footer(frame: &mut ratatui::Frame<'_>) {
@@ -2627,14 +2818,22 @@ where
             config.title,
             &model,
             &mut scroll,
-            ProgressPhase::Running,
+            if abort_requested {
+                ProgressPhase::Cancelling
+            } else {
+                ProgressPhase::Running
+            },
             device_state.as_ref(),
         )?;
-        match handle_progress_input(&mut scroll, &viewport, ProgressPhase::Running)? {
+        let phase = if abort_requested {
+            ProgressPhase::Cancelling
+        } else {
+            ProgressPhase::Running
+        };
+        match handle_progress_input(&mut scroll, &viewport, phase)? {
             ProgressInput::Abort if confirm_abort(terminal, &model.current).await? => {
                 cancellation.cancel();
                 abort_requested = true;
-                model.current.label = format!("Safely aborting: {}", model.current.label);
             }
             ProgressInput::Continue | ProgressInput::Abort | ProgressInput::Close => {}
         }
@@ -2665,7 +2864,6 @@ where
                 if confirm_abort(terminal, &model.current).await? {
                     cancellation.cancel();
                     abort_requested = true;
-                    model.current.label = format!("Safely aborting: {}", model.current.label);
                 } else {
                     close.set(close_signal());
                 }
@@ -2755,6 +2953,18 @@ fn render_progress_footer(frame: &mut ratatui::Frame<'_>, area: Rect, phase: Pro
                 FooterHint::new("Q/Esc/Ctrl-C", "abort operation"),
             ],
         ),
+        ProgressPhase::Cancelling => {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "Abort requested — waiting for the current operation to stop safely.",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )))
+                .alignment(Alignment::Center),
+                Rect::new(area.x, area.y, area.width, 1),
+            );
+        }
         ProgressPhase::Complete => {
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
@@ -2788,6 +2998,7 @@ enum ProgressInput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProgressPhase {
     Running,
+    Cancelling,
     Complete,
 }
 
@@ -2870,7 +3081,7 @@ async fn confirm_abort(terminal: &mut AppTerminal, operation: &OperationView) ->
 }
 
 fn abort_dialog_config() -> DialogConfig {
-    DialogConfig::new("Abort update?")
+    DialogConfig::new("Abort operation?")
         .width_percent(82)
         .height_percent(70)
         .min_size(48, 14)
@@ -2880,7 +3091,7 @@ fn abort_dialog_config() -> DialogConfig {
         .close_on_outside_click(false)
         .buttons(vec![
             ("Keep running".to_owned(), ContainerAction::Close),
-            ("Abort".to_owned(), ContainerAction::Submit),
+            ("Request abort".to_owned(), ContainerAction::Submit),
         ])
 }
 
@@ -2897,7 +3108,8 @@ fn draw_abort_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut AbortB
     ])
     .split(inner);
     frame.render_widget(
-        Paragraph::new("Stop after the next safe checkpoint?").wrap(Wrap { trim: true }),
+        Paragraph::new("Request cancellation at the next safe checkpoint?")
+            .wrap(Wrap { trim: true }),
         sections[0],
     );
     frame.render_widget(
@@ -2911,8 +3123,10 @@ fn draw_abort_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut AbortB
         sections[1],
     );
     frame.render_widget(
-        Paragraph::new("Any open device transaction will be rolled back.")
-            .wrap(Wrap { trim: true }),
+        Paragraph::new(
+            "Cancellation may require rollback or later recovery. Do not disconnect until this screen closes.",
+        )
+        .wrap(Wrap { trim: true }),
         sections[2],
     );
 }
@@ -2958,11 +3172,7 @@ fn link_style() -> Style {
 fn operation_line(operation: &OperationView, include_state: bool) -> Line<'static> {
     let mut spans = Vec::new();
     if include_state {
-        let state = operation.state.unwrap_or(ProgressState::Started);
-        spans.push(Span::styled(
-            format!("{}  ", stage_symbol(state)),
-            Style::default().fg(state_color(operation.state)),
-        ));
+        spans.extend(history_prefix(operation));
     }
     if let Some(stage) = operation.stage {
         spans.push(Span::styled(
@@ -2979,17 +3189,48 @@ fn operation_line(operation: &OperationView, include_state: bool) -> Line<'stati
     Line::from(spans)
 }
 
-fn operation_text(operation: &OperationView, include_state: bool) -> Text<'static> {
-    let mut label = operation.clone();
-    label.path = None;
-    let mut lines = vec![operation_line(&label, include_state)];
-    if let Some(path) = &operation.path {
-        lines.push(Line::from(vec![
-            Span::raw("   "),
-            Span::styled(path.clone(), path_style()),
-        ]));
+fn history_prefix(operation: &OperationView) -> Vec<Span<'static>> {
+    let state = operation.state.unwrap_or(ProgressState::Started);
+    vec![
+        Span::styled(
+            stage_symbol(state),
+            Style::default().fg(state_color(operation.state)),
+        ),
+        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            history_timestamp(operation.recorded_at),
+            Style::default().fg(Color::Gray),
+        ),
+        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            history_duration(operation.duration),
+            Style::default().fg(Color::Gray),
+        ),
+        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+    ]
+}
+
+fn history_timestamp(recorded_at: Option<SystemTime>) -> String {
+    recorded_at
+        .and_then(|timestamp| jiff::Zoned::try_from(timestamp).ok())
+        .map_or_else(
+            || "--:--:--".to_owned(),
+            |timestamp| timestamp.strftime("%H:%M:%S").to_string(),
+        )
+}
+
+fn history_duration(duration: Option<Duration>) -> String {
+    let Some(duration) = duration else {
+        return "--:--:--".to_owned();
+    };
+    if duration < Duration::from_secs(1) {
+        return format!("00:{:05.2}", duration.as_secs_f64());
     }
-    Text::from(lines)
+    elapsed_clock(duration)
+}
+
+fn operation_text(operation: &OperationView, include_state: bool) -> Text<'static> {
+    Text::from(operation_line(operation, include_state))
 }
 
 fn progress_gauge(view: &StageView, width: u16) -> Gauge<'static> {
@@ -3079,22 +3320,30 @@ fn gauge_label(stage: OperationStage, view: &StageView) -> String {
 }
 
 fn dashboard_gauge_label(stage: OperationStage, view: &StageView, model: &ProgressModel) -> String {
-    if stage != OperationStage::Verify || !model.stage_is_active(OperationStage::Download) {
-        return gauge_label(stage, view);
+    if stage == OperationStage::Verify && model.stage_is_active(OperationStage::Download) {
+        let (completed, total) = model.item_completion(OperationStage::Verify);
+        let mut metrics = Vec::with_capacity(3);
+        if total > 0 {
+            metrics.push(format!(
+                "{completed}/{total} file{} verified",
+                if total == 1 { "" } else { "s" }
+            ));
+        }
+        metrics.push("waiting for active downloads".to_owned());
+        if let Some(elapsed) = stage_elapsed(view) {
+            metrics.push(format!("{} elapsed", progress_elapsed(elapsed)));
+        }
+        return gauge_label_with_metrics(stage, view, &metrics);
     }
-    let (completed, total) = model.item_completion(OperationStage::Verify);
-    let mut metrics = Vec::with_capacity(3);
-    if total > 0 {
-        metrics.push(format!(
-            "{completed}/{total} file{} verified",
-            if total == 1 { "" } else { "s" }
-        ));
+    if view.is_active() && stale_byte_progress(view).is_some() && model.active().next().is_some() {
+        let mut metrics = Vec::with_capacity(2);
+        if let Some(elapsed) = stage_elapsed(view) {
+            metrics.push(format!("{} elapsed", progress_elapsed(elapsed)));
+        }
+        metrics.push("current file progress shown below".to_owned());
+        return gauge_label_with_metrics(stage, view, &metrics);
     }
-    metrics.push("waiting for active downloads".to_owned());
-    if let Some(elapsed) = stage_elapsed(view) {
-        metrics.push(format!("{} elapsed", progress_elapsed(elapsed)));
-    }
-    gauge_label_with_metrics(stage, view, &metrics)
+    gauge_label(stage, view)
 }
 
 fn gauge_label_with_metrics(stage: OperationStage, view: &StageView, metrics: &[String]) -> String {
@@ -3128,32 +3377,69 @@ fn gauge_label_with_metrics(stage: OperationStage, view: &StageView, metrics: &[
 
 fn stage_elapsed(view: &StageView) -> Option<Duration> {
     view.elapsed
+        .or_else(|| {
+            view.started_recorded_at
+                .and_then(|started| SystemTime::now().duration_since(started).ok())
+        })
         .or_else(|| view.started_at.map(|started| started.elapsed()))
+}
+
+fn stale_byte_progress(view: &StageView) -> Option<Duration> {
+    if view.unit != ProgressUnit::Bytes || !view.is_active() {
+        return None;
+    }
+    view.updated_at
+        .map(|updated| updated.elapsed())
+        .filter(|idle| *idle >= STALE_BYTE_PROGRESS_AFTER)
+}
+
+fn byte_sample_elapsed(view: &StageView) -> Option<Duration> {
+    view.started_recorded_at
+        .zip(view.updated_recorded_at)
+        .and_then(|(started, updated)| updated.duration_since(started).ok())
+        .or_else(|| {
+            view.started_at
+                .zip(view.updated_at)
+                .map(|(started, updated)| updated.saturating_duration_since(started))
+        })
+        .or(view.elapsed)
 }
 
 fn progress_metrics(_stage: OperationStage, view: &StageView) -> Vec<String> {
     let Some(elapsed) = stage_elapsed(view) else {
         return Vec::new();
     };
+    if let Some(idle) = stale_byte_progress(view) {
+        return vec![
+            format!("{} elapsed", progress_elapsed(elapsed)),
+            format!(
+                "no progress for {}; device finalizing or stalled",
+                progress_elapsed(idle)
+            ),
+        ];
+    }
     let mut metrics = Vec::with_capacity(3);
-    let bytes_per_second =
-        if view.unit == ProgressUnit::Bytes && view.completed > 0 && !elapsed.is_zero() {
-            #[expect(
-                clippy::cast_precision_loss,
-                reason = "an approximate transfer rate is intentionally represented as f64"
-            )]
-            let rate = view.completed as f64 / elapsed.as_secs_f64();
-            #[expect(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "the non-negative rounded rate is saturated for display as bytes"
-            )]
-            let rounded = rate.max(0.0).round() as u64;
-            metrics.push(format!("{}/s", decimal_bytes(rounded)));
-            Some(rate)
-        } else {
-            None
-        };
+    let bytes_per_second = if let Some(sample_elapsed) = byte_sample_elapsed(view)
+        && view.unit == ProgressUnit::Bytes
+        && view.completed > 0
+        && sample_elapsed >= MIN_RATE_SAMPLE_DURATION
+    {
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "an approximate transfer rate is intentionally represented as f64"
+        )]
+        let rate = view.completed as f64 / sample_elapsed.as_secs_f64();
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "the non-negative rounded rate is saturated for display as bytes"
+        )]
+        let rounded = rate.max(0.0).round() as u64;
+        metrics.push(format!("avg {}/s", decimal_bytes(rounded)));
+        Some(rate)
+    } else {
+        None
+    };
     metrics.push(format!("{} elapsed", progress_elapsed(elapsed)));
     if view.is_active()
         && let (Some(total), Some(rate)) = (view.total, bytes_per_second)
@@ -3360,17 +3646,57 @@ fn select_next(state: &mut ListState, len: usize) {
 mod tests {
     use super::{
         LoadingActivity, MapActionMode, MapChoice, MapChoiceAction, MapVersionTone,
-        SelectedMapAction, dashboard_gauge_label, elapsed_clock, gauge_label, is_cancel_key,
-        path_style, progress_metrics, screen_footer_area, select_map_cell, selected_map_actions,
-        selected_map_choice_count, selected_map_choices, update_confirmation_body,
+        PendingRecoveryActions, PendingRecoveryDecision, SelectedMapAction, dashboard_gauge_label,
+        elapsed_clock, gauge_label, is_cancel_key, path_style, pending_recovery_dialog_config,
+        pending_recovery_result, progress_metrics, screen_footer_area, select_map_cell,
+        selected_map_actions, selected_map_choice_count, selected_map_choices,
+        update_confirmation_body,
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use garmin_progress::{OperationStage, ProgressReporter, ProgressState, ProgressUnit};
     use ratatui::layout::Rect;
     use ratatui::widgets::TableState;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use crate::progress_state::{ProgressModel, StageView};
+
+    #[test]
+    fn pending_recovery_actions_remain_distinct() {
+        use ratatui_interact::traits::{ContainerAction, EventResult};
+
+        assert_eq!(
+            pending_recovery_result(&EventResult::Action(ContainerAction::Submit)),
+            Some(PendingRecoveryDecision::Recover)
+        );
+        assert_eq!(
+            pending_recovery_result(&EventResult::Action(
+                ContainerAction::custom("clear-state",)
+            )),
+            Some(PendingRecoveryDecision::ClearState)
+        );
+        assert_eq!(
+            pending_recovery_result(&EventResult::Action(ContainerAction::Close)),
+            Some(PendingRecoveryDecision::Cancel)
+        );
+        assert_eq!(
+            pending_recovery_result(&EventResult::Action(ContainerAction::custom("discard"))),
+            Some(PendingRecoveryDecision::Discard)
+        );
+    }
+
+    #[test]
+    fn host_only_recovery_does_not_offer_clear_state() {
+        let host_only = pending_recovery_dialog_config(PendingRecoveryActions::RecoverOnly);
+        let portable = pending_recovery_dialog_config(PendingRecoveryActions::RecoverOrClear);
+        let unprepared = pending_recovery_dialog_config(PendingRecoveryActions::DiscardOnly);
+
+        assert_eq!(host_only.buttons.len(), 1);
+        assert_eq!(host_only.buttons[0].0, "Recover now");
+        assert_eq!(portable.buttons.len(), 2);
+        assert_eq!(portable.buttons[0].0, "Clear state");
+        assert_eq!(unprepared.buttons.len(), 1);
+        assert_eq!(unprepared.buttons[0].0, "Discard attempt");
+    }
 
     #[test]
     fn mouse_clicks_choose_keep_change_or_remove() {
@@ -3563,11 +3889,11 @@ mod tests {
 
         assert_eq!(
             progress_metrics(OperationStage::DeviceVerify, &view),
-            ["2.67 MB/s", "00:00:24 elapsed", "ETA 00:01:12"]
+            ["avg 2.67 MB/s", "00:00:24 elapsed", "ETA 00:01:12"]
         );
         assert_eq!(
             gauge_label(OperationStage::DeviceVerify, &view),
-            "64.00 MB / 256.00 MB · 2.67 MB/s · 00:00:24 elapsed · ETA 00:01:12 — Reading MTP object back"
+            "64.00 MB / 256.00 MB · avg 2.67 MB/s · 00:00:24 elapsed · ETA 00:01:12 — Reading MTP object back"
         );
     }
 
@@ -3584,8 +3910,139 @@ mod tests {
 
         assert_eq!(
             gauge_label(OperationStage::DeviceVerify, &view),
-            "256.00 MB / 256.00 MB · 2.67 MB/s · 00:01:36 elapsed — Read back and SHA-256 verified"
+            "256.00 MB / 256.00 MB · avg 2.67 MB/s · 00:01:36 elapsed — Read back and SHA-256 verified"
         );
+    }
+
+    #[test]
+    fn subsecond_byte_sample_does_not_claim_an_impossible_rate_or_eta() {
+        let view = StageView {
+            state: Some(ProgressState::Advanced),
+            unit: ProgressUnit::Bytes,
+            label: "Verifying existing device file".to_owned(),
+            completed: 1_980_000_000,
+            total: Some(16_920_000_000),
+            elapsed: Some(Duration::from_nanos(237)),
+            ..StageView::default()
+        };
+
+        let metrics = progress_metrics(OperationStage::DeviceVerify, &view);
+
+        assert_eq!(metrics, ["0.00s elapsed"]);
+        assert!(metrics.iter().all(|metric| !metric.contains("/s")));
+        assert!(metrics.iter().all(|metric| !metric.contains("ETA")));
+    }
+
+    #[test]
+    fn queued_byte_events_use_producer_elapsed_time_for_rate() {
+        let recorded_now = std::time::SystemTime::now();
+        let view = StageView {
+            state: Some(ProgressState::Advanced),
+            unit: ProgressUnit::Bytes,
+            label: "Verifying existing device file".to_owned(),
+            completed: 1_980_000_000,
+            total: Some(16_920_000_000),
+            started_at: Some(Instant::now()),
+            started_recorded_at: recorded_now.checked_sub(Duration::from_secs(20)),
+            updated_at: Some(Instant::now()),
+            updated_recorded_at: Some(recorded_now),
+            ..StageView::default()
+        };
+
+        let metrics = progress_metrics(OperationStage::DeviceVerify, &view);
+
+        assert!(metrics[0].starts_with("avg "));
+        assert!(!metrics[0].contains("PB/s"));
+        assert!(
+            metrics
+                .iter()
+                .any(|metric| metric.contains("00:00:20 elapsed"))
+        );
+    }
+
+    #[test]
+    fn transfer_rate_uses_the_last_byte_sample_instead_of_decaying_with_wall_time() {
+        let started = std::time::UNIX_EPOCH + Duration::from_secs(1_000);
+        let view = StageView {
+            state: Some(ProgressState::Advanced),
+            unit: ProgressUnit::Bytes,
+            label: "Writing verified file to device".to_owned(),
+            completed: 20_000_000,
+            total: Some(100_000_000),
+            started_recorded_at: Some(started),
+            updated_at: Some(Instant::now()),
+            updated_recorded_at: Some(started + Duration::from_secs(20)),
+            elapsed: Some(Duration::from_secs(100)),
+            ..StageView::default()
+        };
+
+        assert_eq!(
+            progress_metrics(OperationStage::Commit, &view),
+            ["avg 1.00 MB/s", "00:01:40 elapsed", "ETA 00:01:20"]
+        );
+    }
+
+    #[test]
+    fn stale_byte_progress_suppresses_decaying_rate_and_rising_eta() {
+        let now = Instant::now();
+        let view = StageView {
+            state: Some(ProgressState::Advanced),
+            unit: ProgressUnit::Bytes,
+            label: "Writing verified file to device".to_owned(),
+            completed: 4_510_000_000,
+            total: Some(16_920_000_000),
+            started_at: Some(now.checked_sub(Duration::from_secs(1_340)).unwrap()),
+            updated_at: Some(now.checked_sub(Duration::from_secs(12)).unwrap()),
+            ..StageView::default()
+        };
+
+        let metrics = progress_metrics(OperationStage::Commit, &view);
+
+        assert_eq!(metrics[0], "00:22:20 elapsed");
+        assert!(metrics[1].starts_with("no progress for 00:00:12"));
+        assert!(metrics[1].contains("device finalizing or stalled"));
+        assert!(metrics.iter().all(|metric| !metric.contains("/s")));
+        assert!(metrics.iter().all(|metric| !metric.contains("ETA")));
+    }
+
+    #[test]
+    fn stale_aggregate_stage_defers_to_the_active_scoped_file() {
+        let (progress, receiver) = ProgressReporter::channel();
+        let file = progress.for_item("recovery-write-000001");
+        progress.started(
+            OperationStage::Commit,
+            "Reconciling interrupted update files",
+            Some(16_920_000_000),
+        );
+        file.started_with_path(
+            OperationStage::DeviceVerify,
+            "Verifying existing device file",
+            "Garmin/D9486080A.img",
+            Some(3_457_482_752),
+        );
+        file.advanced_with_path(
+            OperationStage::DeviceVerify,
+            "Verifying existing device file",
+            "Garmin/D9486080A.img",
+            1_000_000,
+            Some(3_457_482_752),
+        );
+        let mut model = ProgressModel::new(
+            &[OperationStage::Commit, OperationStage::DeviceVerify],
+            "Preparing",
+        );
+        for event in receiver.try_iter() {
+            model.apply(&event);
+        }
+        let now = Instant::now();
+        model.stages[0].1.started_at = now.checked_sub(Duration::from_secs(30));
+        model.stages[0].1.updated_at = now.checked_sub(Duration::from_secs(12));
+
+        let label = dashboard_gauge_label(OperationStage::Commit, &model.stages[0].1, &model);
+
+        assert!(label.contains("current file progress shown below"));
+        assert!(!label.contains("stalled"));
+        assert!(!label.contains("ETA"));
     }
 
     #[test]

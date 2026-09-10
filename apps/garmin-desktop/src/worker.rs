@@ -27,13 +27,12 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 const SOURCE_LABEL: &str = "Desktop files";
-// Retain the v1 byte domains; derived and imported record IDs depend on them.
-const LEGACY_SOURCE_ID_DOMAIN_V1: &[u8] = b"nimrag/desktop-files/source/v1";
-const LEGACY_OPERATION_ID_DOMAIN_V1: &[u8] = b"nimrag/desktop-files/acquisition/v1";
+const SOURCE_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/desktop-files/source/v1";
+const OPERATION_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/desktop-files/acquisition/v1";
 const AVATAR_SOURCE_LABEL: &str = "Desktop profile pictures";
-const LEGACY_AVATAR_SOURCE_ID_DOMAIN_V1: &[u8] = b"nimrag/desktop-profile-pictures/source/v1";
-const LEGACY_AVATAR_OPERATION_ID_DOMAIN_V1: &[u8] =
-    b"nimrag/desktop-profile-pictures/acquisition/v1";
+const AVATAR_SOURCE_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/desktop-profile-pictures/source/v1";
+const AVATAR_OPERATION_ID_DOMAIN_V1: &[u8] =
+    b"garmin-toolkit/desktop-profile-pictures/acquisition/v1";
 
 pub struct Worker {
     commands: Sender<Command>,
@@ -429,11 +428,11 @@ fn read_import(
 }
 
 fn source(user: UserContext) -> Result<Source, String> {
-    source_from_domain(user, LEGACY_SOURCE_ID_DOMAIN_V1, SOURCE_LABEL)
+    source_from_domain(user, SOURCE_ID_DOMAIN_V1, SOURCE_LABEL)
 }
 
 fn avatar_source(user: UserContext) -> Result<Source, String> {
-    source_from_domain(user, LEGACY_AVATAR_SOURCE_ID_DOMAIN_V1, AVATAR_SOURCE_LABEL)
+    source_from_domain(user, AVATAR_SOURCE_ID_DOMAIN_V1, AVATAR_SOURCE_LABEL)
 }
 
 fn source_from_domain(
@@ -463,7 +462,7 @@ fn avatar_operation_id(
     crop: garmin_importer::AvatarCrop,
 ) -> AcquisitionOperationId {
     let mut digest = blake3::Hasher::new();
-    digest.update(LEGACY_AVATAR_OPERATION_ID_DOMAIN_V1);
+    digest.update(AVATAR_OPERATION_ID_DOMAIN_V1);
     digest.update(source.id().to_string().as_bytes());
     digest.update(&(identity.as_str().len() as u64).to_le_bytes());
     digest.update(identity.as_str().as_bytes());
@@ -481,7 +480,7 @@ fn operation_id(
     bytes: &[u8],
 ) -> AcquisitionOperationId {
     let mut digest = blake3::Hasher::new();
-    digest.update(LEGACY_OPERATION_ID_DOMAIN_V1);
+    digest.update(OPERATION_ID_DOMAIN_V1);
     digest.update(source.id().to_string().as_bytes());
     digest.update(&(identity.as_str().len() as u64).to_le_bytes());
     digest.update(identity.as_str().as_bytes());

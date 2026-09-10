@@ -4,11 +4,11 @@ use sha2::{Digest as _, Sha256};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use super::{
-    BackupDestination, DeviceIoError, DeviceLink, DeviceLinkCapacity, DeviceLinkError,
-    DeviceProbeRequest, DeviceRead, DeviceWrite,
+    BackupDestination, DeviceDirectoryEntry, DeviceIoError, DeviceLink, DeviceLinkCapacity,
+    DeviceLinkError, DeviceProbeRequest, DeviceRead, DeviceWrite,
 };
 use crate::{
-    DeviceInventory, DevicePathInspection, DevicePathState, MountedMtpBackupProgress,
+    DeviceInventory, DevicePathInspection, DevicePathStatus, MountedMtpBackupProgress,
     MountedMtpUploadProgress, SafeRelativePath, TransportKind,
 };
 use garmin_progress::OperationStage;
@@ -157,13 +157,13 @@ impl DeviceRead for DirectoryDevice {
     ) -> Result<DeviceInventory, DeviceIoError> {
         let mut items = Vec::new();
         for path in paths {
-            let (state, size) = self.inspect("primary", path).await?;
+            let status = self.inspect("primary", path).await?;
             items.push(DevicePathInspection {
                 storage_id: "primary".to_owned(),
                 storage_label: "Device storage".to_owned(),
                 path: path.clone(),
-                state,
-                size,
+                state: status.state(),
+                size: status.size(),
             });
         }
         Ok(DeviceInventory {
@@ -178,14 +178,14 @@ impl DeviceRead for DirectoryDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-    ) -> Result<(DevicePathState, Option<u64>), DeviceIoError> {
+    ) -> Result<DevicePathStatus, DeviceIoError> {
         let resolved = self.resolve(storage, path, false).await?;
         match tokio::fs::symlink_metadata(resolved).await {
-            Ok(meta) if meta.is_file() => Ok((DevicePathState::RegularFile, Some(meta.len()))),
-            Ok(meta) if meta.is_dir() => Ok((DevicePathState::Directory, None)),
-            Ok(_) => Ok((DevicePathState::Other, None)),
+            Ok(meta) if meta.is_file() => Ok(DevicePathStatus::RegularFile { size: meta.len() }),
+            Ok(meta) if meta.is_dir() => Ok(DevicePathStatus::Directory),
+            Ok(_) => Ok(DevicePathStatus::Other),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok((DevicePathState::Missing, None))
+                Ok(DevicePathStatus::Missing)
             }
             Err(error) => Err(error.into()),
         }
@@ -237,10 +237,159 @@ impl DeviceRead for DirectoryDevice {
     ) -> Result<(), DeviceIoError> {
         verify_file(&self.resolve(storage, path, false).await?, size, sha256).await
     }
+
+    async fn read_bounded_file(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        limit: u64,
+    ) -> Result<Option<Vec<u8>>, DeviceIoError> {
+        let resolved = self.resolve(storage, path, false).await?;
+        let metadata = match tokio::fs::symlink_metadata(&resolved).await {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.file_type().is_file() {
+            return Err(DeviceIoError::UnsafePath(path.to_string()));
+        }
+        if metadata.len() > limit {
+            return Err(DeviceIoError::LimitExceeded(path.to_string()));
+        }
+        let bytes = tokio::fs::read(resolved).await?;
+        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
+            return Err(DeviceIoError::LimitExceeded(path.to_string()));
+        }
+        Ok(Some(bytes))
+    }
+
+    async fn list_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> Result<Vec<DeviceDirectoryEntry>, DeviceIoError> {
+        let directory = self.resolve(storage, path, false).await?;
+        let metadata = tokio::fs::symlink_metadata(&directory).await?;
+        if !metadata.file_type().is_dir() {
+            return Err(DeviceIoError::UnsafePath(path.to_string()));
+        }
+        let mut entries = tokio::fs::read_dir(directory).await?;
+        let mut result = Vec::new();
+        let mut names = std::collections::BTreeSet::new();
+        while let Some(entry) = entries.next_entry().await? {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !names.insert(name.to_ascii_lowercase()) {
+                return Err(DeviceIoError::UnsafePath(path.to_string()));
+            }
+            let metadata = tokio::fs::symlink_metadata(entry.path()).await?;
+            let (state, size) = if metadata.file_type().is_file() {
+                (crate::DevicePathState::RegularFile, Some(metadata.len()))
+            } else if metadata.file_type().is_dir() {
+                (crate::DevicePathState::Directory, None)
+            } else {
+                (crate::DevicePathState::Other, None)
+            };
+            result.push(DeviceDirectoryEntry { name, state, size });
+        }
+        result.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(result)
+    }
 }
 
 #[async_trait::async_trait]
 impl DeviceWrite for DirectoryDevice {
+    async fn ensure_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> Result<(), DeviceIoError> {
+        if storage != "primary" {
+            return Err(DeviceIoError::Storage(storage.to_owned()));
+        }
+        let mut current = self.root.clone();
+        for component in path.as_path().components() {
+            let expected = component.as_os_str().to_string_lossy();
+            let mut entries = tokio::fs::read_dir(&current).await?;
+            let mut found = None;
+            while let Some(entry) = entries.next_entry().await? {
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&expected)
+                {
+                    if found.is_some() {
+                        return Err(DeviceIoError::UnsafePath(path.to_string()));
+                    }
+                    found = Some(entry.path());
+                }
+            }
+            current = found.unwrap_or_else(|| current.join(component.as_os_str()));
+            match tokio::fs::symlink_metadata(&current).await {
+                Ok(metadata) if metadata.file_type().is_dir() => {}
+                Ok(_) => return Err(DeviceIoError::UnsafePath(path.to_string())),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    tokio::fs::create_dir(&current).await?;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
+    }
+
+    async fn create_verified_file(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        bytes: &[u8],
+    ) -> Result<(), DeviceIoError> {
+        let destination = self.resolve(storage, path, false).await?;
+        let mut output = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+            .await
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    DeviceIoError::Occupied(path.to_string())
+                } else {
+                    error.into()
+                }
+            })?;
+        let result = async {
+            output.write_all(bytes).await?;
+            output.flush().await?;
+            output.sync_all().await?;
+            let observed = tokio::fs::read(&destination).await?;
+            if observed != bytes {
+                return Err(DeviceIoError::Verification(path.to_string()));
+            }
+            Ok(())
+        }
+        .await;
+        drop(output);
+        if result.is_err() {
+            let _ = tokio::fs::remove_file(&destination).await;
+        }
+        result
+    }
+
+    async fn remove_empty_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> Result<(), DeviceIoError> {
+        let directory = self.resolve(storage, path, false).await?;
+        let metadata = tokio::fs::symlink_metadata(&directory).await?;
+        if !metadata.file_type().is_dir() {
+            return Err(DeviceIoError::UnsafePath(path.to_string()));
+        }
+        tokio::fs::remove_dir(directory).await?;
+        if self.inspect(storage, path).await? != DevicePathStatus::Missing {
+            return Err(DeviceIoError::Verification(path.to_string()));
+        }
+        Ok(())
+    }
+
     async fn delete(
         &self,
         storage: &str,
@@ -250,12 +399,12 @@ impl DeviceWrite for DirectoryDevice {
     ) -> Result<(), DeviceIoError> {
         self.verify(storage, path, size, sha256).await?;
         tokio::fs::remove_file(self.resolve(storage, path, false).await?).await?;
-        if self.inspect(storage, path).await?.0 != DevicePathState::Missing {
+        if self.inspect(storage, path).await? != DevicePathStatus::Missing {
             return Err(DeviceIoError::Verification(path.to_string()));
         }
         Ok(())
     }
-    async fn delete_unverified(
+    async fn delete_size_checked(
         &self,
         storage: &str,
         path: &SafeRelativePath,
@@ -267,7 +416,7 @@ impl DeviceWrite for DirectoryDevice {
             return Err(DeviceIoError::Verification(path.to_string()));
         }
         tokio::fs::remove_file(target).await?;
-        if self.inspect(storage, path).await?.0 != DevicePathState::Missing {
+        if self.inspect(storage, path).await? != DevicePathStatus::Missing {
             return Err(DeviceIoError::Verification(path.to_string()));
         }
         Ok(())
