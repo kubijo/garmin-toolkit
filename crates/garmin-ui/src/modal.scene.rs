@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::{Size as ComponentSize, icons, input, modal};
 
-scene_meta! { title: "Desktop / Components / Modal" }
+scene_meta! { title: "Components / Overlays / Modals" }
 
 #[derive(Clone, Copy)]
 struct SceneProps {

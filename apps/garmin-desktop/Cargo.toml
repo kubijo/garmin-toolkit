@@ -32,6 +32,7 @@ rfd.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
+winit.workspace = true
 
 [dev-dependencies]
 garmin-fit = { workspace = true, features = ["test-fixtures"] }

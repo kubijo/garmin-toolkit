@@ -2,7 +2,7 @@ use gallery::prelude::*;
 use garmin_cli_tui::{RunProfile, preview::PreviewScreen};
 use garmin_progress::OperationStage;
 
-scene_meta! { title: "TUI / Progress" }
+scene_meta! { title: "TUI / Operations / Update" }
 
 #[scene(default, order = 10)]
 fn backup(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {

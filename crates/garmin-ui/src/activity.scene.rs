@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::{activity, icons};
 
-scene_meta! { title: "Desktop / Compositions / Activities" }
+scene_meta! { title: "Desktop / Activities" }
 
 const ITEMS: &[activity::ItemProps<'_>] = &[
     activity::ItemProps {

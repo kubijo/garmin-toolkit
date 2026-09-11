@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::path;
 
-scene_meta! { title: "Desktop / Components / Path preview" }
+scene_meta! { title: "Components / Data display / Path preview" }
 
 const FIRST: &[path::Point] = &[
     path::Point {

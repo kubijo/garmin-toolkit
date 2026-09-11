@@ -390,19 +390,20 @@ pub async fn remove_empty_mounted_mtp_directory(
     .map_err(MountedMtpError::Task)?
 }
 
-pub(super) fn mounted_device_state_blocking(
-    mount_id: &str,
-) -> Result<crate::DeviceStateSnapshot, MountedMtpError> {
-    mounted_device_state_blocking_with_cancellable(mount_id, None)
-}
-
 fn mounted_device_state_blocking_with_cancellable(
     mount_id: &str,
     cancellable: Option<&gio::Cancellable>,
 ) -> Result<crate::DeviceStateSnapshot, MountedMtpError> {
     let root = mounted_root(mount_id)?;
+    mounted_device_state_for_root(&root, cancellable)
+}
+
+fn mounted_device_state_for_root(
+    root: &File,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<crate::DeviceStateSnapshot, MountedMtpError> {
     let mut storages = Vec::new();
-    for (index, storage) in storage_roots_with_cancellable(&root, cancellable)?
+    for (index, storage) in storage_roots_with_cancellable(root, cancellable)?
         .into_iter()
         .enumerate()
     {
@@ -622,24 +623,54 @@ enum ChildMetadata {
 
 fn open_mounted_mtp_blocking(mount_id: &str) -> Result<DeviceManifest, MountedMtpError> {
     let root = mounted_root(mount_id)?;
+    open_mounted_mtp_root_blocking(&root, mount_id)
+}
+
+fn open_mounted_mtp_root_blocking(
+    root: &File,
+    mount_id: &str,
+) -> Result<DeviceManifest, MountedMtpError> {
+    let manifests = mounted_mtp_manifests_for_root(root, mount_id)?;
+    match manifests.as_slice() {
+        [manifest] => Ok(manifest.clone()),
+        _ => Err(MountedMtpError::AmbiguousManifest),
+    }
+}
+
+fn mounted_mtp_manifests_for_root(
+    root: &File,
+    mount_id: &str,
+) -> Result<Vec<DeviceManifest>, MountedMtpError> {
     let mut manifests = Vec::new();
-    for garmin in garmin_directories(&root)? {
+    for garmin in garmin_directories(root)? {
         if let Some(manifest) = child_named(&garmin, "GarminDevice.xml", FileType::Regular)? {
             manifests.push(manifest);
         }
     }
-    let manifest = match manifests.as_slice() {
-        [] => return Err(MountedMtpError::ManifestMissing),
-        [manifest] => manifest,
-        _ => return Err(MountedMtpError::AmbiguousManifest),
-    };
-    let xml = read_bounded(manifest)?;
-    parse_manifest(
-        &xml,
-        TransportKind::MountedMtp,
-        format!("mounted-mtp:{mount_id}"),
-    )
-    .map_err(Into::into)
+    if manifests.is_empty() {
+        return Err(MountedMtpError::ManifestMissing);
+    }
+    manifests
+        .iter()
+        .map(|manifest| {
+            let xml = read_bounded(manifest)?;
+            parse_manifest(
+                &xml,
+                TransportKind::MountedMtp,
+                format!("mounted-mtp:{mount_id}"),
+            )
+            .map_err(Into::into)
+        })
+        .collect()
+}
+
+pub(super) fn inspect_mounted_attachment_blocking(
+    root: &File,
+    mount_id: &str,
+) -> Result<(Vec<DeviceManifest>, crate::DeviceStateSnapshot), MountedMtpError> {
+    let manifests = mounted_mtp_manifests_for_root(root, mount_id)?;
+    let state = mounted_device_state_for_root(root, None)?;
+    Ok((manifests, state))
 }
 
 /// Copy one previously inventoried mounted-MTP object to a new local backup.

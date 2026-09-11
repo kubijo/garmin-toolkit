@@ -1,20 +1,20 @@
 use gallery::prelude::*;
 use garmin_ui::{device, icons};
 
-scene_meta! { title: "Desktop / Compositions / Attached device" }
+scene_meta! { title: "Desktop / Devices" }
 
 #[scene(default)]
-fn available(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+fn inspecting(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, (720, 300), |ui| {
-        let _action = device::show(
+        device::show(
             ui,
             &device::Props {
                 name: "Garmin Edge 1050",
                 connection: "USB/MTP",
                 identifier: None,
                 software: None,
-                status: "Ready to inspect",
+                status: "Inspecting…",
                 status_label: "Status",
                 identifier_label: "Device ID",
                 software_label: "Software",
@@ -22,8 +22,6 @@ fn available(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
                 transfers: &[],
                 storages: &[],
                 icon: icons::BICYCLE,
-                inspect_label: "Read device details",
-                inspect_enabled: true,
             },
         );
     });
@@ -47,7 +45,7 @@ fn inspected(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
                 directions: "Read and write",
             },
         ];
-        let _action = device::show(
+        device::show(
             ui,
             &device::Props {
                 name: "Garmin Edge 1050",
@@ -62,25 +60,23 @@ fn inspected(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
                 transfers: &transfers,
                 storages: &[],
                 icon: icons::BICYCLE,
-                inspect_label: "Device inspected",
-                inspect_enabled: false,
             },
         );
     });
 }
 
 #[scene]
-fn inspecting(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+fn failed(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, (720, 300), |ui| {
-        let _action = device::show(
+        device::show(
             ui,
             &device::Props {
                 name: "Garmin fēnix 8",
                 connection: "USB/MTP",
                 identifier: None,
                 software: None,
-                status: "Reading device details…",
+                status: "Inspection failed",
                 status_label: "Status",
                 identifier_label: "Device ID",
                 software_label: "Software",
@@ -88,8 +84,6 @@ fn inspecting(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
                 transfers: &[],
                 storages: &[],
                 icon: icons::WATCH,
-                inspect_label: "Reading device details…",
-                inspect_enabled: false,
             },
         );
     });

@@ -25,7 +25,7 @@ use thiserror::Error;
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 const FILE_ATTRIBUTES: &str = "standard::name,standard::type,standard::size,time::modified";
 
-/// A file-manager-visible MTP mount that can be checked after consent.
+/// A file-manager-visible MTP mount.
 #[derive(Clone, Serialize)]
 pub struct MountedMtpCandidate {
     pub mount_id: String,
@@ -49,7 +49,7 @@ impl MountedMtpCandidate {
         &self.root
     }
 
-    /// Discovers the shared manifest and readable files after consent.
+    /// Discovers manifests and readable files.
     /// # Errors
     /// Inaccessible, invalid, or ambiguous device data.
     pub fn scan(&self) -> Result<Vec<Catalog>, Error> {
@@ -92,14 +92,16 @@ impl crate::attachments::Candidate for MountedMtpCandidate {
     }
 
     fn inspect(&self) -> Result<crate::attachments::Metadata, String> {
-        let catalogs = self.scan().map_err(|error| error.to_string())?;
-        let first = catalogs
+        let (devices, storage) =
+            super::mounted_mtp::inspect_mounted_attachment_blocking(&self.root, &self.mount_id)
+                .map_err(|error| error.to_string())?;
+        let first = devices
             .first()
             .ok_or_else(|| "the device exposed no manifest-bearing storage".to_owned())?;
-        let manifest = first.manifest();
+        let manifest = first.capabilities();
         let mut capabilities = Vec::new();
-        for catalog in &catalogs {
-            let current = catalog.manifest();
+        for device in &devices {
+            let current = device.capabilities();
             if current.id() != manifest.id() || current.model() != manifest.model() {
                 return Err("the device exposed conflicting manifests".to_owned());
             }
@@ -118,8 +120,7 @@ impl crate::attachments::Candidate for MountedMtpCandidate {
             name: normalize_display_name(manifest.model().description()),
             software_version: manifest.model().software_version(),
             capabilities,
-            storage: super::mounted_mtp::mounted_device_state_blocking(&self.mount_id)
-                .map_err(|error| error.to_string())?,
+            storage,
         })
     }
 }
@@ -646,23 +647,32 @@ mod tests {
     }
 
     fn manifest() -> Result<String, quick_xml::SeError> {
+        manifest_with(123_456, "FIT_TYPE_4", "GARMIN/ACTIVITY", "OutputFromUnit")
+    }
+
+    fn manifest_with(
+        id: u32,
+        data_type: &'static str,
+        path: &'static str,
+        direction: &'static str,
+    ) -> Result<String, quick_xml::SeError> {
         quick_xml::se::to_string(&ManifestFixture {
             namespace: NAMESPACE,
             model: ModelFixture {
                 version: 2244,
                 description: "Synthetic Garmin",
             },
-            id: 123_456,
+            id,
             mass_storage: StorageFixture {
                 data_type: DataTypeFixture {
-                    name: "FIT_TYPE_4",
+                    name: data_type,
                     file: FileFixture {
                         specification: SpecificationFixture { identifier: "FIT" },
                         location: LocationFixture {
-                            path: "GARMIN/ACTIVITY",
+                            path,
                             extension: "FIT",
                         },
-                        direction: "OutputFromUnit",
+                        direction,
                     },
                 },
             },
@@ -733,6 +743,98 @@ mod tests {
             file.copy_to(&mut Vec::new()),
             Err(Error::SizeMismatch { .. })
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn attachment_inspection_reads_bounded_metadata_without_catalog_scan()
+    -> Result<(), Box<dyn StdError>> {
+        let mount = tempdir()?;
+        let storage = mount.path().join("Internal Storage");
+        let garmin = storage.join("GARMIN");
+        fs::create_dir_all(&garmin)?;
+        fs::write(garmin.join("GarminDevice.xml"), manifest()?)?;
+        fs::create_dir_all(storage.join("unrelated/private/deep/tree"))?;
+
+        let candidate = MountedMtpCandidate {
+            mount_id: "test://bounded".to_owned(),
+            name: "Synthetic mount".to_owned(),
+            root: File::for_path(mount.path()),
+        };
+        let metadata =
+            crate::attachments::Candidate::inspect(&candidate).map_err(io::Error::other)?;
+
+        assert_eq!(
+            metadata.id,
+            crate::capabilities::DeviceId::from_u32(123_456)
+        );
+        assert_eq!(metadata.name, "Synthetic Garmin");
+        assert_eq!(metadata.storage.storages.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn attachment_inspection_merges_matching_storage_manifests() -> Result<(), Box<dyn StdError>> {
+        let mount = tempdir()?;
+        let internal = mount.path().join("Internal Storage/GARMIN");
+        let card = mount.path().join("Memory Card/GARMIN");
+        fs::create_dir_all(&internal)?;
+        fs::create_dir_all(&card)?;
+        fs::write(internal.join("GarminDevice.xml"), manifest()?)?;
+        fs::write(
+            card.join("GarminDevice.xml"),
+            manifest_with(123_456, "FIT_TYPE_5", "GARMIN/WORKOUTS", "InputToUnit")?,
+        )?;
+        let candidate = MountedMtpCandidate {
+            mount_id: "test://multiple".to_owned(),
+            name: "Synthetic mount".to_owned(),
+            root: File::for_path(mount.path()),
+        };
+
+        let metadata =
+            crate::attachments::Candidate::inspect(&candidate).map_err(io::Error::other)?;
+
+        assert_eq!(metadata.storage.storages.len(), 2);
+        assert_eq!(
+            metadata.capabilities,
+            [
+                crate::attachments::Capability::new(
+                    crate::capabilities::DataType::Activity,
+                    crate::capabilities::TransferDirection::OutputFromUnit,
+                ),
+                crate::attachments::Capability::new(
+                    crate::capabilities::DataType::Workout,
+                    crate::capabilities::TransferDirection::InputToUnit,
+                ),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn attachment_inspection_rejects_conflicting_storage_manifests() -> Result<(), Box<dyn StdError>>
+    {
+        let mount = tempdir()?;
+        let internal = mount.path().join("Internal Storage/GARMIN");
+        let card = mount.path().join("Memory Card/GARMIN");
+        fs::create_dir_all(&internal)?;
+        fs::create_dir_all(&card)?;
+        fs::write(internal.join("GarminDevice.xml"), manifest()?)?;
+        fs::write(
+            card.join("GarminDevice.xml"),
+            manifest_with(654_321, "FIT_TYPE_4", "GARMIN/ACTIVITY", "OutputFromUnit")?,
+        )?;
+        let candidate = MountedMtpCandidate {
+            mount_id: "test://conflict".to_owned(),
+            name: "Synthetic mount".to_owned(),
+            root: File::for_path(mount.path()),
+        };
+
+        let Err(error) = crate::attachments::Candidate::inspect(&candidate) else {
+            return Err("conflicting device identities were accepted".into());
+        };
+
+        assert_eq!(error, "the device exposed conflicting manifests");
         Ok(())
     }
 

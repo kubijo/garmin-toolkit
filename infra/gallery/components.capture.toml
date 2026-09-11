@@ -1,0 +1,16 @@
+out = "../../.tmp/gallery/components"
+size = "1920x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "attached-device-storage"
+scene = "capacity::Multiple Storages"
+
+[[shot]]
+name = "notification-toast-stack"
+scene = "garmin_gallery::notification::Toast Stack"
+
+[shot.knobs]
+mode = "expanded"

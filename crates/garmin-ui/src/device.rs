@@ -1,9 +1,9 @@
 //! Device collection and detail views.
 
 use cint::ColorInterop;
-use egui::{Align, Layout, RichText, TextStyle, Ui};
+use egui::{RichText, TextStyle, Ui};
 
-use crate::{Size, button, icons};
+use crate::icons;
 
 const DEVICE_ICON_SIZE: f32 = 32.0;
 
@@ -21,20 +21,12 @@ pub struct Props<'a> {
     pub transfers: &'a [Transfer<'a>],
     pub storages: &'a [crate::capacity::Props<'a>],
     pub icon: icons::Icon,
-    pub inspect_label: &'a str,
-    pub inspect_enabled: bool,
 }
 
 /// One display row of supported device transfers.
 pub struct Transfer<'a> {
     pub data: &'a str,
     pub directions: &'a str,
-}
-
-/// Device-page interaction.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Action {
-    Inspect,
 }
 
 /// Availability of a device collection supplied by another process.
@@ -65,8 +57,7 @@ pub fn show_collection_state(ui: &mut Ui, state: CollectionState<'_>) {
     }
 }
 
-#[must_use]
-pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
+pub fn show(ui: &mut Ui, props: &Props<'_>) {
     let palette = crate::theme::palette(ui);
     ui.horizontal(|ui| {
         icons::Props {
@@ -85,7 +76,6 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     });
     ui.add_space(20.0);
 
-    let mut inspect = false;
     egui::Frame::new()
         .fill(crate::theme::color32(
             palette.surfaces().layer(garmin_color::theme::Level::One),
@@ -93,44 +83,30 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
         .inner_margin(16.0)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    metadata(ui, props.status_label, props.status);
-                    if let Some(identifier) = props.identifier {
-                        metadata(ui, props.identifier_label, identifier);
+            ui.vertical(|ui| {
+                metadata(ui, props.status_label, props.status);
+                if let Some(identifier) = props.identifier {
+                    metadata(ui, props.identifier_label, identifier);
+                }
+                if let Some(software) = props.software {
+                    metadata(ui, props.software_label, software);
+                }
+                if !props.transfers.is_empty() {
+                    ui.label(
+                        RichText::new(props.transfers_label)
+                            .small()
+                            .color(palette.content().text_secondary().into_cint()),
+                    );
+                    for transfer in props.transfers {
+                        ui.horizontal(|ui| {
+                            ui.label(transfer.data);
+                            ui.label(
+                                RichText::new(transfer.directions)
+                                    .color(palette.content().text_secondary().into_cint()),
+                            );
+                        });
                     }
-                    if let Some(software) = props.software {
-                        metadata(ui, props.software_label, software);
-                    }
-                    if !props.transfers.is_empty() {
-                        ui.label(
-                            RichText::new(props.transfers_label)
-                                .small()
-                                .color(palette.content().text_secondary().into_cint()),
-                        );
-                        for transfer in props.transfers {
-                            ui.horizontal(|ui| {
-                                ui.label(transfer.data);
-                                ui.label(
-                                    RichText::new(transfer.directions)
-                                        .color(palette.content().text_secondary().into_cint()),
-                                );
-                            });
-                        }
-                    }
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    inspect = button::Props {
-                        label: props.inspect_label,
-                        icon: Some(icons::MAGNIFYING_GLASS),
-                        kind: button::Kind::Primary,
-                        size: Size::Medium,
-                        width: button::Width::Fit,
-                        enabled: props.inspect_enabled,
-                    }
-                    .show(ui)
-                    .clicked();
-                });
+                }
             });
         });
 
@@ -140,7 +116,6 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
             crate::capacity::show(ui, storage);
         }
     }
-    inspect.then_some(Action::Inspect)
 }
 
 fn metadata(ui: &mut Ui, label: &str, value: &str) {

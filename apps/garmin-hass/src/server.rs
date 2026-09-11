@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn websocket_carries_device_snapshots_and_inspection() -> anyhow::Result<()> {
+    async fn websocket_carries_automatically_inspected_device_snapshots() -> anyhow::Result<()> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let server = tokio::spawn(async move {
@@ -116,15 +116,8 @@ mod tests {
             remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx)
                 .consume()
                 .await?;
-        let mut snapshots = client.watch().await?;
-
-        assert_eq!(
-            snapshots.borrow()?.first().map(|device| device.inspection),
-            Some(InspectionState::Available)
-        );
-        client.inspect("demo:fenix-8".to_owned()).await?;
-        snapshots.changed().await?;
-        let update = snapshots.borrow_and_update()?;
+        let snapshots = client.watch().await?;
+        let update = snapshots.borrow()?;
         let device = update.first().expect("the demo device remains attached");
 
         assert_eq!(device.inspection, InspectionState::Ready);

@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::image_crop;
 
-scene_meta! { title: "Desktop / Components / Image crop" }
+scene_meta! { title: "Components / Media / Image crop" }
 
 #[scene(default)]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {

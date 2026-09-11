@@ -6,9 +6,12 @@ Use `garmin-device` as the only shared device boundary. It owns attachment disco
 manifest retention, typed capabilities, mass-storage access, raw MTP access, mounted-MTP access, safe paths, capacity
 inspection, and bounded file operations.
 
-Discovery may expose transport metadata without reading device contents. Inspection requires consent; mutation requires
-a separate confirmed capability. Frontends may provide target adapters such as Linux GIO monitoring, but do not define a
-second device model.
+Attaching or mounting a recognizable Garmin authorizes automatic local inspection of canonical `GarminDevice.xml` and
+storage metadata. Inputs remain untrusted; inspection does not crawl or copy unrelated content.
+
+Copying user files from the device, contacting a network service, and every device mutation remain separate explicit
+actions. Frontends may provide target adapters such as Linux GIO monitoring, but do not define a second device model or
+an additional "read device details" consent step.
 
 The strict typed `GarminDevice.xml` view and the exact source document coexist: applications use allowlisted
 capabilities, while the map service receives the original manifest it requires.

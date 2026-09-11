@@ -28,14 +28,20 @@ render SCENE OUT SIZE='1280x720':
         --manifest-path Cargo.toml --all-features -- \
         --scene "{{ SCENE }}" --render "{{ OUT }}" --size {{ SIZE }}
 
-# Render the maintained capture recipe without opening a window.
-capture FILE='capture.toml' OUT='':
+# Render one maintained capture set without opening a window.
+capture FILE='components.capture.toml' OUT='':
     WGPU_BACKEND=vulkan cargo run --quiet --locked \
         --manifest-path Cargo.toml --all-features -- \
         --capture "{{ FILE }}" {{ if OUT == '' { '' } else { '--out "' + OUT + '"' } }}
 
-# Reproduce the maintained capture inside the pinned Nix environment.
-capture-nix FILE='capture.toml' OUT='':
+# Render the component, desktop, and TUI evidence sheets.
+capture-all:
+    just capture components.capture.toml
+    just capture desktop.capture.toml
+    just capture tui.capture.toml
+
+# Reproduce one maintained capture set inside the pinned Nix environment.
+capture-nix FILE='components.capture.toml' OUT='':
     WGPU_BACKEND=vulkan nix develop --command cargo run --quiet --locked \
         --manifest-path Cargo.toml --all-features -- \
         --capture "{{ FILE }}" {{ if OUT == '' { '' } else { '--out "' + OUT + '"' } }}

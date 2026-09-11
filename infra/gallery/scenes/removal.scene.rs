@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_cli_tui::{RunProfile, preview::PreviewScreen};
 
-scene_meta! { title: "TUI / Removal" }
+scene_meta! { title: "TUI / Operations / Removal" }
 
 #[scene(default, order = 10)]
 fn confirmation(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {

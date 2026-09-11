@@ -1,8 +1,9 @@
 # Home Assistant watch vertical slice
 
 Import preserved FIT from the recorded watch, render it in egui/WASM, create route plans, and deploy one FIT Course.
-Inspection and writing require separate consent. Bluetooth is excluded. The native HASS process owns storage, devices,
-sync, API, and assets; ingress serves WASM without credentials or host-device access.
+Attaching or mounting a recognizable Garmin authorizes bounded local inspection. File transfer and writing require
+separate confirmation. Bluetooth is excluded. The native HASS process owns storage, devices, sync, API, and assets;
+ingress serves WASM without credentials or host-device access.
 
 [Shared interface workflows](shared-interface-workflows.md) owns user-visible parity with desktop. This plan owns the
 HASS host, typed browser boundary, packaging, deployment, and hardware proof.
@@ -32,7 +33,7 @@ slice is device capacity and map management; the watch workflow below builds on 
 
 ## Ordered proof
 
-01. Detect attachments without reading them; inspect only after consent.
+01. Detect attachments and automatically inspect manifest and storage metadata.
 02. Pair a profile through the on-device marker; prove verified creation, updates, reconnect, and reassociation.
 03. Import selected FIT read-only with interruption recovery and idempotent retries.
 04. Extend the shared service boundary to watch import and route operations.

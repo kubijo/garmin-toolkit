@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::file_import;
 
-scene_meta! { title: "Desktop / Compositions / FIT import" }
+scene_meta! { title: "Desktop / Import" }
 
 #[scene(default)]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {

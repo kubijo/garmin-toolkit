@@ -2,7 +2,7 @@ use gallery::prelude::*;
 use garmin_color::{Color, theme};
 use garmin_ui::icons;
 
-scene_meta! { title: "Desktop / Components / Icons" }
+scene_meta! { title: "Components / Visuals / Icons" }
 
 const TINT_NAMES: &[&str] = &[
     "primary",

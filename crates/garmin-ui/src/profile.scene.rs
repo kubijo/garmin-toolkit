@@ -4,7 +4,7 @@ use garmin_i18n::{Intl, Language, Translations};
 use garmin_ui::profile;
 use std::sync::OnceLock;
 
-scene_meta! { title: "Desktop / Compositions / Profiles" }
+scene_meta! { title: "Desktop / Profiles" }
 
 const AVATAR_SAMPLE_WIDTH: f32 = 96.0;
 const AVATAR_SAMPLE_LABEL_HEIGHT: f32 = 24.0;

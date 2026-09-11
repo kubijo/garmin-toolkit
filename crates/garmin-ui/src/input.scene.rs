@@ -2,7 +2,7 @@ use gallery::prelude::*;
 use garmin_ui::Size;
 use garmin_ui::input;
 
-scene_meta! { title: "Desktop / Components / Input" }
+scene_meta! { title: "Components / Input / Text" }
 
 struct SceneProps {
     value: String,

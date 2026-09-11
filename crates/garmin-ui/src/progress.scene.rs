@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::progress;
 
-scene_meta! { title: "Desktop / Components / Progress" }
+scene_meta! { title: "Components / Feedback / Progress" }
 
 #[scene]
 fn determinate(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {

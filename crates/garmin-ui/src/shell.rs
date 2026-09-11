@@ -74,16 +74,17 @@ pub struct Props<'a> {
 }
 
 /// Native-window interaction emitted by the shell header.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WindowAction {
     Drag,
+    ShowMenu(egui::Pos2),
     Minimize,
     ToggleMaximize,
     Close,
 }
 
 /// Shell interaction.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
     ToggleNavigation,
     Navigate(usize),
@@ -278,13 +279,32 @@ fn header_window_action(
         } else if drag.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
-        if drag.double_clicked() {
+        let menu_position = if drag.contains_pointer() {
+            ui.input(|input| secondary_press(&input.events, drag.rect))
+        } else {
+            None
+        };
+        if let Some(position) = menu_position {
+            Some(Action::Window(WindowAction::ShowMenu(position)))
+        } else if drag.double_clicked() {
             Some(Action::Window(WindowAction::ToggleMaximize))
-        } else if drag.drag_started() {
+        } else if drag.drag_started_by(egui::PointerButton::Primary) {
             Some(Action::Window(WindowAction::Drag))
         } else {
             controls_action.map(Action::Window)
         }
+    })
+}
+
+fn secondary_press(events: &[egui::Event], rect: Rect) -> Option<egui::Pos2> {
+    events.iter().find_map(|event| match event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Secondary,
+            pressed: true,
+            ..
+        } if rect.contains(*pos) => Some(*pos),
+        _ => None,
     })
 }
 
@@ -558,6 +578,50 @@ fn paint_focus_ring(ui: &Ui, response: &Response) {
                 crate::theme::palette(ui).interaction().focus().into_cint(),
             ),
             egui::StrokeKind::Inside,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_menu_uses_only_secondary_press_inside_title() {
+        let title = Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(400.0, HEADER_HEIGHT));
+        let inside = title.center();
+        let outside = egui::pos2(inside.x, title.bottom() + 20.0);
+        let event = |pos, button, pressed| egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+
+        assert_eq!(
+            secondary_press(
+                &[event(inside, egui::PointerButton::Secondary, true)],
+                title,
+            ),
+            Some(inside)
+        );
+        assert_eq!(
+            secondary_press(
+                &[event(inside, egui::PointerButton::Secondary, false)],
+                title,
+            ),
+            None
+        );
+        assert_eq!(
+            secondary_press(
+                &[event(outside, egui::PointerButton::Secondary, true)],
+                title,
+            ),
+            None
+        );
+        assert_eq!(
+            secondary_press(&[event(inside, egui::PointerButton::Primary, true)], title,),
+            None
         );
     }
 }

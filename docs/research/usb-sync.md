@@ -2,8 +2,9 @@
 
 ## Direction
 
-Before consent, inspect only attachment descriptors. After consent, stage, hash, and atomically commit originals with
-disconnect recovery. Writing is separate; reading never deletes.
+Attaching or mounting a recognizable Garmin authorizes automatic inspection of canonical `GarminDevice.xml` and storage
+metadata. Inspection does not crawl or copy unrelated content. File transfer, network access, and mutation remain
+explicit. Writes stage, hash, and atomically commit originals with disconnect recovery; reads never delete.
 
 HASS may request raw USB/udev. Current fēnix/Edge devices expose MTP; mass storage remains a separate adapter.
 

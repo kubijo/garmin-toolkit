@@ -11,7 +11,7 @@ Complete each stage as a working vertical slice before advancing.
 
 | Stage | Slice                                                                   | Working result                                                          |
 | ----- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| 01    | [Read-only device inspection](device-state.md)                          | CLI, desktop, and HASS show refreshed, consented device state.          |
+| 01    | [Read-only device inspection](device-state.md)                          | Recognized devices are inspected and presented automatically.           |
 | 02    | [Portable data foundation](data-foundation.md)                          | Verified snapshots, restore, open export, and GPX sharing work.         |
 | 03    | [Home Assistant watch slice](hass-watch-vertical-slice.md)              | The deployed add-on imports FIT, plans a route, and transfers a course. |
 | 04    | [Shared interface workflows](shared-interface-workflows.md)             | Desktop and HASS complete the same reviewed workflows.                  |

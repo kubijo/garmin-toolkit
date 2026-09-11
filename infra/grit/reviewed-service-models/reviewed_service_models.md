@@ -18,7 +18,6 @@ or {
   $name <: not or {
     `DeviceSnapshot`,
     `InspectionState`,
-    `InspectionError`
   }
 }
 ```

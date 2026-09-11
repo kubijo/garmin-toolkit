@@ -4,7 +4,7 @@ use garmin_i18n::{Intl, Language, Translations};
 use garmin_ui::{icons, profile, shell};
 use std::sync::OnceLock;
 
-scene_meta! { title: "Desktop / Compositions / Application shell" }
+scene_meta! { title: "Desktop / Shell" }
 
 const PRIMARY_DESTINATIONS: &[shell::Destination<'_>] = &[
     shell::Destination {

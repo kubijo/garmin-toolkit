@@ -16,7 +16,7 @@ use parley_ratatui::{
 };
 use ratatui::Terminal;
 
-scene_meta! { title: "TUI / Planning" }
+scene_meta! { title: "TUI / Setup / Update" }
 
 const SIZES: &[&str] = &["80 × 24", "100 × 30", "140 × 40"];
 const RESIZE_SETTLE_TIME: Duration = Duration::from_millis(120);

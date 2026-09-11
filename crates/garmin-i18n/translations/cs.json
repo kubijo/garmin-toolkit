@@ -143,10 +143,6 @@
     "source": "{count, plural, one {# file was already imported} other {# files were already imported}}",
     "translation": "{count, plural, one {# soubor již byl importován} few {# soubory již byly importovány} other {# souborů již bylo importováno}}"
   },
-  "7c1rdZ/WFp": {
-    "source": "Open its device page to inspect or manage it.",
-    "translation": "Otevřete stránku zařízení pro kontrolu nebo správu."
-  },
   "7c6qjta7pc": {
     "source": "discard attempt",
     "translation": "zahodit pokus"
@@ -167,10 +163,6 @@
   "95PRHWmLRH": {
     "source": "Device finalize",
     "translation": "Dokončení na zařízení"
-  },
-  "9Vo+vfuznH": {
-    "source": "Could not inspect the device",
-    "translation": "Zařízení se nepodařilo zkontrolovat"
   },
   "9e+QqEgrF1": {
     "source": "Preparing update…",
@@ -377,10 +369,6 @@
   "K3slcKbJJi": {
     "source": "desktop-mounted MTP",
     "translation": "MTP připojené systémem"
-  },
-  "KA+rHePuzc": {
-    "source": "Software {version}",
-    "translation": "Software {version}"
   },
   "KGzfLt+9s8": {
     "source": "Removed",
@@ -674,10 +662,6 @@
     "source": "New profile draft",
     "translation": "Rozepsaný nový profil"
   },
-  "bEMKFgf45M": {
-    "source": "Not inspected",
-    "translation": "Nezkontrolováno"
-  },
   "c3VJQoWwCE": {
     "source": "Device",
     "translation": "Zařízení"
@@ -749,10 +733,6 @@
   "gBx/BO2pUc": {
     "source": "MD5 verified",
     "translation": "MD5 ověřeno"
-  },
-  "gDrPgQ9mp+": {
-    "source": "Device details read",
-    "translation": "Údaje zařízení načteny"
   },
   "gG+/7BblKQ": {
     "source": "refresh space",
@@ -850,10 +830,6 @@
   "nr7h1mEE6E": {
     "source": "Esc or Ctrl-C",
     "translation": "Esc nebo Ctrl-C"
-  },
-  "oCuR/y9780": {
-    "source": "Read device details",
-    "translation": "Načíst údaje zařízení"
   },
   "oNH4AWD5A+": {
     "source": "Close window",

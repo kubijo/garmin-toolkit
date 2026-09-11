@@ -10,8 +10,9 @@ Targets compose crates, never each other. Real, dry-run, and demo share workflow
 capabilities. Production permits confirmed mutation. Dry-run uses real services and verification but skips commit. Demo
 supplies isolated fake services and devices.
 
-Discovery exposes candidates without reading them. Inspection and mutation require separate consent. Automatic deletion
-is forbidden. Cloud connectors stop on authentication or rate limits until explicit recovery.
+Discovery exposes transport candidates. Attaching or mounting a recognizable Garmin authorizes bounded local inspection;
+file transfers, network contact, and mutation remain explicit actions. Automatic deletion is forbidden. Cloud connectors
+stop on authentication or rate limits until explicit recovery.
 
 HASS targets Linux `aarch64`, with `x86_64` for development. Desktop needs no daemon. Mobile, Bluetooth, and new device
 tuples require separate evidence. Connect IQ remains optional, source-only, and locally built.

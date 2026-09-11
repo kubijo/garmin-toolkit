@@ -65,9 +65,6 @@ impl App {
 
     fn show_device(&self, ui: &mut Ui, snapshot: &DeviceSnapshot) {
         let status = match snapshot.inspection {
-            InspectionState::Available => {
-                format_message!(&self.intl, default_message: "Not inspected")
-            }
             InspectionState::Running => {
                 format_message!(&self.intl, default_message: "Inspecting…")
             }
@@ -76,32 +73,20 @@ impl App {
                 format_message!(&self.intl, default_message: "Inspection failed")
             }
         };
-        let inspect_label = if matches!(
-            snapshot.inspection,
-            InspectionState::Available | InspectionState::Failed
-        ) {
-            format_message!(&self.intl, default_message: "Read device details")
-        } else {
-            format_message!(&self.intl, default_message: "Device details read")
-        };
         let status_label = format_message!(&self.intl, default_message: "Status");
         let identifier_label = format_message!(&self.intl, default_message: "Device ID");
         let software_label = format_message!(&self.intl, default_message: "Software");
         let identifier = snapshot.identifier.map(|value| value.to_string());
-        let software = snapshot.software_version.map(|value| {
-            format_message!(
-                &self.intl,
-                default_message: "Software {version}",
-                values: { version: format!("{}.{:02}", value / 100, value % 100) },
-            )
-        });
+        let software = snapshot
+            .software_version
+            .map(|value| format!("{}.{:02}", value / 100, value % 100));
         let storages = snapshot
             .storages
             .iter()
             .map(|storage| StorageView::new(storage, &self.intl))
             .collect::<Vec<_>>();
         let storage_props = storages.iter().map(StorageView::props).collect::<Vec<_>>();
-        let action = device::show(
+        device::show(
             ui,
             &device::Props {
                 name: &snapshot.name,
@@ -116,20 +101,8 @@ impl App {
                 transfers: &[],
                 storages: &storage_props,
                 icon: icons::WATCH,
-                inspect_label: &inspect_label,
-                inspect_enabled: matches!(
-                    snapshot.inspection,
-                    InspectionState::Available | InspectionState::Failed
-                ),
             },
         );
-        if action == Some(device::Action::Inspect) {
-            inspect(
-                Rc::clone(&self.shared),
-                snapshot.key.clone(),
-                ui.ctx().clone(),
-            );
-        }
     }
 }
 
@@ -281,20 +254,6 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                 shared.borrow_mut().error = Some(error.to_string());
                 context.request_repaint();
             }
-        }
-    });
-}
-
-fn inspect(shared: Rc<RefCell<State>>, key: String, context: eframe::egui::Context) {
-    let client = shared.borrow().client.clone();
-    spawn_local(async move {
-        let result = match client {
-            Some(client) => client.inspect(key).await.map_err(|error| error.to_string()),
-            None => Err("the device host is not connected".to_owned()),
-        };
-        if let Err(error) = result {
-            shared.borrow_mut().error = Some(error);
-            context.request_repaint();
         }
     });
 }

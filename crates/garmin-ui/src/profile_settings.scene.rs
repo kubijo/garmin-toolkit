@@ -3,7 +3,7 @@ use garmin_i18n::{Language, Translations};
 use garmin_ui::profile_settings;
 use std::sync::OnceLock;
 
-scene_meta! { title: "Desktop / Compositions / Profile settings" }
+scene_meta! { title: "Desktop / Profiles / Settings" }
 
 #[scene(default)]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {

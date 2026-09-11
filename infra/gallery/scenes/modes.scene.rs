@@ -2,7 +2,7 @@ use gallery::prelude::*;
 use garmin_cli_tui::{RunProfile, preview::PreviewScreen};
 use garmin_progress::OperationStage;
 
-scene_meta! { title: "TUI / Modes" }
+scene_meta! { title: "TUI / Setup / Execution profiles" }
 
 #[scene(default, order = 10)]
 fn dry_run_confirmation(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {

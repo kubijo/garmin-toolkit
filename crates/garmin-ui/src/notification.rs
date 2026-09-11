@@ -14,6 +14,7 @@ const STACK_GAP: f32 = 8.0;
 const STACK_MARGIN: f32 = 16.0;
 const STACK_PEEK: f32 = 8.0;
 const TOAST_WIDTH: f32 = 320.0;
+const TOAST_SHADOW_CLIP_MARGIN: f32 = 20.0;
 
 /// Notification severity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -350,9 +351,9 @@ impl Toasts {
                         egui::vec2(TOAST_WIDTH - inset * 2.0, height),
                     );
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-                    child.set_clip_rect(rect.expand(1.0));
+                    child.set_clip_rect(rect.expand(TOAST_SHADOW_CLIP_MARGIN));
                     child.set_opacity(visibility);
-                    if let Some(action) = surface_with_opacity(
+                    if let Some(action) = render_surface(
                         &mut child,
                         &ActionableProps {
                             kind: entry.toast.kind,
@@ -362,7 +363,9 @@ impl Toasts {
                             closable: true,
                         },
                         if index == 0 { 1.0 } else { expansion },
-                    ) {
+                    )
+                    .action
+                    {
                         interactions.push((entry.id, action));
                     }
                 }
@@ -410,7 +413,7 @@ fn measure_surface(ui: &mut Ui, entry: &Entry) -> f32 {
             .sizing_pass()
             .invisible(),
     );
-    let _ = surface(
+    render_surface(
         &mut child,
         &ActionableProps {
             kind: entry.toast.kind,
@@ -419,19 +422,22 @@ fn measure_surface(ui: &mut Ui, entry: &Entry) -> f32 {
             action: entry.toast.action.as_deref(),
             closable: true,
         },
-    );
-    child.min_rect().height()
+        1.0,
+    )
+    .rect
+    .height()
 }
 
 fn surface(ui: &mut Ui, props: &ActionableProps<'_>) -> Option<Action> {
-    surface_with_opacity(ui, props, 1.0)
+    render_surface(ui, props, 1.0).action
 }
 
-fn surface_with_opacity(
-    ui: &mut Ui,
-    props: &ActionableProps<'_>,
-    content_opacity: f32,
-) -> Option<Action> {
+struct SurfaceOutput {
+    action: Option<Action>,
+    rect: Rect,
+}
+
+fn render_surface(ui: &mut Ui, props: &ActionableProps<'_>, content_opacity: f32) -> SurfaceOutput {
     let palette = crate::theme::palette(ui);
     let accent = props.kind.color(ui);
     let output = egui::Frame::new()
@@ -517,7 +523,10 @@ fn surface_with_opacity(
         egui::pos2(output.response.rect.min.x + 3.0, output.response.rect.max.y),
     );
     ui.painter().rect_filled(marker, 0.0, accent.into_cint());
-    output.inner
+    SurfaceOutput {
+        action: output.inner,
+        rect: output.response.rect,
+    }
 }
 
 fn close_button(ui: &mut Ui, color: Color) -> Response {

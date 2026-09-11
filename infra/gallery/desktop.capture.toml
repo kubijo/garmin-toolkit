@@ -1,0 +1,17 @@
+out = "../../.tmp/gallery/desktop"
+size = "1920x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "attached-device-inspecting"
+scene = "device::Inspecting"
+
+[[shot]]
+name = "attached-device-ready"
+scene = "device::Inspected"
+
+[[shot]]
+name = "attached-device-failed"
+scene = "device::Failed"

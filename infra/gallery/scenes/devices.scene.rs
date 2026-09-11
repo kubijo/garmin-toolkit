@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_cli_tui::{RunProfile, preview::PreviewScreen};
 
-scene_meta! { title: "TUI / Devices" }
+scene_meta! { title: "TUI / Setup / Devices" }
 
 #[scene(default, order = 10)]
 fn device_selection(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {

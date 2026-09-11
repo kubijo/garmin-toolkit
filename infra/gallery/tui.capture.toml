@@ -1,4 +1,4 @@
-out = "../../.tmp/gallery"
+out = "../../.tmp/gallery/tui"
 size = "1920x1080"
 sheet = "sheet.png"
 report = "capture.json"
@@ -162,19 +162,19 @@ scene = "progress::Pipeline complete"
 
 [[shot]]
 name = "link-benchmark"
-scene = "progress::Link benchmark"
+scene = "garmin_gallery::progress::Link Benchmark"
 
 [[shot]]
 name = "link-benchmark-complete"
-scene = "progress::Link benchmark complete"
+scene = "garmin_gallery::progress::Link Benchmark Complete"
 
 [[shot]]
 name = "link-benchmark-finalize"
-scene = "progress::Link benchmark finalize"
+scene = "garmin_gallery::progress::Link Benchmark Finalize"
 
 [[shot]]
 name = "link-benchmark-recovery"
-scene = "progress::Link benchmark recovery"
+scene = "garmin_gallery::progress::Link Benchmark Recovery"
 
 [[shot]]
 name = "abort-confirmation"

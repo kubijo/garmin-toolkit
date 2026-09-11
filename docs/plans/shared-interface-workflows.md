@@ -8,8 +8,8 @@ plan owns user-visible workflow parity between its browser client and the native
 
 ## Shared work
 
-1. Give each device page explicit inspection, FIT import, route upload, map management, and asset-management entry
-   points. Inspection and mutation require separate consent.
+1. Populate each device page through automatic bounded inspection, then give it explicit FIT import, route upload, map
+   management, and asset-management entry points. File transfer and mutation require separate confirmation.
 2. Stage FIT ingress before persistence. Pre-parse selected or dropped files and present their activities, metadata,
    duplicates, warnings, and failures for review. Import nothing until the user explicitly confirms the staged set.
 3. Confine drag and drop to visible, enabled targets. Show clear accept or reject feedback while hovering. A drop target

@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::device;
 
-scene_meta! { title: "Shared / Devices / Collection state" }
+scene_meta! { title: "Components / Device state / Collection" }
 
 #[scene(default)]
 fn connecting(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {

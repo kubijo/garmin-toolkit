@@ -4,7 +4,7 @@ use garmin_i18n::{Intl, Language, Translations};
 use garmin_ui::{profile, shell};
 use std::sync::OnceLock;
 
-scene_meta! { title: "Desktop / Components / Header selectors" }
+scene_meta! { title: "Components / Navigation / Header selector" }
 
 #[scene(default)]
 fn profile_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {

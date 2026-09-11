@@ -6,7 +6,7 @@ use crate::capabilities::{DataType, DeviceId, SoftwareVersion, TransferDirection
 
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(5);
 
-/// One host attachment that can be inspected after consent.
+/// A recognizable attachment.
 pub trait Candidate: Clone + Send + 'static {
     /// Opaque identity for the current attachment.
     fn key(&self) -> &str;
@@ -14,13 +14,13 @@ pub trait Candidate: Clone + Send + 'static {
     /// Host-provided display name.
     fn name(&self) -> &str;
 
-    /// Reads and validates device metadata.
+    /// Reads device metadata.
     /// # Errors
-    /// a stable failure summary when the attachment cannot be inspected.
+    /// A stable inspection failure.
     fn inspect(&self) -> Result<Metadata, String>;
 }
 
-/// Platform attachment-discovery adapter.
+/// Attachment discovery.
 pub trait Backend {
     /// Candidate produced by this adapter.
     type Candidate: Candidate;
@@ -32,7 +32,7 @@ pub trait Backend {
     fn candidates(&self) -> Vec<Self::Candidate>;
 }
 
-/// Device-list or inspection change consumed by the view.
+/// An attachment change.
 pub enum Event {
     Attached {
         /// Opaque attachment identity.
@@ -45,10 +45,14 @@ pub enum Event {
         key: String,
     },
     Inspected {
+        /// Opaque attachment identity.
+        key: String,
         /// Manifest-provided device name.
         name: String,
     },
     InspectionFailed {
+        /// Opaque attachment identity.
+        key: String,
         /// Best available device name.
         name: String,
         /// Stable failure summary.
@@ -56,7 +60,7 @@ pub enum Event {
     },
 }
 
-/// Owned display data for one attachment.
+/// Display data for an attachment.
 pub struct Presentation {
     pub key: String,
     pub name: String,
@@ -67,7 +71,7 @@ pub struct Presentation {
     pub state: InspectionState,
 }
 
-/// One supported device data transfer.
+/// A supported transfer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Capability {
     data_type: DataType,
@@ -94,16 +98,15 @@ impl Capability {
     }
 }
 
-/// Consent-gated inspection state.
+/// Inspection state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InspectionState {
-    Available,
     Running,
     Ready,
     Failed,
 }
 
-/// Attachment reconciliation and consented inspection state.
+/// Attached-device coordinator.
 pub struct Manager<B>
 where
     B: Backend,
@@ -113,6 +116,7 @@ where
     last_reconcile: Option<std::time::Instant>,
     inspection_tx: mpsc::Sender<InspectionResult>,
     inspection_rx: mpsc::Receiver<InspectionResult>,
+    next_generation: u64,
 }
 
 impl<B> Manager<B>
@@ -128,23 +132,26 @@ where
             last_reconcile: None,
             inspection_tx,
             inspection_rx,
+            next_generation: 0,
         }
     }
 
-    /// Dispatches mount events, repairs state periodically, and collects inspections.
+    /// Reconciles attachments and collects inspections.
     pub fn poll(&mut self) -> Vec<Event> {
         let now = std::time::Instant::now();
         let initial = self.last_reconcile.is_none();
+        let changed = self.backend.poll_changed();
         let due = self
             .last_reconcile
             .is_none_or(|last| now.duration_since(last) >= RECONCILE_INTERVAL);
-        let mut events = if self.backend.poll_changed() || due {
+        let mut events = if changed || due {
             self.last_reconcile = Some(now);
-            self.reconcile(!initial)
+            self.reconcile(!initial, changed)
         } else {
             Vec::new()
         };
         events.extend(self.collect_inspections());
+        events.extend(self.start_inspections());
         events
     }
 
@@ -155,14 +162,7 @@ where
             .map(|attachment| {
                 let (name, identifier, software_version, capabilities, state) =
                     match &attachment.inspection {
-                        Inspection::Available => (
-                            attachment.name.clone(),
-                            None,
-                            None,
-                            Vec::new(),
-                            InspectionState::Available,
-                        ),
-                        Inspection::Running => (
+                        Inspection::Available | Inspection::Running => (
                             attachment.name.clone(),
                             None,
                             None,
@@ -208,40 +208,7 @@ where
             .map(|attachment| attachment.name.as_str())
     }
 
-    /// Starts reading and validating one device manifest after consent.
-    /// # Errors
-    /// An error when no matching mount exists or the inspection worker cannot start.
-    pub fn inspect(&mut self, key: &str) -> Result<(), String> {
-        let attachment = self
-            .attachments
-            .iter_mut()
-            .find(|attachment| attachment.key == key)
-            .ok_or_else(|| "the attached device is no longer available".to_owned())?;
-        if matches!(
-            attachment.inspection,
-            Inspection::Running | Inspection::Ready(_)
-        ) {
-            return Ok(());
-        }
-
-        attachment.inspection = Inspection::Running;
-        let candidate = attachment.candidate.clone();
-        let key = attachment.key.clone();
-        let sender = self.inspection_tx.clone();
-        std::thread::Builder::new()
-            .name("garmin-toolkit-device-inspection".to_owned())
-            .spawn(move || {
-                let result = candidate.inspect();
-                let _ignored = sender.send(InspectionResult { key, result });
-            })
-            .map(|_| ())
-            .map_err(|error| {
-                attachment.inspection = Inspection::Failed;
-                format!("could not start device inspection: {error}")
-            })
-    }
-
-    fn reconcile(&mut self, report_arrivals: bool) -> Vec<Event> {
+    fn reconcile(&mut self, report_arrivals: bool, refresh_existing: bool) -> Vec<Event> {
         let mut previous = std::mem::take(&mut self.attachments)
             .into_iter()
             .map(|attachment| (attachment.key.clone(), attachment))
@@ -251,6 +218,11 @@ where
             let key = candidate.key().to_owned();
             if let Some(mut attachment) = previous.remove(&key) {
                 attachment.candidate = candidate;
+                if refresh_existing {
+                    attachment.inspection = Inspection::Available;
+                    attachment.generation = self.next_generation;
+                    self.next_generation = self.next_generation.wrapping_add(1);
+                }
                 self.attachments.push(attachment);
             } else {
                 let name = candidate.name().to_owned();
@@ -265,36 +237,78 @@ where
                     name,
                     candidate,
                     inspection: Inspection::Available,
+                    generation: self.next_generation,
                 });
+                self.next_generation = self.next_generation.wrapping_add(1);
             }
         }
         events.extend(previous.into_keys().map(|key| Event::Detached { key }));
         events
     }
 
+    fn start_inspections(&mut self) -> Vec<Event> {
+        let mut events = Vec::new();
+        for attachment in &mut self.attachments {
+            if !matches!(attachment.inspection, Inspection::Available) {
+                continue;
+            }
+            attachment.inspection = Inspection::Running;
+            let candidate = attachment.candidate.clone();
+            let key = attachment.key.clone();
+            let generation = attachment.generation;
+            let sender = self.inspection_tx.clone();
+            if let Err(error) = std::thread::Builder::new()
+                .name("garmin-toolkit-device-inspection".to_owned())
+                .spawn(move || {
+                    let result = candidate.inspect();
+                    let _ignored = sender.send(InspectionResult {
+                        key,
+                        generation,
+                        result,
+                    });
+                })
+            {
+                let reason = format!("could not start device inspection: {error}");
+                attachment.inspection = Inspection::Failed;
+                events.push(Event::InspectionFailed {
+                    key: attachment.key.clone(),
+                    name: attachment.name.clone(),
+                    reason,
+                });
+            }
+        }
+        events
+    }
+
     fn collect_inspections(&mut self) -> Vec<Event> {
         self.inspection_rx
             .try_iter()
-            .filter_map(|result| {
-                let attachment = self
-                    .attachments
-                    .iter_mut()
-                    .find(|attachment| attachment.key == result.key)?;
-                Some(match result.result {
-                    Ok(metadata) => {
-                        let name = metadata.name.clone();
-                        attachment.inspection = Inspection::Ready(metadata);
-                        Event::Inspected { name }
-                    }
-                    Err(reason) => {
-                        attachment.inspection = Inspection::Failed;
-                        Event::InspectionFailed {
-                            name: attachment.name.clone(),
-                            reason,
+            .filter_map(
+                |InspectionResult {
+                     key,
+                     generation,
+                     result,
+                 }| {
+                    let attachment = self.attachments.iter_mut().find(|attachment| {
+                        attachment.key == key && attachment.generation == generation
+                    })?;
+                    Some(match result {
+                        Ok(metadata) => {
+                            let name = metadata.name.clone();
+                            attachment.inspection = Inspection::Ready(metadata);
+                            Event::Inspected { key, name }
                         }
-                    }
-                })
-            })
+                        Err(reason) => {
+                            attachment.inspection = Inspection::Failed;
+                            Event::InspectionFailed {
+                                key,
+                                name: attachment.name.clone(),
+                                reason,
+                            }
+                        }
+                    })
+                },
+            )
             .collect()
     }
 }
@@ -304,6 +318,7 @@ struct Attachment<C> {
     name: String,
     candidate: C,
     inspection: Inspection,
+    generation: u64,
 }
 
 enum Inspection {
@@ -324,6 +339,7 @@ pub struct Metadata {
 
 struct InspectionResult {
     key: String,
+    generation: u64,
     result: Result<Metadata, String>,
 }
 
@@ -356,16 +372,7 @@ mod tests {
         fn inspect(&self) -> Result<Metadata, String> {
             self.inspections.fetch_add(1, Ordering::Relaxed);
             self.inspected.send(()).map_err(|error| error.to_string())?;
-            Ok(Metadata {
-                id: DeviceId::from_u32(42),
-                name: "Garmin Edge test".to_owned(),
-                software_version: SoftwareVersion::from_hundredths(912),
-                storage: crate::DeviceStateSnapshot::default(),
-                capabilities: vec![Capability::new(
-                    DataType::Activity,
-                    TransferDirection::OutputFromUnit,
-                )],
-            })
+            Ok(metadata(42))
         }
     }
 
@@ -390,18 +397,22 @@ mod tests {
     }
 
     #[test]
-    fn startup_inventory_is_silent_and_does_not_inspect_device_contents() {
+    fn startup_inventory_automatically_inspects_recognized_devices() {
         let fixture = fixture();
         let mut manager = Manager::new(fixture.backend);
 
         let events = manager.poll();
 
         assert!(events.is_empty());
-        assert_eq!(fixture.inspections.load(Ordering::Relaxed), 0);
+        fixture
+            .inspected
+            .recv_timeout(Duration::from_secs(1))
+            .expect("automatic inspection starts");
+        assert_eq!(fixture.inspections.load(Ordering::Relaxed), 1);
         let presentations = manager.presentations();
         assert_eq!(presentations.len(), 1);
         assert_eq!(presentations[0].key, "test://edge");
-        assert_eq!(presentations[0].state, InspectionState::Available);
+        assert_eq!(presentations[0].state, InspectionState::Running);
     }
 
     #[test]
@@ -409,6 +420,11 @@ mod tests {
         let fixture = fixture();
         let mut manager = Manager::new(fixture.backend);
         let _startup = manager.poll();
+        fixture
+            .inspected
+            .recv_timeout(Duration::from_secs(1))
+            .expect("startup inspection completes");
+        let _inspected = manager.poll();
         let mut fenix = fixture
             .candidates
             .lock()
@@ -425,19 +441,22 @@ mod tests {
         let events = manager.poll();
 
         assert!(
-            matches!(events.as_slice(), [Event::Attached { key, .. }] if key == "test://fenix")
+            events
+                .iter()
+                .any(|event| matches!(event, Event::Attached { key, .. } if key == "test://fenix"))
         );
+        fixture
+            .inspected
+            .recv_timeout(Duration::from_secs(1))
+            .expect("new attachment is inspected automatically");
     }
 
     #[test]
-    fn explicit_inspection_enriches_the_same_attachment() {
+    fn automatic_inspection_enriches_the_same_attachment() {
         let fixture = fixture();
         let mut manager = Manager::new(fixture.backend);
         let _events = manager.poll();
 
-        manager
-            .inspect("test://edge")
-            .expect("the discovered test attachment can be inspected");
         fixture
             .inspected
             .recv_timeout(Duration::from_secs(1))
@@ -455,9 +474,8 @@ mod tests {
             std::thread::yield_now();
         };
 
-        assert!(
-            matches!(events.as_slice(), [Event::Inspected { name }] if name == "Garmin Edge test")
-        );
+        assert!(matches!(events.as_slice(), [Event::Inspected { key, name }]
+                if key == "test://edge" && name == "Garmin Edge test"));
         let presentations = manager.presentations();
         assert_eq!(presentations[0].identifier, Some(DeviceId::from_u32(42)));
         assert_eq!(
@@ -471,6 +489,77 @@ mod tests {
                 DataType::Activity,
                 TransferDirection::OutputFromUnit,
             )]
+        );
+    }
+
+    #[test]
+    fn mount_change_refreshes_completed_inspection() {
+        let fixture = fixture();
+        let mut manager = Manager::new(fixture.backend);
+        let _startup = manager.poll();
+        fixture
+            .inspected
+            .recv_timeout(Duration::from_secs(1))
+            .expect("startup inspection completes");
+        wait_until_ready(&mut manager);
+
+        fixture.changed.store(true, Ordering::Relaxed);
+        let _refresh = manager.poll();
+        fixture
+            .inspected
+            .recv_timeout(Duration::from_secs(1))
+            .expect("mount change starts a bounded refresh");
+
+        assert_eq!(fixture.inspections.load(Ordering::Relaxed), 2);
+        assert_eq!(manager.presentations()[0].state, InspectionState::Running);
+    }
+
+    #[test]
+    fn stale_inspection_result_cannot_replace_refreshed_attachment() {
+        let fixture = fixture();
+        let mut manager = Manager::new(fixture.backend);
+        let _arrival = manager.reconcile(false, false);
+        let stale_generation = manager.attachments[0].generation;
+        manager.attachments[0].inspection = Inspection::Running;
+
+        let _refresh = manager.reconcile(false, true);
+        let current_generation = manager.attachments[0].generation;
+        assert_ne!(stale_generation, current_generation);
+        assert!(matches!(
+            manager.attachments[0].inspection,
+            Inspection::Available
+        ));
+
+        manager
+            .inspection_tx
+            .send(InspectionResult {
+                key: "test://edge".to_owned(),
+                generation: stale_generation,
+                result: Ok(metadata(7)),
+            })
+            .expect("the manager retains its inspection receiver");
+        assert!(manager.collect_inspections().is_empty());
+        assert!(matches!(
+            manager.attachments[0].inspection,
+            Inspection::Available
+        ));
+
+        manager.attachments[0].inspection = Inspection::Running;
+        manager
+            .inspection_tx
+            .send(InspectionResult {
+                key: "test://edge".to_owned(),
+                generation: current_generation,
+                result: Ok(metadata(43)),
+            })
+            .expect("the manager retains its inspection receiver");
+        assert!(matches!(
+            manager.collect_inspections().as_slice(),
+            [Event::Inspected { key, .. }] if key == "test://edge"
+        ));
+        assert_eq!(
+            manager.presentations()[0].identifier,
+            Some(DeviceId::from_u32(43))
         );
     }
 
@@ -500,6 +589,31 @@ mod tests {
             changed,
             inspections,
             inspected,
+        }
+    }
+
+    fn metadata(id: u32) -> Metadata {
+        Metadata {
+            id: DeviceId::from_u32(id),
+            name: "Garmin Edge test".to_owned(),
+            software_version: SoftwareVersion::from_hundredths(912),
+            storage: crate::DeviceStateSnapshot::default(),
+            capabilities: vec![Capability::new(
+                DataType::Activity,
+                TransferDirection::OutputFromUnit,
+            )],
+        }
+    }
+
+    fn wait_until_ready(manager: &mut Manager<TestBackend>) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while manager.presentations()[0].state != InspectionState::Ready {
+            let _events = manager.poll();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the inspection result reaches the manager"
+            );
+            std::thread::yield_now();
         }
     }
 }

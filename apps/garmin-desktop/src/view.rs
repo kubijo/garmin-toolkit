@@ -83,7 +83,7 @@ impl Desktop {
         })
     }
 
-    fn show_chooser(&mut self, ui: &mut Ui) {
+    fn show_chooser(&mut self, ui: &mut Ui, frame: &eframe::Frame) {
         let window_copy = WindowCopy::new(&self.intl);
         let window_controls = window_copy.props(ui.ctx());
         let output = shell::show(
@@ -100,7 +100,7 @@ impl Desktop {
             },
             |ui| self.show_chooser_content(ui),
         );
-        self.handle_shell_action(ui.ctx(), output.action, &[]);
+        self.handle_shell_action(ui.ctx(), frame, output.action, &[]);
     }
 
     fn show_chooser_content(&mut self, ui: &mut Ui) {
@@ -144,7 +144,13 @@ impl Desktop {
         }
     }
 
-    fn show_application(&mut self, ui: &mut Ui, profile_index: usize, drop_active: bool) {
+    fn show_application(
+        &mut self,
+        ui: &mut Ui,
+        frame: &eframe::Frame,
+        profile_index: usize,
+        drop_active: bool,
+    ) {
         let profile_props = self.profile_props();
         let device_views = self.device_views();
         let device_destinations = device_views
@@ -227,13 +233,12 @@ impl Desktop {
                     ui,
                     &self.profile_settings_props(profile_index),
                 )),
-                Page::Device(key) => PageOutput::Device {
-                    key: key.clone(),
-                    action: device_views
-                        .iter()
-                        .find(|device| &device.key == key)
-                        .and_then(|device| device.show(ui, &self.intl)),
-                },
+                Page::Device(key) => {
+                    if let Some(device) = device_views.iter().find(|device| &device.key == key) {
+                        device.show(ui, &self.intl);
+                    }
+                    PageOutput::Device
+                }
             }
         });
 
@@ -242,7 +247,7 @@ impl Desktop {
             .iter()
             .map(|device| device.key.clone())
             .collect::<Vec<_>>();
-        self.handle_shell_action(ui.ctx(), output.action, &device_keys);
+        self.handle_shell_action(ui.ctx(), frame, output.action, &device_keys);
     }
 
     fn handle_page_output(&mut self, profile_index: usize, output: PageOutput) {
@@ -258,15 +263,7 @@ impl Desktop {
             PageOutput::Settings(Some(action)) => {
                 self.handle_profile_settings_action(profile_index, action);
             }
-            PageOutput::Device {
-                key,
-                action: Some(device::Action::Inspect),
-            } => {
-                if let Err(reason) = self.devices.inspect(&key) {
-                    self.device_inspection_error(reason);
-                }
-            }
-            PageOutput::Settings(None) | PageOutput::Device { action: None, .. } => {}
+            PageOutput::Settings(None) | PageOutput::Device => {}
         }
     }
 
@@ -429,6 +426,7 @@ impl Desktop {
     fn handle_shell_action(
         &mut self,
         context: &Context,
+        frame: &eframe::Frame,
         action: Option<shell::Action>,
         device_keys: &[String],
     ) {
@@ -461,6 +459,9 @@ impl Desktop {
             }
             Some(shell::Action::Window(shell::WindowAction::Drag)) => {
                 context.send_viewport_cmd(ViewportCommand::StartDrag);
+            }
+            Some(shell::Action::Window(shell::WindowAction::ShowMenu(position))) => {
+                crate::window::show_menu(context, frame, position);
             }
             Some(shell::Action::Window(shell::WindowAction::Minimize)) => {
                 context.send_viewport_cmd(ViewportCommand::Minimized(true));
@@ -624,10 +625,7 @@ impl Desktop {
                         description: "Notification title for a newly attached device",
                         values: { device: name.as_str() },
                     );
-                    let detail = format_message!(
-                        &self.intl,
-                        default_message: "Open its device page to inspect or manage it.",
-                    );
+                    let detail = format_message!(&self.intl, default_message: "Inspecting…");
                     let action = format_message!(
                         &self.intl,
                         default_message: "View device",
@@ -640,20 +638,13 @@ impl Desktop {
                     self.device_toasts.insert(id, key);
                 }
                 devices::Event::Detached { key } => {
-                    let stale = self
-                        .device_toasts
-                        .iter()
-                        .filter_map(|(id, pending)| (pending == &key).then_some(*id))
-                        .collect::<Vec<_>>();
-                    for id in stale {
-                        self.device_toasts.remove(&id);
-                        self.toasts.dismiss(id);
-                    }
+                    self.dismiss_device_toasts(&key);
                     if matches!(&self.page, Page::Device(active) if active == &key) {
                         self.page = Page::Activities;
                     }
                 }
-                devices::Event::Inspected { name } => {
+                devices::Event::Inspected { key, name } => {
+                    self.dismiss_device_toasts(&key);
                     let title = format_message!(
                         &self.intl,
                         default_message: "{device} inspected",
@@ -663,7 +654,8 @@ impl Desktop {
                     self.toasts
                         .push(notification::Toast::new(notification::Kind::Success, title));
                 }
-                devices::Event::InspectionFailed { name, reason } => {
+                devices::Event::InspectionFailed { key, name, reason } => {
+                    self.dismiss_device_toasts(&key);
                     let title = format_message!(
                         &self.intl,
                         default_message: "Could not inspect {device}",
@@ -677,6 +669,18 @@ impl Desktop {
                     );
                 }
             }
+        }
+    }
+
+    fn dismiss_device_toasts(&mut self, key: &str) {
+        let stale = self
+            .device_toasts
+            .iter()
+            .filter_map(|(id, pending)| (pending == key).then_some(*id))
+            .collect::<Vec<_>>();
+        for id in stale {
+            self.device_toasts.remove(&id);
+            self.toasts.dismiss(id);
         }
     }
 
@@ -695,20 +699,6 @@ impl Desktop {
                 }
             }
         }
-    }
-
-    fn device_inspection_error(&mut self, reason: String) {
-        self.toasts.push(
-            notification::Toast::new(
-                notification::Kind::Error,
-                format_message!(
-                    &self.intl,
-                    default_message: "Could not inspect the device",
-                ),
-            )
-            .detail(reason)
-            .persistent(),
-        );
     }
 
     fn process_events(&mut self) {
@@ -1053,7 +1043,7 @@ impl Desktop {
 }
 
 impl eframe::App for Desktop {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         self.process_events();
         self.process_devices(ui.ctx());
         self.handle_quit_input(ui.ctx());
@@ -1072,8 +1062,8 @@ impl eframe::App for Desktop {
             self.start_import(dropped);
         }
         match self.selected_profile {
-            Some(index) => self.show_application(ui, index, drop_active),
-            None => self.show_chooser(ui),
+            Some(index) => self.show_application(ui, frame, index, drop_active),
+            None => self.show_chooser(ui, frame),
         }
         self.show_create_profile(ui);
         self.show_avatar_editor(ui);
@@ -1183,19 +1173,11 @@ struct DeviceView {
     transfers: Vec<DeviceTransfer>,
     storages: Vec<DeviceStorageView>,
     icon: icons::Icon,
-    inspect_enabled: bool,
 }
 
 impl DeviceView {
     fn new(presentation: devices::Presentation, intl: &Intl) -> Self {
-        let inspect_enabled = matches!(
-            presentation.state,
-            devices::InspectionState::Available | devices::InspectionState::Failed
-        );
         let status = match presentation.state {
-            devices::InspectionState::Available => {
-                format_message!(intl, default_message: "Not inspected")
-            }
             devices::InspectionState::Running => {
                 format_message!(intl, default_message: "Inspecting…")
             }
@@ -1204,13 +1186,9 @@ impl DeviceView {
                 format_message!(intl, default_message: "Inspection failed")
             }
         };
-        let firmware = presentation.software_version.map(|version| {
-            format_message!(
-                intl,
-                default_message: "Software {version}",
-                values: { version: version.to_string() },
-            )
-        });
+        let firmware = presentation
+            .software_version
+            .map(|version| version.to_string());
         let icon = device_icon(&presentation.name);
         let transfers = device_transfers(&presentation.capabilities, intl);
         Self {
@@ -1227,16 +1205,10 @@ impl DeviceView {
                 .map(|storage| DeviceStorageView::new(storage, intl))
                 .collect(),
             icon,
-            inspect_enabled,
         }
     }
 
-    fn show(&self, ui: &mut Ui, intl: &Intl) -> Option<device::Action> {
-        let inspect_label = if self.inspect_enabled {
-            format_message!(intl, default_message: "Read device details")
-        } else {
-            format_message!(intl, default_message: "Device details read")
-        };
+    fn show(&self, ui: &mut Ui, intl: &Intl) {
         let status_label = format_message!(intl, default_message: "Status");
         let identifier_label = format_message!(intl, default_message: "Device ID");
         let software_label = format_message!(intl, default_message: "Software");
@@ -1272,10 +1244,8 @@ impl DeviceView {
                     })
                     .collect::<Vec<_>>(),
                 icon: self.icon,
-                inspect_label: &inspect_label,
-                inspect_enabled: self.inspect_enabled,
             },
-        )
+        );
     }
 }
 
@@ -1444,13 +1414,11 @@ impl Page {
     }
 }
 
+#[derive(Clone, Copy)]
 enum PageOutput {
     Activities((Option<file_import::Action>, Option<activity::Action>)),
     Settings(Option<profile_settings::Action>),
-    Device {
-        key: String,
-        action: Option<device::Action>,
-    },
+    Device,
 }
 
 #[derive(Default)]

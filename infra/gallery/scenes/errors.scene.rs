@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_cli_tui::{RunProfile, preview::PreviewScreen};
 
-scene_meta! { title: "TUI / Errors" }
+scene_meta! { title: "TUI / Failures" }
 
 #[scene(order = 5)]
 fn storage_check_failed(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {

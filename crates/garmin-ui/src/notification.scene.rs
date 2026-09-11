@@ -3,7 +3,7 @@ use std::sync::{Mutex, OnceLock};
 use gallery::prelude::*;
 use garmin_ui::notification;
 
-scene_meta! { title: "Desktop / Components / Notification" }
+scene_meta! { title: "Components / Feedback / Notifications" }
 
 #[scene]
 fn states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
@@ -53,8 +53,8 @@ fn actionable(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
             &notification::ActionableProps {
                 kind,
                 title: "Garmin Edge 1050 connected",
-                detail: detail.then_some("USB/MTP · Review it before scanning."),
-                action: action.then_some("Review device"),
+                detail: detail.then_some("Inspecting…"),
+                action: action.then_some("View device"),
                 closable,
             },
         );
@@ -118,8 +118,8 @@ fn seeded_toast_scene() -> ToastScene {
             notification::Kind::Information,
             "Garmin Edge 1050 connected",
         )
-        .detail("USB/MTP · Review it before scanning.")
-        .action("Review device"),
+        .detail("Inspecting…")
+        .action("View device"),
     );
     state.toasts.push(
         notification::Toast::new(notification::Kind::Success, "Profile settings saved")
@@ -140,8 +140,8 @@ fn toast(index: usize) -> Option<notification::Toast> {
                 notification::Kind::Information,
                 "Garmin Edge 1050 connected",
             )
-            .detail("USB/MTP · Review it before scanning.")
-            .action("Review device"),
+            .detail("Inspecting…")
+            .action("View device"),
         ),
         2 => Some(notification::Toast::new(
             notification::Kind::Success,

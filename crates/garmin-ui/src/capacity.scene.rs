@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::{capacity, device, icons};
 
-scene_meta! { title: "Shared / Devices / Storage" }
+scene_meta! { title: "Components / Device state / Storage capacity" }
 
 #[scene(default)]
 fn multiple_storages(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
@@ -47,7 +47,7 @@ fn show(ctx: &mut SceneCtx<'_>, ui: &mut Ui, unavailable: bool, long: bool) {
                     bytes: Some((12_000_000_000, 64_000_000_000)),
                 },
             ];
-            let _action = device::show(
+            device::show(
                 ui,
                 &device::Props {
                     name: "Garmin fēnix 8",
@@ -62,8 +62,6 @@ fn show(ctx: &mut SceneCtx<'_>, ui: &mut Ui, unavailable: bool, long: bool) {
                     transfers: &[],
                     storages: &storages,
                     icon: icons::WATCH,
-                    inspect_label: "Device details read",
-                    inspect_enabled: false,
                 },
             );
         },

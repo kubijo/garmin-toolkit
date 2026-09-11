@@ -1,6 +1,6 @@
 #[cfg(not(feature = "demo"))]
 use garmin_device::attachments;
-use garmin_service_api::{DeviceService, DeviceSnapshot, InspectionError, InspectionState};
+use garmin_service_api::{DeviceService, DeviceSnapshot, InspectionState};
 use remoc::{rch, rtc};
 use std::future::Future;
 #[cfg(not(feature = "demo"))]
@@ -10,13 +10,11 @@ use std::time::Duration;
 
 pub(super) trait Source: Send {
     fn snapshot(&mut self) -> Vec<DeviceSnapshot>;
-    fn inspect(&mut self, key: &str) -> Result<(), String>;
 }
 
 #[cfg(not(feature = "demo"))]
 pub(super) struct MountedSource {
     requests: Option<mpsc::Sender<MountedRequest>>,
-    startup_error: Option<String>,
 }
 
 #[cfg(not(feature = "demo"))]
@@ -29,12 +27,11 @@ impl MountedSource {
         {
             Ok(_worker) => Self {
                 requests: Some(requests),
-                startup_error: None,
             },
-            Err(error) => Self {
-                requests: None,
-                startup_error: Some(format!("could not start device discovery: {error}")),
-            },
+            Err(error) => {
+                tracing::error!(%error, "could not start device discovery");
+                Self { requests: None }
+            }
         }
     }
 }
@@ -53,27 +50,11 @@ impl Source for MountedSource {
             .recv_timeout(Duration::from_secs(2))
             .unwrap_or_default()
     }
-
-    fn inspect(&mut self, key: &str) -> Result<(), String> {
-        let requests = self.requests.as_ref().ok_or_else(|| {
-            self.startup_error
-                .clone()
-                .unwrap_or_else(|| "device discovery stopped".to_owned())
-        })?;
-        let (reply, response) = mpsc::channel();
-        requests
-            .send(MountedRequest::Inspect(key.to_owned(), reply))
-            .map_err(|_| "device discovery stopped".to_owned())?;
-        response
-            .recv_timeout(Duration::from_secs(2))
-            .map_err(|_| "device discovery did not respond".to_owned())?
-    }
 }
 
 #[cfg(not(feature = "demo"))]
 enum MountedRequest {
     Snapshot(mpsc::Sender<Vec<DeviceSnapshot>>),
-    Inspect(String, mpsc::Sender<Result<(), String>>),
 }
 
 #[cfg(not(feature = "demo"))]
@@ -87,10 +68,6 @@ fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
                 let value = manager.presentations().into_iter().map(snapshot).collect();
                 let _ignored = reply.send(value);
             }
-            Ok(MountedRequest::Inspect(key, reply)) => {
-                let result = manager.inspect(&key);
-                let _ignored = reply.send(result);
-            }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
@@ -98,14 +75,12 @@ fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
 }
 
 #[cfg(any(feature = "demo", test))]
-pub(super) struct DemoSource {
-    inspected: bool,
-}
+pub(super) struct DemoSource;
 
 #[cfg(any(feature = "demo", test))]
 impl DemoSource {
     pub(super) const fn new() -> Self {
-        Self { inspected: false }
+        Self
     }
 }
 
@@ -115,32 +90,16 @@ impl Source for DemoSource {
         vec![DeviceSnapshot {
             key: "demo:fenix-8".to_owned(),
             name: "fēnix 8 – 47mm, Solar".to_owned(),
-            identifier: self.inspected.then_some(42_530_200),
-            software_version: self.inspected.then_some(1_870),
-            inspection: if self.inspected {
-                InspectionState::Ready
-            } else {
-                InspectionState::Available
-            },
-            storages: self
-                .inspected
-                .then(|| garmin_device::DeviceStorageState {
-                    id: "internal".to_owned(),
-                    label: "Internal storage".to_owned(),
-                    capacity: garmin_device::StorageCapacity::new(32_000_000_000, 8_600_000_000),
-                    writable: Some(true),
-                })
-                .into_iter()
-                .collect(),
+            identifier: Some(42_530_200),
+            software_version: Some(1_870),
+            inspection: InspectionState::Ready,
+            storages: vec![garmin_device::DeviceStorageState {
+                id: "internal".to_owned(),
+                label: "Internal storage".to_owned(),
+                capacity: garmin_device::StorageCapacity::new(32_000_000_000, 8_600_000_000),
+                writable: Some(true),
+            }],
         }]
-    }
-
-    fn inspect(&mut self, key: &str) -> Result<(), String> {
-        if key != "demo:fenix-8" {
-            return Err("the attached device is no longer available".to_owned());
-        }
-        self.inspected = true;
-        Ok(())
     }
 }
 
@@ -183,28 +142,6 @@ impl DeviceService for Host {
     {
         std::future::ready(Ok(self.snapshots.subscribe()))
     }
-
-    fn inspect(&self, key: String) -> impl Future<Output = Result<(), InspectionError>> {
-        let source = Arc::clone(&self.source);
-        let snapshots = Arc::clone(&self.snapshots);
-        async move {
-            let inspection_source = Arc::clone(&source);
-            tokio::task::spawn_blocking(move || {
-                inspection_source
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .inspect(&key)
-            })
-            .await
-            .map_err(|error| InspectionError::Rejected(error.to_string()))?
-            .map_err(InspectionError::Rejected)?;
-            let next = source_snapshot(source)
-                .await
-                .map_err(InspectionError::Rejected)?;
-            publish_snapshot(&snapshots, next);
-            Ok(())
-        }
-    }
 }
 
 async fn source_snapshot(
@@ -241,7 +178,6 @@ fn snapshot(presentation: attachments::Presentation) -> DeviceSnapshot {
             .software_version
             .map(garmin_device::capabilities::SoftwareVersion::into_hundredths),
         inspection: match presentation.state {
-            attachments::InspectionState::Available => InspectionState::Available,
             attachments::InspectionState::Running => InspectionState::Running,
             attachments::InspectionState::Ready => InspectionState::Ready,
             attachments::InspectionState::Failed => InspectionState::Failed,
@@ -259,17 +195,10 @@ mod tests {
     use garmin_service_api::{DeviceService as _, InspectionState};
 
     #[tokio::test]
-    async fn inspection_publishes_capacity_through_the_service_contract() {
+    async fn automatic_inspection_publishes_capacity_through_the_service_contract() {
         let host = Host::new(Box::new(DemoSource::new()));
-        let mut snapshots = host.watch().await.unwrap();
-        assert_eq!(
-            snapshots.borrow().unwrap()[0].inspection,
-            InspectionState::Available
-        );
-
-        host.inspect("demo:fenix-8".to_owned()).await.unwrap();
-        snapshots.changed().await.unwrap();
-        let ready = snapshots.borrow_and_update().unwrap();
+        let snapshots = host.watch().await.unwrap();
+        let ready = snapshots.borrow().unwrap();
 
         assert_eq!(ready[0].inspection, InspectionState::Ready);
         assert_eq!(

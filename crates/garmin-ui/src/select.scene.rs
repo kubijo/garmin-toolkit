@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::{Size, images, select};
 
-scene_meta! { title: "Desktop / Components / Select" }
+scene_meta! { title: "Components / Input / Select" }
 
 const CHOICES: &[select::Choice<'_>] = &[
     select::Choice::new("Metric"),
