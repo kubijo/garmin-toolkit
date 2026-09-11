@@ -35,9 +35,7 @@ let
             toolchain
             fenix.packages.${system}.targets.wasm32-unknown-unknown.stable.rust-std
           ];
-          # Hardware-only MTP lowers the initial floor. Raise it with simulator
-          # coverage; the active plan tracks owner-specific thresholds.
-          coverageMinimum = 30;
+          coverageMinimum = 65;
           build = import ./packages.nix {
             inherit
               crane

@@ -11,15 +11,14 @@ Complete each stage as a working vertical slice before advancing.
 
 | Stage | Slice                                                                   | Working result                                                          |
 | ----- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| 01    | [Production CLI map maintenance](mounted-device-updates.md)             | Mounted updates and recovery pass boundary and hardware proof.          |
-| 02    | [Read-only device inspection](device-state.md)                          | CLI, desktop, and HASS show refreshed, consented device state.          |
-| 03    | [Portable data foundation](data-foundation.md)                          | Verified snapshots, restore, open export, and GPX sharing work.         |
-| 04    | [Home Assistant watch slice](hass-watch-vertical-slice.md)              | The deployed add-on imports FIT, plans a route, and transfers a course. |
-| 05    | [Shared interface workflows](shared-interface-workflows.md)             | Desktop and HASS complete the same reviewed workflows.                  |
-| 06    | [Security hardening](security-hardening.md)                             | Optional protection works without removing passwordless local use.      |
-| 07    | [Garmin Connect and sharing](garmin-connect-and-sharing.md)             | Opt-in cloud and sharing cannot weaken local USB operation.             |
-| 08    | [Device expansion and publication](device-expansion-and-publication.md) | Every published device and application claim has current evidence.      |
-| 09    | [CLI distribution channels](distribution.md)                            | Verified archives and accepted installation channels are published.     |
+| 01    | [Read-only device inspection](device-state.md)                          | CLI, desktop, and HASS show refreshed, consented device state.          |
+| 02    | [Portable data foundation](data-foundation.md)                          | Verified snapshots, restore, open export, and GPX sharing work.         |
+| 03    | [Home Assistant watch slice](hass-watch-vertical-slice.md)              | The deployed add-on imports FIT, plans a route, and transfers a course. |
+| 04    | [Shared interface workflows](shared-interface-workflows.md)             | Desktop and HASS complete the same reviewed workflows.                  |
+| 05    | [Security hardening](security-hardening.md)                             | Optional protection works without removing passwordless local use.      |
+| 06    | [Garmin Connect and sharing](garmin-connect-and-sharing.md)             | Opt-in cloud and sharing cannot weaken local USB operation.             |
+| 07    | [Device expansion and publication](device-expansion-and-publication.md) | Every published device and application claim has current evidence.      |
+| 08    | [CLI distribution channels](distribution.md)                            | Verified archives and accepted installation channels are published.     |
 
 [Cross-cutting integration gates](toolkit-integration.md) apply at every stage exit rather than forming an incomplete
 user-facing stage. Each stage must use the production path through injected adapters, pass boundary tests and relevant
@@ -27,12 +26,12 @@ interface previews, move lasting evidence into durable documentation, and remove
 `just qa::full` and `just qa::audit` before closing it; record pushed-revision package evidence where the stage claims a
 deployable artifact.
 
-Read-only device inspection owns capacity discovery and display. Production CLI map maintenance owns transaction
-preflight and hardware writes. Device expansion owns support claims and HASS/desktop publication; distribution owns CLI
-packaging.
+Read-only device inspection owns capacity discovery and display. Completed transaction preflight and hardware-write
+evidence lives in [USB synchronization](../research/usb-sync.md#map-maintenance-evidence). Device expansion owns support
+claims and HASS/desktop publication; distribution owns CLI packaging.
 
-Finish the consented hardware upgrade, restart, and interrupted-recovery matrix before exposing map mutation through
-HASS or desktop. Their existing device inspection and capacity views are read-only. Automated transaction failures are
-covered, but virtual success cannot satisfy the hardware release gate.
+The consented fēnix and Edge hardware update, restart, and interrupted-recovery matrix is complete. HASS and desktop map
+mutation remain owned by their active interface and publication plans; their existing device inspection and capacity
+views are read-only.
 
 [Open questions](open-questions.md) records unresolved choices under their earliest owning plan.

@@ -19,7 +19,9 @@ use garmin_device::{
     storage::{DeviceIoError, DeviceRead, DeviceWrite, MtpStorageDevice},
 };
 use garmin_model::map::MapAuthorization;
-use garmin_progress::{OperationStage, ProgressReporter, ProgressState};
+use garmin_progress::{
+    OperationStage, ProgressEvent, ProgressEventKind, ProgressReporter, ProgressState,
+};
 use garmin_update::{
     DownloadProgress, DownloadSpec, MountedInstallError, MountedUpdateRecoveryOutcome, UpdatePlan,
     apply_mounted_mtp_with_progress, preflight_mounted_mtp_update, recover_mounted_mtp_update,
@@ -45,6 +47,17 @@ const TEST_CAPACITY: u64 = 100_000_000;
 const DEVICE_STATE_HEADROOM: u64 = 16 * 1024 * 1024;
 const DEVICE_STATE_FIXTURE_ALLOWANCE: u64 = 8 * 1024;
 const TEST_DEVICE_DIGEST: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+fn assert_boundary_storage_snapshots(events: &[ProgressEvent], storages: usize) {
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == ProgressEventKind::StorageSnapshot)
+            .count(),
+        storages * 2,
+        "retain only initial and final capacity per storage"
+    );
+}
 
 #[derive(Clone, Copy)]
 enum Fault {
@@ -929,12 +942,8 @@ async fn backup_free_recovery_removes_a_partial_then_reclaims_space_before_uploa
         initial_usage + peak_growth + DEVICE_STATE_HEADROOM + DEVICE_STATE_FIXTURE_ALLOWANCE,
     )?;
     transaction.plan.backup_policy = garmin_update::BackupPolicy::Skip;
-    assert!(
-        transaction
-            .apply_with(&device, &authorization)
-            .await
-            .is_err()
-    );
+    let first_attempt = transaction.apply_with(&device, &authorization).await;
+    assert!(first_attempt.is_err());
     let free = device
         .state()
         .await?
@@ -957,6 +966,8 @@ async fn backup_free_recovery_removes_a_partial_then_reclaims_space_before_uploa
     let events = receiver.try_iter().collect::<Vec<_>>();
 
     assert_eq!(report.outcome, MountedUpdateRecoveryOutcome::Resumed);
+    let storage_count = device.state().await?.storages.len();
+    assert_boundary_storage_snapshots(&events, storage_count);
     assert!(events.iter().any(|event| {
         event.state == ProgressState::Started
             && event.label == "Removing proven incomplete update file"
@@ -1140,9 +1151,14 @@ async fn recovery_accepts_an_applied_file_by_path_and_size_without_readback() ->
 #[tokio::test]
 async fn multi_file_commit_covers_replacements_additions_authorization_and_removal() -> Result {
     let (device, transaction, authorization) = multi_file_fixture(Fault::None)?;
+    let (progress, events) = ProgressReporter::channel();
 
-    transaction.apply_with(&device, &authorization).await?;
-
+    transaction
+        .apply_with_progress(&device, &authorization, progress)
+        .await?;
+    let events = events.try_iter().collect::<Vec<_>>();
+    let storage_count = device.state().await?.storages.len();
+    assert_boundary_storage_snapshots(&events, storage_count);
     verify_path(&device, "Garmin/map.img", REPLACEMENT_MAP_BYTES).await?;
     verify_path(&device, "Garmin/map2.img", SECOND_REPLACEMENT_MAP_BYTES).await?;
     verify_path(&device, "Garmin/new.img", ADDED_MAP_BYTES).await?;

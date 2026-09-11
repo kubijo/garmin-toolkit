@@ -1,4 +1,5 @@
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
+use garmin_i18n::format_message;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Style};
@@ -11,7 +12,7 @@ use super::progress_state::{OperationView, ProgressModel};
 use super::{
     ProgressInput, ProgressPhase, ProgressPresentation, decimal_bytes, history_prefix,
     operation_line, operation_text, path_style, progress_metrics, render_progress_footer,
-    render_progress_gauge, stage_name, stale_byte_progress, state_icon,
+    render_progress_gauge, selected_formatter, stage_name, stale_byte_progress, state_icon,
 };
 const ACTIVE_MAX_HEIGHT: u16 = 10;
 
@@ -161,6 +162,7 @@ pub(super) fn render_progress_dashboard(
     model: &ProgressModel,
     scroll: &mut DashboardScroll,
 ) -> DashboardViewport {
+    let intl = selected_formatter();
     let complete = presentation.phase == ProgressPhase::Complete;
     let cancelling = presentation.phase == ProgressPhase::Cancelling;
     if complete {
@@ -213,11 +215,15 @@ pub(super) fn render_progress_dashboard(
     scroll.active = scroll.active.min(viewport.active.max_offset());
     scroll.history = scroll.history.min(viewport.history.max_offset());
     let active_title = if complete {
-        "Complete".to_owned()
+        format_message!(&intl, default_message: "Complete")
     } else if active_count > 0 {
-        format!("Active files ({active_count})")
+        format_message!(
+            &intl,
+            default_message: "Active files ({count})",
+            values: { count: i64::try_from(active_count).unwrap_or(i64::MAX) },
+        )
     } else {
-        "Current operation".to_owned()
+        format_message!(&intl, default_message: "Current operation")
     };
     render_panel(
         frame,
@@ -236,7 +242,7 @@ pub(super) fn render_progress_dashboard(
     render_panel(
         frame,
         history,
-        "History — newest first",
+        &format_message!(&intl, default_message: "History — newest first"),
         viewport.history,
         scroll.history,
         if scroll.focus == Panel::History {
@@ -250,6 +256,7 @@ pub(super) fn render_progress_dashboard(
 }
 
 fn active_text(model: &ProgressModel, complete: bool) -> Text<'static> {
+    let intl = selected_formatter();
     if complete || model.active().next().is_none() {
         return operation_text(&model.current, complete);
     }
@@ -281,11 +288,28 @@ fn active_text(model: &ProgressModel, complete: bool) -> Text<'static> {
         {
             let idle = updated.elapsed().as_secs();
             let (label, color) = if idle < 2 {
-                ("receiving".to_owned(), Color::Cyan)
+                (
+                    format_message!(&intl, default_message: "receiving"),
+                    Color::Cyan,
+                )
             } else if idle < 10 {
-                (format!("last data {idle}s ago"), Color::Gray)
+                (
+                    format_message!(
+                        &intl,
+                        default_message: "last data {seconds}s ago",
+                        values: { seconds: i64::try_from(idle).unwrap_or(i64::MAX) },
+                    ),
+                    Color::Gray,
+                )
             } else {
-                (format!("no data for {idle}s"), Color::Yellow)
+                (
+                    format_message!(
+                        &intl,
+                        default_message: "no data for {seconds}s",
+                        values: { seconds: i64::try_from(idle).unwrap_or(i64::MAX) },
+                    ),
+                    Color::Yellow,
+                )
             };
             summary.push(Span::styled(
                 format!(" · {label}"),
@@ -305,6 +329,7 @@ fn active_text(model: &ProgressModel, complete: bool) -> Text<'static> {
 }
 
 fn history_text<'a>(history: impl DoubleEndedIterator<Item = &'a OperationView>) -> Text<'static> {
+    let intl = selected_formatter();
     let mut lines = Vec::new();
     let mut entries = history.rev().peekable();
     while let Some(entry) = entries.next() {
@@ -328,9 +353,9 @@ fn history_text<'a>(history: impl DoubleEndedIterator<Item = &'a OperationView>)
             spans.extend([
                 Span::styled(path.clone(), path_style()),
                 Span::styled(" · ", Style::default().fg(Color::DarkGray)),
-                Span::raw("cached"),
+                Span::raw(format_message!(&intl, default_message: "cached")),
                 Span::styled(" · ", Style::default().fg(Color::DarkGray)),
-                Span::raw("MD5 verified"),
+                Span::raw(format_message!(&intl, default_message: "MD5 verified")),
             ]);
             lines.push(Line::from(spans));
             continue;

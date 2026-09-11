@@ -2,9 +2,10 @@ use super::PreviewState;
 use crate::{
     LINK_BENCHMARK_COMPLETE, LINK_BENCHMARK_STAGES, OperationView, PIPELINE_PROBE_COMPLETE,
     PIPELINE_PROBE_STAGES, ProgressModel, ProgressPhase, ProgressPresentation,
-    REMOVAL_RECOVERY_COMPLETE, REMOVAL_RECOVERY_STAGES, REMOVAL_STAGES, UPDATE_COMPLETE,
-    UPDATE_PROGRESS_TITLE, UPDATE_RECOVERY_COMPLETE, UPDATE_RECOVERY_STAGES, UPDATE_STAGES,
+    REMOVAL_RECOVERY_STAGES, REMOVAL_STAGES, UPDATE_RECOVERY_STAGES, UPDATE_STAGES,
+    selected_formatter,
 };
+use garmin_i18n::format_message;
 use garmin_progress::{
     OperationStage, ProgressEvent, ProgressEventKind, ProgressReporter, ProgressState, ProgressUnit,
 };
@@ -17,6 +18,8 @@ pub(super) fn render_stage(
     active: OperationStage,
     preview: &mut PreviewState,
 ) {
+    let intl = selected_formatter();
+    let title = format_message!(&intl, default_message: "garmin-cli — Updating maps");
     let mut model = progress_fixture(UPDATE_STAGES, active, preview_stage_details, None);
     if active == OperationStage::Backup {
         for state in [ProgressState::Started, ProgressState::Advanced] {
@@ -56,7 +59,7 @@ pub(super) fn render_stage(
         frame,
         area,
         ProgressPresentation {
-            title: UPDATE_PROGRESS_TITLE,
+            title: &title,
             phase: ProgressPhase::Running,
         },
         &model,
@@ -143,6 +146,11 @@ pub(super) fn render_removal(
     completion: Option<&str>,
     preview: &mut PreviewState,
 ) {
+    let intl = selected_formatter();
+    let title = format_message!(
+        &intl,
+        default_message: "garmin-cli — Removing map components"
+    );
     let model = progress_fixture(
         REMOVAL_STAGES,
         active,
@@ -153,7 +161,7 @@ pub(super) fn render_removal(
         frame,
         area,
         ProgressPresentation {
-            title: "garmin-cli — Removing map components",
+            title: &title,
             phase: if completion.is_some() {
                 ProgressPhase::Complete
             } else {
@@ -169,17 +177,26 @@ pub(super) fn render_removal_recovery_preview(
     area: Rect,
     preview: &mut PreviewState,
 ) {
+    let intl = selected_formatter();
+    let completion = format_message!(
+        &intl,
+        default_message: "Recovery complete. Target paths and sizes match."
+    );
+    let title = format_message!(
+        &intl,
+        default_message: "garmin-cli — Recovering component removal"
+    );
     let model = progress_fixture(
         REMOVAL_RECOVERY_STAGES,
         OperationStage::Cleanup,
         removal_recovery_preview_stage_details,
-        Some(REMOVAL_RECOVERY_COMPLETE),
+        Some(&completion),
     );
     preview.render_progress(
         frame,
         area,
         ProgressPresentation {
-            title: "garmin-cli — Recovering component removal",
+            title: &title,
             phase: ProgressPhase::Complete,
         },
         &model,
@@ -191,17 +208,26 @@ pub(super) fn render_update_recovery_preview(
     area: Rect,
     preview: &mut PreviewState,
 ) {
+    let intl = selected_formatter();
+    let completion = format_message!(
+        &intl,
+        default_message: "Update recovered. Device state reconciled."
+    );
+    let title = format_message!(
+        &intl,
+        default_message: "garmin-cli — Recovering map update"
+    );
     let model = progress_fixture(
         UPDATE_RECOVERY_STAGES,
         OperationStage::Cleanup,
         update_recovery_preview_stage_details,
-        Some(UPDATE_RECOVERY_COMPLETE),
+        Some(&completion),
     );
     preview.render_progress(
         frame,
         area,
         ProgressPresentation {
-            title: "garmin-cli — Recovering map update",
+            title: &title,
             phase: ProgressPhase::Complete,
         },
         &model,
@@ -407,17 +433,23 @@ pub(super) fn render_verification_complete_preview(
     area: Rect,
     preview: &mut PreviewState,
 ) {
+    let intl = selected_formatter();
+    let completion = format_message!(
+        &intl,
+        default_message: "Transaction complete. Evidence retained."
+    );
+    let title = format_message!(&intl, default_message: "garmin-cli — Updating maps");
     let model = progress_fixture(
         UPDATE_STAGES,
         OperationStage::Cleanup,
         simulation_preview_stage_details,
-        Some(UPDATE_COMPLETE),
+        Some(&completion),
     );
     preview.render_progress(
         frame,
         area,
         ProgressPresentation {
-            title: UPDATE_PROGRESS_TITLE,
+            title: &title,
             phase: ProgressPhase::Complete,
         },
         &model,
@@ -552,17 +584,23 @@ pub(super) fn render_completion_preview(
     area: Rect,
     preview: &mut PreviewState,
 ) {
+    let intl = selected_formatter();
+    let completion = format_message!(
+        &intl,
+        default_message: "Transaction complete. Evidence retained."
+    );
+    let title = format_message!(&intl, default_message: "garmin-cli — Updating maps");
     let model = progress_fixture(
         UPDATE_STAGES,
         OperationStage::Cleanup,
         preview_stage_details,
-        Some(UPDATE_COMPLETE),
+        Some(&completion),
     );
     preview.render_progress(
         frame,
         area,
         ProgressPresentation {
-            title: UPDATE_PROGRESS_TITLE,
+            title: &title,
             phase: ProgressPhase::Complete,
         },
         &model,
@@ -576,6 +614,8 @@ pub(super) fn render_concurrent(
     overflow: bool,
     preview: &mut PreviewState,
 ) {
+    let intl = selected_formatter();
+    let title = format_message!(&intl, default_message: "garmin-cli — Updating maps");
     let (progress, receiver) = ProgressReporter::channel();
     let count = if overflow { 8 } else { 3 };
     let total = count * 80_000_000;
@@ -664,7 +704,7 @@ pub(super) fn render_concurrent(
         frame,
         area,
         ProgressPresentation {
-            title: UPDATE_PROGRESS_TITLE,
+            title: &title,
             phase: ProgressPhase::Running,
         },
         &model,

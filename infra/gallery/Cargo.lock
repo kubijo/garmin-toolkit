@@ -2287,6 +2287,8 @@ dependencies = [
  "byte-unit",
  "crossterm",
  "garmin-device",
+ "garmin-i18n",
+ "garmin-model",
  "garmin-progress",
  "garmin-update",
  "indoc",

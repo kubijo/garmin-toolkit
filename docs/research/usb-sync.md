@@ -164,9 +164,27 @@ received final acknowledgement in 0.03 seconds, read the object back at 2.67 MB/
 SHA-256 digest, and removed it in 0.79 seconds. This proves the desktop-mounted whole-object path for that session, not
 the raw-MTP path or firmware acceptance of map content.
 
-The fēnix 8 Solar removal screen reported two Garmin Ski Map files backed up and verified absent, with recovery backups
-retained. That establishes reported removal success, not restoration or a complete map upgrade.
+At revision `e981670`, the retained fēnix `t03` transaction recovered without device-file read-back. It accepted all 18
+writes by path and size, completed the remaining 6 of 9 removals, and finished with 11.07 GB free. The 16.92 GB retained
+payload set verified in 43 seconds and device reconciliation took 30 seconds.
 
-These reports lack complete firmware/host/revision tuples. Do not generalize them to the merged revision or other
-devices. Full map installation, post-restart recognition, and interrupted-update recovery still need
-[dedicated proof](../plans/mounted-device-updates.md). Private captures are not publication artifacts.
+Edge 1050 (`006-B4440-00`) then completed two guarded removal runs. The first removed 9 files from TopoActive Middle
+East & Central Asia, North Africa, and South Africa and reclaimed 8.42 GB. The second removed the 2.54 GB TopoActive
+Australia & Oceania component. Verified backups were retained. A subsequent backup-free update reused and verified 15
+cached files, wrote 18.65 GB for Trailforks and TopoActive Central, Eastern, and Western Europe in 17 minutes 12
+seconds, and finished with 39.82 GB free of 61.89 GB. All uploaded paths and sizes passed inspection.
+
+The same Edge session proved that an attempt cancelled before portable publication can be discarded without invoking
+recovery. On 2026-09-11, no-capture inspections after safe restarts found fēnix firmware 22.44 and Edge firmware 32.20
+through their GVFS mounts. Neither device offered recovery. The fēnix inventory retained its recovered 2026.11 maps; the
+Edge inventory retained Trailforks and the three updated 2026.11 European components, while the previously removed
+components remained available only as installs. This is black-box restart acceptance of both completed transactions.
+
+The Edge then installed the disposable 946.08 MB TopoActive Antarctica component with verified recovery backups. After a
+safe restart, the firmware inventory exposed Antarctica as installed. A normal removal backed up and verified all four
+component files, reclaimed the space, and completed in 58 seconds. A cached reinstall was then killed with `SIGKILL`
+during commit, after 148.39 MB of the first 222.96 MB map file had been written. On the next production TUI start, the
+portable transaction blocked further changes and offered recovery. Verified-backup recovery rolled the mounted-MTP
+update back, reconciled device state, and restored 39.82 GB free. After another safe eject, restart, and remount, the
+TUI presented no recovery prompt and offered Antarctica only as an install. This completes the current fēnix and Edge
+black-box update, restart, and interrupted-recovery matrix. Private captures are not publication artifacts.

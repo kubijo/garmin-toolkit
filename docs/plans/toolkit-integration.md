@@ -8,8 +8,9 @@ state formats directly rather than adding compatibility branches.
 
 1. Verify packaged production/demo IDs, data roots, and binary names. Exercise desktop startup with a populated database
    and HASS environment precedence through the built applications.
-2. Measure device/update/CLI coverage after the [mounted-update tests](mounted-device-updates.md). Raise the enforced
-   floor through behavioral coverage, without blanket exclusions or suppression.
+2. Measure device/update/CLI coverage after the completed
+   [mounted-update work](../research/usb-sync.md#map-maintenance-evidence). Raise the enforced floor through behavioral
+   coverage, without blanket exclusions or suppression.
 3. Audit crate boundaries after the transaction work. Keep a crate only for an independently reusable capability or a
    dependency-inversion boundary. In particular, keep `garmin-progress` limited to operation observation and
    cancellation; move policy, persistence, and presentation to their owners.
@@ -22,5 +23,5 @@ state formats directly rather than adding compatibility branches.
 - Current state and persisted plans use one versioned format without pre-release compatibility branches.
 - Built identities, sandboxed checks, security audit, and behavioral coverage have revision-specific evidence.
 
-Hardware proof: [mounted-device updates](mounted-device-updates.md). Capacity discovery:
+Hardware proof: [USB synchronization](../research/usb-sync.md#map-maintenance-evidence). Capacity discovery:
 [device state](device-state.md). Delete this plan once its remaining contracts and evidence have durable homes.

@@ -1,4 +1,6 @@
 use garmin_device::{DeviceSummary, TransportKind};
+use garmin_i18n::format_message;
+use garmin_model::map::MapOperation;
 use garmin_progress::{OperationStage, ProgressEventKind, ProgressState};
 use indoc::indoc;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -6,14 +8,15 @@ use ratatui::widgets::{ListState, TableState};
 use ratatui_interact::components::{DialogState, PopupDialog};
 
 use crate::{
-    AbortBody, ConfirmationBody, MapActionMode, MapChoice, MapChoiceAction, MapVersionTone,
-    OperationView, PIPELINE_PROBE_WRITE_WARNING, PendingRecoveryActions, SelectedMapAction,
-    abort_dialog_config, confirmation_dialog_config, draw_abort_body, draw_confirmation_body,
-    draw_map_selection, draw_update_confirmation_body, garmin_contact_confirmation_body,
+    AbortBody, ConfirmationBody, MapActionMode, MapCacheAvailability, MapChoice, MapChoiceAction,
+    MapVersionTone, OperationView, PIPELINE_PROBE_WRITE_WARNING, PendingRecoveryActions,
+    RecoveryOperation, SelectedMapAction, abort_dialog_config, confirmation_dialog_config,
+    draw_abort_body, draw_confirmation_body, draw_map_selection, draw_update_confirmation_body,
+    garmin_contact_confirmation_body, pending_recovery_confirmation_body,
     pending_recovery_dialog_config, removal_confirmation_body, render_abort_footer,
     render_confirmation_footer, render_device_selection, render_dialog_backdrop,
-    render_pending_recovery_footer, render_update_confirmation_footer, update_confirmation_body,
-    update_device_rows,
+    render_pending_recovery_footer, render_update_confirmation_footer, selected_formatter,
+    update_confirmation_body, update_device_rows,
 };
 
 const PREVIEW_MAP_SERVICE_URL: &str = "https://omt.garmin.com/api/maps/universal/update";
@@ -38,39 +41,15 @@ pub(super) fn render_contact_garmin_preview(frame: &mut ratatui::Frame<'_>) {
 pub(super) fn render_pending_recovery_preview(frame: &mut ratatui::Frame<'_>) {
     let actions = PendingRecoveryActions::RecoverOrClear;
     let config = pending_recovery_dialog_config(actions);
-    let mut state = DialogState::new(ConfirmationBody {
-        introduction: ratatui::text::Text::raw(indoc! {"
-            An earlier operation for this device did not reach a completed operation report.
-            Recover it before starting another device change."}),
-        fields: vec![
-            crate::ConfirmationField::new(
-                indoc! {"Device"},
-                indoc! {"
-                    fenix 8 - 47mm, Solar (006-B4532-00)
-                    desktop-mounted MTP at mounted-mtp:0e4054edc7e3f331"},
-                crate::ConfirmationValueTone::Neutral,
-            ),
-            crate::ConfirmationField::new(
-                "Operation",
-                "Map update",
-                crate::ConfirmationValueTone::Warning,
-            ),
-            crate::ConfirmationField::new(
-                "Plan ID",
-                "01953ce506d6d6da6c7bfafaf8eafd4e",
-                crate::ConfirmationValueTone::Muted,
-            ),
-            crate::ConfirmationField::new(
-                "Recovery",
-                ".tmp/fenix-t03",
-                crate::ConfirmationValueTone::Path,
-            ),
-        ],
-        note: Some(ratatui::text::Text::raw(indoc! {"
-            Recover reconciles the interrupted transaction.
-            Clear state is allowed only after the device is proven fully updated or untouched."})),
-        confirm_action: "recover now".to_owned(),
-    });
+    let mut state = DialogState::new(pending_recovery_confirmation_body(
+        indoc! {"
+            fenix 8 - 47mm, Solar (006-B4532-00)
+            desktop-mounted MTP at mounted-mtp:0e4054edc7e3f331"},
+        RecoveryOperation::Update,
+        "01953ce506d6d6da6c7bfafaf8eafd4e",
+        Some(".tmp/fenix-t03"),
+        actions,
+    ));
     for index in 0..config.buttons.len() {
         state.register_button(index);
     }
@@ -84,35 +63,36 @@ pub(super) fn render_pending_recovery_preview(frame: &mut ratatui::Frame<'_>) {
 }
 
 pub(super) fn render_device_preview(frame: &mut ratatui::Frame<'_>, area: Rect, empty: bool) {
+    let intl = selected_formatter();
     let rows = if empty {
-        vec!["No Garmin device is currently visible".to_owned()]
+        vec![format_message!(
+            &intl,
+            default_message: "No Garmin device is currently visible"
+        )]
     } else {
-        update_device_rows(&[
-            DeviceSummary {
-                transport: TransportKind::MountedMtp,
-                model: "Example Watch".to_owned(),
-                part_number: Some("006-TEST-01".to_owned()),
-                software_version: Some("99.01".to_owned()),
-                location: "mounted-mtp:synthetic-watch".to_owned(),
-            },
-            DeviceSummary {
-                transport: TransportKind::MountedMtp,
-                model: "Example Cycling Computer".to_owned(),
-                part_number: Some("006-TEST-02".to_owned()),
-                software_version: Some("99.02".to_owned()),
-                location: "mounted-mtp:synthetic-cycle".to_owned(),
-            },
-        ])
+        update_device_rows(
+            &intl,
+            &[
+                DeviceSummary {
+                    transport: TransportKind::MountedMtp,
+                    model: "Example Watch".to_owned(),
+                    part_number: Some("006-TEST-01".to_owned()),
+                    software_version: Some("99.01".to_owned()),
+                    location: "mounted-mtp:synthetic-watch".to_owned(),
+                },
+                DeviceSummary {
+                    transport: TransportKind::MountedMtp,
+                    model: "Example Cycling Computer".to_owned(),
+                    part_number: Some("006-TEST-02".to_owned()),
+                    software_version: Some("99.02".to_owned()),
+                    location: "mounted-mtp:synthetic-cycle".to_owned(),
+                },
+            ],
+        )
     };
+    let title = format_message!(&intl, default_message: "Select an update device");
     let mut state = ListState::default().with_selected((!empty).then_some(0));
-    render_device_selection(
-        frame,
-        area,
-        &rows,
-        "Select an update device",
-        true,
-        &mut state,
-    );
+    render_device_selection(frame, area, &rows, &title, true, &mut state);
 }
 
 pub(super) fn render_map_preview(frame: &mut ratatui::Frame<'_>, area: Rect) {
@@ -122,7 +102,7 @@ pub(super) fn render_map_preview(frame: &mut ratatui::Frame<'_>, area: Rect) {
             version_transition: "(9.00) → 9.00".to_owned(),
             version_tone: MapVersionTone::UpToDate,
             description: "Base maps · 2 files · 53.95 MB".to_owned(),
-            install_label: "Reinstall",
+            operation: MapOperation::Reinstall,
             can_remove: false,
             cache: None,
         },
@@ -131,9 +111,9 @@ pub(super) fn render_map_preview(frame: &mut ratatui::Frame<'_>, area: Rect) {
             version_transition: "(2024.10) → 2026.11".to_owned(),
             version_tone: MapVersionTone::Outdated,
             description: "Europe · TopoActive · 5 files · 5.30 GB".to_owned(),
-            install_label: "Update",
+            operation: MapOperation::Update,
             can_remove: true,
-            cache: Some(super::super::MapCacheAvailability {
+            cache: Some(MapCacheAvailability {
                 cached_files: 5,
                 total_files: 5,
             }),
@@ -143,9 +123,9 @@ pub(super) fn render_map_preview(frame: &mut ratatui::Frame<'_>, area: Rect) {
             version_transition: "(unknown) → 2026.10".to_owned(),
             version_tone: MapVersionTone::Unknown,
             description: "Points of Interest · 2 files · 42.76 MB".to_owned(),
-            install_label: "Install",
+            operation: MapOperation::Install,
             can_remove: false,
-            cache: Some(super::super::MapCacheAvailability {
+            cache: Some(MapCacheAvailability {
                 cached_files: 1,
                 total_files: 2,
             }),
@@ -223,14 +203,14 @@ pub(super) fn render_confirmation_preview(frame: &mut ratatui::Frame<'_>, backup
             fenix 8 - 47mm, Solar (006-B4532-00)
             desktop-mounted MTP at mounted-mtp:0e4054edc7e3f331"},
         &[
-            SelectedMapAction::new("Base maps", "Reinstall"),
-            SelectedMapAction::new("Garmin Ski Map", "Install"),
-            SelectedMapAction::new("TopoActive Central Europe", "Update"),
+            SelectedMapAction::new("Base maps", MapOperation::Reinstall),
+            SelectedMapAction::new("Garmin Ski Map", MapOperation::Install),
+            SelectedMapAction::new("TopoActive Central Europe", MapOperation::Update),
         ],
         "952bf20745678c8c8a39bb27016d99ca",
-        "9 files",
+        9,
         "6.40 GB",
-        "9 files",
+        9,
         ".tmp/fenix-update-20260906-02",
     )
     .with_backup_plan_ids(
@@ -238,7 +218,10 @@ pub(super) fn render_confirmation_preview(frame: &mut ratatui::Frame<'_>, backup
         "59f49870b6577cc75e7d3f21b18e9bcb",
     )
     .with_backup_enabled(backup_enabled);
-    let config = confirmation_dialog_config("Continue with update?", body.confirm_label());
+    let intl = selected_formatter();
+    let title = format_message!(&intl, default_message: "Continue with update?");
+    let confirm_label = body.confirm_label();
+    let config = confirmation_dialog_config(&title, &confirm_label);
     let mut state = DialogState::new(body);
     state.register_button(0);
     state.register_button(1);
@@ -260,7 +243,7 @@ pub(super) fn render_removal_confirmation_preview(frame: &mut ratatui::Frame<'_>
             desktop-mounted MTP at mounted-mtp:synthetic-watch"},
         "00000000000000000000000000000001",
         "Example Regional Map",
-        "2 files",
+        2,
         "35.20 MB",
         ".tmp/removal-run",
     ));

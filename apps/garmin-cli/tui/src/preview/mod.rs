@@ -6,9 +6,10 @@ mod screens;
 mod state;
 
 use crate::{
-    LOADING_SPINNER_INTERVAL, LoadingActivity, LoadingScreen, REMOVAL_COMPLETE, RunProfile,
-    draw_profile_banner, profile_content_area,
+    LOADING_SPINNER_INTERVAL, LoadingActivity, LoadingScreen, RunProfile, draw_profile_banner,
+    profile_content_area, selected_formatter,
 };
+use garmin_i18n::format_message;
 use garmin_progress::OperationStage;
 pub use state::PreviewState;
 
@@ -132,15 +133,7 @@ pub fn render_preview(
         PreviewScreen::RemovalCommit => {
             progress::render_removal(frame, area, OperationStage::Commit, None, preview);
         }
-        PreviewScreen::RemovalComplete => {
-            progress::render_removal(
-                frame,
-                area,
-                OperationStage::Cleanup,
-                Some(REMOVAL_COMPLETE),
-                preview,
-            );
-        }
+        PreviewScreen::RemovalComplete => render_removal_complete(frame, area, preview),
         PreviewScreen::UpdateRecoveryComplete => {
             progress::render_update_recovery_preview(frame, area, preview);
         }
@@ -169,6 +162,25 @@ pub fn render_preview(
         | PreviewScreen::ErrorRecoveryEvidence => errors::render_failure_preview(frame, screen),
     }
     draw_profile_banner(frame, profile);
+}
+
+fn render_removal_complete(
+    frame: &mut ratatui::Frame<'_>,
+    area: ratatui::layout::Rect,
+    preview: &mut PreviewState,
+) {
+    let intl = selected_formatter();
+    let completion = format_message!(
+        &intl,
+        default_message: "Removal complete. Verified backups retained."
+    );
+    progress::render_removal(
+        frame,
+        area,
+        OperationStage::Cleanup,
+        Some(&completion),
+        preview,
+    );
 }
 
 fn render_loading_preview(

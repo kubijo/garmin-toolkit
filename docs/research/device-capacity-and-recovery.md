@@ -28,8 +28,9 @@ indexes the richer host capture. Documents carry a magic value, kind, and exact 
 structs remain private. Unsupported versions fail closed.
 
 After device selection, unresolved portable state blocks a new update and offers recovery or proven clear. Clearing
-requires the device to match a committed or untouched transaction. A retained host receipt covers interruption before
-portable publication. Cross-host recovery is not implemented: it still needs the originating retained payloads.
+requires the device to match a committed or untouched transaction. A host receipt created before the transaction was
+prepared may be discarded; once a prepared journal exists, recovery or proven clear is required. Cross-host recovery is
+not implemented because the originating payloads remain host-local.
 
 ## Safety and progress
 
@@ -39,7 +40,8 @@ and mandatory rollback use independent bounded cancellation.
 
 Aggregate transaction progress and per-file byte progress are separate. Rates and ETAs disappear when samples are stale.
 History rows contain status, completion time, duration, message, and path; repeated cached work is coalesced. Capacity
-polling does not flood history, while mutation snapshots and reclamation remain visible.
+polling updates the live header. Successful transactions retain only their initial and final capacity; reclamation and
+refresh failures remain explicit history events.
 
 ## Evidence and limits
 
@@ -48,5 +50,6 @@ restart, rollback, marker collisions, exact completed-write reuse, failed-upload
 recovery ordering through production orchestration and directory-backed devices. Demo and dry-run execute the same
 transaction engine against an isolated shadow.
 
-This does not prove every desktop-MTP implementation, physical firmware acceptance, or recovery after a real cable
-disconnect. Those remain in [production CLI map maintenance](../plans/mounted-device-updates.md).
+This does not prove every desktop-MTP implementation or recovery after a real cable disconnect. Current fēnix and Edge
+mounted-MTP update, firmware-restart acceptance, and process-interruption recovery evidence lives in
+[USB synchronization](usb-sync.md#map-maintenance-evidence).

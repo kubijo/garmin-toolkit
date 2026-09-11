@@ -10,11 +10,13 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use garmin_device::{DeviceSummary, TransportKind};
+use garmin_i18n::{Intl, Language, Translations, format_message};
+use garmin_model::map::MapOperation;
 use garmin_progress::{
     CancellationToken, DeviceStateUpdate, OperationStage, ProgressReceiver, ProgressState,
     ProgressUnit,
 };
-use indoc::{formatdoc, indoc};
+use indoc::indoc;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Alignment;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -33,6 +35,7 @@ use ratatui_interact::traits::{ContainerAction, EventResult};
 use std::future::Future;
 use std::io;
 use std::io::stdout;
+use std::sync::{LazyLock, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 mod device_state;
@@ -118,14 +121,6 @@ impl AppTerminal {
     }
 }
 
-pub const UPDATE_PLAN_INTRODUCTION: &str = indoc! {"
-    Review this exact plan.
-    Its ID fingerprints the device and changes."};
-const UPDATE_PROGRESS_TITLE: &str = "garmin-cli — Updating maps";
-const UPDATE_COMPLETE: &str = "Transaction complete. Evidence retained; close when ready.";
-const COMPLETION_INSTRUCTIONS: &str = indoc! {"
-    Transaction committed; recovery files removed.
-    Eject or unmount before unplugging."};
 const UPDATE_STAGES: &[OperationStage] = &[
     OperationStage::Backup,
     OperationStage::Download,
@@ -169,11 +164,39 @@ const UPDATE_RECOVERY_STAGES: &[OperationStage] = &[
     OperationStage::DeviceVerify,
     OperationStage::Cleanup,
 ];
-const UPDATE_RECOVERY_COMPLETE: &str = "Update recovered. Device state reconciled.";
-const REMOVAL_COMPLETE: &str =
-    "Removal complete. Files removed; verified backups retained in the capture.";
 const REMOVAL_RECOVERY_STAGES: &[OperationStage] = &[OperationStage::Cleanup];
-const REMOVAL_RECOVERY_COMPLETE: &str = "Recovery complete. Every target path and size is present.";
+
+static TRANSLATIONS: LazyLock<Translations> =
+    LazyLock::new(|| Translations::bundled().expect("embedded translations are valid"));
+static SELECTED_LANGUAGE: OnceLock<Language> = OnceLock::new();
+
+/// Sets the process-wide TUI language before opening a session.
+///
+/// # Errors
+/// The language was already set to a different value.
+pub fn configure_language(language: Language) -> Result<()> {
+    match SELECTED_LANGUAGE.set(language) {
+        Ok(()) => Ok(()),
+        Err(language) if SELECTED_LANGUAGE.get() == Some(&language) => Ok(()),
+        Err(_) => anyhow::bail!("TUI language is already configured"),
+    }
+}
+
+fn selected_formatter() -> Intl {
+    TRANSLATIONS
+        .formatter(*SELECTED_LANGUAGE.get_or_init(Language::default))
+        .expect("selected-language formatter")
+}
+
+fn map_operation_label(intl: &Intl, operation: MapOperation) -> String {
+    match operation {
+        MapOperation::Install => format_message!(intl, default_message: "Install"),
+        MapOperation::Update => format_message!(intl, default_message: "Update"),
+        MapOperation::Reinstall => format_message!(intl, default_message: "Reinstall"),
+        MapOperation::Repair => format_message!(intl, default_message: "Repair"),
+        MapOperation::Downgrade => format_message!(intl, default_message: "Downgrade"),
+    }
+}
 
 pub struct Session {
     terminal: AppTerminal,
@@ -268,15 +291,10 @@ impl Session {
     /// # Errors
     /// Rendering or input failure.
     pub fn select_device(&mut self, devices: &[DeviceSummary]) -> Result<Option<usize>> {
-        let rows = update_device_rows(devices);
-        match device_selection_loop(
-            self.terminal(),
-            &rows,
-            "Select an update device",
-            !devices.is_empty(),
-            0,
-            None,
-        )? {
+        let intl = selected_formatter();
+        let rows = update_device_rows(&intl, devices);
+        let title = format_message!(&intl, default_message: "Select an update device");
+        match device_selection_loop(self.terminal(), &rows, &title, !devices.is_empty(), 0, None)? {
             DeviceSelection::Selected(selected) => Ok(Some(selected)),
             DeviceSelection::Cancelled => Ok(None),
             DeviceSelection::Rescan(_) => unreachable!("static device picker requested a rescan"),
@@ -291,11 +309,13 @@ impl Session {
         devices: &[DeviceSummary],
         selected: usize,
     ) -> Result<DeviceSelection> {
-        let rows = update_device_rows(devices);
+        let intl = selected_formatter();
+        let rows = update_device_rows(&intl, devices);
+        let title = format_message!(&intl, default_message: "Select an update device");
         device_selection_loop(
             self.terminal(),
             &rows,
-            "Select an update device",
+            &title,
             !devices.is_empty(),
             selected,
             Some(DEVICE_RESCAN_INTERVAL),
@@ -303,7 +323,7 @@ impl Session {
     }
 }
 
-fn update_device_rows(devices: &[DeviceSummary]) -> Vec<String> {
+fn update_device_rows(intl: &Intl, devices: &[DeviceSummary]) -> Vec<String> {
     let mut rows = devices
         .iter()
         .map(|device| {
@@ -313,9 +333,13 @@ fn update_device_rows(devices: &[DeviceSummary]) -> Vec<String> {
                 .map(|part_number| format!(" ({part_number})"))
                 .unwrap_or_default();
             let transport = match device.transport {
-                TransportKind::MassStorage => "mass storage",
-                TransportKind::Mtp => "MTP",
-                TransportKind::MountedMtp => "desktop-mounted MTP",
+                TransportKind::MassStorage => {
+                    format_message!(intl, default_message: "mass storage")
+                }
+                TransportKind::Mtp => "MTP".to_owned(),
+                TransportKind::MountedMtp => {
+                    format_message!(intl, default_message: "desktop-mounted MTP")
+                }
             };
             format!(
                 "{}{part_number}  [{transport}]  {}",
@@ -324,7 +348,10 @@ fn update_device_rows(devices: &[DeviceSummary]) -> Vec<String> {
         })
         .collect::<Vec<_>>();
     if rows.is_empty() {
-        rows.push("No Garmin device is currently visible".to_owned());
+        rows.push(format_message!(
+            intl,
+            default_message: "No Garmin device is currently visible"
+        ));
     }
     rows
 }
@@ -354,14 +381,14 @@ pub struct ConfirmationField {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedMapAction {
     pub name: String,
-    pub action: String,
+    pub operation: MapOperation,
 }
 
 impl SelectedMapAction {
-    pub fn new(name: impl Into<String>, action: impl Into<String>) -> Self {
+    pub fn new(name: impl Into<String>, operation: MapOperation) -> Self {
         Self {
             name: name.into(),
-            action: action.into(),
+            operation,
         }
     }
 }
@@ -385,12 +412,12 @@ pub struct ConfirmationBody {
     pub introduction: Text<'static>,
     pub fields: Vec<ConfirmationField>,
     pub note: Option<Text<'static>>,
-    pub confirm_action: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct UpdateConfirmationBody {
     details: ConfirmationBody,
+    plan_id_field: usize,
     backup: CheckBoxState,
     backup_area: Option<Rect>,
     verified_plan_id: Option<String>,
@@ -420,11 +447,12 @@ impl UpdateConfirmationBody {
         self.backup.checked
     }
 
-    fn confirm_label(&self) -> &'static str {
+    fn confirm_label(&self) -> String {
+        let intl = selected_formatter();
         if self.backup_enabled() {
-            "Continue"
+            format_message!(&intl, default_message: "Continue")
         } else {
-            "Continue without backup"
+            format_message!(&intl, default_message: "Continue without backup")
         }
     }
 
@@ -435,11 +463,7 @@ impl UpdateConfirmationBody {
             self.skipped_plan_id.as_ref()
         };
         if let Some(plan_id) = plan_id
-            && let Some(field) = self
-                .details
-                .fields
-                .iter_mut()
-                .find(|field| field.label == "Plan ID")
+            && let Some(field) = self.details.fields.get_mut(self.plan_id_field)
         {
             field.value.clone_from(plan_id);
         }
@@ -467,6 +491,21 @@ pub enum PendingRecoveryActions {
     DiscardOnly,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryOperation {
+    Update,
+    Removal,
+}
+
+impl RecoveryOperation {
+    fn label(self, intl: &Intl) -> String {
+        match self {
+            Self::Update => format_message!(intl, default_message: "Update"),
+            Self::Removal => format_message!(intl, default_message: "Map removal"),
+        }
+    }
+}
+
 impl PendingRecoveryActions {
     const fn allows_clear(self) -> bool {
         matches!(self, Self::RecoverOrClear)
@@ -487,36 +526,126 @@ impl ConfirmationBody {
             introduction: Text::raw(message.into()),
             fields: Vec::new(),
             note: None,
-            confirm_action: "confirm".to_owned(),
         }
     }
 }
 
 #[must_use]
-pub fn garmin_contact_confirmation_body(
+pub fn pending_recovery_confirmation_body(
+    device: impl Into<String>,
+    operation: RecoveryOperation,
+    plan_id: impl Into<String>,
+    recovery: Option<impl Into<String>>,
+    actions: PendingRecoveryActions,
+) -> ConfirmationBody {
+    let intl = selected_formatter();
+    let (introduction, note) = match actions {
+        PendingRecoveryActions::RecoverOrClear => (
+            format_message!(
+                &intl,
+                default_message: "This device contains an interrupted transaction. Resolve it before making more changes."
+            ),
+            format_message!(
+                &intl,
+                default_message: "Recover finishes it. Clear requires proof that the device is updated or untouched."
+            ),
+        ),
+        PendingRecoveryActions::RecoverOnly => (
+            format_message!(
+                &intl,
+                default_message: "This host retained an interrupted transaction. Recover it before making more changes."
+            ),
+            format_message!(
+                &intl,
+                default_message: "Recovery finishes journal-authorized writes and cleanup."
+            ),
+        ),
+        PendingRecoveryActions::DiscardOnly => (
+            format_message!(
+                &intl,
+                default_message: "The previous operation stopped before changing the device."
+            ),
+            format_message!(
+                &intl,
+                default_message: "Discard removes this notice. Cache and capture files remain."
+            ),
+        ),
+    };
+    ConfirmationBody {
+        introduction: Text::raw(introduction),
+        fields: vec![
+            ConfirmationField::new(
+                format_message!(&intl, default_message: "Device"),
+                device,
+                ConfirmationValueTone::Neutral,
+            ),
+            ConfirmationField::new(
+                format_message!(&intl, default_message: "Operation"),
+                operation.label(&intl),
+                ConfirmationValueTone::Warning,
+            ),
+            ConfirmationField::new(
+                format_message!(&intl, default_message: "Plan ID"),
+                plan_id,
+                ConfirmationValueTone::Muted,
+            ),
+            ConfirmationField::new(
+                format_message!(&intl, default_message: "Recovery"),
+                recovery.map_or_else(
+                    || format_message!(&intl, default_message: "Not retained on this host"),
+                    Into::into,
+                ),
+                ConfirmationValueTone::Path,
+            ),
+        ],
+        note: Some(Text::raw(note)),
+    }
+}
+
+fn garmin_contact_confirmation_body(
     endpoint: impl Into<String>,
     may_download: bool,
 ) -> ConfirmationBody {
+    let intl = selected_formatter();
+    let manifest = "GarminDevice.xml";
+    let send_manifest = format_message!(
+        &intl,
+        default_message: "Send {file} to Garmin:",
+        values: { file: manifest },
+    );
+    let privacy = format_message!(
+        &intl,
+        default_message: "The file may contain the device ID, hardware, software, and installed maps."
+    );
     let mut introduction = vec![
-        Line::from(vec![
-            Span::raw("Send "),
-            Span::styled("GarminDevice.xml", path_style()),
-            Span::raw(" to Garmin:"),
-        ]),
+        line_with_styled_value(send_manifest, manifest, path_style()),
         Line::from(Span::styled(endpoint.into(), link_style())),
         Line::raw(""),
-        Line::raw("It may contain the device ID, hardware, software, and installed maps."),
+        Line::raw(privacy),
     ];
     if may_download {
-        introduction.push(Line::raw("Garmin download hosts may also be contacted."));
+        introduction.push(Line::raw(format_message!(
+            &intl,
+            default_message: "Garmin download hosts may also be contacted."
+        )));
     }
-    introduction.push(Line::raw("No account credentials are sent."));
+    introduction.push(Line::raw(format_message!(
+        &intl,
+        default_message: "No account credentials are sent."
+    )));
     ConfirmationBody {
         introduction: Text::from(introduction),
         fields: Vec::new(),
         note: None,
-        confirm_action: "confirm".to_owned(),
     }
+}
+
+/// Confirms Garmin service access in a temporary terminal session.
+/// # Errors
+/// Terminal setup, rendering, or input failure.
+pub fn confirm_garmin_contact(endpoint: impl Into<String>, may_download: bool) -> Result<bool> {
+    let mut session = Session::open()?;
+    session.confirm_garmin_contact(endpoint, may_download)
 }
 
 #[must_use]
@@ -524,42 +653,61 @@ pub fn update_confirmation_body(
     device: impl Into<String>,
     components: &[SelectedMapAction],
     plan_id: impl Into<String>,
-    files: impl Into<String>,
+    files: usize,
     transfer_size: impl Into<String>,
-    removals: impl Into<String>,
+    removals: usize,
     capture: impl Into<String>,
 ) -> UpdateConfirmationBody {
+    let intl = selected_formatter();
     UpdateConfirmationBody {
         details: ConfirmationBody {
-            introduction: Text::raw(UPDATE_PLAN_INTRODUCTION),
+            introduction: Text::raw(format_message!(
+                &intl,
+                default_message: "Review the device and selected changes."
+            )),
             fields: vec![
-                ConfirmationField::new("Device", device, ConfirmationValueTone::Neutral),
                 ConfirmationField::new(
-                    "Components",
-                    selected_map_actions(components),
+                    format_message!(&intl, default_message: "Device"),
+                    device,
+                    ConfirmationValueTone::Neutral,
+                ),
+                ConfirmationField::new(
+                    format_message!(&intl, default_message: "Components"),
+                    selected_map_actions(&intl, components),
                     ConfirmationValueTone::Warning,
                 ),
-                ConfirmationField::new("Plan ID", plan_id, ConfirmationValueTone::Muted),
-                ConfirmationField::new("Files", files, ConfirmationValueTone::Neutral),
                 ConfirmationField::new(
-                    "Transfer size",
+                    format_message!(&intl, default_message: "Plan ID"),
+                    plan_id,
+                    ConfirmationValueTone::Muted,
+                ),
+                ConfirmationField::new(
+                    format_message!(&intl, default_message: "Files"),
+                    localized_file_count(&intl, files),
+                    ConfirmationValueTone::Neutral,
+                ),
+                ConfirmationField::new(
+                    format_message!(&intl, default_message: "Transfer size"),
                     transfer_size,
                     ConfirmationValueTone::Neutral,
                 ),
-                ConfirmationField::new("Remove", removals, ConfirmationValueTone::Warning),
-                ConfirmationField::new("Capture", capture, ConfirmationValueTone::Path),
-            ],
-            note: Some(Text::from(Line::from(vec![
-                Span::styled(
-                    "Map authorization — ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
+                ConfirmationField::new(
+                    format_message!(&intl, default_message: "Remove"),
+                    localized_file_count(&intl, removals),
+                    ConfirmationValueTone::Warning,
                 ),
-                Span::raw("protected maps need device-bound authorization."),
-            ]))),
-            confirm_action: "continue".to_owned(),
+                ConfirmationField::new(
+                    format_message!(&intl, default_message: "Capture"),
+                    capture,
+                    ConfirmationValueTone::Path,
+                ),
+            ],
+            note: Some(Text::raw(format_message!(
+                &intl,
+                default_message: "Map authorization — protected maps require device-bound authorization."
+            ))),
         },
+        plan_id_field: 2,
         backup: CheckBoxState::new(true),
         backup_area: None,
         verified_plan_id: None,
@@ -567,15 +715,20 @@ pub fn update_confirmation_body(
     }
 }
 
-fn selected_map_actions(components: &[SelectedMapAction]) -> String {
-    let action_width = components
+fn selected_map_actions(intl: &Intl, components: &[SelectedMapAction]) -> String {
+    let labels = components
         .iter()
-        .map(|component| component.action.chars().count())
+        .map(|component| map_operation_label(intl, component.operation))
+        .collect::<Vec<_>>();
+    let action_width = labels
+        .iter()
+        .map(|label| label.chars().count())
         .max()
         .unwrap_or_default();
     components
         .iter()
-        .map(|component| format!("{:<action_width$}  {}", component.action, component.name))
+        .zip(labels)
+        .map(|(component, label)| format!("{label:<action_width$}  {}", component.name))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -585,34 +738,61 @@ pub fn removal_confirmation_body(
     device: impl Into<String>,
     plan_id: impl Into<String>,
     components: impl Into<String>,
-    files: impl Into<String>,
+    files: usize,
     reclaimed: impl Into<String>,
     capture: impl Into<String>,
 ) -> ConfirmationBody {
+    let intl = selected_formatter();
     ConfirmationBody {
-        introduction: Text::raw(indoc! {"
-            Review this exact removal.
-            Its ID fingerprints the device and targets."}),
+        introduction: Text::raw(format_message!(
+            &intl,
+            default_message: "Review the device and selected removals."
+        )),
         fields: vec![
-            ConfirmationField::new("Device", device, ConfirmationValueTone::Neutral),
-            ConfirmationField::new("Plan ID", plan_id, ConfirmationValueTone::Muted),
-            ConfirmationField::new("Components", components, ConfirmationValueTone::Warning),
-            ConfirmationField::new("Files", files, ConfirmationValueTone::Warning),
-            ConfirmationField::new("Reclaim", reclaimed, ConfirmationValueTone::Neutral),
-            ConfirmationField::new("Recovery", capture, ConfirmationValueTone::Path),
+            ConfirmationField::new(
+                format_message!(&intl, default_message: "Device"),
+                device,
+                ConfirmationValueTone::Neutral,
+            ),
+            ConfirmationField::new(
+                format_message!(&intl, default_message: "Plan ID"),
+                plan_id,
+                ConfirmationValueTone::Muted,
+            ),
+            ConfirmationField::new(
+                format_message!(&intl, default_message: "Components"),
+                components,
+                ConfirmationValueTone::Warning,
+            ),
+            ConfirmationField::new(
+                format_message!(&intl, default_message: "Files"),
+                localized_file_count(&intl, files),
+                ConfirmationValueTone::Warning,
+            ),
+            ConfirmationField::new(
+                format_message!(&intl, default_message: "Reclaim"),
+                reclaimed,
+                ConfirmationValueTone::Neutral,
+            ),
+            ConfirmationField::new(
+                format_message!(&intl, default_message: "Recovery"),
+                capture,
+                ConfirmationValueTone::Path,
+            ),
         ],
-        note: Some(Text::from(vec![
-            Line::from(Span::styled(
-                "Guarded removal",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::raw("Every target is backed up and verified before deletion."),
-            Line::raw("An interrupted transaction can be restored from this capture."),
-        ])),
-        confirm_action: "remove files".to_owned(),
+        note: Some(Text::raw(format_message!(
+            &intl,
+            default_message: "Backups are verified before deletion and retained for recovery."
+        ))),
     }
+}
+
+fn localized_file_count(intl: &Intl, count: usize) -> String {
+    format_message!(
+        intl,
+        default_message: "{count, plural, one {# file} other {# files}}",
+        values: { count: i64::try_from(count).unwrap_or(i64::MAX) },
+    )
 }
 
 #[must_use]
@@ -621,11 +801,16 @@ pub fn verification_completion_message(
     files: usize,
     capture: impl std::fmt::Display,
 ) -> String {
-    let noun = if files == 1 { "file" } else { "files" };
-    formatdoc! {"
-        Verified {bytes} across {files} selected {noun}; captured Garmin's authorization response.
-
-        Device unchanged. Evidence: {capture}"}
+    let intl = selected_formatter();
+    format_message!(
+        &intl,
+        default_message: "Verified {bytes} across {files, plural, one {# selected file} other {# selected files}}; captured Garmin's authorization response.\n\nDevice unchanged. Evidence: {capture}",
+        values: {
+            bytes: bytes.to_string(),
+            files: i64::try_from(files).unwrap_or(i64::MAX),
+            capture: capture.to_string(),
+        },
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -669,10 +854,11 @@ impl FailureBody {
         fields: Vec<FailureField>,
         capture: impl Into<String>,
     ) -> Self {
+        let intl = selected_formatter();
         Self {
             summary: summary.into(),
             fields,
-            outcome: "Update incomplete.".to_owned(),
+            outcome: format_message!(&intl, default_message: "Update incomplete."),
             diagnostics: Some(capture.into()),
         }
     }
@@ -708,7 +894,7 @@ pub struct MapChoice {
     pub version_transition: String,
     pub version_tone: MapVersionTone,
     pub description: String,
-    pub install_label: &'static str,
+    pub operation: MapOperation,
     pub can_remove: bool,
     pub cache: Option<MapCacheAvailability>,
 }
@@ -794,6 +980,21 @@ pub fn select_maps(choices: &[MapChoice]) -> Result<Option<Vec<usize>>> {
 }
 
 impl Session {
+    /// Confirms Garmin service access within this terminal session.
+    /// # Errors
+    /// Rendering or input failure.
+    pub fn confirm_garmin_contact(
+        &mut self,
+        endpoint: impl Into<String>,
+        may_download: bool,
+    ) -> Result<bool> {
+        let intl = selected_formatter();
+        let title = format_message!(&intl, default_message: "Contact Garmin?");
+        let confirm_label = format_message!(&intl, default_message: "Contact Garmin");
+        let body = garmin_contact_confirmation_body(endpoint, may_download);
+        confirmation_loop(self.terminal(), &title, body, &confirm_label)
+    }
+
     /// Displays a confirmation prompt within this terminal session.
     /// # Errors
     /// Rendering or input failure.
@@ -829,10 +1030,11 @@ impl Session {
     /// Rendering or input failure.
     pub fn confirm_update(
         &mut self,
-        title: &str,
         body: UpdateConfirmationBody,
     ) -> Result<UpdateConfirmationDecision> {
-        update_confirmation_loop(self.terminal(), title, body)
+        let intl = selected_formatter();
+        let title = format_message!(&intl, default_message: "Continue with update?");
+        update_confirmation_loop(self.terminal(), &title, body)
     }
 
     /// Asks which map components should be kept or installed.
@@ -991,10 +1193,21 @@ fn draw_map_selection(
     mode: MapActionMode,
 ) {
     let (table_area, help_area) = areas;
+    let intl = selected_formatter();
+    let map_component = format_message!(&intl, default_message: "Map component");
+    let map_components = format_message!(&intl, default_message: "Garmin map components");
+    let keep = format_message!(&intl, default_message: "Keep");
+    let change = format_message!(&intl, default_message: "Change");
+    let remove = format_message!(&intl, default_message: "Remove");
     let header = if mode.allows_removal() {
-        Row::new(["Map component", "Keep", "Change", "Remove"])
+        Row::new([
+            map_component.as_str(),
+            keep.as_str(),
+            change.as_str(),
+            remove.as_str(),
+        ])
     } else {
-        Row::new(["Map component", "Keep", "Change"])
+        Row::new([map_component.as_str(), keep.as_str(), change.as_str()])
     }
     .style(
         Style::default()
@@ -1008,7 +1221,7 @@ fn draw_map_selection(
         .zip(actions)
         .enumerate()
         .map(|(index, (choice, action))| {
-            map_choice_row(choice, *action, selected == Some(index), mode)
+            map_choice_row(&intl, choice, *action, selected == Some(index), mode)
         });
     let widths = if mode.allows_removal() {
         vec![
@@ -1029,7 +1242,7 @@ fn draw_map_selection(
         .column_spacing(MAP_TABLE_COLUMN_SPACING)
         .block(
             Block::default()
-                .title(" Garmin map components ")
+                .title(format!(" {map_components} "))
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan)),
         )
@@ -1037,23 +1250,50 @@ fn draw_map_selection(
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(table, table_area, state);
 
+    render_map_selection_help(frame, help_area, actions, can_refresh, mode);
+}
+
+fn render_map_selection_help(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    actions: &[MapChoiceAction],
+    can_refresh: bool,
+    mode: MapActionMode,
+) {
+    let intl = selected_formatter();
     let selected = selected_map_choices(actions);
-    let mut bulk_actions = vec![("A", "change all"), ("K", "keep all")];
+    let row = format_message!(&intl, default_message: "row");
+    let action = format_message!(&intl, default_message: "action");
+    let select = format_message!(&intl, default_message: "select");
+    let mouse = format_message!(&intl, default_message: "Mouse");
+    let change_all = format_message!(&intl, default_message: "change all");
+    let keep_all = format_message!(&intl, default_message: "keep all");
+    let refresh_space = format_message!(&intl, default_message: "refresh space");
+    let continue_action = format_message!(&intl, default_message: "continue");
+    let cancel = format_message!(&intl, default_message: "cancel");
+    let mut bulk_actions = vec![("A", change_all.as_str()), ("K", keep_all.as_str())];
     if can_refresh {
-        bulk_actions.push(("R", "refresh space"));
+        bulk_actions.push(("R", refresh_space.as_str()));
     }
     let mut hints = vec![
-        key_hints(&[("↑/↓", "row"), ("←/→", "action"), ("Mouse", "select")]),
+        key_hints(&[
+            ("↑/↓", row.as_str()),
+            ("←/→", action.as_str()),
+            (mouse.as_str(), select.as_str()),
+        ]),
         key_hints(&bulk_actions),
     ];
     if can_refresh {
-        hints.push(key_hints(&[("Enter", "continue"), ("Esc", "cancel")]));
+        hints.push(key_hints(&[
+            ("Enter", continue_action.as_str()),
+            ("Esc", cancel.as_str()),
+        ]));
     } else {
         hints[1] = key_hints(&[
-            ("A", "change all"),
-            ("K", "keep all"),
-            ("Enter", "continue"),
-            ("Esc", "cancel"),
+            ("A", change_all.as_str()),
+            ("K", keep_all.as_str()),
+            ("Enter", continue_action.as_str()),
+            ("Esc", cancel.as_str()),
         ]);
     }
     hints.push(Line::from(Span::styled(
@@ -1064,7 +1304,7 @@ fn draw_map_selection(
     )));
     frame.render_widget(
         Paragraph::new(Text::from(hints)).alignment(Alignment::Center),
-        help_area,
+        area,
     );
 }
 
@@ -1072,12 +1312,13 @@ const fn map_selection_footer_height(can_refresh: bool) -> u16 {
     if can_refresh { 4 } else { 3 }
 }
 
-fn map_choice_row(
-    choice: &MapChoice,
+fn map_choice_row<'a>(
+    intl: &Intl,
+    choice: &'a MapChoice,
     action: MapChoiceAction,
     highlighted: bool,
     mode: MapActionMode,
-) -> Row<'_> {
+) -> Row<'a> {
     let metadata_style = Style::default().fg(if highlighted {
         Color::Black
     } else {
@@ -1125,11 +1366,20 @@ fn map_choice_row(
         )),
         Line::from(metadata),
     ]);
-    let keep = choice_marker(action == MapChoiceAction::Keep, "Keep");
-    let change = choice_marker(action == MapChoiceAction::Change, choice.install_label);
-    let remove = choice
-        .can_remove
-        .then(|| choice_marker(action == MapChoiceAction::Remove, "Remove"));
+    let keep = choice_marker(
+        action == MapChoiceAction::Keep,
+        &format_message!(intl, default_message: "Keep"),
+    );
+    let change = choice_marker(
+        action == MapChoiceAction::Change,
+        &map_operation_label(intl, choice.operation),
+    );
+    let remove = choice.can_remove.then(|| {
+        choice_marker(
+            action == MapChoiceAction::Remove,
+            &format_message!(intl, default_message: "Remove"),
+        )
+    });
     let inactive = if highlighted {
         Style::default().fg(Color::Black)
     } else {
@@ -1229,18 +1479,20 @@ fn selected_map_choices(actions: &[MapChoiceAction]) -> SelectedMapChoices {
 }
 
 fn selected_map_choice_count(selected: &SelectedMapChoices, mode: MapActionMode) -> String {
-    let change_count = selected.changes.len();
-    let changes = format!(
-        "{change_count} change{}",
-        if change_count == 1 { "" } else { "s" }
-    );
+    let intl = selected_formatter();
+    let changes = i64::try_from(selected.changes.len()).unwrap_or(i64::MAX);
     if !mode.allows_removal() {
-        return format!("{changes} selected");
+        return format_message!(
+            &intl,
+            default_message: "{changes, plural, one {# change selected} other {# changes selected}}",
+            values: { changes: changes },
+        );
     }
-    let removal_count = selected.removals.len();
-    format!(
-        "{changes} · {removal_count} removal{} selected",
-        if removal_count == 1 { "" } else { "s" }
+    let removals = i64::try_from(selected.removals.len()).unwrap_or(i64::MAX);
+    format_message!(
+        &intl,
+        default_message: "{changes, plural, one {# change} other {# changes}} · {removals, plural, one {# removal selected} other {# removals selected}}",
+        values: { changes: changes, removals: removals },
     )
 }
 
@@ -1425,7 +1677,8 @@ fn update_confirmation_loop(
 
     loop {
         state.children.backup.set_focused(state.is_child_focused(0));
-        let config = confirmation_dialog_config(title, state.children.confirm_label());
+        let confirm_label = state.children.confirm_label();
+        let config = confirmation_dialog_config(title, &confirm_label);
         terminal.draw(|frame| {
             render_dialog_backdrop(frame);
             {
@@ -1578,6 +1831,7 @@ fn profile_content_area(area: Rect, profile: RunProfile) -> Rect {
 }
 
 fn confirmation_dialog_config(title: &str, confirm_label: &str) -> DialogConfig {
+    let intl = selected_formatter();
     DialogConfig::new(title)
         .width_percent(88)
         .height_percent(96)
@@ -1587,38 +1841,48 @@ fn confirmation_dialog_config(title: &str, confirm_label: &str) -> DialogConfig 
         .focused_border_color(Color::Yellow)
         .close_on_outside_click(false)
         .buttons(vec![
-            ("Cancel".to_owned(), ContainerAction::Close),
+            (
+                format_message!(&intl, default_message: "Cancel"),
+                ContainerAction::Close,
+            ),
             (confirm_label.to_owned(), ContainerAction::Submit),
         ])
 }
 
 fn pending_recovery_dialog_config(actions: PendingRecoveryActions) -> DialogConfig {
+    let intl = selected_formatter();
     let (title, buttons) = if actions.allows_clear() {
         (
-            "Pending device recovery detected",
+            format_message!(&intl, default_message: "Pending device recovery"),
             vec![
                 (
-                    "Clear state".to_owned(),
+                    format_message!(&intl, default_message: "Clear state"),
                     ContainerAction::custom("clear-state"),
                 ),
-                ("Recover now".to_owned(), ContainerAction::Submit),
+                (
+                    format_message!(&intl, default_message: "Recover now"),
+                    ContainerAction::Submit,
+                ),
             ],
         )
     } else if actions.allows_discard() {
         (
-            "Interrupted preparation detected",
+            format_message!(&intl, default_message: "Interrupted preparation"),
             vec![(
-                "Discard attempt".to_owned(),
+                format_message!(&intl, default_message: "Discard attempt"),
                 ContainerAction::custom("discard"),
             )],
         )
     } else {
         (
-            "Pending device recovery detected",
-            vec![("Recover now".to_owned(), ContainerAction::Submit)],
+            format_message!(&intl, default_message: "Pending device recovery"),
+            vec![(
+                format_message!(&intl, default_message: "Recover now"),
+                ContainerAction::Submit,
+            )],
         )
     };
-    DialogConfig::new(title)
+    DialogConfig::new(&title)
         .width_percent(88)
         .height_percent(96)
         .min_size(58, 22)
@@ -1763,8 +2027,10 @@ fn render_backup_option(
     area: Rect,
     backup: &CheckBoxState,
 ) -> Rect {
+    let intl = selected_formatter();
     frame.render_widget(
-        Paragraph::new("Recovery:").style(Style::default().fg(Color::Gray)),
+        Paragraph::new(format_message!(&intl, default_message: "Recovery:"))
+            .style(Style::default().fg(Color::Gray)),
         Rect::new(area.x, area.y, area.width, 1),
     );
 
@@ -1813,14 +2079,23 @@ fn render_backup_option(
             .add_modifier(Modifier::BOLD)
     };
     let explanation = if backup.checked {
-        "Recommended; enables automatic rollback if the update fails."
+        format_message!(
+            &intl,
+            default_message: "Recommended; enables automatic rollback if the update fails."
+        )
     } else {
-        "No automatic rollback; old device files can be identified only by their authorized path and size, and reinstall may be required after a failed update."
+        format_message!(
+            &intl,
+            default_message: "No automatic rollback; old device files can be identified only by their authorized path and size, and reinstall may be required after a failed update."
+        )
     };
     frame.render_widget(
         Paragraph::new(Text::from(vec![
             Line::from(Span::styled(
-                "Create verified recovery backups",
+                format_message!(
+                    &intl,
+                    default_message: "Create verified recovery backups"
+                ),
                 label_style,
             )),
             Line::from(Span::styled(explanation, secondary_style)),
@@ -1886,65 +2161,89 @@ fn screen_footer_area(screen_area: Rect) -> Rect {
 }
 
 fn render_confirmation_footer(frame: &mut ratatui::Frame<'_>) {
+    let intl = selected_formatter();
+    let focus = format_message!(&intl, default_message: "focus");
+    let confirm = format_message!(&intl, default_message: "confirm");
+    let cancel = format_message!(&intl, default_message: "cancel");
     let footer_area = screen_footer_area(frame.area());
     render_hint_footer(
         frame,
         footer_area,
         &[
-            FooterHint::new("Tab", "focus"),
-            FooterHint::new("Enter", "confirm"),
-            FooterHint::new("Esc", "cancel"),
+            FooterHint::new("Tab", &focus),
+            FooterHint::new("Enter", &confirm),
+            FooterHint::new("Esc", &cancel),
         ],
     );
 }
 
 fn render_update_confirmation_footer(frame: &mut ratatui::Frame<'_>) {
+    let intl = selected_formatter();
+    let focus = format_message!(&intl, default_message: "focus");
+    let toggle = format_message!(&intl, default_message: "toggle");
+    let space = format_message!(&intl, default_message: "Space");
+    let continue_action = format_message!(&intl, default_message: "continue");
+    let cancel = format_message!(&intl, default_message: "cancel");
     let footer_area = screen_footer_area(frame.area());
     render_hint_footer(
         frame,
         footer_area,
         &[
-            FooterHint::new("Tab", "focus"),
-            FooterHint::new("Space", "toggle"),
-            FooterHint::new("Enter", "continue"),
-            FooterHint::new("Esc", "cancel"),
+            FooterHint::new("Tab", &focus),
+            FooterHint::new(&space, &toggle),
+            FooterHint::new("Enter", &continue_action),
+            FooterHint::new("Esc", &cancel),
         ],
     );
 }
 
 fn render_pending_recovery_footer(frame: &mut ratatui::Frame<'_>, actions: PendingRecoveryActions) {
+    let intl = selected_formatter();
+    let action = format_message!(&intl, default_message: "action");
+    let choose = format_message!(&intl, default_message: "choose");
+    let recover_clear = format_message!(&intl, default_message: "recover/clear");
+    let discard_attempt = format_message!(&intl, default_message: "discard attempt");
+    let recover = format_message!(&intl, default_message: "recover");
+    let cancel = format_message!(&intl, default_message: "cancel");
+    let enter_or_d = format_message!(&intl, default_message: "Enter or D");
+    let enter_or_r = format_message!(&intl, default_message: "Enter or R");
     let footer_area = screen_footer_area(frame.area());
     let hints = if actions.allows_clear() {
         vec![
-            FooterHint::new("←/→/Tab", "action"),
-            FooterHint::new("Enter", "choose"),
-            FooterHint::new("R/C", "recover/clear"),
-            FooterHint::new("Esc", "cancel"),
+            FooterHint::new("←/→/Tab", &action),
+            FooterHint::new("Enter", &choose),
+            FooterHint::new("R/C", &recover_clear),
+            FooterHint::new("Esc", &cancel),
         ]
     } else if actions.allows_discard() {
         vec![
-            FooterHint::new("Enter or D", "discard attempt"),
-            FooterHint::new("Esc", "cancel"),
+            FooterHint::new(&enter_or_d, &discard_attempt),
+            FooterHint::new("Esc", &cancel),
         ]
     } else {
         vec![
-            FooterHint::new("Enter or R", "recover"),
-            FooterHint::new("Esc", "cancel"),
+            FooterHint::new(&enter_or_r, &recover),
+            FooterHint::new("Esc", &cancel),
         ]
     };
     render_hint_footer(frame, footer_area, &hints);
 }
 
 fn render_abort_footer(frame: &mut ratatui::Frame<'_>) {
+    let intl = selected_formatter();
+    let focus = format_message!(&intl, default_message: "focus");
+    let choose = format_message!(&intl, default_message: "choose");
+    let abort = format_message!(&intl, default_message: "abort");
+    let keep_running = format_message!(&intl, default_message: "keep running");
     let footer_area = screen_footer_area(frame.area());
     render_hint_footer(
         frame,
         footer_area,
         &[
-            FooterHint::new("Tab", "focus"),
-            FooterHint::new("Enter", "choose"),
-            FooterHint::new("A", "abort"),
-            FooterHint::new("Esc", "keep running"),
+            FooterHint::new("Tab", &focus),
+            FooterHint::new("Enter", &choose),
+            FooterHint::new("A", &abort),
+            FooterHint::new("Esc", &keep_running),
         ],
     );
 }
@@ -2056,19 +2355,26 @@ impl Session {
     where
         F: Future<Output = Result<T>>,
     {
+        let intl = selected_formatter();
         self.run_operation_progress(
             receiver,
             task,
             cancellation,
             ProgressConfig {
-                title: UPDATE_PROGRESS_TITLE,
-                initial: "Preparing update…",
+                title: format_message!(&intl, default_message: "garmin-cli — Updating maps"),
+                initial: format_message!(&intl, default_message: "Preparing update…"),
                 stages: UPDATE_STAGES,
-                completion: Some(UPDATE_COMPLETE),
+                completion: Some(format_message!(
+                    &intl,
+                    default_message: "Transaction complete. Evidence retained."
+                )),
                 initial_completion: (backup_policy == garmin_update::BackupPolicy::Skip).then_some(
                     InitialStageCompletion {
                         stage: OperationStage::Backup,
-                        label: "Skipped by user; automatic rollback is unavailable",
+                        label: format_message!(
+                            &intl,
+                            default_message: "Skipped by user; automatic rollback is unavailable"
+                        ),
                     },
                 ),
             },
@@ -2093,10 +2399,10 @@ impl Session {
             task,
             cancellation,
             ProgressConfig {
-                title: "garmin-cli — Real update pipeline probe",
-                initial: "Preparing pipeline benchmark…",
+                title: "garmin-cli — Real update pipeline probe".to_owned(),
+                initial: "Preparing pipeline benchmark…".to_owned(),
                 stages: PIPELINE_PROBE_STAGES,
-                completion: Some(PIPELINE_PROBE_COMPLETE),
+                completion: Some(PIPELINE_PROBE_COMPLETE.to_owned()),
                 initial_completion: None,
             },
         )
@@ -2120,10 +2426,10 @@ impl Session {
             task,
             cancellation,
             ProgressConfig {
-                title: "garmin-cli — Device link benchmark",
-                initial: "Preparing disposable transfer…",
+                title: "garmin-cli — Device link benchmark".to_owned(),
+                initial: "Preparing disposable transfer…".to_owned(),
                 stages: LINK_BENCHMARK_STAGES,
-                completion: Some(LINK_BENCHMARK_COMPLETE),
+                completion: Some(LINK_BENCHMARK_COMPLETE.to_owned()),
                 initial_completion: None,
             },
         )
@@ -2142,15 +2448,22 @@ impl Session {
     where
         F: Future<Output = Result<T>>,
     {
+        let intl = selected_formatter();
         self.run_operation_progress(
             receiver,
             task,
             cancellation,
             ProgressConfig {
-                title: "garmin-cli — Removing map components",
-                initial: "Preparing guarded removal…",
+                title: format_message!(
+                    &intl,
+                    default_message: "garmin-cli — Removing map components"
+                ),
+                initial: format_message!(&intl, default_message: "Preparing guarded removal…"),
                 stages: REMOVAL_STAGES,
-                completion: Some(REMOVAL_COMPLETE),
+                completion: Some(format_message!(
+                    &intl,
+                    default_message: "Removal complete. Verified backups retained."
+                )),
                 initial_completion: None,
             },
         )
@@ -2169,15 +2482,22 @@ impl Session {
     where
         F: Future<Output = Result<T>>,
     {
+        let intl = selected_formatter();
         self.run_operation_progress(
             receiver,
             task,
             cancellation,
             ProgressConfig {
-                title: "garmin-cli — Recovering map update",
-                initial: "Inspecting update journal…",
+                title: format_message!(
+                    &intl,
+                    default_message: "garmin-cli — Recovering map update"
+                ),
+                initial: format_message!(&intl, default_message: "Inspecting update journal…"),
                 stages: UPDATE_RECOVERY_STAGES,
-                completion: Some(UPDATE_RECOVERY_COMPLETE),
+                completion: Some(format_message!(
+                    &intl,
+                    default_message: "Update recovered. Device state reconciled."
+                )),
                 initial_completion: None,
             },
         )
@@ -2196,15 +2516,22 @@ impl Session {
     where
         F: Future<Output = Result<T>>,
     {
+        let intl = selected_formatter();
         self.run_operation_progress(
             receiver,
             task,
             cancellation,
             ProgressConfig {
-                title: "garmin-cli — Recovering component removal",
-                initial: "Inspecting removal journal…",
+                title: format_message!(
+                    &intl,
+                    default_message: "garmin-cli — Recovering component removal"
+                ),
+                initial: format_message!(&intl, default_message: "Inspecting removal journal…"),
                 stages: REMOVAL_RECOVERY_STAGES,
-                completion: Some(REMOVAL_RECOVERY_COMPLETE),
+                completion: Some(format_message!(
+                    &intl,
+                    default_message: "Recovery complete. Target paths and sizes match."
+                )),
                 initial_completion: None,
             },
         )
@@ -2278,37 +2605,66 @@ enum LoadingActivity {
 }
 
 impl LoadingActivity {
-    const fn title(self) -> &'static str {
+    fn title(self, intl: &Intl) -> String {
         match self {
-            Self::Discovery => " Device discovery ",
-            Self::DeviceMetadata => " Device inspection ",
-            Self::DeviceRecovery => " Device recovery ",
-            Self::DeviceStorage => " Device storage ",
-            Self::MapComponents => " Map components ",
+            Self::Discovery => format_message!(intl, default_message: "Device discovery"),
+            Self::DeviceMetadata => format_message!(intl, default_message: "Device inspection"),
+            Self::DeviceRecovery => format_message!(intl, default_message: "Device recovery"),
+            Self::DeviceStorage => format_message!(intl, default_message: "Device storage"),
+            Self::MapComponents => format_message!(intl, default_message: "Map components"),
         }
     }
 
-    const fn message(self) -> &'static str {
+    fn message(self, intl: &Intl) -> String {
         match self {
-            Self::Discovery => "  Looking for attached Garmin devices…",
-            Self::DeviceMetadata => "  Reading selected device metadata…",
-            Self::DeviceRecovery => "  Resetting an unresponsive Garmin link…",
-            Self::DeviceStorage => "  Reading device storage…",
-            Self::MapComponents => "  Loading map components…",
+            Self::Discovery => {
+                format_message!(intl, default_message: "Looking for attached Garmin devices…")
+            }
+            Self::DeviceMetadata => {
+                format_message!(intl, default_message: "Reading selected device metadata…")
+            }
+            Self::DeviceRecovery => {
+                format_message!(intl, default_message: "Resetting an unresponsive Garmin link…")
+            }
+            Self::DeviceStorage => {
+                format_message!(intl, default_message: "Reading device storage…")
+            }
+            Self::MapComponents => {
+                format_message!(intl, default_message: "Loading map components…")
+            }
         }
     }
 
-    fn detail(self) -> Line<'static> {
+    fn detail(self, intl: &Intl) -> Line<'static> {
         match self {
-            Self::Discovery => Line::raw("Checking host-visible attachment candidates."),
-            Self::DeviceMetadata => Line::from(vec![
-                Span::raw("Reading and validating "),
-                Span::styled("GarminDevice.xml", path_style()),
-                Span::raw("."),
-            ]),
-            Self::DeviceRecovery => Line::raw("Clearing stalled MTP state, then waiting quietly."),
-            Self::DeviceStorage => Line::raw("Reading storage totals without scanning files."),
-            Self::MapComponents => Line::raw("Contacting the map-update service."),
+            Self::Discovery => Line::raw(format_message!(
+                intl,
+                default_message: "Checking host-visible attachment candidates."
+            )),
+            Self::DeviceMetadata => {
+                let manifest = "GarminDevice.xml";
+                line_with_styled_value(
+                    format_message!(
+                        intl,
+                        default_message: "Reading and validating {file}.",
+                        values: { file: manifest },
+                    ),
+                    manifest,
+                    path_style(),
+                )
+            }
+            Self::DeviceRecovery => Line::raw(format_message!(
+                intl,
+                default_message: "Clearing stalled MTP state, then waiting quietly."
+            )),
+            Self::DeviceStorage => Line::raw(format_message!(
+                intl,
+                default_message: "Reading storage totals without scanning files."
+            )),
+            Self::MapComponents => Line::raw(format_message!(
+                intl,
+                default_message: "Contacting the map-update service."
+            )),
         }
     }
 
@@ -2384,8 +2740,11 @@ impl LoadingScreen {
     }
 
     fn render(self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        let intl = selected_formatter();
+        let title = self.activity.title(&intl);
+        let message = self.activity.message(&intl);
         let outer = Block::default()
-            .title(self.activity.title())
+            .title(format!(" {title} "))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan));
         let inner = outer.inner(area);
@@ -2404,18 +2763,24 @@ impl LoadingScreen {
                         LOADING_SPINNER_FRAMES[self.frame_index % LOADING_SPINNER_FRAMES.len()],
                         Style::default().fg(Color::Yellow),
                     ),
-                    Span::raw(self.activity.message()),
+                    Span::raw(format!("  {message}")),
                 ]),
-                self.activity.detail(),
-                Line::from(vec![
-                    Span::styled("Elapsed ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        elapsed_clock(self.elapsed),
+                self.activity.detail(&intl),
+                {
+                    let duration = elapsed_clock(self.elapsed);
+                    let elapsed = format_message!(
+                        &intl,
+                        default_message: "{duration} elapsed",
+                        values: { duration: duration.clone() },
+                    );
+                    line_with_styled_value(
+                        elapsed,
+                        &duration,
                         Style::default()
                             .fg(Color::Yellow)
                             .add_modifier(Modifier::BOLD),
-                    ),
-                ]),
+                    )
+                },
             ]))
             .alignment(Alignment::Center),
             sections[1],
@@ -2423,7 +2788,10 @@ impl LoadingScreen {
         render_hint_footer(
             frame,
             sections[3],
-            &[FooterHint::new("Q/Esc/Ctrl-C", "cancel")],
+            &[FooterHint::new(
+                "Q/Esc/Ctrl-C",
+                &format_message!(&intl, default_message: "cancel"),
+            )],
         );
     }
 }
@@ -2507,6 +2875,7 @@ struct NoticeBody {
 }
 
 fn notice_dialog_config(title: &str) -> DialogConfig {
+    let intl = selected_formatter();
     DialogConfig::new(title)
         .width_percent(84)
         .height_percent(70)
@@ -2515,10 +2884,14 @@ fn notice_dialog_config(title: &str) -> DialogConfig {
         .border_color(Color::Green)
         .focused_border_color(Color::Green)
         .close_on_outside_click(false)
-        .buttons(vec![("Close".to_owned(), ContainerAction::Close)])
+        .buttons(vec![(
+            format_message!(&intl, default_message: "Close"),
+            ContainerAction::Close,
+        )])
 }
 
 fn failure_dialog_config(title: &str) -> DialogConfig {
+    let intl = selected_formatter();
     DialogConfig::new(title)
         .width_percent(84)
         .height_percent(70)
@@ -2527,7 +2900,10 @@ fn failure_dialog_config(title: &str) -> DialogConfig {
         .border_color(Color::Red)
         .focused_border_color(Color::Red)
         .close_on_outside_click(false)
-        .buttons(vec![("Close".to_owned(), ContainerAction::Close)])
+        .buttons(vec![(
+            format_message!(&intl, default_message: "Close"),
+            ContainerAction::Close,
+        )])
 }
 
 fn draw_notice_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut NoticeBody) {
@@ -2540,6 +2916,7 @@ fn draw_notice_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut Notic
 }
 
 fn draw_failure_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut FailureBody) {
+    let intl = selected_formatter();
     let mut lines = vec![Line::raw(body.summary.clone()), Line::raw("")];
     for field in &body.fields {
         lines.push(Line::from(vec![
@@ -2557,10 +2934,16 @@ fn draw_failure_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut Fail
     }
     lines.push(Line::raw(body.outcome.clone()));
     if let Some(diagnostics) = &body.diagnostics {
-        lines.push(Line::raw("Diagnostics:"));
+        lines.push(Line::raw(format_message!(
+            &intl,
+            default_message: "Diagnostics:"
+        )));
         lines.push(Line::from(Span::styled(diagnostics.clone(), path_style())));
     } else {
-        lines.push(Line::raw("No diagnostic capture was requested."));
+        lines.push(Line::raw(format_message!(
+            &intl,
+            default_message: "No diagnostic capture was requested."
+        )));
     }
     frame.render_widget(
         Paragraph::new(Text::from(lines))
@@ -2629,7 +3012,8 @@ fn completion_loop(
 }
 
 fn completion_dialog_config() -> DialogConfig {
-    DialogConfig::new("Update complete")
+    let intl = selected_formatter();
+    DialogConfig::new(&format_message!(&intl, default_message: "Update complete"))
         .width_percent(84)
         .height_percent(85)
         .min_size(48, 18)
@@ -2637,45 +3021,23 @@ fn completion_dialog_config() -> DialogConfig {
         .border_color(Color::Green)
         .focused_border_color(Color::Green)
         .close_on_outside_click(false)
-        .buttons(vec![("Close".to_owned(), ContainerAction::Close)])
+        .buttons(vec![(
+            format_message!(&intl, default_message: "Close"),
+            ContainerAction::Close,
+        )])
 }
 
 fn draw_completion_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut CompletionBody) {
+    let intl = selected_formatter();
     let panel = Block::default()
         .padding(Padding::new(2, 2, 1, 1))
         .style(Style::default().bg(Color::Black));
     let inner = panel.inner(area);
     frame.render_widget(panel, area);
-    let rate = display_rate(body.report.bytes_per_second());
-    let fields = [
-        ("Device", completion_device_line(&body.device)),
-        (
-            "Installed",
-            completion_value_line(format!("{} files", body.report.files_written)),
-        ),
-        (
-            "Removed",
-            completion_value_line(format!("{} files", body.report.files_removed)),
-        ),
-        (
-            "Device transfer",
-            completion_value_line(format!(
-                "{} in {:.2}s · {rate}",
-                decimal_bytes(body.report.bytes_written),
-                body.report.elapsed.as_secs_f64()
-            )),
-        ),
-        (
-            "Transaction",
-            completion_value_line(format!(
-                "Committed and cleaned up in {:.2}s",
-                body.workflow_elapsed.as_secs_f64()
-            )),
-        ),
-    ];
+    let fields = completion_fields(&intl, body);
     let label_width = 18;
     let value_width = inner.width.saturating_sub(label_width);
-    let field_heights: [u16; 5] = std::array::from_fn(|index| {
+    let heights: [u16; 5] = std::array::from_fn(|index| {
         let value = &fields[index].1;
         u16::try_from(
             Paragraph::new(value.clone())
@@ -2685,10 +3047,7 @@ fn draw_completion_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut C
         .unwrap_or(u16::MAX)
         .max(1)
     });
-    let details_height = field_heights
-        .iter()
-        .copied()
-        .fold(0_u16, u16::saturating_add);
+    let details_height = heights.iter().copied().fold(0_u16, u16::saturating_add);
     let sections = Layout::vertical([
         Constraint::Length(2),
         Constraint::Length(details_height),
@@ -2698,16 +3057,91 @@ fn draw_completion_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut C
     ])
     .split(inner);
     frame.render_widget(
-        Paragraph::new("Map update installed.").style(
+        Paragraph::new(format_message!(
+            &intl,
+            default_message: "Map update installed."
+        ))
+        .style(
             Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
         ),
         sections[0],
     );
-    let mut row_y = sections[1].y;
-    for ((label, value), height) in fields.into_iter().zip(field_heights) {
-        let row = Rect::new(sections[1].x, row_y, sections[1].width, height);
+    render_completion_fields(frame, sections[1], fields, heights, label_width);
+    frame.render_widget(
+        Paragraph::new(format_message!(
+            &intl,
+            default_message: "Transaction committed. Eject or unmount before unplugging."
+        ))
+        .wrap(Wrap { trim: true }),
+        sections[3],
+    );
+    frame.render_widget(
+        Paragraph::new(key_hints(&[(
+            &format_message!(&intl, default_message: "Enter, Esc, q, or mouse"),
+            &format_message!(&intl, default_message: "close"),
+        )]))
+        .alignment(Alignment::Center),
+        sections[4],
+    );
+}
+
+fn completion_fields(intl: &Intl, body: &CompletionBody) -> [(String, Line<'static>); 5] {
+    [
+        (
+            format_message!(intl, default_message: "Device"),
+            completion_device_line(&body.device),
+        ),
+        (
+            format_message!(intl, default_message: "Installed"),
+            completion_value_line(format_message!(
+                intl,
+                default_message: "{count, plural, one {# file} other {# files}}",
+                values: { count: i64::try_from(body.report.files_written).unwrap_or(i64::MAX) },
+            )),
+        ),
+        (
+            format_message!(intl, default_message: "Removed"),
+            completion_value_line(format_message!(
+                intl,
+                default_message: "{count, plural, one {# file} other {# files}}",
+                values: { count: i64::try_from(body.report.files_removed).unwrap_or(i64::MAX) },
+            )),
+        ),
+        (
+            format_message!(intl, default_message: "Device transfer"),
+            completion_value_line(format_message!(
+                intl,
+                default_message: "{bytes} in {seconds}s · {rate}",
+                values: {
+                    bytes: decimal_bytes(body.report.bytes_written),
+                    seconds: format!("{:.2}", body.report.elapsed.as_secs_f64()),
+                    rate: display_rate(body.report.bytes_per_second()),
+                },
+            )),
+        ),
+        (
+            format_message!(intl, default_message: "Transaction"),
+            completion_value_line(format_message!(
+                intl,
+                default_message: "Committed and cleaned up in {seconds}s",
+                values: { seconds: format!("{:.2}", body.workflow_elapsed.as_secs_f64()) },
+            )),
+        ),
+    ]
+}
+
+fn render_completion_fields(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    fields: [(String, Line<'static>); 5],
+    heights: [u16; 5],
+    label_width: u16,
+) {
+    let mut y = area.y;
+    for ((label, value), height) in fields.into_iter().zip(heights) {
+        let row = Rect::new(area.x, y, area.width, height);
         let columns =
             Layout::horizontal([Constraint::Length(label_width), Constraint::Min(1)]).split(row);
         frame.render_widget(
@@ -2715,29 +3149,23 @@ fn draw_completion_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut C
             columns[0],
         );
         frame.render_widget(Paragraph::new(value).wrap(Wrap { trim: true }), columns[1]);
-        row_y = row_y.saturating_add(height);
+        y = y.saturating_add(height);
     }
-    frame.render_widget(
-        Paragraph::new(COMPLETION_INSTRUCTIONS).wrap(Wrap { trim: true }),
-        sections[3],
-    );
-    frame.render_widget(
-        Paragraph::new(key_hints(&[("Enter, Esc, q, or mouse", "close")]))
-            .alignment(Alignment::Center),
-        sections[4],
-    );
 }
 
 fn completion_device_line(device: &DeviceSummary) -> Line<'static> {
+    let intl = selected_formatter();
     let part_number = device
         .part_number
         .as_deref()
         .map(|part_number| format!(" ({part_number})"))
         .unwrap_or_default();
     let transport = match device.transport {
-        TransportKind::MassStorage => "mass storage",
-        TransportKind::Mtp => "MTP",
-        TransportKind::MountedMtp => "desktop-mounted MTP",
+        TransportKind::MassStorage => format_message!(&intl, default_message: "mass storage"),
+        TransportKind::Mtp => "MTP".to_owned(),
+        TransportKind::MountedMtp => {
+            format_message!(&intl, default_message: "desktop-mounted MTP")
+        }
     };
     let value_style = Style::default().add_modifier(Modifier::BOLD);
     let location_style = if device.transport == TransportKind::MassStorage {
@@ -2771,19 +3199,19 @@ fn display_rate(bytes_per_second: f64) -> String {
     format!("{}/s", decimal_bytes(bytes_per_second))
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ProgressConfig<'a> {
-    title: &'a str,
-    initial: &'a str,
+    title: String,
+    initial: String,
     stages: &'a [OperationStage],
-    completion: Option<&'a str>,
-    initial_completion: Option<InitialStageCompletion<'a>>,
+    completion: Option<String>,
+    initial_completion: Option<InitialStageCompletion>,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct InitialStageCompletion<'a> {
+#[derive(Debug, Clone)]
+struct InitialStageCompletion {
     stage: OperationStage,
-    label: &'a str,
+    label: String,
 }
 
 async fn progress_future_loop<T, F>(
@@ -2798,9 +3226,9 @@ where
     F: Future<Output = Result<T>>,
 {
     tokio::pin!(task);
-    let mut model = ProgressModel::new(config.stages, config.initial);
-    if let Some(initial) = config.initial_completion {
-        model.set_initial_completion(initial.stage, initial.label);
+    let mut model = ProgressModel::new(config.stages, &config.initial);
+    if let Some(initial) = &config.initial_completion {
+        model.set_initial_completion(initial.stage, &initial.label);
     }
     let mut scroll = DashboardScroll::default();
 
@@ -2815,7 +3243,7 @@ where
         }
         let viewport = draw_progress_dashboard(
             terminal,
-            config.title,
+            &config.title,
             &model,
             &mut scroll,
             if abort_requested {
@@ -2842,11 +3270,11 @@ where
             result = &mut task => match result {
                 Ok(value) => {
                     drain_progress_events(receiver, &mut model);
-                    if let Some(completion) = config.completion {
+                    if let Some(completion) = &config.completion {
                         model.current = OperationView::completed(completion);
                         await_progress_close(
                             terminal,
-                            config.title,
+                            &config.title,
                             &model,
                             &mut scroll,
                             receiver,
@@ -2943,20 +3371,31 @@ struct ProgressPresentation<'a> {
 }
 
 fn render_progress_footer(frame: &mut ratatui::Frame<'_>, area: Rect, phase: ProgressPhase) {
+    let intl = selected_formatter();
+    let panel = format_message!(&intl, default_message: "panel");
+    let scroll = format_message!(&intl, default_message: "scroll");
+    let abort_operation = format_message!(&intl, default_message: "abort operation");
+    let history = format_message!(&intl, default_message: "history");
+    let close = format_message!(&intl, default_message: "close");
+    let scroll_keys = format_message!(&intl, default_message: "↑↓/PgUp/PgDn/wheel");
+    let history_keys = format_message!(&intl, default_message: "↑↓/wheel");
     match phase {
         ProgressPhase::Running => render_hint_footer(
             frame,
             area,
             &[
-                FooterHint::new("Tab", "panel"),
-                FooterHint::new("↑↓/PgUp/PgDn/wheel", "scroll"),
-                FooterHint::new("Q/Esc/Ctrl-C", "abort operation"),
+                FooterHint::new("Tab", &panel),
+                FooterHint::new(&scroll_keys, &scroll),
+                FooterHint::new("Q/Esc/Ctrl-C", &abort_operation),
             ],
         ),
         ProgressPhase::Cancelling => {
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    "Abort requested — waiting for the current operation to stop safely.",
+                    format_message!(
+                        &intl,
+                        default_message: "Abort requested — waiting for the current operation to stop safely."
+                    ),
                     Style::default()
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD),
@@ -2968,7 +3407,10 @@ fn render_progress_footer(frame: &mut ratatui::Frame<'_>, area: Rect, phase: Pro
         ProgressPhase::Complete => {
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    "Operation complete — review the history, then close when ready.",
+                    format_message!(
+                        &intl,
+                        default_message: "Operation complete — review the history, then close when ready."
+                    ),
                     Style::default()
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD),
@@ -2980,8 +3422,8 @@ fn render_progress_footer(frame: &mut ratatui::Frame<'_>, area: Rect, phase: Pro
                 frame,
                 area,
                 &[
-                    FooterHint::new("↑↓/wheel", "history"),
-                    FooterHint::new("Enter/Esc/Q/Ctrl-C", "close"),
+                    FooterHint::new(&history_keys, &history),
+                    FooterHint::new("Enter/Esc/Q/Ctrl-C", &close),
                 ],
             );
         }
@@ -3081,7 +3523,8 @@ async fn confirm_abort(terminal: &mut AppTerminal, operation: &OperationView) ->
 }
 
 fn abort_dialog_config() -> DialogConfig {
-    DialogConfig::new("Abort operation?")
+    let intl = selected_formatter();
+    DialogConfig::new(&format_message!(&intl, default_message: "Abort operation?"))
         .width_percent(82)
         .height_percent(70)
         .min_size(48, 14)
@@ -3090,12 +3533,19 @@ fn abort_dialog_config() -> DialogConfig {
         .focused_border_color(Color::Yellow)
         .close_on_outside_click(false)
         .buttons(vec![
-            ("Keep running".to_owned(), ContainerAction::Close),
-            ("Request abort".to_owned(), ContainerAction::Submit),
+            (
+                format_message!(&intl, default_message: "Keep running"),
+                ContainerAction::Close,
+            ),
+            (
+                format_message!(&intl, default_message: "Request abort"),
+                ContainerAction::Submit,
+            ),
         ])
 }
 
 fn draw_abort_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut AbortBody) {
+    let intl = selected_formatter();
     let panel = Block::default()
         .padding(Padding::new(2, 2, 1, 1))
         .style(Style::default().bg(Color::Black));
@@ -3108,14 +3558,18 @@ fn draw_abort_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut AbortB
     ])
     .split(inner);
     frame.render_widget(
-        Paragraph::new("Request cancellation at the next safe checkpoint?")
-            .wrap(Wrap { trim: true }),
+        Paragraph::new(format_message!(
+            &intl,
+            default_message: "Request cancellation at the next safe checkpoint?"
+        ))
+        .wrap(Wrap { trim: true }),
         sections[0],
     );
     frame.render_widget(
         Table::new(
             [Row::new([
-                Cell::from("Active operation:").style(Style::default().fg(Color::Gray)),
+                Cell::from(format_message!(&intl, default_message: "Active operation:"))
+                    .style(Style::default().fg(Color::Gray)),
                 Cell::from(operation_line(&body.operation, false)),
             ])],
             [Constraint::Length(19), Constraint::Min(1)],
@@ -3123,30 +3577,36 @@ fn draw_abort_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut AbortB
         sections[1],
     );
     frame.render_widget(
-        Paragraph::new(
-            "Cancellation may require rollback or later recovery. Do not disconnect until this screen closes.",
-        )
+        Paragraph::new(format_message!(
+            &intl,
+            default_message: "Cancellation may require rollback or later recovery. Do not disconnect until this screen closes."
+        ))
         .wrap(Wrap { trim: true }),
         sections[2],
     );
 }
 
-fn stage_name(stage: OperationStage) -> &'static str {
+fn stage_name(stage: OperationStage) -> String {
+    let intl = selected_formatter();
     match stage {
-        OperationStage::Inspect => "Inspect",
-        OperationStage::Query => "Query",
-        OperationStage::Plan => "Plan",
-        OperationStage::Backup => "Backup",
-        OperationStage::Download => "Download",
-        OperationStage::Verify => "Verify",
-        OperationStage::Authorize => "Authorize",
-        OperationStage::Stage => "Stage",
-        OperationStage::Commit => "Commit",
-        OperationStage::Cleanup => "Cleanup",
-        OperationStage::Upload => "Upload",
-        OperationStage::DeviceFinalize => "Device finalize",
-        OperationStage::DeviceVerify => "Device verify",
-        OperationStage::Delete => "Delete",
+        OperationStage::Inspect => format_message!(&intl, default_message: "Inspect"),
+        OperationStage::Query => format_message!(&intl, default_message: "Query"),
+        OperationStage::Plan => format_message!(&intl, default_message: "Plan"),
+        OperationStage::Backup => format_message!(&intl, default_message: "Backup"),
+        OperationStage::Download => format_message!(&intl, default_message: "Download"),
+        OperationStage::Verify => format_message!(&intl, default_message: "Verify"),
+        OperationStage::Authorize => format_message!(&intl, default_message: "Authorize"),
+        OperationStage::Stage => format_message!(&intl, default_message: "Stage"),
+        OperationStage::Commit => format_message!(&intl, default_message: "Commit"),
+        OperationStage::Cleanup => format_message!(&intl, default_message: "Cleanup"),
+        OperationStage::Upload => format_message!(&intl, default_message: "Upload"),
+        OperationStage::DeviceFinalize => {
+            format_message!(&intl, default_message: "Device finalize")
+        }
+        OperationStage::DeviceVerify => {
+            format_message!(&intl, default_message: "Device verify")
+        }
+        OperationStage::Delete => format_message!(&intl, default_message: "Delete"),
     }
 }
 
@@ -3161,6 +3621,17 @@ fn stage_symbol(state: ProgressState) -> &'static str {
 
 fn path_style() -> Style {
     Style::default().fg(Color::Rgb(135, 175, 205))
+}
+
+fn line_with_styled_value(message: String, value: &str, style: Style) -> Line<'static> {
+    let Some((before, after)) = message.split_once(value) else {
+        return Line::raw(message);
+    };
+    Line::from(vec![
+        Span::raw(before.to_owned()),
+        Span::styled(value.to_owned(), style),
+        Span::raw(after.to_owned()),
+    ])
 }
 
 fn link_style() -> Style {
@@ -3320,39 +3791,67 @@ fn gauge_label(stage: OperationStage, view: &StageView) -> String {
 }
 
 fn dashboard_gauge_label(stage: OperationStage, view: &StageView, model: &ProgressModel) -> String {
+    let intl = selected_formatter();
     if stage == OperationStage::Verify && model.stage_is_active(OperationStage::Download) {
         let (completed, total) = model.item_completion(OperationStage::Verify);
         let mut metrics = Vec::with_capacity(3);
         if total > 0 {
-            metrics.push(format!(
-                "{completed}/{total} file{} verified",
-                if total == 1 { "" } else { "s" }
+            metrics.push(format_message!(
+                &intl,
+                default_message: "{completed}/{total} {total, plural, one {file verified} other {files verified}}",
+                values: {
+                    completed: i64::try_from(completed).unwrap_or(i64::MAX),
+                    total: i64::try_from(total).unwrap_or(i64::MAX),
+                },
             ));
         }
-        metrics.push("waiting for active downloads".to_owned());
+        metrics.push(format_message!(
+            &intl,
+            default_message: "waiting for active downloads"
+        ));
         if let Some(elapsed) = stage_elapsed(view) {
-            metrics.push(format!("{} elapsed", progress_elapsed(elapsed)));
+            metrics.push(format_message!(
+                &intl,
+                default_message: "{duration} elapsed",
+                values: { duration: progress_elapsed(elapsed) },
+            ));
         }
         return gauge_label_with_metrics(stage, view, &metrics);
     }
     if view.is_active() && stale_byte_progress(view).is_some() && model.active().next().is_some() {
         let mut metrics = Vec::with_capacity(2);
         if let Some(elapsed) = stage_elapsed(view) {
-            metrics.push(format!("{} elapsed", progress_elapsed(elapsed)));
+            metrics.push(format_message!(
+                &intl,
+                default_message: "{duration} elapsed",
+                values: { duration: progress_elapsed(elapsed) },
+            ));
         }
-        metrics.push("current file progress shown below".to_owned());
+        metrics.push(format_message!(
+            &intl,
+            default_message: "current file progress shown below"
+        ));
         return gauge_label_with_metrics(stage, view, &metrics);
     }
     gauge_label(stage, view)
 }
 
 fn gauge_label_with_metrics(stage: OperationStage, view: &StageView, metrics: &[String]) -> String {
+    let intl = selected_formatter();
     let mut label = match view.total {
         Some(total)
             if view.unit == ProgressUnit::Operations
                 && (stage == OperationStage::Commit || total > 1) =>
         {
-            format!("{} / {total} operations — {}", view.completed, view.label)
+            format_message!(
+                &intl,
+                default_message: "{completed} / {total} {total, plural, one {operation} other {operations}} — {label}",
+                values: {
+                    completed: i64::try_from(view.completed).unwrap_or(i64::MAX),
+                    total: i64::try_from(total).unwrap_or(i64::MAX),
+                    label: view.label.clone(),
+                },
+            )
         }
         Some(total) if view.unit == ProgressUnit::Bytes && total > 1 => {
             let completed = decimal_bytes(view.completed);
@@ -3406,15 +3905,21 @@ fn byte_sample_elapsed(view: &StageView) -> Option<Duration> {
 }
 
 fn progress_metrics(_stage: OperationStage, view: &StageView) -> Vec<String> {
+    let intl = selected_formatter();
     let Some(elapsed) = stage_elapsed(view) else {
         return Vec::new();
     };
     if let Some(idle) = stale_byte_progress(view) {
         return vec![
-            format!("{} elapsed", progress_elapsed(elapsed)),
-            format!(
-                "no progress for {}; device finalizing or stalled",
-                progress_elapsed(idle)
+            format_message!(
+                &intl,
+                default_message: "{duration} elapsed",
+                values: { duration: progress_elapsed(elapsed) },
+            ),
+            format_message!(
+                &intl,
+                default_message: "no progress for {duration}; device finalizing or stalled",
+                values: { duration: progress_elapsed(idle) },
             ),
         ];
     }
@@ -3435,12 +3940,20 @@ fn progress_metrics(_stage: OperationStage, view: &StageView) -> Vec<String> {
             reason = "the non-negative rounded rate is saturated for display as bytes"
         )]
         let rounded = rate.max(0.0).round() as u64;
-        metrics.push(format!("avg {}/s", decimal_bytes(rounded)));
+        metrics.push(format_message!(
+            &intl,
+            default_message: "avg {rate}/s",
+            values: { rate: decimal_bytes(rounded) },
+        ));
         Some(rate)
     } else {
         None
     };
-    metrics.push(format!("{} elapsed", progress_elapsed(elapsed)));
+    metrics.push(format_message!(
+        &intl,
+        default_message: "{duration} elapsed",
+        values: { duration: progress_elapsed(elapsed) },
+    ));
     if view.is_active()
         && let (Some(total), Some(rate)) = (view.total, bytes_per_second)
         && total > view.completed
@@ -3453,7 +3966,11 @@ fn progress_metrics(_stage: OperationStage, view: &StageView) -> Vec<String> {
         )]
         let seconds = (total - view.completed) as f64 / rate;
         if let Ok(eta) = Duration::try_from_secs_f64(seconds.max(0.0)) {
-            metrics.push(format!("ETA {}", elapsed_clock(eta)));
+            metrics.push(format_message!(
+                &intl,
+                default_message: "ETA {duration}",
+                values: { duration: elapsed_clock(eta) },
+            ));
         }
     }
     metrics
@@ -3559,17 +4076,24 @@ fn render_device_selection(
     refreshable: bool,
     state: &mut ListState,
 ) {
+    let intl = selected_formatter();
     let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(5)])
         .split(area);
+    let select_keys = format_message!(&intl, default_message: "↑/↓ or Mouse");
+    let select = format_message!(&intl, default_message: "select");
+    let continue_action = format_message!(&intl, default_message: "continue");
+    let cancel_keys = format_message!(&intl, default_message: "Esc or Ctrl-C");
+    let cancel = format_message!(&intl, default_message: "cancel");
+    let rescan = format_message!(&intl, default_message: "rescan");
     let mut hints = vec![
-        ("↑/↓ or Mouse", "select"),
-        ("Enter", "continue"),
-        ("Esc or Ctrl-C", "cancel"),
+        (select_keys.as_str(), select.as_str()),
+        ("Enter", continue_action.as_str()),
+        (cancel_keys.as_str(), cancel.as_str()),
     ];
     if refreshable {
-        hints.insert(hints.len().saturating_sub(1), ("R", "rescan"));
+        hints.insert(hints.len().saturating_sub(1), ("R", rescan.as_str()));
     }
     frame.render_widget(
         Paragraph::new(key_hints(&hints)).block(
@@ -3647,12 +4171,13 @@ mod tests {
     use super::{
         LoadingActivity, MapActionMode, MapChoice, MapChoiceAction, MapVersionTone,
         PendingRecoveryActions, PendingRecoveryDecision, SelectedMapAction, dashboard_gauge_label,
-        elapsed_clock, gauge_label, is_cancel_key, path_style, pending_recovery_dialog_config,
-        pending_recovery_result, progress_metrics, screen_footer_area, select_map_cell,
-        selected_map_actions, selected_map_choice_count, selected_map_choices,
-        update_confirmation_body,
+        elapsed_clock, gauge_label, is_cancel_key, localized_file_count, path_style,
+        pending_recovery_dialog_config, pending_recovery_result, progress_metrics,
+        screen_footer_area, select_map_cell, selected_map_actions, selected_map_choice_count,
+        selected_map_choices, update_confirmation_body, verification_completion_message,
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use garmin_model::map::MapOperation;
     use garmin_progress::{OperationStage, ProgressReporter, ProgressState, ProgressUnit};
     use ratatui::layout::Rect;
     use ratatui::widgets::TableState;
@@ -3708,7 +4233,7 @@ mod tests {
             version_transition: "(1.00) → 2.00".to_owned(),
             version_tone: MapVersionTone::Outdated,
             description: String::new(),
-            install_label: "Update",
+            operation: MapOperation::Update,
             can_remove: true,
             cache: None,
         }];
@@ -3755,7 +4280,7 @@ mod tests {
             version_transition: "Installed 26.20".to_owned(),
             version_tone: MapVersionTone::UpToDate,
             description: String::new(),
-            install_label: "Reinstall",
+            operation: MapOperation::Reinstall,
             can_remove: false,
             cache: None,
         }];
@@ -3804,24 +4329,38 @@ mod tests {
 
     #[test]
     fn selected_actions_align_without_trailing_space() {
-        let rendered = selected_map_actions(&[
-            SelectedMapAction::new("Base maps", "Update"),
-            SelectedMapAction::new("Worldwide map", "Install"),
-        ]);
+        let intl = super::selected_formatter();
+        let rendered = selected_map_actions(
+            &intl,
+            &[
+                SelectedMapAction::new("Base maps", MapOperation::Update),
+                SelectedMapAction::new("Worldwide map", MapOperation::Install),
+            ],
+        );
 
         assert_eq!(rendered, "Update   Base maps\nInstall  Worldwide map");
         assert!(rendered.lines().all(|line| !line.ends_with(' ')));
     }
 
     #[test]
+    fn user_facing_file_counts_use_icu_plural_rules() {
+        let intl = super::selected_formatter();
+
+        assert_eq!(localized_file_count(&intl, 1), "1 file");
+        assert_eq!(localized_file_count(&intl, 2), "2 files");
+        assert!(verification_completion_message("1 GB", 1, "capture").contains("1 selected file"));
+        assert!(verification_completion_message("2 GB", 2, "capture").contains("2 selected files"));
+    }
+
+    #[test]
     fn backup_choice_switches_the_plan_identity_shown_for_confirmation() {
         let mut body = update_confirmation_body(
             "Device",
-            &[SelectedMapAction::new("Map", "Update")],
+            &[SelectedMapAction::new("Map", MapOperation::Update)],
             "verified-plan",
-            "1 file",
+            1,
             "1 GB",
-            "1 file",
+            1,
             "capture",
         )
         .with_backup_plan_ids("verified-plan", "skipped-plan");
@@ -4150,7 +4689,8 @@ mod tests {
 
     #[test]
     fn device_metadata_loading_styles_the_manifest_as_a_path() {
-        let detail = LoadingActivity::DeviceMetadata.detail();
+        let intl = super::selected_formatter();
+        let detail = LoadingActivity::DeviceMetadata.detail(&intl);
 
         assert_eq!(detail.spans[1].content, "GarminDevice.xml");
         assert_eq!(detail.spans[1].style, path_style());

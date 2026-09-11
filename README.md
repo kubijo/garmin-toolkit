@@ -24,6 +24,9 @@ pretty and colored on a terminal; redirected output stays plain. `FORCE_COLOR` a
 overrides; `--color auto|off|always` provides explicit control. Failures use structured, width-aware reports on stderr
 after any TUI closes, while redirected diagnostics remain plain and copyable.
 
+The TUI follows `--language en|cs`, then `GARMIN_LANGUAGE`, then `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, and `LANG`.
+Unsupported system locales fall back to English; `--language auto` forces system-locale detection.
+
 Verified map payloads are reused from a content-addressed cache. Installed binaries default to
 `~/.cache/garmin-toolkit/maps`; `GARMIN_TOOLKIT_CACHE_DIR` relocates it and `--cache-dir` takes precedence. Repository
 recipes keep it at `.tmp/app-cache`. The link benchmark uses the normal device picker, asks before writing one

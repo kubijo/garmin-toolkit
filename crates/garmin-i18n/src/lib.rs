@@ -26,6 +26,18 @@ impl Language {
             Self::Czech => "cs",
         }
     }
+
+    /// Matches a supported language from a BCP-47 locale.
+    #[must_use]
+    pub fn from_locale(locale: &str) -> Option<Self> {
+        match locale.split('-').next()? {
+            language if language.eq_ignore_ascii_case("c") => Some(Self::English),
+            language if language.eq_ignore_ascii_case("posix") => Some(Self::English),
+            language if language.eq_ignore_ascii_case("en") => Some(Self::English),
+            language if language.eq_ignore_ascii_case("cs") => Some(Self::Czech),
+            _ => None,
+        }
+    }
 }
 
 /// Immutable translation catalogs and their shared compiled-message cache.
@@ -98,5 +110,13 @@ mod tests {
         assert_eq!(english_message, "2 activities");
         assert_eq!(czech_message, "2 aktivity");
         Ok(())
+    }
+
+    #[test]
+    fn supported_languages_match_bcp47_locales() {
+        assert_eq!(Language::from_locale("cs-CZ"), Some(Language::Czech));
+        assert_eq!(Language::from_locale("en-US"), Some(Language::English));
+        assert_eq!(Language::from_locale("C"), Some(Language::English));
+        assert_eq!(Language::from_locale("de-DE"), None);
     }
 }

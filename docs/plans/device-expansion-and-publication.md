@@ -20,5 +20,6 @@ Extend operation-specific device evidence, then publish only supported artifacts
 Delete this plan after every advertised operation has recorded evidence, release artifacts pass policy, the public tree
 contains no private data, and the repository is understandable without plans.
 
-[Mounted-device updates](mounted-device-updates.md) owns CLI map-upgrade proof on the current devices. This plan owns
-broader device conformance and the published support matrix; a successful map operation proves no FIT or HASS workflow.
+[USB synchronization](../research/usb-sync.md#map-maintenance-evidence) records CLI map-upgrade proof on the current
+devices. This plan owns broader device conformance and the published support matrix; a successful map operation proves
+no FIT or HASS workflow.

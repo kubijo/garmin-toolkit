@@ -50,5 +50,6 @@ An in-process virtual registry does not automatically reach a child CLI process.
 without introducing test workflow branches. Keep durable capture/storage in disposable directories for restart tests.
 
 Native adapter conformance remains separate: a virtual raw-MTP responder does not exercise Linux GIO/GVfs, macOS
-ownership, Windows WPD, USB timing, or Garmin firmware. A tmpfs-backed directory does not change that boundary. Physical
-upgrade and device-recognition evidence remain required by the [CLI plan](../plans/mounted-device-updates.md).
+ownership, Windows WPD, USB timing, or Garmin firmware. A tmpfs-backed directory does not change that boundary. Current
+physical upgrade, restart, and process-interruption evidence is recorded in
+[USB synchronization](usb-sync.md#map-maintenance-evidence).

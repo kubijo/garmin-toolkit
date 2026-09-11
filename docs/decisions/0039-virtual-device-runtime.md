@@ -41,4 +41,4 @@ missing files, and incomplete runs. JSON retains exact bytes; the summary uses r
 
 Run success, failure, cancellation, and restart through demo and dry-run. Verify artifacts, backups, journals, reports,
 cross-target rejection, and zero source mutation. Render changed progress and completion states in the shared gallery.
-Hardware evidence remains in [production CLI map maintenance](../plans/mounted-device-updates.md).
+Current hardware evidence is recorded in [USB synchronization](../research/usb-sync.md#map-maintenance-evidence).

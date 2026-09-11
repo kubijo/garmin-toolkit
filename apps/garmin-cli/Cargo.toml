@@ -11,13 +11,14 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 byte-unit.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
 crossterm.workspace = true
 dirs.workspace = true
 garmin-map-service.workspace = true
 garmin-model.workspace = true
 garmin-capture.workspace = true
 garmin-device.workspace = true
+garmin-i18n.workspace = true
 garmin-progress.workspace = true
 garmin-simulator.workspace = true
 garmin-services.workspace = true
@@ -28,6 +29,7 @@ miette = { workspace = true, features = ["fancy"] }
 ratatui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sys-locale.workspace = true
 tempfile.workspace = true
 termcolor.workspace = true
 termcolor-json.workspace = true

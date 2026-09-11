@@ -320,6 +320,7 @@ where
         }
     };
     let state = observe_device_state(device, &progress).await?;
+    retain_device_state(&progress, &state);
     crate::space::check_device_space(&state, &prepared.requirements)?;
     let mut journal = build_journal(
         plan,
@@ -393,6 +394,7 @@ where
         .await);
     }
     device_state.finish(&portable).await?;
+    publish_device_state(device, &progress).await;
     let cleanup = match plan.backup_policy {
         BackupPolicy::Verified => "Verified recovery backups retained in the capture",
         BackupPolicy::Skip => "Update evidence retained; no recovery backup was created",
@@ -610,7 +612,7 @@ where
     {
         return Err(MountedInstallError::RecoveryPlanMismatch);
     }
-    refresh_device_state(device, progress).await;
+    publish_device_state(device, progress).await;
     let committed_path = capture_root.join("mounted-update/transaction/committed.json");
     if tokio::fs::try_exists(&committed_path).await? {
         let committed = read_journal(&committed_path).await?;
@@ -1453,8 +1455,7 @@ where
     } else {
         return Ok(());
     };
-    publish_device_state(device, progress).await;
-    Ok(removal?)
+    refresh_after_mutation(device, progress, removal).await
 }
 
 async fn commit_removals<D>(
@@ -1489,8 +1490,7 @@ where
                 progress,
             )
             .await;
-        publish_device_state(device, progress).await;
-        removal?;
+        refresh_after_mutation(device, progress, removal).await?;
         operation += 1;
         write_transaction_event(capture, operation_index, CheckpointKind::Applied, original)
             .await?;
@@ -1530,8 +1530,7 @@ where
                 progress,
             )
             .await;
-        publish_device_state(device, progress).await;
-        removal?;
+        refresh_after_mutation(device, progress, removal).await?;
         operation += 1;
         write_transaction_event(capture, operation_index, CheckpointKind::Applied, target).await?;
         device_state
@@ -2153,8 +2152,7 @@ where
                     progress,
                 )
                 .await;
-            publish_device_state(device, progress).await;
-            removal?;
+            refresh_after_mutation(device, progress, removal).await?;
         }
     }
     upload_recovery_payload(device, write, payload, progress).await?;
@@ -2379,8 +2377,7 @@ where
     };
     match result {
         Ok(()) => {
-            let state = observe_device_state(device, state_progress).await?;
-            retain_device_state(state_progress, &state);
+            observe_device_state(device, state_progress).await?;
             Ok(())
         }
         Err(error) => {
@@ -3181,6 +3178,27 @@ where
     D: DeviceWrite + ?Sized,
 {
     let _ = observe_device_state(device, progress).await;
+}
+
+async fn refresh_after_mutation<D, E>(
+    device: &D,
+    progress: &ProgressReporter,
+    result: Result<(), E>,
+) -> Result<(), MountedInstallError>
+where
+    D: DeviceWrite + ?Sized,
+    E: Into<MountedInstallError>,
+{
+    match result {
+        Ok(()) => {
+            refresh_device_state(device, progress).await;
+            Ok(())
+        }
+        Err(error) => {
+            publish_device_state(device, progress).await;
+            Err(error.into())
+        }
+    }
 }
 
 fn retain_device_state(progress: &ProgressReporter, state: &garmin_device::DeviceStateSnapshot) {

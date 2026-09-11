@@ -16,6 +16,7 @@ use garmin_device::{
     discover_mtp_candidates, inventory_mass_storage, inventory_mtp,
     mtp_usb_reset_known_ineffective, open_mass_storage, open_mtp, reset_mtp_transport,
 };
+use garmin_i18n::Language;
 use garmin_map_service::{ClientIdentity, OmtClient};
 use garmin_model::map::{MapCatalog, MapComponent, MapVersionStatus};
 use garmin_progress::ProgressReporter;
@@ -51,6 +52,15 @@ enum ColorChoice {
     Always,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum LanguageChoice {
+    Auto,
+    #[value(name = "en", alias = "english")]
+    English,
+    #[value(name = "cs", alias = "czech")]
+    Czech,
+}
+
 #[derive(Debug, Parser)]
 #[command(version, about = "Unofficial Garmin-compatible map maintenance client")]
 struct Cli {
@@ -60,6 +70,16 @@ struct Cli {
     /// Control color in command output.
     #[arg(long, global = true, value_enum, default_value = "auto")]
     color: ColorChoice,
+    /// Set the interface language; defaults to `GARMIN_LANGUAGE` or the system locale.
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        value_name = "LANGUAGE",
+        env = "GARMIN_LANGUAGE",
+        default_value = "auto"
+    )]
+    language: LanguageChoice,
     /// Use a loopback map service.
     #[arg(long, global = true, value_name = "URL")]
     mock_server: Option<url::Url>,
@@ -380,6 +400,7 @@ async fn main() -> ExitCode {
 }
 
 async fn run_main(cli: Cli) -> Result<()> {
+    tui::configure_language(resolve_language(cli.language))?;
     configure_cache_dir(cli.cache_dir.as_deref())?;
     let terminal_ui = !cli.json && std::io::stdout().is_terminal();
     if cli.dry && (cli.command.is_some() || cli.mock_device.is_some()) {
@@ -459,6 +480,16 @@ async fn run_main(cli: Cli) -> Result<()> {
         }
     }
     if cancelled.is_some() { Ok(()) } else { result }
+}
+
+fn resolve_language(choice: LanguageChoice) -> Language {
+    match choice {
+        LanguageChoice::English => Language::English,
+        LanguageChoice::Czech => Language::Czech,
+        LanguageChoice::Auto => sys_locale::get_locales()
+            .find_map(|locale| Language::from_locale(&locale))
+            .unwrap_or_default(),
+    }
 }
 
 fn default_session_capture_path() -> Result<PathBuf> {
@@ -946,8 +977,19 @@ async fn offer_pending_recovery(
         ),
         (None, None) => return Ok(()),
     };
-    let body =
-        pending_recovery_confirmation_body(manifest, kind, plan_digest, recovery.as_ref(), actions);
+    let operation = match kind {
+        PendingRecoveryKind::Update => tui::RecoveryOperation::Update,
+        PendingRecoveryKind::Removal => tui::RecoveryOperation::Removal,
+    };
+    let body = tui::pending_recovery_confirmation_body(
+        update_confirmation_device(manifest),
+        operation,
+        plan_digest,
+        recovery
+            .as_ref()
+            .map(|recovery| recovery.transaction.display().to_string()),
+        actions,
+    );
     match session.pending_recovery(body, actions)? {
         tui::PendingRecoveryDecision::Recover => {
             let recovery = recovery
@@ -989,70 +1031,6 @@ fn clear_recovery_notice(store: &PendingRecoveryStore, recovery: &PendingRecover
             capture = %recovery.transaction.display(),
             "completed recovery notice could not be cleared"
         );
-    }
-}
-
-fn pending_recovery_confirmation_body(
-    manifest: &DeviceManifest,
-    kind: PendingRecoveryKind,
-    plan_digest: &str,
-    recovery: Option<&PendingRecovery>,
-    actions: tui::PendingRecoveryActions,
-) -> tui::ConfirmationBody {
-    let recovery_location = recovery.map_or_else(
-        || "Not retained on this host".to_owned(),
-        |recovery| recovery.transaction.display().to_string(),
-    );
-    let operation = match kind {
-        PendingRecoveryKind::Update => "Map update",
-        PendingRecoveryKind::Removal => "Map removal",
-    };
-    let introduction = match actions {
-        tui::PendingRecoveryActions::RecoverOrClear => indoc! {"
-            This device contains an interrupted transaction.
-            Resolve it before another device change."},
-        tui::PendingRecoveryActions::RecoverOnly => indoc! {"
-            This host retained an interrupted transaction.
-            Recover it before another device change."},
-        tui::PendingRecoveryActions::DiscardOnly => indoc! {"
-            The previous operation stopped before device changes began.
-            Discard the attempt to continue."},
-    };
-    let note = match actions {
-        tui::PendingRecoveryActions::RecoverOrClear => indoc! {"
-            Recover finishes the transaction.
-            Clear requires proof that the device is updated or untouched."},
-        tui::PendingRecoveryActions::RecoverOnly => indoc! {"
-        Recover finishes journal-authorized writes and cleanup."},
-        tui::PendingRecoveryActions::DiscardOnly => indoc! {"
-        Discard removes this notice. Cache and capture files remain."},
-    };
-    tui::ConfirmationBody {
-        introduction: ratatui::text::Text::raw(introduction),
-        fields: vec![
-            tui::ConfirmationField::new(
-                "Device",
-                update_confirmation_device(manifest),
-                tui::ConfirmationValueTone::Neutral,
-            ),
-            tui::ConfirmationField::new(
-                "Operation",
-                operation,
-                tui::ConfirmationValueTone::Warning,
-            ),
-            tui::ConfirmationField::new("Plan ID", plan_digest, tui::ConfirmationValueTone::Muted),
-            tui::ConfirmationField::new(
-                "Recovery",
-                recovery_location,
-                tui::ConfirmationValueTone::Path,
-            ),
-        ],
-        note: Some(ratatui::text::Text::raw(note)),
-        confirm_action: match actions {
-            tui::PendingRecoveryActions::DiscardOnly => "discard attempt",
-            _ => "recover now",
-        }
-        .to_owned(),
     }
 }
 
@@ -2248,7 +2226,6 @@ async fn recover_mounted_update_device(args: MountedUpdateRecoveryArgs, json: bo
             ),
         ],
         note: None,
-        confirm_action: "recover update".to_owned(),
     };
     authorize_device_write_details(
         &args.write_consent,
@@ -2327,7 +2304,6 @@ async fn recover_removal_device(args: RemovalRecoveryArgs, json: bool) -> Result
             ),
         ],
         note: None,
-        confirm_action: "recover files".to_owned(),
     };
     authorize_device_write_details(
         &args.write_consent,
@@ -2740,7 +2716,7 @@ async fn execute_removal_report(
         update_confirmation_device(manifest),
         &report.execution_plan.digest,
         removed_components.join(", "),
-        file_count(report.execution_plan.files_to_remove.len()),
+        report.execution_plan.files_to_remove.len(),
         format_bytes(report.execution_plan.bytes_to_remove),
         capture.root().display().to_string(),
     );
@@ -2918,9 +2894,9 @@ fn authorize_selected_update(
                     update_confirmation_device(&context.manifest),
                     &selection.components,
                     &selection.plan.digest,
-                    file_count(selection.plan.downloads.len()),
+                    selection.plan.downloads.len(),
                     format_bytes(selection.plan.total_bytes),
-                    file_count(selection.plan.files_to_remove.len()),
+                    selection.plan.files_to_remove.len(),
                     capture.root().display().to_string(),
                 )
                 .with_backup_plan_ids(&verified_plan.digest, &skipped_plan.digest)
@@ -2929,7 +2905,7 @@ fn authorize_selected_update(
                     .session
                     .as_deref_mut()
                     .context("interactive update session is unavailable")?
-                    .confirm_update("Continue with update?", body)?;
+                    .confirm_update(body)?;
                 if !decision.confirmed {
                     return Err(tui::Cancelled::new("update confirmation").into());
                 }
@@ -3516,13 +3492,10 @@ fn authorize_garmin_contact(
     )? {
         return Ok(());
     }
-    let body = tui::garmin_contact_confirmation_body(
-        garmin_map_service::omt_update_endpoint().to_string(),
-        may_download,
-    );
+    let endpoint = garmin_map_service::omt_update_endpoint().to_string();
     let confirmed = match session {
-        Some(session) => session.confirm_details("Contact Garmin?", body, "Contact Garmin"),
-        None => tui::confirm_details("Contact Garmin?", body, "Contact Garmin"),
+        Some(session) => session.confirm_garmin_contact(endpoint, may_download),
+        None => tui::confirm_garmin_contact(endpoint, may_download),
     }?;
     if confirmed {
         Ok(())
@@ -3717,7 +3690,7 @@ fn selected_map_actions(
                 .with_context(|| format!("selected map index {index} is outside the catalog"))?;
             Ok(tui::SelectedMapAction::new(
                 choice.name.clone(),
-                choice.install_label,
+                choice.operation,
             ))
         })
         .collect()
@@ -3977,7 +3950,7 @@ fn print_updates(response: &MapCatalog) {
             "{}\t{}\t{}\t{} option(s)",
             map.display_name,
             map_version_transition(map),
-            map_install_label(map),
+            map.operation().label(),
             map.install_options.len()
         );
     }
@@ -4235,7 +4208,7 @@ fn map_choices(response: &MapCatalog) -> Vec<tui::MapChoice> {
                 } else {
                     details.join(" · ")
                 },
-                install_label: map_install_label(map),
+                operation: map.operation(),
                 can_remove: map_removal_available(map),
                 cache: None,
             }
@@ -4245,10 +4218,6 @@ fn map_choices(response: &MapCatalog) -> Vec<tui::MapChoice> {
 
 fn map_removal_available(map: &MapComponent) -> bool {
     map.installation_state.is_present() && map.can_uninstall && !map.files_to_remove.is_empty()
-}
-
-fn map_install_label(map: &MapComponent) -> &'static str {
-    map.operation().label()
 }
 
 fn map_version_transition(map: &MapComponent) -> String {
@@ -4395,14 +4364,15 @@ fn format_rate(bytes_per_second: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplyArgs, BackupChoice, Cli, ColorChoice, Command, MapSelectionArgs, MockCommand,
-        UpdateCommand, UpdatePlanArgs, color_enabled, device_identification, format_bytes,
-        map_choices, mock_command, mounted_install_failure_presentation, parse_byte_size,
-        resolve_cache_dir, select_maps, selected_map_actions, should_prompt, tui, write_json,
+        ApplyArgs, BackupChoice, Cli, ColorChoice, Command, LanguageChoice, MapSelectionArgs,
+        MockCommand, UpdateCommand, UpdatePlanArgs, color_enabled, device_identification,
+        format_bytes, map_choices, mock_command, mounted_install_failure_presentation,
+        parse_byte_size, resolve_cache_dir, resolve_language, select_maps, selected_map_actions,
+        should_prompt, tui, write_json,
     };
     use clap::Parser;
     use garmin_device::{TransportKind, parse_manifest};
-    use garmin_model::map::{MapCatalog, MapComponent, MapFile};
+    use garmin_model::map::{MapCatalog, MapComponent, MapFile, MapOperation};
 
     #[tokio::test]
     async fn mock_test_exercises_the_production_update_workflow() {
@@ -4499,6 +4469,26 @@ mod tests {
     fn parses_sizes_with_library_units() {
         assert_eq!(parse_byte_size("256MB").unwrap().as_u64(), 256_000_000);
         assert_eq!(parse_byte_size("1GiB").unwrap().as_u64(), 1_073_741_824);
+    }
+
+    #[test]
+    fn explicit_language_resolves_without_system_detection() {
+        assert_eq!(
+            resolve_language(LanguageChoice::English),
+            garmin_i18n::Language::English
+        );
+        assert_eq!(
+            resolve_language(LanguageChoice::Czech),
+            garmin_i18n::Language::Czech
+        );
+    }
+
+    #[test]
+    fn language_is_a_global_root_option() {
+        let parsed =
+            Cli::try_parse_from(["garmin-cli", "device", "list", "--language", "cs"]).unwrap();
+
+        assert_eq!(parsed.language, LanguageChoice::Czech);
     }
 
     #[test]
@@ -4887,14 +4877,14 @@ mod tests {
         };
 
         let choices = map_choices(&response);
-        assert_eq!(choices[0].install_label, "Reinstall");
+        assert_eq!(choices[0].operation, MapOperation::Reinstall);
         assert_eq!(choices[0].version_transition, "(9.00) → 9.00");
         assert_eq!(choices[0].version_tone, tui::MapVersionTone::UpToDate);
         assert!(choices[0].description.contains("Europe"));
-        assert_eq!(choices[1].install_label, "Update");
+        assert_eq!(choices[1].operation, MapOperation::Update);
         assert_eq!(choices[1].version_transition, "(2025.10) → 2026.20");
         assert_eq!(choices[1].version_tone, tui::MapVersionTone::Outdated);
-        assert_eq!(choices[2].install_label, "Install");
+        assert_eq!(choices[2].operation, MapOperation::Install);
         assert_eq!(choices[2].version_transition, "(unknown) → unknown");
         assert_eq!(choices[2].version_tone, tui::MapVersionTone::Unknown);
     }
@@ -4965,9 +4955,9 @@ mod tests {
         let actions = selected_map_actions(&response, &[0, 1]).unwrap();
 
         assert_eq!(actions[0].name, "Base maps");
-        assert_eq!(actions[0].action, "Reinstall");
+        assert_eq!(actions[0].operation, MapOperation::Reinstall);
         assert_eq!(actions[1].name, "TopoActive Central Europe");
-        assert_eq!(actions[1].action, "Update");
+        assert_eq!(actions[1].operation, MapOperation::Update);
     }
 
     #[test]
