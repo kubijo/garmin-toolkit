@@ -55,7 +55,7 @@
           );
           webArgs = commonArgs // {
             CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
-            cargoExtraArgs = "-p garmin-hass-web --target wasm32-unknown-unknown";
+            cargoExtraArgs = "-p garmin-hass-web";
           };
           webCargoArtifacts = wasmCraneLib.buildDepsOnly (
             webArgs
@@ -63,22 +63,20 @@
               pname = "garmin-hass-web-deps";
             }
           );
-          webPackage = wasmCraneLib.buildPackage (
+          webPackage = wasmCraneLib.buildTrunkPackage (
             webArgs
             // {
               pname = "garmin-hass-web";
               cargoArtifacts = webCargoArtifacts;
-              nativeBuildInputs = [ pkgs.wasm-bindgen-cli_0_2_126 ];
-              postInstall = ''
+              trunkIndexPath = "apps/garmin-hass/web/index.html";
+              wasm-bindgen-cli = pkgs.wasm-bindgen-cli_0_2_126;
+              buildPhaseCargoCommand = ''
+                ( cd apps/garmin-hass/web && trunk build --release=true index.html )
+              '';
+              installPhaseCommand = ''
                 webRoot="$out/share/garmin-hass/web"
                 mkdir -p "$webRoot"
-                wasm-bindgen \
-                  --target web \
-                  --out-dir "$webRoot" \
-                  --out-name garmin_hass_web \
-                  target/wasm32-unknown-unknown/release/garmin_hass_web.wasm
-                install -Dm444 apps/garmin-hass/web/index.html "$webRoot/index.html"
-                install -Dm444 apps/garmin-hass/web/initializer.js "$webRoot/initializer.js"
+                cp -r apps/garmin-hass/web/dist/. "$webRoot/"
               '';
             }
           );
@@ -139,10 +137,10 @@
             test -f ${demoPackage}/share/garmin-hass/icon.png
             test -f ${demoPackage}/share/garmin-hass/logo.png
             test -f ${package}/share/garmin-hass/web/index.html
-            test -f ${package}/share/garmin-hass/web/initializer.js
-            test -f ${package}/share/garmin-hass/web/garmin_hass_web.js
-            test -f ${package}/share/garmin-hass/web/garmin_hass_web_bg.wasm
-            test -f ${demoPackage}/share/garmin-hass/web/garmin_hass_web_bg.wasm
+            find ${package}/share/garmin-hass/web -maxdepth 1 -name '*.js' -print -quit | grep -q .
+            find ${package}/share/garmin-hass/web -maxdepth 1 -name '*.wasm' -print -quit | grep -q .
+            find ${package}/share/garmin-hass/web -maxdepth 1 -name '*.svg' -print -quit | grep -q .
+            find ${demoPackage}/share/garmin-hass/web -maxdepth 1 -name '*.wasm' -print -quit | grep -q .
             touch "$out"
           '';
           devShell = craneLib.devShell {

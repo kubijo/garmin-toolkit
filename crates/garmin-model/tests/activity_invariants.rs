@@ -95,6 +95,67 @@ fn scalar_values_round_trip_and_render() {
 }
 
 #[test]
+fn activity_summary_round_trips_through_postcard() -> TestResult {
+    let summary = ActivitySummary::from_parts(
+        ActivitySport::Cycling,
+        time_range(1_000, 3_000)?,
+        totals()?,
+        metrics()?,
+    );
+
+    let encoded = postcard::to_stdvec(&summary)?;
+    let decoded = postcard::from_bytes::<ActivitySummary>(&encoded)?;
+
+    assert_eq!(decoded, summary);
+    Ok(())
+}
+
+#[test]
+fn wire_deserialization_revalidates_domain_values() -> TestResult {
+    #[derive(serde::Serialize)]
+    struct RangeWire {
+        start: Timestamp,
+        end: Timestamp,
+    }
+
+    #[derive(serde::Serialize)]
+    struct TotalsWire {
+        elapsed: ActivityDuration,
+        timer: ActivityDuration,
+        distance: Option<Distance>,
+        energy: Option<Energy>,
+        ascent: Option<Distance>,
+        descent: Option<Distance>,
+    }
+
+    let cadence = postcard::to_stdvec(&-1.0_f64)?;
+    assert!(postcard::from_bytes::<Cadence>(&cadence).is_err());
+
+    let latitude = postcard::to_stdvec(&91.0_f64)?;
+    assert!(postcard::from_bytes::<Latitude>(&latitude).is_err());
+
+    let longitude = postcard::to_stdvec(&f64::NAN)?;
+    assert!(postcard::from_bytes::<Longitude>(&longitude).is_err());
+
+    let range = postcard::to_stdvec(&RangeWire {
+        start: timestamp(2_000)?,
+        end: timestamp(1_000)?,
+    })?;
+    assert!(postcard::from_bytes::<TimeRange>(&range).is_err());
+
+    let totals = postcard::to_stdvec(&TotalsWire {
+        elapsed: ActivityDuration::from_milliseconds(1_000),
+        timer: ActivityDuration::from_milliseconds(2_000),
+        distance: None,
+        energy: None,
+        ascent: None,
+        descent: None,
+    })?;
+    assert!(postcard::from_bytes::<ActivityTotals>(&totals).is_err());
+    Ok(())
+}
+
+#[test]
 fn aggregates_expose_independent_measurements() -> TestResult {
     let totals = totals()?;
     assert_eq!(totals.elapsed().as_milliseconds(), 2_000);

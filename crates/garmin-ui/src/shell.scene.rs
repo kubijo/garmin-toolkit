@@ -1,10 +1,8 @@
 use gallery::prelude::*;
 use garmin_color::swatch;
-use garmin_i18n::{Intl, Language, Translations};
 use garmin_ui::{icons, profile, shell};
-use std::sync::OnceLock;
 
-scene_meta! { title: "Desktop / Shell" }
+scene_meta! { title: "Application / Shell" }
 
 const PRIMARY_DESTINATIONS: &[shell::Destination<'_>] = &[
     shell::Destination {
@@ -42,8 +40,7 @@ struct SelectorState {
 }
 
 #[scene(default)]
-fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
+fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let props = SceneProps {
         navigation: if ctx.buttons("navigation", &["expanded", "rail"], 0) == 0 {
             shell::Navigation::Expanded
@@ -60,15 +57,15 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         width: ctx.slider("width", 960.0, 360.0, 1280.0, 1.0),
         height: ctx.slider("height", 600.0, 360.0, 800.0, 1.0),
     };
-    show_shell(ctx, ui, props, "playground");
+    show_shell(ctx, ui, globals, props, "playground");
 }
 
 #[scene]
-fn expanded(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
+fn expanded(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     show_shell(
         ctx,
         ui,
+        globals,
         SceneProps {
             navigation: shell::Navigation::Expanded,
             active: 1,
@@ -82,11 +79,11 @@ fn expanded(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 #[scene]
-fn rail(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
+fn rail(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     show_shell(
         ctx,
         ui,
+        globals,
         SceneProps {
             navigation: shell::Navigation::Rail,
             active: 2,
@@ -100,11 +97,11 @@ fn rail(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 #[scene]
-fn narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
+fn narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     show_shell(
         ctx,
         ui,
+        globals,
         SceneProps {
             navigation: shell::Navigation::Rail,
             active: 3,
@@ -117,25 +114,13 @@ fn narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     );
 }
 
-#[scene]
-fn light(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply_palette(ui.style_mut(), &garmin_color::theme::GRAY_10);
-    show_shell(
-        ctx,
-        ui,
-        SceneProps {
-            navigation: shell::Navigation::Expanded,
-            active: 1,
-            profile: true,
-            window_controls: true,
-            width: 960.0,
-            height: 600.0,
-        },
-        "light",
-    );
-}
-
-fn show_shell(ctx: &mut SceneCtx<'_>, ui: &mut Ui, props: SceneProps, state_name: &'static str) {
+fn show_shell(
+    ctx: &mut SceneCtx<'_>,
+    ui: &mut Ui,
+    globals: &crate::Globals,
+    props: SceneProps,
+    state_name: &'static str,
+) {
     let state_id = egui::Id::new(("shell-gallery-selectors", state_name));
     let mut state = ui
         .data(|data| data.get_temp::<SelectorState>(state_id))
@@ -157,7 +142,7 @@ fn show_shell(ctx: &mut SceneCtx<'_>, ui: &mut Ui, props: SceneProps, state_name
             avatar: None,
         },
     ];
-    let intl = formatter();
+    let intl = globals.intl();
     let selector = profile::SelectorProps {
         intl: &intl,
         profiles: &profiles,
@@ -216,14 +201,4 @@ fn show_shell(ctx: &mut SceneCtx<'_>, ui: &mut Ui, props: SceneProps, state_name
         }
     });
     ui.data_mut(|data| data.insert_temp(state_id, state));
-}
-
-fn formatter() -> Intl {
-    static TRANSLATIONS: OnceLock<Translations> = OnceLock::new();
-    TRANSLATIONS
-        .get_or_init(|| {
-            Translations::bundled().expect("embedded catalogs are validated during the build")
-        })
-        .formatter(Language::English)
-        .expect("the gallery requests a bundled language")
 }

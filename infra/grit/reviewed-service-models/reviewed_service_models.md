@@ -17,7 +17,15 @@ or {
   $item <: contains visibility_modifier(),
   $name <: not or {
     `DeviceSnapshot`,
+    `DeviceCapability`,
+    `DeviceDataType`,
+    `DeploymentMode`,
     `InspectionState`,
+    `TransferDirection`,
+    `ProfileSnapshot`,
+    `ProfileAvatarSnapshot`,
+    `ActivitySnapshot`,
+    `ActivityDetailSnapshot`,
   }
 }
 ```

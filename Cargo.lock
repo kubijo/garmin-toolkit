@@ -1496,9 +1496,9 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "ecolor"
-version = "0.36.1"
+version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc883f505d446814c0226bef4b64564b9adb9966fc00c88c57ce6d827dd152d6"
+checksum = "0656a7530b9e2841ee7a5f983965bdd9840c32f4012f759cfd44b912cced6b34"
 dependencies = [
  "bytemuck",
  "cint",
@@ -1508,9 +1508,9 @@ dependencies = [
 
 [[package]]
 name = "eframe"
-version = "0.36.1"
+version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2afc0cbcdb6896b7bfb1dbbebaf7b9af9635ff38fd01e89bdd0174c1717b1857"
+checksum = "55ad41fac6e3149abb4866e93df37dbd33baa95db525c3368c944584e95a5dc2"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1546,9 +1546,9 @@ dependencies = [
 
 [[package]]
 name = "egui"
-version = "0.36.1"
+version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c977ac91dfaa651633fd9722e4ce9ccb32cda4c748b89a5cb57e504036e37c13"
+checksum = "dc938cc27cd911415e1e4d151bc56ff9df063d8db081374e87aeb805ea74b2ba"
 dependencies = [
  "accesskit",
  "ahash",
@@ -1568,9 +1568,9 @@ dependencies = [
 
 [[package]]
 name = "egui-wgpu"
-version = "0.36.1"
+version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fc362cc6bc8c1d7169c9cb0e7741ff1e03063681373d6e55cc3b25fd21213f3"
+checksum = "5cef1f6d1bba40b09a4d0d62cb822b81030922cfbf65c5373398c3a3caafc5bd"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1588,9 +1588,9 @@ dependencies = [
 
 [[package]]
 name = "egui-winit"
-version = "0.36.1"
+version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9327fc8edef2c57db9bcbcacc82c8a4b1e8cc64cd41a67db4419dcf643d88c83"
+checksum = "98466000559d66ba4db786a30448b01483946add4188e7f10f522a27b4fb89cc"
 dependencies = [
  "arboard",
  "bytemuck",
@@ -1609,9 +1609,9 @@ dependencies = [
 
 [[package]]
 name = "egui_extras"
-version = "0.36.1"
+version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e651e08ddf6bb8bfd964ad70e33bc721c093f2b77ab59580e7140c008dab68c"
+checksum = "05cbdc785020861553f230f23d330ba1fb72613b9d8e0e457f3bdc8ba6db6dcf"
 dependencies = [
  "ahash",
  "egui",
@@ -1625,9 +1625,9 @@ dependencies = [
 
 [[package]]
 name = "egui_glow"
-version = "0.36.1"
+version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69b65e45f8d8d7c6d848b3ec41f642b54ad828033f1511d4b4c9adc09040166a"
+checksum = "606ed4167daf341e5753d703285c4c1d562324b2c07aa8f405cd7d066fe58f3b"
 dependencies = [
  "bytemuck",
  "egui",
@@ -1648,9 +1648,9 @@ dependencies = [
 
 [[package]]
 name = "emath"
-version = "0.36.1"
+version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce03cf1604f74515830012c29991beb0b58f69e4e43f5afe22fa7afed65ccd5"
+checksum = "52c8d4141cf0f60fb2f7aefaf352d3ffa5171ef0ab09731c64391801e95e48f1"
 dependencies = [
  "bytemuck",
  "serde",
@@ -1722,9 +1722,9 @@ dependencies = [
 
 [[package]]
 name = "epaint"
-version = "0.36.1"
+version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11863a6b2b7823010c1090ddf4706947bdda46766742def0673195cbf7ff4a73"
+checksum = "a0ec0308dc23130fc1a7d4623a8534c2ed069c6dc84e258ee4f3de99615aa1a3"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1748,9 +1748,9 @@ dependencies = [
 
 [[package]]
 name = "epaint_default_fonts"
-version = "0.36.1"
+version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18dee69613aac468922cf28a32025eb7d7ed6985b61f73245848e58f37876c98"
+checksum = "773fa9c96dd0dbef887e39d0ed6177f141cce4d68e6041df77570aa3702dfa13"
 
 [[package]]
 name = "equivalent"
@@ -2263,7 +2263,9 @@ name = "garmin-color"
 version = "0.1.0"
 dependencies = [
  "cint",
+ "garmin-macros",
  "palette",
+ "serde",
  "thiserror 2.0.20",
 ]
 
@@ -2272,7 +2274,6 @@ name = "garmin-desktop"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "byte-unit",
  "eframe",
  "futures-lite",
  "garmin-color",
@@ -2282,6 +2283,7 @@ dependencies = [
  "garmin-i18n",
  "garmin-importer",
  "garmin-model",
+ "garmin-service-api",
  "garmin-services",
  "garmin-storage",
  "garmin-ui",
@@ -2367,15 +2369,22 @@ dependencies = [
  "futures-util",
  "garmin-device",
  "garmin-fixtures",
+ "garmin-model",
  "garmin-service-api",
+ "garmin-services",
  "garmin-storage",
+ "http-security-headers",
+ "nu-ansi-term",
  "remoc",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tokio-tungstenite",
  "tower-http",
  "tracing",
+ "tracing-logfmt",
  "tracing-subscriber",
 ]
 
@@ -2383,7 +2392,6 @@ dependencies = [
 name = "garmin-hass-web"
 version = "0.1.0"
 dependencies = [
- "byte-unit",
  "bytes",
  "eframe",
  "futures-util",
@@ -2425,6 +2433,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "garmin-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
+]
+
+[[package]]
 name = "garmin-map-service"
 version = "0.1.0"
 dependencies = [
@@ -2453,6 +2470,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "garmin-color",
+ "garmin-macros",
  "geo-types",
  "jiff",
  "mediatype",
@@ -2484,6 +2502,7 @@ dependencies = [
 name = "garmin-service-api"
 version = "0.1.0"
 dependencies = [
+ "garmin-macros",
  "garmin-model",
  "remoc",
  "serde",
@@ -2567,12 +2586,15 @@ dependencies = [
 name = "garmin-ui"
 version = "0.1.0"
 dependencies = [
+ "byte-unit",
  "cint",
  "egui",
  "egui_extras",
  "garmin-brand",
  "garmin-color",
  "garmin-i18n",
+ "garmin-model",
+ "garmin-service-api",
  "phosphor-svgs",
  "tempfile",
  "usvg",
@@ -3063,6 +3085,16 @@ name = "http-range-header"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9171a2ea8a68358193d15dd5d70c1c10a2afc3e7e4c5bc92bc9f025cebd7359c"
+
+[[package]]
+name = "http-security-headers"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb53850e2fa1b1ed16bf2b42dddec0f6689f6c86d53d889a3ee39e4f8fd443dd"
+dependencies = [
+ "getrandom 0.4.3",
+ "thiserror 2.0.20",
+]
 
 [[package]]
 name = "httparse"
@@ -4361,6 +4393,7 @@ version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa56da58097c7ae893c4097bb6d91bb5f7fa330053e07e033349db4d5f83ba8"
 dependencies = [
+ "serde",
  "uuid",
 ]
 
@@ -7425,6 +7458,19 @@ dependencies = [
  "log",
  "once_cell",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-logfmt"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a250055a3518b5efba928a18ffac8d32d42ea607a9affff4532144cd5b2e378e"
+dependencies = [
+ "nu-ansi-term",
+ "time",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]

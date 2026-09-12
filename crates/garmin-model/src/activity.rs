@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// Elapsed time stored canonically in milliseconds.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[garmin_macros::portable(copy, hash, ord)]
 pub struct ActivityDuration(u64);
 
 impl ActivityDuration {
@@ -39,7 +39,7 @@ impl fmt::Display for ActivityDuration {
 }
 
 /// Distance stored canonically in millimeters.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[garmin_macros::portable(copy, hash, ord)]
 pub struct Distance(u64);
 
 impl Distance {
@@ -66,7 +66,7 @@ impl fmt::Display for Distance {
 }
 
 /// Speed stored canonically in millimeters per second.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[garmin_macros::portable(copy, hash, ord)]
 pub struct Speed(u32);
 
 impl Speed {
@@ -93,7 +93,7 @@ impl fmt::Display for Speed {
 }
 
 /// Heart rate in beats per minute.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[garmin_macros::portable(copy, hash, ord)]
 pub struct HeartRate(u16);
 
 impl HeartRate {
@@ -120,8 +120,18 @@ impl fmt::Display for HeartRate {
 }
 
 /// Cadence in revolutions per minute.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[garmin_macros::portable(copy, custom_deserialize)]
 pub struct Cadence(f64);
+
+impl<'de> serde::Deserialize<'de> for Cadence {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <f64 as serde::Deserialize>::deserialize(deserializer)?;
+        Self::from_revolutions_per_minute(value).map_err(serde::de::Error::custom)
+    }
+}
 
 impl Cadence {
     /// Validates revolutions per minute.
@@ -152,7 +162,7 @@ impl fmt::Display for Cadence {
 }
 
 /// Mechanical power in watts.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[garmin_macros::portable(copy, hash, ord)]
 pub struct Power(u32);
 
 impl Power {
@@ -179,7 +189,7 @@ impl fmt::Display for Power {
 }
 
 /// Energy in kilocalories.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[garmin_macros::portable(copy, hash, ord)]
 pub struct Energy(u32);
 
 impl Energy {
@@ -240,7 +250,7 @@ impl fmt::Display for Temperature {
 }
 
 /// Supported normalized activity sport.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[garmin_macros::portable(copy, hash)]
 pub enum ActivitySport {
     Running,
     Cycling,
@@ -256,10 +266,26 @@ impl fmt::Display for ActivitySport {
 }
 
 /// An activity or lap time range.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[garmin_macros::portable(copy, custom_deserialize, eq)]
 pub struct TimeRange {
     start: Timestamp,
     end: Timestamp,
+}
+
+impl<'de> serde::Deserialize<'de> for TimeRange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct Wire {
+            start: Timestamp,
+            end: Timestamp,
+        }
+
+        let Wire { start, end } = <Wire as serde::Deserialize>::deserialize(deserializer)?;
+        Self::from_parts(start, end).map_err(serde::de::Error::custom)
+    }
 }
 
 impl TimeRange {
@@ -293,7 +319,7 @@ impl TimeRange {
 }
 
 /// Aggregate totals shared by activities and laps.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[garmin_macros::portable(copy, custom_deserialize, eq)]
 pub struct ActivityTotals {
     elapsed: ActivityDuration,
     timer: ActivityDuration,
@@ -301,6 +327,34 @@ pub struct ActivityTotals {
     energy: Option<Energy>,
     ascent: Option<Distance>,
     descent: Option<Distance>,
+}
+
+impl<'de> serde::Deserialize<'de> for ActivityTotals {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct Wire {
+            elapsed: ActivityDuration,
+            timer: ActivityDuration,
+            distance: Option<Distance>,
+            energy: Option<Energy>,
+            ascent: Option<Distance>,
+            descent: Option<Distance>,
+        }
+
+        let Wire {
+            elapsed,
+            timer,
+            distance,
+            energy,
+            ascent,
+            descent,
+        } = <Wire as serde::Deserialize>::deserialize(deserializer)?;
+        Self::from_parts(elapsed, timer, distance, energy, ascent, descent)
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 impl ActivityTotals {
@@ -360,7 +414,7 @@ impl ActivityTotals {
 }
 
 /// Average and maximum values for one optional aggregate measurement.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[garmin_macros::portable(copy, eq)]
 pub struct ActivityMetric<T> {
     average: Option<T>,
     maximum: Option<T>,
@@ -398,7 +452,7 @@ impl<T: Copy> ActivityMetric<T> {
 }
 
 /// Optional summary measurements shared by activities and laps.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[garmin_macros::portable(copy, default)]
 pub struct ActivityMetrics {
     speed: ActivityMetric<Speed>,
     heart_rate: ActivityMetric<HeartRate>,
@@ -464,7 +518,7 @@ impl ActivityMetrics {
 }
 
 /// Aggregate activity summary.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[garmin_macros::portable(copy)]
 pub struct ActivitySummary {
     sport: ActivitySport,
     time: TimeRange,

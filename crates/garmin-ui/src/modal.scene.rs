@@ -20,7 +20,6 @@ enum Backdrop {
 
 #[scene(default)]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let props = SceneProps {
         size: size(ctx.buttons("size", &["small", "medium", "large"], 1)),
         danger: ctx.toggle("danger", false),
@@ -37,7 +36,6 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn form(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         show_dialog(
             ui,
@@ -56,7 +54,6 @@ fn form(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn destructive(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         show_dialog(
             ui,
@@ -75,7 +72,6 @@ fn destructive(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn quit(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(640.0, 420.0), egui::Sense::hover());
         let mut parent = ui.new_child(egui::UiBuilder::new().max_rect(rect));
@@ -107,7 +103,6 @@ fn quit(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         show_dialog(
             ui,

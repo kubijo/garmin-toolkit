@@ -16,7 +16,6 @@ struct SceneProps {
 
 #[scene(default)]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let props = SceneProps {
         kind: kind(ctx.buttons("kind", KINDS, 0)),
         size: size(ctx.buttons("size", SIZES, 1)),
@@ -39,7 +38,6 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         for (label, kind) in [
             ("Primary", Kind::Primary),
@@ -71,7 +69,6 @@ fn states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         for (label, size) in [
             ("Small", Size::Small),
@@ -107,7 +104,6 @@ fn sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn group(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let selected = ctx.buttons("selected", &["auto", "dark", "light"], 0);
     stage!(ctx, ui, |ui| {
         let choices = [

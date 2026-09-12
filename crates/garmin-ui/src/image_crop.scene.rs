@@ -5,7 +5,6 @@ scene_meta! { title: "Components / Media / Image crop" }
 
 #[scene(default)]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let zoom = ctx.slider("zoom", 1.25, 1.0, 4.0, 0.05);
     let center_x = ctx.slider("horizontal", 0.5, 0.0, 1.0, 0.01);
     let center_y = ctx.slider("vertical", 0.45, 0.0, 1.0, 0.01);
@@ -29,7 +28,6 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn dialog(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, (640, 680), |ui| {
         let texture = texture(ui);
         let mut state = image_crop::State::default();

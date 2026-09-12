@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 blake3.workspace = true
 garmin-color.workspace = true
+garmin-macros.workspace = true
 geo-types.workspace = true
 jiff.workspace = true
 mediatype.workspace = true

@@ -21,8 +21,18 @@ macro_rules! define_id {
 macro_rules! text_value {
     ($name:ident, $error_type:ty, $error:expr, $doc:literal) => {
         #[doc = $doc]
-        #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        #[garmin_macros::portable(custom_deserialize, hash, ord)]
         pub struct $name(String);
+
+        impl<'de> ::serde::Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: ::serde::Deserializer<'de>,
+            {
+                let value = <String as ::serde::Deserialize>::deserialize(deserializer)?;
+                Self::from_string(value).map_err(::serde::de::Error::custom)
+            }
+        }
 
         impl $name {
             /// Parses trimmed, non-empty text.

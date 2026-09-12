@@ -39,8 +39,18 @@ text_value!(
 );
 
 /// Latitude in canonical decimal degrees.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[garmin_macros::portable(copy, custom_deserialize)]
 pub struct Latitude(f64);
+
+impl<'de> serde::Deserialize<'de> for Latitude {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let degrees = <f64 as serde::Deserialize>::deserialize(deserializer)?;
+        Self::from_degrees(degrees).map_err(serde::de::Error::custom)
+    }
+}
 
 impl Latitude {
     /// Validates decimal degrees in the inclusive `-90..=90` range.
@@ -71,8 +81,18 @@ impl fmt::Display for Latitude {
 }
 
 /// Longitude in canonical decimal degrees.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[garmin_macros::portable(copy, custom_deserialize)]
 pub struct Longitude(f64);
+
+impl<'de> serde::Deserialize<'de> for Longitude {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let degrees = <f64 as serde::Deserialize>::deserialize(deserializer)?;
+        Self::from_degrees(degrees).map_err(serde::de::Error::custom)
+    }
+}
 
 impl Longitude {
     /// Validates decimal degrees in the inclusive `-180..=180` range.
@@ -135,7 +155,7 @@ impl fmt::Display for Elevation {
 }
 
 /// A validated geographic coordinate.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[garmin_macros::portable(copy)]
 pub struct Coordinate {
     latitude: Latitude,
     longitude: Longitude,

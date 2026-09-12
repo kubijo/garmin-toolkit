@@ -46,6 +46,11 @@ impl Icon {
         self.source
     }
 
+    #[must_use]
+    pub const fn as_svg(&self) -> &'static [u8] {
+        self.svg
+    }
+
     /// Creates an egui image tinted with an application color.
     pub fn image(self, color: Color) -> Image<'static> {
         self.mask().tint(color.into_cint())

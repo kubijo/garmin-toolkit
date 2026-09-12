@@ -6,19 +6,16 @@ use eframe::egui::{
 };
 use garmin_color::{Color, swatch};
 use garmin_device::attachments as devices;
-use garmin_device::capabilities::{DataType, TransferDirection};
 use garmin_i18n::{Intl, Language, Translations, format_message};
-use garmin_model::{
-    activity::{ActivityDuration, ActivitySport, ActivitySummary, Distance},
-    identity::{
-        DisplayName, LanguagePreference, ProfilePreferences, ThemePreference, UnitSystem, User,
-        UserId,
-    },
+use garmin_model::identity::{LanguagePreference, ThemePreference, UnitSystem, User, UserId};
+use garmin_service_api::{
+    DeviceCapability, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
 };
 use garmin_services::{ActivityPreview, Application, UserContext};
 use garmin_ui::{
-    activity, device, file_import, icons, image_crop, input, modal, notification, path, profile,
+    activity, device, file_import, icons, image_crop, modal, notification, path, profile,
     profile_settings, progress, shell,
+    workspace::{self, Page},
 };
 
 use crate::{
@@ -39,7 +36,7 @@ pub struct Desktop {
     activity_path: Option<ActivityPath>,
     navigation: shell::Navigation,
     loaded: bool,
-    create_profile: Option<CreateProfile>,
+    create_profile: Option<profile::CreateState>,
     avatar_editor: Option<AvatarEditor>,
     quit: QuitState,
     import: ImportStatus,
@@ -89,7 +86,7 @@ impl Desktop {
         let output = shell::show(
             ui,
             &shell::Props {
-                product_name: "Garmin Toolkit",
+                product_name: crate::mode::WINDOW_TITLE,
                 navigation_groups: &[],
                 active: None,
                 navigation: shell::Navigation::Rail,
@@ -137,7 +134,7 @@ impl Desktop {
                 self.select_profile(index);
             }
             Some(profile::Action::Create) => {
-                self.create_profile = Some(CreateProfile::default());
+                self.create_profile = Some(profile::CreateState::default());
             }
             Some(profile::Action::Toggle | profile::Action::Settings | profile::Action::Logout)
             | None => {}
@@ -152,73 +149,21 @@ impl Desktop {
         drop_active: bool,
     ) {
         let profile_props = self.profile_props();
-        let device_views = self.device_views();
-        let device_destinations = device_views
-            .iter()
-            .map(|device| shell::Destination {
-                label: &device.name,
-                icon: device.icon,
-            })
-            .collect::<Vec<_>>();
-        let activities = format_message!(
-            &self.intl,
-            default_message: "Activities",
-        );
-        let settings = format_message!(
-            &self.intl,
-            default_message: "Profile settings",
-        );
-        let primary_destinations = [
-            shell::Destination {
-                label: &activities,
-                icon: icons::ACTIVITY,
-            },
-            shell::Destination {
-                label: &settings,
-                icon: icons::GEAR,
-            },
-        ];
-        let devices_label = format_message!(
-            &self.intl,
-            default_message: "Attached devices",
-        );
-        let navigation_groups = [
-            shell::NavigationGroup {
-                label: None,
-                destinations: &primary_destinations,
-            },
-            shell::NavigationGroup {
-                label: (!device_destinations.is_empty()).then_some(devices_label.as_str()),
-                destinations: &device_destinations,
-            },
-        ];
-        let toggle_navigation = format_message!(
-            &self.intl,
-            default_message: "Toggle navigation",
-        );
-        let choose_profile = format_message!(
-            &self.intl,
-            default_message: "Choose a profile",
-        );
+        let device_snapshots = self.device_snapshots();
         let window_copy = WindowCopy::new(&self.intl);
         let window_controls = window_copy.props(ui.ctx());
-        let profile_selector = profile::SelectorProps {
+        let props = workspace::Props {
+            product_name: crate::mode::WINDOW_TITLE,
             intl: &self.intl,
             profiles: &profile_props,
-            selected: Some(profile_index),
-            expanded: self.profile_menu_expanded,
-        };
-        let props = shell::Props {
-            product_name: "Garmin Toolkit",
-            navigation_groups: &navigation_groups,
-            active: self.page.index(&device_views),
+            selected_profile: profile_index,
+            profile_menu_expanded: self.profile_menu_expanded,
+            page: &self.page,
             navigation: self.navigation,
-            profile_selector: Some(&profile_selector),
-            toggle_label: &toggle_navigation,
-            profile_label: &choose_profile,
+            devices: &device_snapshots,
             window_controls: Some(&window_controls),
         };
-        let output = shell::show(ui, &props, |ui| {
+        let output = workspace::show(ui, &props, |ui| {
             if let Some(notice) = &self.notice {
                 notification::show(ui, &notice.props());
                 ui.add_space(12.0);
@@ -234,8 +179,11 @@ impl Desktop {
                     &self.profile_settings_props(profile_index),
                 )),
                 Page::Device(key) => {
-                    if let Some(device) = device_views.iter().find(|device| &device.key == key) {
-                        device.show(ui, &self.intl);
+                    if let Some(snapshot) = device_snapshots
+                        .iter()
+                        .find(|snapshot| &snapshot.key == key)
+                    {
+                        device::show_snapshot(ui, &self.intl, snapshot);
                     }
                     PageOutput::Device
                 }
@@ -243,11 +191,7 @@ impl Desktop {
         });
 
         self.handle_page_output(profile_index, output.inner);
-        let device_keys = device_views
-            .iter()
-            .map(|device| device.key.clone())
-            .collect::<Vec<_>>();
-        self.handle_shell_action(ui.ctx(), frame, output.action, &device_keys);
+        self.handle_shell_action(ui.ctx(), frame, output.action, &device_snapshots);
     }
 
     fn handle_page_output(&mut self, profile_index: usize, output: PageOutput) {
@@ -333,31 +277,18 @@ impl Desktop {
         let preferences = profile.preferences();
         profile_settings::Props {
             intl: &self.intl,
-            values: profile_settings::Values {
-                unit_system: match preferences.unit_system() {
-                    UnitSystem::Metric => profile_settings::UnitSystem::Metric,
-                    UnitSystem::Imperial => profile_settings::UnitSystem::Imperial,
-                },
-                language: match preferences.language() {
-                    LanguagePreference::English => profile_settings::Language::English,
-                    LanguagePreference::Czech => profile_settings::Language::Czech,
-                },
-                theme: match preferences.theme() {
-                    ThemePreference::Auto => profile_settings::Theme::Auto,
-                    ThemePreference::Dark => profile_settings::Theme::Dark,
-                    ThemePreference::Light => profile_settings::Theme::Light,
-                },
-            },
+            preferences,
             profile: self.profiles[profile_index].profile_props(),
+            picture_enabled: true,
             disabled: self.preferences_saving,
         }
     }
 
-    fn device_views(&self) -> Vec<DeviceView> {
+    fn device_snapshots(&self) -> Vec<DeviceSnapshot> {
         self.devices
             .presentations()
             .into_iter()
-            .map(|presentation| DeviceView::new(presentation, &self.intl))
+            .map(device_snapshot)
             .collect()
     }
 
@@ -366,10 +297,14 @@ impl Desktop {
         profile_index: usize,
         action: profile_settings::Action,
     ) {
-        if action == profile_settings::Action::ChoosePicture {
-            self.choose_profile_picture(profile_index);
-        } else {
-            self.update_preferences(profile_index, action);
+        match action {
+            profile_settings::Action::ChoosePicture => self.choose_profile_picture(profile_index),
+            profile_settings::Action::UpdatePreferences(preferences) => {
+                let user = &self.profiles[profile_index].user;
+                self.preferences_saving = true;
+                self.worker
+                    .update_preferences(UserContext::new(user.id()), preferences);
+            }
         }
     }
 
@@ -387,48 +322,12 @@ impl Desktop {
         }
     }
 
-    fn update_preferences(&mut self, profile_index: usize, action: profile_settings::Action) {
-        let user = &self.profiles[profile_index].user;
-        let current = user.profile().preferences();
-        let preferences = match action {
-            profile_settings::Action::ChoosePicture => return,
-            profile_settings::Action::UnitSystem(unit_system) => ProfilePreferences::from_parts(
-                match unit_system {
-                    profile_settings::UnitSystem::Metric => UnitSystem::Metric,
-                    profile_settings::UnitSystem::Imperial => UnitSystem::Imperial,
-                },
-                current.language(),
-                current.theme(),
-            ),
-            profile_settings::Action::Language(language) => ProfilePreferences::from_parts(
-                current.unit_system(),
-                match language {
-                    profile_settings::Language::English => LanguagePreference::English,
-                    profile_settings::Language::Czech => LanguagePreference::Czech,
-                },
-                current.theme(),
-            ),
-            profile_settings::Action::Theme(theme) => ProfilePreferences::from_parts(
-                current.unit_system(),
-                current.language(),
-                match theme {
-                    profile_settings::Theme::Auto => ThemePreference::Auto,
-                    profile_settings::Theme::Dark => ThemePreference::Dark,
-                    profile_settings::Theme::Light => ThemePreference::Light,
-                },
-            ),
-        };
-        self.preferences_saving = true;
-        self.worker
-            .update_preferences(UserContext::new(user.id()), preferences);
-    }
-
     fn handle_shell_action(
         &mut self,
         context: &Context,
         frame: &eframe::Frame,
         action: Option<shell::Action>,
-        device_keys: &[String],
+        devices: &[DeviceSnapshot],
     ) {
         match action {
             Some(shell::Action::ToggleNavigation) => {
@@ -445,7 +344,7 @@ impl Desktop {
                 self.profile_menu_expanded = false;
             }
             Some(shell::Action::Profile(profile::Action::Create)) => {
-                self.create_profile = Some(CreateProfile::default());
+                self.create_profile = Some(profile::CreateState::default());
                 self.profile_menu_expanded = false;
             }
             Some(shell::Action::Profile(profile::Action::Settings)) => {
@@ -473,7 +372,7 @@ impl Desktop {
             }
             Some(shell::Action::Window(shell::WindowAction::Close)) => self.request_quit(context),
             Some(shell::Action::Navigate(index)) => {
-                self.page = Page::from_index(index, device_keys).unwrap_or(Page::Activities);
+                self.page = Page::from_index(index, devices).unwrap_or(Page::Activities);
                 self.profile_menu_expanded = false;
             }
             None => {}
@@ -501,7 +400,7 @@ impl Desktop {
             operations.push(ActiveOperation::SavingPreferences);
         }
         if let Some(profile) = &self.create_profile {
-            operations.push(if profile.submitting {
+            operations.push(if profile.is_submitting() {
                 ActiveOperation::CreatingProfile
             } else {
                 ActiveOperation::ProfileDraft
@@ -722,9 +621,10 @@ impl Desktop {
                     }
                     Err(reason) => {
                         if let Some(dialog) = self.create_profile.as_mut() {
-                            dialog.submitting = false;
+                            dialog.set_problem(reason);
+                        } else {
+                            self.notice = Some(Notice::error(reason));
                         }
-                        self.notice = Some(Notice::error(reason));
                     }
                 },
                 worker::Event::ProfileUpdated(result) => {
@@ -847,60 +747,13 @@ impl Desktop {
         let Some(dialog) = self.create_profile.as_mut() else {
             return;
         };
-        let title = format_message!(&self.intl, default_message: "Create a profile");
-        let description = format_message!(
-            &self.intl,
-            default_message: "Profiles keep each person's activities and devices separate.",
-        );
-        let label = format_message!(&self.intl, default_message: "Profile name");
-        let placeholder = format_message!(&self.intl, default_message: "Enter a name");
-        let required = format_message!(&self.intl, default_message: "Enter a profile name");
-        let cancel = format_message!(&self.intl, default_message: "Cancel");
-        let create = if dialog.submitting {
-            format_message!(&self.intl, default_message: "Creating…")
-        } else {
-            format_message!(&self.intl, default_message: "Create")
-        };
-        let parsed = DisplayName::from_string(dialog.name.clone());
-        let message = (!dialog.name.is_empty() && parsed.is_err())
-            .then_some(input::Message::Error(required.as_str()));
-        let output = modal::show(
-            ui,
-            Id::new("create-profile"),
-            &modal::Props {
-                title: &title,
-                description: Some(&description),
-                size: modal::Size::Medium,
-                presentation: modal::Presentation::Modal,
-                cancel_label: &cancel,
-                backdrop_closes: Some(!dialog.submitting),
-                primary: modal::Primary {
-                    label: &create,
-                    icon: Some(icons::PLUS),
-                    kind: modal::PrimaryKind::Confirm,
-                    enabled: parsed.is_ok() && !dialog.submitting,
-                },
-            },
-            |ui| {
-                input::show(
-                    ui,
-                    &mut dialog.name,
-                    input::Props::new(&label)
-                        .placeholder(&placeholder)
-                        .message(message)
-                        .disabled(dialog.submitting),
-                )
-            },
-        );
-        match output.action {
-            Some(modal::Action::Cancel) if !dialog.submitting => self.create_profile = None,
-            Some(modal::Action::Primary) => {
-                if let Ok(display_name) = parsed {
-                    dialog.submitting = true;
-                    self.worker.create_profile(display_name);
-                }
+        match profile::create_dialog(ui, &self.intl, dialog) {
+            Some(profile::CreateAction::Cancel) => self.create_profile = None,
+            Some(profile::CreateAction::Submit(display_name)) => {
+                dialog.set_submitting(true);
+                self.worker.create_profile(display_name);
             }
-            Some(modal::Action::Cancel) | None => {}
+            None => {}
         }
     }
 
@@ -1164,196 +1017,52 @@ impl AvatarEditor {
     }
 }
 
-struct DeviceView {
-    key: String,
-    name: String,
-    identifier: Option<String>,
-    firmware: Option<String>,
-    status: String,
-    transfers: Vec<DeviceTransfer>,
-    storages: Vec<DeviceStorageView>,
-    icon: icons::Icon,
-}
-
-impl DeviceView {
-    fn new(presentation: devices::Presentation, intl: &Intl) -> Self {
-        let status = match presentation.state {
-            devices::InspectionState::Running => {
-                format_message!(intl, default_message: "Inspecting…")
-            }
-            devices::InspectionState::Ready => format_message!(intl, default_message: "Ready"),
-            devices::InspectionState::Failed => {
-                format_message!(intl, default_message: "Inspection failed")
-            }
-        };
-        let firmware = presentation
+fn device_snapshot(presentation: devices::Presentation) -> DeviceSnapshot {
+    DeviceSnapshot {
+        key: presentation.key,
+        name: presentation.name,
+        identifier: presentation
+            .identifier
+            .map(garmin_device::capabilities::DeviceId::into_u32),
+        software_version: presentation
             .software_version
-            .map(|version| version.to_string());
-        let icon = device_icon(&presentation.name);
-        let transfers = device_transfers(&presentation.capabilities, intl);
-        Self {
-            key: presentation.key,
-            name: presentation.name,
-            identifier: presentation.identifier.map(|id| id.to_string()),
-            firmware,
-            status,
-            transfers,
-            storages: presentation
-                .storage
-                .into_iter()
-                .flat_map(|state| state.storages)
-                .map(|storage| DeviceStorageView::new(storage, intl))
-                .collect(),
-            icon,
-        }
-    }
-
-    fn show(&self, ui: &mut Ui, intl: &Intl) {
-        let status_label = format_message!(intl, default_message: "Status");
-        let identifier_label = format_message!(intl, default_message: "Device ID");
-        let software_label = format_message!(intl, default_message: "Software");
-        let transfers_label = format_message!(intl, default_message: "Supported transfers");
-        let transfers = self
-            .transfers
-            .iter()
-            .map(|transfer| device::Transfer {
-                data: &transfer.data,
-                directions: &transfer.directions,
+            .map(garmin_device::capabilities::SoftwareVersion::into_hundredths),
+        inspection: match presentation.state {
+            devices::InspectionState::Running => InspectionState::Running,
+            devices::InspectionState::Ready => InspectionState::Ready,
+            devices::InspectionState::Failed => InspectionState::Failed,
+        },
+        capabilities: presentation
+            .capabilities
+            .into_iter()
+            .filter_map(|capability| {
+                let data_type = match capability.data_type() {
+                    garmin_device::capabilities::DataType::Activity => DeviceDataType::Activity,
+                    garmin_device::capabilities::DataType::Workout => DeviceDataType::Workout,
+                    garmin_device::capabilities::DataType::Course => DeviceDataType::Course,
+                    _ => return None,
+                };
+                let direction = match capability.direction() {
+                    garmin_device::capabilities::TransferDirection::OutputFromUnit => {
+                        TransferDirection::OutputFromUnit
+                    }
+                    garmin_device::capabilities::TransferDirection::InputToUnit => {
+                        TransferDirection::InputToUnit
+                    }
+                    garmin_device::capabilities::TransferDirection::InputOutput => {
+                        TransferDirection::InputOutput
+                    }
+                };
+                Some(DeviceCapability {
+                    data_type,
+                    direction,
+                })
             })
-            .collect::<Vec<_>>();
-        device::show(
-            ui,
-            &device::Props {
-                name: &self.name,
-                connection: "USB/MTP",
-                identifier: self.identifier.as_deref(),
-                software: self.firmware.as_deref(),
-                status: &self.status,
-                status_label: &status_label,
-                identifier_label: &identifier_label,
-                software_label: &software_label,
-                transfers_label: &transfers_label,
-                transfers: &transfers,
-                storages: &self
-                    .storages
-                    .iter()
-                    .map(|storage| garmin_ui::capacity::Props {
-                        label: &storage.label,
-                        detail: &storage.detail,
-                        bytes: storage.bytes,
-                    })
-                    .collect::<Vec<_>>(),
-                icon: self.icon,
-            },
-        );
-    }
-}
-
-struct DeviceTransfer {
-    data: String,
-    directions: String,
-}
-
-struct DeviceStorageView {
-    label: String,
-    detail: String,
-    bytes: Option<(u64, u64)>,
-}
-
-impl DeviceStorageView {
-    fn new(storage: garmin_device::DeviceStorageState, intl: &Intl) -> Self {
-        let label = if storage.writable == Some(false) {
-            format_message!(intl, default_message: "{storage} · read-only", values: { storage: storage.label })
-        } else {
-            storage.label
-        };
-        let measured = storage.capacity.bytes();
-        let bytes = measured.map(|(total, free)| (total - free, total));
-        let detail = if let Some((total, free)) = measured {
-            format_message!(intl,
-            default_message: "{used} used · {free} free · {total} total",
-            values: {
-                used: capacity_bytes(total - free),
-                free: capacity_bytes(free),
-                total: capacity_bytes(total)
-            })
-        } else {
-            let reason = match storage.capacity {
-                garmin_device::StorageCapacity::Unavailable { reason } => reason,
-                garmin_device::StorageCapacity::Available { .. } => {
-                    "The device reported invalid storage totals".to_owned()
-                }
-            };
-            format_message!(intl,
-                default_message: "Could not read storage usage: {reason}",
-                values: { reason: reason })
-        };
-        Self {
-            label,
-            detail,
-            bytes,
-        }
-    }
-}
-
-fn capacity_bytes(bytes: u64) -> String {
-    format!(
-        "{:.2}",
-        byte_unit::Byte::from_u64(bytes).get_appropriate_unit(byte_unit::UnitType::Decimal)
-    )
-}
-
-fn device_transfers(capabilities: &[devices::Capability], intl: &Intl) -> Vec<DeviceTransfer> {
-    let data_types = [
-        (
-            DataType::Activity,
-            format_message!(intl, default_message: "Activities"),
-        ),
-        (
-            DataType::Workout,
-            format_message!(intl, default_message: "Workouts"),
-        ),
-        (
-            DataType::Course,
-            format_message!(intl, default_message: "Courses"),
-        ),
-    ];
-    data_types
-        .into_iter()
-        .filter_map(|(data_type, data)| {
-            let readable = capabilities.iter().any(|capability| {
-                capability.data_type() == data_type
-                    && matches!(
-                        capability.direction(),
-                        TransferDirection::OutputFromUnit | TransferDirection::InputOutput
-                    )
-            });
-            let writable = capabilities.iter().any(|capability| {
-                capability.data_type() == data_type
-                    && matches!(
-                        capability.direction(),
-                        TransferDirection::InputToUnit | TransferDirection::InputOutput
-                    )
-            });
-            let directions = match (readable, writable) {
-                (true, true) => format_message!(intl, default_message: "Read and write"),
-                (true, false) => format_message!(intl, default_message: "Read"),
-                (false, true) => format_message!(intl, default_message: "Write"),
-                (false, false) => return None,
-            };
-            Some(DeviceTransfer { data, directions })
-        })
-        .collect()
-}
-
-fn device_icon(name: &str) -> icons::Icon {
-    let name = name.to_lowercase();
-    if name.contains("edge") {
-        icons::BICYCLE
-    } else if name.contains("fenix") || name.contains("fēnix") || name.contains("venu") {
-        icons::WATCH
-    } else {
-        icons::HARD_DRIVE
+            .collect(),
+        storages: presentation
+            .storage
+            .map(|storage| storage.storages)
+            .unwrap_or_default(),
     }
 }
 
@@ -1385,46 +1094,11 @@ impl WindowCopy {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-enum Page {
-    #[default]
-    Activities,
-    ProfileSettings,
-    Device(String),
-}
-
-impl Page {
-    fn index(&self, devices: &[DeviceView]) -> Option<usize> {
-        match self {
-            Self::Activities => Some(0),
-            Self::ProfileSettings => Some(1),
-            Self::Device(key) => devices
-                .iter()
-                .position(|device| &device.key == key)
-                .map(|index| index + 2),
-        }
-    }
-
-    fn from_index(index: usize, device_keys: &[String]) -> Option<Self> {
-        match index {
-            0 => Some(Self::Activities),
-            1 => Some(Self::ProfileSettings),
-            _ => device_keys.get(index - 2).cloned().map(Self::Device),
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 enum PageOutput {
     Activities((Option<file_import::Action>, Option<activity::Action>)),
     Settings(Option<profile_settings::Action>),
     Device,
-}
-
-#[derive(Default)]
-struct CreateProfile {
-    name: String,
-    submitting: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1661,7 +1335,7 @@ struct ProfileView {
     accent: Color,
     avatar: Option<profile::AvatarImage>,
     previews: Vec<ActivityPreview>,
-    activities: Vec<ActivityView>,
+    activities: Vec<activity::Presentation>,
 }
 
 impl ProfileView {
@@ -1676,7 +1350,7 @@ impl ProfileView {
         let activities = profile
             .activities
             .iter()
-            .map(|preview| ActivityView::new(preview, intl, units))
+            .map(|preview| activity_presentation(preview, intl, units))
             .collect();
         let accent = profile.user.profile().accent().unwrap_or(swatch::ACTION);
         Self {
@@ -1692,7 +1366,7 @@ impl ProfileView {
         self.activities = self
             .previews
             .iter()
-            .map(|preview| ActivityView::new(preview, intl, units))
+            .map(|preview| activity_presentation(preview, intl, units))
             .collect();
     }
 
@@ -1707,14 +1381,14 @@ impl ProfileView {
     fn activity_props(&self) -> Vec<activity::ItemProps<'_>> {
         self.activities
             .iter()
-            .map(ActivityView::item_props)
+            .map(activity::Presentation::item_props)
             .collect()
     }
 
     fn metric_props(&self, selected: usize) -> Vec<activity::MetricProps<'_>> {
         self.activities
             .get(selected)
-            .map_or_else(Vec::new, ActivityView::metric_props)
+            .map_or_else(Vec::new, activity::Presentation::metric_props)
     }
 
     fn detail_props<'a>(
@@ -1729,74 +1403,16 @@ impl ProfileView {
     }
 }
 
-struct ActivityView {
-    icon: icons::Icon,
-    title: String,
-    subtitle: String,
-    distance: Option<String>,
-    duration: String,
-    metrics: Vec<MetricView>,
-}
-
-impl ActivityView {
-    fn new(preview: &ActivityPreview, intl: &Intl, units: UnitSystem) -> Self {
-        let summary = preview.summary();
-        let title = sport_title(summary.sport(), intl);
-        let icon = sport_icon(summary.sport());
-        let source = preview
-            .creator()
-            .product_name()
-            .map_or_else(|| "FIT".to_owned(), ToString::to_string);
-        let subtitle = format_message!(
-            intl,
-            default_message: "{start} · {source}",
-            values: {
-                start: summary.time().start().to_string(),
-                source: source,
-            },
-        );
-        let totals = summary.totals();
-        let distance = totals.distance().map(|value| format_distance(value, units));
-        let duration = duration(totals.timer());
-        let metrics = metrics(summary, intl, units);
-        Self {
-            icon,
-            title,
-            subtitle,
-            distance,
-            duration,
-            metrics,
-        }
-    }
-
-    fn item_props(&self) -> activity::ItemProps<'_> {
-        activity::ItemProps {
-            icon: self.icon,
-            title: &self.title,
-            subtitle: &self.subtitle,
-            distance: self.distance.as_deref(),
-            duration: &self.duration,
-        }
-    }
-
-    fn metric_props(&self) -> Vec<activity::MetricProps<'_>> {
-        self.metrics.iter().map(MetricView::props).collect()
-    }
-
-    fn detail_props<'a>(
-        &'a self,
-        metrics: &'a [activity::MetricProps<'a>],
-        path: path::Props<'a>,
-    ) -> activity::DetailProps<'a> {
-        activity::DetailProps {
-            icon: self.icon,
-            title: &self.title,
-            subtitle: &self.subtitle,
-            metrics,
-            path: Some(path),
-            footer: None,
-        }
-    }
+fn activity_presentation(
+    preview: &ActivityPreview,
+    intl: &Intl,
+    units: UnitSystem,
+) -> activity::Presentation {
+    let source = preview
+        .creator()
+        .product_name()
+        .map_or("FIT", |value| value.as_str());
+    activity::Presentation::from_summary(preview.summary(), source, intl, units)
 }
 
 struct ActivityPath {
@@ -1834,162 +1450,5 @@ impl ActivityPath {
             .iter()
             .map(|points| path::Segment { points })
             .collect()
-    }
-}
-
-struct MetricView {
-    label: String,
-    value: String,
-}
-
-impl MetricView {
-    fn props(&self) -> activity::MetricProps<'_> {
-        activity::MetricProps {
-            label: &self.label,
-            value: &self.value,
-        }
-    }
-}
-
-fn metrics(summary: ActivitySummary, intl: &Intl, units: UnitSystem) -> Vec<MetricView> {
-    let totals = summary.totals();
-    let mut metrics = Vec::with_capacity(4);
-    if let Some(distance) = totals.distance() {
-        metrics.push(MetricView {
-            label: format_message!(intl, default_message: "Distance"),
-            value: format_distance(distance, units),
-        });
-    }
-    metrics.push(MetricView {
-        label: format_message!(intl, default_message: "Active time"),
-        value: duration(totals.timer()),
-    });
-    if let Some(heart_rate) = summary.metrics().average_heart_rate() {
-        metrics.push(MetricView {
-            label: format_message!(intl, default_message: "Average heart rate"),
-            value: heart_rate.to_string(),
-        });
-    }
-    if let Some(ascent) = totals.ascent() {
-        metrics.push(MetricView {
-            label: format_message!(intl, default_message: "Ascent"),
-            value: format_distance(ascent, units),
-        });
-    }
-    metrics
-}
-
-fn format_distance(value: Distance, units: UnitSystem) -> String {
-    match units {
-        UnitSystem::Metric => metric_distance(value),
-        UnitSystem::Imperial => imperial_distance(value),
-    }
-}
-
-fn metric_distance(value: Distance) -> String {
-    let millimeters = u128::from(value.as_millimeters());
-    if millimeters >= 1_000_000 {
-        let hundredths = (millimeters + 5_000) / 10_000;
-        format!("{}.{:02} km", hundredths / 100, hundredths % 100)
-    } else {
-        format!("{} m", (millimeters + 500) / 1_000)
-    }
-}
-
-fn imperial_distance(value: Distance) -> String {
-    const MILLIMETERS_PER_MILE: u128 = 1_609_344;
-    let millimeters = u128::from(value.as_millimeters());
-    if millimeters >= MILLIMETERS_PER_MILE {
-        let hundredths = (millimeters * 100 + MILLIMETERS_PER_MILE / 2) / MILLIMETERS_PER_MILE;
-        format!("{}.{:02} mi", hundredths / 100, hundredths % 100)
-    } else {
-        let feet = (millimeters * 10 + 1_524) / 3_048;
-        format!("{feet} ft")
-    }
-}
-
-fn duration(value: ActivityDuration) -> String {
-    let seconds = (value.as_milliseconds() + 500) / 1_000;
-    let hours = seconds / 3_600;
-    let minutes = seconds % 3_600 / 60;
-    if hours > 0 {
-        format!("{hours} h {minutes} min")
-    } else if minutes > 0 {
-        format!("{minutes} min")
-    } else {
-        format!("{seconds} s")
-    }
-}
-
-const fn sport_icon(sport: ActivitySport) -> icons::Icon {
-    match sport {
-        ActivitySport::Running => icons::PERSON_SIMPLE_RUN,
-        ActivitySport::Cycling => icons::BICYCLE,
-    }
-}
-
-fn sport_title(sport: ActivitySport, intl: &Intl) -> String {
-    match sport {
-        ActivitySport::Running => format_message!(intl, default_message: "Running"),
-        ActivitySport::Cycling => format_message!(intl, default_message: "Cycling"),
-    }
-}
-
-#[cfg(test)]
-mod preference_tests {
-    use super::*;
-
-    #[test]
-    fn units_change_distance_rendering_without_changing_the_value() {
-        let value = Distance::from_millimeters(10_000_000);
-
-        assert_eq!(format_distance(value, UnitSystem::Metric), "10.00 km");
-        assert_eq!(format_distance(value, UnitSystem::Imperial), "6.21 mi");
-        assert_eq!(value.as_millimeters(), 10_000_000);
-    }
-
-    #[test]
-    fn activity_duration_is_compact() {
-        assert_eq!(
-            duration(ActivityDuration::from_milliseconds(42_000)),
-            "42 s"
-        );
-        assert_eq!(
-            duration(ActivityDuration::from_milliseconds(3_180_000)),
-            "53 min"
-        );
-        assert_eq!(
-            duration(ActivityDuration::from_milliseconds(7_500_000)),
-            "2 h 5 min"
-        );
-    }
-
-    #[test]
-    fn device_transfers_group_direction_specific_capabilities() {
-        let translations = Translations::bundled().expect("embedded catalogs are valid");
-        let intl = translations
-            .formatter(Language::English)
-            .expect("the source locale is available");
-        let capabilities = [
-            devices::Capability::new(DataType::Activity, TransferDirection::OutputFromUnit),
-            devices::Capability::new(DataType::Workout, TransferDirection::OutputFromUnit),
-            devices::Capability::new(DataType::Workout, TransferDirection::InputToUnit),
-            devices::Capability::new(DataType::Course, TransferDirection::OutputFromUnit),
-            devices::Capability::new(DataType::Course, TransferDirection::InputToUnit),
-        ];
-
-        let transfers = device_transfers(&capabilities, &intl)
-            .into_iter()
-            .map(|transfer| (transfer.data, transfer.directions))
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            transfers,
-            [
-                ("Activities".to_owned(), "Read".to_owned()),
-                ("Workouts".to_owned(), "Read and write".to_owned()),
-                ("Courses".to_owned(), "Read and write".to_owned()),
-            ]
-        );
     }
 }

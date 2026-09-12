@@ -8,7 +8,7 @@ license = "AGPL-3.0-or-later"
 
 [package.metadata.cargo-machete]
 # Build-time scene discovery hides these direct dependencies.
-ignored = ["garmin-color", "garmin-i18n"]
+ignored = ["garmin-color", "garmin-i18n", "garmin-model", "garmin-service-api"]
 
 [lib]
 path = "lib.rs"
@@ -20,10 +20,12 @@ path = "main.rs"
 
 [dependencies]
 crossterm = "=0.29.0"
-gallery = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.9.0", features = ["extras-svg"] }
+gallery = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.10.1", features = ["extras-svg"] }
 garmin-cli-tui = { path = "../../apps/garmin-cli/tui", features = ["gallery"] }
 garmin-color = { path = "../../crates/garmin-color" }
 garmin-i18n = { path = "../../crates/garmin-i18n" }
+garmin-model = { path = "../../crates/garmin-model" }
+garmin-service-api = { path = "../../crates/garmin-service-api" }
 garmin-progress = { path = "../../crates/garmin-progress" }
 garmin-ui = { path = "../../crates/garmin-ui" }
 nerd_font = "=0.3.1"
@@ -31,12 +33,13 @@ num-traits = "=0.2.19"
 parley_ratatui = "=0.3.4"
 pollster = "=0.4.0"
 ratatui = "=0.30.2"
+serde = { version = "=1.0.229", features = ["derive"] }
 
 [build-dependencies]
-gallery-build = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.9.0", package = "gallery-build" }
+gallery-build = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.10.1", package = "gallery-build" }
 
 [dev-dependencies]
-egui_kittest = { version = "=0.36.1", features = ["eframe"] }
+egui_kittest = { version = "=0.36.2", features = ["eframe"] }
 
 [workspace]
 

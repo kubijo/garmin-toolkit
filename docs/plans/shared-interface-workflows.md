@@ -21,6 +21,10 @@ plan owns user-visible workflow parity between its browser client and the native
    across reconnects.
 7. Prove offline sync, visualization, export, snapshot and restore, and one confirmed upload through both clients.
 8. Use only original or individually licensed artwork with generated attribution.
+9. Complete a keyboard-only audit of both shells, including focus visibility, traversal order, modal trapping, and
+   reconnect recovery.
+10. Add redacted structured diagnostics with configurable startup verbosity, bounded live history, rotated log files,
+    shared filtering, and explicit download from the UI.
 
 ## Target edges
 

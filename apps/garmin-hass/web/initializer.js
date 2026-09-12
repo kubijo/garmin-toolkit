@@ -1,9 +1,9 @@
-import init from './garmin_hass_web.js';
-
 const message = document.querySelector('#loading-message');
 const progress = document.querySelector('#loading-progress');
 const detail = document.querySelector('#loading-detail');
 const trace = document.querySelector('#loading-trace');
+let pendingProgress;
+let progressFrame;
 
 function size(bytes) {
     return new Intl.NumberFormat(undefined, {
@@ -13,64 +13,53 @@ function size(bytes) {
     }).format(bytes / 1_000_000);
 }
 
-function rate(bytes, started) {
-    const seconds = Math.max((performance.now() - started) / 1000, 0.001);
-    return `${size(bytes / seconds)}/s`;
-}
-
-async function download(url) {
-    const response = await fetch(url, { cache: 'no-cache' });
-    if (!response.ok) {
-        throw new Error(`WASM download failed: HTTP ${response.status}`);
-    }
-
-    const total = Number(response.headers.get('Content-Length')) || undefined;
+export default function () {
     const started = performance.now();
-    if (!response.body) {
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        detail.textContent = `${size(bytes.length)} downloaded`;
-        return bytes;
+    function renderProgress() {
+        progressFrame = undefined;
+        const { current, total } = pendingProgress;
+        const done = total > 0 && current >= total;
+        if (total > 0) {
+            const ratio = Math.min(current / total, 1);
+            progress.dataset.determinate = 'true';
+            progress.style.setProperty('--loading-progress', ratio);
+            progress.setAttribute('aria-valuemin', '0');
+            progress.setAttribute('aria-valuemax', String(total));
+            progress.setAttribute('aria-valuenow', String(current));
+        }
+        if (done) {
+            message.textContent = 'Starting Garmin Toolkit…';
+            detail.textContent = 'Download complete';
+            trace.textContent = 'Initializing the application. The first frame will replace this screen.';
+            return;
+        }
+        const seconds = Math.max((performance.now() - started) / 1000, 0.001);
+        const amount = total > 0 ? `${size(current)} of ${size(total)}` : size(current);
+        detail.textContent = `${amount} · ${size(current / seconds)}/s`;
     }
 
-    const reader = response.body.getReader();
-    const chunks = [];
-    let received = 0;
-    if (total) {
-        progress.max = total;
-        progress.value = 0;
-    }
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        received += value.length;
-        if (total) progress.value = received;
-        const amount = total ? `${size(received)} of ${size(total)}` : size(received);
-        detail.textContent = `${amount} · ${rate(received, started)}`;
-    }
-
-    const bytes = new Uint8Array(received);
-    let offset = 0;
-    for (const chunk of chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.length;
-    }
-    return bytes;
+    return {
+        onStart() {
+            detail.textContent = 'Starting download…';
+            trace.textContent = 'Fetching the browser application from the host.';
+        },
+        onProgress({ current, total }) {
+            pendingProgress = { current, total };
+            if (progressFrame === undefined) {
+                progressFrame = requestAnimationFrame(renderProgress);
+            }
+        },
+        onFailure(error) {
+            if (progressFrame !== undefined) {
+                cancelAnimationFrame(progressFrame);
+                progressFrame = undefined;
+            }
+            pendingProgress = undefined;
+            document.querySelector('#loading').setAttribute('aria-busy', 'false');
+            message.textContent = 'Garmin Toolkit could not start.';
+            detail.textContent = error instanceof Error ? error.message : String(error);
+            trace.textContent = 'Reload the page. If the problem persists, inspect the host log.';
+            console.error(error);
+        },
+    };
 }
-
-async function start() {
-    trace.textContent = 'Downloading the browser application.';
-    const bytes = await download(new URL('./garmin_hass_web_bg.wasm', import.meta.url));
-    message.textContent = 'Starting Garmin Toolkit…';
-    detail.textContent = 'Download complete';
-    trace.textContent = 'Initializing the application. The first frame will replace this screen.';
-    await init(bytes);
-}
-
-start().catch(error => {
-    document.querySelector('#loading').setAttribute('aria-busy', 'false');
-    message.textContent = 'Garmin Toolkit could not start.';
-    detail.textContent = error instanceof Error ? error.message : String(error);
-    trace.textContent = 'Reload the page. If the problem persists, inspect the host log.';
-    console.error(error);
-});

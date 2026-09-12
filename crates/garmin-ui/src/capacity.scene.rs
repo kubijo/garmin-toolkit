@@ -19,7 +19,6 @@ fn long_metadata(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 fn show(ctx: &mut SceneCtx<'_>, ui: &mut Ui, unavailable: bool, long: bool) {
-    garmin_ui::theme::apply(ui.style_mut());
     let width = ctx.buttons("width", &["360", "720"], 1);
     ctx.stage(
         ui,

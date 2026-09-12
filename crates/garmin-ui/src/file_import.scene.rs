@@ -5,7 +5,6 @@ scene_meta! { title: "Desktop / Import" }
 
 #[scene(default)]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let drop_active = ctx.toggle("drop active", false);
     let enabled = ctx.toggle("enabled", true);
     stage!(ctx, ui, |ui| {
@@ -26,7 +25,6 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         ui.set_width(320.0);
         let _ = file_import::show(

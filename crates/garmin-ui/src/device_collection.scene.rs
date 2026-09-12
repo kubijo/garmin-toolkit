@@ -36,7 +36,6 @@ fn failure(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 fn show(ctx: &mut SceneCtx<'_>, ui: &mut Ui, state: device::CollectionState<'_>, width: f32) {
-    garmin_ui::theme::apply(ui.style_mut());
     ctx.stage(ui, Stage::Fixed(egui::vec2(width, 220.0)), |ui| {
         ui.heading("Garmin Toolkit");
         ui.label("Devices");

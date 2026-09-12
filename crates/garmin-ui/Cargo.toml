@@ -12,12 +12,15 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+byte-unit.workspace = true
 garmin-brand.workspace = true
 cint.workspace = true
 garmin-color.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
 garmin-i18n.workspace = true
+garmin-model.workspace = true
+garmin-service-api.workspace = true
 
 [build-dependencies]
 phosphor-svgs.workspace = true

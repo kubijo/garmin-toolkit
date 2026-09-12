@@ -1,17 +1,14 @@
 use gallery::prelude::*;
 use garmin_color::swatch;
-use garmin_i18n::{Intl, Language, Translations};
 use garmin_ui::{profile, shell};
-use std::sync::OnceLock;
 
 scene_meta! { title: "Components / Navigation / Header selector" }
 
 #[scene(default)]
-fn profile_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
+fn profile_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let id = egui::Id::new("profile-selector-gallery-expanded");
     let mut expanded = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(true);
-    let intl = formatter();
+    let intl = globals.intl();
     let profiles = [profile::ProfileProps {
         display_name: "Alex Rider",
         accent: swatch::cyan::G40,
@@ -46,14 +43,4 @@ fn profile_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         }
     });
     ui.data_mut(|data| data.insert_temp(id, expanded));
-}
-
-fn formatter() -> Intl {
-    static TRANSLATIONS: OnceLock<Translations> = OnceLock::new();
-    TRANSLATIONS
-        .get_or_init(|| {
-            Translations::bundled().expect("embedded catalogs are validated during the build")
-        })
-        .formatter(Language::English)
-        .expect("the gallery requests a bundled language")
 }

@@ -3,6 +3,12 @@
 use cint::ColorInterop;
 use egui::{Align2, FontId, Rect, Response, Sense, Stroke, Ui, Vec2};
 use garmin_color::theme;
+use garmin_i18n::{Intl, format_message};
+use garmin_model::{
+    activity::{ActivitySport, ActivitySummary, Distance, HeartRate},
+    identity::UnitSystem,
+};
+use garmin_service_api::ActivitySnapshot;
 
 use crate::{icons, path, theme::color32};
 
@@ -16,6 +22,206 @@ const BROWSER_BREAKPOINT: f32 = 720.0;
 const BROWSER_LIST_WIDTH: f32 = 360.0;
 const METRIC_GAP: f32 = 1.0;
 const METRIC_MAX_HEIGHT: f32 = 96.0;
+
+pub struct Presentation {
+    icon: icons::Icon,
+    title: String,
+    subtitle: String,
+    distance: Option<String>,
+    duration: String,
+    metrics: Vec<Metric>,
+}
+
+impl Presentation {
+    #[must_use]
+    pub fn from_summary(
+        summary: ActivitySummary,
+        source: &str,
+        intl: &Intl,
+        units: UnitSystem,
+    ) -> Self {
+        Self::new(
+            summary.sport(),
+            summary.time().start().to_string(),
+            source,
+            summary.totals().timer().into_milliseconds(),
+            summary.totals().distance().map(Distance::into_millimeters),
+            summary
+                .metrics()
+                .average_heart_rate()
+                .map(HeartRate::into_beats_per_minute),
+            summary.totals().ascent().map(Distance::into_millimeters),
+            intl,
+            units,
+        )
+    }
+
+    #[must_use]
+    pub fn from_snapshot(snapshot: &ActivitySnapshot, intl: &Intl, units: UnitSystem) -> Self {
+        Self::from_summary(snapshot.summary, &snapshot.source, intl, units)
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the arguments are the activity summary fields"
+    )]
+    fn new(
+        sport: ActivitySport,
+        started_at: String,
+        source: &str,
+        timer_milliseconds: u64,
+        distance_millimeters: Option<u64>,
+        average_heart_rate: Option<u16>,
+        ascent_millimeters: Option<u64>,
+        intl: &Intl,
+        units: UnitSystem,
+    ) -> Self {
+        let title = sport_title(sport, intl);
+        let subtitle = format_message!(
+            intl,
+            default_message: "{start} · {source}",
+            values: {
+                start: started_at,
+                source: source,
+            },
+        );
+        let distance = distance_millimeters.map(|value| format_distance(value, units));
+        let duration = duration(timer_milliseconds);
+        let mut metrics = Vec::with_capacity(4);
+        if let Some(distance) = &distance {
+            metrics.push(Metric {
+                label: format_message!(intl, default_message: "Distance"),
+                value: distance.clone(),
+            });
+        }
+        metrics.push(Metric {
+            label: format_message!(intl, default_message: "Active time"),
+            value: duration.clone(),
+        });
+        if let Some(heart_rate) = average_heart_rate {
+            metrics.push(Metric {
+                label: format_message!(intl, default_message: "Average heart rate"),
+                value: heart_rate.to_string(),
+            });
+        }
+        if let Some(ascent) = ascent_millimeters {
+            metrics.push(Metric {
+                label: format_message!(intl, default_message: "Ascent"),
+                value: format_distance(ascent, units),
+            });
+        }
+        Self {
+            icon: sport_icon(sport),
+            title,
+            subtitle,
+            distance,
+            duration,
+            metrics,
+        }
+    }
+
+    #[must_use]
+    pub fn item_props(&self) -> ItemProps<'_> {
+        ItemProps {
+            icon: self.icon,
+            title: &self.title,
+            subtitle: &self.subtitle,
+            distance: self.distance.as_deref(),
+            duration: &self.duration,
+        }
+    }
+
+    #[must_use]
+    pub fn metric_props(&self) -> Vec<MetricProps<'_>> {
+        self.metrics.iter().map(Metric::props).collect()
+    }
+
+    #[must_use]
+    pub fn detail_props<'a>(
+        &'a self,
+        metrics: &'a [MetricProps<'a>],
+        path: path::Props<'a>,
+    ) -> DetailProps<'a> {
+        DetailProps {
+            icon: self.icon,
+            title: &self.title,
+            subtitle: &self.subtitle,
+            metrics,
+            path: Some(path),
+            footer: None,
+        }
+    }
+}
+
+struct Metric {
+    label: String,
+    value: String,
+}
+
+impl Metric {
+    fn props(&self) -> MetricProps<'_> {
+        MetricProps {
+            label: &self.label,
+            value: &self.value,
+        }
+    }
+}
+
+fn format_distance(millimeters: u64, units: UnitSystem) -> String {
+    match units {
+        UnitSystem::Metric => metric_distance(millimeters),
+        UnitSystem::Imperial => imperial_distance(millimeters),
+    }
+}
+
+fn metric_distance(millimeters: u64) -> String {
+    let millimeters = u128::from(millimeters);
+    if millimeters >= 1_000_000 {
+        let hundredths = (millimeters + 5_000) / 10_000;
+        format!("{}.{:02} km", hundredths / 100, hundredths % 100)
+    } else {
+        format!("{} m", (millimeters + 500) / 1_000)
+    }
+}
+
+fn imperial_distance(millimeters: u64) -> String {
+    const MILLIMETERS_PER_MILE: u128 = 1_609_344;
+    let millimeters = u128::from(millimeters);
+    if millimeters >= MILLIMETERS_PER_MILE {
+        let hundredths = (millimeters * 100 + MILLIMETERS_PER_MILE / 2) / MILLIMETERS_PER_MILE;
+        format!("{}.{:02} mi", hundredths / 100, hundredths % 100)
+    } else {
+        let feet = (millimeters * 10 + 1_524) / 3_048;
+        format!("{feet} ft")
+    }
+}
+
+fn duration(milliseconds: u64) -> String {
+    let seconds = (milliseconds + 500) / 1_000;
+    let hours = seconds / 3_600;
+    let minutes = seconds % 3_600 / 60;
+    if hours > 0 {
+        format!("{hours} h {minutes} min")
+    } else if minutes > 0 {
+        format!("{minutes} min")
+    } else {
+        format!("{seconds} s")
+    }
+}
+
+const fn sport_icon(sport: ActivitySport) -> icons::Icon {
+    match sport {
+        ActivitySport::Running => icons::PERSON_SIMPLE_RUN,
+        ActivitySport::Cycling => icons::BICYCLE,
+    }
+}
+
+fn sport_title(sport: ActivitySport, intl: &Intl) -> String {
+    match sport {
+        ActivitySport::Running => format_message!(intl, default_message: "Running"),
+        ActivitySport::Cycling => format_message!(intl, default_message: "Cycling"),
+    }
+}
 
 /// One activity-list row.
 #[derive(Clone, Copy, Debug)]
@@ -363,5 +569,26 @@ fn paint_metrics(ui: &Ui, rect: Rect, top: f32, metrics: &[MetricProps<'_>]) {
             );
         }
         cell_top += cell_height;
+    }
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use super::{duration, format_distance};
+    use garmin_model::identity::UnitSystem;
+
+    #[test]
+    fn units_change_distance_rendering_without_changing_the_value() {
+        let value = 10_000_000;
+
+        assert_eq!(format_distance(value, UnitSystem::Metric), "10.00 km");
+        assert_eq!(format_distance(value, UnitSystem::Imperial), "6.21 mi");
+    }
+
+    #[test]
+    fn activity_duration_is_compact() {
+        assert_eq!(duration(42_000), "42 s");
+        assert_eq!(duration(3_180_000), "53 min");
+        assert_eq!(duration(7_500_000), "2 h 5 min");
     }
 }

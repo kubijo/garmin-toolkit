@@ -10,6 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use garmin_services::Application;
 use garmin_storage::Storage;
 use thiserror::Error;
 
@@ -41,11 +42,9 @@ pub async fn prepare_storage(data_root: impl AsRef<Path>) -> Result<Storage, Err
 pub async fn run() -> Result<(), Error> {
     let data_root = deployment_data_root();
     let storage = prepare_storage(data_root).await?;
-    let devices = devices::Host::new(mode::device_source());
+    let devices = devices::Host::new(mode::device_source(), Application::new(storage));
     devices.start();
-    let result = server::serve(devices).await;
-    storage.close().await;
-    result?;
+    server::serve(devices).await?;
     Ok(())
 }
 

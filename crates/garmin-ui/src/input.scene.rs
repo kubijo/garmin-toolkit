@@ -14,7 +14,6 @@ struct SceneProps {
 
 #[scene(default)]
 fn text_playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let mut props = SceneProps {
         value: ctx.text("value", "Alex Rider"),
         state: ctx.buttons("message", &["none", "helper", "error"], 1),
@@ -39,7 +38,6 @@ fn text_playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn text_states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         ui.set_width(360.0);
         let mut empty = String::new();
@@ -77,7 +75,6 @@ fn text_states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn text_sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         ui.set_width(360.0);
         for (label, size) in [

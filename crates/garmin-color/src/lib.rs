@@ -10,7 +10,7 @@ pub mod swatch;
 pub mod theme;
 
 /// Unpremultiplied encoded-sRGB RGBA.
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+#[garmin_macros::portable(copy, custom_debug, hash)]
 #[repr(transparent)]
 pub struct Color(u32);
 

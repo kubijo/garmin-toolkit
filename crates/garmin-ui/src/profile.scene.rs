@@ -1,27 +1,22 @@
 use gallery::prelude::*;
-use garmin_color::{Color, swatch, theme};
-use garmin_i18n::{Intl, Language, Translations};
+use garmin_color::{Color, swatch};
 use garmin_ui::profile;
-use std::sync::OnceLock;
 
-scene_meta! { title: "Desktop / Profiles" }
+scene_meta! { title: "Application / Profiles" }
 
 const AVATAR_SAMPLE_WIDTH: f32 = 96.0;
 const AVATAR_SAMPLE_LABEL_HEIGHT: f32 = 24.0;
 
 struct ChooserSceneProps {
     dataset: usize,
-    language: usize,
     width: f32,
     height: f32,
 }
 
 #[scene]
-fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
+fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let props = ChooserSceneProps {
         dataset: ctx.buttons("profiles", &["household", "single", "empty"], 0),
-        language: ctx.buttons("language", &["English", "Čeština"], 0),
         width: ctx.slider("width", 720.0, 320.0, 960.0, 1.0),
         height: ctx.slider("height", 520.0, 400.0, 720.0, 1.0),
     };
@@ -49,7 +44,7 @@ fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         2 => &profiles[..0],
         _ => &profiles[..],
     };
-    let intl = formatter(props.language);
+    let intl = globals.intl();
 
     stage!(ctx, ui, |ui| {
         ui.set_width(props.width);
@@ -64,23 +59,8 @@ fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     });
 }
 
-fn formatter(language: usize) -> Intl {
-    static TRANSLATIONS: OnceLock<Translations> = OnceLock::new();
-    let translations = TRANSLATIONS.get_or_init(|| {
-        Translations::bundled().expect("embedded catalogs are validated during the build")
-    });
-    translations
-        .formatter(if language == 1 {
-            Language::Czech
-        } else {
-            Language::English
-        })
-        .expect("the gallery requests only bundled languages")
-}
-
 #[scene]
 fn avatars(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let size = ctx.slider("size", 48.0, 24.0, 96.0, 1.0);
     let texture = avatar_texture(ui);
     let image = profile::AvatarImage::texture(egui::load::SizedTexture::from_handle(&texture));
@@ -88,7 +68,13 @@ fn avatars(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         ("Alex Rider", swatch::cyan::G40, Some(&image)),
         ("Sam Runner", swatch::magenta::G40, None),
         ("Taylor Cyclist", swatch::green::G40, None),
-        ("", theme::GRAY_100.interaction().interactive(), None),
+        (
+            "",
+            garmin_ui::theme::palette(ui)
+                .interaction()
+                .interactive(),
+            None,
+        ),
     ];
 
     stage!(ctx, ui, |ui| {

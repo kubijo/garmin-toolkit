@@ -1,0 +1,25 @@
+out = "../../.tmp/gallery/web"
+size = "1920x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "workspace-web"
+scene = "workspace::Web$"
+
+[[shot]]
+name = "workspace-web-demo"
+scene = "workspace::Web Demo$"
+
+[[shot]]
+name = "workspace-web-light-czech"
+scene = "workspace::Web$"
+
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+
+[[shot]]
+name = "workspace-offline"
+scene = "offline::Disconnected"

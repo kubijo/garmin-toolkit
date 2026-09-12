@@ -1,5 +1,3 @@
-//! Build-selected Home Assistant storage composition.
-
 use std::path::{Path, PathBuf};
 
 use garmin_storage::Storage;
@@ -8,6 +6,10 @@ use thiserror::Error;
 #[cfg(feature = "demo")]
 mod selected {
     use super::{DataError, Path, PathBuf, Storage};
+
+    pub const DEPLOYMENT_MODE: garmin_service_api::DeploymentMode =
+        garmin_service_api::DeploymentMode::Demo;
+    pub const PRODUCT_NAME: &str = "Garmin Toolkit Demo";
 
     pub fn device_source() -> Box<dyn crate::devices::Source> {
         Box::new(crate::devices::DemoSource::new())
@@ -26,6 +28,10 @@ mod selected {
 mod selected {
     use super::{DataError, Path, PathBuf, Storage};
 
+    pub const DEPLOYMENT_MODE: garmin_service_api::DeploymentMode =
+        garmin_service_api::DeploymentMode::Production;
+    pub const PRODUCT_NAME: &str = "Garmin Toolkit";
+
     pub fn device_source() -> Box<dyn crate::devices::Source> {
         Box::new(crate::devices::MountedSource::new())
     }
@@ -39,7 +45,7 @@ mod selected {
     }
 }
 
-pub(super) use selected::{data_root, device_source, open_storage};
+pub(super) use selected::{DEPLOYMENT_MODE, PRODUCT_NAME, data_root, device_source, open_storage};
 
 #[derive(Debug, Error)]
 pub enum DataError {

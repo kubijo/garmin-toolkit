@@ -7,7 +7,6 @@ scene_meta! { title: "Components / Feedback / Notifications" }
 
 #[scene]
 fn states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         ui.set_width(560.0);
         for props in [
@@ -40,7 +39,6 @@ fn states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn actionable(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let kind = kind(ctx.buttons("kind", &["information", "success", "warning", "error"], 0));
     let detail = ctx.toggle("detail", true);
     let action = ctx.toggle("action", true);
@@ -63,7 +61,6 @@ fn actionable(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene(default)]
 fn toast_stack(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let add = ctx.buttons("add", &["none", "device", "saved", "warning", "failure"], 0);
     let mode = ctx.buttons("mode", &["automatic", "collapsed", "expanded"], 0);
 

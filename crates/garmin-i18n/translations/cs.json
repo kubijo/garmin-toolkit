@@ -1,8 +1,4 @@
 {
-  "+20FW7RyTg": {
-    "source": "Devices",
-    "translation": "Zařízení"
-  },
   "+NS4DG0PnP": {
     "source": "change all",
     "translation": "změnit vše"
@@ -34,6 +30,10 @@
   "/P2gshr7DR": {
     "source": "Create a profile",
     "translation": "Vytvořit profil"
+  },
+  "/r6LEP1upO": {
+    "source": "Offline for {duration}",
+    "translation": "Bez připojení {duration}"
   },
   "0L2D2d+keZ": {
     "source": "Could not read storage usage: {reason}",
@@ -225,6 +225,10 @@
     "source": "Map components",
     "translation": "Mapové komponenty"
   },
+  "CN/B/k3dCh": {
+    "source": "Connection lost",
+    "translation": "Spojení přerušeno"
+  },
   "CNsqMm7Bej": {
     "source": "Transaction committed. Eject or unmount before unplugging.",
     "translation": "Transakce potvrzena. Před odpojením zařízení vysuňte nebo odpojte."
@@ -309,6 +313,10 @@
   "HvwZaPKxdv": {
     "source": "Continue with update?",
     "translation": "Pokračovat v aktualizaci?"
+  },
+  "HwmUj83ahc": {
+    "source": "Your recent activities will reappear when the connection returns.",
+    "translation": "Vaše nedávné aktivity se znovu zobrazí po obnovení připojení."
   },
   "I9Vq88kNSi": {
     "source": "Choose files",
@@ -702,6 +710,10 @@
     "source": "Inspecting…",
     "translation": "Kontrola…"
   },
+  "f0MYRvYSEE": {
+    "source": "Shared application content",
+    "translation": "Sdílený obsah aplikace"
+  },
   "f9m4vqwE6j": {
     "source": "Device ID",
     "translation": "ID zařízení"
@@ -737,10 +749,6 @@
   "gG+/7BblKQ": {
     "source": "refresh space",
     "translation": "aktualizovat volné místo"
-  },
-  "gW0s9WcVME": {
-    "source": "No Garmin devices are connected.",
-    "translation": "Není připojeno žádné zařízení Garmin."
   },
   "hX5jJfBpJZ": {
     "source": "Backup",
@@ -910,6 +918,10 @@
   "sC7jX5Rlyh": {
     "source": "Update incomplete.",
     "translation": "Aktualizace není dokončena."
+  },
+  "sWdi9N2/EP": {
+    "source": "Reconnecting automatically…",
+    "translation": "Spojení se automaticky obnovuje…"
   },
   "sZ+6emuebS": {
     "source": "Garmin map components",

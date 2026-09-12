@@ -25,7 +25,6 @@ struct CatalogProps {
 
 #[scene(default)]
 fn catalog(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let query = ctx.text("filter", "");
     let size = ctx.slider("size", 32.0, 16.0, 64.0, 1.0);
     let tint = ctx.buttons("tint", TINT_NAMES, 0);

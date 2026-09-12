@@ -18,6 +18,7 @@ pub mod images;
 pub mod input;
 pub mod modal;
 pub mod notification;
+pub mod offline;
 pub mod path;
 pub mod profile;
 pub mod profile_settings;
@@ -28,6 +29,7 @@ mod size;
 mod text;
 pub mod theme;
 pub mod typography;
+pub mod workspace;
 
 pub use size::Size;
 

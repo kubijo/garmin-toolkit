@@ -15,7 +15,6 @@ demo = ["dep:garmin-fixtures"]
 workspace = true
 
 [dependencies]
-byte-unit.workspace = true
 blake3.workspace = true
 eframe = { workspace = true, features = ["default_fonts", "persistence", "wayland", "wgpu", "x11"] }
 futures-lite.workspace = true
@@ -25,6 +24,7 @@ garmin-fixtures = { workspace = true, optional = true }
 garmin-i18n.workspace = true
 garmin-importer.workspace = true
 garmin-model.workspace = true
+garmin-service-api.workspace = true
 garmin-services.workspace = true
 garmin-storage.workspace = true
 garmin-ui.workspace = true

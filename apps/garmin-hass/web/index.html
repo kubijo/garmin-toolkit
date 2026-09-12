@@ -4,6 +4,8 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Garmin Toolkit</title>
+        <link data-trunk rel="rust" data-wasm-opt="0" data-initializer="initializer.js">
+        <link data-trunk rel="icon" href="../../../crates/garmin-brand/assets/icon.svg">
         <style>
         :root {
             color-scheme: dark;
@@ -34,12 +36,33 @@
             background: #0b0e13;
             text-align: center;
         }
-        #loading[aria-busy="false"] progress {
+        #loading[aria-busy="false"] #loading-progress {
             display: none;
         }
-        progress {
+        #loading-progress {
+            height: 0.35rem;
             width: min(28rem, 75vw);
-            accent-color: #43b7dd;
+            overflow: hidden;
+            border: 1px solid #68717c;
+            border-radius: 999px;
+            background: #292e35;
+        }
+        #loading-progress-bar {
+            display: block;
+            width: 40%;
+            height: 100%;
+            border-radius: inherit;
+            background: #43b7dd;
+            transform: translate3d(-100%, 0, 0);
+            will-change: transform;
+            animation: loading-slide 1.1s ease-in-out infinite;
+        }
+        #loading-progress[data-determinate="true"] #loading-progress-bar {
+            width: 100%;
+            transform: scaleX(var(--loading-progress, 0));
+            transform-origin: left;
+            transition: transform 140ms linear;
+            animation: none;
         }
         #loading-detail {
             color: #abb6c3;
@@ -50,16 +73,31 @@
             color: #7f8a98;
             font-size: 0.8rem;
         }
+        @keyframes loading-slide {
+            to {
+                transform: translate3d(250%, 0, 0);
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #loading-progress-bar {
+                transform: translate3d(75%, 0, 0);
+                animation: none;
+            }
+            #loading-progress[data-determinate="true"] #loading-progress-bar {
+                transition: none;
+            }
+        }
         </style>
     </head>
     <body>
         <canvas id="garmin-toolkit"></canvas>
         <main id="loading" aria-live="polite" aria-busy="true">
             <strong id="loading-message">Loading Garmin Toolkit…</strong>
-            <progress id="loading-progress"></progress>
-            <span id="loading-detail">Preparing download…</span>
-            <span id="loading-trace"></span>
+            <div id="loading-progress" role="progressbar" aria-label="Application download">
+                <span id="loading-progress-bar"></span>
+            </div>
+            <span id="loading-detail">Loading application files…</span>
+            <span id="loading-trace">Waiting for the download to begin.</span>
         </main>
-        <script type="module" src="./initializer.js"></script>
     </body>
 </html>

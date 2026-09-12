@@ -1,11 +1,10 @@
 use gallery::prelude::*;
 use garmin_ui::{device, icons};
 
-scene_meta! { title: "Desktop / Devices" }
+scene_meta! { title: "Application / Devices" }
 
 #[scene(default)]
 fn inspecting(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, (720, 300), |ui| {
         device::show(
             ui,
@@ -29,7 +28,6 @@ fn inspecting(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn inspected(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, (720, 360), |ui| {
         let transfers = [
             device::Transfer {
@@ -67,7 +65,6 @@ fn inspected(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn failed(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, (720, 300), |ui| {
         device::show(
             ui,

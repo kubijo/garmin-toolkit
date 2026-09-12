@@ -47,7 +47,7 @@ text_value!(
 );
 
 /// An artifact selected as a profile avatar.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[garmin_macros::portable(copy, hash)]
 pub struct AvatarArtifactId(ArtifactId);
 
 impl AvatarArtifactId {
@@ -75,7 +75,7 @@ pub struct ImageDimensions {
 }
 
 /// Units used to present physical measurements.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[garmin_macros::portable(copy, default, hash)]
 pub enum UnitSystem {
     /// Metric units.
     #[default]
@@ -84,7 +84,7 @@ pub enum UnitSystem {
 }
 
 /// Bundled presentation language.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[garmin_macros::portable(copy, default, hash)]
 pub enum LanguagePreference {
     /// English source messages.
     #[default]
@@ -93,7 +93,7 @@ pub enum LanguagePreference {
 }
 
 /// Selected semantic color theme.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[garmin_macros::portable(copy, default, hash)]
 pub enum ThemePreference {
     /// Follow the system theme.
     #[default]
@@ -103,7 +103,7 @@ pub enum ThemePreference {
 }
 
 /// Portable profile presentation preferences.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[garmin_macros::portable(copy, default, hash)]
 pub struct ProfilePreferences {
     unit_system: UnitSystem,
     language: LanguagePreference,
@@ -173,7 +173,7 @@ impl ImageDimensions {
 pub struct ImageDimensionsError;
 
 /// A mutable portable-user profile.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[garmin_macros::portable(eq)]
 pub struct Profile {
     display_name: DisplayName,
     accent: Option<Color>,
@@ -250,14 +250,14 @@ impl Profile {
 }
 
 /// A deployment-level user role.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[garmin_macros::portable(copy, hash)]
 pub enum Role {
     Owner,
     Member,
 }
 
 /// A portable application user.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[garmin_macros::portable(eq)]
 pub struct User {
     id: UserId,
     role: Role,
@@ -415,7 +415,16 @@ mod tests {
 
         assert_eq!(previous, ProfilePreferences::default());
         assert_eq!(profile.preferences(), preferences);
+        let encoded = postcard::to_stdvec(&preferences).unwrap();
+        let decoded = postcard::from_bytes::<ProfilePreferences>(&encoded).unwrap();
+        assert_eq!(decoded, preferences);
         Ok(())
+    }
+
+    #[test]
+    fn display_names_are_revalidated_when_deserialized() {
+        let encoded = postcard::to_stdvec(&" \t".to_owned()).unwrap();
+        assert!(postcard::from_bytes::<DisplayName>(&encoded).is_err());
     }
 
     #[test]

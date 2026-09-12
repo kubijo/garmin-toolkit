@@ -15,3 +15,7 @@ scene = "device::Inspected"
 [[shot]]
 name = "attached-device-failed"
 scene = "device::Failed"
+
+[[shot]]
+name = "workspace-desktop"
+scene = "workspace::Desktop"

@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::{activity, icons};
 
-scene_meta! { title: "Desktop / Activities" }
+scene_meta! { title: "Application / Activities" }
 
 const ITEMS: &[activity::ItemProps<'_>] = &[
     activity::ItemProps {
@@ -83,7 +83,6 @@ struct SceneProps {
 
 #[scene(default)]
 fn browser(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let selected = ctx.buttons("selection", &["first", "second", "none"], 0);
     let props = SceneProps {
         selected: (selected < 2).then_some(selected),
@@ -95,7 +94,6 @@ fn browser(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn list(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         ui.set_width(360.0);
         let _ = activity::list(
@@ -111,7 +109,6 @@ fn list(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn detail(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         ui.set_width(560.0);
         activity::detail(ui, &DETAIL);
@@ -120,7 +117,6 @@ fn detail(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn empty(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     show_browser(
         ctx,
         ui,

@@ -10,7 +10,6 @@ const CHOICES: &[select::Choice<'_>] = &[
 
 #[scene(default)]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let mut selected = ctx.buttons("selected", &["metric", "imperial"], 0);
     let disabled = ctx.toggle("disabled", false);
     stage!(ctx, ui, |ui| {
@@ -29,7 +28,6 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         ui.set_width(360.0);
         for (label, size) in [
@@ -52,7 +50,6 @@ fn sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn leading_images(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     let mut selected = ctx.buttons("selected", &["english", "czech"], 0);
     let choices = [
         select::Choice::new("English").image(images::UNITED_KINGDOM),

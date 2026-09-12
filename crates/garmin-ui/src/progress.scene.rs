@@ -5,7 +5,6 @@ scene_meta! { title: "Components / Feedback / Progress" }
 
 #[scene]
 fn determinate(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         ui.set_width(480.0);
         progress::show(
@@ -24,7 +23,6 @@ fn determinate(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn indeterminate(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         ui.set_width(480.0);
         progress::show(

@@ -16,6 +16,7 @@ icon_catalog! {
         FILE => phosphor_svgs::style::regular::FILE,
         FOLDER_OPEN => phosphor_svgs::style::regular::FOLDER_OPEN,
         GEAR => phosphor_svgs::style::regular::GEAR,
+        GLOBE => phosphor_svgs::style::regular::GLOBE,
         HARD_DRIVE => phosphor_svgs::style::regular::HARD_DRIVE,
         HOUSE => phosphor_svgs::style::regular::HOUSE,
         INFO => phosphor_svgs::style::regular::INFO,
@@ -34,11 +35,13 @@ icon_catalog! {
         SIGN_OUT => phosphor_svgs::style::regular::SIGN_OUT,
         SUN => phosphor_svgs::style::regular::SUN,
         TRASH => phosphor_svgs::style::regular::TRASH,
+        TRANSLATE => phosphor_svgs::style::regular::TRANSLATE,
         UPLOAD_SIMPLE => phosphor_svgs::style::regular::UPLOAD_SIMPLE,
         USER_CIRCLE => phosphor_svgs::style::regular::USER_CIRCLE,
         USERS => phosphor_svgs::style::regular::USERS,
         WARNING => phosphor_svgs::style::regular::WARNING,
         WATCH => phosphor_svgs::style::regular::WATCH,
+        WIFI_SLASH => phosphor_svgs::style::regular::WIFI_SLASH,
         X => phosphor_svgs::style::regular::X,
     }
     local {

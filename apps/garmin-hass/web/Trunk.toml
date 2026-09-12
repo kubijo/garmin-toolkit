@@ -1,0 +1,7 @@
+[build]
+public_url = "./"
+filehash = true
+no_sri = true
+minify = "on_release"
+create_nonce = true
+nonce_placeholder = "GARMIN_TOOLKIT_CSP_NONCE"

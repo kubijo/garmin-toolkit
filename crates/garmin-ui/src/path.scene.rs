@@ -42,7 +42,6 @@ const SEGMENTS: &[path::Segment<'_>] = &[
 
 #[scene(default)]
 fn path_preview(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         ui.set_width(560.0);
         path::preview(
@@ -58,7 +57,6 @@ fn path_preview(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 
 #[scene]
 fn empty(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    garmin_ui::theme::apply(ui.style_mut());
     stage!(ctx, ui, |ui| {
         ui.set_width(560.0);
         path::preview(

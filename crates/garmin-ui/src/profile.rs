@@ -2,15 +2,17 @@
 
 use cint::ColorInterop;
 use egui::{
-    Align, Align2, FontId, Image, ImageSource, Layout, Response, RichText, Sense, Ui, UiBuilder,
-    Vec2,
+    Align, Align2, FontId, Id, Image, ImageSource, Layout, Response, RichText, Sense, Ui,
+    UiBuilder, Vec2,
     load::{Bytes, SizedTexture},
 };
-use garmin_color::{Color, theme};
+use garmin_color::{Color, swatch, theme};
 use garmin_i18n::{Intl, format_message};
+use garmin_model::identity::DisplayName;
+use garmin_service_api::ProfileSnapshot;
 use std::borrow::Cow;
 
-use crate::{header_selector, icons, theme::color32};
+use crate::{header_selector, icons, input, modal, theme::color32};
 
 const AVATAR_SIZE: f32 = 36.0;
 const ROW_PADDING: f32 = 8.0;
@@ -19,6 +21,131 @@ const CHOOSER_AVATAR_SIZE: f32 = 48.0;
 const CHOOSER_ROW_HEIGHT: f32 = 72.0;
 const CHOOSER_ROW_PADDING: f32 = 12.0;
 const HEADER_AVATAR_SIZE: f32 = 28.0;
+
+pub struct Presentation {
+    display_name: String,
+    accent: Color,
+    avatar: Option<AvatarImage>,
+}
+
+impl Presentation {
+    #[must_use]
+    pub fn from_snapshot(snapshot: &ProfileSnapshot) -> Self {
+        let avatar = snapshot.avatar.as_ref().map(|avatar| {
+            AvatarImage::encoded(
+                format!("bytes://garmin-toolkit/profile-avatar/{}.png", avatar.key),
+                avatar.thumbnail.clone(),
+            )
+        });
+        Self {
+            display_name: snapshot.user.profile().display_name().as_str().to_owned(),
+            accent: snapshot.user.profile().accent().unwrap_or(swatch::ACTION),
+            avatar,
+        }
+    }
+
+    #[must_use]
+    pub fn props(&self) -> ProfileProps<'_> {
+        ProfileProps {
+            display_name: &self.display_name,
+            accent: self.accent,
+            avatar: self.avatar.as_ref(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct CreateState {
+    name: String,
+    submitting: bool,
+    problem: Option<String>,
+}
+
+impl CreateState {
+    #[must_use]
+    pub const fn is_submitting(&self) -> bool {
+        self.submitting
+    }
+
+    pub fn set_submitting(&mut self, submitting: bool) {
+        self.submitting = submitting;
+        if submitting {
+            self.problem = None;
+        }
+    }
+
+    pub fn set_problem(&mut self, problem: String) {
+        self.submitting = false;
+        self.problem = Some(problem);
+    }
+}
+
+pub enum CreateAction {
+    Cancel,
+    Submit(DisplayName),
+}
+
+#[must_use]
+pub fn create_dialog(ui: &mut Ui, intl: &Intl, state: &mut CreateState) -> Option<CreateAction> {
+    let title = format_message!(intl, default_message: "Create a profile");
+    let description = format_message!(
+        intl,
+        default_message: "Profiles keep each person's activities and devices separate.",
+    );
+    let label = format_message!(intl, default_message: "Profile name");
+    let placeholder = format_message!(intl, default_message: "Enter a name");
+    let required = format_message!(intl, default_message: "Enter a profile name");
+    let cancel = format_message!(intl, default_message: "Cancel");
+    let create = if state.submitting {
+        format_message!(intl, default_message: "Creating…")
+    } else {
+        format_message!(intl, default_message: "Create")
+    };
+    let parsed = DisplayName::from_string(state.name.clone());
+    let problem = state.problem.clone();
+    let message = if !state.name.is_empty() && parsed.is_err() {
+        Some(input::Message::Error(required.as_str()))
+    } else {
+        problem.as_deref().map(input::Message::Error)
+    };
+    let output = modal::show(
+        ui,
+        Id::new("create-profile"),
+        &modal::Props {
+            title: &title,
+            description: Some(&description),
+            size: modal::Size::Medium,
+            presentation: modal::Presentation::Modal,
+            cancel_label: &cancel,
+            backdrop_closes: Some(!state.submitting),
+            primary: modal::Primary {
+                label: &create,
+                icon: Some(icons::PLUS),
+                kind: modal::PrimaryKind::Confirm,
+                enabled: parsed.is_ok() && !state.submitting,
+            },
+        },
+        |ui| {
+            let response = input::show(
+                ui,
+                &mut state.name,
+                input::Props::new(&label)
+                    .placeholder(&placeholder)
+                    .message(message)
+                    .disabled(state.submitting),
+            );
+            if response.changed() {
+                state.problem = None;
+            }
+            response
+        },
+    );
+    match output.action {
+        Some(modal::Action::Cancel) if !state.submitting => Some(CreateAction::Cancel),
+        Some(modal::Action::Primary) => parsed.ok().map(CreateAction::Submit),
+        Some(modal::Action::Cancel) | None => None,
+    }
+}
 
 /// An avatar image already owned by the presentation boundary.
 #[derive(Clone)]

@@ -16,6 +16,7 @@ members = [
   "crates/garmin-i18n",
   "crates/garmin-importer",
   "crates/garmin-map-service",
+  "crates/garmin-macros",
   "crates/garmin-model",
   "crates/garmin-progress",
   "crates/garmin-route",
@@ -48,9 +49,9 @@ clap = { version = "=4.6.6", features = ["derive"] }
 comrak = { version = "=0.54.0", default-features = false }
 crossterm = { version = "=0.29.0", features = ["event-stream"] }
 dirs = "=6.0.0"
-eframe = { version = "=0.36.1", default-features = false }
-egui = { version = "=0.36.1", default-features = false, features = ["cint"] }
-egui_extras = { version = "=0.36.1", default-features = false, features = ["image", "svg"] }
+eframe = { version = "=0.36.2", default-features = false }
+egui = { version = "=0.36.2", default-features = false, features = ["cint"] }
+egui_extras = { version = "=0.36.2", default-features = false, features = ["image", "svg"] }
 embedded-io-adapters = { version = "=0.7.0", features = ["std"] }
 formatjs_intl = "=0.5.0"
 fs2 = "=0.4.3"
@@ -69,6 +70,7 @@ garmin-gpx = { version = "0.1.0", path = "crates/garmin-gpx" }
 garmin-i18n = { version = "0.1.0", path = "crates/garmin-i18n" }
 garmin-importer = { version = "0.1.0", path = "crates/garmin-importer" }
 garmin-map-service = { version = "0.1.0", path = "crates/garmin-map-service" }
+garmin-macros = { version = "0.1.0", path = "crates/garmin-macros" }
 garmin-model = { version = "0.1.0", path = "crates/garmin-model" }
 garmin-progress = { version = "0.1.0", path = "crates/garmin-progress" }
 garmin-route = { version = "0.1.0", path = "crates/garmin-route" }
@@ -82,6 +84,7 @@ gio = "=0.22.9"
 gpx-format = { package = "gpx", version = "=0.10.0" }
 har = "=0.9.0"
 hex = "=0.4.3"
+http-security-headers = "=0.5.0"
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 indoc = "=2.0.7"
 js-sys = "=0.3.103"
@@ -90,12 +93,15 @@ md-5 = "=0.11.0"
 mediatype = "=0.23.0"
 miette = { git = "https://github.com/zkat/miette", rev = "e853bbf9bc78bbe0b225995de54a3108d77dcaf8", default-features = false }
 mtp-rs = "=0.32.0"
-newtype-uuid = { version = "=1.4.0", features = ["v4"] }
+newtype-uuid = { version = "=1.4.0", features = ["serde", "v4"] }
 nusb = { version = "=0.2.7", features = ["tokio"] }
+nu-ansi-term = "=0.50.3"
 palette = { version = "=0.7.7", default-features = false, features = ["std"] }
 phosphor-svgs = "=0.3.0"
 postcard = { version = "=1.1.3", default-features = false, features = ["use-std"] }
+proc-macro2 = "=1.0.107"
 quick-xml = { version = "=0.42.0", features = ["serialize"] }
+quote = "=1.0.47"
 ratatui = { version = "=0.30.2", features = ["unstable-rendered-line-info"] }
 ratatui-interact = "=0.5.3"
 remoc = { version = "=0.20.1", default-features = false, features = ["rtc"] }
@@ -109,6 +115,7 @@ serde_json = "=1.0.151"
 sha2 = "=0.11.0"
 sqlx = { version = "=0.9.0", default-features = false, features = ["macros", "migrate", "runtime-smol", "sqlite-bundled"] }
 sys-locale = "=0.3.2"
+syn = "=3.0.5"
 tempfile = "=3.27.0"
 termcolor = "=1.4.1"
 termcolor-json = "=1.0.0"
@@ -119,6 +126,7 @@ tokio-tungstenite = "=0.29.0"
 toml_edit = "=0.25.13"
 tower-http = "=0.6.11"
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
+tracing-logfmt = { version = "=0.3.7", features = ["ansi_logs"] }
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt"] }
 url = { version = "=2.5.8", features = ["serde"] }
 usvg = { version = "=0.45.1", default-features = false }

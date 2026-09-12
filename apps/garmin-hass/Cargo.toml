@@ -21,13 +21,20 @@ futures-lite.workspace = true
 futures-util.workspace = true
 garmin-device.workspace = true
 garmin-fixtures = { workspace = true, optional = true }
+garmin-model.workspace = true
 garmin-service-api.workspace = true
+garmin-services.workspace = true
 garmin-storage.workspace = true
+http-security-headers = { workspace = true, features = ["nonce"] }
+nu-ansi-term.workspace = true
 remoc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tower-http = { workspace = true, features = ["fs"] }
 tracing.workspace = true
+tracing-logfmt.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]

@@ -34,10 +34,11 @@ capture FILE='components.capture.toml' OUT='':
         --manifest-path Cargo.toml --all-features -- \
         --capture "{{ FILE }}" {{ if OUT == '' { '' } else { '--out "' + OUT + '"' } }}
 
-# Render the component, desktop, and TUI evidence sheets.
+# Render every maintained evidence sheet.
 capture-all:
     just capture components.capture.toml
     just capture desktop.capture.toml
+    just capture web.capture.toml
     just capture tui.capture.toml
 
 # Reproduce one maintained capture set inside the pinned Nix environment.
