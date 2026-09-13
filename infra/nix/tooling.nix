@@ -2,11 +2,13 @@
   lib,
   nix-tools,
   pkgs,
+  pythonToolsEnv,
   system,
   toolchain,
   workspaceSrc,
 }:
 let
+  pythonConfig = ../python/pyproject.toml;
   sqlFluffConfig = ../sqlfluff/pyproject.toml;
   allFormatters = {
     html = true;
@@ -15,7 +17,7 @@ let
     justfile = true;
     markdown = true;
     nix = true;
-    python = true;
+    python.configFile = pythonConfig;
     rust.exe = lib.getExe' toolchain "rustfmt";
     shell = true;
     sql.configFile = sqlFluffConfig;
@@ -29,6 +31,7 @@ let
     inherit system;
     src = workspaceSrc;
     exclude = [
+      ".python-version"
       "LICENSE-AGPL"
       "LICENSE-APACHE"
       "LICENSE-MIT"
@@ -59,7 +62,25 @@ let
         ignoreLinks = [ "^https?://" ];
       };
       nix = true;
-      python = true;
+      python.configFile = pythonConfig;
+      extraProjectCheckers = {
+        python-lock.command = pkgs.writeShellScript "python-lock-check" ''
+          exec ${lib.getExe pkgs.uv} lock --check --offline \
+            --python ${pythonToolsEnv}/bin/python \
+            --project infra/python
+        '';
+        python-tests.command = pkgs.writeShellScript "python-tests" ''
+          exec ${pythonToolsEnv}/bin/python -m unittest discover -q \
+            --start-directory infra/python \
+            --pattern 'test_*.py'
+        '';
+        python-types.command = pkgs.writeShellScript "python-types" ''
+          exec ${lib.getExe pkgs.ty} check \
+            --project infra/python \
+            --python ${pythonToolsEnv} \
+            infra/python
+        '';
+      };
       shell = true;
       sql.configFile = sqlFluffConfig;
       workflows = true;

@@ -1172,7 +1172,7 @@ mod tests {
         );
         assert_eq!(
             creator.product_name().map(ProductName::as_str),
-            Some("Synthetic tracker")
+            Some("Mock Track-o-Matic 9000")
         );
         assert_eq!(
             creator

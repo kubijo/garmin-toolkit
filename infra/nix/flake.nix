@@ -8,6 +8,9 @@
   gallery,
   hass,
   nix-tools,
+  pyproject-build-systems,
+  pyproject-nix,
+  uv2nix,
   ...
 }:
 let
@@ -36,6 +39,15 @@ let
             fenix.packages.${system}.targets.wasm32-unknown-unknown.stable.rust-std
           ];
           coverageMinimum = 65;
+          pythonToolsEnv = import ./python-tools.nix {
+            inherit
+              nixpkgs
+              pkgs
+              pyproject-build-systems
+              pyproject-nix
+              uv2nix
+              ;
+          };
           build = import ./packages.nix {
             inherit
               crane
@@ -51,6 +63,7 @@ let
               lib
               nix-tools
               pkgs
+              pythonToolsEnv
               system
               toolchain
               workspaceSrc
@@ -105,6 +118,7 @@ let
               inheritanceCheck
               lib
               pkgs
+              pythonToolsEnv
               toolchain
               ;
             craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
@@ -188,8 +202,11 @@ let
                   pkgs.gvfs
                   pkgs.just
                   pkgs.pkg-config
+                  pkgs.ty
                   pkgs.usbutils
+                  pkgs.uv
                   pkgs.wrapGAppsNoGuiHook
+                  pythonToolsEnv
                   toolchain
                 ];
               GIO_EXTRA_MODULES = "${pkgs.gvfs}/lib/gio/modules";

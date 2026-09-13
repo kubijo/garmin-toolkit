@@ -3,7 +3,7 @@ use axum::{
     Extension, Router,
     body::{Body, Bytes},
     extract::{
-        DefaultBodyLimit, State,
+        DefaultBodyLimit, Path as AxumPath, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, HeaderValue, Request, StatusCode, header, uri::Authority},
@@ -23,6 +23,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use tokio::io::AsyncReadExt as _;
 use tower_http::services::ServeDir;
 
 const ADDRESS_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_ADDRESS";
@@ -126,6 +127,7 @@ async fn web_index(
 fn router(host: Arc<Host>) -> io::Result<Router> {
     let app = Router::new()
         .route("/remoc", any(websocket))
+        .route("/device-download/{token}", get(device_download))
         .route("/health", get(|| async { "ok" }))
         .route("/csp-report", post(csp_report))
         .with_state(host);
@@ -151,8 +153,10 @@ async fn browser_cache_policy(mut request: Request<Body>, next: Next) -> Respons
     let path = request.uri().path();
     let entry_point = matches!(path, "/" | "/index.html");
     let initializer = path.ends_with("-initializer.js");
-    let static_asset =
-        !entry_point && !initializer && !matches!(path, "/health" | "/remoc" | "/csp-report");
+    let static_asset = !entry_point
+        && !initializer
+        && !path.starts_with("/device-download/")
+        && !matches!(path, "/health" | "/remoc" | "/csp-report");
     let nonce = Nonce::random();
     let content_security_policy = content_security_policy(request.headers(), &nonce);
     request.extensions_mut().insert(nonce);
@@ -298,6 +302,54 @@ async fn websocket(
     })
 }
 
+async fn device_download(
+    State(host): State<Arc<Host>>,
+    AxumPath(token): AxumPath<String>,
+) -> Response {
+    let Some(download) = host.take_browser_download(&token) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let content_length = download.size;
+    let file = match tokio::fs::File::open(download.path()).await {
+        Ok(file) => file,
+        Err(error) => {
+            tracing::warn!(%error, "prepared browser download disappeared");
+            return StatusCode::NOT_FOUND.into_response();
+        }
+    };
+    let body = Body::from_stream(futures_util::stream::try_unfold(
+        (file, download),
+        |(mut file, download)| async move {
+            let mut bytes = vec![0_u8; 64 * 1024];
+            let count = file.read(&mut bytes).await?;
+            if count == 0 {
+                Ok::<_, std::io::Error>(None)
+            } else {
+                bytes.truncate(count);
+                Ok(Some((Bytes::from(bytes), (file, download))))
+            }
+        },
+    ));
+    let mut response = Response::new(body);
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_static("attachment"),
+    );
+    if let Ok(content_length) = HeaderValue::from_str(&content_length.to_string()) {
+        headers.insert(header::CONTENT_LENGTH, content_length);
+    }
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    response
+}
+
 fn browser_origin_allowed(headers: &HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN) else {
         return true;
@@ -356,11 +408,14 @@ mod tests {
         CSP_NONCE_PLACEHOLDER, WebIndex, browser_origin_allowed, content_security_policy,
         csp_report, router, startup_banner, web_link,
     };
-    use crate::devices::{DemoSource, Host};
+    use crate::devices::{Host, demo::DemoSource};
     use axum::body::Bytes;
     use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
     use futures_util::{SinkExt as _, StreamExt as _, future};
-    use garmin_service_api::{ApplicationService as _, ApplicationServiceClient, InspectionState};
+    use garmin_service_api::{
+        ApplicationService as _, ApplicationServiceClient, DeviceBrowserTarget,
+        DeviceCatalogEntryKind, InspectionState,
+    };
     use garmin_services::Application;
     use http_security_headers::{ContentSecurityPolicy, Nonce};
     use remoc::prelude::*;
@@ -468,9 +523,64 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let storage = crate::prepare_storage(directory.path()).await?;
         let _router = router(Host::new(
-            Box::new(DemoSource::new()),
+            Box::new(DemoSource::new(
+                directory.path().join("device"),
+                tokio::runtime::Handle::current(),
+            )?),
             Application::new(storage),
         ))?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn prepared_browser_download_is_same_origin_and_single_use() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let storage = crate::prepare_storage(directory.path()).await?;
+        let host = Host::new(
+            Box::new(DemoSource::new(
+                directory.path().join("device"),
+                tokio::runtime::Handle::current(),
+            )?),
+            Application::new(storage),
+        );
+        let ticket = host
+            .prepare_device_browser_download(
+                "demo:watch-o-matic-9000".to_owned(),
+                DeviceBrowserTarget {
+                    storage_id: "internal".to_owned(),
+                    path: "Garmin/Activity/History/2026/made-up-morning-ride.fit".into(),
+                    kind: DeviceCatalogEntryKind::File,
+                },
+            )
+            .await?
+            .map_err(anyhow::Error::msg)?;
+        assert_eq!(ticket.file_name, "made-up-morning-ride.fit");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let app = router(host)?;
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let url = format!("http://{address}/device-download/{}", ticket.token);
+        let response = reqwest::get(&url).await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_DISPOSITION),
+            Some(&HeaderValue::from_static("attachment"))
+        );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
+        assert_eq!(
+            response.bytes().await?.as_ref(),
+            garmin_fit::fixture::ActivityCase::RecoveryRide
+                .encode()?
+                .as_slice()
+        );
+        assert_eq!(reqwest::get(url).await?.status(), StatusCode::NOT_FOUND);
+
+        server.abort();
         Ok(())
     }
 
@@ -481,7 +591,10 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let app = router(Host::new(
-            Box::new(DemoSource::new()),
+            Box::new(DemoSource::new(
+                directory.path().join("device"),
+                tokio::runtime::Handle::current(),
+            )?),
             Application::new(storage),
         ))?;
         let server = tokio::spawn(async move { axum::serve(listener, app).await });

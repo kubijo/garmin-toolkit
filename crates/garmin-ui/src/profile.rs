@@ -12,15 +12,18 @@ use garmin_model::identity::DisplayName;
 use garmin_service_api::ProfileSnapshot;
 use std::borrow::Cow;
 
-use crate::{header_selector, icons, input, modal, theme::color32};
+use crate::{
+    header_selector, icons, input, modal,
+    theme::{CONTROL_RADIUS, color32},
+};
 
 const AVATAR_SIZE: f32 = 36.0;
 const ROW_PADDING: f32 = 8.0;
 const CHOOSER_MAX_WIDTH: f32 = 440.0;
 const CHOOSER_AVATAR_SIZE: f32 = 48.0;
-const CHOOSER_ROW_HEIGHT: f32 = 72.0;
+const CHOOSER_ROW_HEIGHT: f32 = 64.0;
 const CHOOSER_ROW_PADDING: f32 = 12.0;
-const HEADER_AVATAR_SIZE: f32 = 28.0;
+const HEADER_AVATAR_SIZE: f32 = 20.0;
 
 pub struct Presentation {
     display_name: String,
@@ -328,7 +331,7 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
             Layout::top_down(Align::Min),
             |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.label(crate::typography::semibold(heading).size(28.0));
+                    ui.label(crate::typography::semibold(heading).size(24.0));
                 });
                 ui.add_space(32.0);
 
@@ -357,7 +360,7 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
 fn chooser_content_height(profile_count: usize) -> f32 {
     let profiles_height = std::iter::repeat_n(CHOOSER_ROW_HEIGHT + 8.0, profile_count).sum::<f32>();
     let empty_height = if profile_count == 0 { 36.0 } else { 8.0 };
-    40.0 + 32.0 + profiles_height + empty_height + 56.0
+    32.0 + 32.0 + profiles_height + empty_height + 48.0
 }
 
 fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>) -> Response {
@@ -384,17 +387,22 @@ fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>) -> Response {
     } else {
         palette.borders().subtle()
     };
-    ui.painter().rect_filled(rect, 0.0, fill.into_cint());
+    ui.painter()
+        .rect_filled(rect, CONTROL_RADIUS, fill.into_cint());
     ui.painter().rect_stroke(
         rect,
-        0.0,
+        CONTROL_RADIUS,
         egui::Stroke::new(1.0, border.into_cint()),
         egui::StrokeKind::Inside,
     );
 
+    let content_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + CHOOSER_ROW_PADDING, rect.top()),
+        egui::pos2(rect.right() - CHOOSER_ROW_PADDING, rect.bottom()),
+    );
     let mut child = ui.new_child(
         UiBuilder::new()
-            .max_rect(rect.shrink(CHOOSER_ROW_PADDING))
+            .max_rect(content_rect)
             .layout(Layout::left_to_right(Align::Center)),
     );
     avatar(&mut child, profile, CHOOSER_AVATAR_SIZE);
@@ -413,7 +421,7 @@ fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>) -> Response {
 }
 
 fn chooser_create_row(ui: &mut Ui, label: &str) -> Response {
-    const HEIGHT: f32 = 56.0;
+    const HEIGHT: f32 = 48.0;
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), HEIGHT), Sense::click());
     let response = row_response(ui, response);
@@ -421,9 +429,14 @@ fn chooser_create_row(ui: &mut Ui, label: &str) -> Response {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     let visuals = ui.style().interact(&response);
-    ui.painter().rect_filled(rect, 0.0, visuals.weak_bg_fill);
     ui.painter()
-        .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+        .rect_filled(rect, CONTROL_RADIUS, visuals.weak_bg_fill);
+    ui.painter().rect_stroke(
+        rect,
+        CONTROL_RADIUS,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
 
     let icon_center = egui::pos2(
         rect.left() + CHOOSER_ROW_PADDING + CHOOSER_AVATAR_SIZE / 2.0,
@@ -539,7 +552,7 @@ fn paint_focus_ring(ui: &Ui, response: &Response) {
     if response.has_focus() {
         ui.painter().rect_stroke(
             response.rect,
-            0.0,
+            CONTROL_RADIUS,
             egui::Stroke::new(
                 2.0,
                 crate::theme::palette(ui)

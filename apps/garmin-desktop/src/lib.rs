@@ -22,13 +22,14 @@ pub use mode::DataError;
 
 /// Opens the platform database and native window.
 ///
-/// The `demo` build uses a separate data root seeded through the production importer.
+/// The `demo` build uses a separate seeded database and directory-backed fake device.
 /// # Errors
 /// [`enum@Error`] when application data or the native window cannot be initialized.
 pub fn run() -> Result<(), Error> {
     let data_root = eframe::storage_dir(mode::APP_ID).ok_or(Error::DataRootUnavailable)?;
     fs::create_dir_all(&data_root)?;
     let storage = block_on(mode::open_storage(mode::database_path(&data_root)))?;
+    let device_platform = device_backend::open(&data_root)?;
     let application = Application::new(storage);
     let translations = Translations::bundled()?;
     let viewport = eframe::egui::ViewportBuilder::default()
@@ -50,6 +51,7 @@ pub fn run() -> Result<(), Error> {
                 application,
                 translations,
                 creation.egui_ctx.clone(),
+                device_platform,
             )?))
         }),
     )?;
@@ -65,6 +67,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Data(#[from] DataError),
+    #[error(transparent)]
+    Device(#[from] device_backend::Error),
     #[error(transparent)]
     Application(#[from] garmin_services::Error),
     #[error(transparent)]

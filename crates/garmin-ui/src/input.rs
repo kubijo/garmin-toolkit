@@ -3,7 +3,10 @@
 use cint::ColorInterop;
 use egui::{Response, RichText, Ui, emath::Numeric};
 
-use crate::{Size, button, icons};
+use crate::{
+    Size, button, icons,
+    theme::{CONTROL_RADIUS, PANEL_RADIUS},
+};
 
 /// Supporting or validation text below an input.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -267,8 +270,8 @@ fn field(
                 .unwrap_or_else(|| ui.visuals().extreme_bg_color)
         };
         let response = control(ui, fill);
-        let emphasized = response.has_focus() || props.message.is_some_and(Message::is_error);
-        let border = if props.message.is_some_and(Message::is_error) {
+        let is_error = props.message.is_some_and(Message::is_error);
+        let border = if is_error {
             app_theme.support().error()
         } else if response.has_focus() {
             app_theme.borders().interactive()
@@ -277,11 +280,16 @@ fn field(
         } else {
             app_theme.borders().subtle()
         };
-        let width = if emphasized { 2.0 } else { 1.0 };
-        ui.painter().hline(
-            response.rect.x_range(),
-            response.rect.bottom() - width / 2.0,
+        let width = if response.has_focus() && !is_error {
+            2.0
+        } else {
+            1.0
+        };
+        ui.painter().rect_stroke(
+            response.rect,
+            CONTROL_RADIUS,
             egui::Stroke::new(width, border.into_cint()),
+            egui::StrokeKind::Inside,
         );
 
         if let Some(message) = props.message {
@@ -319,6 +327,7 @@ fn number_control<N: Numeric>(
         ui.style_mut().drag_value_text_style = egui::TextStyle::Body;
         egui::Frame::new()
             .fill(fill)
+            .corner_radius(PANEL_RADIUS)
             .show(ui, |ui| {
                 ui.allocate_ui_with_layout(
                     egui::vec2(ui.available_width(), metrics.height),
@@ -430,21 +439,21 @@ struct Metrics {
 const fn metrics(size: Size) -> Metrics {
     match size {
         Size::Small => Metrics {
-            height: 40.0,
+            height: 32.0,
             horizontal_padding: 12,
-            vertical_padding: 10,
+            vertical_padding: 6,
             font_size: 14.0,
         },
         Size::Medium => Metrics {
-            height: 48.0,
+            height: 40.0,
             horizontal_padding: 16,
-            vertical_padding: 14,
+            vertical_padding: 10,
             font_size: 14.0,
         },
         Size::Large => Metrics {
-            height: 64.0,
+            height: 48.0,
             horizontal_padding: 16,
-            vertical_padding: 22,
+            vertical_padding: 14,
             font_size: 16.0,
         },
     }

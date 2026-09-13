@@ -281,7 +281,7 @@ fn encode_activity_with_file_type(
     file_id.manufacturer = typedef::Manufacturer::DEVELOPMENT;
     file_id.product = 42;
     file_id.serial_number = 1_234;
-    "Synthetic tracker".clone_into(&mut file_id.product_name);
+    "Mock Track-o-Matic 9000".clone_into(&mut file_id.product_name);
     file_id.time_created = typedef::DateTime::from_unix_timestamp(definition.timing.start);
 
     let mut creator = mesgdef::DeviceInfo::new();

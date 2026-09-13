@@ -8,6 +8,7 @@
   lib,
   nixCargoTargetDir,
   pkgs,
+  pythonToolsEnv,
   toolchain,
   workspaceSrc,
 }:
@@ -143,6 +144,10 @@ let
   src = import ./cargo-source.nix {
     inherit craneLib lib workspaceSrc;
   };
+  i18nSrc = import ./cargo-source.nix {
+    inherit craneLib lib workspaceSrc;
+    extraFilesets = [ (workspaceSrc + "/infra/python") ];
+  };
   commonArgs = {
     inherit src;
     CARGO_TARGET_DIR = "target";
@@ -186,28 +191,34 @@ let
     trap 'rm -rf "$i18n_dir"' EXIT
 
     ${extractSourceCatalog "$i18n_dir/en-source.json"}
-    ${lib.getExe pkgs.jq} --exit-status \
-      --slurpfile translation crates/garmin-i18n/translations/cs.json \
-      '(length == ($translation[0] | length)) and all(to_entries[];
-        $translation[0][.key].source == .value.message and
-        ($translation[0][.key].description // null) == (.value.description // null) and
-        ($translation[0][.key].translation | type == "string" and length > 0))' \
-      "$i18n_dir/en-source.json" > /dev/null
+    ${pythonToolsEnv}/bin/python -m unittest discover -q --start-directory infra/python --pattern 'test_*.py'
+    ${pythonToolsEnv}/bin/python infra/python/check_translation_metadata.py \
+      "$i18n_dir/en-source.json" \
+      crates/garmin-i18n/translations/cs.json
+
     message_count=$(${lib.getExe pkgs.jq} length "$i18n_dir/en-source.json")
-    echo "FormatJS catalog completeness: $message_count/$message_count Czech messages"
+    echo "FormatJS source catalog: $message_count messages"
+
     ${compileCatalogs "$i18n_dir"}
-    cmp crates/garmin-i18n/catalogs/cs.json "$i18n_dir/cs.json"
+    if ! cmp --silent crates/garmin-i18n/catalogs/cs.json "$i18n_dir/cs.json"; then
+      printf 'Compiled Czech catalog is stale; run just dev::i18n-sync.\n' >&2
+      exit 1
+    fi
+
     ${formatjs} verify "$i18n_dir/en.json" "$i18n_dir/cs.json" \
       --source-locale en \
       --missing-keys \
       --extra-keys \
       --structural-equality
   '';
+
   i18nCheck = mkApp "i18n-check" [
     formatjsCli
     pkgs.coreutils
     pkgs.jq
+    pythonToolsEnv
   ] i18nCheckCommand;
+
   i18nSync =
     mkApp "i18n-sync"
       [
@@ -236,6 +247,7 @@ let
           --out-file crates/garmin-i18n/catalogs/cs.json \
           crates/garmin-i18n/translations/cs.json
       '';
+
   projectLint =
     mkApp "project-lint"
       [
@@ -267,6 +279,7 @@ let
         run_step "gallery deny" ${cargoCommand galleryDenyArgs}
         finish_check
       '';
+
   projectCheck =
     name: nativeBuildInputs: command:
     pkgs.runCommand name { inherit nativeBuildInputs; } ''
@@ -276,6 +289,7 @@ let
       ${command}
       touch "$out"
     '';
+
   sqlxPrepareCommand = check: ''
     sqlx_prepare_dir=$(mktemp -d)
     trap 'rm -rf "$sqlx_prepare_dir"' EXIT
@@ -293,16 +307,19 @@ let
       --all-features \
       --all-targets
   '';
+
   sqlxPrepare = mkApp "sqlx-prepare" [
     pkgs.coreutils
     pkgs.sqlx-cli
     toolchain
   ] (sqlxPrepareCommand false);
+
   sqlxCheck = mkApp "sqlx-check" [
     pkgs.coreutils
     pkgs.sqlx-cli
     toolchain
   ] (sqlxPrepareCommand true);
+
   sourceShapeCommands = ''
     if rg --line-number \
       --glob '*.md' \
@@ -314,6 +331,7 @@ let
       exit 1
     fi
   '';
+
   sourceShapeCheck = pkgs.writeShellApplication {
     name = "source-shape-check";
     runtimeInputs = [ pkgs.ripgrep ];
@@ -345,6 +363,7 @@ in
           run_step "staged secrets" ${lib.getExe pkgs.gitleaks} git --config infra/gitleaks.toml --redact --no-banner --pre-commit --staged .
           finish_check
         '';
+
     coverage =
       mkApp "coverage"
         [
@@ -387,6 +406,7 @@ in
             (toString coverageMinimum)
           ]}
         '';
+
     dedupe = mkApp "dedupe" [ pkgs.cargo-deny ] ''
       ${cargoCommand [
         "deny"
@@ -394,12 +414,17 @@ in
         "bans"
       ]}
     '';
+
     docs = mkApp "docs" [ toolchain ] ''
       env RUSTDOCFLAGS='-D warnings' ${cargoCommand docArgs} --open "$@"
     '';
+
     project-lint = projectLint;
+
     i18n-check = i18nCheck;
+
     i18n-sync = i18nSync;
+
     outdated =
       mkApp "outdated"
         [
@@ -413,8 +438,11 @@ in
             "--root-deps-only"
           ]}
         '';
+
     sqlx-prepare = sqlxPrepare;
+
     sqlx-check = sqlxCheck;
+
     test =
       mkApp "test"
         [
@@ -425,6 +453,7 @@ in
           ${cargoCommand testArgs} "$@"
         '';
   };
+
   checks = {
     rust-clippy = craneLib.cargoClippy (
       commonArgs
@@ -433,6 +462,7 @@ in
         cargoClippyExtraArgs = lib.escapeShellArgs (craneArgs (lib.tail clippyArgs));
       }
     );
+
     rust-coverage = craneLib.cargoNextest (
       commonArgs
       // {
@@ -452,6 +482,7 @@ in
         withLlvmCov = true;
       }
     );
+
     rust-deny = craneLib.cargoDeny (
       commonArgs
       // {
@@ -459,6 +490,7 @@ in
         cargoDenyChecks = lib.concatStringsSep " " (lib.drop 2 denyArgs);
       }
     );
+
     rust-doc = craneLib.cargoDoc (
       commonArgs
       // {
@@ -467,9 +499,11 @@ in
         RUSTDOCFLAGS = "-D warnings";
       }
     );
+
     rust-inheritance = projectCheck "rust-workspace-inheritance" [ inheritanceCheck ] ''
       ${lib.getExe inheritanceCheck} --path .
     '';
+
     rust-i18n =
       pkgs.runCommand "rust-i18n"
         {
@@ -480,12 +514,13 @@ in
           ];
         }
         ''
-          cp -R ${src} source
+          cp -R ${i18nSrc} source
           chmod -R u+w source
           cd source
           ${i18nCheckCommand}
           touch "$out"
         '';
+
     rust-machete =
       projectCheck "rust-unused-dependencies"
         [
@@ -495,6 +530,7 @@ in
         ''
           ${cargoCommand [ "machete" ]}
         '';
+
     rust-sqlx = craneLib.mkCargoDerivation (
       commonArgs
       // {
@@ -509,7 +545,9 @@ in
         doInstallCargoArtifacts = false;
       }
     );
+
     rust-source-shape = projectCheck "rust-source-shape" [ pkgs.ripgrep ] sourceShapeCommands;
+
     rust-source-closure = pkgs.runCommandLocal "rust-source-closure" { } ''
       diff --recursive --brief \
         ${workspaceSrc}/crates/garmin-brand/assets \
@@ -520,6 +558,7 @@ in
       test ! -e ${src}/infra/gallery
       touch "$out"
     '';
+
     rust-tests = craneLib.cargoNextest (
       commonArgs
       // {

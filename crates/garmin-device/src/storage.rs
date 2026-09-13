@@ -206,6 +206,17 @@ pub trait DeviceWrite: DeviceRead {
         )))
     }
 
+    async fn ensure_directory_with_progress(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        progress: &garmin_progress::ProgressReporter,
+    ) -> Result<(), DeviceIoError> {
+        require_running(progress)?;
+        self.ensure_directory(storage, path).await?;
+        require_running(progress)
+    }
+
     /// Create and verify a small file.
     async fn create_verified_file(
         &self,
@@ -228,6 +239,17 @@ pub trait DeviceWrite: DeviceRead {
         Err(DeviceIoError::Transport(format!(
             "directory removal is unsupported for {storage}:{path}"
         )))
+    }
+
+    async fn remove_empty_directory_with_progress(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        progress: &garmin_progress::ProgressReporter,
+    ) -> Result<(), DeviceIoError> {
+        require_running(progress)?;
+        self.remove_empty_directory(storage, path).await?;
+        require_running(progress)
     }
 
     async fn delete(
@@ -426,6 +448,17 @@ impl DeviceWrite for MountedMtpDevice {
         Ok(self.backend_ensure_directory(storage, path).await?)
     }
 
+    async fn ensure_directory_with_progress(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        progress: &garmin_progress::ProgressReporter,
+    ) -> Result<(), DeviceIoError> {
+        Ok(self
+            .backend_ensure_directory_with_progress(storage, path, progress)
+            .await?)
+    }
+
     async fn create_verified_file(
         &self,
         storage: &str,
@@ -443,6 +476,17 @@ impl DeviceWrite for MountedMtpDevice {
         path: &SafeRelativePath,
     ) -> Result<(), DeviceIoError> {
         Ok(self.backend_remove_empty_directory(storage, path).await?)
+    }
+
+    async fn remove_empty_directory_with_progress(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        progress: &garmin_progress::ProgressReporter,
+    ) -> Result<(), DeviceIoError> {
+        Ok(self
+            .backend_remove_empty_directory_with_progress(storage, path, progress)
+            .await?)
     }
 
     async fn delete(

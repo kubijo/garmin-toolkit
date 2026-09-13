@@ -6,6 +6,9 @@ OKLab/OKLCH operations; `cint` is the lossless renderer boundary.
 Themes derive from Carbon Gray 100 and Gray 10. Components use semantic roles, never swatch grades. Auto follows the
 system and falls back to dark; an app-owned swatch supplies action states.
 
+The application-wide [visual language](visual-language.md) defines the original Carbon-derived composition, geometry,
+type, interaction, and verification rules. External applications are observational references only and are never copied.
+
 Profiles may store an accent and avatar. Import bounds content-detected PNG, JPEG, or WebP at 10 MiB and 4096 pixels per
 edge, retains the original, and derives a 256-pixel PNG thumbnail. These fields affect presentation only.
 
@@ -53,6 +56,12 @@ focus.
 
 Image baselines are deferred. Until capture coverage can merge into LLVM profiles, the numeric gate excludes `garmin-ui`
 and desktop views while their tests still run.
+
+The Web canvas intentionally owns secondary-click interaction instead of opening the browser's generic context menu.
+Application context menus expose only actions meaningful for the item or surface under the pointer and dispatch the same
+typed actions as the visible interface; right-click is never the sole route to an operation. Keyboard users can open the
+same menu with the platform context-menu key or `Shift+F10`. Native window-titlebar secondary-click behavior remains
+owned by the operating system where supported.
 
 `garmin-i18n` wraps FormatJS. English ICU messages live beside call sites as fallback; Czech source, translation, and
 context compile into a flat catalog. Checks reject stale, missing, empty, extra, malformed, or incompatible messages.

@@ -20,7 +20,7 @@ const PRIMARY_DESTINATIONS: &[shell::Destination<'_>] = &[
 ];
 
 const DEVICE_DESTINATIONS: &[shell::Destination<'_>] = &[shell::Destination {
-    label: "Garmin Edge 1050",
+    label: "Mock Cycle-o-Matic 9000",
     icon: icons::BICYCLE,
 }];
 
@@ -29,6 +29,7 @@ struct SceneProps {
     navigation: shell::Navigation,
     active: usize,
     profile: bool,
+    profile_open: bool,
     window_controls: bool,
     width: f32,
     height: f32,
@@ -53,6 +54,7 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             1,
         ),
         profile: ctx.toggle("profile", true),
+        profile_open: false,
         window_controls: ctx.toggle("window controls", true),
         width: ctx.slider("width", 960.0, 360.0, 1280.0, 1.0),
         height: ctx.slider("height", 600.0, 360.0, 800.0, 1.0),
@@ -70,6 +72,7 @@ fn expanded(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             navigation: shell::Navigation::Expanded,
             active: 1,
             profile: true,
+            profile_open: false,
             window_controls: true,
             width: 960.0,
             height: 600.0,
@@ -88,6 +91,7 @@ fn rail(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             navigation: shell::Navigation::Rail,
             active: 2,
             profile: true,
+            profile_open: false,
             window_controls: true,
             width: 720.0,
             height: 520.0,
@@ -106,11 +110,31 @@ fn narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             navigation: shell::Navigation::Rail,
             active: 3,
             profile: true,
+            profile_open: false,
             window_controls: true,
             width: 400.0,
             height: 640.0,
         },
         "narrow",
+    );
+}
+
+#[scene]
+fn profile_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_shell(
+        ctx,
+        ui,
+        globals,
+        SceneProps {
+            navigation: shell::Navigation::Expanded,
+            active: 1,
+            profile: true,
+            profile_open: true,
+            window_controls: false,
+            width: 640.0,
+            height: 480.0,
+        },
+        "profile-menu",
     );
 }
 
@@ -124,7 +148,9 @@ fn show_shell(
     let state_id = egui::Id::new(("shell-gallery-selectors", state_name));
     let mut state = ui
         .data(|data| data.get_temp::<SelectorState>(state_id))
-        .unwrap_or_default();
+        .unwrap_or(SelectorState {
+            profile_open: props.profile_open,
+        });
     let profiles = [
         profile::ProfileProps {
             display_name: "Alex Rider",

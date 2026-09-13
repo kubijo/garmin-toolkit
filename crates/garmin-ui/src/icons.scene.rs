@@ -64,7 +64,7 @@ fn show_icon(ui: &mut egui::Ui, icon: icons::Icon, props: &CatalogProps) {
     let visuals = ui.style().interact_selectable(&response, selected);
     if response.hovered() || selected {
         ui.painter()
-            .rect_filled(rect, egui::CornerRadius::same(4), visuals.bg_fill);
+            .rect_filled(rect, egui::CornerRadius::ZERO, visuals.bg_fill);
     }
 
     let icon_center = egui::pos2(

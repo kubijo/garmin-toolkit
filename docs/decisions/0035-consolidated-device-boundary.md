@@ -16,6 +16,13 @@ an additional "read device details" consent step.
 The strict typed `GarminDevice.xml` view and the exact source document coexist: applications use allowlisted
 capabilities, while the map service receives the original manifest it requires.
 
+Device-metadata parsing has one format-neutral boundary. It detects a document from its root element and namespace,
+dispatches to a statically registered format parser, and returns normalized metadata tagged with its source format and
+any tolerated quirks. GarminDevice v2 is currently the only registered format; its private wire structures and
+normalization policy live under `manifest::garmin::v2`. Future v1, v3, or other-manufacturer support adds a separately
+named parser and dispatch arm rather than model-name conditionals or changes to the v2 parser. Metadata-file discovery
+remains Garmin-specific until a real additional format establishes its own locations.
+
 This supersedes ADR 0012 where its former USB crate boundary conflicts with the consolidated device owner.
 
 ## Why
@@ -27,4 +34,6 @@ duplicate identity, manifest, MTP, and lifecycle behavior at the most safety-sen
 
 All device transports fail closed on ambiguous manifests, unsafe paths, partial listings, identity changes, and
 disconnects. Updates, backups, removal, recovery, activity import, and future device-state views consume the same device
-types. Physical-device validation remains necessary for transport claims that simulators cannot prove.
+types. Parser quirks describe tolerated wire-layout deviations; they do not create model-specific parsers or alter the
+normalized capability contract. Physical-device validation remains necessary for transport claims that simulators cannot
+prove.

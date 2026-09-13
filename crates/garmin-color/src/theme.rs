@@ -525,18 +525,18 @@ pub const GRAY_100: Theme = Theme {
         tertiary: ButtonStates {
             rest: ButtonState {
                 background: swatch::TRANSPARENT,
-                foreground: swatch::WHITE,
-                border: swatch::WHITE,
+                foreground: swatch::gray::G30,
+                border: swatch::gray::G60,
             },
             hover: ButtonState {
-                background: swatch::gray::G10,
-                foreground: swatch::gray::G100,
-                border: swatch::gray::G10,
+                background: swatch::gray::G80,
+                foreground: swatch::gray::G10,
+                border: swatch::gray::G60,
             },
             active: ButtonState {
-                background: swatch::gray::G30,
-                foreground: swatch::gray::G100,
-                border: swatch::TRANSPARENT,
+                background: swatch::gray::G70,
+                foreground: swatch::gray::G10,
+                border: swatch::gray::G60,
             },
             disabled: ButtonState {
                 background: swatch::TRANSPARENT,
@@ -756,18 +756,18 @@ pub const GRAY_10: Theme = Theme {
         tertiary: ButtonStates {
             rest: ButtonState {
                 background: swatch::TRANSPARENT,
-                foreground: swatch::ACTION,
-                border: swatch::ACTION,
+                foreground: swatch::gray::G70,
+                border: swatch::gray::G50,
             },
             hover: ButtonState {
-                background: swatch::ACTION,
-                foreground: swatch::WHITE,
-                border: swatch::ACTION,
+                background: swatch::gray::G20,
+                foreground: swatch::gray::G100,
+                border: swatch::gray::G60,
             },
             active: ButtonState {
-                background: swatch::ACTION_ACTIVE,
-                foreground: swatch::WHITE,
-                border: swatch::ACTION_ACTIVE,
+                background: swatch::gray::G30,
+                foreground: swatch::gray::G100,
+                border: swatch::gray::G60,
             },
             disabled: ButtonState {
                 background: swatch::TRANSPARENT,
@@ -904,6 +904,21 @@ mod tests {
             assert_eq!(theme.borders().interactive(), action);
             assert_eq!(theme.buttons().primary().rest().background(), action);
             assert_eq!(theme.modal_actions().confirm().rest().background(), action);
+        }
+    }
+
+    #[test]
+    fn tertiary_buttons_are_neutral_and_subdued() {
+        for theme in [&GRAY_100, &GRAY_10] {
+            let tertiary = theme.buttons().tertiary();
+
+            assert_eq!(tertiary.rest().background(), swatch::TRANSPARENT);
+            assert_ne!(tertiary.rest().foreground(), swatch::ACTION);
+            assert_ne!(tertiary.rest().border(), swatch::ACTION);
+            assert_ne!(
+                tertiary.rest().foreground(),
+                theme.buttons().primary().rest().background()
+            );
         }
     }
 }

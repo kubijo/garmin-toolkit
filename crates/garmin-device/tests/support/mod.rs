@@ -99,7 +99,7 @@ pub fn manifest_with_updates(
         namespace: namespace.to_owned(),
         model: Model {
             software_version: 2244,
-            description: "Synthetic Garmin".to_owned(),
+            description: "Mock Storage-o-Matic 9000".to_owned(),
         },
         id: 123_456,
         mass_storage_mode: MassStorageMode {

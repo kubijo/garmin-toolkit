@@ -32,7 +32,7 @@ fn source(owner_id: UserId) -> Result<Source, garmin_model::identity::Error> {
     Ok(Source::from_parts(
         SourceId::new_v4(),
         owner_id,
-        "USB watch".parse::<SourceLabel>()?,
+        "Mock watch source".parse::<SourceLabel>()?,
         None,
     ))
 }
@@ -447,12 +447,15 @@ fn identity_and_shared_values_round_trip() -> TestResult {
     assert_eq!(user.id(), owner_id);
 
     let device_id = DeviceId::new_v4();
-    let device_label = DeviceLabel::from_string(" Edge 1050 ".to_owned())?;
-    assert_eq!(device_label.to_string(), "Edge 1050");
-    assert_eq!(device_label.clone().into_string(), "Edge 1050");
+    let device_label = DeviceLabel::from_string(" Mock Cycle-o-Matic 9000 ".to_owned())?;
+    assert_eq!(device_label.to_string(), "Mock Cycle-o-Matic 9000");
+    assert_eq!(
+        device_label.clone().into_string(),
+        "Mock Cycle-o-Matic 9000"
+    );
     let device = Device::from_parts(device_id, device_label);
     assert_eq!(device.id(), device_id);
-    assert_eq!(device.label().as_str(), "Edge 1050");
+    assert_eq!(device.label().as_str(), "Mock Cycle-o-Matic 9000");
 
     let source_label = SourceLabel::from_string(" USB ".to_owned())?;
     assert_eq!(source_label.to_string(), "USB");

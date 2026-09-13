@@ -13,10 +13,12 @@ workspace = true
 
 [dependencies]
 byte-unit.workspace = true
+camino.workspace = true
 garmin-brand.workspace = true
 cint.workspace = true
 garmin-color.workspace = true
 egui.workspace = true
+egui_ltreeview.workspace = true
 egui_extras.workspace = true
 garmin-i18n.workspace = true
 garmin-model.workspace = true

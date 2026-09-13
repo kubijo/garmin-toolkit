@@ -9,12 +9,14 @@ fn inspecting(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         device::show(
             ui,
             &device::Props {
-                name: "Garmin Edge 1050",
+                name: "Mock Cycle-o-Matic 9000",
                 connection: "USB/MTP",
                 identifier: None,
                 software: None,
                 status: "Inspecting…",
                 status_label: "Status",
+                inspection_error: None,
+                inspection_error_label: "Inspection error",
                 identifier_label: "Device ID",
                 software_label: "Software",
                 transfers_label: "Supported transfers",
@@ -46,12 +48,14 @@ fn inspected(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         device::show(
             ui,
             &device::Props {
-                name: "Garmin Edge 1050",
+                name: "Mock Cycle-o-Matic 9000",
                 connection: "USB/MTP",
                 identifier: Some("1234567890"),
                 software: Some("9.12"),
                 status: "Ready",
                 status_label: "Status",
+                inspection_error: None,
+                inspection_error_label: "Inspection error",
                 identifier_label: "Device ID",
                 software_label: "Software",
                 transfers_label: "Supported transfers",
@@ -69,12 +73,14 @@ fn failed(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         device::show(
             ui,
             &device::Props {
-                name: "Garmin fēnix 8",
+                name: "Mock Watch-o-Matic 9000",
                 connection: "USB/MTP",
                 identifier: None,
                 software: None,
                 status: "Inspection failed",
                 status_label: "Status",
+                inspection_error: Some("The device metadata could not be read."),
+                inspection_error_label: "Inspection error",
                 identifier_label: "Device ID",
                 software_label: "Software",
                 transfers_label: "Supported transfers",

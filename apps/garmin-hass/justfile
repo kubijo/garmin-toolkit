@@ -12,5 +12,9 @@ run mode data_base:
         *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
     esac
 
-    package_path="$(nix build --quiet --no-warn-dirty --no-link --print-out-paths "{{ flake }}#${package}")"
+    package_path="$(
+        {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 \
+            nix build --quiet --no-warn-dirty --no-link --print-out-paths \
+            "{{ flake }}#${package}"
+    )"
     exec env GARMIN_TOOLKIT_HASS_DATA_BASE={{ quote(data_base) }} "$package_path/bin/garmin-hass"

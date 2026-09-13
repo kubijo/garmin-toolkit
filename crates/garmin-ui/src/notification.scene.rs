@@ -50,7 +50,7 @@ fn actionable(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
             ui,
             &notification::ActionableProps {
                 kind,
-                title: "Garmin Edge 1050 connected",
+                title: "Mock Cycle-o-Matic 9000 connected",
                 detail: detail.then_some("Inspecting…"),
                 action: action.then_some("View device"),
                 closable,
@@ -98,6 +98,22 @@ fn toast_stack(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     });
 }
 
+#[scene]
+fn toast_stack_narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+    stage!(ctx, ui, (360, 480), |ui| {
+        let (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 0.0, ui.visuals().panel_fill);
+
+        let mut state = seeded_toast_scene();
+        let _ = state.toasts.show_in(
+            ui.ctx(),
+            egui::Id::new("notification-gallery-narrow-stack"),
+            rect,
+            notification::StackMode::Expanded,
+        );
+    });
+}
+
 #[derive(Default)]
 struct ToastScene {
     toasts: notification::Toasts,
@@ -113,7 +129,7 @@ fn seeded_toast_scene() -> ToastScene {
     state.toasts.push(
         notification::Toast::new(
             notification::Kind::Information,
-            "Garmin Edge 1050 connected",
+            "Mock Cycle-o-Matic 9000 connected",
         )
         .detail("Inspecting…")
         .action("View device"),
@@ -135,7 +151,7 @@ fn toast(index: usize) -> Option<notification::Toast> {
         1 => Some(
             notification::Toast::new(
                 notification::Kind::Information,
-                "Garmin Edge 1050 connected",
+                "Mock Cycle-o-Matic 9000 connected",
             )
             .detail("Inspecting…")
             .action("View device"),

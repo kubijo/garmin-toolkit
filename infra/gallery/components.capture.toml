@@ -14,3 +14,11 @@ scene = "garmin_gallery::notification::Toast Stack"
 
 [shot.knobs]
 mode = "expanded"
+
+[[shot]]
+name = "notification-toast-stack-narrow"
+scene = "garmin_gallery::notification::Toast Stack Narrow"
+
+[[shot]]
+name = "device-explorer-populated"
+scene = "garmin_gallery::device_browser::Populated"

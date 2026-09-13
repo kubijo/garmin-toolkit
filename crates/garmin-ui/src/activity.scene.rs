@@ -49,7 +49,7 @@ const METRICS: &[activity::MetricProps<'_>] = &[
 const DETAIL: activity::DetailProps<'_> = activity::DetailProps {
     icon: icons::PERSON_SIMPLE_RUN,
     title: "Running",
-    subtitle: "30 May 2026 · 17:30 · Synthetic tracker",
+    subtitle: "30 May 2026 · 17:30 · Mock Track-o-Matic 9000",
     metrics: METRICS,
     path: Some(garmin_ui::path::Props {
         segments: &[garmin_ui::path::Segment {

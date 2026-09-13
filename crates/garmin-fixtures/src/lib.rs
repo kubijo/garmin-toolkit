@@ -1,5 +1,7 @@
 //! Publishable data for mock deployments and tests.
 
+pub mod device;
+
 use std::{
     ffi::{OsStr, OsString},
     fmt::Display,
@@ -160,7 +162,7 @@ fn definitions() -> Result<[Definition; 3], SeedError> {
             1,
             Role::Owner,
             "Alex Rider",
-            "Synthetic fēnix",
+            "Mock Watch-o-Matic 9000",
             "Demo watch",
             &[ActivityCase::MorningRun, ActivityCase::TempoRun],
         )?,
@@ -168,7 +170,7 @@ fn definitions() -> Result<[Definition; 3], SeedError> {
             2,
             Role::Member,
             "Sam Runner",
-            "Synthetic running watch",
+            "Mock Running Watch-o-Matic 9000",
             "Demo running watch",
             &[ActivityCase::TrailRun],
         )?,
@@ -176,7 +178,7 @@ fn definitions() -> Result<[Definition; 3], SeedError> {
             3,
             Role::Member,
             "Taylor Cyclist",
-            "Synthetic Edge",
+            "Mock Cycle-o-Matic 9000",
             "Demo bike computer",
             &[
                 ActivityCase::CommuteRide,

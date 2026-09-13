@@ -1,20 +1,25 @@
 #![cfg(target_arch = "wasm32")]
 
 use bytes::Bytes;
-use eframe::egui::{Id, Ui};
+use camino::Utf8PathBuf;
+use eframe::egui::{ColorImage, Id, TextureHandle, TextureOptions, Ui, load::SizedTexture};
 use futures_util::{SinkExt as _, StreamExt as _, future};
 use garmin_i18n::{Intl, Language, Translations, format_message};
 use garmin_model::identity::{LanguagePreference, ProfilePreferences, ThemePreference, UserId};
 use garmin_service_api::{
-    ActivityDetailSnapshot, ApplicationService, ApplicationServiceClient, DeploymentMode,
+    ActivityDetailSnapshot, ApplicationService, ApplicationServiceClient, AvatarCrop, AvatarUpload,
+    DeploymentMode, DeviceBrowserDownloadTicket, DeviceBrowserRequest, DeviceBrowserTarget,
+    DeviceBrowserUpload, DeviceCatalogSnapshot, DeviceFitImportOutcome, DeviceFitPreview,
     DeviceSnapshot, ProfileSnapshot,
 };
 use garmin_ui::{
-    activity, device, notification, offline, path, profile, profile_settings, progress, shell,
+    activity, device, device_browser, device_fit_preview, icons, image_crop, modal, notification,
+    offline, path, profile, profile_settings, progress, shell,
     workspace::{self, Page},
 };
 use remoc::prelude::*;
-use std::{cell::RefCell, fmt, io, rc::Rc, time::Duration};
+use std::{cell::RefCell, fmt, io, io::Cursor, rc::Rc, time::Duration};
+use tokio_wasm_io::io::AsyncWriteExt as _;
 use wasm_bindgen::{JsCast as _, prelude::*};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use websocket_web::{Msg, WebSocket};
@@ -22,6 +27,8 @@ use websocket_web::{Msg, WebSocket};
 const CANVAS_ID: &str = "garmin-toolkit";
 const HEARTBEAT_INTERVAL_MILLISECONDS: i32 = 3_000;
 const HEARTBEAT_TIMEOUT_MILLISECONDS: i32 = 5_000;
+const MAX_DEVICE_BROWSER_TRANSFER_BYTES: f64 = 512.0 * 1024.0 * 1024.0;
+const MAX_AVATAR_UPLOAD_BYTES: f64 = 10.0 * 1024.0 * 1024.0;
 
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
@@ -81,6 +88,9 @@ struct App {
     activity_detail: Option<Rc<ActivityDetailSnapshot>>,
     activity_segments: Vec<Vec<path::Point>>,
     applied_preferences: Option<(UserId, ProfilePreferences)>,
+    avatar_editor: Option<AvatarEditor>,
+    device_browser: Option<device_browser::Browser>,
+    device_fit_preview: Option<device_fit_preview::Preview>,
 }
 
 impl App {
@@ -107,6 +117,9 @@ impl App {
             activity_detail: None,
             activity_segments: Vec::new(),
             applied_preferences: None,
+            avatar_editor: None,
+            device_browser: None,
+            device_fit_preview: None,
         })
     }
 
@@ -197,7 +210,7 @@ impl App {
         loaded: bool,
         connected: bool,
         error: Option<&str>,
-        notice: Option<&str>,
+        notice: Option<&Notice>,
     ) {
         let profile_props = self
             .profile_presentations
@@ -218,7 +231,23 @@ impl App {
             },
             |ui| {
                 if let Some(error) = error {
-                    device::show_collection_state(ui, device::CollectionState::Error(error));
+                    let title = format_message!(
+                        &self.intl,
+                        default_message: "Could not connect to the device host",
+                    );
+                    let detail = format_message!(
+                        &self.intl,
+                        default_message: "{reason} Retrying…",
+                        values: { reason: error },
+                    );
+                    notification::show(
+                        ui,
+                        &notification::Props {
+                            kind: notification::Kind::Error,
+                            title: &title,
+                            detail: Some(&detail),
+                        },
+                    );
                     return None;
                 }
                 if !connected || !loaded {
@@ -241,14 +270,7 @@ impl App {
                     return None;
                 }
                 if let Some(notice) = notice {
-                    notification::show(
-                        ui,
-                        &notification::Props {
-                            kind: notification::Kind::Error,
-                            title: notice,
-                            detail: None,
-                        },
-                    );
+                    notification::show(ui, &notice.props());
                     ui.add_space(12.0);
                 }
                 profile::chooser(
@@ -277,12 +299,15 @@ impl App {
         profiles: &[ProfileSnapshot],
         devices: &[DeviceSnapshot],
         preferences_saving: bool,
-        notice: Option<&str>,
+        device_catalog_loading: Option<&str>,
+        notice: Option<&Notice>,
     ) {
+        let mut device_browser = self.device_browser.take();
         let Some(profile_index) = self
             .selected_profile
             .filter(|index| *index < profiles.len())
         else {
+            self.device_browser = device_browser;
             self.selected_profile = None;
             return;
         };
@@ -292,61 +317,75 @@ impl App {
             .map(profile::Presentation::props)
             .collect::<Vec<_>>();
         let current_profile = &profiles[profile_index];
-        let output = workspace::show(
-            ui,
-            &workspace::Props {
-                product_name,
-                intl: &self.intl,
-                profiles: &profile_props,
-                selected_profile: profile_index,
-                profile_menu_expanded: self.profile_menu_expanded,
-                page: &self.page,
-                navigation: self.navigation,
-                devices,
-                window_controls: None,
-            },
-            |ui| {
-                if let Some(notice) = notice {
-                    notification::show(
-                        ui,
-                        &notification::Props {
-                            kind: notification::Kind::Error,
-                            title: notice,
-                            detail: None,
-                        },
-                    );
-                    ui.add_space(12.0);
-                }
-                match &self.page {
-                    Page::Activities => PageAction::Activities(show_activities(
-                        ui,
-                        &self.intl,
-                        current_profile,
-                        &self.activity_presentations,
-                        self.selected_activity,
-                        self.activity_detail.as_deref(),
-                        &self.activity_segments,
-                    )),
-                    Page::ProfileSettings => PageAction::Settings(profile_settings::show(
-                        ui,
-                        &settings_props(
+        let output =
+            workspace::show(
+                ui,
+                &workspace::Props {
+                    product_name,
+                    intl: &self.intl,
+                    profiles: &profile_props,
+                    selected_profile: profile_index,
+                    profile_menu_expanded: self.profile_menu_expanded,
+                    page: &self.page,
+                    navigation: self.navigation,
+                    devices,
+                    window_controls: None,
+                },
+                |ui| {
+                    if let Some(notice) = notice {
+                        notification::show(ui, &notice.props());
+                        ui.add_space(12.0);
+                    }
+                    match &self.page {
+                        Page::Activities => PageAction::Activities(show_activities(
+                            ui,
                             &self.intl,
                             current_profile,
-                            self.profile_presentations[profile_index].props(),
-                            preferences_saving,
-                        ),
-                    )),
-                    Page::Device(key) => {
-                        if let Some(snapshot) = devices.iter().find(|device| &device.key == key) {
-                            device::show_snapshot(ui, &self.intl, snapshot);
+                            &self.activity_presentations,
+                            self.selected_activity,
+                            self.activity_detail.as_deref(),
+                            &self.activity_segments,
+                        )),
+                        Page::ProfileSettings => PageAction::Settings(profile_settings::show(
+                            ui,
+                            &settings_props(
+                                &self.intl,
+                                current_profile,
+                                self.profile_presentations[profile_index].props(),
+                                preferences_saving,
+                            ),
+                        )),
+                        Page::Device(key) => {
+                            let action = devices.iter().find(|device| &device.key == key).and_then(
+                                |snapshot| {
+                                    device::show_snapshot(
+                                        ui,
+                                        &self.intl,
+                                        snapshot,
+                                        device_catalog_loading == Some(key.as_str()),
+                                    )
+                                },
+                            );
+                            PageAction::Device {
+                                key: key.clone(),
+                                action,
+                            }
                         }
-                        PageAction::Device
                     }
-                }
-            },
-        );
+                },
+            );
+        let browser_action = match (&self.page, device_browser.as_mut()) {
+            (Page::Device(key), Some(browser)) if browser.device_key() == key => {
+                browser.show_window(ui, &self.intl)
+            }
+            _ => None,
+        };
+        self.device_browser = device_browser;
         self.handle_page_action(output.inner, profiles);
         self.handle_shell_action(output.action, profiles, devices);
+        if let Some(action) = browser_action {
+            self.handle_device_browser_action(action);
+        }
     }
 
     fn show_offline(&self, ui: &Ui, since_milliseconds: f64) {
@@ -380,13 +419,126 @@ impl App {
                 self.selected_activity = index;
                 self.load_selected_activity(profiles);
             }
-            PageAction::Settings(Some(profile_settings::Action::ChoosePicture)) => {}
+            PageAction::Settings(Some(profile_settings::Action::ChoosePicture)) => {
+                self.choose_profile_picture(profiles);
+            }
             PageAction::Settings(Some(profile_settings::Action::UpdatePreferences(
                 preferences,
             ))) => {
                 self.update_preferences(preferences, profiles);
             }
-            PageAction::Activities(None) | PageAction::Settings(None) | PageAction::Device => {}
+            PageAction::Device {
+                key,
+                action: Some(device::Action::BrowseFiles),
+            } => spawn_device_catalog(Rc::clone(&self.shared), self.context.clone(), key),
+            PageAction::Activities(None)
+            | PageAction::Settings(None)
+            | PageAction::Device { action: None, .. } => {}
+        }
+    }
+
+    fn handle_device_browser_action(&mut self, action: device_browser::Action) {
+        if matches!(action, device_browser::Action::Close) {
+            if !device_browser_busy(&self.shared.borrow()) {
+                self.device_browser = None;
+            }
+            return;
+        }
+        if device_browser_busy(&self.shared.borrow()) {
+            return;
+        }
+        let Some(device_key) = self
+            .device_browser
+            .as_ref()
+            .map(|browser| browser.device_key().to_owned())
+        else {
+            return;
+        };
+        match action {
+            device_browser::Action::Download(selection) => spawn_device_download(
+                Rc::clone(&self.shared),
+                self.context.clone(),
+                device_key,
+                browser_target(selection),
+                &format_message!(&self.intl, default_message: "Downloading from the device…"),
+                format_message!(&self.intl, default_message: "Download started"),
+                format_message!(&self.intl, default_message: "Download failed"),
+            ),
+            device_browser::Action::Upload {
+                storage_id,
+                directory,
+            } => spawn_device_upload(
+                Rc::clone(&self.shared),
+                self.context.clone(),
+                device_key,
+                storage_id,
+                directory,
+                DeviceUploadCopy {
+                    progress: format_message!(
+                        &self.intl,
+                        default_message: "Uploading to the device…",
+                    ),
+                    complete: format_message!(&self.intl, default_message: "Upload complete"),
+                    failure: format_message!(&self.intl, default_message: "Upload failed"),
+                    too_large: format_message!(
+                        &self.intl,
+                        default_message: "The selected file exceeds the 512 MiB device-browser limit",
+                    ),
+                },
+            ),
+            device_browser::Action::CreateDirectory {
+                storage_id,
+                parent,
+                name,
+            } => spawn_device_browser_request(
+                Rc::clone(&self.shared),
+                self.context.clone(),
+                DeviceBrowserRequest::CreateDirectory {
+                    device_key,
+                    storage_id,
+                    parent,
+                    name,
+                },
+                &format_message!(&self.intl, default_message: "Creating the folder…"),
+                format_message!(&self.intl, default_message: "Folder created"),
+                format_message!(&self.intl, default_message: "Could not create folder"),
+            ),
+            device_browser::Action::Remove(selection) => spawn_device_browser_request(
+                Rc::clone(&self.shared),
+                self.context.clone(),
+                DeviceBrowserRequest::Remove {
+                    device_key,
+                    target: browser_target(selection),
+                },
+                &format_message!(&self.intl, default_message: "Removing the selected item…"),
+                format_message!(&self.intl, default_message: "Item removed"),
+                format_message!(&self.intl, default_message: "Could not remove item"),
+            ),
+            device_browser::Action::Open(selection) => spawn_device_fit_preview(
+                Rc::clone(&self.shared),
+                self.context.clone(),
+                device_key,
+                browser_target(selection),
+                &format_message!(&self.intl, default_message: "Opening the FIT file…"),
+            ),
+            device_browser::Action::ImportFit(selection) => {
+                let Some(user_id) = self
+                    .selected_profile
+                    .and_then(|index| self.profiles.get(index))
+                    .map(|profile| profile.user.id())
+                else {
+                    return;
+                };
+                spawn_device_fit_import(
+                    Rc::clone(&self.shared),
+                    self.context.clone(),
+                    user_id,
+                    device_key,
+                    browser_target(selection),
+                    &format_message!(&self.intl, default_message: "Importing the FIT file…"),
+                );
+            }
+            device_browser::Action::Close => unreachable!("close was handled above"),
         }
     }
 
@@ -476,6 +628,26 @@ impl App {
             profile.user.id(),
             current,
             preferences,
+            format_message!(
+                &self.intl,
+                default_message: "Could not save profile settings",
+            ),
+        );
+    }
+
+    fn choose_profile_picture(&self, profiles: &[ProfileSnapshot]) {
+        let Some(user_id) = self
+            .selected_profile
+            .and_then(|index| profiles.get(index))
+            .map(|profile| profile.user.id())
+        else {
+            return;
+        };
+        spawn_choose_avatar(
+            Rc::clone(&self.shared),
+            self.context.clone(),
+            user_id,
+            format_message!(&self.intl, default_message: "Could not open profile picture"),
         );
     }
 
@@ -504,6 +676,7 @@ impl App {
                 &self.intl,
                 default_message: "The selected activity no longer exists",
             ),
+            format_message!(&self.intl, default_message: "Could not load activity"),
         );
     }
 
@@ -519,6 +692,125 @@ impl App {
                     Rc::clone(&self.shared),
                     self.context.clone(),
                     name.into_string(),
+                );
+            }
+            None => {}
+        }
+    }
+
+    fn show_avatar_editor(&mut self, ui: &mut Ui) {
+        let Some(editor) = self.avatar_editor.as_mut() else {
+            return;
+        };
+        let title = format_message!(&self.intl, default_message: "Adjust profile picture");
+        let description = format_message!(
+            &self.intl,
+            default_message: "Drag to reposition. Scroll or use the slider to zoom.",
+        );
+        let zoom = format_message!(&self.intl, default_message: "Zoom");
+        let cancel = format_message!(&self.intl, default_message: "Cancel");
+        let save = if editor.submitting {
+            format_message!(&self.intl, default_message: "Saving…")
+        } else {
+            format_message!(&self.intl, default_message: "Save picture")
+        };
+        let output = modal::show(
+            ui,
+            Id::new("profile-picture"),
+            &modal::Props {
+                title: &title,
+                description: Some(&description),
+                size: modal::Size::Medium,
+                presentation: modal::Presentation::Modal,
+                cancel_label: &cancel,
+                backdrop_closes: Some(!editor.submitting),
+                primary: modal::Primary {
+                    label: &save,
+                    icon: Some(icons::CHECK),
+                    kind: modal::PrimaryKind::Confirm,
+                    enabled: !editor.submitting,
+                },
+            },
+            |ui| {
+                ui.vertical_centered(|ui| {
+                    image_crop::show(
+                        ui,
+                        &mut editor.crop,
+                        image_crop::Props {
+                            texture: SizedTexture::from_handle(&editor.texture),
+                            source_size: editor.source_size,
+                            zoom_label: &zoom,
+                            disabled: editor.submitting,
+                        },
+                    )
+                    .crop
+                })
+                .inner
+            },
+        );
+        match output.action {
+            Some(modal::Action::Cancel) if !editor.submitting => self.avatar_editor = None,
+            Some(modal::Action::Primary) => {
+                editor.submitting = true;
+                spawn_import_avatar(
+                    Rc::clone(&self.shared),
+                    self.context.clone(),
+                    editor.user_id,
+                    AvatarUpload {
+                        file_name: editor.file_name.clone(),
+                        bytes: editor.bytes.clone(),
+                        crop: AvatarCrop {
+                            left: output.inner.left(),
+                            top: output.inner.top(),
+                            edge: output.inner.edge(),
+                        },
+                    },
+                    format_message!(
+                        &self.intl,
+                        default_message: "Could not save profile picture",
+                    ),
+                );
+            }
+            Some(modal::Action::Cancel) | None => {}
+        }
+    }
+
+    fn show_device_fit_preview(&mut self, ui: &mut Ui) {
+        let units = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .map_or(garmin_model::identity::UnitSystem::Metric, |profile| {
+                profile.user.profile().preferences().unit_system()
+            });
+        let busy = device_browser_busy(&self.shared.borrow());
+        let Some(preview) = self.device_fit_preview.as_mut() else {
+            return;
+        };
+        match preview.show(ui, &self.intl, busy, units) {
+            Some(device_fit_preview::Action::Close) => self.device_fit_preview = None,
+            Some(device_fit_preview::Action::Import(target)) => {
+                let Some(user_id) = self
+                    .selected_profile
+                    .and_then(|index| self.profiles.get(index))
+                    .map(|profile| profile.user.id())
+                else {
+                    return;
+                };
+                let Some(device_key) = self
+                    .device_browser
+                    .as_ref()
+                    .map(|browser| browser.device_key().to_owned())
+                else {
+                    self.device_fit_preview = None;
+                    return;
+                };
+                spawn_device_fit_import(
+                    Rc::clone(&self.shared),
+                    self.context.clone(),
+                    user_id,
+                    device_key,
+                    target,
+                    &format_message!(&self.intl, default_message: "Importing the FIT file…"),
                 );
             }
             None => {}
@@ -540,14 +832,22 @@ impl eframe::App for App {
             error,
             notice,
             activity_detail,
-            saving,
+            preferences_saving,
+            avatar_saving,
+            avatar_draft,
+            avatar_finished,
+            device_catalog,
+            device_catalog_loading,
+            device_browser_refresh,
+            device_fit_preview,
+            device_fit_import,
             created,
             creating,
             create_problem,
             disconnected_since,
             deployment_mode,
         ) = {
-            let state = self.shared.borrow();
+            let mut state = self.shared.borrow_mut();
             (
                 Rc::clone(&state.snapshots),
                 Rc::clone(&state.profiles),
@@ -557,6 +857,14 @@ impl eframe::App for App {
                 state.notice.clone(),
                 state.activity_detail.as_ref().map(Rc::clone),
                 state.preferences_saving,
+                state.avatar_saving,
+                state.avatar_draft.take(),
+                state.avatar_finished.take(),
+                state.device_catalog.take(),
+                state.device_catalog_loading.clone(),
+                state.device_browser_refresh.take(),
+                state.device_fit_preview.take(),
+                state.device_fit_import.take(),
                 state.created_profile,
                 state.profile_creating,
                 state.profile_create_problem.clone(),
@@ -569,10 +877,113 @@ impl eframe::App for App {
             DeploymentMode::Demo => "Garmin Toolkit Demo",
         };
         self.sync_profiles(profiles);
+        if let Some(draft) = avatar_draft {
+            self.avatar_editor = Some(AvatarEditor::from_draft(&self.context, draft));
+        }
+        if let Some(saved) = avatar_finished {
+            if saved {
+                self.avatar_editor = None;
+            } else if let Some(editor) = self.avatar_editor.as_mut() {
+                editor.submitting = false;
+            }
+        }
+        if let Some((requested_key, result)) = device_catalog
+            && matches!(&self.page, Page::Device(key) if key == &requested_key)
+        {
+            let failure_title =
+                format_message!(&self.intl, default_message: "Could not browse device files");
+            match result {
+                Ok(catalog) => {
+                    let device_name = devices
+                        .iter()
+                        .find(|device| device.key == catalog.device_key)
+                        .map(|device| device.name.clone());
+                    if let Some(device_name) = device_name {
+                        match device_browser::Browser::open(catalog, &self.intl, &device_name) {
+                            Ok(browser) => self.device_browser = Some(browser),
+                            Err(error) => {
+                                self.shared.borrow_mut().notice =
+                                    Some(Notice::error(failure_title, error));
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    self.shared.borrow_mut().notice = Some(Notice::error(failure_title, error));
+                }
+            }
+            self.context.request_repaint();
+        }
+        if let Some((requested_key, result)) = device_browser_refresh
+            && self
+                .device_browser
+                .as_ref()
+                .is_some_and(|browser| browser.device_key() == requested_key)
+        {
+            let failure_title =
+                format_message!(&self.intl, default_message: "Could not browse device files");
+            match result {
+                Ok(catalog) => {
+                    if let Err(error) = self
+                        .device_browser
+                        .as_mut()
+                        .expect("the active browser was checked above")
+                        .refresh(catalog)
+                    {
+                        self.shared.borrow_mut().notice = Some(Notice::error(failure_title, error));
+                    }
+                }
+                Err(error) => {
+                    self.shared.borrow_mut().notice = Some(Notice::error(failure_title, error));
+                }
+            }
+        }
+        if let Some((requested_key, target, result)) = device_fit_preview
+            && self
+                .device_browser
+                .as_ref()
+                .is_some_and(|browser| browser.device_key() == requested_key)
+        {
+            match result {
+                Ok(preview) => {
+                    self.device_fit_preview =
+                        Some(device_fit_preview::Preview::new(target, preview));
+                }
+                Err(error) => {
+                    let title =
+                        format_message!(&self.intl, default_message: "Could not open FIT file");
+                    self.shared.borrow_mut().notice = Some(Notice::error(title, error));
+                }
+            }
+        }
+        if let Some(result) = device_fit_import {
+            self.device_fit_preview = None;
+            self.page = Page::Activities;
+            self.shared.borrow_mut().notice = Some(match result {
+                Ok(DeviceFitImportOutcome::Imported { activities }) => {
+                    Notice::success(format_message!(
+                        &self.intl,
+                        default_message: "Imported {count} activities",
+                        values: { count: activities },
+                    ))
+                }
+                Ok(DeviceFitImportOutcome::Duplicate) => Notice::information(format_message!(
+                    &self.intl,
+                    default_message: "This FIT file was already imported",
+                )),
+                Ok(DeviceFitImportOutcome::Rejected { reason }) | Err(reason) => Notice::error(
+                    format_message!(&self.intl, default_message: "Could not import FIT file"),
+                    reason,
+                ),
+            });
+            self.context.request_repaint();
+        }
         self.sync_activity_detail(activity_detail);
         let profiles = Rc::clone(&self.profiles);
         if matches!(&self.page, Page::Device(key) if !devices.iter().any(|device| &device.key == key))
         {
+            self.device_browser = None;
+            self.device_fit_preview = None;
             self.page = Page::Activities;
         }
         if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
@@ -615,8 +1026,9 @@ impl eframe::App for App {
                 product_name,
                 profiles.as_slice(),
                 devices.as_slice(),
-                saving,
-                notice.as_deref(),
+                preferences_saving || avatar_saving,
+                device_catalog_loading.as_deref(),
+                notice.as_ref(),
             ),
             None => self.show_chooser(
                 ui,
@@ -625,11 +1037,13 @@ impl eframe::App for App {
                 loaded,
                 connected,
                 error.as_deref(),
-                notice.as_deref(),
+                notice.as_ref(),
             ),
         }
         if !offline {
             self.show_create_profile(ui);
+            self.show_avatar_editor(ui);
+            self.show_device_fit_preview(ui);
         }
         if let Some(since) = disconnected_since.filter(|_| loaded) {
             self.show_offline(ui, since);
@@ -640,7 +1054,10 @@ impl eframe::App for App {
 enum PageAction {
     Activities(Option<activity::Action>),
     Settings(Option<profile_settings::Action>),
-    Device,
+    Device {
+        key: String,
+        action: Option<device::Action>,
+    },
 }
 
 fn show_activities(
@@ -706,7 +1123,7 @@ fn settings_props<'a>(
         intl,
         preferences: snapshot.user.profile().preferences(),
         profile,
-        picture_enabled: false,
+        picture_enabled: true,
         disabled,
     }
 }
@@ -727,12 +1144,569 @@ struct State {
     activity_detail: Option<Rc<ActivityDetailSnapshot>>,
     requested_activity: Option<garmin_model::observation::ObservationId>,
     preferences_saving: bool,
+    avatar_saving: bool,
+    avatar_draft: Option<AvatarDraft>,
+    avatar_finished: Option<bool>,
+    device_catalog: Option<(String, Result<DeviceCatalogSnapshot, String>)>,
+    device_catalog_loading: Option<String>,
+    active_device_browser_operation: Option<DeviceBrowserOperationToken>,
+    next_device_browser_operation: u64,
+    connection_generation: u64,
+    device_browser_refresh: Option<(String, Result<DeviceCatalogSnapshot, String>)>,
+    device_fit_preview: Option<(
+        String,
+        DeviceBrowserTarget,
+        Result<DeviceFitPreview, String>,
+    )>,
+    device_fit_import: Option<Result<DeviceFitImportOutcome, String>>,
     profile_creating: bool,
     profile_create_problem: Option<String>,
     created_profile: Option<UserId>,
-    notice: Option<String>,
+    notice: Option<Notice>,
     error: Option<String>,
     disconnected_since_milliseconds: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DeviceBrowserOperationToken {
+    connection_generation: u64,
+    operation: u64,
+}
+
+#[derive(Clone)]
+struct Notice {
+    kind: notification::Kind,
+    title: String,
+    detail: Option<String>,
+}
+
+impl Notice {
+    const fn information(title: String) -> Self {
+        Self {
+            kind: notification::Kind::Information,
+            title,
+            detail: None,
+        }
+    }
+
+    const fn success(title: String) -> Self {
+        Self {
+            kind: notification::Kind::Success,
+            title,
+            detail: None,
+        }
+    }
+
+    fn error(title: String, detail: impl fmt::Display) -> Self {
+        Self {
+            kind: notification::Kind::Error,
+            title,
+            detail: Some(notification::normalize_error_detail(&detail.to_string())),
+        }
+    }
+
+    fn props(&self) -> notification::Props<'_> {
+        notification::Props {
+            kind: self.kind,
+            title: &self.title,
+            detail: self.detail.as_deref(),
+        }
+    }
+}
+
+struct AvatarDraft {
+    user_id: UserId,
+    file_name: String,
+    bytes: Vec<u8>,
+    image: ColorImage,
+    source_size: [u32; 2],
+}
+
+struct AvatarEditor {
+    user_id: UserId,
+    file_name: String,
+    bytes: Vec<u8>,
+    texture: TextureHandle,
+    source_size: [u32; 2],
+    crop: image_crop::State,
+    submitting: bool,
+}
+
+impl AvatarEditor {
+    fn from_draft(context: &eframe::egui::Context, draft: AvatarDraft) -> Self {
+        let texture = context.load_texture(
+            format!("profile-picture-preview/{}", draft.file_name),
+            draft.image,
+            TextureOptions::LINEAR,
+        );
+        Self {
+            user_id: draft.user_id,
+            file_name: draft.file_name,
+            bytes: draft.bytes,
+            texture,
+            source_size: draft.source_size,
+            crop: image_crop::State::default(),
+            submitting: false,
+        }
+    }
+}
+
+fn spawn_choose_avatar(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    user_id: UserId,
+    failure: String,
+) {
+    spawn_local(async move {
+        let Some(file) = rfd::AsyncFileDialog::new()
+            .add_filter("Profile picture", &["png", "jpg", "jpeg", "webp"])
+            .pick_file()
+            .await
+        else {
+            return;
+        };
+        if file.inner().size() > MAX_AVATAR_UPLOAD_BYTES {
+            shared.borrow_mut().notice = Some(Notice::error(
+                failure,
+                "profile picture exceeds the 10 MiB limit".to_owned(),
+            ));
+            context.request_repaint();
+            return;
+        }
+        let file_name = file.file_name();
+        let bytes = file.read().await;
+        let result = avatar_draft(user_id, file_name, bytes);
+        let mut state = shared.borrow_mut();
+        match result {
+            Ok(draft) => state.avatar_draft = Some(draft),
+            Err(error) => state.notice = Some(Notice::error(failure, error)),
+        }
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+fn avatar_draft(user_id: UserId, file_name: String, bytes: Vec<u8>) -> Result<AvatarDraft, String> {
+    const MAX_AVATAR_BYTES: usize = 10 * 1024 * 1024;
+    const MAX_AVATAR_DIMENSION: u32 = 4_096;
+    const MAX_DECODE_ALLOCATION: u64 = 128 * 1024 * 1024;
+    if bytes.len() > MAX_AVATAR_BYTES {
+        return Err("profile picture exceeds the 10 MiB limit".to_owned());
+    }
+    let format = image::guess_format(&bytes).map_err(|error| error.to_string())?;
+    if !matches!(
+        format,
+        image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::WebP
+    ) {
+        return Err("profile picture must be a PNG, JPEG, or WebP image".to_owned());
+    }
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_AVATAR_DIMENSION);
+    limits.max_image_height = Some(MAX_AVATAR_DIMENSION);
+    limits.max_alloc = Some(MAX_DECODE_ALLOCATION);
+    let mut reader = image::ImageReader::with_format(Cursor::new(&bytes), format);
+    reader.limits(limits);
+    let mut decoder = reader.into_decoder().map_err(|error| error.to_string())?;
+    let orientation =
+        image::ImageDecoder::orientation(&mut decoder).map_err(|error| error.to_string())?;
+    let mut decoded =
+        image::DynamicImage::from_decoder(decoder).map_err(|error| error.to_string())?;
+    decoded.apply_orientation(orientation);
+    let width = usize::try_from(decoded.width()).map_err(|error| error.to_string())?;
+    let height = usize::try_from(decoded.height()).map_err(|error| error.to_string())?;
+    let rgba = decoded.to_rgba8();
+    Ok(AvatarDraft {
+        user_id,
+        file_name,
+        bytes,
+        image: ColorImage::from_rgba_unmultiplied([width, height], rgba.as_raw()),
+        source_size: [decoded.width(), decoded.height()],
+    })
+}
+
+fn spawn_import_avatar(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    user_id: UserId,
+    upload: AvatarUpload,
+    failure: String,
+) {
+    let Some(client) = shared.borrow().client.clone() else {
+        return;
+    };
+    {
+        let mut state = shared.borrow_mut();
+        state.avatar_saving = true;
+        state.notice = None;
+    }
+    spawn_local(async move {
+        let result = client
+            .import_avatar(user_id, upload)
+            .await
+            .map_err(ConnectError::call)
+            .and_then(|result| result.map_err(ConnectError::domain));
+        let mut state = shared.borrow_mut();
+        state.avatar_saving = false;
+        state.avatar_finished = Some(result.is_ok());
+        match result {
+            Ok(avatar) => {
+                if let Some(profile) = Rc::make_mut(&mut state.profiles)
+                    .iter_mut()
+                    .find(|profile| profile.user.id() == user_id)
+                {
+                    profile.avatar = Some(avatar);
+                }
+            }
+            Err(error) => state.notice = Some(Notice::error(failure, error)),
+        }
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+fn browser_target(selection: device_browser::Selection) -> DeviceBrowserTarget {
+    DeviceBrowserTarget {
+        storage_id: selection.storage_id,
+        path: selection.path,
+        kind: selection.kind,
+    }
+}
+
+fn spawn_device_browser_request(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    request: DeviceBrowserRequest,
+    progress: &str,
+    complete: String,
+    failure: String,
+) {
+    let Some((client, token)) = begin_device_browser_request(&shared, progress) else {
+        return;
+    };
+    spawn_local(execute_device_browser_request(
+        shared, context, client, token, request, complete, failure,
+    ));
+}
+
+fn spawn_device_download(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    device_key: String,
+    target: DeviceBrowserTarget,
+    progress: &str,
+    complete: String,
+    failure: String,
+) {
+    let Some((client, token)) = begin_device_browser_request(&shared, progress) else {
+        return;
+    };
+    spawn_local(async move {
+        let result = client
+            .prepare_device_browser_download(device_key, target)
+            .await
+            .map_err(ConnectError::call)
+            .and_then(|result| result.map_err(ConnectError::domain))
+            .map_err(|error| error.to_string());
+        let mut state = shared.borrow_mut();
+        if !finish_device_browser_request(&mut state, token) {
+            return;
+        }
+        state.notice = Some(
+            match result.and_then(|ticket| trigger_browser_download(&ticket)) {
+                Ok(()) => Notice::success(complete),
+                Err(error) => Notice::error(failure, error),
+            },
+        );
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+fn spawn_device_upload(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    device_key: String,
+    storage_id: String,
+    directory: Utf8PathBuf,
+    copy: DeviceUploadCopy,
+) {
+    spawn_local(async move {
+        let Some(file) = rfd::AsyncFileDialog::new().pick_file().await else {
+            return;
+        };
+        if file.inner().size() > MAX_DEVICE_BROWSER_TRANSFER_BYTES {
+            shared.borrow_mut().notice = Some(Notice::error(copy.failure, copy.too_large));
+            context.request_repaint();
+            return;
+        }
+        let Some((client, token)) = begin_device_browser_request(&shared, &copy.progress) else {
+            return;
+        };
+        let file_name = file.file_name();
+        let size = file.inner().size() as u64;
+        let (sender, receiver) = remoc::rch::io::sized::<remoc::codec::Default>(size);
+        let request = DeviceBrowserUpload {
+            device_key: device_key.clone(),
+            storage_id,
+            directory,
+            file_name,
+            size,
+        };
+        let rpc = async move {
+            client
+                .upload_device_browser_file(request, receiver)
+                .await
+                .map_err(ConnectError::call)
+                .and_then(|result| result.map_err(ConnectError::domain))
+                .map_err(|error| error.to_string())
+        };
+        let stream = stream_browser_upload(file.inner().clone(), sender);
+        let result = future::try_join(rpc, stream)
+            .await
+            .map(|(catalog, ())| catalog);
+        let mut state = shared.borrow_mut();
+        if !finish_device_browser_request(&mut state, token) {
+            return;
+        }
+        match result {
+            Ok(catalog) => {
+                state.device_browser_refresh = Some((device_key, Ok(catalog)));
+                state.notice = Some(Notice::success(copy.complete));
+            }
+            Err(error) => state.notice = Some(Notice::error(copy.failure, error)),
+        }
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+async fn stream_browser_upload(
+    file: web_sys::File,
+    mut sender: remoc::rch::io::Sender,
+) -> Result<(), String> {
+    const CHUNK_BYTES: u64 = 1024 * 1024;
+    let size = file.size() as u64;
+    let mut offset = 0_u64;
+    while offset < size {
+        let end = offset.saturating_add(CHUNK_BYTES).min(size);
+        let blob = file
+            .slice_with_f64_and_f64(offset as f64, end as f64)
+            .map_err(|error| format!("could not read the selected file: {}", js_reason(&error)))?;
+        let buffer = JsFuture::from(blob.array_buffer())
+            .await
+            .map_err(|error| format!("could not read the selected file: {}", js_reason(&error)))?;
+        let array = js_sys::Uint8Array::new(&buffer);
+        let mut bytes = vec![0_u8; array.length() as usize];
+        array.copy_to(&mut bytes);
+        sender
+            .write_all(&bytes)
+            .await
+            .map_err(|error| format!("could not send the selected file: {error}"))?;
+        offset = end;
+    }
+    sender
+        .shutdown()
+        .await
+        .map_err(|error| format!("could not finish sending the selected file: {error}"))
+}
+
+struct DeviceUploadCopy {
+    progress: String,
+    complete: String,
+    failure: String,
+    too_large: String,
+}
+
+fn spawn_device_fit_preview(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    device_key: String,
+    target: DeviceBrowserTarget,
+    progress: &str,
+) {
+    let Some((client, token)) = begin_device_browser_request(&shared, progress) else {
+        return;
+    };
+    spawn_local(async move {
+        let result = client
+            .device_fit_preview(device_key.clone(), target.clone())
+            .await
+            .map_err(ConnectError::call)
+            .and_then(|result| result.map_err(ConnectError::domain))
+            .map_err(|error| error.to_string());
+        let mut state = shared.borrow_mut();
+        if !finish_device_browser_request(&mut state, token) {
+            return;
+        }
+        state.notice = None;
+        state.device_fit_preview = Some((device_key, target, result));
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+fn spawn_device_fit_import(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    user_id: UserId,
+    device_key: String,
+    target: DeviceBrowserTarget,
+    progress: &str,
+) {
+    let Some((client, token)) = begin_device_browser_request(&shared, progress) else {
+        return;
+    };
+    spawn_local(async move {
+        let result = client
+            .import_device_fit(user_id, device_key, target)
+            .await
+            .map_err(ConnectError::call)
+            .and_then(|result| result.map_err(ConnectError::domain))
+            .map_err(|error| error.to_string());
+        let profiles = if result.is_ok() {
+            client.profiles().await.ok().and_then(Result::ok)
+        } else {
+            None
+        };
+        let mut state = shared.borrow_mut();
+        if !finish_device_browser_request(&mut state, token) {
+            return;
+        }
+        if let Some(profiles) = profiles {
+            state.profiles = Rc::new(profiles);
+        }
+        state.device_fit_import = Some(result);
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+fn begin_device_browser_request(
+    shared: &RefCell<State>,
+    progress: &str,
+) -> Option<(ApplicationServiceClient, DeviceBrowserOperationToken)> {
+    let mut state = shared.borrow_mut();
+    if device_browser_busy(&state) {
+        return None;
+    }
+    let client = state.client.clone()?;
+    let token = DeviceBrowserOperationToken {
+        connection_generation: state.connection_generation,
+        operation: state.next_device_browser_operation,
+    };
+    state.next_device_browser_operation = state.next_device_browser_operation.wrapping_add(1);
+    state.active_device_browser_operation = Some(token);
+    state.notice = Some(Notice::information(progress.to_owned()));
+    Some((client, token))
+}
+
+fn device_browser_busy(state: &State) -> bool {
+    state.active_device_browser_operation.is_some()
+}
+
+fn finish_device_browser_request(state: &mut State, token: DeviceBrowserOperationToken) -> bool {
+    if state.active_device_browser_operation != Some(token)
+        || state.connection_generation != token.connection_generation
+    {
+        return false;
+    }
+    state.active_device_browser_operation = None;
+    true
+}
+
+async fn execute_device_browser_request(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    client: ApplicationServiceClient,
+    token: DeviceBrowserOperationToken,
+    request: DeviceBrowserRequest,
+    complete: String,
+    failure: String,
+) {
+    let device_key = browser_request_device_key(&request).to_owned();
+    let result = client
+        .device_browser(request)
+        .await
+        .map_err(ConnectError::call)
+        .and_then(|result| result.map_err(ConnectError::domain))
+        .map_err(|error| error.to_string());
+    let mut state = shared.borrow_mut();
+    if !finish_device_browser_request(&mut state, token) {
+        return;
+    }
+    match result {
+        Ok(catalog) => {
+            state.device_browser_refresh = Some((device_key, Ok(catalog)));
+            state.notice = Some(Notice::success(complete));
+        }
+        Err(error) => state.notice = Some(Notice::error(failure, error)),
+    }
+    drop(state);
+    context.request_repaint();
+}
+
+fn trigger_browser_download(ticket: &DeviceBrowserDownloadTicket) -> Result<(), String> {
+    (|| -> Result<(), JsValue> {
+        let document = web_sys::window()
+            .and_then(|window| window.document())
+            .ok_or_else(|| js_error("the browser document is unavailable"))?;
+        let anchor = document
+            .create_element("a")?
+            .dyn_into::<web_sys::HtmlAnchorElement>()?;
+        anchor.set_href(&format!("device-download/{}", ticket.token));
+        anchor.set_download(&ticket.file_name);
+        anchor.set_attribute("hidden", "")?;
+        let body = document
+            .body()
+            .ok_or_else(|| js_error("the browser document body is unavailable"))?;
+        body.append_child(&anchor)?;
+        anchor.click();
+        anchor.remove();
+        Ok(())
+    })()
+    .map_err(|error| format!("could not start the download: {}", js_reason(&error)))
+}
+
+fn browser_request_device_key(request: &DeviceBrowserRequest) -> &str {
+    match request {
+        DeviceBrowserRequest::CreateDirectory { device_key, .. }
+        | DeviceBrowserRequest::Remove { device_key, .. } => device_key,
+    }
+}
+
+fn spawn_device_catalog(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    device_key: String,
+) {
+    let (client, connection_generation) = {
+        let mut state = shared.borrow_mut();
+        if state.device_catalog_loading.is_some() {
+            return;
+        }
+        let Some(client) = state.client.clone() else {
+            return;
+        };
+        state.notice = None;
+        state.device_catalog_loading = Some(device_key.clone());
+        (client, state.connection_generation)
+    };
+    spawn_local(async move {
+        let requested_key = device_key.clone();
+        let result = client
+            .device_catalog(device_key)
+            .await
+            .map_err(ConnectError::call)
+            .and_then(|result| result.map_err(ConnectError::domain))
+            .map_err(|error| error.to_string());
+        let mut state = shared.borrow_mut();
+        if state.connection_generation != connection_generation {
+            return;
+        }
+        state.device_catalog_loading = None;
+        state.device_catalog = Some((requested_key, result));
+        context.request_repaint();
+    });
 }
 
 fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) {
@@ -813,10 +1787,14 @@ async fn next_connection_event(
 fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     let mut state = shared.borrow_mut();
     state.client = None;
+    state.active_device_browser_operation = None;
+    state.device_catalog_loading = None;
+    state.notice = None;
+    state.connection_generation = state.connection_generation.wrapping_add(1);
     if state.profiles_loaded && state.disconnected_since_milliseconds.is_none() {
         state.disconnected_since_milliseconds = Some(js_sys::Date::now());
     }
-    state.error = Some(format!("{error} Retrying…"));
+    state.error = Some(notification::normalize_error_detail(&error.to_string()));
 }
 
 async fn heartbeat(client: &ApplicationServiceClient) -> Result<(), ConnectError> {
@@ -900,6 +1878,7 @@ fn spawn_update_preferences(
     user_id: UserId,
     previous: ProfilePreferences,
     preferences: ProfilePreferences,
+    failure: String,
 ) {
     let Some(client) = shared.borrow().client.clone() else {
         return;
@@ -939,7 +1918,7 @@ fn spawn_update_preferences(
                 {
                     set_profile_preferences(profile, previous);
                 }
-                state.notice = Some(error.to_string());
+                state.notice = Some(Notice::error(failure, error));
             }
         }
         drop(state);
@@ -953,6 +1932,7 @@ fn spawn_activity(
     user_id: UserId,
     observation_id: garmin_model::observation::ObservationId,
     missing: String,
+    failure: String,
 ) {
     let Some(client) = shared.borrow().client.clone() else {
         return;
@@ -975,9 +1955,9 @@ fn spawn_activity(
                 Ok(Some(detail)) => state.activity_detail = Some(Rc::new(detail)),
                 Ok(None) => {
                     state.activity_detail = None;
-                    state.notice = Some(missing);
+                    state.notice = Some(Notice::error(failure.clone(), missing));
                 }
-                Err(error) => state.notice = Some(error.to_string()),
+                Err(error) => state.notice = Some(Notice::error(failure, error)),
             }
             state.requested_activity = None;
         }

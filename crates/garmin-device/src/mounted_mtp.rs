@@ -16,7 +16,7 @@ use gio::{File, FileCopyFlags, FileType};
 use sha2::{Digest, Sha256};
 use std::fs::File as StdFile;
 use std::io::{Read as _, Write as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -28,6 +28,120 @@ use uuid::Uuid;
 const CHILD_ATTRIBUTES: &str = "standard::name,standard::type,standard::size";
 const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(40);
 const REQUIRED_CLEANUP_TIMEOUT: Duration = Duration::from_secs(30);
+const BROWSER_MAX_DEPTH: usize = 32;
+const BROWSER_MAX_ENTRIES: usize = 4_096;
+
+pub(super) fn browse_mounted_attachment_blocking(
+    root: &File,
+    mount_id: &str,
+) -> Result<crate::DeviceCatalog, String> {
+    browse_mounted_attachment_blocking_inner(root, mount_id, None)
+}
+
+pub(super) fn browse_mounted_attachment_blocking_with_progress(
+    root: &File,
+    mount_id: &str,
+    progress: &ProgressReporter,
+) -> Result<crate::DeviceCatalog, String> {
+    let cancellable = gio::Cancellable::new();
+    let _cancellation = CancellableWatcher::new(progress.cancellation_token(), &cancellable);
+    let result = browse_mounted_attachment_blocking_inner(root, mount_id, Some(&cancellable));
+    if progress.is_cancelled() {
+        Err("device browsing was cancelled".to_owned())
+    } else {
+        result
+    }
+}
+
+fn browse_mounted_attachment_blocking_inner(
+    root: &File,
+    mount_id: &str,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<crate::DeviceCatalog, String> {
+    let roots =
+        storage_roots_with_cancellable(root, cancellable).map_err(|error| error.to_string())?;
+    let mut storages = Vec::with_capacity(roots.len());
+    let mut remaining_entries = BROWSER_MAX_ENTRIES;
+    for (index, storage) in roots.into_iter().enumerate() {
+        let id = mount_id_for_uri(&storage.uri());
+        let label = storage_label(&storage, index);
+        let entries = browse_storage(&storage, &mut remaining_entries, cancellable)?;
+        storages.push(crate::DeviceCatalogStorage { id, label, entries });
+    }
+    if storages.is_empty() {
+        return Err(format!("device {mount_id} exposed no browsable storage"));
+    }
+    Ok(crate::DeviceCatalog { storages })
+}
+
+fn browse_storage(
+    root: &File,
+    remaining_entries: &mut usize,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<Vec<crate::DeviceCatalogEntry>, String> {
+    let mut pending = vec![(root.clone(), PathBuf::new(), 0_usize)];
+    let mut entries = Vec::new();
+    while let Some((directory, parent, depth)) = pending.pop() {
+        let enumerator = directory
+            .enumerate_children(
+                CHILD_ATTRIBUTES,
+                gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+                cancellable,
+            )
+            .map_err(|error| error.to_string())?;
+        let mut names = std::collections::BTreeSet::new();
+        while let Some(info) = enumerator
+            .next_file(cancellable)
+            .map_err(|error| error.to_string())?
+        {
+            if *remaining_entries == 0 {
+                return Err(format!(
+                    "device browser exceeded its {BROWSER_MAX_ENTRIES}-entry limit"
+                ));
+            }
+            *remaining_entries -= 1;
+            let name = info
+                .name()
+                .to_str()
+                .ok_or_else(|| "device browser found a non-Unicode filename".to_owned())?
+                .to_owned();
+            if !names.insert(name.to_lowercase()) {
+                return Err(format!(
+                    "device directory {} is ambiguous",
+                    parent.display()
+                ));
+            }
+            let path = parent.join(&name);
+            let safe = crate::SafeRelativePath::parse(&path).map_err(|error| error.to_string())?;
+            let (kind, size) = match info.file_type() {
+                FileType::Directory => {
+                    if depth >= BROWSER_MAX_DEPTH {
+                        return Err(format!(
+                            "device browser exceeded its {BROWSER_MAX_DEPTH}-level depth limit"
+                        ));
+                    }
+                    pending.push((enumerator.child(&info), path, depth + 1));
+                    (crate::DeviceCatalogEntryKind::Directory, None)
+                }
+                FileType::Regular => (
+                    crate::DeviceCatalogEntryKind::File,
+                    Some(
+                        u64::try_from(info.size())
+                            .map_err(|_| "device file reported a negative size".to_owned())?,
+                    ),
+                ),
+                _ => continue,
+            };
+            entries.push(crate::DeviceCatalogEntry {
+                path: safe.into_utf8_path_buf(),
+                kind,
+                size,
+            });
+        }
+    }
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(entries)
+}
 
 struct CancellableWatcher {
     stop: Arc<AtomicBool>,
@@ -268,61 +382,88 @@ pub async fn ensure_mounted_mtp_directory(
     storage_id: &str,
     path: &SafeRelativePath,
 ) -> Result<(), MountedMtpError> {
+    ensure_mounted_mtp_directory_with_progress(
+        mount_id,
+        storage_id,
+        path,
+        &ProgressReporter::default(),
+    )
+    .await
+}
+
+pub async fn ensure_mounted_mtp_directory_with_progress(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+    progress: &ProgressReporter,
+) -> Result<(), MountedMtpError> {
     let mount_id = mount_id.to_owned();
     let storage_id = storage_id.to_owned();
     let path = path.clone();
+    let progress = progress.clone();
     tokio::task::spawn_blocking(move || {
-        let root = mounted_root(&mount_id)?;
-        let mut parent = storage_for_id_with_cancellable(&root, &storage_id, None)?;
-        for component in path.as_path().components() {
-            let name = component.as_os_str().to_string_lossy().into_owned();
-            parent = match child_metadata_with_cancellable(&parent, &name, None)? {
-                ChildMetadata::Unique {
-                    file,
-                    file_type: FileType::Directory,
-                    ..
-                } => file,
-                ChildMetadata::Missing => {
-                    let directory = parent.child(&name);
-                    directory.make_directory(gio::Cancellable::NONE)?;
-                    match child_metadata_with_cancellable(&parent, &name, None)? {
-                        ChildMetadata::Unique {
-                            file,
-                            file_type: FileType::Directory,
-                            ..
-                        } => file,
-                        ChildMetadata::Ambiguous => {
-                            return Err(MountedMtpError::MetadataPathState {
-                                path,
-                                state: DevicePathState::Ambiguous,
-                            });
-                        }
-                        _ => {
-                            return Err(MountedMtpError::MetadataPathState {
-                                path,
-                                state: DevicePathState::Other,
-                            });
-                        }
-                    }
-                }
-                ChildMetadata::Ambiguous => {
-                    return Err(MountedMtpError::MetadataPathState {
-                        path,
-                        state: DevicePathState::Ambiguous,
-                    });
-                }
-                ChildMetadata::Unique { .. } => {
-                    return Err(MountedMtpError::MetadataPathState {
-                        path,
-                        state: DevicePathState::Other,
-                    });
-                }
-            };
-        }
-        Ok(())
+        run_cancellable(&progress, |cancellable| {
+            ensure_mounted_mtp_directory_blocking(&mount_id, &storage_id, &path, Some(cancellable))
+        })
     })
     .await
     .map_err(MountedMtpError::Task)?
+}
+
+fn ensure_mounted_mtp_directory_blocking(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<(), MountedMtpError> {
+    let root = mounted_root(mount_id)?;
+    let mut parent = storage_for_id_with_cancellable(&root, storage_id, cancellable)?;
+    for component in path.as_path().components() {
+        let name = component.as_os_str().to_string_lossy().into_owned();
+        parent = match child_metadata_with_cancellable(&parent, &name, cancellable)? {
+            ChildMetadata::Unique {
+                file,
+                file_type: FileType::Directory,
+                ..
+            } => file,
+            ChildMetadata::Missing => {
+                let directory = parent.child(&name);
+                directory.make_directory(cancellable)?;
+                match child_metadata_with_cancellable(&parent, &name, cancellable)? {
+                    ChildMetadata::Unique {
+                        file,
+                        file_type: FileType::Directory,
+                        ..
+                    } => file,
+                    ChildMetadata::Ambiguous => {
+                        return Err(MountedMtpError::MetadataPathState {
+                            path: path.clone(),
+                            state: DevicePathState::Ambiguous,
+                        });
+                    }
+                    _ => {
+                        return Err(MountedMtpError::MetadataPathState {
+                            path: path.clone(),
+                            state: DevicePathState::Other,
+                        });
+                    }
+                }
+            }
+            ChildMetadata::Ambiguous => {
+                return Err(MountedMtpError::MetadataPathState {
+                    path: path.clone(),
+                    state: DevicePathState::Ambiguous,
+                });
+            }
+            ChildMetadata::Unique { .. } => {
+                return Err(MountedMtpError::MetadataPathState {
+                    path: path.clone(),
+                    state: DevicePathState::Other,
+                });
+            }
+        };
+    }
+    Ok(())
 }
 
 pub async fn create_verified_mounted_mtp_file(
@@ -370,21 +511,39 @@ pub async fn remove_empty_mounted_mtp_directory(
     storage_id: &str,
     path: &SafeRelativePath,
 ) -> Result<(), MountedMtpError> {
+    remove_empty_mounted_mtp_directory_with_progress(
+        mount_id,
+        storage_id,
+        path,
+        &ProgressReporter::default(),
+    )
+    .await
+}
+
+pub async fn remove_empty_mounted_mtp_directory_with_progress(
+    mount_id: &str,
+    storage_id: &str,
+    path: &SafeRelativePath,
+    progress: &ProgressReporter,
+) -> Result<(), MountedMtpError> {
     let mount_id = mount_id.to_owned();
     let storage_id = storage_id.to_owned();
     let path = path.clone();
+    let progress = progress.clone();
     tokio::task::spawn_blocking(move || {
-        let root = mounted_root(&mount_id)?;
-        let storage = storage_for_id_with_cancellable(&root, &storage_id, None)?;
-        let directory = mounted_directory_with_cancellable(&storage, &path, None)?;
-        directory.delete(gio::Cancellable::NONE)?;
-        if directory.query_exists(gio::Cancellable::NONE) {
-            return Err(MountedMtpError::MetadataPathState {
-                path,
-                state: DevicePathState::Directory,
-            });
-        }
-        Ok(())
+        run_cancellable(&progress, |cancellable| {
+            let root = mounted_root(&mount_id)?;
+            let storage = storage_for_id_with_cancellable(&root, &storage_id, Some(cancellable))?;
+            let directory = mounted_directory_with_cancellable(&storage, &path, Some(cancellable))?;
+            directory.delete(Some(cancellable))?;
+            if directory.query_exists(Some(cancellable)) {
+                return Err(MountedMtpError::MetadataPathState {
+                    path,
+                    state: DevicePathState::Directory,
+                });
+            }
+            Ok(())
+        })
     })
     .await
     .map_err(MountedMtpError::Task)?

@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+garmin-device.workspace = true
 garmin-fit = { workspace = true, features = ["test-fixtures"] }
 garmin-importer.workspace = true
 garmin-model.workspace = true
