@@ -252,6 +252,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbitrary"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
+dependencies = [
+ "derive_arbitrary",
+]
+
+[[package]]
 name = "arboard"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -709,9 +718,9 @@ dependencies = [
 
 [[package]]
 name = "bytemuck_derive"
-version = "1.12.0"
+version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc0e56a716f1e132ff6bf4bdac1c944a3fcdc1cae65f70a4a2a1ac3b401d2d1f"
+checksum = "6a1f896587b6f2c069c73d2f0913e2d590c3990285cd2f0b6aa02b786b4c679c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -844,9 +853,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.4.5"
+version = "1.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "005ec2760ca554fae18df7a11195552ec576cd665632a881bc011d5bb2fd4d80"
+checksum = "a3eb0f42d6c360dc3f8a821f6bf2fdea7f72bfd36b3076eb0e6d1e9e0752fff4"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1155,9 +1164,9 @@ dependencies = [
 
 [[package]]
 name = "crc32fast"
-version = "1.5.1"
+version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8498c871161e1742aaa9d52551b2d6ebdd4c3d45a3be423e3728f33b955be550"
+checksum = "01a7799fd6b852db0e61728dde9a204c423b44d689dbd432522543614b490e78"
 dependencies = [
  "cfg-if",
 ]
@@ -1395,6 +1404,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "derive_arbitrary"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1667,6 +1687,15 @@ dependencies = [
  "serde",
  "toml",
  "wgpu 30.0.1",
+]
+
+[[package]]
+name = "egui_ltreeview"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7aff0f79eec78ea0b2084940afd4d31bec4e78e3bdd221387d41ed38ac700130"
+dependencies = [
+ "egui",
 ]
 
 [[package]]
@@ -2080,9 +2109,9 @@ dependencies = [
 
 [[package]]
 name = "formatjs_icu_messageformat"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d6266596da59dda8852bab6b7f0955ac7f48ce06332a9d0c6fcf175b1332516"
+checksum = "be16b58530f5243528676c6afd3a0ae5caa80c821b104b1c931be8b2a51d691f"
 dependencies = [
  "fixed_decimal",
  "formatjs_icu_messageformat_parser",
@@ -2092,9 +2121,9 @@ dependencies = [
 
 [[package]]
 name = "formatjs_icu_messageformat_parser"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c7cdfc7d732a72f6acd30bdf6a5b38c27075d75c9c8b2324763534fa9ff2e23"
+checksum = "d0909dd9d16e47e4c6edb7e0e118c2afecef3ccffab077e20597d84b373bec33"
 dependencies = [
  "formatjs_icu_skeleton_parser",
  "icu",
@@ -2130,9 +2159,9 @@ dependencies = [
 
 [[package]]
 name = "formatjs_intl_macros"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f4da939c6b15801e1bea8cb5abfa5036b13413d7f1a3d4e6b3bb6e4e9636fca"
+checksum = "9bc823e9b4c3b93b33ea2b2717b4d6c5f09354602eebdee73a066a944b32bb18"
 dependencies = [
  "base64 0.23.1",
  "formatjs_icu_messageformat_parser",
@@ -2286,8 +2315,8 @@ dependencies = [
 
 [[package]]
 name = "gallery"
-version = "0.10.1"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.10.1#711f985bae598f1a667c70bc5bfb18176427e7ee"
+version = "0.11.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.11.0#6d2327ecf3b25127338c9cb3bebf2ba219429375"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2329,8 +2358,8 @@ dependencies = [
 
 [[package]]
 name = "gallery-build"
-version = "0.10.1"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.10.1#711f985bae598f1a667c70bc5bfb18176427e7ee"
+version = "0.11.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.11.0#6d2327ecf3b25127338c9cb3bebf2ba219429375"
 dependencies = [
  "camino",
  "glob",
@@ -2340,8 +2369,8 @@ dependencies = [
 
 [[package]]
 name = "gallery-macros"
-version = "0.10.1"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.10.1#711f985bae598f1a667c70bc5bfb18176427e7ee"
+version = "0.11.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.11.0#6d2327ecf3b25127338c9cb3bebf2ba219429375"
 dependencies = [
  "heck",
  "prettyplease",
@@ -2407,6 +2436,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "camino",
  "fs2",
  "futures-lite",
  "futures-util",
@@ -2426,6 +2456,7 @@ dependencies = [
  "tracing",
  "uuid",
  "walkdir",
+ "zip",
 ]
 
 [[package]]
@@ -2498,6 +2529,7 @@ dependencies = [
 name = "garmin-service-api"
 version = "0.1.0"
 dependencies = [
+ "camino",
  "garmin-macros",
  "garmin-model",
  "remoc",
@@ -2509,9 +2541,11 @@ name = "garmin-ui"
 version = "0.1.0"
 dependencies = [
  "byte-unit",
+ "camino",
  "cint",
  "egui",
  "egui_extras",
+ "egui_ltreeview",
  "garmin-brand",
  "garmin-color",
  "garmin-i18n",
@@ -3716,11 +3750,12 @@ dependencies = [
 
 [[package]]
 name = "jiff-core"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7feca88439efe53da3754500c1851dedf3cb36c524dd5cf8225cc0794de95d09"
+checksum = "5e52fe76043ccecc9005d2305ebaadf7d7fc0cc89ca6baa10a94d6bc68c7128c"
 dependencies = [
  "defmt",
+ "log",
 ]
 
 [[package]]
@@ -3956,9 +3991,9 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libredox"
-version = "0.1.23"
+version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d8f1ea3f21fd3405dcaf6c9b5c1630af9afc422d9073ea39c5f6d6c772e08ed"
+checksum = "6480ccc157a1389bb2e4891b24751b0f798ba640d22386f23143fbcc89da195a"
 dependencies = [
  "bitflags 2.13.2",
  "libc",
@@ -8827,6 +8862,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.5",
+]
+
+[[package]]
+name = "zip"
+version = "4.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "indexmap 2.14.2",
+ "memchr",
 ]
 
 [[package]]

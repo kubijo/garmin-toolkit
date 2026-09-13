@@ -35,3 +35,13 @@ mutation remain owned by their active interface and publication plans; their exi
 views are read-only.
 
 [Open questions](open-questions.md) records unresolved choices under their earliest owning plan.
+
+## Cross-cutting follow-ups
+
+- [Session review follow-ups](session-follow-ups.md) is the recovery ledger for unfinished issues found during the
+  current device and HASS interface review.
+- [Production device explorer](device-explorer-work.md) owns the device-file browser window and notification defects.
+- [Device-manifest parser cleanup](device-manifest-parser-cleanup.md) owns the format-dispatch and normalization
+  refactor.
+- [Application-wide visual refresh](visual-refresh.md) owns adoption of the original Carbon-derived visual language
+  across every shared primitive and primary page.

@@ -4396,7 +4396,8 @@ mod tests {
         };
         let error = anyhow::Error::msg("outer error");
 
-        let presentation = mounted_install_failure_presentation(&mounted, &error, ".tmp/fenix-t03");
+        let presentation =
+            mounted_install_failure_presentation(&mounted, &error, ".tmp/mock-watch-t03");
         let body = format!("{:?}", presentation.body);
 
         assert_eq!(presentation.title, "Update incomplete — device changed");
@@ -4455,7 +4456,8 @@ mod tests {
         let mounted = garmin_update::MountedInstallError::JournalVersion(3);
         let error = anyhow::Error::msg("mounted update journal version 3 is unsupported");
 
-        let presentation = mounted_install_failure_presentation(&mounted, &error, ".tmp/fenix-t03");
+        let presentation =
+            mounted_install_failure_presentation(&mounted, &error, ".tmp/mock-watch-t03");
         let body = format!("{:?}", presentation.body);
 
         assert_eq!(presentation.title, "Recovery evidence rejected");
@@ -4594,9 +4596,9 @@ mod tests {
             indoc::indoc! {r#"
                 <Device xmlns="http://www.garmin.com/xmlschemas/GarminDevice/v2">
                   <Model>
-                    <PartNumber>006-TEST-02</PartNumber>
+                    <PartNumber>006-FAKE-02</PartNumber>
                     <SoftwareVersion>9902</SoftwareVersion>
-                    <Description>Example Cycling Computer</Description>
+                    <Description>Mock Cycle-o-Matic 9000</Description>
                   </Model>
                   <Id>42</Id>
                   <MassStorageMode />
@@ -4609,7 +4611,7 @@ mod tests {
 
         assert_eq!(
             device_identification(&manifest),
-            "Example Cycling Computer (006-TEST-02) — desktop-mounted MTP at synthetic-mount"
+            "Mock Cycle-o-Matic 9000 (006-FAKE-02) — desktop-mounted MTP at synthetic-mount"
         );
     }
 

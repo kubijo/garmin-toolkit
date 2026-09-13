@@ -43,11 +43,11 @@ pub(super) fn render_pending_recovery_preview(frame: &mut ratatui::Frame<'_>) {
     let config = pending_recovery_dialog_config(actions);
     let mut state = DialogState::new(pending_recovery_confirmation_body(
         indoc! {"
-            fenix 8 - 47mm, Solar (006-B4532-00)
-            desktop-mounted MTP at mounted-mtp:0e4054edc7e3f331"},
+            Mock Watch-o-Matic 9000 (006-FAKE-01)
+            desktop-mounted MTP at mounted-mtp:mock-watch"},
         RecoveryOperation::Update,
         "01953ce506d6d6da6c7bfafaf8eafd4e",
-        Some(".tmp/fenix-t03"),
+        Some(".tmp/mock-watch-recovery"),
         actions,
     ));
     for index in 0..config.buttons.len() {
@@ -75,15 +75,15 @@ pub(super) fn render_device_preview(frame: &mut ratatui::Frame<'_>, area: Rect, 
             &[
                 DeviceSummary {
                     transport: TransportKind::MountedMtp,
-                    model: "Example Watch".to_owned(),
-                    part_number: Some("006-TEST-01".to_owned()),
+                    model: "Mock Watch-o-Matic 9000".to_owned(),
+                    part_number: Some("006-FAKE-01".to_owned()),
                     software_version: Some("99.01".to_owned()),
                     location: "mounted-mtp:synthetic-watch".to_owned(),
                 },
                 DeviceSummary {
                     transport: TransportKind::MountedMtp,
-                    model: "Example Cycling Computer".to_owned(),
-                    part_number: Some("006-TEST-02".to_owned()),
+                    model: "Mock Cycle-o-Matic 9000".to_owned(),
+                    part_number: Some("006-FAKE-02".to_owned()),
                     software_version: Some("99.02".to_owned()),
                     location: "mounted-mtp:synthetic-cycle".to_owned(),
                 },
@@ -200,8 +200,8 @@ pub(super) fn storage_fixture(unavailable: bool) -> garmin_device::DeviceStateSn
 pub(super) fn render_confirmation_preview(frame: &mut ratatui::Frame<'_>, backup_enabled: bool) {
     let body = update_confirmation_body(
         indoc! {"
-            fenix 8 - 47mm, Solar (006-B4532-00)
-            desktop-mounted MTP at mounted-mtp:0e4054edc7e3f331"},
+            Mock Watch-o-Matic 9000 (006-FAKE-01)
+            desktop-mounted MTP at mounted-mtp:mock-watch"},
         &[
             SelectedMapAction::new("Base maps", MapOperation::Reinstall),
             SelectedMapAction::new("Garmin Ski Map", MapOperation::Install),
@@ -211,7 +211,7 @@ pub(super) fn render_confirmation_preview(frame: &mut ratatui::Frame<'_>, backup
         9,
         "6.40 GB",
         9,
-        ".tmp/fenix-update-20260906-02",
+        ".tmp/mock-watch-update",
     )
     .with_backup_plan_ids(
         "952bf20745678c8c8a39bb27016d99ca",
@@ -239,7 +239,7 @@ pub(super) fn render_removal_confirmation_preview(frame: &mut ratatui::Frame<'_>
     let config = confirmation_dialog_config("Remove map component?", "Remove files");
     let mut state = DialogState::new(removal_confirmation_body(
         indoc! {"
-            Example Watch (006-TEST-01)
+            Mock Watch-o-Matic 9000 (006-FAKE-01)
             desktop-mounted MTP at mounted-mtp:synthetic-watch"},
         "00000000000000000000000000000001",
         "Example Regional Map",

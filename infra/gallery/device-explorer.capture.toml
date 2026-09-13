@@ -1,0 +1,59 @@
+out = "../../.tmp/gallery/device-explorer"
+size = "1920x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "windowed"
+scene = "device_browser::Windowed"
+
+[[shot]]
+name = "windowed-narrow"
+scene = "device_browser::Compact Window"
+
+[[shot]]
+name = "storage-root"
+scene = "device_browser::Storage Root"
+
+[[shot]]
+name = "nested-folder"
+scene = "device_browser::Populated"
+
+[[shot]]
+name = "selected-generic-file"
+scene = "device_browser::Selected Generic File"
+
+[[shot]]
+name = "selected-fit-file"
+scene = "device_browser::Selected Fit File"
+
+[[shot]]
+name = "empty-storage"
+scene = "device_browser::Empty Storage"
+
+[[shot]]
+name = "inspection-failure"
+scene = "device::Failed"
+
+[[shot]]
+name = "narrow-width"
+scene = "device_browser::Narrow"
+
+[[shot]]
+name = "dark-theme"
+scene = "device_browser::Populated"
+
+[[shot]]
+name = "light-theme"
+scene = "device_browser::Populated"
+
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "czech"
+scene = "device_browser::Populated"
+
+[shot.globals]
+Language = "Čeština"

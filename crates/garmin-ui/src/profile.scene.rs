@@ -70,9 +70,7 @@ fn avatars(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         ("Taylor Cyclist", swatch::green::G40, None),
         (
             "",
-            garmin_ui::theme::palette(ui)
-                .interaction()
-                .interactive(),
+            garmin_ui::theme::palette(ui).interaction().interactive(),
             None,
         ),
     ];

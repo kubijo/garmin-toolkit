@@ -49,6 +49,22 @@ fn sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 #[scene]
+fn open_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+    stage!(ctx, ui, (360, 240), |ui| {
+        let id = egui::Id::new("open-units");
+        egui::Popup::open_id(ui.ctx(), id.with("popup"));
+        let mut selected = 0;
+        let _ = select::show(
+            ui,
+            id,
+            &mut selected,
+            CHOICES,
+            select::Props::new("Unit system"),
+        );
+    });
+}
+
+#[scene]
 fn leading_images(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     let mut selected = ctx.buttons("selected", &["english", "czech"], 0);
     let choices = [

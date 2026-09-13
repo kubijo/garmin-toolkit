@@ -10,6 +10,8 @@ pub mod brand;
 pub mod button;
 pub mod capacity;
 pub mod device;
+pub mod device_browser;
+pub mod device_fit_preview;
 pub mod file_import;
 mod header_selector;
 pub mod icons;

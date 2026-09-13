@@ -1,5 +1,6 @@
 repository_root := parent_directory(parent_directory(source_directory()))
 flake := "git+file://" + repository_root
+memory_capped := repository_root / "infra/just/memory-capped.sh"
 export GARMIN_TOOLKIT_CACHE_DIR := repository_root + "/.tmp/app-cache"
 
 set default-list
@@ -14,5 +15,8 @@ in-shell +cmd:
 
     cd {{ quote(repository_root) }}
 
-    if command -v "$1" >/dev/null 2>&1; then exec "$@"; fi
-    exec nix develop {{ quote(flake) }} --command "$@"
+    if command -v "$1" >/dev/null 2>&1; then
+        exec {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 "$@"
+    fi
+    exec {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 \
+        nix develop {{ quote(flake) }} --command "$@"

@@ -1,0 +1,101 @@
+out = "../../.tmp/gallery/visual-language"
+size = "1920x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "shell-dark"
+scene = "shell::Expanded"
+
+[[shot]]
+name = "shell-light"
+scene = "shell::Expanded"
+
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "shell-profile-menu"
+scene = "shell::Profile Menu"
+
+[[shot]]
+name = "shell-rail"
+scene = "shell::Rail"
+
+[[shot]]
+name = "shell-narrow"
+scene = "shell::Narrow"
+
+[[shot]]
+name = "button-states"
+scene = "button::States"
+
+[[shot]]
+name = "text-input-states"
+scene = "input::Text States"
+
+[[shot]]
+name = "select-sizes"
+scene = "select::Sizes"
+
+[[shot]]
+name = "select-open-menu"
+scene = "select::Open Menu"
+
+[[shot]]
+name = "modal-form"
+scene = "modal::Form"
+
+[[shot]]
+name = "profile-chooser"
+scene = "profile::Chooser"
+
+[[shot]]
+name = "profile-settings"
+scene = "profile_settings::Playground"
+
+[[shot]]
+name = "activities-browser"
+scene = "activity::Browser"
+
+[[shot]]
+name = "device-inspected"
+scene = "device::Inspected"
+
+[[shot]]
+name = "device-explorer"
+scene = "device_browser::Populated"
+
+[[shot]]
+name = "device-explorer-light"
+scene = "device_browser::Populated"
+
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "device-explorer-context-menu"
+scene = "device_browser::Context Menu$"
+
+[[shot]]
+name = "device-explorer-context-menu-light"
+scene = "device_browser::Context Menu Light$"
+
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "file-import"
+scene = "file_import::Playground"
+
+[[shot]]
+name = "offline"
+scene = "offline::Disconnected"
+
+[[shot]]
+name = "toast-stack"
+scene = "notification::Toast Stack$"
+
+[shot.knobs]
+mode = "expanded"

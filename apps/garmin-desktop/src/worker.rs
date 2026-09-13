@@ -1,24 +1,24 @@
 use std::{
     collections::HashSet,
     fs,
+    io::{self, Write as _},
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{Receiver, Sender, channel},
-    },
+    sync::mpsc::{Receiver, Sender, channel},
     thread::JoinHandle,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use camino::Utf8PathBuf;
 use eframe::egui;
 use futures_lite::future::block_on;
+use garmin_device::attachments::Candidate as _;
 use garmin_model::{
     artifact::{AcquisitionOperationId, ArtifactDigest, SourceIdentity},
     identity::{DisplayName, ProfilePreferences, Source, SourceId, User},
     observation::ObservationId,
     value::Timestamp,
 };
+use garmin_progress::{CancellationToken, ProgressReporter};
 use garmin_services::{
     Application, AvatarImportRequest, FitImportRequest, FitImportResult, ImportDisposition,
     UserContext,
@@ -33,11 +33,14 @@ const AVATAR_SOURCE_LABEL: &str = "Desktop profile pictures";
 const AVATAR_SOURCE_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/desktop-profile-pictures/source/v1";
 const AVATAR_OPERATION_ID_DOMAIN_V1: &[u8] =
     b"garmin-toolkit/desktop-profile-pictures/acquisition/v1";
+const DEVICE_SOURCE_LABEL: &str = "Connected Garmin device";
+const DEVICE_SOURCE_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/device-files/source/v1";
+const DEVICE_OPERATION_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/device-files/acquisition/v1";
 
 pub struct Worker {
     commands: Sender<Command>,
     events: Receiver<Event>,
-    abort: Arc<AtomicBool>,
+    abort: CancellationToken,
     join: Option<JoinHandle<()>>,
 }
 
@@ -45,8 +48,8 @@ impl Worker {
     pub fn spawn(application: Application, context: egui::Context) -> std::io::Result<Self> {
         let (commands, command_rx) = channel();
         let (event_tx, events) = channel();
-        let abort = Arc::new(AtomicBool::new(false));
-        let worker_abort = Arc::clone(&abort);
+        let abort = CancellationToken::default();
+        let worker_abort = abort.clone();
         let join = std::thread::Builder::new()
             .name("garmin-toolkit-application".to_owned())
             .spawn(move || {
@@ -102,12 +105,26 @@ impl Worker {
         });
     }
 
+    pub fn browse_device(&self, candidate: crate::device_backend::Candidate) {
+        let _ignored = self.commands.send(Command::BrowseDevice(candidate));
+    }
+
+    pub fn operate_device(
+        &self,
+        candidate: crate::device_backend::Candidate,
+        operation: DeviceBrowserOperation,
+    ) {
+        let _ignored = self
+            .commands
+            .send(Command::OperateDevice(candidate, operation));
+    }
+
     pub fn drain(&self) -> impl Iterator<Item = Event> + '_ {
         self.events.try_iter()
     }
 
     pub fn abort(&self) {
-        self.abort.store(true, Ordering::Release);
+        self.abort.cancel();
     }
 }
 
@@ -142,6 +159,8 @@ enum Command {
         bytes: Vec<u8>,
         crop: garmin_importer::AvatarCrop,
     },
+    BrowseDevice(crate::device_backend::Candidate),
+    OperateDevice(crate::device_backend::Candidate, DeviceBrowserOperation),
     Shutdown,
 }
 
@@ -150,6 +169,15 @@ pub enum Event {
     ProfileCreated(Result<(garmin_model::identity::UserId, Vec<ProfileData>), String>),
     ProfileUpdated(Result<Vec<ProfileData>, String>),
     AvatarUpdated(Result<Vec<ProfileData>, String>),
+    DeviceCatalog {
+        key: String,
+        result: Result<garmin_device::DeviceCatalog, String>,
+    },
+    DeviceBrowser {
+        key: String,
+        kind: DeviceBrowserOperationKind,
+        result: Result<DeviceBrowserOutcome, String>,
+    },
     ImportStarted {
         total: usize,
     },
@@ -179,14 +207,77 @@ pub enum ImportOutcome {
     Failed(String),
 }
 
+pub enum DeviceBrowserOperation {
+    OpenFit(garmin_device::DeviceBrowserTarget),
+    ImportFit {
+        target: garmin_device::DeviceBrowserTarget,
+        user: UserContext,
+    },
+    Download {
+        target: garmin_device::DeviceBrowserTarget,
+        destination: PathBuf,
+    },
+    Upload {
+        storage_id: String,
+        directory: Utf8PathBuf,
+        source: PathBuf,
+    },
+    CreateDirectory {
+        storage_id: String,
+        parent: Utf8PathBuf,
+        name: String,
+    },
+    Remove(garmin_device::DeviceBrowserTarget),
+}
+
+impl DeviceBrowserOperation {
+    pub(crate) const fn kind(&self) -> DeviceBrowserOperationKind {
+        match self {
+            Self::OpenFit(_) => DeviceBrowserOperationKind::OpenFit,
+            Self::ImportFit { .. } => DeviceBrowserOperationKind::ImportFit,
+            Self::Download { .. } => DeviceBrowserOperationKind::Download,
+            Self::Upload { .. } => DeviceBrowserOperationKind::Upload,
+            Self::CreateDirectory { .. } => DeviceBrowserOperationKind::CreateDirectory,
+            Self::Remove(_) => DeviceBrowserOperationKind::Remove,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeviceBrowserOperationKind {
+    OpenFit,
+    ImportFit,
+    Download,
+    Upload,
+    CreateDirectory,
+    Remove,
+}
+
+pub enum DeviceBrowserOutcome {
+    FitPreview {
+        target: garmin_service_api::DeviceBrowserTarget,
+        preview: garmin_service_api::DeviceFitPreview,
+    },
+    FitImported {
+        item: ImportItem,
+        profiles: Vec<ProfileData>,
+    },
+    Downloaded(PathBuf),
+    Refreshed(garmin_device::DeviceCatalog),
+}
+
 fn run(
     application: Application,
     commands: &Receiver<Command>,
     events: &Sender<Event>,
     context: &egui::Context,
-    abort: &AtomicBool,
+    abort: &CancellationToken,
 ) {
-    while !abort.load(Ordering::Acquire) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("device browser runtime must start");
+    while !abort.is_cancelled() {
         let Ok(command) = commands.recv() else {
             break;
         };
@@ -253,10 +344,216 @@ fn run(
                     break;
                 }
             }
+            Command::BrowseDevice(candidate) => {
+                let key = candidate.key().to_owned();
+                let progress = ProgressReporter::default().with_cancellation(abort.clone());
+                let result = candidate.browse_with_progress(&progress);
+                if !emit(events, context, Event::DeviceCatalog { key, result }) {
+                    break;
+                }
+            }
+            Command::OperateDevice(candidate, operation) => {
+                let key = candidate.key().to_owned();
+                let kind = operation.kind();
+                let progress = ProgressReporter::default().with_cancellation(abort.clone());
+                let result =
+                    operate_device(&runtime, &application, &candidate, operation, &progress);
+                if !emit(events, context, Event::DeviceBrowser { key, kind, result }) {
+                    break;
+                }
+            }
             Command::Shutdown => break,
         }
     }
     block_on(application.close());
+}
+
+fn operate_device(
+    runtime: &tokio::runtime::Runtime,
+    application: &Application,
+    candidate: &crate::device_backend::Candidate,
+    operation: DeviceBrowserOperation,
+    progress: &ProgressReporter,
+) -> Result<DeviceBrowserOutcome, String> {
+    let catalog = candidate.browse_with_progress(progress)?;
+    let device = crate::device_backend::transport(candidate);
+    match operation {
+        DeviceBrowserOperation::OpenFit(target) => {
+            open_device_fit(runtime, &device, &catalog, target, progress)
+        }
+        DeviceBrowserOperation::ImportFit { target, user } => import_device_fit(
+            runtime,
+            DeviceFitImportRequest {
+                application,
+                device_key: candidate.key(),
+                device: &device,
+                catalog: &catalog,
+                target: &target,
+                user,
+            },
+            progress,
+        ),
+        DeviceBrowserOperation::Download {
+            target,
+            destination,
+        } => {
+            let download = runtime
+                .block_on(garmin_device::prepare_browser_download(
+                    &device, &catalog, &target, progress,
+                ))
+                .map_err(|error| error.to_string())?;
+            persist_download(&destination, download.path())?;
+            Ok(DeviceBrowserOutcome::Downloaded(destination))
+        }
+        DeviceBrowserOperation::Upload {
+            storage_id,
+            directory,
+            source,
+        } => {
+            let metadata = fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
+            if !metadata.file_type().is_file() {
+                return Err("the selected upload is not a regular file".to_owned());
+            }
+            if metadata.len() > garmin_device::MAX_BROWSER_TRANSFER_BYTES {
+                return Err(garmin_device::DeviceBrowserOperationError::TransferLimit.to_string());
+            }
+            let name = source
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| "the selected upload has an invalid file name".to_owned())?;
+            runtime
+                .block_on(garmin_device::upload_browser_file_from_path(
+                    &device,
+                    &catalog,
+                    garmin_device::BrowserFileUpload {
+                        storage_id: &storage_id,
+                        directory: &directory,
+                        file_name: name,
+                        source: &source,
+                        size: metadata.len(),
+                    },
+                    progress,
+                ))
+                .map_err(|error| error.to_string())?;
+            candidate
+                .browse_with_progress(progress)
+                .map(DeviceBrowserOutcome::Refreshed)
+        }
+        DeviceBrowserOperation::CreateDirectory {
+            storage_id,
+            parent,
+            name,
+        } => {
+            runtime
+                .block_on(garmin_device::create_browser_directory_with_progress(
+                    &device,
+                    &catalog,
+                    &storage_id,
+                    &parent,
+                    &name,
+                    progress,
+                ))
+                .map_err(|error| error.to_string())?;
+            candidate
+                .browse_with_progress(progress)
+                .map(DeviceBrowserOutcome::Refreshed)
+        }
+        DeviceBrowserOperation::Remove(target) => {
+            runtime
+                .block_on(garmin_device::remove_browser_target_with_progress(
+                    &device, &catalog, &target, progress,
+                ))
+                .map_err(|error| error.to_string())?;
+            candidate
+                .browse_with_progress(progress)
+                .map(DeviceBrowserOutcome::Refreshed)
+        }
+    }
+}
+
+fn open_device_fit(
+    runtime: &tokio::runtime::Runtime,
+    device: &crate::device_backend::Device,
+    catalog: &garmin_device::DeviceCatalog,
+    target: garmin_device::DeviceBrowserTarget,
+    progress: &ProgressReporter,
+) -> Result<DeviceBrowserOutcome, String> {
+    let download = runtime
+        .block_on(garmin_device::prepare_browser_download(
+            device, catalog, &target, progress,
+        ))
+        .map_err(|error| error.to_string())?;
+    let bytes = fs::read(download.path()).map_err(|error| error.to_string())?;
+    let preview = device_fit_preview(download.file_name, &bytes)?;
+    Ok(DeviceBrowserOutcome::FitPreview {
+        target: service_browser_target(target),
+        preview,
+    })
+}
+
+#[derive(Clone, Copy)]
+struct DeviceFitImportRequest<'a> {
+    application: &'a Application,
+    device_key: &'a str,
+    device: &'a crate::device_backend::Device,
+    catalog: &'a garmin_device::DeviceCatalog,
+    target: &'a garmin_device::DeviceBrowserTarget,
+    user: UserContext,
+}
+
+fn import_device_fit(
+    runtime: &tokio::runtime::Runtime,
+    request: DeviceFitImportRequest<'_>,
+    progress: &ProgressReporter,
+) -> Result<DeviceBrowserOutcome, String> {
+    let DeviceFitImportRequest {
+        application,
+        device_key,
+        device,
+        catalog,
+        target,
+        user,
+    } = request;
+    let download = runtime
+        .block_on(garmin_device::prepare_browser_download(
+            device, catalog, target, progress,
+        ))
+        .map_err(|error| error.to_string())?;
+    let bytes = fs::read(download.path()).map_err(|error| error.to_string())?;
+    let source = source_from_domain(user, DEVICE_SOURCE_ID_DOMAIN_V1, DEVICE_SOURCE_LABEL)?;
+    let identity = device_source_identity(device_key, target)?;
+    let outcome = import_bytes(
+        application,
+        user,
+        &source,
+        identity,
+        DEVICE_OPERATION_ID_DOMAIN_V1,
+        &bytes,
+    )?;
+    let item = ImportItem {
+        path: PathBuf::from(target.path.as_str()),
+        outcome,
+    };
+    let profiles = block_on(load_profiles(application))?;
+    Ok(DeviceBrowserOutcome::FitImported { item, profiles })
+}
+
+fn persist_download(path: &Path, source: &Path) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "the download destination has no parent directory".to_owned())?;
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
+    let mut source = fs::File::open(source).map_err(|error| error.to_string())?;
+    io::copy(&mut source, &mut temporary)
+        .map(|_| ())
+        .and_then(|()| temporary.flush())
+        .and_then(|()| temporary.as_file().sync_all())
+        .map_err(|error| error.to_string())?;
+    temporary
+        .persist(path)
+        .map_err(|error| error.error.to_string())?;
+    Ok(())
 }
 
 async fn load_profiles(application: &Application) -> Result<Vec<ProfileData>, String> {
@@ -319,7 +616,7 @@ fn import_paths(
     paths: Vec<PathBuf>,
     events: &Sender<Event>,
     context: &egui::Context,
-    abort: &AtomicBool,
+    abort: &CancellationToken,
 ) -> bool {
     let Some(candidates) = candidates(paths, abort) else {
         return false;
@@ -337,7 +634,7 @@ fn import_paths(
         Ok(source) => source,
         Err(error) => {
             for candidate in candidates {
-                if abort.load(Ordering::Acquire) {
+                if abort.is_cancelled() {
                     return false;
                 }
                 let path = candidate.path().to_owned();
@@ -361,7 +658,7 @@ fn import_paths(
     };
 
     for candidate in candidates {
-        if abort.load(Ordering::Acquire) {
+        if abort.is_cancelled() {
             return false;
         }
         let item = match candidate {
@@ -371,7 +668,7 @@ fn import_paths(
                 outcome: ImportOutcome::Failed(reason),
             },
         };
-        if abort.load(Ordering::Acquire) || !emit(events, context, Event::ImportItem(item)) {
+        if abort.is_cancelled() || !emit(events, context, Event::ImportItem(item)) {
             return false;
         }
     }
@@ -400,20 +697,38 @@ fn read_import(
     path: &Path,
 ) -> Result<ImportOutcome, String> {
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    let acquired_at = timestamp(SystemTime::now())?;
     let path = path
         .to_str()
         .ok_or_else(|| "FIT path is not valid UTF-8".to_owned())?;
     let source_identity =
         SourceIdentity::from_string(path.to_owned()).map_err(|error| error.to_string())?;
-    let operation_id = operation_id(source, &source_identity, &bytes);
+    import_bytes(
+        application,
+        user,
+        source,
+        source_identity,
+        OPERATION_ID_DOMAIN_V1,
+        &bytes,
+    )
+}
+
+fn import_bytes(
+    application: &Application,
+    user: UserContext,
+    source: &Source,
+    source_identity: SourceIdentity,
+    operation_domain: &[u8],
+    bytes: &[u8],
+) -> Result<ImportOutcome, String> {
+    let acquired_at = timestamp(SystemTime::now())?;
+    let operation_id = operation_id_from_domain(operation_domain, source, &source_identity, bytes);
     let result = block_on(application.import_fit(FitImportRequest::from_parts(
         user,
         source,
         source_identity,
         operation_id,
         acquired_at,
-        &bytes,
+        bytes,
     )))
     .map_err(|error| error.to_string())?;
     if result.disposition() == ImportDisposition::Existing {
@@ -474,19 +789,105 @@ fn avatar_operation_id(
     AcquisitionOperationId::from_u128(id.as_u128())
 }
 
+#[cfg(test)]
 fn operation_id(
     source: &Source,
     identity: &SourceIdentity,
     bytes: &[u8],
 ) -> AcquisitionOperationId {
+    operation_id_from_domain(OPERATION_ID_DOMAIN_V1, source, identity, bytes)
+}
+
+fn operation_id_from_domain(
+    domain: &[u8],
+    source: &Source,
+    identity: &SourceIdentity,
+    bytes: &[u8],
+) -> AcquisitionOperationId {
     let mut digest = blake3::Hasher::new();
-    digest.update(OPERATION_ID_DOMAIN_V1);
+    digest.update(domain);
     digest.update(source.id().to_string().as_bytes());
     digest.update(&(identity.as_str().len() as u64).to_le_bytes());
     digest.update(identity.as_str().as_bytes());
     digest.update(ArtifactDigest::from_bytes(bytes).as_blake3().as_bytes());
     let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, digest.finalize().as_bytes());
     AcquisitionOperationId::from_u128(id.as_u128())
+}
+
+fn device_source_identity(
+    device_key: &str,
+    target: &garmin_device::DeviceBrowserTarget,
+) -> Result<SourceIdentity, String> {
+    SourceIdentity::from_string(format!(
+        "device/{device_key}/{}/{}",
+        target.storage_id, target.path
+    ))
+    .map_err(|error| error.to_string())
+}
+
+fn service_browser_target(
+    target: garmin_device::DeviceBrowserTarget,
+) -> garmin_service_api::DeviceBrowserTarget {
+    garmin_service_api::DeviceBrowserTarget {
+        storage_id: target.storage_id,
+        path: target.path,
+        kind: match target.kind {
+            garmin_device::DeviceCatalogEntryKind::Directory => {
+                garmin_service_api::DeviceCatalogEntryKind::Directory
+            }
+            garmin_device::DeviceCatalogEntryKind::File => {
+                garmin_service_api::DeviceCatalogEntryKind::File
+            }
+        },
+    }
+}
+
+fn device_fit_preview(
+    file_name: String,
+    bytes: &[u8],
+) -> Result<garmin_service_api::DeviceFitPreview, String> {
+    let import = garmin_fit::normalize_activities(bytes).map_err(|error| error.to_string())?;
+    let activities = import
+        .normalized_activities()
+        .map(|activity| {
+            let source = activity
+                .creator()
+                .product_name()
+                .map_or_else(|| "FIT".to_owned(), ToString::to_string);
+            garmin_service_api::DeviceFitPreviewActivity {
+                source,
+                summary: activity.activity().summary(),
+                segments: track_segments(activity.activity().track()),
+            }
+        })
+        .collect::<Vec<_>>();
+    if activities.is_empty() {
+        return Err("the FIT file does not contain an activity".to_owned());
+    }
+    Ok(garmin_service_api::DeviceFitPreview {
+        file_name,
+        activities,
+    })
+}
+
+fn track_segments(
+    track: &[garmin_model::activity::TrackPoint],
+) -> Vec<Vec<garmin_model::route::Coordinate>> {
+    let mut segments = Vec::new();
+    let mut current = Vec::new();
+    for sample in track {
+        if let Some(coordinate) = sample.coordinate() {
+            current.push(coordinate);
+        } else if current.len() >= 2 {
+            segments.push(std::mem::take(&mut current));
+        } else {
+            current.clear();
+        }
+    }
+    if current.len() >= 2 {
+        segments.push(current);
+    }
+    segments
 }
 
 fn timestamp(time: SystemTime) -> Result<Timestamp, String> {
@@ -498,20 +899,20 @@ fn timestamp(time: SystemTime) -> Result<Timestamp, String> {
     Timestamp::from_unix_milliseconds(milliseconds).map_err(|error| error.to_string())
 }
 
-fn candidates(paths: Vec<PathBuf>, abort: &AtomicBool) -> Option<Vec<Candidate>> {
-    if abort.load(Ordering::Acquire) {
+fn candidates(paths: Vec<PathBuf>, abort: &CancellationToken) -> Option<Vec<Candidate>> {
+    if abort.is_cancelled() {
         return None;
     }
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
     for path in paths {
-        if abort.load(Ordering::Acquire) {
+        if abort.is_cancelled() {
             return None;
         }
         if path.is_dir() {
             let before = candidates.len();
             for entry in WalkDir::new(&path).follow_links(false) {
-                if abort.load(Ordering::Acquire) {
+                if abort.is_cancelled() {
                     return None;
                 }
                 match entry {
@@ -596,7 +997,7 @@ mod tests {
         fs::write(nested.join("a.fit"), b"a")?;
         fs::write(nested.join("ignored.txt"), b"x")?;
 
-        let abort = AtomicBool::new(false);
+        let abort = CancellationToken::default();
         let found = candidates(vec![root.path().to_owned(), nested.join("a.fit")], &abort)
             .expect("the test never requests cancellation");
         let paths = found.iter().map(Candidate::path).collect::<Vec<_>>();
@@ -612,9 +1013,23 @@ mod tests {
 
     #[test]
     fn path_expansion_honors_cancellation() {
-        let abort = AtomicBool::new(true);
+        let abort = CancellationToken::default();
+        abort.cancel();
 
         assert!(candidates(Vec::new(), &abort).is_none());
+    }
+
+    #[test]
+    fn download_is_persisted_at_the_selected_destination() -> Result<(), Box<dyn Error>> {
+        let root = tempdir()?;
+        let destination = root.path().join("selected-download.fit");
+
+        let source = root.path().join("prepared-download");
+        fs::write(&source, b"downloaded device bytes")?;
+        persist_download(&destination, &source)?;
+
+        assert_eq!(fs::read(destination)?, b"downloaded device bytes");
+        Ok(())
     }
 
     #[test]
@@ -636,6 +1051,18 @@ mod tests {
             operation_id(&source, &first, b"same"),
             operation_id(&source, &first, b"changed")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn device_fit_preview_normalizes_activity_data() -> Result<(), Box<dyn Error>> {
+        let bytes = fixture::activity(fixture::Sport::Cycling)?;
+
+        let preview = device_fit_preview("activity.fit".to_owned(), &bytes)?;
+
+        assert_eq!(preview.file_name, "activity.fit");
+        assert_eq!(preview.activities.len(), 1);
+        assert!(!preview.activities[0].source.is_empty());
         Ok(())
     }
 

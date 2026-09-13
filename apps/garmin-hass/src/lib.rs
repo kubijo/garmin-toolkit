@@ -41,8 +41,8 @@ pub async fn prepare_storage(data_root: impl AsRef<Path>) -> Result<Storage, Err
 /// [`enum@Error`] when persistent state cannot be prepared.
 pub async fn run() -> Result<(), Error> {
     let data_root = deployment_data_root();
-    let storage = prepare_storage(data_root).await?;
-    let devices = devices::Host::new(mode::device_source(), Application::new(storage));
+    let storage = prepare_storage(&data_root).await?;
+    let devices = devices::Host::new(mode::device_source(&data_root)?, Application::new(storage));
     devices.start();
     server::serve(devices).await?;
     Ok(())

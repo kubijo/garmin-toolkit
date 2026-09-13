@@ -12,6 +12,11 @@ const IMAGE_HEIGHT: f32 = 16.0;
 const IMAGE_SLOT_WIDTH: f32 = 24.0;
 const IMAGE_GAP: f32 = 8.0;
 const CARET_SIZE: f32 = 16.0;
+const MENU_MARGIN: egui::Margin = egui::Margin::same(0);
+const MENU_ITEM_GAP: f32 = 0.0;
+const CONTROL_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
+const MENU_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
+const CHOICE_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
 
 /// One selectable value.
 #[derive(Clone, Copy, Debug)]
@@ -110,8 +115,9 @@ pub fn show(
             .id(popup_id)
             .width(response.rect.width())
             .style(egui::style::StyleModifier::new(|style| {
-                style.spacing.menu_margin = egui::Margin::ZERO;
-                style.spacing.item_spacing.y = 0.0;
+                style.spacing.menu_margin = MENU_MARGIN;
+                style.spacing.item_spacing.y = MENU_ITEM_GAP;
+                style.visuals.menu_corner_radius = MENU_RADIUS;
             }))
             .show(|ui| {
                 ui.set_min_width(response.rect.width());
@@ -119,13 +125,8 @@ pub fn show(
                     .max_height(menu_height(choices.len(), row_height))
                     .show(ui, |ui| {
                         for (index, choice) in choices.iter().enumerate() {
-                            let choice_response = choice_row(
-                                ui,
-                                *choice,
-                                *selected == index,
-                                index + 1 == choices.len(),
-                                row_height,
-                            );
+                            let choice_response =
+                                choice_row(ui, *choice, *selected == index, row_height);
                             if choice_response.clicked() && *selected != index {
                                 *selected = index;
                                 changed = true;
@@ -175,7 +176,7 @@ fn control(
     };
     ui.painter().rect(
         rect,
-        visuals.corner_radius,
+        CONTROL_RADIUS,
         visuals.weak_bg_fill,
         visuals.bg_stroke,
         egui::StrokeKind::Inside,
@@ -238,13 +239,7 @@ fn menu_height(choice_count: usize, row_height: f32) -> f32 {
     row_height * f32::from(visible)
 }
 
-fn choice_row(
-    ui: &mut Ui,
-    choice: Choice<'_>,
-    selected: bool,
-    last: bool,
-    row_height: f32,
-) -> Response {
+fn choice_row(ui: &mut Ui, choice: Choice<'_>, selected: bool, row_height: f32) -> Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), row_height), Sense::click());
     response.widget_info(|| {
@@ -258,25 +253,18 @@ fn choice_row(
     }
     let palette = crate::theme::palette(ui);
     let fill = if selected {
-        palette.interaction().interactive()
+        color32(palette.surfaces().layer(theme::Level::Two))
     } else if response.hovered() {
-        palette.surfaces().layer_hover(theme::Level::One)
+        color32(palette.surfaces().layer_hover(theme::Level::One))
     } else {
-        palette.surfaces().layer(theme::Level::One)
+        color32(palette.surfaces().layer(theme::Level::One))
     };
-    ui.painter().rect_filled(rect, 0.0, fill.into_cint());
-    if !last {
-        ui.painter().hline(
-            rect.x_range(),
-            rect.bottom(),
-            egui::Stroke::new(1.0, palette.borders().subtle().into_cint()),
-        );
-    }
+    ui.painter().rect_filled(rect, CHOICE_RADIUS, fill);
     paint_choice(ui, rect, choice, color32(palette.content().text_primary()));
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect,
-            0.0,
+            CHOICE_RADIUS,
             egui::Stroke::new(2.0, palette.interaction().focus().into_cint()),
             egui::StrokeKind::Inside,
         );

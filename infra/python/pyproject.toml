@@ -1,0 +1,22 @@
+[project]
+name = "garmin-python-tools"
+version = "0.1.0"
+requires-python = "==3.14.*"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.ty.environment]
+python-version = "3.14"
+root = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

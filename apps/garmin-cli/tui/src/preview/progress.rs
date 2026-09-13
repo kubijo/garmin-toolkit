@@ -700,6 +700,7 @@ pub(super) fn render_concurrent(
     for item in model.active_mut() {
         item.view.elapsed = Some(std::time::Duration::from_secs(15));
     }
+    stabilize_history(&mut model);
     preview.render_progress(
         frame,
         area,

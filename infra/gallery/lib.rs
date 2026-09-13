@@ -13,7 +13,7 @@ mod terminal_input;
 
 use std::sync::{LazyLock, OnceLock};
 
-use gallery::{CatalogGlobals, GlobalControls, Icon};
+use gallery::{CatalogGlobals, Checkerboard, GlobalControls, Icon};
 use garmin_i18n::{Intl, Language as IntlLanguage, Translations};
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +52,13 @@ pub(crate) struct Globals {
 }
 
 impl Globals {
+    pub(crate) const fn checkerboard(&self) -> Checkerboard {
+        match self.theme {
+            GalleryTheme::Light => Checkerboard::Light,
+            GalleryTheme::Dark => Checkerboard::Dark,
+        }
+    }
+
     pub(crate) fn intl(&self) -> Intl {
         static TRANSLATIONS: OnceLock<Translations> = OnceLock::new();
         TRANSLATIONS

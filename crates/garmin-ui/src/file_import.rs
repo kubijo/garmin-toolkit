@@ -35,6 +35,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     let mut action = None;
     egui::Frame::new()
         .fill(widget_theme::color32(fill))
+        .corner_radius(widget_theme::PANEL_RADIUS)
         .stroke(if props.drop_active {
             Stroke::new(2.0, palette.interaction().interactive().into_cint())
         } else {

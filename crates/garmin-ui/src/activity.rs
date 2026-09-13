@@ -10,7 +10,10 @@ use garmin_model::{
 };
 use garmin_service_api::ActivitySnapshot;
 
-use crate::{icons, path, theme::color32};
+use crate::{
+    icons, path,
+    theme::{CONTROL_RADIUS, PANEL_RADIUS, color32},
+};
 
 const ROW_HEIGHT: f32 = 72.0;
 const PADDING: f32 = 16.0;
@@ -283,7 +286,7 @@ pub fn list(ui: &mut Ui, props: &ListProps<'_>) -> Option<Action> {
     let palette = crate::theme::palette(ui);
     ui.painter().rect_filled(
         rect,
-        0.0,
+        PANEL_RADIUS,
         palette.surfaces().layer(theme::Level::Two).into_cint(),
     );
 
@@ -308,6 +311,13 @@ pub fn list(ui: &mut Ui, props: &ListProps<'_>) -> Option<Action> {
         row_top += ROW_HEIGHT;
         let response = row_response(ui, row, index, item.title);
         paint_row(ui, row, item, props.selected == Some(index), &response);
+        if index + 1 < props.items.len() {
+            ui.painter().hline(
+                row.x_range(),
+                row.bottom(),
+                Stroke::new(1.0, palette.borders().subtle().into_cint()),
+            );
+        }
         if response.clicked() {
             action = Some(Action::Select(index));
         }
@@ -322,14 +332,14 @@ pub fn detail(ui: &mut Ui, props: &DetailProps<'_>) {
     let palette = crate::theme::palette(ui);
     ui.painter().rect_filled(
         rect,
-        0.0,
+        PANEL_RADIUS,
         palette.surfaces().layer(theme::Level::One).into_cint(),
     );
 
     let header_bottom = rect.top() + 88.0;
     ui.painter().rect_filled(
         Rect::from_min_max(rect.min, egui::pos2(rect.right(), header_bottom)),
-        0.0,
+        PANEL_RADIUS,
         palette.surfaces().layer(theme::Level::Two).into_cint(),
     );
     let icon_center = egui::pos2(rect.left() + PADDING + ICON_SIZE / 2.0, rect.top() + 40.0);
@@ -414,7 +424,7 @@ fn detail_or_empty(ui: &mut Ui, detail_props: Option<&DetailProps<'_>>, empty: &
         let palette = crate::theme::palette(ui);
         ui.painter().rect_filled(
             rect,
-            0.0,
+            PANEL_RADIUS,
             palette.surfaces().layer(theme::Level::Two).into_cint(),
         );
         ui.painter().text(
@@ -449,7 +459,7 @@ fn paint_row(ui: &Ui, rect: Rect, props: &ItemProps<'_>, selected: bool, respons
     if response.highlighted() || selected {
         ui.painter().rect_filled(
             rect,
-            0.0,
+            CONTROL_RADIUS,
             palette
                 .surfaces()
                 .layer_hover(theme::Level::Two)
@@ -459,8 +469,8 @@ fn paint_row(ui: &Ui, rect: Rect, props: &ItemProps<'_>, selected: bool, respons
     if selected {
         ui.painter().rect_filled(
             Rect::from_min_size(rect.min, egui::vec2(SELECTED_MARKER_WIDTH, rect.height())),
-            0.0,
-            palette.interaction().interactive().into_cint(),
+            egui::CornerRadius::ZERO,
+            crate::theme::selection_accent(ui).into_cint(),
         );
     }
 
@@ -517,7 +527,7 @@ fn paint_row(ui: &Ui, rect: Rect, props: &ItemProps<'_>, selected: bool, respons
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect,
-            0.0,
+            CONTROL_RADIUS,
             Stroke::new(2.0, palette.interaction().focus().into_cint()),
             egui::StrokeKind::Inside,
         );
@@ -550,7 +560,7 @@ fn paint_metrics(ui: &Ui, rect: Rect, top: f32, metrics: &[MetricProps<'_>]) {
             cell_left += cell_width;
             ui.painter().rect_filled(
                 cell,
-                0.0,
+                CONTROL_RADIUS,
                 palette.surfaces().layer(theme::Level::Two).into_cint(),
             );
             ui.painter().text(

@@ -3,7 +3,11 @@
 use egui::{Response, RichText, Ui};
 use garmin_color::theme;
 
-use crate::{Size, icons::Icon, theme::widget};
+use crate::{
+    Size,
+    icons::Icon,
+    theme::{CONTROL_RADIUS, widget},
+};
 
 /// Visual and semantic importance.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -152,7 +156,7 @@ impl Props<'_> {
                     },
                     height,
                 ))
-                .corner_radius(egui::CornerRadius::ZERO);
+                .corner_radius(CONTROL_RADIUS);
 
             ui.add_enabled(self.enabled, button)
         })

@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, sync::mpsc, time::Duration};
 
-use crate::capabilities::{DataType, DeviceId, SoftwareVersion, TransferDirection};
+use crate::{DataType, DeviceId, SoftwareVersion, TransferDirection};
 
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -18,6 +18,31 @@ pub trait Candidate: Clone + Send + 'static {
     /// # Errors
     /// A stable inspection failure.
     fn inspect(&self) -> Result<Metadata, String>;
+
+    /// Takes a bounded, read-only snapshot for an explicitly opened browser.
+    /// # Errors
+    /// The adapter does not support browsing or the attachment changed.
+    fn browse(&self) -> Result<crate::DeviceCatalog, String> {
+        Err("device browsing is unsupported by this adapter".to_owned())
+    }
+
+    /// Takes a bounded snapshot while honoring operation cancellation.
+    /// # Errors
+    /// The adapter does not support browsing, the attachment changed, or cancellation was
+    /// requested.
+    fn browse_with_progress(
+        &self,
+        progress: &garmin_progress::ProgressReporter,
+    ) -> Result<crate::DeviceCatalog, String> {
+        if progress.is_cancelled() {
+            return Err("device browsing was cancelled".to_owned());
+        }
+        let catalog = self.browse()?;
+        if progress.is_cancelled() {
+            return Err("device browsing was cancelled".to_owned());
+        }
+        Ok(catalog)
+    }
 }
 
 /// Attachment discovery.
@@ -69,6 +94,7 @@ pub struct Presentation {
     pub capabilities: Vec<Capability>,
     pub storage: Option<crate::DeviceStateSnapshot>,
     pub state: InspectionState,
+    pub inspection_error: Option<String>,
 }
 
 /// A supported transfer.
@@ -160,7 +186,7 @@ where
         self.attachments
             .iter()
             .map(|attachment| {
-                let (name, identifier, software_version, capabilities, state) =
+                let (name, identifier, software_version, capabilities, state, inspection_error) =
                     match &attachment.inspection {
                         Inspection::Available | Inspection::Running => (
                             attachment.name.clone(),
@@ -168,6 +194,7 @@ where
                             None,
                             Vec::new(),
                             InspectionState::Running,
+                            None,
                         ),
                         Inspection::Ready(metadata) => (
                             metadata.name.clone(),
@@ -175,13 +202,15 @@ where
                             Some(metadata.software_version),
                             metadata.capabilities.clone(),
                             InspectionState::Ready,
+                            None,
                         ),
-                        Inspection::Failed => (
+                        Inspection::Failed(reason) => (
                             attachment.name.clone(),
                             None,
                             None,
                             Vec::new(),
                             InspectionState::Failed,
+                            Some(reason.clone()),
                         ),
                     };
                 Presentation {
@@ -195,9 +224,18 @@ where
                         _ => None,
                     },
                     state,
+                    inspection_error,
                 }
             })
             .collect()
+    }
+
+    #[must_use]
+    pub fn candidate(&self, key: &str) -> Option<B::Candidate> {
+        self.attachments
+            .iter()
+            .find(|attachment| attachment.key == key)
+            .map(|attachment| attachment.candidate.clone())
     }
 
     #[must_use]
@@ -269,7 +307,7 @@ where
                 })
             {
                 let reason = format!("could not start device inspection: {error}");
-                attachment.inspection = Inspection::Failed;
+                attachment.inspection = Inspection::Failed(reason.clone());
                 events.push(Event::InspectionFailed {
                     key: attachment.key.clone(),
                     name: attachment.name.clone(),
@@ -299,7 +337,7 @@ where
                             Event::Inspected { key, name }
                         }
                         Err(reason) => {
-                            attachment.inspection = Inspection::Failed;
+                            attachment.inspection = Inspection::Failed(reason.clone());
                             Event::InspectionFailed {
                                 key,
                                 name: attachment.name.clone(),
@@ -325,7 +363,7 @@ enum Inspection {
     Available,
     Running,
     Ready(Metadata),
-    Failed,
+    Failed(String),
 }
 
 /// Validated metadata produced by a target adapter.
@@ -366,7 +404,7 @@ mod tests {
         }
 
         fn name(&self) -> &'static str {
-            "Garmin test device"
+            "Mock Inspect-o-Matic 9000"
         }
 
         fn inspect(&self) -> Result<Metadata, String> {
@@ -411,7 +449,7 @@ mod tests {
         assert_eq!(fixture.inspections.load(Ordering::Relaxed), 1);
         let presentations = manager.presentations();
         assert_eq!(presentations.len(), 1);
-        assert_eq!(presentations[0].key, "test://edge");
+        assert_eq!(presentations[0].key, "test://mock-cycle");
         assert_eq!(presentations[0].state, InspectionState::Running);
     }
 
@@ -425,26 +463,24 @@ mod tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("startup inspection completes");
         let _inspected = manager.poll();
-        let mut fenix = fixture
+        let mut mock_watch = fixture
             .candidates
             .lock()
             .expect("the test retains no poisoned lock")[0]
             .clone();
-        fenix.key = "test://fenix";
+        mock_watch.key = "test://mock-watch";
         fixture
             .candidates
             .lock()
             .expect("the test retains no poisoned lock")
-            .push(fenix);
+            .push(mock_watch);
         fixture.changed.store(true, Ordering::Relaxed);
 
         let events = manager.poll();
 
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event, Event::Attached { key, .. } if key == "test://fenix"))
-        );
+        assert!(events.iter().any(
+            |event| matches!(event, Event::Attached { key, .. } if key == "test://mock-watch")
+        ));
         fixture
             .inspected
             .recv_timeout(Duration::from_secs(1))
@@ -475,7 +511,7 @@ mod tests {
         };
 
         assert!(matches!(events.as_slice(), [Event::Inspected { key, name }]
-                if key == "test://edge" && name == "Garmin Edge test"));
+                if key == "test://mock-cycle" && name == "Mock Cycle-o-Matic 9000"));
         let presentations = manager.presentations();
         assert_eq!(presentations[0].identifier, Some(DeviceId::from_u32(42)));
         assert_eq!(
@@ -533,7 +569,7 @@ mod tests {
         manager
             .inspection_tx
             .send(InspectionResult {
-                key: "test://edge".to_owned(),
+                key: "test://mock-cycle".to_owned(),
                 generation: stale_generation,
                 result: Ok(metadata(7)),
             })
@@ -548,14 +584,14 @@ mod tests {
         manager
             .inspection_tx
             .send(InspectionResult {
-                key: "test://edge".to_owned(),
+                key: "test://mock-cycle".to_owned(),
                 generation: current_generation,
                 result: Ok(metadata(43)),
             })
             .expect("the manager retains its inspection receiver");
         assert!(matches!(
             manager.collect_inspections().as_slice(),
-            [Event::Inspected { key, .. }] if key == "test://edge"
+            [Event::Inspected { key, .. }] if key == "test://mock-cycle"
         ));
         assert_eq!(
             manager.presentations()[0].identifier,
@@ -575,7 +611,7 @@ mod tests {
         let inspections = Arc::new(AtomicUsize::new(0));
         let (inspected_tx, inspected) = mpsc::channel();
         let candidates = Arc::new(Mutex::new(vec![TestCandidate {
-            key: "test://edge",
+            key: "test://mock-cycle",
             inspections: Arc::clone(&inspections),
             inspected: inspected_tx,
         }]));
@@ -595,7 +631,7 @@ mod tests {
     fn metadata(id: u32) -> Metadata {
         Metadata {
             id: DeviceId::from_u32(id),
-            name: "Garmin Edge test".to_owned(),
+            name: "Mock Cycle-o-Matic 9000".to_owned(),
             software_version: SoftwareVersion::from_hundredths(912),
             storage: crate::DeviceStateSnapshot::default(),
             capabilities: vec![Capability::new(
