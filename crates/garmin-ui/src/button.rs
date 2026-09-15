@@ -60,12 +60,25 @@ pub struct GroupChoice<'a, T> {
     label: &'a str,
     icon: Icon,
     value: T,
+    enabled: bool,
 }
 
 impl<'a, T> GroupChoice<'a, T> {
     /// Creates an icon-and-label option.
     pub const fn new(label: &'a str, icon: Icon, value: T) -> Self {
-        Self { label, icon, value }
+        Self {
+            label,
+            icon,
+            value,
+            enabled: true,
+        }
+    }
+
+    /// Controls whether this individual option can be selected.
+    #[must_use]
+    pub const fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
     }
 }
 
@@ -86,12 +99,43 @@ pub fn group<T>(
 where
     T: Copy + Eq,
 {
+    group_with_density(ui, selected, choices, props, GroupDensity::Standard)
+}
+
+pub(crate) fn compact_group<T>(
+    ui: &mut Ui,
+    selected: T,
+    choices: &[GroupChoice<'_, T>],
+    props: GroupProps,
+) -> Option<T>
+where
+    T: Copy + Eq,
+{
+    group_with_density(ui, selected, choices, props, GroupDensity::Compact)
+}
+
+#[derive(Clone, Copy)]
+enum GroupDensity {
+    Standard,
+    Compact,
+}
+
+fn group_with_density<T>(
+    ui: &mut Ui,
+    selected: T,
+    choices: &[GroupChoice<'_, T>],
+    props: GroupProps,
+    density: GroupDensity,
+) -> Option<T>
+where
+    T: Copy + Eq,
+{
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         ui.horizontal(|ui| {
             choices.iter().find_map(|choice| {
                 let is_selected = choice.value == selected;
-                let clicked = Props {
+                let button = Props {
                     label: choice.label,
                     icon: Some(choice.icon),
                     kind: if is_selected {
@@ -101,9 +145,12 @@ where
                     },
                     size: props.size,
                     width: Width::Fit,
-                    enabled: props.enabled,
+                    enabled: props.enabled && choice.enabled,
+                };
+                let clicked = match density {
+                    GroupDensity::Standard => button.show(ui),
+                    GroupDensity::Compact => button.show_compact(ui),
                 }
-                .show(ui)
                 .clicked();
                 (clicked && !is_selected).then_some(choice.value)
             })
@@ -130,8 +177,26 @@ impl Props<'_> {
         states: &theme::ButtonStates,
         height: f32,
     ) -> Response {
-        let metrics = metrics(self.size);
+        let metrics = Metrics {
+            height,
+            ..metrics(self.size)
+        };
+        self.show_with_states_and_metrics(ui, states, metrics)
+    }
+
+    pub(crate) fn show_compact(self, ui: &mut Ui) -> Response {
+        let states = self.kind.states(ui);
+        self.show_with_states_and_metrics(ui, states, compact_metrics())
+    }
+
+    fn show_with_states_and_metrics(
+        self,
+        ui: &mut Ui,
+        states: &theme::ButtonStates,
+        metrics: Metrics,
+    ) -> Response {
         ui.scope(|ui| {
+            ui.spacing_mut().interact_size.y = metrics.height;
             let visuals = &mut ui.style_mut().visuals;
             visuals.widgets.inactive = state_visuals(states.rest());
             visuals.widgets.hovered = state_visuals(states.hover());
@@ -154,7 +219,7 @@ impl Props<'_> {
                         Width::Fit => 0.0,
                         Width::Fill => ui.available_width(),
                     },
-                    height,
+                    metrics.height,
                 ))
                 .corner_radius(CONTROL_RADIUS);
 
@@ -187,6 +252,7 @@ impl IconProps<'_> {
         let icon_size = icon_button_size(self.size);
         let response = ui
             .scope(|ui| {
+                ui.spacing_mut().interact_size = egui::Vec2::splat(dimension);
                 let visuals = &mut ui.style_mut().visuals;
                 visuals.widgets.inactive =
                     icon_state_visuals(self.kind, states.rest(), content.icon_secondary());
@@ -229,12 +295,23 @@ const fn icon_button_size(size: Size) -> f32 {
     }
 }
 
+#[derive(Clone, Copy)]
 struct Metrics {
     height: f32,
     horizontal_padding: f32,
     font_size: f32,
     icon_size: f32,
     gap: f32,
+}
+
+const fn compact_metrics() -> Metrics {
+    Metrics {
+        height: 28.0,
+        horizontal_padding: 8.0,
+        font_size: 12.0,
+        icon_size: 14.0,
+        gap: 4.0,
+    }
 }
 
 const fn metrics(size: Size) -> Metrics {

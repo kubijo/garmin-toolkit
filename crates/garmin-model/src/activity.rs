@@ -254,6 +254,7 @@ impl fmt::Display for Temperature {
 pub enum ActivitySport {
     Running,
     Cycling,
+    Swimming,
 }
 
 impl fmt::Display for ActivitySport {
@@ -261,6 +262,7 @@ impl fmt::Display for ActivitySport {
         match self {
             Self::Running => formatter.write_str("running"),
             Self::Cycling => formatter.write_str("cycling"),
+            Self::Swimming => formatter.write_str("swimming"),
         }
     }
 }

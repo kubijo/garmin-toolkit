@@ -15,7 +15,13 @@ use crate::{
     theme::{CONTROL_RADIUS, PANEL_RADIUS, color32},
 };
 
-const ROW_HEIGHT: f32 = 72.0;
+mod map;
+mod workspace;
+
+pub use map::{MapTileDecoder, MapTileRequest, MapTileResponse};
+pub use workspace::{ActivityCursor, CursorMode, Viewer, ViewerProps, Workspace, WorkspaceProps};
+
+const ROW_HEIGHT: f32 = 52.0;
 const PADDING: f32 = 16.0;
 const ICON_SIZE: f32 = 24.0;
 const SELECTED_MARKER_WIDTH: f32 = 3.0;
@@ -27,6 +33,7 @@ const METRIC_GAP: f32 = 1.0;
 const METRIC_MAX_HEIGHT: f32 = 96.0;
 
 pub struct Presentation {
+    sport: ActivitySport,
     icon: icons::Icon,
     title: String,
     subtitle: String,
@@ -114,6 +121,7 @@ impl Presentation {
             });
         }
         Self {
+            sport,
             icon: sport_icon(sport),
             title,
             subtitle,
@@ -121,6 +129,11 @@ impl Presentation {
             duration,
             metrics,
         }
+    }
+
+    #[must_use]
+    pub const fn sport(&self) -> ActivitySport {
+        self.sport
     }
 
     #[must_use]
@@ -216,6 +229,7 @@ const fn sport_icon(sport: ActivitySport) -> icons::Icon {
     match sport {
         ActivitySport::Running => icons::PERSON_SIMPLE_RUN,
         ActivitySport::Cycling => icons::BICYCLE,
+        ActivitySport::Swimming => icons::PERSON_SIMPLE_SWIM,
     }
 }
 
@@ -223,6 +237,7 @@ fn sport_title(sport: ActivitySport, intl: &Intl) -> String {
     match sport {
         ActivitySport::Running => format_message!(intl, default_message: "Running"),
         ActivitySport::Cycling => format_message!(intl, default_message: "Cycling"),
+        ActivitySport::Swimming => format_message!(intl, default_message: "Swimming"),
     }
 }
 

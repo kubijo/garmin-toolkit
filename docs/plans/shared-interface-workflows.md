@@ -16,7 +16,8 @@ plan owns user-visible workflow parity between its browser client and the native
     target cannot remain active elsewhere in the window or application.
 04. Add a consented mounted-device browser behind an owned `garmin-ui` model. Render storages separately and treat
     optional volume icons as bounded untrusted input.
-05. Replace the activity-detail spike with maps, laps, charts, measurements, device data, and provenance.
+05. Replace the activity-detail spike through the shared [activity map workspace](activity-map-workspace.md), including
+    maps, laps, charts, measurements, device data, and provenance.
 06. Report mutations through the notification host. Success follows persistence; failures remain visible and actionable
     across reconnects.
 07. Prove offline sync, visualization, export, snapshot and restore, and one confirmed upload through both clients.

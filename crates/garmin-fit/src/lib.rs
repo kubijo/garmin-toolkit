@@ -488,7 +488,7 @@ pub enum ActivityError {
     ConflictingCreatorField(&'static str),
 }
 
-/// Classifies every sequence and normalizes single-session running or cycling activities.
+/// Classifies every sequence and normalizes supported single-session activities.
 ///
 /// Unknown data remains in the caller-preserved original FIT artifact.
 ///
@@ -837,6 +837,7 @@ const fn sport(value: typedef::Sport) -> Result<ActivitySport, ActivityError> {
     match value {
         typedef::Sport::RUNNING => Ok(ActivitySport::Running),
         typedef::Sport::CYCLING => Ok(ActivitySport::Cycling),
+        typedef::Sport::SWIMMING => Ok(ActivitySport::Swimming),
         _ => Err(ActivityError::UnsupportedSport(value.0)),
     }
 }
