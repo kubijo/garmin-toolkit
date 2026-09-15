@@ -5,12 +5,13 @@ use garmin_i18n::{Intl, format_message};
 use garmin_model::identity::UnitSystem;
 use garmin_service_api::{DeviceBrowserTarget, DeviceFitPreview};
 
-use crate::{activity, icons, modal, path};
+use crate::{activity, icons, modal};
 
 pub struct Preview {
     target: DeviceBrowserTarget,
     data: DeviceFitPreview,
     selected: usize,
+    workspace: activity::Workspace,
 }
 
 pub enum Action {
@@ -20,12 +21,25 @@ pub enum Action {
 
 impl Preview {
     #[must_use]
-    pub const fn new(target: DeviceBrowserTarget, data: DeviceFitPreview) -> Self {
+    pub fn new(target: DeviceBrowserTarget, data: DeviceFitPreview) -> Self {
         Self {
             target,
             data,
             selected: 0,
+            workspace: activity::Workspace::default(),
         }
+    }
+
+    pub fn take_map_tile_requests(&mut self) -> Vec<activity::MapTileRequest> {
+        self.workspace.take_map_tile_requests()
+    }
+
+    pub fn resolve_map_tile(
+        &mut self,
+        context: &egui::Context,
+        response: activity::MapTileResponse,
+    ) {
+        self.workspace.resolve_map_tile(context, response);
     }
 
     pub fn show(
@@ -50,7 +64,7 @@ impl Preview {
     }
 
     fn render(
-        &self,
+        &mut self,
         ui: &mut Ui,
         intl: &Intl,
         busy: bool,
@@ -73,23 +87,9 @@ impl Preview {
             .iter()
             .map(activity::Presentation::item_props)
             .collect::<Vec<_>>();
-        let metrics = presentations
-            .get(self.selected)
-            .map_or_else(Vec::new, activity::Presentation::metric_props);
-        let points = self.selected_points();
-        let segments = points
-            .iter()
-            .map(|points| path::Segment { points })
-            .collect::<Vec<_>>();
-        let no_path = format_message!(intl, default_message: "No recorded path");
-        let path = path::Props {
-            segments: &segments,
-            empty: &no_path,
-            height: None,
-        };
-        let detail = presentations
-            .get(self.selected)
-            .map(|presentation| presentation.detail_props(&metrics, path));
+        let selected = self.data.activities.get(self.selected);
+        let recording_key = selected.map(|_| format!("{}:{}", self.data.file_name, self.selected));
+        let no_route = format_message!(intl, default_message: "No recorded route");
         let description = format_message!(intl, default_message: "FIT activity preview");
         let close = format_message!(intl, default_message: "Close");
         let import = if busy {
@@ -117,41 +117,22 @@ impl Preview {
                 },
             },
             |ui| {
-                activity::browser(
+                self.workspace.show(
                     ui,
-                    &activity::BrowserProps {
-                        list: activity::ListProps {
-                            items: &items,
-                            selected: (!items.is_empty()).then_some(self.selected),
-                            empty: &empty,
-                        },
-                        detail: detail.as_ref(),
+                    intl,
+                    &activity::WorkspaceProps {
+                        items: &items,
+                        presentations: &presentations,
+                        selected: (!items.is_empty()).then_some(self.selected),
+                        recording: selected.map(|activity| &activity.recording),
+                        recording_key: recording_key.as_deref(),
+                        units,
+                        empty_list: &empty,
                         empty_detail: &select,
+                        no_route: &no_route,
                     },
                 )
             },
         )
-    }
-
-    fn selected_points(&self) -> Vec<Vec<path::Point>> {
-        self.data
-            .activities
-            .get(self.selected)
-            .map(|activity| {
-                activity
-                    .segments
-                    .iter()
-                    .map(|segment| {
-                        segment
-                            .iter()
-                            .map(|coordinate| path::Point {
-                                latitude: coordinate.latitude().as_degrees(),
-                                longitude: coordinate.longitude().as_degrees(),
-                            })
-                            .collect()
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
     }
 }

@@ -13,6 +13,7 @@ use garmin_services::Application;
 use thiserror::Error;
 
 mod device_backend;
+mod map_worker;
 mod mode;
 mod view;
 mod window;
@@ -52,6 +53,7 @@ pub fn run() -> Result<(), Error> {
                 translations,
                 creation.egui_ctx.clone(),
                 device_platform,
+                &data_root,
             )?))
         }),
     )?;

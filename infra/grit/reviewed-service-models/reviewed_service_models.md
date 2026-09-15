@@ -39,6 +39,11 @@ or {
     `AvatarCrop`,
     `ActivitySnapshot`,
     `ActivityDetailSnapshot`,
+    `ActivityRecordingSnapshot`,
+    `ActivityLapSnapshot`,
+    `ActivitySampleSnapshot`,
+    `ActivityTimerEventSnapshot`,
+    `ActivityTimerStateSnapshot`,
   }
 }
 ```

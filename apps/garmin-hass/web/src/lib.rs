@@ -14,11 +14,11 @@ use garmin_service_api::{
 };
 use garmin_ui::{
     activity, device, device_browser, device_fit_preview, icons, image_crop, modal, notification,
-    offline, path, profile, profile_settings, progress, shell,
+    offline, profile, profile_settings, progress, shell,
     workspace::{self, Page},
 };
 use remoc::prelude::*;
-use std::{cell::RefCell, fmt, io, io::Cursor, rc::Rc, time::Duration};
+use std::{cell::RefCell, collections::VecDeque, fmt, io, io::Cursor, rc::Rc, time::Duration};
 use tokio_wasm_io::io::AsyncWriteExt as _;
 use wasm_bindgen::{JsCast as _, prelude::*};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
@@ -29,6 +29,8 @@ const HEARTBEAT_INTERVAL_MILLISECONDS: i32 = 3_000;
 const HEARTBEAT_TIMEOUT_MILLISECONDS: i32 = 5_000;
 const MAX_DEVICE_BROWSER_TRANSFER_BYTES: f64 = 512.0 * 1024.0 * 1024.0;
 const MAX_AVATAR_UPLOAD_BYTES: f64 = 10.0 * 1024.0 * 1024.0;
+const MAX_MAP_TILE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_MAP_TILES_IN_FLIGHT: usize = 6;
 
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
@@ -70,6 +72,52 @@ fn identify_text_agent(canvas: &web_sys::HtmlCanvasElement) {
     let _ignored = input.set_attribute("id", "garmin-toolkit-text-agent");
 }
 
+fn fetch_map_tile(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    target: MapTarget,
+    request: activity::MapTileRequest,
+) {
+    spawn_local(async move {
+        let result = fetch_map_tile_bytes(request).await;
+        shared
+            .borrow_mut()
+            .map_tile_responses
+            .push((target, activity::MapTileResponse::encoded(request, result)));
+        context.request_repaint();
+    });
+}
+
+async fn fetch_map_tile_bytes(request: activity::MapTileRequest) -> Result<Vec<u8>, String> {
+    let path = format!("map/tiles/{}/{}/{}.pbf", request.zoom, request.x, request.y);
+    let window = web_sys::window().ok_or_else(|| "browser window is unavailable".to_owned())?;
+    let response = JsFuture::from(window.fetch_with_str(&path))
+        .await
+        .map_err(map_fetch_error)?
+        .dyn_into::<web_sys::Response>()
+        .map_err(|_| "map tile response had an unexpected type".to_owned())?;
+    if !response.ok() {
+        return Err(format!(
+            "map tile request returned HTTP {}",
+            response.status()
+        ));
+    }
+    let buffer = JsFuture::from(response.array_buffer().map_err(map_fetch_error)?)
+        .await
+        .map_err(map_fetch_error)?;
+    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+    if bytes.len() > MAX_MAP_TILE_BYTES {
+        return Err("map tile exceeded the 2 MiB browser limit".to_owned());
+    }
+    Ok(bytes)
+}
+
+fn map_fetch_error(value: JsValue) -> String {
+    value
+        .as_string()
+        .unwrap_or_else(|| "browser map request failed".to_owned())
+}
+
 struct App {
     context: eframe::egui::Context,
     translations: Translations,
@@ -86,11 +134,19 @@ struct App {
     profile_presentations: Vec<profile::Presentation>,
     activity_presentations: Vec<activity::Presentation>,
     activity_detail: Option<Rc<ActivityDetailSnapshot>>,
-    activity_segments: Vec<Vec<path::Point>>,
+    activity_workspace: activity::Workspace,
+    map_tile_queue: VecDeque<(MapTarget, activity::MapTileRequest)>,
+    map_tiles_in_flight: usize,
     applied_preferences: Option<(UserId, ProfilePreferences)>,
     avatar_editor: Option<AvatarEditor>,
     device_browser: Option<device_browser::Browser>,
     device_fit_preview: Option<device_fit_preview::Preview>,
+}
+
+#[derive(Clone, Copy)]
+enum MapTarget {
+    Activity,
+    FitPreview,
 }
 
 impl App {
@@ -115,7 +171,9 @@ impl App {
             profile_presentations: Vec::new(),
             activity_presentations: Vec::new(),
             activity_detail: None,
-            activity_segments: Vec::new(),
+            activity_workspace: activity::Workspace::default(),
+            map_tile_queue: VecDeque::new(),
+            map_tiles_in_flight: 0,
             applied_preferences: None,
             avatar_editor: None,
             device_browser: None,
@@ -181,24 +239,6 @@ impl App {
         {
             return;
         }
-        self.activity_segments = detail
-            .as_deref()
-            .map(|detail| {
-                detail
-                    .segments
-                    .iter()
-                    .map(|segment| {
-                        segment
-                            .iter()
-                            .map(|point| path::Point {
-                                latitude: point.latitude().as_degrees(),
-                                longitude: point.longitude().as_degrees(),
-                            })
-                            .collect()
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
         self.activity_detail = detail;
     }
 
@@ -344,7 +384,7 @@ impl App {
                             &self.activity_presentations,
                             self.selected_activity,
                             self.activity_detail.as_deref(),
-                            &self.activity_segments,
+                            &mut self.activity_workspace,
                         )),
                         Page::ProfileSettings => PageAction::Settings(profile_settings::show(
                             ui,
@@ -846,6 +886,7 @@ impl eframe::App for App {
             create_problem,
             disconnected_since,
             deployment_mode,
+            map_tile_responses,
         ) = {
             let mut state = self.shared.borrow_mut();
             (
@@ -870,6 +911,7 @@ impl eframe::App for App {
                 state.profile_create_problem.clone(),
                 state.disconnected_since_milliseconds,
                 state.deployment_mode,
+                std::mem::take(&mut state.map_tile_responses),
             )
         };
         let product_name = match deployment_mode {
@@ -978,6 +1020,7 @@ impl eframe::App for App {
             });
             self.context.request_repaint();
         }
+        self.resolve_map_tiles(map_tile_responses);
         self.sync_activity_detail(activity_detail);
         let profiles = Rc::clone(&self.profiles);
         if matches!(&self.page, Page::Device(key) if !devices.iter().any(|device| &device.key == key))
@@ -1045,8 +1088,52 @@ impl eframe::App for App {
             self.show_avatar_editor(ui);
             self.show_device_fit_preview(ui);
         }
+        self.request_map_tiles();
         if let Some(since) = disconnected_since.filter(|_| loaded) {
             self.show_offline(ui, since);
+        }
+    }
+}
+
+impl App {
+    fn resolve_map_tiles(&mut self, responses: Vec<(MapTarget, activity::MapTileResponse)>) {
+        for (target, response) in responses {
+            self.map_tiles_in_flight = self.map_tiles_in_flight.saturating_sub(1);
+            match target {
+                MapTarget::Activity => self
+                    .activity_workspace
+                    .resolve_map_tile(&self.context, response),
+                MapTarget::FitPreview => {
+                    if let Some(preview) = self.device_fit_preview.as_mut() {
+                        preview.resolve_map_tile(&self.context, response);
+                    }
+                }
+            }
+        }
+    }
+
+    fn request_map_tiles(&mut self) {
+        for request in self.activity_workspace.take_map_tile_requests() {
+            self.map_tile_queue
+                .push_back((MapTarget::Activity, request));
+        }
+        if let Some(preview) = self.device_fit_preview.as_mut() {
+            for request in preview.take_map_tile_requests() {
+                self.map_tile_queue
+                    .push_back((MapTarget::FitPreview, request));
+            }
+        }
+        while self.map_tiles_in_flight < MAX_MAP_TILES_IN_FLIGHT {
+            let Some((target, request)) = self.map_tile_queue.pop_front() else {
+                break;
+            };
+            self.map_tiles_in_flight += 1;
+            fetch_map_tile(
+                Rc::clone(&self.shared),
+                self.context.clone(),
+                target,
+                request,
+            );
         }
     }
 }
@@ -1067,48 +1154,35 @@ fn show_activities(
     presentations: &[activity::Presentation],
     selected: usize,
     detail: Option<&ActivityDetailSnapshot>,
-    points: &[Vec<path::Point>],
+    workspace: &mut activity::Workspace,
 ) -> Option<activity::Action> {
     let items = presentations
         .iter()
         .map(activity::Presentation::item_props)
         .collect::<Vec<_>>();
-    let metrics = presentations
-        .get(selected)
-        .map_or_else(Vec::new, activity::Presentation::metric_props);
-    let points = detail
-        .filter(|detail| {
-            profile
-                .activities
-                .get(selected)
-                .is_some_and(|activity| activity.id == detail.id)
-        })
-        .map_or(&[][..], |_| points);
-    let segments = points
-        .iter()
-        .map(|points| path::Segment { points })
-        .collect::<Vec<_>>();
-    let no_path = format_message!(intl, default_message: "No recorded path");
-    let path = path::Props {
-        segments: &segments,
-        empty: &no_path,
-        height: None,
-    };
-    let detail = presentations
-        .get(selected)
-        .map(|presentation| presentation.detail_props(&metrics, path));
+    let detail = detail.filter(|detail| {
+        profile
+            .activities
+            .get(selected)
+            .is_some_and(|activity| activity.id == detail.id)
+    });
+    let recording_key = detail.map(|detail| detail.id.to_string());
+    let no_route = format_message!(intl, default_message: "No recorded route");
     let no_activities = format_message!(intl, default_message: "No activities yet");
     let select_activity = format_message!(intl, default_message: "Select an activity");
-    activity::browser(
+    workspace.show(
         ui,
-        &activity::BrowserProps {
-            list: activity::ListProps {
-                items: &items,
-                selected: (!items.is_empty()).then_some(selected),
-                empty: &no_activities,
-            },
-            detail: detail.as_ref(),
+        intl,
+        &activity::WorkspaceProps {
+            items: &items,
+            presentations,
+            selected: (!items.is_empty()).then_some(selected),
+            recording: detail.map(|detail| &detail.recording),
+            recording_key: recording_key.as_deref(),
+            units: profile.user.profile().preferences().unit_system(),
+            empty_list: &no_activities,
             empty_detail: &select_activity,
+            no_route: &no_route,
         },
     )
 }
@@ -1165,6 +1239,7 @@ struct State {
     notice: Option<Notice>,
     error: Option<String>,
     disconnected_since_milliseconds: Option<f64>,
+    map_tile_responses: Vec<(MapTarget, activity::MapTileResponse)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

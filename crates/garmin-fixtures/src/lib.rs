@@ -50,7 +50,7 @@ fn remove_if_present(path: impl AsRef<Path>) -> Result<(), SeedError> {
     }
 }
 
-/// One imported synthetic activity.
+/// One imported development activity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeededActivity {
     owner_id: UserId,
@@ -75,7 +75,7 @@ impl SeededActivity {
     }
 }
 
-/// Records produced by seeding the synthetic corpus.
+/// Records produced by seeding the development corpus.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeededCorpus {
     users: Vec<User>,
@@ -103,7 +103,8 @@ impl SeededCorpus {
 
 /// Seeds a database through the production FIT importer.
 ///
-/// Stable IDs make repeated calls idempotent. No private or third-party bytes are used.
+/// Stable IDs make repeated calls idempotent. The normalized source recordings are
+/// redistributable and documented in the fixture manifest and third-party notices.
 /// # Errors
 /// [`SeedError`] when definitions, encoding, import, or persistence fail.
 pub async fn seed(storage: &Storage) -> Result<SeededCorpus, SeedError> {
@@ -162,9 +163,9 @@ fn definitions() -> Result<[Definition; 3], SeedError> {
             1,
             Role::Owner,
             "Alex Rider",
-            "Mock Watch-o-Matic 9000",
-            "Demo watch",
-            &[ActivityCase::MorningRun, ActivityCase::TempoRun],
+            "Mock Cycle-o-Matic 9000",
+            "Demo bike computer",
+            &[ActivityCase::CityRide, ActivityCase::IndoorPowerRide],
         )?,
         definition(
             2,
@@ -172,19 +173,15 @@ fn definitions() -> Result<[Definition; 3], SeedError> {
             "Sam Runner",
             "Mock Running Watch-o-Matic 9000",
             "Demo running watch",
-            &[ActivityCase::TrailRun],
+            &[ActivityCase::ForestRun, ActivityCase::CoastalRun],
         )?,
         definition(
             3,
             Role::Member,
-            "Taylor Cyclist",
-            "Mock Cycle-o-Matic 9000",
-            "Demo bike computer",
-            &[
-                ActivityCase::CommuteRide,
-                ActivityCase::EnduranceRide,
-                ActivityCase::RecoveryRide,
-            ],
+            "Taylor Multisport",
+            "Mock Multisport-o-Matic 9000",
+            "Demo multisport watch",
+            &[ActivityCase::CityRun, ActivityCase::OpenWaterSwim],
         )?,
     ])
 }
@@ -222,12 +219,12 @@ fn definition(
 
 const fn operation_id(case: ActivityCase) -> AcquisitionOperationId {
     let ordinal = match case {
-        ActivityCase::MorningRun => 1,
-        ActivityCase::TempoRun => 2,
-        ActivityCase::TrailRun => 3,
-        ActivityCase::CommuteRide => 4,
-        ActivityCase::EnduranceRide => 5,
-        ActivityCase::RecoveryRide => 6,
+        ActivityCase::ForestRun => 1,
+        ActivityCase::CoastalRun => 2,
+        ActivityCase::CityRun => 3,
+        ActivityCase::CityRide => 4,
+        ActivityCase::OpenWaterSwim => 5,
+        ActivityCase::IndoorPowerRide => 6,
     };
     AcquisitionOperationId::from_u128(0x4000_0000_0000_4000_8000_0000_0000_0000 + ordinal)
 }
@@ -263,7 +260,7 @@ pub enum SeedError {
     Encoding(#[from] garmin_fit::fixture::EncodingError),
     #[error("generated FIT {file} was rejected: {reason}")]
     Rejected {
-        /// Synthetic file name.
+        /// Fixture file name.
         file: &'static str,
         /// Parser failure.
         reason: String,
@@ -309,7 +306,7 @@ mod tests {
                     Some(activity.case().encode()?)
                 );
                 let [observation_id] = activity.receipt().observation_ids() else {
-                    return Err("synthetic file did not produce one activity".into());
+                    return Err("development file did not produce one activity".into());
                 };
                 let stored = storage
                     .activity(activity.owner_id(), *observation_id)
@@ -324,7 +321,7 @@ mod tests {
                         .summary()
                         .totals()
                         .distance()
-                        .ok_or("synthetic activity had no distance")?
+                        .ok_or("development activity had no distance")?
                         .as_millimeters(),
                     distance
                 );
@@ -348,7 +345,7 @@ mod tests {
             for count in activity_counts {
                 counts.push(count.await?);
             }
-            assert_eq!(counts, [2, 1, 3]);
+            assert_eq!(counts, [2, 2, 2]);
 
             storage.close().await;
             Ok(())
@@ -382,12 +379,12 @@ mod tests {
 
     const fn expected(case: ActivityCase) -> (ActivitySport, u64) {
         match case {
-            ActivityCase::MorningRun => (ActivitySport::Running, 7_850_000),
-            ActivityCase::TempoRun => (ActivitySport::Running, 10_870_000),
-            ActivityCase::TrailRun => (ActivitySport::Running, 12_430_000),
-            ActivityCase::CommuteRide => (ActivitySport::Cycling, 18_420_000),
-            ActivityCase::EnduranceRide => (ActivitySport::Cycling, 67_420_000),
-            ActivityCase::RecoveryRide => (ActivitySport::Cycling, 27_060_000),
+            ActivityCase::ForestRun => (ActivitySport::Running, 14_134_310),
+            ActivityCase::CoastalRun => (ActivitySport::Running, 5_048_280),
+            ActivityCase::CityRun => (ActivitySport::Running, 14_793_040),
+            ActivityCase::CityRide => (ActivitySport::Cycling, 67_917_190),
+            ActivityCase::OpenWaterSwim => (ActivitySport::Swimming, 1_620_540),
+            ActivityCase::IndoorPowerRide => (ActivitySport::Cycling, 50_000_600),
         }
     }
 }

@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fs, path::PathBuf, time::Duration};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use camino::Utf8Path;
 use eframe::egui::{
@@ -10,13 +15,14 @@ use garmin_device::attachments as devices;
 use garmin_i18n::{Intl, Language, Translations, format_message};
 use garmin_model::identity::{LanguagePreference, ThemePreference, UnitSystem, User, UserId};
 use garmin_service_api::{
-    DeviceCapability, DeviceCatalogEntry, DeviceCatalogEntryKind, DeviceCatalogSnapshot,
-    DeviceCatalogStorage, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
+    ActivityDetailSnapshot, DeviceCapability, DeviceCatalogEntry, DeviceCatalogEntryKind,
+    DeviceCatalogSnapshot, DeviceCatalogStorage, DeviceDataType, DeviceSnapshot, InspectionState,
+    TransferDirection,
 };
 use garmin_services::{ActivityPreview, Application, UserContext};
 use garmin_ui::{
     activity, device, device_browser, device_fit_preview, file_import, icons, image_crop, modal,
-    notification, path, profile, profile_settings, progress, shell,
+    notification, profile, profile_settings, progress, shell,
     workspace::{self, Page},
 };
 
@@ -35,7 +41,8 @@ pub struct Desktop {
     page: Page,
     preferences_saving: bool,
     selected_activity: usize,
-    activity_path: Option<ActivityPath>,
+    activity_detail: Option<ActivityDetailSnapshot>,
+    activity_workspace: activity::Workspace,
     navigation: shell::Navigation,
     loaded: bool,
     create_profile: Option<profile::CreateState>,
@@ -51,6 +58,7 @@ pub struct Desktop {
     devices: devices::Manager<device_backend::Platform>,
     device_toasts: HashMap<notification::ToastId, String>,
     worker: Worker,
+    map_worker: crate::map_worker::Worker,
 }
 
 impl Desktop {
@@ -59,9 +67,14 @@ impl Desktop {
         translations: Translations,
         context: eframe::egui::Context,
         device_platform: device_backend::Platform,
+        data_root: &Path,
     ) -> Result<Self, Error> {
         let intl = translations.formatter(Language::English)?;
         let worker = Worker::spawn(application, context.clone())?;
+        let map_worker = crate::map_worker::Worker::spawn(
+            &data_root.join("cache/activity-map"),
+            context.clone(),
+        )?;
         Ok(Self {
             context,
             translations,
@@ -72,7 +85,8 @@ impl Desktop {
             page: Page::Activities,
             preferences_saving: false,
             selected_activity: 0,
-            activity_path: None,
+            activity_detail: None,
+            activity_workspace: activity::Workspace::default(),
             navigation: shell::Navigation::Expanded,
             loaded: false,
             create_profile: None,
@@ -88,6 +102,7 @@ impl Desktop {
             devices: devices::Manager::new(device_platform),
             device_toasts: HashMap::new(),
             worker,
+            map_worker,
         })
     }
 
@@ -160,6 +175,7 @@ impl Desktop {
         drop_active: bool,
     ) {
         let mut device_browser = self.device_browser.take();
+        let mut activity_workspace = std::mem::take(&mut self.activity_workspace);
         let profile_props = self.profile_props();
         let device_snapshots = self.device_snapshots();
         let window_copy = WindowCopy::new(&self.intl);
@@ -185,6 +201,7 @@ impl Desktop {
                     ui,
                     profile_index,
                     drop_active,
+                    &mut activity_workspace,
                 )),
                 Page::ProfileSettings => PageOutput::Settings(profile_settings::show(
                     ui,
@@ -209,6 +226,7 @@ impl Desktop {
                 }
             }
         });
+        self.activity_workspace = activity_workspace;
         let browser_action = match (&self.page, device_browser.as_mut()) {
             (Page::Device(key), Some(browser)) if browser.device_key() == key => {
                 browser.show_window(ui, &self.intl)
@@ -348,28 +366,19 @@ impl Desktop {
         ui: &mut Ui,
         profile_index: usize,
         drop_active: bool,
+        activity_workspace: &mut activity::Workspace,
     ) -> (Option<file_import::Action>, Option<activity::Action>) {
+        let drop_rect = ui.available_rect_before_wrap();
         let current_profile = &self.profiles[profile_index];
         let items = current_profile.activity_props();
-        let metric_props = current_profile.metric_props(self.selected_activity);
-        let segments = self
-            .activity_path
-            .as_ref()
-            .filter(|path| {
-                current_profile
-                    .previews
-                    .get(self.selected_activity)
-                    .is_some_and(|preview| preview.observation_id() == path.observation_id)
-            })
-            .map(ActivityPath::segment_props)
-            .unwrap_or_default();
-        let no_path = format_message!(&self.intl, default_message: "No recorded path");
-        let path = path::Props {
-            segments: &segments,
-            empty: &no_path,
-            height: None,
-        };
-        let detail = current_profile.detail_props(self.selected_activity, &metric_props, path);
+        let detail = self.activity_detail.as_ref().filter(|detail| {
+            current_profile
+                .previews
+                .get(self.selected_activity)
+                .is_some_and(|preview| preview.observation_id() == detail.id)
+        });
+        let recording_key = detail.map(|detail| detail.id.to_string());
+        let no_route = format_message!(&self.intl, default_message: "No recorded route");
         let no_activities = format_message!(&self.intl, default_message: "No activities yet");
         let select_activity = format_message!(&self.intl, default_message: "Select an activity");
         let import_copy = ImportCopy::new(&self.intl, drop_active);
@@ -389,18 +398,24 @@ impl Desktop {
         if self.import.visible() {
             ui.add_space(12.0);
         }
-        let selected = activity::browser(
+        let selected = activity_workspace.show(
             ui,
-            &activity::BrowserProps {
-                list: activity::ListProps {
-                    items: &items,
-                    selected: (!items.is_empty()).then_some(self.selected_activity),
-                    empty: &no_activities,
-                },
-                detail: detail.as_ref(),
+            &self.intl,
+            &activity::WorkspaceProps {
+                items: &items,
+                presentations: &current_profile.activities,
+                selected: (!items.is_empty()).then_some(self.selected_activity),
+                recording: detail.map(|detail| &detail.recording),
+                recording_key: recording_key.as_deref(),
+                units: current_profile.user.profile().preferences().unit_system(),
+                empty_list: &no_activities,
                 empty_detail: &select_activity,
+                no_route: &no_route,
             },
         );
+        if drop_active {
+            file_import::drop_overlay(ui, drop_rect, &import_copy.description);
+        }
         (import, selected)
     }
 
@@ -586,14 +601,14 @@ impl Desktop {
         self.profile_menu_expanded = false;
         self.page = Page::Activities;
         self.selected_activity = 0;
-        self.activity_path = None;
+        self.activity_detail = None;
         self.import = ImportStatus::default();
         self.apply_selected_preferences();
         self.load_selected_activity();
     }
 
     fn select_activity(&mut self, index: usize) {
-        if self.selected_activity == index && self.activity_path.is_some() {
+        if self.selected_activity == index && self.activity_detail.is_some() {
             return;
         }
         self.selected_activity = index;
@@ -601,7 +616,7 @@ impl Desktop {
     }
 
     fn load_selected_activity(&mut self) {
-        self.activity_path = None;
+        self.activity_detail = None;
         let Some((user, observation_id)) = self.selected_profile.and_then(|profile_index| {
             let profile = self.profiles.get(profile_index)?;
             let preview = profile.previews.get(self.selected_activity)?;
@@ -829,7 +844,12 @@ impl Desktop {
                     }
                     match result {
                         Ok(Some(details)) => {
-                            self.activity_path = Some(ActivityPath::from_details(&details));
+                            self.activity_detail = Some(ActivityDetailSnapshot {
+                                id: details.observation_id(),
+                                recording: garmin_service_api::ActivityRecordingSnapshot::from(
+                                    details.normalized().activity(),
+                                ),
+                            });
                         }
                         Ok(None) => {
                             self.notice = Some(Notice::error(format_message!(
@@ -1169,6 +1189,7 @@ impl Desktop {
 
 impl eframe::App for Desktop {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
+        self.process_map_tiles(ui.ctx());
         self.process_events();
         self.process_devices(ui.ctx());
         self.handle_quit_input(ui.ctx());
@@ -1193,9 +1214,41 @@ impl eframe::App for Desktop {
         self.show_create_profile(ui);
         self.show_avatar_editor(ui);
         self.show_device_fit_preview(ui);
+        self.request_map_tiles();
         self.show_quit_confirmation(ui);
         self.show_toasts(ui.ctx());
         crate::window::resize(ui);
+    }
+}
+
+impl Desktop {
+    fn process_map_tiles(&mut self, context: &Context) {
+        for response in self.map_worker.drain().collect::<Vec<_>>() {
+            match response.target {
+                crate::map_worker::Target::Activity => {
+                    self.activity_workspace
+                        .resolve_map_tile(context, response.tile);
+                }
+                crate::map_worker::Target::FitPreview => {
+                    if let Some(preview) = self.device_fit_preview.as_mut() {
+                        preview.resolve_map_tile(context, response.tile);
+                    }
+                }
+            }
+        }
+    }
+
+    fn request_map_tiles(&mut self) {
+        for request in self.activity_workspace.take_map_tile_requests() {
+            self.map_worker
+                .request(crate::map_worker::Target::Activity, request);
+        }
+        if let Some(preview) = self.device_fit_preview.as_mut() {
+            for request in preview.take_map_tile_requests() {
+                self.map_worker
+                    .request(crate::map_worker::Target::FitPreview, request);
+            }
+        }
     }
 }
 
@@ -1818,23 +1871,6 @@ impl ProfileView {
             .map(activity::Presentation::item_props)
             .collect()
     }
-
-    fn metric_props(&self, selected: usize) -> Vec<activity::MetricProps<'_>> {
-        self.activities
-            .get(selected)
-            .map_or_else(Vec::new, activity::Presentation::metric_props)
-    }
-
-    fn detail_props<'a>(
-        &'a self,
-        selected: usize,
-        metrics: &'a [activity::MetricProps<'a>],
-        path: path::Props<'a>,
-    ) -> Option<activity::DetailProps<'a>> {
-        self.activities
-            .get(selected)
-            .map(|activity| activity.detail_props(metrics, path))
-    }
 }
 
 fn activity_presentation(
@@ -1847,44 +1883,6 @@ fn activity_presentation(
         .product_name()
         .map_or("FIT", |value| value.as_str());
     activity::Presentation::from_summary(preview.summary(), source, intl, units)
-}
-
-struct ActivityPath {
-    observation_id: garmin_model::observation::ObservationId,
-    segments: Vec<Vec<path::Point>>,
-}
-
-impl ActivityPath {
-    fn from_details(details: &garmin_services::ActivityDetails) -> Self {
-        let mut segments = Vec::new();
-        let mut current = Vec::new();
-        for sample in details.normalized().activity().track() {
-            if let Some(coordinate) = sample.coordinate() {
-                current.push(path::Point {
-                    latitude: coordinate.latitude().as_degrees(),
-                    longitude: coordinate.longitude().as_degrees(),
-                });
-            } else if current.len() >= 2 {
-                segments.push(std::mem::take(&mut current));
-            } else {
-                current.clear();
-            }
-        }
-        if current.len() >= 2 {
-            segments.push(current);
-        }
-        Self {
-            observation_id: details.observation_id(),
-            segments,
-        }
-    }
-
-    fn segment_props(&self) -> Vec<path::Segment<'_>> {
-        self.segments
-            .iter()
-            .map(|points| path::Segment { points })
-            .collect()
-    }
 }
 
 #[cfg(test)]

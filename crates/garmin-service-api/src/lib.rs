@@ -2,8 +2,15 @@
 
 use camino::Utf8PathBuf;
 use garmin_model::{
-    activity::ActivitySummary, device::DeviceStorageState, identity::User,
-    observation::ObservationId, route::Coordinate,
+    activity::{
+        Activity, ActivityMetrics, ActivitySummary, ActivityTotals, Cadence, Distance, HeartRate,
+        Power, Speed, TimeRange, TimerState,
+    },
+    device::DeviceStorageState,
+    identity::User,
+    observation::ObservationId,
+    route::Coordinate,
+    value::Timestamp,
 };
 #[garmin_macros::portable(eq)]
 pub struct DeviceSnapshot {
@@ -89,7 +96,7 @@ pub struct DeviceFitPreview {
 pub struct DeviceFitPreviewActivity {
     pub source: String,
     pub summary: ActivitySummary,
-    pub segments: Vec<Vec<Coordinate>>,
+    pub recording: ActivityRecordingSnapshot,
 }
 
 #[garmin_macros::portable(eq)]
@@ -163,7 +170,94 @@ pub struct ActivitySnapshot {
 #[garmin_macros::portable]
 pub struct ActivityDetailSnapshot {
     pub id: ObservationId,
-    pub segments: Vec<Vec<Coordinate>>,
+    pub recording: ActivityRecordingSnapshot,
+}
+
+/// Portable complete recording used by both activity details and FIT previews.
+#[garmin_macros::portable]
+pub struct ActivityRecordingSnapshot {
+    pub laps: Vec<ActivityLapSnapshot>,
+    pub samples: Vec<ActivitySampleSnapshot>,
+    pub timer_events: Vec<ActivityTimerEventSnapshot>,
+}
+
+#[garmin_macros::portable]
+pub struct ActivityLapSnapshot {
+    pub time: TimeRange,
+    pub totals: ActivityTotals,
+    pub metrics: ActivityMetrics,
+}
+
+#[garmin_macros::portable]
+pub struct ActivitySampleSnapshot {
+    pub timestamp: Timestamp,
+    pub coordinate: Option<Coordinate>,
+    pub elevation_meters: Option<f64>,
+    pub distance: Option<Distance>,
+    pub speed: Option<Speed>,
+    pub heart_rate: Option<HeartRate>,
+    pub cadence: Option<Cadence>,
+    pub power: Option<Power>,
+    pub temperature_millicelsius: Option<i32>,
+}
+
+#[garmin_macros::portable(copy, eq)]
+pub struct ActivityTimerEventSnapshot {
+    pub timestamp: Timestamp,
+    pub state: ActivityTimerStateSnapshot,
+}
+
+#[garmin_macros::portable(copy, eq)]
+pub enum ActivityTimerStateSnapshot {
+    Running,
+    Stopped,
+}
+
+impl From<&Activity> for ActivityRecordingSnapshot {
+    fn from(activity: &Activity) -> Self {
+        Self {
+            laps: activity
+                .laps()
+                .iter()
+                .map(|lap| ActivityLapSnapshot {
+                    time: lap.time(),
+                    totals: lap.totals(),
+                    metrics: lap.metrics(),
+                })
+                .collect(),
+            samples: activity
+                .track()
+                .iter()
+                .map(|sample| {
+                    let measurements = sample.measurements();
+                    ActivitySampleSnapshot {
+                        timestamp: sample.timestamp(),
+                        coordinate: sample.coordinate(),
+                        elevation_meters: sample.elevation().map(|value| value.as_meters()),
+                        distance: sample.distance(),
+                        speed: measurements.speed(),
+                        heart_rate: measurements.heart_rate(),
+                        cadence: measurements.cadence(),
+                        power: measurements.power(),
+                        temperature_millicelsius: measurements
+                            .temperature()
+                            .map(|temperature| temperature.as_millicelsius()),
+                    }
+                })
+                .collect(),
+            timer_events: activity
+                .timer_events()
+                .iter()
+                .map(|event| ActivityTimerEventSnapshot {
+                    timestamp: event.timestamp(),
+                    state: match event.state() {
+                        TimerState::Running => ActivityTimerStateSnapshot::Running,
+                        TimerState::Stopped => ActivityTimerStateSnapshot::Stopped,
+                    },
+                })
+                .collect(),
+        }
+    }
 }
 
 #[garmin_macros::portable(copy, eq)]
@@ -254,7 +348,19 @@ pub use rpc::{ApplicationService, ApplicationServiceClient, ApplicationServiceSe
 
 #[cfg(test)]
 mod tests {
-    use super::{DeviceBrowserTarget, DeviceCatalogEntryKind};
+    use super::{
+        ActivityRecordingSnapshot, ActivityTimerStateSnapshot, DeviceBrowserTarget,
+        DeviceCatalogEntryKind,
+    };
+    use garmin_model::{
+        activity::{
+            Activity, ActivityDuration, ActivityMetrics, ActivityTotals, Cadence, Distance,
+            HeartRate, Lap, Power, Speed, TimeRange, TimerEvent, TimerState, TrackMeasurements,
+            TrackPoint,
+        },
+        route::{Coordinate, Elevation, Latitude, Longitude},
+        value::Timestamp,
+    };
 
     #[test]
     fn browser_path_wire_format_remains_a_string() {
@@ -269,6 +375,80 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<DeviceBrowserTarget>(&json).unwrap(),
             target
+        );
+    }
+
+    #[test]
+    fn recording_projection_keeps_inspection_data_and_timer_events() {
+        let start = Timestamp::from_unix_milliseconds(1_000).unwrap();
+        let end = Timestamp::from_unix_milliseconds(2_000).unwrap();
+        let time = TimeRange::from_parts(start, end).unwrap();
+        let totals = ActivityTotals::from_parts(
+            ActivityDuration::from_milliseconds(1_000),
+            ActivityDuration::from_milliseconds(900),
+            Some(Distance::from_millimeters(4_000)),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let summary = garmin_model::activity::ActivitySummary::from_parts(
+            garmin_model::activity::ActivitySport::Running,
+            time,
+            totals,
+            ActivityMetrics::default(),
+        );
+        let measurements = TrackMeasurements::from_parts(
+            Some(Speed::from_millimeters_per_second(4_000)),
+            Some(HeartRate::from_beats_per_minute(142)),
+            Some(Cadence::from_revolutions_per_minute(88.0).unwrap()),
+            Some(Power::from_watts(240)),
+            Some(garmin_model::activity::Temperature::from_millicelsius(
+                18_500,
+            )),
+        );
+        let activity = Activity::from_parts(
+            summary,
+            vec![Lap::from_parts(time, totals, ActivityMetrics::default())],
+            vec![
+                TrackPoint::from_parts(
+                    start,
+                    Some(Coordinate::from_parts(
+                        Latitude::from_degrees(60.0).unwrap(),
+                        Longitude::from_degrees(24.0).unwrap(),
+                    )),
+                    Some(Elevation::from_meters(52.5).unwrap()),
+                    Some(Distance::from_millimeters(0)),
+                    measurements,
+                ),
+                TrackPoint::from_parts(
+                    end,
+                    None,
+                    None,
+                    Some(Distance::from_millimeters(4_000)),
+                    TrackMeasurements::default(),
+                ),
+            ],
+            vec![TimerEvent::from_parts(end, TimerState::Stopped)],
+        )
+        .unwrap();
+
+        let recording = ActivityRecordingSnapshot::from(&activity);
+
+        assert_eq!(recording.laps.len(), 1);
+        assert_eq!(recording.samples.len(), 2);
+        assert_eq!(recording.samples[0].elevation_meters, Some(52.5));
+        assert_eq!(recording.samples[0].temperature_millicelsius, Some(18_500));
+        assert_eq!(
+            recording.samples[0]
+                .heart_rate
+                .unwrap()
+                .as_beats_per_minute(),
+            142
+        );
+        assert_eq!(
+            recording.timer_events[0].state,
+            ActivityTimerStateSnapshot::Stopped
         );
     }
 }

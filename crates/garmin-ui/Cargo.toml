@@ -20,9 +20,11 @@ garmin-color.workspace = true
 egui.workspace = true
 egui_ltreeview.workspace = true
 egui_extras.workspace = true
+egui_plot.workspace = true
 garmin-i18n.workspace = true
 garmin-model.workspace = true
 garmin-service-api.workspace = true
+walkers.workspace = true
 
 [build-dependencies]
 phosphor-svgs.workspace = true

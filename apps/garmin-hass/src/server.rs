@@ -31,12 +31,15 @@ const WEB_ROOT_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_WEB_ROOT";
 const CSP_REPORT_LIMIT: usize = 32 * 1024;
 const CSP_NONCE_PLACEHOLDER: &str = "GARMIN_TOOLKIT_CSP_NONCE";
 
-pub(super) async fn serve(host: Arc<Host>) -> Result<(), std::io::Error> {
+pub(super) async fn serve(
+    host: Arc<Host>,
+    map_tiles: garmin_map_tiles::Service,
+) -> Result<(), std::io::Error> {
     let address = std::env::var(ADDRESS_ENVIRONMENT)
         .unwrap_or_else(|_| "127.0.0.1:8099".to_owned())
         .parse::<SocketAddr>()
         .map_err(std::io::Error::other)?;
-    let app = router(host)?;
+    let app = router(host, map_tiles)?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     announce_server(address, crate::mode::PRODUCT_NAME)?;
     axum::serve(listener, app)
@@ -124,13 +127,15 @@ async fn web_index(
     Html(index.render(&nonce))
 }
 
-fn router(host: Arc<Host>) -> io::Result<Router> {
+fn router(host: Arc<Host>, map_tiles: garmin_map_tiles::Service) -> io::Result<Router> {
     let app = Router::new()
         .route("/remoc", any(websocket))
         .route("/device-download/{token}", get(device_download))
+        .route("/map/tiles/{zoom}/{x}/{file}", get(map_tile))
         .route("/health", get(|| async { "ok" }))
         .route("/csp-report", post(csp_report))
-        .with_state(host);
+        .with_state(host)
+        .layer(Extension(map_tiles));
     let app = match std::env::var_os(WEB_ROOT_ENVIRONMENT).map(PathBuf::from) {
         Some(root) => app
             .route("/", get(web_index))
@@ -153,9 +158,11 @@ async fn browser_cache_policy(mut request: Request<Body>, next: Next) -> Respons
     let path = request.uri().path();
     let entry_point = matches!(path, "/" | "/index.html");
     let initializer = path.ends_with("-initializer.js");
+    let map_tile = path.starts_with("/map/tiles/");
     let static_asset = !entry_point
         && !initializer
         && !path.starts_with("/device-download/")
+        && !map_tile
         && !matches!(path, "/health" | "/remoc" | "/csp-report");
     let nonce = Nonce::random();
     let content_security_policy = content_security_policy(request.headers(), &nonce);
@@ -165,18 +172,86 @@ async fn browser_cache_policy(mut request: Request<Body>, next: Next) -> Respons
         request.headers_mut().remove(header::IF_NONE_MATCH);
     }
     let mut response = next.run(request).await;
-    let policy = if static_asset && response.status().is_success() {
-        "public, max-age=31536000, immutable"
-    } else {
-        "no-store"
-    };
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
+    if !map_tile {
+        let policy = if static_asset && response.status().is_success() {
+            "public, max-age=31536000, immutable"
+        } else {
+            "no-store"
+        };
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
+    }
     response
         .headers_mut()
         .insert(header::CONTENT_SECURITY_POLICY, content_security_policy);
     response
+}
+
+async fn map_tile(
+    Extension(service): Extension<garmin_map_tiles::Service>,
+    AxumPath((zoom, x, file)): AxumPath<(u8, u32, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(y) = file
+        .strip_suffix(".pbf")
+        .and_then(|value| value.parse::<u32>().ok())
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let tile_id = garmin_map_tiles::TileId { zoom, x, y };
+    if tile_id.validate().is_err() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let tile = match service.tile(tile_id).await {
+        Ok(tile) => tile,
+        Err(error) => {
+            tracing::warn!(%error, zoom, x, y, "Could not serve activity map tile");
+            return StatusCode::BAD_GATEWAY.into_response();
+        }
+    };
+    let etag = HeaderValue::from_str(&tile.etag).ok();
+    let cache_control = HeaderValue::from_str(&format!("public, max-age={}", tile.max_age_seconds))
+        .unwrap_or_else(|_| HeaderValue::from_static("no-cache"));
+    if request_etag_matches(&headers, &tile.etag) {
+        let mut response = StatusCode::NOT_MODIFIED.into_response();
+        if let Some(etag) = etag {
+            response.headers_mut().insert(header::ETAG, etag);
+        }
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, cache_control);
+        return response;
+    }
+    let mut response = Response::new(Body::from(tile.bytes));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/vnd.mapbox-vector-tile"),
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, cache_control);
+    response.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    if let Some(etag) = etag {
+        response.headers_mut().insert(header::ETAG, etag);
+    }
+    response
+}
+
+fn request_etag_matches(headers: &HeaderMap, etag: &str) -> bool {
+    let etag = etag.strip_prefix("W/").unwrap_or(etag);
+    headers
+        .get_all(header::IF_NONE_MATCH)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .any(|candidate| {
+            candidate == "*" || candidate.strip_prefix("W/").unwrap_or(candidate) == etag
+        })
 }
 
 fn content_security_policy(headers: &HeaderMap, nonce: &Nonce) -> HeaderValue {
@@ -406,7 +481,7 @@ async fn serve_client(socket: WebSocket, host: Arc<Host>) -> anyhow::Result<()> 
 mod tests {
     use super::{
         CSP_NONCE_PLACEHOLDER, WebIndex, browser_origin_allowed, content_security_policy,
-        csp_report, router, startup_banner, web_link,
+        csp_report, request_etag_matches, router, startup_banner, web_link,
     };
     use crate::devices::{Host, demo::DemoSource};
     use axum::body::Bytes;
@@ -419,6 +494,7 @@ mod tests {
     use garmin_services::Application;
     use http_security_headers::{ContentSecurityPolicy, Nonce};
     use remoc::prelude::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
 
     #[test]
@@ -479,6 +555,18 @@ mod tests {
     }
 
     #[test]
+    fn map_revalidation_accepts_lists_and_weak_etags() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_static(r#""other", W/"current""#),
+        );
+
+        assert!(request_etag_matches(&headers, r#""current""#));
+        assert!(!request_etag_matches(&headers, r#""missing""#));
+    }
+
+    #[test]
     fn web_index_replaces_the_trunk_nonce_placeholder() {
         let index =
             WebIndex(format!(r#"<script nonce="{CSP_NONCE_PLACEHOLDER}"></script>"#).into());
@@ -522,13 +610,97 @@ mod tests {
     async fn host_routes_are_constructible() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
         let storage = crate::prepare_storage(directory.path()).await?;
-        let _router = router(Host::new(
-            Box::new(DemoSource::new(
-                directory.path().join("device"),
-                tokio::runtime::Handle::current(),
-            )?),
-            Application::new(storage),
-        ))?;
+        let _router = router(
+            Host::new(
+                Box::new(DemoSource::new(
+                    directory.path().join("device"),
+                    tokio::runtime::Handle::current(),
+                )?),
+                Application::new(storage),
+            ),
+            garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+        )?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn map_tiles_are_relative_cacheable_and_revalidated() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let cache = directory.path().join("map-cache/0/0");
+        tokio::fs::create_dir_all(&cache).await?;
+        let bytes = [0x1a, 0x05, 0x0a, 0x01, b'x', 0x78, 0x02];
+        tokio::fs::write(cache.join("0.pbf"), bytes).await?;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        tokio::fs::write(
+            cache.join("0.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "fetched_at": now,
+                "accessed_at": now,
+                "etag": null,
+            }))?,
+        )
+        .await?;
+        let storage = crate::prepare_storage(directory.path()).await?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let app = router(
+            Host::new(
+                Box::new(DemoSource::new(
+                    directory.path().join("device"),
+                    tokio::runtime::Handle::current(),
+                )?),
+                Application::new(storage),
+            ),
+            garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+        )?;
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let client = reqwest::Client::new();
+        let url = format!("http://{address}/map/tiles/0/0/0.pbf");
+
+        let response = client.get(&url).send().await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static(
+                "application/vnd.mapbox-vector-tile"
+            ))
+        );
+        assert!(
+            response
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.starts_with("public, max-age=604"))
+        );
+        assert!(
+            response
+                .headers()
+                .get(header::CONTENT_SECURITY_POLICY)
+                .is_some()
+        );
+        let etag = response
+            .headers()
+            .get(header::ETAG)
+            .expect("a cached tile has a response validator")
+            .clone();
+        assert_eq!(response.bytes().await?.as_ref(), bytes.as_slice());
+
+        let response = client
+            .get(&url)
+            .header(header::IF_NONE_MATCH, etag)
+            .send()
+            .await?;
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(
+            client
+                .get(format!("http://{address}/map/tiles/23/0/0.pbf"))
+                .send()
+                .await?
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        server.abort();
         Ok(())
     }
 
@@ -548,17 +720,20 @@ mod tests {
                 "demo:watch-o-matic-9000".to_owned(),
                 DeviceBrowserTarget {
                     storage_id: "internal".to_owned(),
-                    path: "Garmin/Activity/History/2026/made-up-morning-ride.fit".into(),
+                    path: "Garmin/Activity/History/2026/city-ride.fit".into(),
                     kind: DeviceCatalogEntryKind::File,
                 },
             )
             .await?
             .map_err(anyhow::Error::msg)?;
-        assert_eq!(ticket.file_name, "made-up-morning-ride.fit");
+        assert_eq!(ticket.file_name, "city-ride.fit");
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
-        let app = router(host)?;
+        let app = router(
+            host,
+            garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+        )?;
         let server = tokio::spawn(async move { axum::serve(listener, app).await });
         let url = format!("http://{address}/device-download/{}", ticket.token);
         let response = reqwest::get(&url).await?;
@@ -574,7 +749,7 @@ mod tests {
         );
         assert_eq!(
             response.bytes().await?.as_ref(),
-            garmin_fit::fixture::ActivityCase::RecoveryRide
+            garmin_fit::fixture::ActivityCase::CityRide
                 .encode()?
                 .as_slice()
         );
@@ -590,13 +765,16 @@ mod tests {
         let storage = crate::prepare_storage(directory.path()).await?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
-        let app = router(Host::new(
-            Box::new(DemoSource::new(
-                directory.path().join("device"),
-                tokio::runtime::Handle::current(),
-            )?),
-            Application::new(storage),
-        ))?;
+        let app = router(
+            Host::new(
+                Box::new(DemoSource::new(
+                    directory.path().join("device"),
+                    tokio::runtime::Handle::current(),
+                )?),
+                Application::new(storage),
+            ),
+            garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+        )?;
         let server = tokio::spawn(async move { axum::serve(listener, app).await });
         let (socket, response) = connect_async(format!("ws://{address}/remoc")).await?;
         assert!(

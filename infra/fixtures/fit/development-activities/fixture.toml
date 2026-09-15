@@ -1,20 +1,50 @@
-id = "fit-development-activities-v1"
-purpose = "Small activity corpus for development and integration tests"
-origin = "synthetic"
-generator = "garmin-fit::fixture::ActivityCase"
-generator_revision = 1
-license = "AGPL-3.0-or-later"
+id = "fit-development-activities-v2"
+purpose = "Varied activity corpus for the desktop demo and integration tests"
+origin = "derived from the real-data examples in trackeR 1.6.1"
+generator = "infra/fixtures/fit/development-activities/generate.py and garmin-fit::fixture::ActivityCase"
+generator_revision = 2
+license = "GPL-3.0-only"
+license_file = "LICENSE"
 publication_approved = true
-committed_inputs = []
 expected_profiles = 3
 expected_activities = 6
-expected_sports = ["running", "cycling"]
+expected_sports = ["running", "cycling", "swimming"]
+
+source_url = "https://cran.r-project.org/src/contrib/trackeR_1.6.1.tar.gz"
+source_sha256 = "61ae7adb5fc53b8342af9d263ba59d0d8006c5d3a41995e107dc6ac5d4dc24b6"
+source_revision = "trackeR 1.6.1, published 2025-08-29"
+source_authors = ["Ioannis Kosmidis", "Hannah Frick", "Robin Hornak"]
+
+source_members = [
+    "trackeR/inst/extdata/tcx/2013-06-01-183220.TCX.gz sha256:bc32dc93878e71c5eece8f0f2c54897946429369431817b4fe17bcc206f7212a",
+    "trackeR/inst/extdata/tcx/2013-06-08-090442.TCX.gz sha256:0ea8aa3931e4c14626c0e613875f3829dd3f48a412762e5578a10b49210d90f6",
+    "trackeR/inst/extdata/gpx/20170708-154835-Run.gpx.gz sha256:c3f6018ceb9d6db6b61a7133d75b84307252fa8ff3a8b5830ae1c49f30720c92",
+    "trackeR/inst/extdata/gpx/20170709-151453-Ride.gpx.gz sha256:ce9bb79746b71546187d0b2d1a348779dad62d5fe2a614fcc6e3e462d435914f",
+    "trackeR/inst/extdata/gpx/20170714-143644-Swim.gpx.gz sha256:032cbc586782f0143b8a4ab19f97a5f51837bb884ca6e342ade31678e35fa7a2",
+    "trackeR/inst/extdata/json/2017_04_24_10_18_45.json.gz sha256:9ea6c6f76920df585a6a6bdfb39e77baf89bf00d0bd8bc22652b54a5bb5122cf",
+]
+
+committed_inputs = [
+    "recordings/forest-run.csv.gz sha256:3c04c2aece087d61c0f7375b12e1bcc3d1f9a8bd26c86a8ea0ba491b0e12b457",
+    "recordings/coastal-run.csv.gz sha256:3d880d1bb9a12143792ef5f6a84a199d6bfdad38d40bcdf65fec5696052d503d",
+    "recordings/city-run.csv.gz sha256:e5cfa515eac336162d7c7c44033d4e6387cb7dbd4ff4daecd29f1789e58e2be6",
+    "recordings/city-ride.csv.gz sha256:f95f0c76e883cb550921b49ad85528b223baedb211f6da5e405489ad76c174db",
+    "recordings/open-water-swim.csv.gz sha256:2f48185d565c6df61561797a38d3352a3bbef64c5db983938bc438bc9c675c56",
+    "recordings/indoor-power-ride.csv.gz sha256:49471955a08a100b1b876ba39c4c52e41651bc5690ee4f0be29aec2b0339db1c",
+]
+
+modifications = [
+    "Retained elapsed time, route geometry, elevation, distance, sensors, and lap boundaries only.",
+    "Downsampled recordings to approximately five-second intervals.",
+    "Derived distance and smoothed speed from GPX coordinates; divided GPX activities into four deterministic laps.",
+    "Discarded source timestamps and identity/device metadata; generated FIT files use shifted 2026 dates and fake device metadata.",
+]
 
 cases = [
-    "2026-05-28-morning-run.fit",
-    "2026-05-29-commute-ride.fit",
-    "2026-05-30-tempo-run.fit",
-    "2026-05-31-endurance-ride.fit",
-    "2026-06-01-trail-run.fit",
-    "2026-06-02-recovery-ride.fit",
+    "2026-09-05-forest-run.fit",
+    "2026-09-07-coastal-run.fit",
+    "2026-09-09-indoor-power-ride.fit",
+    "2026-09-10-city-run.fit",
+    "2026-09-12-city-ride.fit",
+    "2026-09-14-open-water-swim.fit",
 ]

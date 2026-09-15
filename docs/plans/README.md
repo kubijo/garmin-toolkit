@@ -38,6 +38,8 @@ views are read-only.
 
 ## Cross-cutting follow-ups
 
+- [Activity map workspace](activity-map-workspace.md) owns the shared map, charts, sample inspection, laps, and playback
+  replacement for the current activity-detail spike.
 - [Session review follow-ups](session-follow-ups.md) is the recovery ledger for unfinished issues found during the
   current device and HASS interface review.
 - [Production device explorer](device-explorer-work.md) owns the device-file browser window and notification defects.

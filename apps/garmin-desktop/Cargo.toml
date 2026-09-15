@@ -25,6 +25,7 @@ garmin-fit.workspace = true
 garmin-fixtures = { workspace = true, optional = true }
 garmin-i18n.workspace = true
 garmin-importer.workspace = true
+garmin-map-tiles.workspace = true
 garmin-model.workspace = true
 garmin-progress.workspace = true
 garmin-service-api.workspace = true

@@ -48,8 +48,8 @@ impl Device {
             let path = root.join(directory);
             std::fs::create_dir_all(&path).map_err(|source| io_error("create", path, source))?;
         }
-        let activity = root.join("Garmin/Activity/History/2026/made-up-morning-ride.fit");
-        std::fs::write(&activity, ActivityCase::RecoveryRide.encode()?)
+        let activity = root.join("Garmin/Activity/History/2026/city-ride.fit");
+        std::fs::write(&activity, ActivityCase::CityRide.encode()?)
             .map_err(|source| io_error("write", activity, source))?;
         let description = root.join("Garmin/GarminDevice.xml");
         std::fs::write(

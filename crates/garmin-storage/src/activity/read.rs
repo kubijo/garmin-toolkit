@@ -495,6 +495,7 @@ fn decode_sport(value: &str) -> Result<ActivitySport, crate::Error> {
     match value {
         "running" => Ok(ActivitySport::Running),
         "cycling" => Ok(ActivitySport::Cycling),
+        "swimming" => Ok(ActivitySport::Swimming),
         _ => Err(invalid("activity sport", value)),
     }
 }

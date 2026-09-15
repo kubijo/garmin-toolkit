@@ -16,6 +16,7 @@ members = [
   "crates/garmin-i18n",
   "crates/garmin-importer",
   "crates/garmin-map-service",
+  "crates/garmin-map-tiles",
   "crates/garmin-macros",
   "crates/garmin-model",
   "crates/garmin-progress",
@@ -53,9 +54,11 @@ dirs = "=6.0.0"
 eframe = { version = "=0.36.2", default-features = false }
 egui = { version = "=0.36.2", default-features = false, features = ["cint"] }
 egui_extras = { version = "=0.36.2", default-features = false, features = ["image", "svg"] }
+egui_plot = "=0.37.0"
 embedded-io-adapters = { version = "=0.7.0", features = ["std"] }
 formatjs_intl = "=0.5.0"
 fs2 = "=0.4.3"
+flate2 = "=1.1.10"
 futures-lite = "=2.6.1"
 futures-util = "=0.3.34"
 geo-types = "=0.7.20"
@@ -71,6 +74,7 @@ garmin-gpx = { version = "0.1.0", path = "crates/garmin-gpx" }
 garmin-i18n = { version = "0.1.0", path = "crates/garmin-i18n" }
 garmin-importer = { version = "0.1.0", path = "crates/garmin-importer" }
 garmin-map-service = { version = "0.1.0", path = "crates/garmin-map-service" }
+garmin-map-tiles = { version = "0.1.0", path = "crates/garmin-map-tiles" }
 garmin-macros = { version = "0.1.0", path = "crates/garmin-macros" }
 garmin-model = { version = "0.1.0", path = "crates/garmin-model" }
 garmin-progress = { version = "0.1.0", path = "crates/garmin-progress" }
@@ -135,6 +139,7 @@ url = { version = "=2.5.8", features = ["serde"] }
 usvg = { version = "=0.45.1", default-features = false }
 uuid = { version = "=1.26.0", features = ["serde", "v4", "v5"] }
 walkdir = "=2.5.0"
+walkers = { version = "=0.59.0", default-features = false, features = ["mvt"] }
 wasm-bindgen = "=0.2.126"
 wasm-bindgen-futures = "=0.4.76"
 web-sys = "=0.3.103"
@@ -158,3 +163,34 @@ unimplemented = "deny"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Interactive vector maps are prohibitively slow when
+# their parser and tessellator run fully unoptimized.
+# Keep application code quick to compile while making
+# debug map interaction usable.
+[profile.dev.package.garmin-ui]
+opt-level = 1
+
+[profile.dev.package.walkers]
+opt-level = 3
+
+[profile.dev.package.mvt-reader]
+opt-level = 3
+
+[profile.dev.package.lyon_tessellation]
+opt-level = 3
+
+[profile.dev.package.lyon_path]
+opt-level = 3
+
+[profile.dev.package.prost]
+opt-level = 3
+
+[profile.dev.package.epaint]
+opt-level = 3
+
+[profile.dev.package.emath]
+opt-level = 3
+
+[profile.dev.package.egui_plot]
+opt-level = 3

@@ -31,6 +31,10 @@
     "source": "Create a profile",
     "translation": "Vytvořit profil"
   },
+  "/UnJ3SDiCO": {
+    "source": "Zoom out",
+    "translation": "Oddálit"
+  },
   "/r6LEP1upO": {
     "source": "Offline for {duration}",
     "translation": "Bez připojení {duration}"
@@ -75,6 +79,10 @@
     "source": "Remove this folder?",
     "translation": "Odebrat tuto složku?"
   },
+  "2ADnoTeW0a": {
+    "source": "Lap {number}",
+    "translation": "Okruh {number}"
+  },
   "2nRbMDmfKx": {
     "source": "Interrupted preparation",
     "translation": "Přerušená příprava"
@@ -90,6 +98,10 @@
   "3Ax9yvZaL/": {
     "source": "Select an update device",
     "translation": "Vyberte zařízení k aktualizaci"
+  },
+  "3H0J5pf+Y7": {
+    "source": "Full activity",
+    "translation": "Celá aktivita"
   },
   "3Q13J6QetV": {
     "source": "No activities in this FIT file",
@@ -139,6 +151,10 @@
     "source": "{files} accepted · {duplicates} already imported · {rejected} rejected · {failed} failed",
     "translation": "Přijato: {files} · již importováno: {duplicates} · odmítnuto: {rejected} · selhalo: {failed}"
   },
+  "63JjPpVm7h": {
+    "source": "Map background unavailable",
+    "translation": "Mapový podklad není k dispozici"
+  },
   "66Ne22SKYu": {
     "source": "History — newest first",
     "translation": "Historie — nejnovější první"
@@ -182,6 +198,10 @@
   "7c6qjta7pc": {
     "source": "discard attempt",
     "translation": "zahodit pokus"
+  },
+  "8IM6iWwT81": {
+    "source": "Cadence",
+    "translation": "Kadence"
   },
   "8PBYrouiJt": {
     "source": "Could not inspect {device}",
@@ -240,9 +260,17 @@
     "source": "Recovery complete. Target paths and sizes match.",
     "translation": "Obnova dokončena. Cílové cesty a velikosti odpovídají."
   },
+  "Amt/8bnG1H": {
+    "source": "Minimum",
+    "translation": "Minimum"
+  },
   "B2+PtLuDLG": {
     "source": "Commit",
     "translation": "Zápis"
+  },
+  "BCzmdv6hs1": {
+    "source": "Maximum",
+    "translation": "Maximum"
   },
   "BQVAnsVPgA": {
     "source": "{device} inspected",
@@ -350,6 +378,10 @@
     "source": "Device recovery",
     "translation": "Obnova zařízení"
   },
+  "F1fcf5qGMA": {
+    "source": "Pace",
+    "translation": "Tempo"
+  },
   "F5Fq484uH5": {
     "source": "Audiobooks",
     "translation": "Audioknihy"
@@ -377,6 +409,10 @@
   "Fk4clKNGhw": {
     "source": "Reading files…",
     "translation": "Načítání souborů…"
+  },
+  "FnRTEV9wum": {
+    "source": "Average",
+    "translation": "Průměr"
   },
   "G/yZLul6P1": {
     "source": "Remove",
@@ -410,6 +446,10 @@
     "source": "Choose files",
     "translation": "Vybrat soubory"
   },
+  "IS/aVg5AZp": {
+    "source": "Laps",
+    "translation": "Okruhy"
+  },
   "IU+ie9OEb0": {
     "source": "last data {seconds}s ago",
     "translation": "poslední data před {seconds} s"
@@ -429,6 +469,10 @@
   "Iz4Zmx6pO9": {
     "source": "cached",
     "translation": "v mezipaměti"
+  },
+  "J3ca41Hqe7": {
+    "source": "Play",
+    "translation": "Přehrát"
   },
   "J4SQjQZlH8": {
     "source": "select",
@@ -518,6 +562,10 @@
     "source": "Release to import these files",
     "translation": "Uvolněním soubory importujete"
   },
+  "N0weLRGX26": {
+    "source": "Fit route",
+    "translation": "Přizpůsobit trasu"
+  },
   "N0zUi9Hrsd": {
     "source": "Loading map components…",
     "translation": "Načítání mapových komponent…"
@@ -533,6 +581,10 @@
   "NXI/XLSYwc": {
     "source": "Auto",
     "translation": "Automaticky"
+  },
+  "Nc+TQCQuqm": {
+    "source": "No recorded route",
+    "translation": "Žádná zaznamenaná trasa"
   },
   "Nyz15F0iCV": {
     "source": "Profiles keep each person's activities and devices separate.",
@@ -553,10 +605,6 @@
   "OnM1xpU1Dm": {
     "source": "{used} used · {free} free · {total} total",
     "translation": "Využito {used} · volno {free} · celkem {total}"
-  },
-  "Oxh6x98DVg": {
-    "source": "No recorded path",
-    "translation": "Žádná zaznamenaná trasa"
   },
   "P8JC58mIGs": {
     "source": "Distance",
@@ -602,6 +650,10 @@
     "source": "garmin-cli — Updating maps",
     "translation": "garmin-cli — Aktualizace map"
   },
+  "QWTP0t8UTt": {
+    "source": "Speed",
+    "translation": "Rychlost"
+  },
   "QwnGVYPlwS": {
     "source": "Authorize",
     "translation": "Autorizace"
@@ -609,6 +661,10 @@
   "R85gsW8HY9": {
     "source": "Courses",
     "translation": "Trasy"
+  },
+  "R9peZJU46F": {
+    "source": "Swimming",
+    "translation": "Plavání"
   },
   "RDgr4YI8HK": {
     "source": "This device contains an interrupted transaction. Resolve it before making more changes.",
@@ -625,6 +681,10 @@
   "RXpxPUwfNq": {
     "source": "Forward",
     "translation": "Vpřed"
+  },
+  "Rl5++Udrl5": {
+    "source": "Elevation",
+    "translation": "Nadmořská výška"
   },
   "RmDsSpSa9/": {
     "source": "scroll",
@@ -770,6 +830,10 @@
     "source": "confirm",
     "translation": "potvrdit"
   },
+  "XF2FVGDwkK": {
+    "source": "Heart rate",
+    "translation": "Tepová frekvence"
+  },
   "XslFtApJNA": {
     "source": "Cleanup",
     "translation": "Úklid"
@@ -789,6 +853,10 @@
   "YLLzqBSNUe": {
     "source": "continue",
     "translation": "pokračovat"
+  },
+  "YXoHk0YjYL": {
+    "source": "Power",
+    "translation": "Výkon"
   },
   "YjjTU9NztP": {
     "source": "Choose a folder",
@@ -825,6 +893,10 @@
   "c3VJQoWwCE": {
     "source": "Device",
     "translation": "Zařízení"
+  },
+  "cG0Q8MnYSg": {
+    "source": "Temperature",
+    "translation": "Teplota"
   },
   "cJtOboitAO": {
     "source": "↑↓/wheel",
@@ -1079,6 +1151,10 @@
     "source": "Current directory contents",
     "translation": "Obsah aktuální složky"
   },
+  "ovRK9Z7BLM": {
+    "source": "Loading activity…",
+    "translation": "Načítání aktivity…"
+  },
   "oxpz0TpIVD": {
     "source": "Enter a profile name",
     "translation": "Zadejte název profilu"
@@ -1191,6 +1267,10 @@
     "source": "Import FIT",
     "translation": "Importovat FIT"
   },
+  "tFFMkFDBMO": {
+    "source": "Pause",
+    "translation": "Pozastavit"
+  },
   "tOdNiYuuag": {
     "source": "Dark",
     "translation": "Tmavý"
@@ -1227,6 +1307,10 @@
     "source": "Install",
     "translation": "Nainstalovat"
   },
+  "ug01MkZy2v": {
+    "source": "Time",
+    "translation": "Čas"
+  },
   "uqBy7yud/k": {
     "source": "Enter a name",
     "translation": "Zadejte název"
@@ -1255,6 +1339,14 @@
   "wQDYIPImFE": {
     "source": "Maximize window",
     "translation": "Maximalizovat okno"
+  },
+  "x/yXKSn1p9": {
+    "source": "At cursor",
+    "translation": "Na pozici kurzoru"
+  },
+  "xbi38cl5pP": {
+    "source": "Zoom in",
+    "translation": "Přiblížit"
   },
   "xlL9emwsYC": {
     "source": "{completed} of {total} files",

@@ -344,7 +344,7 @@ fn catalog() -> DeviceCatalogSnapshot {
             DeviceCatalogStorage {
                 id: "mock-internal".to_owned(),
                 label: "Mock internal storage".to_owned(),
-                entries: entries("made-up-morning-ride.fit", true),
+                entries: entries("city-ride.fit", true),
             },
             DeviceCatalogStorage {
                 id: "mock-card".to_owned(),

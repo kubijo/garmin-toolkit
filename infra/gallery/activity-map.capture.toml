@@ -1,0 +1,58 @@
+out = "../../.tmp/gallery/activity-map"
+size = "1920x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "workspace-dark"
+scene = "activity::Workspace"
+
+[[shot]]
+name = "workspace-light"
+scene = "activity::Workspace"
+
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "compact"
+scene = "activity::Compact Workspace"
+
+[[shot]]
+name = "synchronized-hover"
+scene = "activity::Synchronized Hover"
+settle = false
+
+[[shot]]
+name = "pinned-cursor"
+scene = "activity::Pinned Cursor"
+
+[[shot]]
+name = "playback"
+scene = "activity::Playback"
+settle = false
+
+[[shot]]
+name = "selected-lap"
+scene = "activity::Selected Lap"
+
+[[shot]]
+name = "missing-metrics"
+scene = "activity::Missing Metrics"
+
+[[shot]]
+name = "no-gps"
+scene = "activity::No Gps"
+
+[[shot]]
+name = "loading"
+scene = "activity::Loading"
+
+[[shot]]
+name = "provider-failure"
+scene = "activity::Provider Failure"
+
+[[shot]]
+name = "device-fit-preview"
+scene = "activity::Device Fit Preview"
