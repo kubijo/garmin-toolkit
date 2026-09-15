@@ -857,7 +857,7 @@ fn device_fit_preview(
             garmin_service_api::DeviceFitPreviewActivity {
                 source,
                 summary: activity.activity().summary(),
-                segments: track_segments(activity.activity().track()),
+                recording: garmin_service_api::ActivityRecordingSnapshot::from(activity.activity()),
             }
         })
         .collect::<Vec<_>>();
@@ -868,26 +868,6 @@ fn device_fit_preview(
         file_name,
         activities,
     })
-}
-
-fn track_segments(
-    track: &[garmin_model::activity::TrackPoint],
-) -> Vec<Vec<garmin_model::route::Coordinate>> {
-    let mut segments = Vec::new();
-    let mut current = Vec::new();
-    for sample in track {
-        if let Some(coordinate) = sample.coordinate() {
-            current.push(coordinate);
-        } else if current.len() >= 2 {
-            segments.push(std::mem::take(&mut current));
-        } else {
-            current.clear();
-        }
-    }
-    if current.len() >= 2 {
-        segments.push(current);
-    }
-    segments
 }
 
 fn timestamp(time: SystemTime) -> Result<Timestamp, String> {

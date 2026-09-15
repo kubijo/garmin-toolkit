@@ -43,8 +43,9 @@ pub async fn run() -> Result<(), Error> {
     let data_root = deployment_data_root();
     let storage = prepare_storage(&data_root).await?;
     let devices = devices::Host::new(mode::device_source(&data_root)?, Application::new(storage));
+    let map_tiles = garmin_map_tiles::Service::new(data_root.join("cache/activity-map"))?;
     devices.start();
-    server::serve(devices).await?;
+    server::serve(devices, map_tiles).await?;
     Ok(())
 }
 
@@ -64,6 +65,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Data(#[from] DataError),
+    #[error(transparent)]
+    MapTiles(#[from] garmin_map_tiles::Error),
 }
 
 #[cfg(test)]

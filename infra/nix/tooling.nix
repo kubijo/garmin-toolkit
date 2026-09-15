@@ -37,6 +37,8 @@ let
       "LICENSE-MIT"
       "assets/licenses/**"
       "crates/garmin-ui/assets/fonts/**"
+      "infra/fixtures/fit/development-activities/LICENSE"
+      "infra/fixtures/fit/development-activities/recordings/**"
       "old/**"
       "infra/gallery/fonts/**"
     ];

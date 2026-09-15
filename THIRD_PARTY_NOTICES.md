@@ -35,5 +35,19 @@
 - Integrity: Regular `sha256:478c558ea716033cd60c03438f628dfa75694dcf6b5f6d505a2f05fd2b4f3823`; SemiBold
   `sha256:a4e91fd530ac2b4ef5367240144ff37d7d65d66cf76f2e9a2187b93c676f92d0`.
 
+## trackeR example activity data
+
+- Source: [`trackeR` 1.6.1](https://cran.r-project.org/package=trackeR), published by CRAN on 2025-08-29; source archive
+  `sha256:61ae7adb5fc53b8342af9d263ba59d0d8006c5d3a41995e107dc6ac5d4dc24b6`.
+- Authors: Ioannis Kosmidis, Hannah Frick, and Robin Hornak.
+- License: GPL-3.0-only.
+- Reused: six real-data demonstration recordings covering outdoor running, outdoor cycling, open-water swimming, and
+  indoor cycling.
+- Modified: the fixture generator retains elapsed time, route and sensor series, and lap boundaries; downsamples to
+  approximately five-second intervals; derives GPX distance and speed; discards source timestamps and identity/device
+  metadata; and encodes deterministic FIT files with fake device metadata.
+- Integrity: exact source-member and normalized-output hashes are recorded in
+  `infra/fixtures/fit/development-activities/fixture.toml`.
+
 Cargo dependency and asset license texts are harvested into the generated [desktop](assets/licenses/bundle-desktop.json)
 and [HASS](assets/licenses/bundle-hass.json) bundles.

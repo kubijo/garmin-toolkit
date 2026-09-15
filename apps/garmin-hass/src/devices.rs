@@ -486,23 +486,11 @@ fn activity_snapshot(activity: &garmin_services::ActivityPreview) -> ActivitySna
 }
 
 fn activity_detail_snapshot(details: &garmin_services::ActivityDetails) -> ActivityDetailSnapshot {
-    let mut segments = Vec::new();
-    let mut current = Vec::new();
-    for sample in details.normalized().activity().track() {
-        if let Some(coordinate) = sample.coordinate() {
-            current.push(coordinate);
-        } else if current.len() >= 2 {
-            segments.push(std::mem::take(&mut current));
-        } else {
-            current.clear();
-        }
-    }
-    if current.len() >= 2 {
-        segments.push(current);
-    }
     ActivityDetailSnapshot {
         id: details.observation_id(),
-        segments,
+        recording: garmin_service_api::ActivityRecordingSnapshot::from(
+            details.normalized().activity(),
+        ),
     }
 }
 
@@ -660,7 +648,7 @@ fn device_fit_preview(file_name: String, bytes: &[u8]) -> Result<DeviceFitPrevie
                 .product_name()
                 .map_or_else(|| "FIT".to_owned(), ToString::to_string),
             summary: activity.activity().summary(),
-            segments: track_segments(activity.activity().track()),
+            recording: garmin_service_api::ActivityRecordingSnapshot::from(activity.activity()),
         })
         .collect::<Vec<_>>();
     if activities.is_empty() {
@@ -670,26 +658,6 @@ fn device_fit_preview(file_name: String, bytes: &[u8]) -> Result<DeviceFitPrevie
         file_name,
         activities,
     })
-}
-
-fn track_segments(
-    track: &[garmin_model::activity::TrackPoint],
-) -> Vec<Vec<garmin_model::route::Coordinate>> {
-    let mut segments = Vec::new();
-    let mut current = Vec::new();
-    for sample in track {
-        if let Some(coordinate) = sample.coordinate() {
-            current.push(coordinate);
-        } else if current.len() >= 2 {
-            segments.push(std::mem::take(&mut current));
-        } else {
-            current.clear();
-        }
-    }
-    if current.len() >= 2 {
-        segments.push(current);
-    }
-    segments
 }
 
 async fn import_device_fit(
@@ -1073,7 +1041,7 @@ mod tests {
                 )
         }));
         assert!(catalog.storages[0].entries.iter().any(|entry| {
-            entry.path == "Garmin/Activity/History/2026/made-up-morning-ride.fit"
+            entry.path == "Garmin/Activity/History/2026/city-ride.fit"
                 && entry.kind == DeviceCatalogEntryKind::File
                 && entry.size.is_some_and(|size| size > 0)
         }));

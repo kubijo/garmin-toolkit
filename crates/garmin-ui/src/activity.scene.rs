@@ -1,7 +1,62 @@
 use gallery::prelude::*;
-use garmin_ui::{activity, icons};
+use garmin_model::{
+    activity::{
+        ActivityDuration, ActivityMetrics, ActivitySport, ActivitySummary, ActivityTotals, Cadence,
+        Distance, HeartRate, Power, Speed, TimeRange,
+    },
+    identity::UnitSystem,
+    route::{Coordinate, Latitude, Longitude},
+    value::Timestamp,
+};
+use garmin_service_api::{
+    ActivityLapSnapshot, ActivityRecordingSnapshot, ActivitySampleSnapshot,
+    ActivityTimerEventSnapshot, ActivityTimerStateSnapshot, DeviceBrowserTarget,
+    DeviceCatalogEntryKind, DeviceFitPreview, DeviceFitPreviewActivity,
+};
+use garmin_ui::{activity, device_fit_preview, icons};
+use std::cell::RefCell;
 
 scene_meta! { title: "Application / Activities" }
+
+const RECORDING_START_MILLISECONDS: i64 = 1_789_453_800_000;
+
+thread_local! {
+    static WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
+    static COMPACT_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
+    static NO_GPS_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
+    static HOVER_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
+    static PINNED_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
+    static PLAYBACK_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
+    static LAP_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
+    static MISSING_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
+    static LOADING_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
+    static FAILURE_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
+    static FIT_PREVIEW: RefCell<Option<device_fit_preview::Preview>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RecordingKind {
+    Complete,
+    MissingMetrics,
+    NoGps,
+}
+
+#[derive(Clone, Copy)]
+struct WorkspaceScene {
+    recording: Option<RecordingKind>,
+    cursor: Option<activity::ActivityCursor>,
+    selected_lap: Option<usize>,
+    fail_tiles: bool,
+}
+
+impl WorkspaceScene {
+    const COMPLETE: Self = Self {
+        recording: Some(RecordingKind::Complete),
+        cursor: None,
+        selected_lap: None,
+        fail_tiles: false,
+    };
+}
 
 const ITEMS: &[activity::ItemProps<'_>] = &[
     activity::ItemProps {
@@ -81,7 +136,7 @@ struct SceneProps {
     width: f32,
 }
 
-#[scene(default)]
+#[scene]
 fn browser(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     let selected = ctx.buttons("selection", &["first", "second", "none"], 0);
     let props = SceneProps {
@@ -90,6 +145,690 @@ fn browser(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         width: ctx.slider("width", 960.0, 320.0, 1280.0, 1.0),
     };
     show_browser(ctx, ui, props);
+}
+
+#[scene(default)]
+fn workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        &WORKSPACE,
+        WorkspaceScene::COMPLETE,
+    );
+}
+
+#[scene]
+fn compact_workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(620.0, 760.0),
+        &COMPACT_WORKSPACE,
+        WorkspaceScene::COMPLETE,
+    );
+}
+
+#[scene]
+fn no_gps(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        &NO_GPS_WORKSPACE,
+        WorkspaceScene {
+            recording: Some(RecordingKind::NoGps),
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn synchronized_hover(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        &HOVER_WORKSPACE,
+        WorkspaceScene {
+            cursor: Some(activity::ActivityCursor {
+                sample_index: Some(64),
+                mode: activity::CursorMode::Hover,
+            }),
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn pinned_cursor(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        &PINNED_WORKSPACE,
+        WorkspaceScene {
+            cursor: Some(activity::ActivityCursor {
+                sample_index: Some(64),
+                mode: activity::CursorMode::Pinned,
+            }),
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn playback(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        &PLAYBACK_WORKSPACE,
+        WorkspaceScene {
+            cursor: Some(activity::ActivityCursor {
+                sample_index: Some(32),
+                mode: activity::CursorMode::Playback,
+            }),
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn selected_lap(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        &LAP_WORKSPACE,
+        WorkspaceScene {
+            cursor: Some(activity::ActivityCursor {
+                sample_index: Some(61),
+                mode: activity::CursorMode::Pinned,
+            }),
+            selected_lap: Some(1),
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn missing_metrics(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        &MISSING_WORKSPACE,
+        WorkspaceScene {
+            recording: Some(RecordingKind::MissingMetrics),
+            cursor: Some(activity::ActivityCursor {
+                sample_index: Some(58),
+                mode: activity::CursorMode::Pinned,
+            }),
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn loading(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        &LOADING_WORKSPACE,
+        WorkspaceScene {
+            recording: None,
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn provider_failure(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        &FAILURE_WORKSPACE,
+        WorkspaceScene {
+            fail_tiles: true,
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn device_fit_preview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(
+        ctx,
+        ui,
+        Stage::Fixed(egui::vec2(1_800.0, 920.0)).checkerboard(globals.checkerboard()),
+        |ui| {
+            let intl = globals.intl();
+            FIT_PREVIEW.with_borrow_mut(|preview| {
+                let preview = preview.get_or_insert_with(|| {
+                    device_fit_preview::Preview::new(
+                        DeviceBrowserTarget {
+                            storage_id: "internal".to_owned(),
+                            path: "Garmin/Activities/2026-09-15-ride.fit".into(),
+                            kind: DeviceCatalogEntryKind::File,
+                        },
+                        DeviceFitPreview {
+                            file_name: "2026-09-15-ride.fit".to_owned(),
+                            activities: vec![DeviceFitPreviewActivity {
+                                source: "Edge 850".to_owned(),
+                                summary: summary(
+                                    ActivitySport::Cycling,
+                                    RECORDING_START_MILLISECONDS,
+                                    43 * 60 * 1_000,
+                                    16_800_000,
+                                ),
+                                recording: sample_recording(RecordingKind::Complete),
+                            }],
+                        },
+                    )
+                });
+                let _ = preview.show(ui, &intl, false, UnitSystem::Metric);
+                for request in preview.take_map_tile_requests() {
+                    preview.resolve_map_tile(
+                        ui.ctx(),
+                        activity::MapTileResponse::encoded(
+                            request,
+                            Ok(gallery_vector_tile(request)),
+                        ),
+                    );
+                }
+            });
+        },
+    );
+}
+
+fn show_workspace(
+    ctx: &mut SceneCtx<'_>,
+    ui: &mut Ui,
+    globals: &crate::Globals,
+    size: egui::Vec2,
+    state: &'static std::thread::LocalKey<RefCell<(activity::Workspace, usize)>>,
+    scene: WorkspaceScene,
+) {
+    stage!(
+        ctx,
+        ui,
+        Stage::Fixed(size).checkerboard(globals.checkerboard()),
+        |ui| {
+            let intl = globals.intl();
+            let recording = scene.recording.map(sample_recording);
+            let presentations = sample_presentations(&intl);
+            let items = presentations
+                .iter()
+                .map(activity::Presentation::item_props)
+                .collect::<Vec<_>>();
+            state.with_borrow_mut(|(workspace, selected)| {
+                if let Some(cursor) = scene.cursor {
+                    workspace.set_cursor(cursor);
+                }
+                if let Some(selected_lap) = scene.selected_lap {
+                    workspace.set_selected_lap(Some(selected_lap));
+                }
+                if let Some(activity::Action::Select(index)) = workspace.show(
+                    ui,
+                    &intl,
+                    &activity::WorkspaceProps {
+                        items: &items,
+                        presentations: &presentations,
+                        selected: Some(*selected),
+                        recording: recording.as_ref(),
+                        recording_key: scene.recording.map(|kind| match kind {
+                            RecordingKind::Complete => "complete",
+                            RecordingKind::MissingMetrics => "missing-metrics",
+                            RecordingKind::NoGps => "no-gps",
+                        }),
+                        units: UnitSystem::Metric,
+                        empty_list: "No activities yet",
+                        empty_detail: "Select an activity",
+                        no_route: "No recorded route",
+                    },
+                ) {
+                    *selected = index;
+                }
+                for request in workspace.take_map_tile_requests() {
+                    let result = if scene.fail_tiles {
+                        Err("gallery provider unavailable".to_owned())
+                    } else {
+                        Ok(gallery_vector_tile(request))
+                    };
+                    workspace.resolve_map_tile(
+                        ui.ctx(),
+                        activity::MapTileResponse::encoded(request, result),
+                    );
+                }
+            });
+        },
+    );
+}
+
+fn gallery_vector_tile(request: activity::MapTileRequest) -> Vec<u8> {
+    let drift = i32::try_from((request.x ^ request.y) % 5).unwrap_or_default() * 90;
+    let forest = tile_feature(
+        3,
+        &polygon_geometry(&[
+            (0, 0),
+            (2_250 + drift, 0),
+            (2_100 + drift, 900),
+            (1_750, 1_650),
+            (850, 2_100),
+            (0, 1_850),
+        ]),
+        true,
+    );
+    let water = tile_feature(
+        3,
+        &polygon_geometry(&[
+            (3_150 - drift, 0),
+            (4_096, 0),
+            (4_096, 4_096),
+            (3_350 + drift, 4_096),
+            (3_200, 3_250),
+            (3_500 - drift, 2_350),
+            (3_230, 1_450),
+            (3_420 - drift, 650),
+        ]),
+        false,
+    );
+    let roads = [
+        tile_feature(
+            2,
+            &line_geometry(&[
+                (0, 3_150 - drift),
+                (900, 2_720),
+                (1_850, 2_520 + drift),
+                (2_850, 1_950),
+                (4_096, 1_700 + drift),
+            ]),
+            true,
+        ),
+        tile_feature(
+            2,
+            &line_geometry(&[
+                (1_050 + drift, 0),
+                (1_250, 900),
+                (1_600, 1_900),
+                (1_520 + drift, 3_000),
+                (1_850, 4_096),
+            ]),
+            true,
+        ),
+    ];
+    let buildings = [
+        tile_feature(
+            3,
+            &polygon_geometry(&[
+                (1_900, 2_850),
+                (2_300, 2_850),
+                (2_300, 3_200),
+                (1_900, 3_200),
+            ]),
+            false,
+        ),
+        tile_feature(
+            3,
+            &polygon_geometry(&[
+                (2_420, 2_650),
+                (2_900, 2_650),
+                (2_900, 3_050),
+                (2_420, 3_050),
+            ]),
+            false,
+        ),
+        tile_feature(
+            3,
+            &polygon_geometry(&[(700, 2_950), (1_080, 2_950), (1_080, 3_350), (700, 3_350)]),
+            false,
+        ),
+    ];
+
+    let layers = [
+        tile_layer("landcover", &[forest], Some(("class", "forest"))),
+        tile_layer("water", &[water], None),
+        tile_layer("transportation", &roads, Some(("class", "primary"))),
+        tile_layer("building", &buildings, None),
+    ];
+    let mut tile = Vec::new();
+    for layer in &layers {
+        push_bytes_field(&mut tile, 3, layer);
+    }
+    tile
+}
+
+fn tile_layer(name: &str, features: &[Vec<u8>], property: Option<(&str, &str)>) -> Vec<u8> {
+    let mut layer = Vec::new();
+    push_bytes_field(&mut layer, 1, name.as_bytes());
+    for feature in features {
+        push_bytes_field(&mut layer, 2, feature);
+    }
+    if let Some((key, value)) = property {
+        push_bytes_field(&mut layer, 3, key.as_bytes());
+        let mut encoded_value = Vec::new();
+        push_bytes_field(&mut encoded_value, 1, value.as_bytes());
+        push_bytes_field(&mut layer, 4, &encoded_value);
+    }
+    push_varint_field(&mut layer, 5, 4_096);
+    push_varint_field(&mut layer, 15, 2);
+    layer
+}
+
+fn tile_feature(geometry_type: u64, geometry: &[u32], tagged: bool) -> Vec<u8> {
+    let mut feature = Vec::new();
+    if tagged {
+        push_packed_field(&mut feature, 2, &[0, 0]);
+    }
+    push_varint_field(&mut feature, 3, geometry_type);
+    push_packed_field(&mut feature, 4, geometry);
+    feature
+}
+
+fn line_geometry(points: &[(i32, i32)]) -> Vec<u32> {
+    geometry(points, false)
+}
+
+fn polygon_geometry(points: &[(i32, i32)]) -> Vec<u32> {
+    geometry(points, true)
+}
+
+fn geometry(points: &[(i32, i32)], closed: bool) -> Vec<u32> {
+    let Some(&(first_x, first_y)) = points.first() else {
+        return Vec::new();
+    };
+    let mut encoded = vec![9, zigzag(first_x), zigzag(first_y)];
+    if points.len() > 1 {
+        let count = u32::try_from(points.len() - 1).unwrap_or_default();
+        encoded.push((count << 3) | 2);
+        let mut previous = (first_x, first_y);
+        for &(x, y) in &points[1..] {
+            encoded.push(zigzag(x - previous.0));
+            encoded.push(zigzag(y - previous.1));
+            previous = (x, y);
+        }
+    }
+    if closed {
+        encoded.push(15);
+    }
+    encoded
+}
+
+fn zigzag(value: i32) -> u32 {
+    u32::try_from((i64::from(value) << 1) ^ (i64::from(value) >> 63)).unwrap_or_default()
+}
+
+fn push_packed_field(output: &mut Vec<u8>, field: u64, values: &[u32]) {
+    let mut packed = Vec::new();
+    for &value in values {
+        push_varint(&mut packed, u64::from(value));
+    }
+    push_bytes_field(output, field, &packed);
+}
+
+fn push_bytes_field(output: &mut Vec<u8>, field: u64, value: &[u8]) {
+    push_varint(output, (field << 3) | 2);
+    push_varint(output, u64::try_from(value.len()).unwrap_or_default());
+    output.extend_from_slice(value);
+}
+
+fn push_varint_field(output: &mut Vec<u8>, field: u64, value: u64) {
+    push_varint(output, field << 3);
+    push_varint(output, value);
+}
+
+fn push_varint(output: &mut Vec<u8>, mut value: u64) {
+    while value >= 0x80 {
+        let byte = u8::try_from(value & 0x7f).unwrap_or_default();
+        output.push(byte | 0x80);
+        value >>= 7;
+    }
+    output.push(u8::try_from(value).unwrap_or_default());
+}
+
+fn sample_presentations(intl: &garmin_i18n::Intl) -> Vec<activity::Presentation> {
+    [
+        (
+            ActivitySport::Cycling,
+            RECORDING_START_MILLISECONDS,
+            43 * 60 * 1_000,
+            16_800_000,
+            "Edge 850",
+        ),
+        (
+            ActivitySport::Running,
+            RECORDING_START_MILLISECONDS + 86_400_000,
+            51 * 60 * 1_000,
+            10_870_000,
+            "Forerunner",
+        ),
+        (
+            ActivitySport::Cycling,
+            RECORDING_START_MILLISECONDS + 172_800_000,
+            34 * 60 * 1_000,
+            18_420_000,
+            "Edge 850",
+        ),
+    ]
+    .into_iter()
+    .map(|(sport, start, duration, distance, source)| {
+        activity::Presentation::from_summary(
+            summary(sport, start, duration, distance),
+            source,
+            intl,
+            UnitSystem::Metric,
+        )
+    })
+    .collect()
+}
+
+fn summary(
+    sport: ActivitySport,
+    start_milliseconds: i64,
+    duration_milliseconds: u64,
+    distance_millimeters: u64,
+) -> ActivitySummary {
+    let start = Timestamp::from_unix_milliseconds(start_milliseconds)
+        .expect("the fixture start timestamp is valid");
+    let end = Timestamp::from_unix_milliseconds(
+        start_milliseconds
+            + i64::try_from(duration_milliseconds).expect("the fixture duration fits i64"),
+    )
+    .expect("the fixture end timestamp is valid");
+    let time = TimeRange::from_parts(start, end).expect("the fixture time range is ordered");
+    let duration = ActivityDuration::from_milliseconds(duration_milliseconds);
+    let totals = ActivityTotals::from_parts(
+        duration,
+        duration,
+        Some(Distance::from_millimeters(distance_millimeters)),
+        None,
+        Some(Distance::from_millimeters(130_000)),
+        Some(Distance::from_millimeters(128_000)),
+    )
+    .expect("the fixture totals are internally consistent");
+    ActivitySummary::from_parts(sport, time, totals, ActivityMetrics::default())
+}
+
+fn sample_recording(kind: RecordingKind) -> ActivityRecordingSnapshot {
+    let sample_count = 121_u64;
+    let duration = 43 * 60 * 1_000_u64;
+    let samples = (0..sample_count)
+        .map(|index| sample(kind, index, sample_count, duration))
+        .collect::<Vec<_>>();
+    let laps = sample_laps(&samples, duration);
+    ActivityRecordingSnapshot {
+        laps,
+        samples,
+        timer_events: vec![
+            ActivityTimerEventSnapshot {
+                timestamp: Timestamp::from_unix_milliseconds(
+                    RECORDING_START_MILLISECONDS + 1_280_000,
+                )
+                .expect("the fixture stop timestamp is valid"),
+                state: ActivityTimerStateSnapshot::Stopped,
+            },
+            ActivityTimerEventSnapshot {
+                timestamp: Timestamp::from_unix_milliseconds(
+                    RECORDING_START_MILLISECONDS + 1_320_000,
+                )
+                .expect("the fixture resume timestamp is valid"),
+                state: ActivityTimerStateSnapshot::Running,
+            },
+        ],
+    }
+}
+
+fn sample(
+    kind: RecordingKind,
+    index: u64,
+    sample_count: u64,
+    duration: u64,
+) -> ActivitySampleSnapshot {
+    let fraction = f64::from(u32::try_from(index).expect("the fixture index fits u32"))
+        / f64::from(u32::try_from(sample_count - 1).expect("the fixture sample count fits u32"));
+    let timestamp = Timestamp::from_unix_milliseconds(
+        RECORDING_START_MILLISECONDS
+            + i64::try_from(index * duration / (sample_count - 1))
+                .expect("the fixture sample timestamp fits i64"),
+    )
+    .expect("the fixture sample timestamp is valid");
+    let angle = fraction * std::f64::consts::TAU;
+    let climb = bell(fraction, 0.56, 0.11);
+    let elevation = 12.0
+        + (angle * 2.0).sin() * 2.4
+        + (angle * 7.0).sin() * 1.3
+        + climb * 18.0
+        + bell(fraction, 0.78, 0.05) * 7.0;
+    let speed_meters_per_second = (6.5 + (angle * 5.0).sin() * 0.7 + (angle * 13.0).sin() * 0.35
+        - climb * 1.5
+        + bell(fraction, 0.28, 0.04) * 1.2)
+        .clamp(3.0, 11.0);
+    let heart_rate = 118.0 + fraction * 18.0 + (angle * 3.0).sin() * 4.0 + climb * 10.0;
+    let cadence = (82.0 + (angle * 4.0).sin() * 6.0 + (angle * 11.0).sin() * 2.0 - climb * 8.0)
+        .clamp(55.0, 105.0);
+    let power = 175.0 + (angle * 5.0).sin() * 35.0 + (angle * 17.0).sin() * 18.0 + climb * 65.0;
+    let coordinate = (kind != RecordingKind::NoGps && index != 62).then(|| {
+        Coordinate::from_parts(
+            Latitude::from_degrees(
+                angle
+                    .sin()
+                    .mul_add(0.017, (angle * 3.0).sin().mul_add(0.003, 60.1708)),
+            )
+            .expect("the fixture latitude is valid"),
+            Longitude::from_degrees(
+                angle
+                    .cos()
+                    .mul_add(0.032, (angle * 2.0).sin().mul_add(0.005, 24.9375)),
+            )
+            .expect("the fixture longitude is valid"),
+        )
+    });
+    ActivitySampleSnapshot {
+        timestamp,
+        coordinate,
+        elevation_meters: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(29))
+            .then_some(elevation),
+        distance: Some(Distance::from_millimeters(
+            index * 16_800_000 / (sample_count - 1),
+        )),
+        speed: Some(Speed::from_millimeters_per_second(rounded_u32(
+            speed_meters_per_second * 1_000.0,
+        ))),
+        heart_rate: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(7)).then(
+            || {
+                HeartRate::from_beats_per_minute(
+                    u16::try_from(rounded_u32(heart_rate))
+                        .expect("the fixture heart rate fits u16"),
+                )
+            },
+        ),
+        cadence: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(11)).then(|| {
+            Cadence::from_revolutions_per_minute(cadence).expect("the fixture cadence is valid")
+        }),
+        power: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(13))
+            .then(|| Power::from_watts(rounded_u32(power))),
+        temperature_millicelsius: (kind != RecordingKind::MissingMetrics
+            || !index.is_multiple_of(17))
+        .then(|| {
+            i32::try_from(rounded_u32(
+                (19.0 - fraction * 1.4 + (angle * 2.0).sin() * 0.25) * 1_000.0,
+            ))
+            .expect("the fixture temperature fits i32")
+        }),
+    }
+}
+
+fn bell(value: f64, center: f64, width: f64) -> f64 {
+    (-((value - center) / width).powi(2)).exp()
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "gallery telemetry is clamped to the target's complete non-negative range"
+)]
+fn rounded_u32(value: f64) -> u32 {
+    value.round().clamp(0.0, f64::from(u32::MAX)) as u32
+}
+
+fn sample_laps(samples: &[ActivitySampleSnapshot], duration: u64) -> Vec<ActivityLapSnapshot> {
+    let halfway = duration / 2;
+    let first_time = TimeRange::from_parts(
+        samples
+            .first()
+            .expect("the fixture always contains samples")
+            .timestamp,
+        Timestamp::from_unix_milliseconds(
+            RECORDING_START_MILLISECONDS
+                + i64::try_from(halfway).expect("the fixture lap timestamp fits i64"),
+        )
+        .expect("the fixture lap timestamp is valid"),
+    )
+    .expect("the first fixture lap is ordered");
+    let second_time = TimeRange::from_parts(
+        first_time.end(),
+        samples
+            .last()
+            .expect("the fixture always contains samples")
+            .timestamp,
+    )
+    .expect("the second fixture lap is ordered");
+    let lap_totals = |distance| {
+        ActivityTotals::from_parts(
+            ActivityDuration::from_milliseconds(halfway),
+            ActivityDuration::from_milliseconds(halfway - 20_000),
+            Some(Distance::from_millimeters(distance)),
+            None,
+            None,
+            None,
+        )
+        .expect("the fixture lap totals are internally consistent")
+    };
+    vec![
+        ActivityLapSnapshot {
+            time: first_time,
+            totals: lap_totals(8_350_000),
+            metrics: ActivityMetrics::default(),
+        },
+        ActivityLapSnapshot {
+            time: second_time,
+            totals: lap_totals(8_450_000),
+            metrics: ActivityMetrics::default(),
+        },
+    ]
 }
 
 #[scene]
