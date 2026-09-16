@@ -156,28 +156,22 @@ fn router(host: Arc<Host>, map_tiles: garmin_map_tiles::Service) -> io::Result<R
 
 async fn browser_cache_policy(mut request: Request<Body>, next: Next) -> Response {
     let path = request.uri().path();
-    let entry_point = matches!(path, "/" | "/index.html");
-    let initializer = path.ends_with("-initializer.js");
+    let entry_point = browser_entry_point(path);
     let map_tile = path.starts_with("/map/tiles/");
     let static_asset = !entry_point
-        && !initializer
         && !path.starts_with("/device-download/")
         && !map_tile
         && !matches!(path, "/health" | "/remoc" | "/csp-report");
     let nonce = Nonce::random();
     let content_security_policy = content_security_policy(request.headers(), &nonce);
     request.extensions_mut().insert(nonce);
-    if entry_point || initializer {
+    if entry_point {
         request.headers_mut().remove(header::IF_MODIFIED_SINCE);
         request.headers_mut().remove(header::IF_NONE_MATCH);
     }
     let mut response = next.run(request).await;
     if !map_tile {
-        let policy = if static_asset && response.status().is_success() {
-            "public, max-age=31536000, immutable"
-        } else {
-            "no-store"
-        };
+        let policy = browser_asset_policy(static_asset, response.status());
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
@@ -186,6 +180,18 @@ async fn browser_cache_policy(mut request: Request<Body>, next: Next) -> Respons
         .headers_mut()
         .insert(header::CONTENT_SECURITY_POLICY, content_security_policy);
     response
+}
+
+fn browser_entry_point(path: &str) -> bool {
+    matches!(path, "/" | "/index.html" | "/map-worker.js") || path.ends_with("-initializer.js")
+}
+
+fn browser_asset_policy(static_asset: bool, status: StatusCode) -> &'static str {
+    if static_asset && status.is_success() {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-store"
+    }
 }
 
 async fn map_tile(
@@ -274,6 +280,7 @@ fn content_security_policy(headers: &HeaderMap, nonce: &Nonce) -> HeaderValue {
         .object_src(["'none'"])
         .script_src(["'self'", "'wasm-unsafe-eval'"])
         .nonce_for(["script-src"])
+        .directive("worker-src", ["'self'"])
         .style_src(["'self'", "'unsafe-inline'"])
         .report_uri(["csp-report"])
         .to_header_value_with_nonce(nonce)
@@ -480,8 +487,9 @@ async fn serve_client(socket: WebSocket, host: Arc<Host>) -> anyhow::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::{
-        CSP_NONCE_PLACEHOLDER, WebIndex, browser_origin_allowed, content_security_policy,
-        csp_report, request_etag_matches, router, startup_banner, web_link,
+        CSP_NONCE_PLACEHOLDER, WebIndex, browser_asset_policy, browser_entry_point,
+        browser_origin_allowed, content_security_policy, csp_report, request_etag_matches, router,
+        startup_banner, web_link,
     };
     use crate::devices::{Host, demo::DemoSource};
     use axum::body::Bytes;
@@ -533,6 +541,7 @@ mod tests {
         assert!(policy.contains("connect-src 'self' ws://127.0.0.1:8099 wss://127.0.0.1:8099"));
         assert!(policy.contains("frame-ancestors 'self'"));
         assert!(policy.contains("script-src 'self' 'wasm-unsafe-eval'"));
+        assert!(policy.contains("worker-src 'self'"));
         assert!(policy.contains("'nonce-dGVzdA=='"));
         assert!(policy.contains("report-uri csp-report"));
         assert!(!policy.contains("report-to"));
@@ -575,6 +584,20 @@ mod tests {
         assert_eq!(
             index.render(&nonce),
             r#"<script nonce="dGVzdA=="></script>"#
+        );
+    }
+
+    #[test]
+    fn stable_browser_worker_is_never_cached_as_an_immutable_asset() {
+        assert!(browser_entry_point("/map-worker.js"));
+        assert_eq!(browser_asset_policy(false, StatusCode::OK), "no-store");
+        assert_eq!(
+            browser_asset_policy(true, StatusCode::OK),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(
+            browser_asset_policy(true, StatusCode::NOT_FOUND),
+            "no-store"
         );
     }
 

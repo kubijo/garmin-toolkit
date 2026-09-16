@@ -1,5 +1,6 @@
 //! Native desktop composition.
 
+#![recursion_limit = "256"]
 #![expect(
     clippy::multiple_crate_versions,
     reason = "eframe and device/rendering adapters require incompatible transitive releases"
@@ -48,12 +49,18 @@ pub fn run() -> Result<(), Error> {
         },
         Box::new(move |creation| {
             garmin_ui::install(&creation.egui_ctx);
+            let map_renderer = creation
+                .wgpu_render_state
+                .as_ref()
+                .ok_or(Error::MapRendererUnavailable)
+                .map(garmin_ui::activity::install_wgpu_map)?;
             Ok(Box::new(view::Desktop::new(
                 application,
                 translations,
                 creation.egui_ctx.clone(),
                 device_platform,
                 &data_root,
+                map_renderer,
             )?))
         }),
     )?;
@@ -65,6 +72,8 @@ pub fn run() -> Result<(), Error> {
 pub enum Error {
     #[error("the platform application-data directory is unavailable")]
     DataRootUnavailable,
+    #[error("eframe did not provide the required WGPU render state")]
+    MapRendererUnavailable,
     #[error("could not prepare the application-data directory: {0}")]
     Io(#[from] std::io::Error),
     #[error(transparent)]

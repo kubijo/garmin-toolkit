@@ -281,6 +281,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1617,7 +1626,7 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "web-time",
- "wgpu 30.0.1",
+ "wgpu 30.0.0",
  "windows-sys 0.61.2",
  "winit",
 ]
@@ -1659,7 +1668,7 @@ dependencies = [
  "thiserror 2.0.20",
  "type-map",
  "web-time",
- "wgpu 30.0.1",
+ "wgpu 30.0.0",
  "winit",
 ]
 
@@ -1730,7 +1739,7 @@ dependencies = [
  "pollster 1.0.1",
  "serde",
  "toml",
- "wgpu 30.0.1",
+ "wgpu 30.0.0",
 ]
 
 [[package]]
@@ -2607,10 +2616,13 @@ dependencies = [
 name = "garmin-ui"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
  "byte-unit",
+ "bytemuck",
  "camino",
  "cint",
  "egui",
+ "egui-wgpu",
  "egui_extras",
  "egui_ltreeview",
  "egui_plot",
@@ -2620,8 +2632,12 @@ dependencies = [
  "garmin-model",
  "garmin-service-api",
  "phosphor-svgs",
+ "postcard",
+ "serde",
+ "tracing",
  "usvg 0.45.1",
  "walkers",
+ "wgpu 30.0.0",
 ]
 
 [[package]]
@@ -8376,9 +8392,9 @@ dependencies = [
 
 [[package]]
 name = "wgpu"
-version = "30.0.1"
+version = "30.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "527ccdf43dd5b2e8676eed9984ce00e2bbb0a1b85b70c1969dcb6cd2eb55ab9e"
+checksum = "6d8f4bd44d92da5270f03409dba9f952dab24f128e05d6a554926101d1bf9114"
 dependencies = [
  "arrayvec",
  "bitflags 2.13.2",

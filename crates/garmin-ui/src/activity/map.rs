@@ -1,109 +1,39 @@
 //! Host-fed `walkers` activity map and linked route overlay.
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::VecDeque,
     time::{Duration, Instant},
 };
 
 use cint::ColorInterop;
-use egui::{Align2, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, Vec2, pos2};
+use egui::{Align2, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, Vec2};
 use garmin_model::route::Coordinate;
 use garmin_service_api::{ActivityRecordingSnapshot, ActivitySampleSnapshot};
-use walkers::{Map, MapMemory, Tile, TileId, TilePiece, Tiles, lon_lat, sources::Attribution};
+use walkers::{Map, MapMemory, Tiles, lon_lat, sources::Attribution};
 
-const DECODED_TILE_LIMIT: usize = 256;
-const MAX_IN_FLIGHT: usize = 6;
-const SOURCE_TILE_SIZE: u32 = 512;
-const WALKERS_TILE_SIZE: u32 = 256;
-const MAX_TILE_ZOOM: u8 = 14;
-const MAX_VIEW_ZOOM: u8 = MAX_TILE_ZOOM + 1;
-const ROUTE_WIDTH: f32 = 3.0;
+use super::{
+    map_runtime::{MapRuntimeHandle, MapSurfaceFrame, MapSurfaceHandle},
+    map_style,
+    route_index::RouteIndex,
+};
+
+#[path = "gpu_map.rs"]
+pub(super) mod gpu_map;
+#[path = "map/tile_store.rs"]
+mod tile_store;
+
+pub(super) use gpu_map::PreparedGpuTile;
+pub use gpu_map::{WgpuMapHandle, install as install_wgpu_map};
+use tile_store::{MAX_VIEW_ZOOM, WALKERS_TILE_SIZE};
+pub use tile_store::{MapTileDecoder, prepare_tile_for_browser_worker};
+pub(super) use tile_store::{MapTileResponse, PreparedTile, TileStore};
+
+#[cfg(test)]
+use tile_store::{DECODED_TILE_LIMIT, Failure, MAX_IN_FLIGHT, MapTilePayload, TileEntry};
+
+const ZOOM_BOUND_EPSILON: f64 = 1.0e-6;
+const DEFAULT_ZOOM_SPEED: f64 = 2.0;
 const ROUTE_POINT_SPACING: f32 = 1.5;
-const SPEED_COLOR_BUCKETS: u8 = 8;
-const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
-
-/// Transport-neutral XYZ request emitted by the shared UI.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct MapTileRequest {
-    pub zoom: u8,
-    pub x: u32,
-    pub y: u32,
-    dark_mode: bool,
-}
-
-/// Host result fed back into the shared UI.
-pub struct MapTileResponse {
-    request: MapTileRequest,
-    result: Result<MapTilePayload, String>,
-}
-
-enum MapTilePayload {
-    Empty,
-    Encoded(Vec<u8>),
-    Decoded(Tile),
-}
-
-impl MapTileResponse {
-    /// Preserve encoded bytes for hosts which cannot decode away from the UI thread.
-    #[must_use]
-    pub fn encoded(request: MapTileRequest, result: Result<Vec<u8>, String>) -> Self {
-        Self {
-            request,
-            result: result.map(|bytes| {
-                if bytes.is_empty() {
-                    MapTilePayload::Empty
-                } else {
-                    MapTilePayload::Encoded(bytes)
-                }
-            }),
-        }
-    }
-}
-
-/// Reusable vector-tile decoder for hosts with a background worker.
-pub struct MapTileDecoder {
-    dark: walkers::Style,
-    light: walkers::Style,
-}
-
-impl Default for MapTileDecoder {
-    fn default() -> Self {
-        Self {
-            dark: map_style(true),
-            light: map_style(false),
-        }
-    }
-}
-
-impl MapTileDecoder {
-    /// Decode a vector tile on the caller's thread before it reaches the UI.
-    #[must_use]
-    pub fn decode(
-        &self,
-        request: MapTileRequest,
-        result: Result<Vec<u8>, String>,
-    ) -> MapTileResponse {
-        let result = result.and_then(|bytes| {
-            if bytes.is_empty() {
-                Ok(MapTilePayload::Empty)
-            } else {
-                Tile::from_mvt(
-                    &bytes,
-                    if request.dark_mode {
-                        &self.dark
-                    } else {
-                        &self.light
-                    },
-                    request.zoom,
-                    SOURCE_TILE_SIZE,
-                )
-                .map(MapTilePayload::Decoded)
-                .map_err(|error| error.to_string())
-            }
-        });
-        MapTileResponse { request, result }
-    }
-}
 
 pub(super) struct Props<'a> {
     pub recording: &'a ActivityRecordingSnapshot,
@@ -117,60 +47,120 @@ pub(super) struct Props<'a> {
 }
 
 pub(super) struct ActivityMap {
-    tiles: TileStore,
+    surface: MapSurfaceHandle,
     memory: MapMemory,
-    fit_key: String,
-    fit_size: Vec2,
-    force_fit: bool,
+    fit: FitState,
     frame_timing: FrameTiming,
-}
-
-impl Default for ActivityMap {
-    fn default() -> Self {
-        Self {
-            tiles: TileStore::default(),
-            memory: MapMemory::default(),
-            fit_key: String::new(),
-            fit_size: Vec2::ZERO,
-            force_fit: false,
-            frame_timing: FrameTiming::default(),
-        }
-    }
+    route_index: RouteIndexCache,
 }
 
 impl ActivityMap {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "map composition keeps the base map and its synchronized route overlay in one render pass"
-    )]
+    pub fn new(runtime: &MapRuntimeHandle) -> Self {
+        Self {
+            surface: runtime.surface(),
+            memory: MapMemory::default(),
+            fit: FitState::default(),
+            frame_timing: FrameTiming::default(),
+            route_index: RouteIndexCache::default(),
+        }
+    }
     pub fn show(&mut self, ui: &mut Ui, props: &Props<'_>) -> Output {
+        let ui_started = Instant::now();
+        let _span = tracing::trace_span!("activity_map_ui").entered();
         let size = Vec2::new(ui.available_width(), props.height);
-        self.tiles.set_theme(ui.visuals().dark_mode);
         let (sample_offset, samples) =
             ranged_samples(&props.recording.samples, props.sample_range.clone());
         let Some(center) = center(samples) else {
+            let _frame = self.surface.frame(ui.ctx(), ui.visuals().dark_mode);
             return empty_map(ui, size, props.empty);
         };
-        if self.force_fit
-            || self.fit_key != props.fit_key
-            || (self.fit_size.x - size.x).abs() > 64.0
-            || (self.fit_size.y - size.y).abs() > 64.0
-        {
-            fit(&mut self.memory, samples, size);
-            self.fit_key.clear();
-            self.fit_key.push_str(props.fit_key);
-            self.fit_size = size;
-            self.force_fit = false;
+        self.fit_if_needed(samples, props.fit_key, size);
+        self.index_route_if_needed(samples, sample_offset, props.fit_key);
+        let mut surface = self.surface.frame(ui.ctx(), ui.visuals().dark_mode);
+
+        let colors = MapColors::new(ui);
+        let route_scene = gpu_map::RouteScene {
+            key: props.fit_key,
+            samples,
+            sample_offset,
+            highlighted_range: props.highlighted_range.clone(),
+            color: colors.route,
+            outline: colors.outline,
+            opacity: if props.highlighted_range.is_some() {
+                map_style::DIMMED_ROUTE_OPACITY
+            } else {
+                1.0
+            },
+        };
+        let rendered = Self::render_map(
+            &mut surface,
+            &mut self.memory,
+            self.route_index.current(),
+            ui,
+            MapRenderInput {
+                size,
+                center,
+                route: &route_scene,
+                colors,
+                selected_coordinate: props.selected_coordinate,
+            },
+        );
+        if surface.scene().background_unavailable() {
+            map_status(ui, rendered.rect, props.background_unavailable);
         }
 
-        let route_color = crate::theme::color32(crate::theme::selection_accent(ui));
-        let marker_fill = crate::theme::color32(crate::theme::palette(ui).surfaces().background());
-        let route_outline = egui::Color32::from_black_alpha(190);
-        let start_color = crate::theme::color32(crate::theme::palette(ui).support().success());
-        let end_color = crate::theme::color32(crate::theme::palette(ui).support().error());
-        let speed_bounds = speed_bounds(samples);
-        let projection_center_longitude = self
-            .memory
+        let scene = surface.scene();
+        let performance = self.frame_timing.sample(MapPerfSample {
+            ui_elapsed: ui_started.elapsed(),
+            scene_milliseconds: rendered.scene.milliseconds,
+            route_query_microseconds: rendered.route_query_microseconds,
+            label_milliseconds: rendered.scene.label_milliseconds,
+            label_backlog: rendered.scene.label_backlog,
+            stale_work: rendered.scene.stale_work,
+            visible_tiles: rendered.scene.visible_tiles,
+            ready_tiles: scene.ready_tiles(),
+            pending_tiles: scene.pending_tiles(),
+            queued_upload_bytes: rendered.scene.queued_upload_bytes,
+            uploaded_bytes: rendered.scene.uploaded_bytes,
+        });
+        attribution(ui, &scene.attribution(), performance.as_deref());
+        Output {
+            hovered: rendered.interaction.hovered,
+            clicked: rendered.interaction.clicked,
+            empty_clicked: rendered.interaction.empty_clicked,
+            rect: rendered.rect,
+        }
+    }
+
+    fn fit_if_needed(&mut self, samples: &[ActivitySampleSnapshot], fit_key: &str, size: Vec2) {
+        self.fit
+            .apply_if_needed(&mut self.memory, samples, fit_key, size);
+    }
+
+    fn index_route_if_needed(
+        &mut self,
+        samples: &[ActivitySampleSnapshot],
+        sample_offset: usize,
+        fit_key: &str,
+    ) {
+        self.route_index.resolve(samples, sample_offset, fit_key);
+    }
+
+    fn render_map(
+        surface: &mut MapSurfaceFrame<'_>,
+        memory: &mut MapMemory,
+        route_index: &RouteIndex,
+        ui: &mut Ui,
+        input: MapRenderInput<'_>,
+    ) -> RenderedMap {
+        let MapRenderInput {
+            size,
+            center,
+            route,
+            colors,
+            selected_coordinate,
+        } = input;
+        let projection_center_longitude = memory
             .detached()
             .map_or_else(|| center.x(), walkers::Position::x);
         let map_rect = Rect::from_min_size(ui.next_widget_position(), size);
@@ -182,214 +172,62 @@ impl ActivityMap {
                 .layer(garmin_color::theme::Level::One)
                 .into_cint(),
         );
+
         let item_spacing = ui.spacing().item_spacing.y;
         ui.spacing_mut().item_spacing.y = 0.0;
+        let mut route_query_microseconds = 0.0;
+        let mut scene = gpu_map::ScenePerf::default();
         let inner =
             ui.allocate_ui_with_layout(size, egui::Layout::top_down(egui::Align::Min), |map_ui| {
                 map_ui.set_min_size(size);
-                Map::new(Some(&mut self.tiles), &mut self.memory, center)
+                let zoom_policy = zoom_policy(map_ui, memory.zoom(), map_rect);
+                let gpu_enabled = surface.gpu_enabled();
+                if let Some(callback) = surface.paint_callback(map_rect) {
+                    map_ui.painter().add(callback);
+                }
+                let overlay_input = OverlayInput {
+                    center,
+                    projection_center_longitude,
+                    gpu_enabled,
+                    route,
+                    colors,
+                    selected_coordinate,
+                };
+                let inner = Map::new(Some(surface as &mut dyn Tiles), memory, center)
                     .zoom_with_ctrl(false)
+                    .zoom_gesture(zoom_policy.gesture_enabled)
+                    .zoom_speed(zoom_policy.speed)
                     .panning(true)
-                    .show(map_ui, |overlay, response, projector, _memory| {
-                        overlay.set_clip_rect(overlay.clip_rect().intersect(response.rect));
-                        let pointer = response.hover_pos();
-                        let mut hit_test = HitTest {
-                            pointer,
-                            hovered: None,
-                            nearest: 14.0_f32.powi(2),
-                        };
-                        let route_style = RouteStyle {
-                            width: ROUTE_WIDTH,
-                            fallback: route_color,
-                            outline: route_outline,
-                            speed_bounds,
-                            opacity: if props.highlighted_range.is_some() {
-                                0.32
-                            } else {
-                                1.0
-                            },
-                        };
-                        let mut current = Vec::with_capacity(samples.len());
-                        for (offset, sample) in samples.iter().enumerate() {
-                            let sample_index = sample_offset + offset;
-                            if let Some(coordinate) = sample.coordinate {
-                                let position = projector
-                                    .project(lon_lat(
-                                        wrapped_longitude(
-                                            coordinate.longitude().as_degrees(),
-                                            projection_center_longitude,
-                                        ),
-                                        coordinate.latitude().as_degrees(),
-                                    ))
-                                    .to_pos2();
-                                push_route_point(
-                                    &mut current,
-                                    RoutePoint {
-                                        index: sample_index,
-                                        position,
-                                        speed: sample.speed.map(|speed| {
-                                            f64::from(speed.as_millimeters_per_second())
-                                        }),
-                                    },
-                                );
-                            } else {
-                                paint_route_segment(
-                                    overlay,
-                                    &current,
-                                    route_style,
-                                    Some(&mut hit_test),
-                                );
-                                current.clear();
-                            }
-                        }
-                        paint_route_segment(overlay, &current, route_style, Some(&mut hit_test));
-                        if let Some(highlighted_range) = &props.highlighted_range {
-                            let mut highlighted = Vec::with_capacity(
-                                highlighted_range
-                                    .end()
-                                    .saturating_sub(*highlighted_range.start())
-                                    .saturating_add(1)
-                                    .min(samples.len()),
-                            );
-                            for (offset, sample) in samples.iter().enumerate() {
-                                let sample_index = sample_offset + offset;
-                                if highlighted_range.contains(&sample_index) {
-                                    if let Some(coordinate) = sample.coordinate {
-                                        push_route_point(
-                                            &mut highlighted,
-                                            RoutePoint {
-                                                index: sample_index,
-                                                position: projector
-                                                    .project(lon_lat(
-                                                        wrapped_longitude(
-                                                            coordinate.longitude().as_degrees(),
-                                                            projection_center_longitude,
-                                                        ),
-                                                        coordinate.latitude().as_degrees(),
-                                                    ))
-                                                    .to_pos2(),
-                                                speed: sample.speed.map(|speed| {
-                                                    f64::from(speed.as_millimeters_per_second())
-                                                }),
-                                            },
-                                        );
-                                    } else {
-                                        paint_route_segment(
-                                            overlay,
-                                            &highlighted,
-                                            RouteStyle {
-                                                width: ROUTE_WIDTH + 1.5,
-                                                opacity: 1.0,
-                                                ..route_style
-                                            },
-                                            None,
-                                        );
-                                        highlighted.clear();
-                                    }
-                                } else if !highlighted.is_empty() {
-                                    paint_route_segment(
-                                        overlay,
-                                        &highlighted,
-                                        RouteStyle {
-                                            width: ROUTE_WIDTH + 1.5,
-                                            opacity: 1.0,
-                                            ..route_style
-                                        },
-                                        None,
-                                    );
-                                    highlighted.clear();
-                                }
-                            }
-                            paint_route_segment(
-                                overlay,
-                                &highlighted,
-                                RouteStyle {
-                                    width: ROUTE_WIDTH + 1.5,
-                                    opacity: 1.0,
-                                    ..route_style
-                                },
-                                None,
-                            );
-                        }
-                        if let Some((start, end)) = route_endpoints(samples) {
-                            let start = projector
-                                .project(lon_lat(
-                                    wrapped_longitude(
-                                        start.longitude().as_degrees(),
-                                        projection_center_longitude,
-                                    ),
-                                    start.latitude().as_degrees(),
-                                ))
-                                .to_pos2();
-                            let end = projector
-                                .project(lon_lat(
-                                    wrapped_longitude(
-                                        end.longitude().as_degrees(),
-                                        projection_center_longitude,
-                                    ),
-                                    end.latitude().as_degrees(),
-                                ))
-                                .to_pos2();
-                            paint_endpoint_marker(
-                                overlay,
-                                start,
-                                Endpoint::Start,
-                                start_color,
-                                marker_fill,
-                            );
-                            paint_endpoint_marker(
-                                overlay,
-                                end,
-                                Endpoint::End,
-                                end_color,
-                                marker_fill,
-                            );
-                        }
-                        if let Some((longitude, latitude)) = props.selected_coordinate {
-                            let position = projector
-                                .project(lon_lat(
-                                    wrapped_longitude(longitude, projection_center_longitude),
-                                    latitude,
-                                ))
-                                .to_pos2();
-                            overlay.painter().circle_filled(position, 5.0, marker_fill);
-                            overlay.painter().circle_stroke(
-                                position,
-                                5.0,
-                                Stroke::new(2.0, route_color),
-                            );
-                        }
-                        if response.is_pointer_button_down_on() {
-                            overlay.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                        } else if hit_test.hovered.is_some() {
-                            overlay.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
-                        } else if response.hovered() {
-                            overlay.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                        }
-                        RouteInteraction {
-                            hovered: hit_test.hovered,
-                            clicked: response.clicked().then_some(hit_test.hovered).flatten(),
-                            empty_clicked: response.clicked() && hit_test.hovered.is_none(),
-                        }
-                    })
-                    .inner
+                    .show(map_ui, |overlay, response, projector, memory| {
+                        let output = paint_route_overlay(
+                            overlay,
+                            response,
+                            projector,
+                            memory,
+                            route_index,
+                            overlay_input,
+                        );
+                        route_query_microseconds = output.query_microseconds;
+                        output.interaction
+                    });
+                if gpu_enabled {
+                    surface.paint_labels(map_ui, memory, center, inner.response.rect);
+                    scene = surface.update_scene(
+                        memory,
+                        center,
+                        inner.response.rect,
+                        map_ui.ctx(),
+                        route,
+                    );
+                }
+                inner.inner
             });
-        if self.memory.zoom() > f64::from(MAX_VIEW_ZOOM) {
-            let _ignored = self.memory.set_zoom(f64::from(MAX_VIEW_ZOOM));
-            ui.ctx().request_repaint();
-        }
-        let rect = inner.response.rect;
-        if self.tiles.background_unavailable {
-            map_status(ui, rect, props.background_unavailable);
-        }
-        let performance = self.frame_timing.sample();
-        attribution(ui, &self.tiles.attribution(), performance.as_deref());
         ui.spacing_mut().item_spacing.y = item_spacing;
-        Output {
-            hovered: inner.inner.hovered,
-            clicked: inner.inner.clicked,
-            empty_clicked: inner.inner.empty_clicked,
-            rect,
+        RenderedMap {
+            interaction: inner.inner,
+            rect: inner.response.rect,
+            route_query_microseconds,
+            scene,
         }
     }
 
@@ -403,15 +241,403 @@ impl ActivityMap {
     }
 
     pub const fn fit(&mut self) {
-        self.force_fit = true;
+        self.fit.request();
+    }
+}
+
+#[derive(Default)]
+struct FitState {
+    applied: Option<AppliedFit>,
+    requested: bool,
+    #[cfg(test)]
+    applications: u64,
+}
+
+struct AppliedFit {
+    key: String,
+    size: Vec2,
+}
+
+impl FitState {
+    fn apply_if_needed(
+        &mut self,
+        memory: &mut MapMemory,
+        samples: &[ActivitySampleSnapshot],
+        key: &str,
+        size: Vec2,
+    ) {
+        let invalid = self.applied.as_ref().is_none_or(|applied| {
+            applied.key != key
+                || (applied.size.x - size.x).abs() > 64.0
+                || (applied.size.y - size.y).abs() > 64.0
+        });
+        if !self.requested && !invalid {
+            return;
+        }
+        fit(memory, samples, size);
+        self.applied = Some(AppliedFit {
+            key: key.to_owned(),
+            size,
+        });
+        self.requested = false;
+        #[cfg(test)]
+        {
+            self.applications += 1;
+        }
     }
 
-    pub fn take_requests(&mut self) -> Vec<MapTileRequest> {
-        std::mem::take(&mut self.tiles.requests)
+    const fn request(&mut self) {
+        self.requested = true;
+    }
+}
+
+#[derive(Default)]
+struct RouteIndexCache {
+    entry: Option<CachedRouteIndex>,
+    #[cfg(test)]
+    builds: u64,
+}
+
+struct CachedRouteIndex {
+    key: String,
+    value: RouteIndex,
+}
+
+impl RouteIndexCache {
+    fn resolve(&mut self, samples: &[ActivitySampleSnapshot], sample_offset: usize, key: &str) {
+        if self.entry.as_ref().is_some_and(|entry| entry.key == key) {
+            return;
+        }
+        self.entry = Some(CachedRouteIndex {
+            key: key.to_owned(),
+            value: RouteIndex::new(samples, sample_offset),
+        });
+        #[cfg(test)]
+        {
+            self.builds += 1;
+        }
     }
 
-    pub fn resolve(&mut self, context: &egui::Context, response: MapTileResponse) {
-        self.tiles.resolve(context, response);
+    fn current(&self) -> &RouteIndex {
+        &self
+            .entry
+            .as_ref()
+            .expect("route index is resolved before map rendering")
+            .value
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MapColors {
+    route: egui::Color32,
+    outline: egui::Color32,
+    marker_fill: egui::Color32,
+    start: egui::Color32,
+    end: egui::Color32,
+}
+
+impl MapColors {
+    fn new(ui: &Ui) -> Self {
+        let palette = crate::theme::palette(ui);
+        Self {
+            route: crate::theme::color32(crate::theme::selection_accent(ui)),
+            outline: egui::Color32::from_black_alpha(190),
+            marker_fill: crate::theme::color32(palette.surfaces().background()),
+            start: crate::theme::color32(palette.support().success()),
+            end: crate::theme::color32(palette.support().error()),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct OverlayInput<'frame, 'recording> {
+    center: walkers::Position,
+    projection_center_longitude: f64,
+    gpu_enabled: bool,
+    route: &'frame gpu_map::RouteScene<'recording>,
+    colors: MapColors,
+    selected_coordinate: Option<(f64, f64)>,
+}
+
+#[derive(Clone, Copy)]
+struct MapRenderInput<'recording> {
+    size: Vec2,
+    center: walkers::Position,
+    route: &'recording gpu_map::RouteScene<'recording>,
+    colors: MapColors,
+    selected_coordinate: Option<(f64, f64)>,
+}
+
+struct OverlayOutput {
+    interaction: RouteInteraction,
+    query_microseconds: f32,
+}
+
+struct RenderedMap {
+    interaction: RouteInteraction,
+    rect: Rect,
+    route_query_microseconds: f32,
+    scene: gpu_map::ScenePerf,
+}
+
+fn paint_route_overlay(
+    overlay: &mut Ui,
+    response: &egui::Response,
+    projector: &walkers::Projector,
+    memory: &MapMemory,
+    route_index: &RouteIndex,
+    input: OverlayInput<'_, '_>,
+) -> OverlayOutput {
+    overlay.set_clip_rect(map_style::clip_rect(response.rect, overlay.clip_rect()));
+    let pointer = (!response.is_pointer_button_down_on())
+        .then(|| response.hover_pos())
+        .flatten();
+    let query_started = Instant::now();
+    let indexed_hover = input.gpu_enabled.then(|| {
+        pointer.and_then(|pointer| {
+            let center = memory.detached().unwrap_or(input.center);
+            let world_pixels = f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(memory.zoom());
+            let world_pointer = [
+                center.x() / 360.0
+                    + 0.5
+                    + f64::from(pointer.x - response.rect.center().x) / world_pixels,
+                mercator_y(center.y())
+                    + f64::from(pointer.y - response.rect.center().y) / world_pixels,
+            ];
+            route_index.query(world_pointer, world_pixels, 14.0)
+        })
+    });
+    let query_microseconds = query_started.elapsed().as_secs_f32() * 1_000_000.0;
+    let mut hit_test = HitTest {
+        pointer,
+        hovered: indexed_hover.flatten(),
+        nearest: 14.0_f32.powi(2),
+    };
+    if !input.gpu_enabled {
+        paint_software_route(overlay, projector, input, &mut hit_test);
+    }
+    paint_route_markers(overlay, projector, input);
+    set_route_cursor(overlay, response, hit_test.hovered);
+    OverlayOutput {
+        interaction: RouteInteraction {
+            hovered: hit_test.hovered,
+            clicked: response.clicked().then_some(hit_test.hovered).flatten(),
+            empty_clicked: response.clicked() && hit_test.hovered.is_none(),
+        },
+        query_microseconds,
+    }
+}
+
+fn paint_software_route(
+    overlay: &mut Ui,
+    projector: &walkers::Projector,
+    input: OverlayInput<'_, '_>,
+    hit_test: &mut HitTest,
+) {
+    let style = RouteStyle {
+        width: map_style::ROUTE_WIDTH,
+        outline_width: map_style::ROUTE_OUTLINE_WIDTH,
+        fallback: input.colors.route,
+        outline: input.colors.outline,
+        speed_bounds: speed_bounds(input.route.samples),
+        opacity: input.route.opacity,
+    };
+    let mut current = Vec::with_capacity(input.route.samples.len());
+    for (offset, sample) in input.route.samples.iter().enumerate() {
+        let sample_index = input.route.sample_offset + offset;
+        if let Some(coordinate) = sample.coordinate {
+            push_route_point(
+                &mut current,
+                RoutePoint {
+                    index: sample_index,
+                    position: project_coordinate(
+                        projector,
+                        coordinate,
+                        input.projection_center_longitude,
+                    ),
+                    speed: sample
+                        .speed
+                        .map(|speed| f64::from(speed.as_millimeters_per_second())),
+                },
+            );
+        } else {
+            paint_route_segment(overlay, &current, style, Some(hit_test));
+            current.clear();
+        }
+    }
+    paint_route_segment(overlay, &current, style, Some(hit_test));
+    paint_highlighted_route(overlay, projector, input, style);
+}
+
+fn paint_highlighted_route(
+    overlay: &mut Ui,
+    projector: &walkers::Projector,
+    input: OverlayInput<'_, '_>,
+    base_style: RouteStyle,
+) {
+    let Some(range) = &input.route.highlighted_range else {
+        return;
+    };
+    let style = RouteStyle {
+        width: map_style::HIGHLIGHT_WIDTH,
+        outline_width: map_style::HIGHLIGHT_OUTLINE_WIDTH,
+        opacity: 1.0,
+        ..base_style
+    };
+    let mut highlighted = Vec::with_capacity(
+        range
+            .end()
+            .saturating_sub(*range.start())
+            .saturating_add(1)
+            .min(input.route.samples.len()),
+    );
+    for (offset, sample) in input.route.samples.iter().enumerate() {
+        let sample_index = input.route.sample_offset + offset;
+        if range.contains(&sample_index)
+            && let Some(coordinate) = sample.coordinate
+        {
+            push_route_point(
+                &mut highlighted,
+                RoutePoint {
+                    index: sample_index,
+                    position: project_coordinate(
+                        projector,
+                        coordinate,
+                        input.projection_center_longitude,
+                    ),
+                    speed: sample
+                        .speed
+                        .map(|speed| f64::from(speed.as_millimeters_per_second())),
+                },
+            );
+        } else if !highlighted.is_empty() {
+            paint_route_segment(overlay, &highlighted, style, None);
+            highlighted.clear();
+        }
+    }
+    paint_route_segment(overlay, &highlighted, style, None);
+}
+
+fn paint_route_markers(
+    overlay: &mut Ui,
+    projector: &walkers::Projector,
+    input: OverlayInput<'_, '_>,
+) {
+    if let Some((start, end)) = route_endpoints(input.route.samples) {
+        paint_endpoint_marker(
+            overlay,
+            project_coordinate(projector, start, input.projection_center_longitude),
+            Endpoint::Start,
+            input.colors.start,
+            input.colors.marker_fill,
+        );
+        paint_endpoint_marker(
+            overlay,
+            project_coordinate(projector, end, input.projection_center_longitude),
+            Endpoint::End,
+            input.colors.end,
+            input.colors.marker_fill,
+        );
+    }
+    if let Some((longitude, latitude)) = input.selected_coordinate {
+        let position = projector
+            .project(lon_lat(
+                wrapped_longitude(longitude, input.projection_center_longitude),
+                latitude,
+            ))
+            .to_pos2();
+        overlay
+            .painter()
+            .circle_filled(position, 5.0, input.colors.marker_fill);
+        overlay
+            .painter()
+            .circle_stroke(position, 5.0, Stroke::new(2.0, input.colors.route));
+    }
+}
+
+fn project_coordinate(
+    projector: &walkers::Projector,
+    coordinate: Coordinate,
+    projection_center_longitude: f64,
+) -> egui::Pos2 {
+    projector
+        .project(lon_lat(
+            wrapped_longitude(
+                coordinate.longitude().as_degrees(),
+                projection_center_longitude,
+            ),
+            coordinate.latitude().as_degrees(),
+        ))
+        .to_pos2()
+}
+
+fn set_route_cursor(overlay: &Ui, response: &egui::Response, hovered: Option<usize>) {
+    let cursor = if response.is_pointer_button_down_on() {
+        egui::CursorIcon::Grabbing
+    } else if hovered.is_some() {
+        egui::CursorIcon::Crosshair
+    } else if response.hovered() {
+        egui::CursorIcon::Grab
+    } else {
+        return;
+    };
+    overlay.ctx().set_cursor_icon(cursor);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ZoomPolicy {
+    gesture_enabled: bool,
+    speed: f64,
+}
+
+fn zoom_policy(ui: &mut Ui, zoom: f64, map_rect: Rect) -> ZoomPolicy {
+    let (gesture, from_scroll) = zoom_gesture(ui);
+    let pointer_over_map = ui.input(|input| {
+        input
+            .pointer
+            .hover_pos()
+            .is_some_and(|pointer| map_rect.contains(pointer))
+    });
+    let blocked = pointer_over_map && outward_zoom_at_bound(zoom, gesture);
+
+    if blocked && from_scroll {
+        ui.input_mut(|input| input.smooth_scroll_delta.y = 0.0);
+    }
+
+    ZoomPolicy {
+        gesture_enabled: !blocked,
+        speed: clamped_zoom_speed(zoom, gesture, DEFAULT_ZOOM_SPEED),
+    }
+}
+
+fn zoom_gesture(ui: &Ui) -> (f64, bool) {
+    let zoom_delta = f64::from(ui.input(egui::InputState::zoom_delta));
+    if (zoom_delta - 1.0).abs() > f64::EPSILON {
+        return (zoom_delta - 1.0, false);
+    }
+
+    let gesture = f64::from(ui.input(|input| {
+        input.smooth_scroll_delta.y
+            * input
+                .stable_dt
+                .clamp(input.predicted_dt * 0.5, input.predicted_dt * 2.0)
+            / 4.0
+    }));
+    (gesture, true)
+}
+
+fn outward_zoom_at_bound(zoom: f64, gesture: f64) -> bool {
+    (gesture > 0.0 && zoom >= f64::from(MAX_VIEW_ZOOM) - ZOOM_BOUND_EPSILON)
+        || (gesture < 0.0 && zoom <= ZOOM_BOUND_EPSILON)
+}
+
+fn clamped_zoom_speed(zoom: f64, gesture: f64, default_speed: f64) -> f64 {
+    if gesture > 0.0 {
+        default_speed.min((f64::from(MAX_VIEW_ZOOM) - zoom).max(0.0) / gesture)
+    } else if gesture < 0.0 {
+        default_speed.min(zoom.max(0.0) / -gesture)
+    } else {
+        default_speed
     }
 }
 
@@ -478,8 +704,8 @@ struct RoutePoint {
 
 fn push_route_point(points: &mut Vec<RoutePoint>, point: RoutePoint) {
     if points.len() > 1
-        && points.last().is_some_and(|last| {
-            last.position.distance_sq(point.position) < ROUTE_POINT_SPACING.powi(2)
+        && points.get(points.len() - 2).is_some_and(|anchor| {
+            anchor.position.distance_sq(point.position) < ROUTE_POINT_SPACING.powi(2)
         })
     {
         if let Some(last) = points.last_mut() {
@@ -493,6 +719,7 @@ fn push_route_point(points: &mut Vec<RoutePoint>, point: RoutePoint) {
 #[derive(Clone, Copy)]
 struct RouteStyle {
     width: f32,
+    outline_width: f32,
     fallback: egui::Color32,
     outline: egui::Color32,
     speed_bounds: Option<(f64, f64)>,
@@ -512,8 +739,10 @@ fn paint_route_segment(
         ui,
         points,
         Stroke::new(
-            style.width + 2.0,
-            style.outline.gamma_multiply(style.opacity.max(0.6)),
+            style.outline_width,
+            style
+                .outline
+                .gamma_multiply(style.opacity.max(map_style::MINIMUM_OUTLINE_OPACITY)),
         ),
         hit_test,
     );
@@ -531,8 +760,9 @@ fn paint_route_outline(
     ui: &mut Ui,
     points: &[RoutePoint],
     stroke: Stroke,
-    mut hit_test: Option<&mut HitTest>,
+    hit_test: Option<&mut HitTest>,
 ) {
+    hit_test_route(ui, points, hit_test, stroke.width);
     let clip = ui.clip_rect().expand(stroke.width);
     let mut visible = Vec::new();
     for pair in points.windows(2) {
@@ -545,24 +775,35 @@ fn paint_route_outline(
                 visible.push(pair[0].position);
             }
             visible.push(pair[1].position);
-            if let Some(hit_test) = hit_test.as_deref_mut()
-                && let Some(pointer) = hit_test.pointer
-            {
-                let (index, distance) = closest_endpoint_on_segment(
-                    pointer,
-                    (pair[0].index, pair[0].position),
-                    (pair[1].index, pair[1].position),
-                );
-                if distance < hit_test.nearest {
-                    hit_test.nearest = distance;
-                    hit_test.hovered = Some(index);
-                }
-            }
         } else {
             paint_visible_segment(ui, std::mem::take(&mut visible), stroke);
         }
     }
     paint_visible_segment(ui, visible, stroke);
+}
+
+fn hit_test_route(ui: &Ui, points: &[RoutePoint], hit_test: Option<&mut HitTest>, width: f32) {
+    let Some(hit_test) = hit_test else {
+        return;
+    };
+    let Some(pointer) = hit_test.pointer else {
+        return;
+    };
+    let clip = ui.clip_rect().expand(width);
+    for pair in points.windows(2) {
+        if !clip.intersects(Rect::from_two_pos(pair[0].position, pair[1].position)) {
+            continue;
+        }
+        let (index, distance) = closest_endpoint_on_segment(
+            pointer,
+            (pair[0].index, pair[0].position),
+            (pair[1].index, pair[1].position),
+        );
+        if distance < hit_test.nearest {
+            hit_test.nearest = distance;
+            hit_test.hovered = Some(index);
+        }
+    }
 }
 
 fn paint_speed_segments(
@@ -574,100 +815,24 @@ fn paint_speed_segments(
     opacity: f32,
 ) {
     let clip = ui.clip_rect().expand(width);
-    let mut bucket = None;
-    let mut visible = Vec::new();
     for pair in points.windows(2) {
         if !clip.intersects(Rect::from_two_pos(pair[0].position, pair[1].position)) {
-            paint_speed_run(
-                ui,
-                std::mem::take(&mut visible),
-                bucket,
-                width,
-                fallback,
-                opacity,
-            );
-            bucket = None;
             continue;
         }
-        let next_bucket = route_speed_bucket(pair[0].speed, pair[1].speed, speed_bounds);
-        if bucket != Some(next_bucket)
-            || visible
-                .last()
-                .is_some_and(|position| *position != pair[0].position)
-        {
-            paint_speed_run(
-                ui,
-                std::mem::take(&mut visible),
-                bucket,
-                width,
-                fallback,
-                opacity,
-            );
-            bucket = Some(next_bucket);
-            visible.push(pair[0].position);
-        }
-        visible.push(pair[1].position);
+        let color = map_style::speed_fraction(pair[0].speed, pair[1].speed, speed_bounds)
+            .map_or(fallback, map_style::speed_color)
+            .gamma_multiply(opacity);
+        ui.painter().line_segment(
+            [pair[0].position, pair[1].position],
+            Stroke::new(width, color),
+        );
     }
-    paint_speed_run(ui, visible, bucket, width, fallback, opacity);
-}
-
-fn paint_speed_run(
-    ui: &Ui,
-    points: Vec<egui::Pos2>,
-    bucket: Option<u8>,
-    width: f32,
-    fallback: egui::Color32,
-    opacity: f32,
-) {
-    if points.len() < 2 {
-        return;
-    }
-    let color = bucket
-        .filter(|bucket| *bucket < SPEED_COLOR_BUCKETS)
-        .map_or(fallback, speed_color)
-        .gamma_multiply(opacity);
-    ui.painter()
-        .add(Shape::line(points, Stroke::new(width, color)));
 }
 
 fn paint_visible_segment(ui: &Ui, points: Vec<egui::Pos2>, stroke: Stroke) {
     if points.len() >= 2 {
         ui.painter().add(Shape::line(points, stroke));
     }
-}
-
-fn route_speed_bucket(start: Option<f64>, end: Option<f64>, bounds: Option<(f64, f64)>) -> u8 {
-    let Some((minimum, maximum)) = bounds else {
-        return SPEED_COLOR_BUCKETS;
-    };
-    let speed = match (start, end) {
-        (Some(start), Some(end)) => f64::midpoint(start, end),
-        (Some(speed), None) | (None, Some(speed)) => speed,
-        (None, None) => return SPEED_COLOR_BUCKETS,
-    };
-    let fraction = ((speed - minimum) / (maximum - minimum)).clamp(0.0, 1.0);
-    let position = fraction * f64::from(SPEED_COLOR_BUCKETS - 1);
-    for bucket in 0..SPEED_COLOR_BUCKETS - 1 {
-        if position < f64::from(bucket) + 0.5 {
-            return bucket;
-        }
-    }
-    SPEED_COLOR_BUCKETS - 1
-}
-
-fn speed_color(bucket: u8) -> egui::Color32 {
-    const COLORS: [[u8; 3]; SPEED_COLOR_BUCKETS as usize] = [
-        [45, 132, 255],
-        [38, 162, 210],
-        [39, 185, 165],
-        [68, 188, 116],
-        [129, 190, 80],
-        [221, 190, 56],
-        [240, 139, 58],
-        [235, 72, 67],
-    ];
-    let [red, green, blue] = COLORS[usize::from(bucket.min(SPEED_COLOR_BUCKETS - 1))];
-    egui::Color32::from_rgb(red, green, blue)
 }
 
 fn speed_bounds(samples: &[ActivitySampleSnapshot]) -> Option<(f64, f64)> {
@@ -731,13 +896,42 @@ fn paint_endpoint_marker(
 struct FrameTiming {
     previous: Option<Instant>,
     smoothed_milliseconds: Option<f32>,
+    ui_milliseconds: VecDeque<f32>,
+}
+
+#[derive(Clone, Copy)]
+struct MapPerfSample {
+    ui_elapsed: Duration,
+    scene_milliseconds: f32,
+    route_query_microseconds: f32,
+    label_milliseconds: f32,
+    label_backlog: usize,
+    stale_work: u64,
+    visible_tiles: usize,
+    ready_tiles: usize,
+    pending_tiles: usize,
+    queued_upload_bytes: usize,
+    uploaded_bytes: usize,
 }
 
 impl FrameTiming {
-    fn sample(&mut self) -> Option<String> {
+    fn sample(&mut self, sample: MapPerfSample) -> Option<String> {
         if !cfg!(debug_assertions) {
             return None;
         }
+        let MapPerfSample {
+            ui_elapsed,
+            scene_milliseconds,
+            route_query_microseconds,
+            label_milliseconds,
+            label_backlog,
+            stale_work,
+            visible_tiles,
+            ready_tiles,
+            pending_tiles,
+            queued_upload_bytes,
+            uploaded_bytes,
+        } = sample;
         let now = Instant::now();
         let elapsed = self.previous.replace(now).map(|previous| now - previous);
         if let Some(elapsed) = elapsed.filter(|elapsed| *elapsed <= Duration::from_millis(250)) {
@@ -747,10 +941,34 @@ impl FrameTiming {
                     current.mul_add(0.85, milliseconds * 0.15)
                 }));
         }
+        self.ui_milliseconds
+            .push_back(ui_elapsed.as_secs_f32() * 1_000.0);
+        if self.ui_milliseconds.len() > 120 {
+            self.ui_milliseconds.pop_front();
+        }
+        let (ui_p50, ui_p95) = percentiles(&self.ui_milliseconds)?;
         self.smoothed_milliseconds
             .filter(|milliseconds| *milliseconds > 0.0)
-            .map(|milliseconds| format!("{:.0} FPS · {milliseconds:.1} ms", 1_000.0 / milliseconds))
+            .map(|milliseconds| {
+                format!(
+                    "{:.0} FPS · UI {ui_p50:.1}/{ui_p95:.1} ms · scene {scene_milliseconds:.2} ms · labels {label_milliseconds:.1} ms/{label_backlog} · route {route_query_microseconds:.0} µs · tiles {visible_tiles}/{ready_tiles}+{pending_tiles} · upload {uploaded_bytes}/{queued_upload_bytes} B · stale {stale_work}",
+                    1_000.0 / milliseconds,
+                )
+            })
     }
+}
+
+fn percentiles(samples: &VecDeque<f32>) -> Option<(f32, f32)> {
+    let mut sorted = samples.iter().copied().collect::<Vec<_>>();
+    if sorted.is_empty() {
+        return None;
+    }
+    sorted.sort_unstable_by(f32::total_cmp);
+    let value = |percent: usize| {
+        let index = (sorted.len() - 1) * percent / 100;
+        sorted[index]
+    };
+    Some((value(50), value(95)))
 }
 
 struct HitTest {
@@ -787,200 +1005,6 @@ struct RouteInteraction {
     hovered: Option<usize>,
     clicked: Option<usize>,
     empty_clicked: bool,
-}
-
-struct TileStore {
-    tiles: HashMap<TileId, Tile>,
-    empty: HashSet<TileId>,
-    order: VecDeque<TileId>,
-    pending: HashSet<TileId>,
-    failed: HashMap<TileId, Failure>,
-    requests: Vec<MapTileRequest>,
-    style: walkers::Style,
-    dark_mode: bool,
-    background_unavailable: bool,
-}
-
-impl Default for TileStore {
-    fn default() -> Self {
-        Self {
-            tiles: HashMap::new(),
-            empty: HashSet::new(),
-            order: VecDeque::new(),
-            pending: HashSet::new(),
-            failed: HashMap::new(),
-            requests: Vec::new(),
-            style: map_style(true),
-            dark_mode: true,
-            background_unavailable: false,
-        }
-    }
-}
-
-struct Failure {
-    attempts: u8,
-    retry_at: Instant,
-}
-
-impl TileStore {
-    fn set_theme(&mut self, dark_mode: bool) {
-        if self.dark_mode == dark_mode {
-            return;
-        }
-        self.dark_mode = dark_mode;
-        self.style = map_style(dark_mode);
-        self.tiles.clear();
-        self.empty.clear();
-        self.order.clear();
-        self.pending.clear();
-        self.failed.clear();
-        self.requests.clear();
-    }
-
-    fn resolve(&mut self, context: &egui::Context, response: MapTileResponse) {
-        let id = TileId {
-            zoom: response.request.zoom,
-            x: response.request.x,
-            y: response.request.y,
-        };
-        if response.request.dark_mode != self.dark_mode {
-            return;
-        }
-        self.pending.remove(&id);
-        let retry_after = match response.result {
-            Ok(MapTilePayload::Empty) => {
-                self.background_unavailable = false;
-                self.failed.remove(&id);
-                self.tiles.remove(&id);
-                self.empty.insert(id);
-                self.promote(id);
-                None
-            }
-            Ok(MapTilePayload::Encoded(bytes)) => {
-                match Tile::from_mvt(&bytes, &self.style, id.zoom, SOURCE_TILE_SIZE) {
-                    Ok(tile) => {
-                        self.background_unavailable = false;
-                        self.failed.remove(&id);
-                        self.empty.remove(&id);
-                        self.tiles.insert(id, tile);
-                        self.promote(id);
-                        None
-                    }
-                    Err(_error) => {
-                        self.background_unavailable = true;
-                        Some(self.record_failure(id))
-                    }
-                }
-            }
-            Ok(MapTilePayload::Decoded(tile)) => {
-                self.background_unavailable = false;
-                self.failed.remove(&id);
-                self.empty.remove(&id);
-                self.tiles.insert(id, tile);
-                self.promote(id);
-                None
-            }
-            Err(_reason) => {
-                self.background_unavailable = true;
-                Some(self.record_failure(id))
-            }
-        };
-        if let Some(delay) = retry_after {
-            context.request_repaint_after(delay);
-        }
-        context.request_repaint();
-    }
-
-    fn record_failure(&mut self, id: TileId) -> Duration {
-        let attempts = self
-            .failed
-            .get(&id)
-            .map_or(1, |failure| failure.attempts.saturating_add(1));
-        let shift = u32::from(attempts.saturating_sub(1).min(5));
-        let delay = Duration::from_secs(1_u64 << shift).min(MAX_RETRY_DELAY);
-        self.failed.insert(
-            id,
-            Failure {
-                attempts,
-                retry_at: Instant::now() + delay,
-            },
-        );
-        if self.failed.len() > DECODED_TILE_LIMIT
-            && let Some(oldest) = self
-                .failed
-                .iter()
-                .min_by_key(|(_, failure)| failure.retry_at)
-                .map(|(id, _)| *id)
-        {
-            self.failed.remove(&oldest);
-        }
-        delay
-    }
-
-    fn promote(&mut self, id: TileId) {
-        self.order.retain(|candidate| *candidate != id);
-        self.order.push_back(id);
-        while self.order.len() > DECODED_TILE_LIMIT {
-            if let Some(evicted) = self.order.pop_front() {
-                self.tiles.remove(&evicted);
-                self.empty.remove(&evicted);
-            }
-        }
-    }
-}
-
-fn map_style(dark_mode: bool) -> walkers::Style {
-    if dark_mode {
-        walkers::Style::openmaptiles_basemap_dark()
-    } else {
-        walkers::Style::openmaptiles_basemap_light()
-    }
-}
-
-impl Tiles for TileStore {
-    fn at(&mut self, tile_id: TileId) -> Option<TilePiece> {
-        if tile_id.zoom > MAX_TILE_ZOOM {
-            return None;
-        }
-        if let Some(tile) = self.tiles.get(&tile_id).cloned() {
-            self.promote(tile_id);
-            return Some(TilePiece::new(
-                tile,
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-            ));
-        }
-        if self.empty.contains(&tile_id) {
-            self.promote(tile_id);
-            return None;
-        }
-        let retry_ready = self
-            .failed
-            .get(&tile_id)
-            .is_none_or(|failure| Instant::now() >= failure.retry_at);
-        if self.pending.len() < MAX_IN_FLIGHT && !self.pending.contains(&tile_id) && retry_ready {
-            self.pending.insert(tile_id);
-            self.requests.push(MapTileRequest {
-                zoom: tile_id.zoom,
-                x: tile_id.x,
-                y: tile_id.y,
-                dark_mode: self.dark_mode,
-            });
-        }
-        None
-    }
-
-    fn attribution(&self) -> Attribution {
-        Attribution {
-            text: "OpenFreeMap · © OpenMapTiles · © OpenStreetMap contributors",
-            url: "https://openfreemap.org/",
-            logo_light: None,
-            logo_dark: None,
-        }
-    }
-
-    fn tile_size(&self) -> u32 {
-        SOURCE_TILE_SIZE
-    }
 }
 
 fn ranged_samples(
@@ -1086,17 +1110,18 @@ fn empty_map(ui: &mut Ui, size: Vec2, message: &str) -> Output {
 
 #[cfg(test)]
 mod tests {
-    use egui::pos2;
+    use egui::{Event, MouseWheelUnit, RawInput, Rect, TouchPhase, pos2, vec2};
     use garmin_model::{
         route::{Coordinate, Latitude, Longitude},
         value::Timestamp,
     };
     use garmin_service_api::ActivitySampleSnapshot;
-    use walkers::{MapMemory, Tiles as _};
+    use walkers::{Map, MapMemory, Tiles as _, lon_lat};
 
     use super::{
-        TileStore, center, closest_endpoint_on_segment, fit, mercator_latitude, mercator_y,
-        ranged_samples, wrapped_longitude,
+        FitState, RouteIndexCache, RoutePoint, TileStore, center, clamped_zoom_speed,
+        closest_endpoint_on_segment, fit, mercator_latitude, mercator_y, outward_zoom_at_bound,
+        push_route_point, ranged_samples, wrapped_longitude, zoom_policy,
     };
 
     fn sample(coordinate: Option<(f64, f64)>) -> ActivitySampleSnapshot {
@@ -1126,6 +1151,39 @@ mod tests {
     }
 
     #[test]
+    fn fit_state_owns_first_fit_resize_reuse_and_explicit_requests() {
+        let samples = [sample(Some((60.0, 24.0))), sample(Some((60.1, 24.2)))];
+        let mut memory = MapMemory::default();
+        let mut state = FitState::default();
+
+        state.apply_if_needed(&mut memory, &samples, "activity", vec2(400.0, 300.0));
+        assert_eq!(state.applications, 1);
+        state.apply_if_needed(&mut memory, &samples, "activity", vec2(440.0, 340.0));
+        assert_eq!(state.applications, 1);
+        state.apply_if_needed(&mut memory, &samples, "activity", vec2(480.0, 380.0));
+        assert_eq!(state.applications, 2);
+        state.request();
+        state.apply_if_needed(&mut memory, &samples, "activity", vec2(480.0, 380.0));
+        assert_eq!(state.applications, 3);
+        state.apply_if_needed(&mut memory, &samples, "other", vec2(480.0, 380.0));
+        assert_eq!(state.applications, 4);
+    }
+
+    #[test]
+    fn route_index_cache_rebuilds_only_for_a_new_source_identity() {
+        let samples = [sample(Some((60.0, 24.0))), sample(Some((60.1, 24.2)))];
+        let mut cache = RouteIndexCache::default();
+
+        cache.resolve(&samples, 0, "activity:all");
+        assert_eq!(cache.builds, 1);
+        let _current = cache.current();
+        cache.resolve(&samples, 0, "activity:all");
+        assert_eq!(cache.builds, 1);
+        cache.resolve(&samples, 4, "activity:lap-2");
+        assert_eq!(cache.builds, 2);
+    }
+
+    #[test]
     fn route_hit_testing_uses_the_line_between_samples() {
         let (index, distance) = closest_endpoint_on_segment(
             pos2(75.0, 4.0),
@@ -1135,6 +1193,85 @@ mod tests {
 
         assert_eq!(index, 5);
         assert!((distance - 16.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn route_simplification_keeps_stable_anchors() {
+        let mut points = Vec::new();
+        let mut x = 0.0;
+        for index in 0..=100 {
+            push_route_point(
+                &mut points,
+                RoutePoint {
+                    index,
+                    position: pos2(x, 0.0),
+                    speed: None,
+                },
+            );
+            x += 1.0;
+        }
+
+        assert!(points.len() > 25);
+        assert_eq!(points.first().map(|point| point.index), Some(0));
+        assert_eq!(points.last().map(|point| point.index), Some(100));
+    }
+
+    #[test]
+    fn zoom_policy_stops_at_bounds_without_overshooting() {
+        let maximum = f64::from(super::MAX_VIEW_ZOOM);
+        assert!(outward_zoom_at_bound(maximum, 0.25));
+        assert!(outward_zoom_at_bound(0.0, -0.25));
+        assert!(!outward_zoom_at_bound(maximum, -0.25));
+        assert!(!outward_zoom_at_bound(0.0, 0.25));
+        assert!(clamped_zoom_speed(maximum, 0.25, 2.0).abs() < f64::EPSILON);
+        assert!(clamped_zoom_speed(0.0, -0.25, 2.0).abs() < f64::EPSILON);
+        assert!((clamped_zoom_speed(maximum, -0.25, 2.0) - 2.0).abs() < f64::EPSILON);
+        assert!((clamped_zoom_speed(maximum - 0.1, 0.2, 2.0) - 0.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn outward_wheel_at_maximum_is_consumed_without_moving_the_map() {
+        let context = egui::Context::default();
+        let mut memory = MapMemory::default();
+        let map_center = lon_lat(27.2, 60.6);
+        memory.center_at(map_center);
+        memory.set_zoom(f64::from(super::MAX_VIEW_ZOOM)).unwrap();
+        let center_before = memory.detached().unwrap();
+        let mut scroll_before_policy = 0.0;
+        let mut scroll_after_policy = f32::NAN;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(320.0, 240.0))),
+            events: vec![
+                Event::PointerMoved(pos2(160.0, 120.0)),
+                Event::MouseWheel {
+                    unit: MouseWheelUnit::Point,
+                    delta: vec2(0.0, 120.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: TouchPhase::Move,
+                },
+            ],
+            ..RawInput::default()
+        };
+
+        let output = context.run_ui(input, |ui| {
+            let map_rect = ui.available_rect_before_wrap();
+            scroll_before_policy = ui.input(|input| input.smooth_scroll_delta.y);
+            let policy = zoom_policy(ui, memory.zoom(), map_rect);
+            scroll_after_policy = ui.input(|input| input.smooth_scroll_delta.y);
+            let _map = Map::new(None, &mut memory, map_center)
+                .zoom_with_ctrl(false)
+                .zoom_gesture(policy.gesture_enabled)
+                .zoom_speed(policy.speed)
+                .show(ui, |_, _, _, _| ());
+        });
+        output.drop_without_applying_deltas();
+
+        let center_after = memory.detached().unwrap();
+        assert!(scroll_before_policy > 0.0);
+        assert!(scroll_after_policy.abs() < f32::EPSILON);
+        assert!((memory.zoom() - f64::from(super::MAX_VIEW_ZOOM)).abs() < f64::EPSILON);
+        assert!((center_after.x() - center_before.x()).abs() < f64::EPSILON);
+        assert!((center_after.y() - center_before.y()).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1173,26 +1310,65 @@ mod tests {
         for x in 0..8 {
             let _piece = tiles.at(walkers::TileId { zoom: 4, x, y: 6 });
         }
+        tiles.schedule_requests();
 
         assert_eq!(tiles.requests.len(), super::MAX_IN_FLIGHT);
-        assert_eq!(tiles.pending.len(), super::MAX_IN_FLIGHT);
+        assert_eq!(tiles.pending_len(), super::MAX_IN_FLIGHT);
+    }
+
+    #[test]
+    fn tile_requests_are_coalesced_and_prioritised_from_the_visible_center() {
+        let mut tiles = TileStore::default();
+        for x in 0..8 {
+            let id = walkers::TileId { zoom: 4, x, y: 6 };
+            let _first = tiles.at(id);
+            let _duplicate = tiles.at(id);
+        }
+
+        tiles.schedule_requests();
+
+        let requested_x = tiles
+            .requests
+            .iter()
+            .map(|request| request.x)
+            .collect::<Vec<_>>();
+        assert_eq!(requested_x.len(), super::MAX_IN_FLIGHT);
+        assert_eq!(&requested_x[..2], &[3, 4]);
+        assert!(!requested_x.contains(&0));
+        assert!(!requested_x.contains(&7));
+    }
+
+    #[test]
+    fn least_recently_used_completed_tiles_are_evicted_at_the_cache_limit() {
+        let mut tiles = TileStore::default();
+        let limit = u32::try_from(super::DECODED_TILE_LIMIT).unwrap();
+        for x in 0..=limit {
+            let id = walkers::TileId { zoom: 9, x, y: 6 };
+            tiles.entries.insert(id, super::TileEntry::Empty);
+            tiles.promote(id);
+        }
+
+        assert_eq!(tiles.entries.len(), super::DECODED_TILE_LIMIT);
+        assert!(!tiles.entries.contains_key(&walkers::TileId {
+            zoom: 9,
+            x: 0,
+            y: 6,
+        }));
     }
 
     #[test]
     fn failed_tiles_retry_with_bounded_backoff() {
-        let mut tiles = TileStore::default();
-        let id = walkers::TileId {
-            zoom: 4,
-            x: 8,
-            y: 6,
-        };
-
-        assert_eq!(tiles.record_failure(id), std::time::Duration::from_secs(1));
-        assert_eq!(tiles.record_failure(id), std::time::Duration::from_secs(2));
-        for _ in 0..8 {
-            let _ignored = tiles.record_failure(id);
+        let mut attempts = 0;
+        let mut delays = Vec::new();
+        for _ in 0..11 {
+            let (failure, delay) = super::Failure::after(attempts);
+            attempts = failure.attempts;
+            delays.push(delay);
         }
-        assert_eq!(tiles.record_failure(id), std::time::Duration::from_secs(30));
+
+        assert_eq!(delays[0], std::time::Duration::from_secs(1));
+        assert_eq!(delays[1], std::time::Duration::from_secs(2));
+        assert_eq!(delays[10], std::time::Duration::from_secs(30));
     }
 
     #[test]
@@ -1204,15 +1380,22 @@ mod tests {
             y: 0,
         };
         assert!(tiles.at(id).is_none());
+        tiles.schedule_requests();
         let request = tiles.requests.pop().unwrap();
         tiles.resolve(
             &egui::Context::default(),
-            super::MapTileResponse::encoded(request, Ok(Vec::new())),
+            super::MapTileResponse {
+                request,
+                result: Ok(super::MapTilePayload::Empty),
+            },
         );
 
         assert!(tiles.at(id).is_none());
         assert!(tiles.requests.is_empty());
-        assert!(tiles.empty.contains(&id));
+        assert!(matches!(
+            tiles.entries.get(&id),
+            Some(super::TileEntry::Empty)
+        ));
     }
 
     #[test]
@@ -1224,17 +1407,104 @@ mod tests {
             y: 6,
         };
         assert!(tiles.at(id).is_none());
+        tiles.schedule_requests();
         let stale = tiles.requests.pop().unwrap();
 
         tiles.set_theme(false);
         assert!(tiles.at(id).is_none());
-        assert!(tiles.pending.contains(&id));
+        tiles.schedule_requests();
+        assert_eq!(tiles.pending_len(), 1);
         tiles.resolve(
             &egui::Context::default(),
-            super::MapTileResponse::encoded(stale, Ok(Vec::new())),
+            super::MapTileResponse {
+                request: stale,
+                result: Ok(super::MapTilePayload::Empty),
+            },
         );
 
-        assert!(tiles.pending.contains(&id));
-        assert!(!tiles.empty.contains(&id));
+        assert_eq!(tiles.pending_len(), 1);
+        assert!(matches!(
+            tiles.entries.get(&id),
+            Some(super::TileEntry::Requested { .. })
+        ));
+    }
+
+    #[test]
+    fn same_theme_from_an_old_generation_cannot_complete_a_new_request() {
+        let mut tiles = TileStore::default();
+        let id = walkers::TileId {
+            zoom: 4,
+            x: 8,
+            y: 6,
+        };
+        assert!(tiles.at(id).is_none());
+        tiles.schedule_requests();
+        let stale = tiles.requests.pop().unwrap();
+
+        tiles.set_theme(false);
+        tiles.set_theme(true);
+        assert!(tiles.at(id).is_none());
+        tiles.schedule_requests();
+        tiles.resolve(
+            &egui::Context::default(),
+            super::MapTileResponse {
+                request: stale,
+                result: Ok(super::MapTilePayload::Empty),
+            },
+        );
+
+        assert_eq!(tiles.pending_len(), 1);
+        assert!(matches!(
+            tiles.entries.get(&id),
+            Some(super::TileEntry::Requested { .. })
+        ));
+    }
+
+    #[test]
+    fn a_success_does_not_hide_another_visible_failed_tile() {
+        let mut tiles = TileStore::default();
+        let failed_id = walkers::TileId {
+            zoom: 4,
+            x: 8,
+            y: 6,
+        };
+        let ready_id = walkers::TileId {
+            zoom: 4,
+            x: 9,
+            y: 6,
+        };
+        assert!(tiles.at(failed_id).is_none());
+        assert!(tiles.at(ready_id).is_none());
+        tiles.schedule_requests();
+        let failed_request = tiles
+            .requests
+            .iter()
+            .copied()
+            .find(|request| request.x == failed_id.x)
+            .unwrap();
+        let ready_request = tiles
+            .requests
+            .iter()
+            .copied()
+            .find(|request| request.x == ready_id.x)
+            .unwrap();
+
+        tiles.resolve(
+            &egui::Context::default(),
+            super::MapTileResponse {
+                request: failed_request,
+                result: Err("provider unavailable".to_owned()),
+            },
+        );
+        assert!(tiles.visible_background_unavailable());
+        tiles.resolve(
+            &egui::Context::default(),
+            super::MapTileResponse {
+                request: ready_request,
+                result: Ok(super::MapTilePayload::Empty),
+            },
+        );
+
+        assert!(tiles.visible_background_unavailable());
     }
 }

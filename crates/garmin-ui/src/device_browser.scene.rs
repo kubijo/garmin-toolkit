@@ -1,3 +1,4 @@
+use crate::SceneStateKey as _;
 use gallery::prelude::*;
 use garmin_color::swatch;
 use garmin_model::device::{DeviceStorageState, StorageCapacity};
@@ -6,21 +7,38 @@ use garmin_service_api::{
     DeviceSnapshot, InspectionState,
 };
 use garmin_ui::{device, device_browser, profile, shell, workspace};
-use std::cell::RefCell;
 
 scene_meta! { title: "Application / Devices / File browser" }
 
 thread_local! {
-    static BROWSER: RefCell<Option<device_browser::Browser>> = const { RefCell::new(None) };
-    static ROOT_BROWSER: RefCell<Option<device_browser::Browser>> = const { RefCell::new(None) };
-    static EMPTY_BROWSER: RefCell<Option<device_browser::Browser>> = const { RefCell::new(None) };
-    static NARROW_BROWSER: RefCell<Option<device_browser::Browser>> = const { RefCell::new(None) };
-    static GENERIC_FILE_BROWSER: RefCell<Option<(device_browser::Browser, u8)>> = const { RefCell::new(None) };
-    static FIT_FILE_BROWSER: RefCell<Option<(device_browser::Browser, u8)>> = const { RefCell::new(None) };
-    static CONTEXT_BROWSER: RefCell<Option<(device_browser::Browser, bool)>> = const { RefCell::new(None) };
-    static CONTEXT_BROWSER_LIGHT: RefCell<Option<(device_browser::Browser, bool)>> = const { RefCell::new(None) };
-    static WINDOW_BROWSER: RefCell<Option<device_browser::Browser>> = const { RefCell::new(None) };
-    static NARROW_WINDOW_BROWSER: RefCell<Option<device_browser::Browser>> = const { RefCell::new(None) };
+    static BROWSERS: crate::SceneState<device_browser::Browser, 6> = const { crate::SceneState::empty() };
+    static SELECTED_BROWSERS: crate::SceneState<(device_browser::Browser, u8), 2> = const { crate::SceneState::empty() };
+    static CONTEXT_BROWSERS: crate::SceneState<(device_browser::Browser, bool), 2> = const { crate::SceneState::empty() };
+}
+
+#[derive(Clone, Copy)]
+#[repr(usize)]
+enum BrowserSlot {
+    Default,
+    Root,
+    Empty,
+    Narrow,
+    Window,
+    NarrowWindow,
+}
+
+#[derive(Clone, Copy)]
+#[repr(usize)]
+enum SelectedBrowserSlot {
+    Generic,
+    Fit,
+}
+
+#[derive(Clone, Copy)]
+#[repr(usize)]
+enum ContextBrowserSlot {
+    Dark,
+    Light,
 }
 
 const INITIAL_DIRECTORY: &str = "Garmin/Activity/History";
@@ -33,8 +51,9 @@ fn populated(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         Stage::Fixed(egui::vec2(960.0, 640.0)).checkerboard(globals.checkerboard()),
         |ui| {
             let intl = globals.intl();
-            BROWSER.with_borrow_mut(|browser| {
-                let browser = browser.get_or_insert_with(|| {
+            BROWSERS.with_scene(
+                BrowserSlot::Default as usize,
+                || {
                     device_browser::Browser::open_directory(
                         catalog(),
                         &intl,
@@ -43,9 +62,11 @@ fn populated(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                         INITIAL_DIRECTORY,
                     )
                     .expect("the gallery catalog and initial directory are valid")
-                });
-                let _ = browser.show(ui, &intl);
-            });
+                },
+                |browser| {
+                    let _ = browser.show(ui, &intl);
+                },
+            );
         },
     );
 }
@@ -57,7 +78,7 @@ fn windowed(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         ui,
         globals,
         egui::vec2(1_280.0, 720.0),
-        &WINDOW_BROWSER,
+        BrowserSlot::Window,
     );
 }
 
@@ -68,7 +89,7 @@ fn compact_window(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals)
         ui,
         globals,
         egui::vec2(640.0, 640.0),
-        &NARROW_WINDOW_BROWSER,
+        BrowserSlot::NarrowWindow,
     );
 }
 
@@ -77,7 +98,7 @@ fn show_window_scene(
     ui: &mut Ui,
     globals: &crate::Globals,
     size: egui::Vec2,
-    state: &'static std::thread::LocalKey<RefCell<Option<device_browser::Browser>>>,
+    slot: BrowserSlot,
 ) {
     stage!(
         ctx,
@@ -123,8 +144,9 @@ fn show_window_scene(
                     let _ = device::show_snapshot(ui, &intl, &devices[0], false);
                 },
             );
-            state.with_borrow_mut(|browser| {
-                let browser = browser.get_or_insert_with(|| {
+            BROWSERS.with_scene(
+                slot as usize,
+                || {
                     device_browser::Browser::open_directory(
                         catalog(),
                         &intl,
@@ -133,9 +155,11 @@ fn show_window_scene(
                         INITIAL_DIRECTORY,
                     )
                     .expect("the gallery catalog and initial directory are valid")
-                });
-                let _ = browser.show_window(ui, &intl);
-            });
+                },
+                |browser| {
+                    let _ = browser.show_window(ui, &intl);
+                },
+            );
         },
     );
 }
@@ -149,18 +173,25 @@ fn storage_root(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         egui::vec2(960.0, 640.0),
         "",
         catalog,
-        &ROOT_BROWSER,
+        BrowserSlot::Root,
     );
 }
 
 #[scene]
 fn selected_generic_file(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
-    show_selected_scene(ctx, ui, globals, "Garmin", 4, &GENERIC_FILE_BROWSER);
+    show_selected_scene(ctx, ui, globals, "Garmin", 4, SelectedBrowserSlot::Generic);
 }
 
 #[scene]
 fn selected_fit_file(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
-    show_selected_scene(ctx, ui, globals, INITIAL_DIRECTORY, 2, &FIT_FILE_BROWSER);
+    show_selected_scene(
+        ctx,
+        ui,
+        globals,
+        INITIAL_DIRECTORY,
+        2,
+        SelectedBrowserSlot::Fit,
+    );
 }
 
 #[scene]
@@ -172,7 +203,7 @@ fn empty_storage(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) 
         egui::vec2(960.0, 640.0),
         "",
         empty_catalog,
-        &EMPTY_BROWSER,
+        BrowserSlot::Empty,
     );
 }
 
@@ -185,7 +216,7 @@ fn narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         egui::vec2(640.0, 640.0),
         INITIAL_DIRECTORY,
         catalog,
-        &NARROW_BROWSER,
+        BrowserSlot::Narrow,
     );
 }
 
@@ -196,7 +227,7 @@ fn show_directory_scene(
     size: egui::Vec2,
     directory: &str,
     fixture: fn() -> DeviceCatalogSnapshot,
-    state: &'static std::thread::LocalKey<RefCell<Option<device_browser::Browser>>>,
+    slot: BrowserSlot,
 ) {
     stage!(
         ctx,
@@ -204,8 +235,9 @@ fn show_directory_scene(
         Stage::Fixed(size).checkerboard(globals.checkerboard()),
         |ui| {
             let intl = globals.intl();
-            state.with_borrow_mut(|browser| {
-                let browser = browser.get_or_insert_with(|| {
+            BROWSERS.with_scene(
+                slot as usize,
+                || {
                     device_browser::Browser::open_directory(
                         fixture(),
                         &intl,
@@ -214,9 +246,11 @@ fn show_directory_scene(
                         directory,
                     )
                     .expect("the gallery catalog and initial directory are valid")
-                });
-                let _ = browser.show(ui, &intl);
-            });
+                },
+                |browser| {
+                    let _ = browser.show(ui, &intl);
+                },
+            );
         },
     );
 }
@@ -227,7 +261,7 @@ fn show_selected_scene(
     globals: &crate::Globals,
     directory: &str,
     selection_steps: u8,
-    state: &'static std::thread::LocalKey<RefCell<Option<(device_browser::Browser, u8)>>>,
+    slot: SelectedBrowserSlot,
 ) {
     stage!(
         ctx,
@@ -235,8 +269,9 @@ fn show_selected_scene(
         Stage::Fixed(egui::vec2(960.0, 640.0)).checkerboard(globals.checkerboard()),
         |ui| {
             let intl = globals.intl();
-            state.with_borrow_mut(|state| {
-                let (browser, completed_steps) = state.get_or_insert_with(|| {
+            SELECTED_BROWSERS.with_scene(
+                slot as usize,
+                || {
                     (
                         device_browser::Browser::open_directory(
                             catalog(),
@@ -248,44 +283,46 @@ fn show_selected_scene(
                         .expect("the gallery catalog and initial directory are valid"),
                         0,
                     )
-                });
-                if *completed_steps < selection_steps {
-                    let table_id =
-                        egui::Id::new(("device-explorer-entry-table", browser.device_key()));
-                    ui.memory_mut(|memory| memory.request_focus(table_id));
-                    ui.input_mut(|input| {
-                        input.events.push(egui::Event::Key {
-                            key: egui::Key::ArrowDown,
-                            physical_key: None,
-                            pressed: true,
-                            repeat: false,
-                            modifiers: egui::Modifiers::NONE,
+                },
+                |(browser, completed_steps)| {
+                    if *completed_steps < selection_steps {
+                        let table_id =
+                            egui::Id::new(("device-explorer-entry-table", browser.device_key()));
+                        ui.memory_mut(|memory| memory.request_focus(table_id));
+                        ui.input_mut(|input| {
+                            input.events.push(egui::Event::Key {
+                                key: egui::Key::ArrowDown,
+                                physical_key: None,
+                                pressed: true,
+                                repeat: false,
+                                modifiers: egui::Modifiers::NONE,
+                            });
                         });
-                    });
-                    *completed_steps += 1;
-                    ui.ctx().request_repaint();
-                }
-                let _ = browser.show(ui, &intl);
-            });
+                        *completed_steps += 1;
+                        ui.ctx().request_repaint();
+                    }
+                    let _ = browser.show(ui, &intl);
+                },
+            );
         },
     );
 }
 
 #[scene]
 fn context_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
-    show_context_menu_scene(ctx, ui, globals, &CONTEXT_BROWSER);
+    show_context_menu_scene(ctx, ui, globals, ContextBrowserSlot::Dark);
 }
 
 #[scene]
 fn context_menu_light(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
-    show_context_menu_scene(ctx, ui, globals, &CONTEXT_BROWSER_LIGHT);
+    show_context_menu_scene(ctx, ui, globals, ContextBrowserSlot::Light);
 }
 
 fn show_context_menu_scene(
     ctx: &mut SceneCtx<'_>,
     ui: &mut Ui,
     globals: &crate::Globals,
-    state: &'static std::thread::LocalKey<RefCell<Option<(device_browser::Browser, bool)>>>,
+    slot: ContextBrowserSlot,
 ) {
     stage!(
         ctx,
@@ -293,8 +330,9 @@ fn show_context_menu_scene(
         Stage::Fixed(egui::vec2(960.0, 640.0)).checkerboard(globals.checkerboard()),
         |ui| {
             let intl = globals.intl();
-            state.with_borrow_mut(|state| {
-                let (browser, selected) = state.get_or_insert_with(|| {
+            CONTEXT_BROWSERS.with_scene(
+                slot as usize,
+                || {
                     (
                         device_browser::Browser::open_directory(
                             catalog(),
@@ -306,33 +344,35 @@ fn show_context_menu_scene(
                         .expect("the gallery catalog and initial directory are valid"),
                         false,
                     )
-                });
-                let table_id =
-                    egui::Id::new(("device-explorer-entry-table", "mock:watch-o-matic-9000"));
-                ui.memory_mut(|memory| memory.request_focus(table_id));
-                ui.input_mut(|input| {
-                    input.events.push(egui::Event::Key {
-                        key: if *selected {
-                            egui::Key::F10
-                        } else {
-                            egui::Key::ArrowDown
-                        },
-                        physical_key: None,
-                        pressed: true,
-                        repeat: false,
-                        modifiers: if *selected {
-                            egui::Modifiers::SHIFT
-                        } else {
-                            egui::Modifiers::NONE
-                        },
+                },
+                |(browser, selected)| {
+                    let table_id =
+                        egui::Id::new(("device-explorer-entry-table", "mock:watch-o-matic-9000"));
+                    ui.memory_mut(|memory| memory.request_focus(table_id));
+                    ui.input_mut(|input| {
+                        input.events.push(egui::Event::Key {
+                            key: if *selected {
+                                egui::Key::F10
+                            } else {
+                                egui::Key::ArrowDown
+                            },
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: if *selected {
+                                egui::Modifiers::SHIFT
+                            } else {
+                                egui::Modifiers::NONE
+                            },
+                        });
                     });
-                });
-                let _ = browser.show(ui, &intl);
-                if !*selected {
-                    *selected = true;
-                    ui.ctx().request_repaint();
-                }
-            });
+                    let _ = browser.show(ui, &intl);
+                    if !*selected {
+                        *selected = true;
+                        ui.ctx().request_repaint();
+                    }
+                },
+            );
         },
     );
 }

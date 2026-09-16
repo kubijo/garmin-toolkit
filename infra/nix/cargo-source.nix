@@ -25,8 +25,10 @@ lib.fileset.toSource {
       (workspaceSrc + "/apps/garmin-hass/web/Trunk.toml")
       (workspaceSrc + "/apps/garmin-hass/web/index.html")
       (workspaceSrc + "/apps/garmin-hass/web/initializer.js")
+      (workspaceSrc + "/apps/garmin-hass/web/map-worker.js")
       (lib.fileset.maybeMissing (workspaceSrc + "/.sqlx"))
       (lib.fileset.fileFilter (file: file.hasExt "sql") workspaceSrc)
+      (lib.fileset.fileFilter (file: file.hasExt "wgsl") workspaceSrc)
     ]
     ++ lib.optionals includeGallery [ (craneLib.fileset.commonCargoSources gallery) ]
     ++ extraFilesets

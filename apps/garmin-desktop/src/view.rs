@@ -58,7 +58,7 @@ pub struct Desktop {
     devices: devices::Manager<device_backend::Platform>,
     device_toasts: HashMap<notification::ToastId, String>,
     worker: Worker,
-    map_worker: crate::map_worker::Worker,
+    map_runtime: activity::map_runtime::MapRuntimeHandle,
 }
 
 impl Desktop {
@@ -68,13 +68,16 @@ impl Desktop {
         context: eframe::egui::Context,
         device_platform: device_backend::Platform,
         data_root: &Path,
+        map_renderer: activity::WgpuMapHandle,
     ) -> Result<Self, Error> {
         let intl = translations.formatter(Language::English)?;
         let worker = Worker::spawn(application, context.clone())?;
-        let map_worker = crate::map_worker::Worker::spawn(
-            &data_root.join("cache/activity-map"),
-            context.clone(),
-        )?;
+        let map_worker = crate::map_worker::Worker::spawn(&data_root.join("cache/activity-map"))?;
+        let map_runtime = activity::map_runtime::MapRuntimeHandle::new(
+            map_worker,
+            activity::map_runtime::Renderer::wgpu(map_renderer),
+        );
+        let activity_workspace = activity::Workspace::new(&map_runtime);
         Ok(Self {
             context,
             translations,
@@ -86,7 +89,7 @@ impl Desktop {
             preferences_saving: false,
             selected_activity: 0,
             activity_detail: None,
-            activity_workspace: activity::Workspace::default(),
+            activity_workspace,
             navigation: shell::Navigation::Expanded,
             loaded: false,
             create_profile: None,
@@ -102,7 +105,7 @@ impl Desktop {
             devices: devices::Manager::new(device_platform),
             device_toasts: HashMap::new(),
             worker,
-            map_worker,
+            map_runtime,
         })
     }
 
@@ -175,9 +178,33 @@ impl Desktop {
         drop_active: bool,
     ) {
         let mut device_browser = self.device_browser.take();
-        let mut activity_workspace = std::mem::take(&mut self.activity_workspace);
-        let profile_props = self.profile_props();
+        let profile_props = self
+            .profiles
+            .iter()
+            .map(ProfileView::profile_props)
+            .collect::<Vec<_>>();
         let device_snapshots = self.device_snapshots();
+        let activities_page = ActivitiesPage::new(
+            &self.intl,
+            &self.profiles[profile_index],
+            self.selected_activity,
+            self.activity_detail.as_ref(),
+            &self.import,
+            drop_active,
+        );
+        let profile = self.profiles[profile_index].user.profile();
+        let settings_props = profile_settings::Props {
+            intl: &self.intl,
+            preferences: profile.preferences(),
+            profile: self.profiles[profile_index].profile_props(),
+            picture_enabled: true,
+            disabled: self.preferences_saving,
+        };
+        let notice = self.notice.as_ref();
+        let page = &self.page;
+        let intl = &self.intl;
+        let device_browser_loading = self.device_browser_loading.as_deref();
+        let activity_workspace = &mut self.activity_workspace;
         let window_copy = WindowCopy::new(&self.intl);
         let window_controls = window_copy.props(ui.ctx());
         let props = workspace::Props {
@@ -192,21 +219,17 @@ impl Desktop {
             window_controls: Some(&window_controls),
         };
         let output = workspace::show(ui, &props, |ui| {
-            if let Some(notice) = &self.notice {
+            if let Some(notice) = notice {
                 notification::show(ui, &notice.props());
                 ui.add_space(12.0);
             }
-            match &self.page {
-                Page::Activities => PageOutput::Activities(self.show_activities_page(
-                    ui,
-                    profile_index,
-                    drop_active,
-                    &mut activity_workspace,
-                )),
-                Page::ProfileSettings => PageOutput::Settings(profile_settings::show(
-                    ui,
-                    &self.profile_settings_props(profile_index),
-                )),
+            match page {
+                Page::Activities => {
+                    PageOutput::Activities(activities_page.show(ui, activity_workspace))
+                }
+                Page::ProfileSettings => {
+                    PageOutput::Settings(profile_settings::show(ui, &settings_props))
+                }
                 Page::Device(key) => {
                     let action = device_snapshots
                         .iter()
@@ -214,9 +237,9 @@ impl Desktop {
                         .and_then(|snapshot| {
                             device::show_snapshot(
                                 ui,
-                                &self.intl,
+                                intl,
                                 snapshot,
-                                self.device_browser_loading.as_deref() == Some(key.as_str()),
+                                device_browser_loading == Some(key.as_str()),
                             )
                         });
                     PageOutput::Device {
@@ -226,7 +249,6 @@ impl Desktop {
                 }
             }
         });
-        self.activity_workspace = activity_workspace;
         let browser_action = match (&self.page, device_browser.as_mut()) {
             (Page::Device(key), Some(browser)) if browser.device_key() == key => {
                 browser.show_window(ui, &self.intl)
@@ -359,76 +381,6 @@ impl Desktop {
         };
         self.device_browser_loading = Some(key);
         self.worker.browse_device(candidate);
-    }
-
-    fn show_activities_page(
-        &self,
-        ui: &mut Ui,
-        profile_index: usize,
-        drop_active: bool,
-        activity_workspace: &mut activity::Workspace,
-    ) -> (Option<file_import::Action>, Option<activity::Action>) {
-        let drop_rect = ui.available_rect_before_wrap();
-        let current_profile = &self.profiles[profile_index];
-        let items = current_profile.activity_props();
-        let detail = self.activity_detail.as_ref().filter(|detail| {
-            current_profile
-                .previews
-                .get(self.selected_activity)
-                .is_some_and(|preview| preview.observation_id() == detail.id)
-        });
-        let recording_key = detail.map(|detail| detail.id.to_string());
-        let no_route = format_message!(&self.intl, default_message: "No recorded route");
-        let no_activities = format_message!(&self.intl, default_message: "No activities yet");
-        let select_activity = format_message!(&self.intl, default_message: "Select an activity");
-        let import_copy = ImportCopy::new(&self.intl, drop_active);
-        let import = file_import::show(
-            ui,
-            &file_import::Props {
-                title: &import_copy.title,
-                description: &import_copy.description,
-                files_label: &import_copy.files,
-                folder_label: &import_copy.folder,
-                drop_active,
-                enabled: !self.import.busy(),
-            },
-        );
-        ui.add_space(12.0);
-        show_import_status(ui, &self.intl, &self.import);
-        if self.import.visible() {
-            ui.add_space(12.0);
-        }
-        let selected = activity_workspace.show(
-            ui,
-            &self.intl,
-            &activity::WorkspaceProps {
-                items: &items,
-                presentations: &current_profile.activities,
-                selected: (!items.is_empty()).then_some(self.selected_activity),
-                recording: detail.map(|detail| &detail.recording),
-                recording_key: recording_key.as_deref(),
-                units: current_profile.user.profile().preferences().unit_system(),
-                empty_list: &no_activities,
-                empty_detail: &select_activity,
-                no_route: &no_route,
-            },
-        );
-        if drop_active {
-            file_import::drop_overlay(ui, drop_rect, &import_copy.description);
-        }
-        (import, selected)
-    }
-
-    fn profile_settings_props(&self, profile_index: usize) -> profile_settings::Props<'_> {
-        let profile = self.profiles[profile_index].user.profile();
-        let preferences = profile.preferences();
-        profile_settings::Props {
-            intl: &self.intl,
-            preferences,
-            profile: self.profiles[profile_index].profile_props(),
-            picture_enabled: true,
-            disabled: self.preferences_saving,
-        }
     }
 
     fn device_snapshots(&self) -> Vec<DeviceSnapshot> {
@@ -926,7 +878,9 @@ impl Desktop {
             }
             Ok(worker::DeviceBrowserOutcome::FitPreview { target, preview }) => {
                 self.notice = None;
-                self.device_fit_preview = Some(device_fit_preview::Preview::new(target, preview));
+                let fit_preview =
+                    device_fit_preview::Preview::new(target, preview, &self.map_runtime);
+                self.device_fit_preview = Some(fit_preview);
             }
             Ok(worker::DeviceBrowserOutcome::FitImported { item, profiles }) => {
                 self.import = ImportStatus::default();
@@ -1189,7 +1143,6 @@ impl Desktop {
 
 impl eframe::App for Desktop {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
-        self.process_map_tiles(ui.ctx());
         self.process_events();
         self.process_devices(ui.ctx());
         self.handle_quit_input(ui.ctx());
@@ -1214,41 +1167,9 @@ impl eframe::App for Desktop {
         self.show_create_profile(ui);
         self.show_avatar_editor(ui);
         self.show_device_fit_preview(ui);
-        self.request_map_tiles();
         self.show_quit_confirmation(ui);
         self.show_toasts(ui.ctx());
         crate::window::resize(ui);
-    }
-}
-
-impl Desktop {
-    fn process_map_tiles(&mut self, context: &Context) {
-        for response in self.map_worker.drain().collect::<Vec<_>>() {
-            match response.target {
-                crate::map_worker::Target::Activity => {
-                    self.activity_workspace
-                        .resolve_map_tile(context, response.tile);
-                }
-                crate::map_worker::Target::FitPreview => {
-                    if let Some(preview) = self.device_fit_preview.as_mut() {
-                        preview.resolve_map_tile(context, response.tile);
-                    }
-                }
-            }
-        }
-    }
-
-    fn request_map_tiles(&mut self) {
-        for request in self.activity_workspace.take_map_tile_requests() {
-            self.map_worker
-                .request(crate::map_worker::Target::Activity, request);
-        }
-        if let Some(preview) = self.device_fit_preview.as_mut() {
-            for request in preview.take_map_tile_requests() {
-                self.map_worker
-                    .request(crate::map_worker::Target::FitPreview, request);
-            }
-        }
     }
 }
 
@@ -1554,6 +1475,90 @@ impl ImportStatus {
 
     const fn finish(&mut self) {
         self.phase = ImportPhase::Finished;
+    }
+}
+
+struct ActivitiesPage<'a> {
+    intl: &'a Intl,
+    profile: &'a ProfileView,
+    selected_activity: usize,
+    detail: Option<&'a ActivityDetailSnapshot>,
+    import: &'a ImportStatus,
+    drop_active: bool,
+}
+
+impl<'a> ActivitiesPage<'a> {
+    fn new(
+        intl: &'a Intl,
+        profile: &'a ProfileView,
+        selected_activity: usize,
+        detail: Option<&'a ActivityDetailSnapshot>,
+        import: &'a ImportStatus,
+        drop_active: bool,
+    ) -> Self {
+        let detail = detail.filter(|detail| {
+            profile
+                .previews
+                .get(selected_activity)
+                .is_some_and(|preview| preview.observation_id() == detail.id)
+        });
+        Self {
+            intl,
+            profile,
+            selected_activity,
+            detail,
+            import,
+            drop_active,
+        }
+    }
+
+    fn show(
+        &self,
+        ui: &mut Ui,
+        workspace: &mut activity::Workspace,
+    ) -> (Option<file_import::Action>, Option<activity::Action>) {
+        let drop_rect = ui.available_rect_before_wrap();
+        let items = self.profile.activity_props();
+        let recording_key = self.detail.map(|detail| detail.id.to_string());
+        let no_route = format_message!(self.intl, default_message: "No recorded route");
+        let no_activities = format_message!(self.intl, default_message: "No activities yet");
+        let select_activity = format_message!(self.intl, default_message: "Select an activity");
+        let import_copy = ImportCopy::new(self.intl, self.drop_active);
+        let import = file_import::show(
+            ui,
+            &file_import::Props {
+                title: &import_copy.title,
+                description: &import_copy.description,
+                files_label: &import_copy.files,
+                folder_label: &import_copy.folder,
+                drop_active: self.drop_active,
+                enabled: !self.import.busy(),
+            },
+        );
+        ui.add_space(12.0);
+        show_import_status(ui, self.intl, self.import);
+        if self.import.visible() {
+            ui.add_space(12.0);
+        }
+        let selected = workspace.show(
+            ui,
+            self.intl,
+            &activity::WorkspaceProps {
+                items: &items,
+                presentations: &self.profile.activities,
+                selected: (!items.is_empty()).then_some(self.selected_activity),
+                recording: self.detail.map(|detail| &detail.recording),
+                recording_key: recording_key.as_deref(),
+                units: self.profile.user.profile().preferences().unit_system(),
+                empty_list: &no_activities,
+                empty_detail: &select_activity,
+                no_route: &no_route,
+            },
+        );
+        if self.drop_active {
+            file_import::drop_overlay(ui, drop_rect, &import_copy.description);
+        }
+        (import, selected)
     }
 }
 

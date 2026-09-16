@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 bytes.workspace = true
 camino.workspace = true
-eframe = { workspace = true, features = ["default_fonts", "glow"] }
+eframe = { workspace = true, features = ["default_fonts", "wgpu"] }
 futures-util.workspace = true
 garmin-i18n.workspace = true
 garmin-model.workspace = true
@@ -25,9 +25,10 @@ image.workspace = true
 rfd = { workspace = true, features = ["file-handle-inner"] }
 remoc = { workspace = true, features = ["js"] }
 tokio-wasm-io.workspace = true
+tracing.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { workspace = true, features = ["Blob", "Document", "Element", "File", "HtmlAnchorElement", "HtmlCanvasElement", "HtmlElement", "Location", "Node", "Response", "Window", "console"] }
+web-sys = { workspace = true, features = ["Blob", "Document", "Element", "ErrorEvent", "File", "HtmlAnchorElement", "HtmlCanvasElement", "HtmlElement", "Location", "MessageEvent", "Node", "Response", "Window", "Worker", "console"] }
 websocket-web.workspace = true
 
 [lints]
