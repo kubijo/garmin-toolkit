@@ -13,35 +13,17 @@ run mode:
 
     exec just in-shell cargo run --locked -p garmin-desktop "${features[@]}"
 
-# Record a symbolized production-shaped Samply profile; close the app to finish the capture.
-profile mode OUT='.tmp/profiles/garmin-desktop.json.gz':
-    #!/usr/bin/env bash
-    set -euo pipefail
+# Pre-warm the exact optimized binary used by a profiling capture.
+profile-build mode:
+    @just in-shell python infra/python/desktop_profile.py build {{ quote(mode) }}
 
-    case {{ quote(mode) }} in
-        production) features=() ;;
-        demo) features=(--features demo) ;;
-        *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
-    esac
+# Record immutable Samply/runtime evidence and derive one enriched profile; close the app to finish.
+profile mode REPORT='00-latest' *samply_args:
+    @shift 2; exec just in-shell python infra/python/desktop_profile.py record {{ quote(mode) }} {{ quote(REPORT) }} -- "$@"
 
-    profile_path={{ quote(OUT) }}
-    if [[ "$profile_path" != /* ]]; then
-        profile_path={{ quote(repository_root) }}/"$profile_path"
-    fi
-    mkdir -p "$(dirname "$profile_path")"
-
-    RUSTFLAGS="${RUSTFLAGS:+${RUSTFLAGS} }-C force-frame-pointers=yes" \
-        just in-shell cargo build --locked --profile profiling -p garmin-desktop "${features[@]}"
-    exec just in-shell samply record \
-        --save-only \
-        --output "$profile_path" \
-        --profile-name "Garmin Toolkit desktop ({{ mode }})" \
-        --reuse-threads \
-        -- .tmp/cargo-target/profiling/garmin-desktop
-
-# Open an existing Samply capture in the local profiler UI.
-profile-load PROFILE='.tmp/profiles/garmin-desktop.json.gz':
-    just in-shell samply load {{ quote(PROFILE) }}
+# Open a named enriched report in the local profiler UI.
+profile-load REPORT='00-latest':
+    just in-shell samply load {{ quote(repository_root) }}/.tmp/profiles/{{ quote(REPORT) }}/combined.json.gz
 
 # Write the selected AppImage to dist.
 appimage mode:

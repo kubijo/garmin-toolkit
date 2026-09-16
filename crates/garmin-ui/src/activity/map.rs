@@ -12,7 +12,7 @@ use garmin_service_api::{ActivityRecordingSnapshot, ActivitySampleSnapshot};
 use walkers::{Map, MapMemory, Tiles, lon_lat, sources::Attribution};
 
 use super::{
-    map_runtime::{MapRuntimeHandle, MapSurfaceFrame, MapSurfaceHandle},
+    map_runtime::{MapPerformanceSample, MapRuntimeHandle, MapSurfaceFrame, MapSurfaceHandle},
     map_style,
     route_index::RouteIndex,
 };
@@ -123,7 +123,8 @@ impl ActivityMap {
             queued_upload_bytes: rendered.scene.queued_upload_bytes,
             uploaded_bytes: rendered.scene.uploaded_bytes,
         });
-        attribution(ui, &scene.attribution(), performance.as_deref());
+        surface.record_performance(performance.sample);
+        attribution(ui, &scene.attribution(), performance.diagnostics.as_deref());
         Output {
             hovered: rendered.interaction.hovered,
             clicked: rendered.interaction.clicked,
@@ -914,11 +915,13 @@ struct MapPerfSample {
     uploaded_bytes: usize,
 }
 
+struct FrameTimingOutput {
+    sample: MapPerformanceSample,
+    diagnostics: Option<String>,
+}
+
 impl FrameTiming {
-    fn sample(&mut self, sample: MapPerfSample) -> Option<String> {
-        if !cfg!(debug_assertions) {
-            return None;
-        }
+    fn sample(&mut self, sample: MapPerfSample) -> FrameTimingOutput {
         let MapPerfSample {
             ui_elapsed,
             scene_milliseconds,
@@ -933,21 +936,45 @@ impl FrameTiming {
             uploaded_bytes,
         } = sample;
         let now = Instant::now();
-        let elapsed = self.previous.replace(now).map(|previous| now - previous);
-        if let Some(elapsed) = elapsed.filter(|elapsed| *elapsed <= Duration::from_millis(250)) {
+        let elapsed = self
+            .previous
+            .replace(now)
+            .map(|previous| now - previous)
+            .filter(|elapsed| *elapsed <= Duration::from_millis(250));
+        if let Some(elapsed) = elapsed {
             let milliseconds = elapsed.as_secs_f32() * 1_000.0;
             self.smoothed_milliseconds =
                 Some(self.smoothed_milliseconds.map_or(milliseconds, |current| {
                     current.mul_add(0.85, milliseconds * 0.15)
                 }));
         }
+        let sample = MapPerformanceSample {
+            frame_milliseconds: elapsed.map(|elapsed| elapsed.as_secs_f32() * 1_000.0),
+            ui_milliseconds: ui_elapsed.as_secs_f32() * 1_000.0,
+            scene_milliseconds,
+            route_query_microseconds,
+            label_milliseconds,
+            label_backlog,
+            stale_work,
+            visible_tiles,
+            ready_tiles,
+            pending_tiles,
+            queued_upload_bytes,
+            uploaded_bytes,
+        };
+        if !cfg!(debug_assertions) {
+            return FrameTimingOutput {
+                sample,
+                diagnostics: None,
+            };
+        }
         self.ui_milliseconds
             .push_back(ui_elapsed.as_secs_f32() * 1_000.0);
         if self.ui_milliseconds.len() > 120 {
             self.ui_milliseconds.pop_front();
         }
-        let (ui_p50, ui_p95) = percentiles(&self.ui_milliseconds)?;
-        self.smoothed_milliseconds
+        let diagnostics = percentiles(&self.ui_milliseconds).and_then(|(ui_p50, ui_p95)| {
+            self.smoothed_milliseconds
             .filter(|milliseconds| *milliseconds > 0.0)
             .map(|milliseconds| {
                 format!(
@@ -955,6 +982,11 @@ impl FrameTiming {
                     1_000.0 / milliseconds,
                 )
             })
+        });
+        FrameTimingOutput {
+            sample,
+            diagnostics,
+        }
     }
 }
 

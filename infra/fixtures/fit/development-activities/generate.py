@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Normalize the pinned trackeR sample activities into publishable demo inputs."""
 
-from __future__ import annotations
-
 import csv
 import gzip
 import hashlib

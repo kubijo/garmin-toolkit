@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use camino::Utf8Path;
@@ -27,7 +27,7 @@ use garmin_ui::{
 };
 
 use crate::{
-    Error, device_backend,
+    Error, device_backend, profiling,
     worker::{self, ImportOutcome, Worker},
 };
 
@@ -59,6 +59,7 @@ pub struct Desktop {
     device_toasts: HashMap<notification::ToastId, String>,
     worker: Worker,
     map_runtime: activity::map_runtime::MapRuntimeHandle,
+    profiling: profiling::RuntimeMetricsRecorder,
 }
 
 impl Desktop {
@@ -69,6 +70,7 @@ impl Desktop {
         device_platform: device_backend::Platform,
         data_root: &Path,
         map_renderer: activity::WgpuMapHandle,
+        profiling: profiling::RuntimeMetricsRecorder,
     ) -> Result<Self, Error> {
         let intl = translations.formatter(Language::English)?;
         let worker = Worker::spawn(application, context.clone())?;
@@ -76,7 +78,8 @@ impl Desktop {
         let map_runtime = activity::map_runtime::MapRuntimeHandle::new(
             map_worker,
             activity::map_runtime::Renderer::wgpu(map_renderer),
-        );
+        )
+        .with_metrics(profiling.clone());
         let activity_workspace = activity::Workspace::new(&map_runtime);
         Ok(Self {
             context,
@@ -106,6 +109,7 @@ impl Desktop {
             device_toasts: HashMap::new(),
             worker,
             map_runtime,
+            profiling,
         })
     }
 
@@ -1143,6 +1147,7 @@ impl Desktop {
 
 impl eframe::App for Desktop {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
+        let started = Instant::now();
         self.process_events();
         self.process_devices(ui.ctx());
         self.handle_quit_input(ui.ctx());
@@ -1170,6 +1175,8 @@ impl eframe::App for Desktop {
         self.show_quit_confirmation(ui);
         self.show_toasts(ui.ctx());
         crate::window::resize(ui);
+        self.profiling
+            .record_desktop_frame(started.elapsed().as_secs_f32() * 1_000.0);
     }
 }
 

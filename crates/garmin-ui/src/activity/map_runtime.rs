@@ -27,6 +27,90 @@ pub use platform::Backend;
 
 type SharedBackend = Shared<dyn Backend>;
 
+/// One rendered activity-map frame, expressed as profiler-friendly measurements.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct MapPerformanceSample {
+    /// Time since the previous rendered map frame, when the map was continuously active.
+    pub frame_milliseconds: Option<f32>,
+    /// CPU time spent in the map's immediate-mode UI pass.
+    pub ui_milliseconds: f32,
+    /// CPU time spent acquiring and publishing the render scene.
+    pub scene_milliseconds: f32,
+    /// CPU time spent querying the route spatial index.
+    pub route_query_microseconds: f32,
+    /// CPU time spent preparing the current label layout.
+    pub label_milliseconds: f32,
+    /// Whether label preparation is waiting for worker completion.
+    pub label_backlog: usize,
+    /// Total stale asynchronous results discarded by this surface.
+    pub stale_work: u64,
+    /// Tiles intersecting the current viewport.
+    pub visible_tiles: usize,
+    /// Prepared tiles available to the scene.
+    pub ready_tiles: usize,
+    /// Tile requests awaiting completion.
+    pub pending_tiles: usize,
+    /// Bytes of prepared GPU data still awaiting upload.
+    pub queued_upload_bytes: usize,
+    /// Bytes uploaded during this frame.
+    pub uploaded_bytes: usize,
+}
+
+/// CPU duration of one WGPU callback phase.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct MapRenderPerformanceSample {
+    /// WGPU callback phase being measured.
+    pub phase: MapRenderPhase,
+    /// CPU time spent in that callback.
+    pub milliseconds: f32,
+}
+
+/// Named WGPU callback phases emitted by the activity map.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MapRenderPhase {
+    /// Resource preparation and queue writes before the render pass.
+    Prepare,
+    /// Render-pass command submission for tiles and routes.
+    Draw,
+}
+
+/// Host-owned destination for activity-map performance measurements.
+pub trait MapMetricsSink: Send + Sync {
+    /// Record one map frame without delaying rendering.
+    fn record(&self, sample: MapPerformanceSample);
+
+    /// Record one renderer callback without delaying submission.
+    fn record_render(&self, _sample: MapRenderPerformanceSample) {}
+}
+
+struct DiscardMapMetrics;
+
+impl MapMetricsSink for DiscardMapMetrics {
+    fn record(&self, _sample: MapPerformanceSample) {}
+}
+
+#[derive(Clone)]
+pub(super) struct MapMetrics(Arc<dyn MapMetricsSink>);
+
+impl MapMetrics {
+    fn discard() -> Self {
+        Self(Arc::new(DiscardMapMetrics))
+    }
+
+    fn new(metrics: impl MapMetricsSink + 'static) -> Self {
+        Self(Arc::new(metrics))
+    }
+
+    fn record(&self, sample: MapPerformanceSample) {
+        self.0.record(sample);
+    }
+
+    pub(super) fn record_render(&self, sample: MapRenderPerformanceSample) {
+        self.0.record_render(sample);
+    }
+}
+
 /// Coordinates and presentation state for one runtime-owned tile request.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TileCoordinates {
@@ -63,6 +147,7 @@ impl TileCoordinates {
 #[derive(Clone)]
 pub struct MapRuntimeHandle {
     backend: SharedBackend,
+    metrics: MapMetrics,
     renderer: Renderer,
 }
 
@@ -71,7 +156,7 @@ pub struct MapRuntimeHandle {
 pub struct Renderer(Arc<dyn RendererFactory>);
 
 trait RendererFactory: Send + Sync {
-    fn painter(&self) -> Box<dyn ScenePainter>;
+    fn painter(&self, metrics: MapMetrics) -> Box<dyn ScenePainter>;
     fn prepare_tile(&self, id: walkers::TileId, tile: walkers::Tile) -> PreparedTile;
     fn prepare_browser_tile(
         &self,
@@ -108,8 +193,8 @@ impl Renderer {
 struct WgpuRenderer(super::map::WgpuMapHandle);
 
 impl RendererFactory for WgpuRenderer {
-    fn painter(&self) -> Box<dyn ScenePainter> {
-        Box::new(super::map::gpu_map::GpuMap::new(&self.0))
+    fn painter(&self, metrics: MapMetrics) -> Box<dyn ScenePainter> {
+        Box::new(super::map::gpu_map::GpuMap::new(&self.0, metrics))
     }
 
     fn prepare_tile(&self, id: walkers::TileId, tile: walkers::Tile) -> PreparedTile {
@@ -128,7 +213,7 @@ impl RendererFactory for WgpuRenderer {
 struct SoftwareRenderer;
 
 impl RendererFactory for SoftwareRenderer {
-    fn painter(&self) -> Box<dyn ScenePainter> {
+    fn painter(&self, _metrics: MapMetrics) -> Box<dyn ScenePainter> {
         Box::new(SoftwarePainter)
     }
 
@@ -213,15 +298,24 @@ impl MapRuntimeHandle {
     pub fn new(backend: impl Backend + 'static, renderer: Renderer) -> Self {
         Self {
             backend: Shared::new(backend),
+            metrics: MapMetrics::discard(),
             renderer,
         }
+    }
+
+    /// Attach a host-owned performance sink to every map surface made by this runtime.
+    #[must_use]
+    pub fn with_metrics(mut self, metrics: impl MapMetricsSink + 'static) -> Self {
+        self.metrics = MapMetrics::new(metrics);
+        self
     }
 
     pub(super) fn surface(&self) -> MapSurfaceHandle {
         let renderer = self.renderer.clone();
         MapSurfaceHandle {
             backend: Shared::clone(&self.backend),
-            painter: renderer.0.painter(),
+            metrics: self.metrics.clone(),
+            painter: renderer.0.painter(self.metrics.clone()),
             renderer,
             responses: ResponseQueue::default(),
             tiles: TileStore::default(),
@@ -231,6 +325,7 @@ impl MapRuntimeHandle {
 
 pub(super) struct MapSurfaceHandle {
     backend: SharedBackend,
+    metrics: MapMetrics,
     painter: Box<dyn ScenePainter>,
     renderer: Renderer,
     responses: ResponseQueue,
@@ -238,6 +333,10 @@ pub(super) struct MapSurfaceHandle {
 }
 
 impl MapSurfaceHandle {
+    pub(super) fn record_performance(&self, sample: MapPerformanceSample) {
+        self.metrics.record(sample);
+    }
+
     /// Begin one scoped demand frame that always dispatches on drop.
     pub(super) fn frame<'a>(
         &'a mut self,

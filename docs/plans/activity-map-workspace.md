@@ -126,10 +126,16 @@ current staged GPU work in place; do not restore it merely to separate commits.
 - On the bundled 67.92 km activity at roughly 1100 by 720 pixels, sustained dragging, wheel zoom, and inertial movement
   target 60 FPS with UI CPU p95 below 16.7 ms. No tile-arrival or label-publication stall may exceed 33 ms, and map
   loading must not alter the camera trajectory.
-- Capture native interaction with `just desktop::profile demo`; close the application after representative panning,
-  wheel zoom, and inertia to write `.tmp/profiles/garmin-desktop.json.gz`, then inspect it with
-  `just desktop::profile-load`. The profiling Cargo profile retains release optimization, debug information, and frame
-  pointers without changing shipped release artifacts.
+- Capture native interaction with `just desktop::profile demo 00-baseline`; close the application after representative
+  panning, wheel zoom, and inertia, then inspect it with `just desktop::profile-load 00-baseline`. Captures require
+  unrestricted Linux perf events rather than silently accepting incomplete samples. The first accurate profiling build
+  recompiles the optimized dependency graph with frame pointers and line-table debug information, and may be pre-warmed
+  with `just desktop::profile-build demo`; interrupted builds retain Cargo's completed work and create no report. Each
+  named report retains the raw Samply profile, presymbolication data, runtime measurements, and provenance manifest
+  unchanged, then derives a separate `combined.json.gz` with desktop frame timing, map UI/scene/query/label timing,
+  render callback timing, worker backlog, tile state, upload pressure, and stale-work counters. Cancellation after
+  capture starts is a terminal report state and preserves raw evidence without a traceback. The profiling Cargo profile
+  retains release optimization, debug information, and frame pointers without changing shipped release artifacts.
 - Keep the route stable, clipped, speed-coloured, and synchronized with charts at every zoom while tiles arrive. Verify
   missing-background behavior by leaving unprepared regions blank rather than falling back to synchronous work.
 - Do not launch a GUI from unattended development or validation commands. Interactive performance evidence is user-run
