@@ -89,7 +89,7 @@ impl BrowserRouteTask {
     }
 }
 
-pub(super) const ROUTE_PROTOCOL_VERSION: u8 = 1;
+pub(super) const ROUTE_PROTOCOL_VERSION: u8 = 2;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub(super) struct RouteRequestWire {
@@ -117,6 +117,9 @@ pub(super) struct BrowserRouteSegment {
     pub(super) end: [f32; 2],
     pub(super) speed: [f32; 2],
     pub(super) sample_indices: [f32; 2],
+    pub(super) start_join: [f32; 2],
+    pub(super) end_join: [f32; 2],
+    pub(super) caps: [f32; 2],
 }
 
 /// Project and segment an activity route inside the dedicated browser worker.
@@ -157,6 +160,9 @@ pub(super) fn encode_browser_route(bytes: &[u8]) -> Result<Vec<u8>, String> {
                     end: segment.end,
                     speed: segment.speed,
                     sample_indices: segment.sample_indices,
+                    start_join: segment.start_join,
+                    end_join: segment.end_join,
+                    caps: segment.caps,
                 })
                 .collect(),
         ),
@@ -200,6 +206,9 @@ pub(super) fn decode_browser_route(bytes: &[u8]) -> Result<Option<PreparedCpuRou
             end: segment.end,
             speed: segment.speed,
             sample_indices: segment.sample_indices,
+            start_join: segment.start_join,
+            end_join: segment.end_join,
+            caps: segment.caps,
         })
         .collect::<Vec<_>>();
     if segments.iter().any(|segment| {
@@ -209,6 +218,9 @@ pub(super) fn decode_browser_route(bytes: &[u8]) -> Result<Option<PreparedCpuRou
             .chain(segment.end)
             .chain(segment.speed)
             .chain(segment.sample_indices)
+            .chain(segment.start_join)
+            .chain(segment.end_join)
+            .chain(segment.caps)
             .any(|value| !value.is_finite())
     }) {
         return Err("prepared map route contained non-finite values".to_owned());
@@ -260,15 +272,31 @@ pub(super) fn build_cpu_route(
         .windows(2)
         .enumerate()
         .filter_map(|(offset, pair)| match (pair[0], pair[1]) {
-            (Some((start, start_speed)), Some((end, end_speed))) => Some(RouteSegment {
-                start: [(start[0] - origin[0]) as f32, (start[1] - origin[1]) as f32],
-                end: [(end[0] - origin[0]) as f32, (end[1] - origin[1]) as f32],
-                speed: [start_speed, end_speed],
-                sample_indices: [
-                    (sample_offset + offset) as f32,
-                    (sample_offset + offset + 1) as f32,
-                ],
-            }),
+            (Some((start, start_speed)), Some((end, end_speed))) => {
+                let previous = offset
+                    .checked_sub(1)
+                    .and_then(|previous| points[previous].map(|point| point.0));
+                let next = points
+                    .get(offset + 2)
+                    .and_then(|point| point.map(|point| point.0));
+                let normal = segment_normal(start, end);
+                Some(RouteSegment {
+                    start: [(start[0] - origin[0]) as f32, (start[1] - origin[1]) as f32],
+                    end: [(end[0] - origin[0]) as f32, (end[1] - origin[1]) as f32],
+                    speed: [start_speed, end_speed],
+                    sample_indices: [
+                        (sample_offset + offset) as f32,
+                        (sample_offset + offset + 1) as f32,
+                    ],
+                    start_join: previous
+                        .map_or(normal, |previous| join_offset(previous, start, end)),
+                    end_join: next.map_or(normal, |next| join_offset(start, end, next)),
+                    caps: [
+                        f32::from(u8::from(previous.is_none())),
+                        f32::from(u8::from(next.is_none())),
+                    ],
+                })
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -276,4 +304,43 @@ pub(super) fn build_cpu_route(
         origin,
         route: Arc::new(CpuRoute { segments }),
     })
+}
+
+fn segment_normal(start: [f64; 2], end: [f64; 2]) -> [f32; 2] {
+    let direction = [end[0] - start[0], end[1] - start[1]];
+    let length = direction[0].hypot(direction[1]);
+    if length <= f64::EPSILON {
+        return [0.0; 2];
+    }
+    [
+        gpu_coordinate(-direction[1] / length),
+        gpu_coordinate(direction[0] / length),
+    ]
+}
+
+fn join_offset(previous: [f64; 2], point: [f64; 2], next: [f64; 2]) -> [f32; 2] {
+    const MITER_LIMIT: f64 = 2.0;
+
+    let incoming = segment_normal(previous, point).map(f64::from);
+    let outgoing = segment_normal(point, next).map(f64::from);
+    let sum = [incoming[0] + outgoing[0], incoming[1] + outgoing[1]];
+    let sum_length = sum[0].hypot(sum[1]);
+    if sum_length <= f64::EPSILON {
+        return segment_normal(point, next);
+    }
+    let miter = [sum[0] / sum_length, sum[1] / sum_length];
+    let denominator = (miter[0] * outgoing[0] + miter[1] * outgoing[1]).abs();
+    let scale = (1.0 / denominator.max(f64::EPSILON)).min(MITER_LIMIT);
+    [
+        gpu_coordinate(miter[0] * scale),
+        gpu_coordinate(miter[1] * scale),
+    ]
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "normalized route geometry is deliberately stored as f32 GPU data"
+)]
+fn gpu_coordinate(value: f64) -> f32 {
+    value as f32
 }

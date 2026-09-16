@@ -7,10 +7,10 @@ use std::{
 };
 
 use egui::{Color32, Rect, Shape, pos2};
-use walkers::{MapMemory, Position, TileId};
+use walkers::TileId;
 
 use super::{BrowserText, CpuTileMesh, VisibleTile};
-use crate::activity::map::{WALKERS_TILE_SIZE, mercator_y};
+use crate::activity::map::{WALKERS_TILE_SIZE, camera::MapCamera};
 
 const CAMERA_SETTLE_DELAY: Duration = Duration::from_millis(120);
 
@@ -22,11 +22,10 @@ pub(super) struct LabelView {
 }
 
 impl LabelView {
-    pub(super) fn new(memory: &MapMemory, followed_position: Position, viewport: Rect) -> Self {
-        let center = memory.detached().unwrap_or(followed_position);
+    pub(super) fn new(camera: &MapCamera, viewport: Rect) -> Self {
         Self {
-            center: [center.x() / 360.0 + 0.5, mercator_y(center.y())],
-            zoom: memory.zoom(),
+            center: camera.center_normalized(),
+            zoom: camera.zoom(),
             viewport,
         }
     }
@@ -336,8 +335,9 @@ fn label_request(task: &LabelTask) -> LabelRequestWire {
     for tile in &task.visible {
         let tile_size =
             f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(task.view.zoom - f64::from(tile.id.zoom));
+        let tile_x = crate::activity::map::camera::tile_x_near_center(tile.id, task.view.center[0]);
         let left = f64::from(task.view.viewport.center().x)
-            + f64::from(tile.id.x).mul_add(tile_size, -task.view.center[0] * world_size);
+            + tile_x.mul_add(tile_size, -task.view.center[0] * world_size);
         let top = f64::from(task.view.viewport.center().y)
             + f64::from(tile.id.y).mul_add(tile_size, -task.view.center[1] * world_size);
         let scale = tile_size as f32 / 512.0;
@@ -415,8 +415,9 @@ pub(super) fn build_label_result(task: &LabelTask) -> LabelResult {
     for tile in &task.visible {
         let tile_size =
             f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(task.view.zoom - f64::from(tile.id.zoom));
+        let tile_x = crate::activity::map::camera::tile_x_near_center(tile.id, task.view.center[0]);
         let left = f64::from(task.view.viewport.center().x)
-            + f64::from(tile.id.x).mul_add(tile_size, -task.view.center[0] * world_size);
+            + tile_x.mul_add(tile_size, -task.view.center[0] * world_size);
         let top = f64::from(task.view.viewport.center().y)
             + f64::from(tile.id.y).mul_add(tile_size, -task.view.center[1] * world_size);
         let scale = tile_size as f32 / 512.0;

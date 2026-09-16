@@ -2,8 +2,6 @@
 
 use std::sync::Arc;
 
-use walkers::Tiles as _;
-
 #[path = "map_runtime/browser_worker.rs"]
 mod browser_worker;
 #[path = "map_runtime/platform.rs"]
@@ -11,7 +9,10 @@ mod platform;
 
 use platform::{ResponseQueue, Shared};
 
-use super::map::{MapTileDecoder, MapTileResponse, PreparedTile, TileStore};
+use super::map::{
+    MapTileDecoder, MapTileResponse, PreparedTile, TileStore,
+    camera::{MapCamera, MapViewDemand},
+};
 
 pub use super::map::MapTileDecoder as TileDecoder;
 pub use super::map::gpu_map::{BrowserLabelTask, BrowserRouteTask};
@@ -30,8 +31,12 @@ type SharedBackend = Shared<dyn Backend>;
 /// One rendered activity-map frame, expressed as profiler-friendly measurements.
 #[derive(Clone, Copy, Debug, serde::Serialize)]
 pub struct MapPerformanceSample {
-    /// Time since the previous rendered map frame, when the map was continuously active.
+    /// Time since the previous rendered map frame.
     pub frame_milliseconds: Option<f32>,
+    /// Time since the previous map frame when that frame requested continued camera motion.
+    pub interaction_frame_milliseconds: Option<f32>,
+    /// Whether dragging, zooming, or inertial camera movement affected this frame.
+    pub camera_active: bool,
     /// CPU time spent in the map's immediate-mode UI pass.
     pub ui_milliseconds: f32,
     /// CPU time spent acquiring and publishing the render scene.
@@ -239,8 +244,8 @@ trait ScenePainter {
 #[derive(Clone, Copy)]
 pub(super) struct LabelFrame<'a> {
     pub ui: &'a egui::Ui,
-    pub memory: &'a walkers::MapMemory,
-    pub followed_position: walkers::Position,
+    pub scene: MapScene<'a>,
+    pub camera: &'a MapCamera,
     pub viewport: egui::Rect,
     pub backend: &'a dyn Backend,
 }
@@ -248,8 +253,7 @@ pub(super) struct LabelFrame<'a> {
 #[derive(Clone, Copy)]
 pub(super) struct SceneFrame<'frame, 'recording> {
     pub scene: MapScene<'frame>,
-    pub memory: &'frame walkers::MapMemory,
-    pub followed_position: walkers::Position,
+    pub camera: &'frame MapCamera,
     pub viewport: egui::Rect,
     pub context: &'frame egui::Context,
     pub route: &'frame super::map::gpu_map::RouteScene<'recording>,
@@ -285,7 +289,55 @@ impl ScenePainter for SoftwarePainter {
         None
     }
 
-    fn paint_labels(&mut self, _frame: LabelFrame<'_>) {}
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "software fallback transforms bounded f64 world coordinates into egui f32 points"
+    )]
+    fn paint_labels(&mut self, frame: LabelFrame<'_>) {
+        let LabelFrame {
+            ui,
+            scene,
+            camera,
+            viewport,
+            ..
+        } = frame;
+        let world_size = super::map::camera::world_size(camera.zoom());
+        let center = camera.center_normalized();
+        let center_pixels = [center[0] * world_size, center[1] * world_size];
+        let painter = ui.painter().with_clip_rect(viewport);
+        for (id, prepared) in scene.renderable_tiles() {
+            let walkers::Tile::Vector { shapes, texts } = &prepared.tile else {
+                continue;
+            };
+            let tile_size = f64::from(super::map::tile_store::WALKERS_TILE_SIZE)
+                * 2.0_f64.powf(camera.zoom() - f64::from(id.zoom));
+            let tile_x = super::map::camera::tile_x_near_center(*id, center[0]);
+            let left =
+                f64::from(viewport.center().x) + tile_x.mul_add(tile_size, -center_pixels[0]);
+            let top = f64::from(viewport.center().y)
+                + f64::from(id.y).mul_add(tile_size, -center_pixels[1]);
+            let scaling = (tile_size / f64::from(super::map::tile_store::SOURCE_TILE_SIZE)) as f32;
+            let transform = egui::emath::TSTransform {
+                scaling,
+                translation: egui::vec2(left as f32, top as f32),
+            };
+            for mut shape in shapes.clone() {
+                shape.transform(transform);
+                preserve_stroke_width(&mut shape, scaling);
+                painter.add(shape);
+            }
+            for text in texts {
+                let position = text.position * scaling + transform.translation;
+                painter.text(
+                    position,
+                    egui::Align2::CENTER_CENTER,
+                    &text.text,
+                    egui::FontId::proportional(text.font_size),
+                    text.text_color,
+                );
+            }
+        }
+    }
 
     fn update(&mut self, _frame: SceneFrame<'_, '_>) -> super::map::gpu_map::ScenePerf {
         super::map::gpu_map::ScenePerf::default()
@@ -337,73 +389,18 @@ impl MapSurfaceHandle {
         self.metrics.record(sample);
     }
 
-    /// Begin one scoped demand frame that always dispatches on drop.
-    pub(super) fn frame<'a>(
-        &'a mut self,
+    /// Apply completed work, replace camera demand, and dispatch a bounded latest-view batch.
+    pub(super) fn submit_view(
+        &mut self,
         context: &egui::Context,
         dark_mode: bool,
-    ) -> MapSurfaceFrame<'a> {
-        self.begin_frame(context, dark_mode);
-        MapSurfaceFrame {
-            surface: self,
-            context: context.clone(),
-        }
-    }
-
-    pub(super) fn gpu_enabled(&self) -> bool {
-        self.painter.is_gpu()
-    }
-
-    pub(super) fn paint_callback(&self, rect: egui::Rect) -> Option<egui::Shape> {
-        self.painter.paint_callback(rect)
-    }
-
-    pub(super) fn paint_labels(
-        &mut self,
-        ui: &egui::Ui,
-        memory: &walkers::MapMemory,
-        followed_position: walkers::Position,
-        viewport: egui::Rect,
+        demand: &MapViewDemand,
     ) {
-        self.painter.paint_labels(LabelFrame {
-            ui,
-            memory,
-            followed_position,
-            viewport,
-            backend: self.backend.as_ref(),
-        });
-    }
-
-    pub(super) fn update_scene(
-        &mut self,
-        memory: &walkers::MapMemory,
-        followed_position: walkers::Position,
-        viewport: egui::Rect,
-        context: &egui::Context,
-        route: &super::map::gpu_map::RouteScene<'_>,
-    ) -> super::map::gpu_map::ScenePerf {
-        self.painter.update(SceneFrame {
-            scene: MapScene { tiles: &self.tiles },
-            memory,
-            followed_position,
-            viewport,
-            context,
-            route,
-            backend: self.backend.as_ref(),
-        })
-    }
-
-    /// Apply completed work and begin collecting the current frame's tile demand.
-    fn begin_frame(&mut self, context: &egui::Context, dark_mode: bool) {
         for response in self.responses.drain() {
             self.tiles.resolve(context, response);
         }
         self.tiles.set_theme(dark_mode);
-        self.tiles.begin_frame();
-    }
-
-    /// Dispatch the bounded request batch produced by the current frame's demand.
-    fn finish_frame(&mut self, context: &egui::Context) {
+        self.tiles.apply_demand(demand);
         self.tiles.schedule_requests();
         for request in self.tiles.take_requests() {
             self.backend.submit(TileTask {
@@ -415,73 +412,92 @@ impl MapSurfaceHandle {
         }
     }
 
-    /// Read-only scene state published by this surface.
+    /// Apply completions without creating tile demand (for coordinate-free recordings).
+    pub(super) fn poll(&mut self, context: &egui::Context, dark_mode: bool) {
+        for response in self.responses.drain() {
+            self.tiles.resolve(context, response);
+        }
+        self.tiles.set_theme(dark_mode);
+    }
+
+    pub(super) fn gpu_enabled(&self) -> bool {
+        self.painter.is_gpu()
+    }
+
+    pub(super) fn paint_callback(&self, rect: egui::Rect) -> Option<egui::Shape> {
+        self.painter.paint_callback(rect)
+    }
+
+    pub(super) fn paint_labels(&mut self, ui: &egui::Ui, camera: &MapCamera, viewport: egui::Rect) {
+        self.painter.paint_labels(LabelFrame {
+            ui,
+            scene: MapScene { tiles: &self.tiles },
+            camera,
+            viewport,
+            backend: self.backend.as_ref(),
+        });
+    }
+
+    pub(super) fn update_scene(
+        &mut self,
+        camera: &MapCamera,
+        viewport: egui::Rect,
+        context: &egui::Context,
+        route: &super::map::gpu_map::RouteScene<'_>,
+    ) -> super::map::gpu_map::ScenePerf {
+        self.painter.update(SceneFrame {
+            scene: MapScene { tiles: &self.tiles },
+            camera,
+            viewport,
+            context,
+            route,
+            backend: self.backend.as_ref(),
+        })
+    }
+
     pub(super) const fn scene(&self) -> MapScene<'_> {
         MapScene { tiles: &self.tiles }
     }
 }
 
-pub(super) struct MapSurfaceFrame<'a> {
-    surface: &'a mut MapSurfaceHandle,
-    context: egui::Context,
-}
-
-impl std::ops::Deref for MapSurfaceFrame<'_> {
-    type Target = MapSurfaceHandle;
-
-    fn deref(&self) -> &Self::Target {
-        self.surface
+fn preserve_stroke_width(shape: &mut egui::Shape, scaling: f32) {
+    if scaling == 0.0 {
+        return;
+    }
+    match shape {
+        egui::Shape::Vec(shapes) => {
+            for shape in shapes {
+                preserve_stroke_width(shape, scaling);
+            }
+        }
+        egui::Shape::Path(path) => path.stroke.width /= scaling,
+        egui::Shape::LineSegment { stroke, .. } => stroke.width /= scaling,
+        egui::Shape::Circle(circle) => circle.stroke.width /= scaling,
+        egui::Shape::Ellipse(ellipse) => ellipse.stroke.width /= scaling,
+        egui::Shape::Rect(rect) => rect.stroke.width /= scaling,
+        egui::Shape::QuadraticBezier(curve) => curve.stroke.width /= scaling,
+        egui::Shape::CubicBezier(curve) => curve.stroke.width /= scaling,
+        egui::Shape::Noop
+        | egui::Shape::Text(_)
+        | egui::Shape::Mesh(_)
+        | egui::Shape::Callback(_) => {}
     }
 }
 
-impl std::ops::DerefMut for MapSurfaceFrame<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.surface
-    }
-}
-
-impl walkers::Tiles for MapSurfaceFrame<'_> {
-    fn at(&mut self, tile_id: walkers::TileId) -> Option<walkers::TilePiece> {
-        self.surface.at(tile_id)
-    }
-
-    fn attribution(&self) -> walkers::sources::Attribution {
-        self.surface.attribution()
-    }
-
-    fn tile_size(&self) -> u32 {
-        self.surface.tile_size()
-    }
-}
-
-impl Drop for MapSurfaceFrame<'_> {
-    fn drop(&mut self) {
-        self.surface.finish_frame(&self.context);
-    }
-}
-
-impl walkers::Tiles for MapSurfaceHandle {
-    fn at(&mut self, tile_id: walkers::TileId) -> Option<walkers::TilePiece> {
-        self.tiles.at(tile_id)
-    }
-
-    fn attribution(&self) -> walkers::sources::Attribution {
-        self.tiles.attribution()
-    }
-
-    fn tile_size(&self) -> u32 {
-        self.tiles.tile_size()
-    }
-}
-
-/// Immutable view of a surface's most recently published tile scene.
+/// Borrowed view of tiles renderable for the current camera demand.
 #[derive(Clone, Copy)]
 pub(super) struct MapScene<'a> {
     tiles: &'a TileStore,
 }
 
 impl<'a> MapScene<'a> {
-    pub(super) fn gpu_tiles(
+    pub(super) fn renderable_tiles(
+        self,
+    ) -> impl Iterator<Item = (&'a walkers::TileId, &'a PreparedTile)> {
+        self.tiles.renderable_tiles()
+    }
+
+    pub(super) fn renderable_gpu_tiles(
         self,
     ) -> impl Iterator<
         Item = (
@@ -489,7 +505,7 @@ impl<'a> MapScene<'a> {
             &'a std::sync::Arc<super::map::PreparedGpuTile>,
         ),
     > {
-        self.tiles.gpu_tiles()
+        self.tiles.renderable_gpu_tiles()
     }
 
     pub(super) fn background_unavailable(self) -> bool {
@@ -502,10 +518,6 @@ impl<'a> MapScene<'a> {
 
     pub(super) fn pending_tiles(self) -> usize {
         self.tiles.pending_len()
-    }
-
-    pub(super) fn attribution(self) -> walkers::sources::Attribution {
-        self.tiles.attribution()
     }
 }
 
@@ -572,6 +584,11 @@ mod tests {
         }
     }
 
+    fn demand(ids: impl IntoIterator<Item = walkers::TileId>) -> MapViewDemand {
+        let visible = ids.into_iter().collect::<Vec<_>>();
+        MapViewDemand::from_tiles(&visible)
+    }
+
     #[test]
     fn surface_coalesces_demand_and_dispatches_center_tiles_first() {
         let backend = RecordingBackend::default();
@@ -579,14 +596,11 @@ mod tests {
         let runtime = MapRuntimeHandle::new(backend, Renderer::software());
         let mut surface = runtime.surface();
         let context = egui::Context::default();
-        {
-            let mut frame = surface.frame(&context, true);
-            for x in 0..8 {
-                let id = walkers::TileId { zoom: 4, x, y: 6 };
-                let _first = frame.at(id);
-                let _duplicate = frame.at(id);
-            }
-        }
+        surface.submit_view(
+            &context,
+            true,
+            &demand((0..8).map(|x| walkers::TileId { zoom: 4, x, y: 6 })),
+        );
 
         let requests = submitted
             .lock()
@@ -595,7 +609,7 @@ mod tests {
             .copied()
             .collect::<Vec<_>>();
         assert_eq!(requests.len(), 6);
-        assert_eq!([requests[0].x, requests[1].x], [3, 4]);
+        assert_eq!([requests[0].x, requests[1].x], [4, 3]);
         assert!(!requests.iter().any(|request| request.x == 0));
         assert!(!requests.iter().any(|request| request.x == 7));
     }
@@ -605,22 +619,20 @@ mod tests {
         let runtime = MapRuntimeHandle::new(CompletingBackend, Renderer::software());
         let mut surface = runtime.surface();
         let context = egui::Context::default();
-        {
-            let mut frame = surface.frame(&context, true);
-            let _tile = frame.at(walkers::TileId {
-                zoom: 4,
-                x: 8,
-                y: 6,
-            });
-        }
-        assert_eq!(surface.scene().pending_tiles(), 1);
+        let current = demand([walkers::TileId {
+            zoom: 4,
+            x: 8,
+            y: 6,
+        }]);
+        surface.submit_view(&context, true, &current);
+        assert!(surface.scene().pending_tiles() > 0);
 
-        assert_eq!(surface.scene().pending_tiles(), 1);
+        assert!(surface.scene().pending_tiles() > 0);
 
-        {
-            let frame = surface.frame(&context, true);
-            assert_eq!(frame.scene().pending_tiles(), 0);
-        }
+        surface.submit_view(&context, true, &current);
+        assert!(surface.scene().pending_tiles() > 0);
+        surface.submit_view(&context, true, &current);
+        assert_eq!(surface.scene().pending_tiles(), 0);
     }
 
     #[test]
@@ -631,9 +643,7 @@ mod tests {
         let mut surface = runtime.surface();
         let context = egui::Context::default();
 
-        {
-            let _frame = surface.frame(&context, true);
-        }
+        surface.poll(&context, true);
 
         assert!(submitted.lock().unwrap().is_empty());
     }
