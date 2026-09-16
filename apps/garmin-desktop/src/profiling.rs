@@ -16,6 +16,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 const REPORT_ENVIRONMENT: &str = "GARMIN_TOOLKIT_RUNTIME_METRICS";
+const METRICS_SCHEMA_VERSION: u8 = 2;
 
 /// Cloneable application-owned metrics destination.
 #[derive(Clone, Default)]
@@ -92,7 +93,7 @@ impl RuntimeMetricsRecorder {
             &mut writer,
             &Header {
                 kind: "header",
-                schema_version: 1,
+                schema_version: METRICS_SCHEMA_VERSION,
                 started_unix_milliseconds,
             },
         )?;
@@ -212,6 +213,8 @@ mod tests {
     fn sample() -> MapPerformanceSample {
         MapPerformanceSample {
             frame_milliseconds: Some(16.0),
+            interaction_frame_milliseconds: Some(16.0),
+            camera_active: true,
             ui_milliseconds: 2.0,
             scene_milliseconds: 0.5,
             route_query_microseconds: 12.0,
@@ -242,7 +245,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0]["kind"], "header");
-        assert_eq!(rows[0]["schema_version"], 1);
+        assert_eq!(rows[0]["schema_version"], METRICS_SCHEMA_VERSION);
         assert_eq!(rows[1]["kind"], "map_frame");
         assert_eq!(rows[1]["visible_tiles"], 6);
         assert_eq!(rows[2]["kind"], "desktop_frame");

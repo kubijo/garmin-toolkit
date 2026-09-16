@@ -13,6 +13,8 @@ use garmin_i18n::Translations;
 use garmin_services::Application;
 use thiserror::Error;
 
+const MULTISAMPLING: u16 = 4;
+
 mod device_backend;
 mod map_worker;
 mod mode;
@@ -48,6 +50,7 @@ pub fn run() -> Result<(), Error> {
         mode::WINDOW_TITLE,
         eframe::NativeOptions {
             viewport,
+            multisampling: MULTISAMPLING,
             ..Default::default()
         },
         Box::new(move |creation| {
@@ -56,7 +59,9 @@ pub fn run() -> Result<(), Error> {
                 .wgpu_render_state
                 .as_ref()
                 .ok_or(Error::MapRendererUnavailable)
-                .map(garmin_ui::activity::install_wgpu_map)?;
+                .map(|render_state| {
+                    garmin_ui::activity::install_wgpu_map(render_state, u32::from(MULTISAMPLING))
+                })?;
             Ok(Box::new(view::Desktop::new(
                 application,
                 translations,

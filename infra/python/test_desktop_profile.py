@@ -1,8 +1,7 @@
-"""Tests for guarded desktop profile capture and non-destructive enrichment."""
-
 import gzip
 import io
 import json
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +11,7 @@ from unittest.mock import patch
 
 from desktop_profile import (
     COMBINED_NAME,
+    CURRENT_METRICS_SCHEMA_VERSION,
     MANIFEST_NAME,
     METRICS_NAME,
     PROFILE_NAME,
@@ -23,14 +23,13 @@ from desktop_profile import (
     file_digest,
     finalize,
     main,
+    report_summary,
     require_perf_access,
     run_checked,
 )
 
 
 class DesktopProfileTests(unittest.TestCase):
-    """Exercise the evidence-preserving parts without starting a GUI or profiler."""
-
     def report(self) -> tuple[tempfile.TemporaryDirectory[str], Path]:
         temporary = tempfile.TemporaryDirectory()
         report = Path(temporary.name)
@@ -69,6 +68,8 @@ class DesktopProfileTests(unittest.TestCase):
                 'kind': 'map_frame',
                 'elapsed_milliseconds': 10.0,
                 'frame_milliseconds': None,
+                'interaction_frame_milliseconds': None,
+                'camera_active': False,
                 'ui_milliseconds': 2.0,
                 'scene_milliseconds': 0.5,
                 'route_query_microseconds': 12.0,
@@ -85,6 +86,8 @@ class DesktopProfileTests(unittest.TestCase):
                 'kind': 'map_frame',
                 'elapsed_milliseconds': 20.0,
                 'frame_milliseconds': 16.0,
+                'interaction_frame_milliseconds': 16.0,
+                'camera_active': True,
                 'ui_milliseconds': 3.0,
                 'scene_milliseconds': 0.75,
                 'route_query_microseconds': 14.0,
@@ -120,15 +123,55 @@ class DesktopProfileTests(unittest.TestCase):
 
         count = finalize(report)
 
-        self.assertEqual(count, 16)
+        self.assertEqual(count, 18)
         self.assertEqual(raw_hashes, {name: file_digest(report / name) for name in raw_hashes})
         with gzip.open(report / COMBINED_NAME, 'rt') as source:
             combined = json.load(source)
-        self.assertEqual(len(combined['counters']), 16)
+        self.assertEqual(len(combined['counters']), 18)
         frame_counter = next(counter for counter in combined['counters'] if counter['name'] == 'Map frame interval')
         self.assertEqual(frame_counter['samples']['time'], [25.0])
         backlog = next(counter for counter in combined['counters'] if counter['name'] == 'Label backlog')
         self.assertEqual(backlog['samples']['count'], [1.0, -1.0])
+
+    def test_report_summary_puts_copyable_commands_on_their_own_lines(self) -> None:
+        temporary, report = self.report()
+        self.addCleanup(temporary.cleanup)
+        finalize(report)
+
+        lines = report_summary(report).splitlines()
+        analysis_command = shlex.join(('just', 'desktop::profile-analyze', report.name))
+        combined_command = shlex.join(('samply', 'load', str((report / COMBINED_NAME).resolve())))
+        raw_command = shlex.join(('samply', 'load', str((report / PROFILE_NAME).resolve())))
+
+        self.assertIn(analysis_command, lines)
+        self.assertIn(combined_command, lines)
+        self.assertIn(raw_command, lines)
+        self.assertEqual(
+            lines[lines.index(combined_command) - 1], 'Open enriched profile (CPU samples + runtime counters)'
+        )
+        self.assertEqual(lines[lines.index(raw_command) - 1], 'Open raw Samply capture')
+
+    def test_loads_current_metrics_schema(self) -> None:
+        temporary, report = self.report()
+        self.addCleanup(temporary.cleanup)
+        metrics = report / METRICS_NAME
+        rows = [json.loads(line) for line in metrics.read_text().splitlines()]
+        rows[0]['schema_version'] = CURRENT_METRICS_SCHEMA_VERSION
+        metrics.write_text('\n'.join(json.dumps(row) for row in rows) + '\n')
+
+        self.assertEqual(finalize(report), 18)
+
+    def test_current_metrics_schema_requires_interaction_fields(self) -> None:
+        temporary, report = self.report()
+        self.addCleanup(temporary.cleanup)
+        metrics = report / METRICS_NAME
+        rows = [json.loads(line) for line in metrics.read_text().splitlines()]
+        rows[0]['schema_version'] = CURRENT_METRICS_SCHEMA_VERSION
+        del rows[3]['camera_active']
+        metrics.write_text('\n'.join(json.dumps(row) for row in rows) + '\n')
+
+        with self.assertRaisesRegex(ProfileError, 'boolean camera_active'):
+            finalize(report)
 
     def test_refuses_to_replace_an_existing_combined_profile(self) -> None:
         temporary, report = self.report()

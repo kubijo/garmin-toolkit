@@ -44,15 +44,27 @@ current staged GPU work in place; do not restore it merely to separate commits.
 
 ## Rendering isolation refactor
 
+### Landed boundary
+
+- The activity UI owns one coherent `MapCamera`; `walkers::Map`, `MapMemory`, UI-side `Tiles::at` traversal, and
+  destructor-triggered request dispatch have been removed. Camera projection, pointer-anchored hard-bounded zoom,
+  panning velocity, inertia, and dateline wrapping now share that state machine.
+- The UI submits a compact `MapViewDemand` camera snapshot. The surface runtime derives visible XYZ coverage and a
+  one-tile prefetch ring, replaces stale unstarted demand, prioritizes visible tiles from the viewport center, and
+  renders only the current visible set rather than every cached zoom level.
+- Remaining work in this section is still real: the host contract exposes tile tasks and decoders, response installation
+  still occurs at the surface boundary on the event-loop thread, scenes are not yet atomically published immutable
+  `Arc`s, and browser GPU uploads still create a complete tile synchronously under an 8 MiB byte cap instead of the
+  specified chunk and time budgets.
+
 ### Current contention and target boundary
 
-- Native tile disk/network access, MVT decoding, styling, and initial geometry tessellation are already off-thread, but
-  the UI still drains and installs responses, scans and sorts visible tiles, lays out labels, projects and hit-tests the
-  complete route, creates new WGPU buffers during paint preparation, and reconstructs all chart widgets on every map
-  repaint. Browser MVT decoding and tessellation still run on its main thread.
-- Inertial movement is not currently classified as dragging. It therefore rebuilds labels for every changing camera;
-  `walkers::place_texts` performs font layout and a progressively growing collision scan. A hovered pointer also causes
-  full-route projection and hit testing on every inertial frame.
+- Native tile disk/network access, MVT decoding, styling, initial geometry tessellation, route preparation, and label
+  preparation are already off-thread. The event-loop surface boundary still drains completions, derives a small tile
+  coverage set, and admits browser uploads; browser uploads still create complete WGPU resources synchronously.
+- Inertial movement is classified as camera motion and label work waits for the camera to settle. Route hover uses the
+  persistent uniform-grid index instead of projecting and hit-testing the complete route; the remaining concern is
+  scene publication and upload work at the event-loop boundary rather than route-query complexity.
 - eframe performs application update, egui tessellation, and paint submission sequentially on its event-loop thread.
   After this refactor that thread may perform only input and camera integration, constant-time route queries, light
   controls and markers, one camera-uniform update, immutable-scene acquisition, and draw submission.
@@ -89,14 +101,20 @@ current staged GPU work in place; do not restore it merely to separate commits.
   labels may appear live during movement without making the camera wait for them.
 - Treat a map-only `OffscreenCanvas` renderer as a worthwhile future slice if profiling after this work shows that GPU
   upload or eframe painting still causes visible web stalls. Moving the entire eframe application into a worker is
-  disproportionately expensive and is not necessary to fix map interaction.
+  disproportionately expensive and is not necessary to fix map interaction. Native 4x antialiasing currently uses
+  eframe's existing full-window multisampled WGPU target and resolve path, so it requires no private offscreen
+  compositor but does charge every native UI frame for the multisampled target. Eframe's web painter remains
+  single-sampled; implementing map-only web MSAA would therefore trigger the map-only `OffscreenCanvas` slice rather
+  than moving the complete application.
 - Render tile positions from immutable tile coordinates and the current camera in the shader. Do not rewrite per-tile
   transform buffers, scan the full cache, or retessellate geometry when the camera changes.
 
 ### Routes, labels, and input
 
 - Prepare a route once per activity or selected-lap revision as world-space GPU geometry. Store normalized speed per
-  route vertex and apply the speed colour ramp in the shader; camera movement must not retessellate or deform it.
+  route vertex and apply the speed colour ramp in the shader; camera movement must not retessellate or deform it. Build
+  shared, miter-limited join offsets during route preparation and analytically antialias both lateral edges and exposed
+  caps so independent segment rectangles cannot leave cracks or translucent overlap wedges at route bends.
 - Apply an explicit map-rectangle scissor in the native and browser WGPU backends so tiles, routes, labels, and cursor
   overlays cannot paint into charts or sidebars. Project start, end, selected-sample, and highlighted-lap overlays from
   the same camera snapshot used by the map scene.
@@ -136,6 +154,22 @@ current staged GPU work in place; do not restore it merely to separate commits.
   render callback timing, worker backlog, tile state, upload pressure, and stale-work counters. Cancellation after
   capture starts is a terminal report state and preserves raw evidence without a traceback. The profiling Cargo profile
   retains release optimization, debug information, and frame pointers without changing shipped release artifacts.
+- Summarize a capture headlessly with `just desktop::profile-analyze 00-baseline` and compare phases with
+  `just desktop::profile-compare 00-baseline 01-antialiasing`. The analyzer resolves Samply's preserved symbol sidecar,
+  including inline frames, reports per-stack inclusive and self CPU samples, verifies every artifact against the
+  manifest, and refuses incompatible comparisons by default. Idle redraw gaps remain separate from uncapped intervals
+  following dragging, wheel zoom, or inertial camera movement. At least 120 samples and two seconds of camera motion are
+  required before evaluating the 16.7 ms/33 ms interaction gate.
+- The user-captured `01-antialiasing` report measured 433 interaction intervals across 7.25 seconds: p95 was 17.544 ms,
+  maximum was 34.638 ms, complete desktop UI p95 was 1.022 ms, and map UI p95 was 0.709 ms. It therefore narrowly failed
+  the strict interaction gate despite remaining visually smooth. Its sampled CPU/core comparison with `00-baseline` is
+  only directional because the captures used different user-driven durations.
+- The clean `02-route-aa` capture after route joins and corrected interaction-tail telemetry covered 1,006 interaction
+  intervals across 17.1 seconds. Interaction p95 was 21.086 ms and the maximum was 34.196 ms, while complete desktop UI
+  p95 remained 1.145 ms, map UI p95 was 0.838 ms, render draw p95 was 0.049 ms, and sampled CPU averaged 0.291 cores.
+  The strict cadence gate still fails, but the application-side measurements and the user's smooth subjective result do
+  not implicate map CPU or draw submission as the limiting work. Retain native 4x MSAA and investigate window-system or
+  presentation cadence only if interaction becomes visibly uneven.
 - Keep the route stable, clipped, speed-coloured, and synchronized with charts at every zoom while tiles arrive. Verify
   missing-background behavior by leaving unprepared regions blank rather than falling back to synchronous work.
 - Do not launch a GUI from unattended development or validation commands. Interactive performance evidence is user-run

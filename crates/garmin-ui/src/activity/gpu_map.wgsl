@@ -22,13 +22,20 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) sample_index: f32,
+    @location(2) route_edge_distance: f32,
+    @location(3) route_cap_distances: vec2<f32>,
 };
+
+const ROUTE_ANTIALIAS_MARGIN_POINTS: f32 = 2.0;
 
 struct RouteSegment {
     start: vec2<f32>,
     end: vec2<f32>,
     speed: vec2<f32>,
     sample_indices: vec2<f32>,
+    start_join: vec2<f32>,
+    end_join: vec2<f32>,
+    caps: vec2<f32>,
 };
 
 struct RouteSourceUniform {
@@ -93,6 +100,8 @@ fn vertex_main(
     output.position = clip_position(point);
     output.color = color;
     output.sample_index = -1.0;
+    output.route_edge_distance = 0.0;
+    output.route_cap_distances = vec2<f32>(1000000.0);
     return output;
 }
 
@@ -127,9 +136,17 @@ fn route_vertex(
     let end = segment.end * world_size() + origin_pixels;
     let direction = end - start;
     let length = max(length(direction), 0.0001);
-    let normal = vec2<f32>(-direction.y, direction.x) / length;
+    let tangent = direction / length;
     let width = route_style.width_opacity_mode_padding.x;
-    let point = mix(start, end, corner.x) + normal * corner.y * width * 0.5;
+    let half_width = width * 0.5;
+    let edge_distance = corner.y * (half_width + ROUTE_ANTIALIAS_MARGIN_POINTS);
+    let join = mix(segment.start_join, segment.end_join, corner.x);
+    let cap_offset = mix(
+        -segment.caps.x * ROUTE_ANTIALIAS_MARGIN_POINTS,
+        segment.caps.y * ROUTE_ANTIALIAS_MARGIN_POINTS,
+        corner.x,
+    );
+    let point = mix(start, end, corner.x) + join * edge_distance + tangent * cap_offset;
 
     var color = route_style.fallback;
     let mode = route_style.width_opacity_mode_padding.z;
@@ -145,6 +162,13 @@ fn route_vertex(
     output.position = clip_position(point);
     output.color = vec4<f32>(color.rgb * opacity, color.a * opacity);
     output.sample_index = mix(segment.sample_indices.x, segment.sample_indices.y, corner.x);
+    output.route_edge_distance = edge_distance;
+    let along = mix(-segment.caps.x * ROUTE_ANTIALIAS_MARGIN_POINTS,
+        length + segment.caps.y * ROUTE_ANTIALIAS_MARGIN_POINTS, corner.x);
+    output.route_cap_distances = vec2<f32>(
+        select(1000000.0, along, segment.caps.x > 0.5),
+        select(1000000.0, length - along, segment.caps.y > 0.5),
+    );
     return output;
 }
 
@@ -171,7 +195,20 @@ fn route_fragment_color(output: VertexOutput) -> vec4<f32> {
             || output.sample_index > route_style.index_range_padding.y) {
         discard;
     }
-    return output.color;
+    let half_width = route_style.width_opacity_mode_padding.x * 0.5;
+    let pixel_width = max(fwidth(output.route_edge_distance), 0.0001);
+    let coverage = clamp(
+        (half_width - abs(output.route_edge_distance)) / pixel_width + 0.5,
+        0.0,
+        1.0,
+    );
+    let start_pixel_width = max(fwidth(output.route_cap_distances.x), 0.0001);
+    let end_pixel_width = max(fwidth(output.route_cap_distances.y), 0.0001);
+    let cap_coverage = min(
+        clamp(output.route_cap_distances.x / start_pixel_width + 0.5, 0.0, 1.0),
+        clamp(output.route_cap_distances.y / end_pixel_width + 0.5, 0.0, 1.0),
+    );
+    return output.color * min(coverage, cap_coverage);
 }
 
 @fragment

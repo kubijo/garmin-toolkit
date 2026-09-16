@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import shlex
 import shutil
 import signal
 import subprocess
@@ -26,6 +27,7 @@ METRICS_NAME = 'runtime-metrics.ndjson'
 MANIFEST_NAME = 'manifest.json'
 METRICS_ENVIRONMENT = 'GARMIN_TOOLKIT_RUNTIME_METRICS'
 MANIFEST_SCHEMA_VERSION = 2
+CURRENT_METRICS_SCHEMA_VERSION = 2
 
 
 class ProfileError(RuntimeError):
@@ -216,6 +218,15 @@ COUNTERS = (
     ),
     CounterSpec('Desktop UI', 'Desktop frame timing (ms)', 'ui_milliseconds', 'teal', False, 'desktop_frame'),
     CounterSpec('Map frame interval', 'Map frame timing (ms)', 'frame_milliseconds', 'blue', False, 'map_frame'),
+    CounterSpec(
+        'Interaction frame interval',
+        'Map frame timing (ms)',
+        'interaction_frame_milliseconds',
+        'green',
+        False,
+        'map_frame',
+    ),
+    CounterSpec('Camera active', 'Map interaction', 'camera_active', 'yellow', True, 'map_frame'),
     CounterSpec('Map UI', 'Map frame timing (ms)', 'ui_milliseconds', 'teal', False, 'map_frame'),
     CounterSpec('Scene acquisition', 'Map frame timing (ms)', 'scene_milliseconds', 'green', False, 'map_frame'),
     CounterSpec('Route query', 'Route query (µs)', 'route_query_microseconds', 'purple', False, 'map_frame'),
@@ -339,6 +350,32 @@ def file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def report_summary(report_dir: Path) -> str:
+    """Render a readable handoff whose command lines can be copied verbatim."""
+    artifacts = sorted(path for path in report_dir.iterdir() if path.is_file())
+    name_width = max((len(path.name) for path in artifacts), default=0)
+    combined = (report_dir / COMBINED_NAME).resolve()
+    raw = (report_dir / PROFILE_NAME).resolve()
+    lines = [
+        '',
+        'Profiling report saved',
+        str(report_dir.resolve()),
+        '',
+        'Artifacts',
+        *(f'  {path.name:<{name_width}}  {path.stat().st_size / 1024:9.1f} KiB' for path in artifacts),
+        '',
+        'Analyze report (headless)',
+        shlex.join(('just', 'desktop::profile-analyze', report_dir.name)),
+        '',
+        'Open enriched profile (CPU samples + runtime counters)',
+        shlex.join(('samply', 'load', str(combined))),
+        '',
+        'Open raw Samply capture',
+        shlex.join(('samply', 'load', str(raw))),
+    ]
+    return '\n'.join(lines)
+
+
 def run_manifest(
     mode: str,
     report: str,
@@ -348,6 +385,11 @@ def run_manifest(
 ) -> dict[str, Any]:
     """Capture enough context to reproduce and reject incomparable runs."""
     status = command_output(['git', 'status', '--porcelain=v1'])
+    working_tree_diff = command_output(['git', 'diff', '--binary', '--no-ext-diff'])
+    index_diff = command_output(['git', 'diff', '--cached', '--binary', '--no-ext-diff'])
+
+    def source_digest(diff: str) -> str | None:
+        return hashlib.sha256(diff.encode()).hexdigest() if diff else None
 
     return {
         'schema_version': MANIFEST_SCHEMA_VERSION,
@@ -361,6 +403,8 @@ def run_manifest(
             'commit': command_output(['git', 'rev-parse', 'HEAD']),
             'dirty': bool(status),
             'status': status.splitlines(),
+            'working_tree_diff_sha256': source_digest(working_tree_diff),
+            'index_diff_sha256': source_digest(index_diff),
         },
         'host': {
             'platform': platform.platform(),
@@ -408,7 +452,7 @@ def load_metrics(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         raise ProfileError(f'{path} has no metrics header')
 
     header = rows[0]
-    if header.get('schema_version') != 1:
+    if header.get('schema_version') not in {1, CURRENT_METRICS_SCHEMA_VERSION}:
         raise ProfileError(f'{path} uses an unsupported metrics schema')
 
     samples = rows[1:]
@@ -419,6 +463,17 @@ def load_metrics(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
 
     if not any(sample.get('kind') == 'map_frame' for sample in samples):
         raise ProfileError(f'{path} contains no complete map frames')
+
+    if header.get('schema_version') == CURRENT_METRICS_SCHEMA_VERSION:
+        for sample in samples:
+            if sample.get('kind') != 'map_frame':
+                continue
+            if not isinstance(sample.get('camera_active'), bool):
+                raise ProfileError(f'{path} schema 2 map frame has no boolean camera_active field')
+            if 'interaction_frame_milliseconds' not in sample:
+                raise ProfileError(f'{path} schema 2 map frame has no interaction interval field')
+            if sample['interaction_frame_milliseconds'] is not None:
+                numeric(sample, 'interaction_frame_milliseconds')
 
     elapsed = [numeric(sample, 'elapsed_milliseconds') for sample in samples]
     if elapsed != sorted(elapsed):
@@ -439,6 +494,14 @@ def numeric(row: dict[str, Any], key: str) -> float:
         raise ProfileError(f'metric {key} is not finite')
 
     return number
+
+
+def counter_value(row: dict[str, Any], key: str) -> float:
+    """Project numeric and boolean runtime fields onto Firefox counter values."""
+    value = row.get(key)
+    if isinstance(value, bool):
+        return float(value)
+    return numeric(row, key)
 
 
 def profile_thread(profile: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -533,7 +596,7 @@ def enrich_profile(profile: dict[str, Any], header: dict[str, Any], samples: lis
             continue
 
         times = [offset + numeric(sample, 'elapsed_milliseconds') for sample in present]
-        values = [numeric(sample, spec.field) for sample in present]
+        values = [counter_value(sample, spec.field) for sample in present]
 
         if spec.gauge:
             values = differences(values)
@@ -545,9 +608,7 @@ def enrich_profile(profile: dict[str, Any], header: dict[str, Any], samples: lis
 
 
 def finalize(report_dir: Path) -> int:
-    """
-    Create a separate enriched profile while leaving both raw inputs untouched.
-    """
+    """Create a separate enriched profile while leaving both raw inputs untouched."""
 
     profile_path = report_dir / PROFILE_NAME
     metrics_path = report_dir / METRICS_NAME
@@ -637,14 +698,7 @@ def capture(mode: str, report: str, samply_arguments: Sequence[str]) -> None:
         run.fail(error)
         raise
 
-    print(f'\nSaved guarded profiling report to {report_dir.resolve()}:')
-
-    for path in sorted(report_dir.iterdir()):
-        if path.is_file():
-            print(f'  {path.name:36s} {path.stat().st_size / 1024:9.1f} KiB')
-
-    print(f'\nView: samply load {(report_dir / COMBINED_NAME).resolve()}')
-    print(f'Raw:  samply load {(report_dir / PROFILE_NAME).resolve()}')
+    print(report_summary(report_dir))
 
 
 def build_only(mode: str) -> None:

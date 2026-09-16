@@ -54,10 +54,9 @@ icon_catalog! {
         WARNING => phosphor_svgs::style::regular::WARNING,
         WATCH => phosphor_svgs::style::regular::WATCH,
         WIFI_SLASH => phosphor_svgs::style::regular::WIFI_SLASH,
+        WINDOW_MAXIMIZE => phosphor_svgs::style::bold::SQUARE,
+        WINDOW_RESTORE => phosphor_svgs::style::bold::COPY_SIMPLE,
         X => phosphor_svgs::style::regular::X,
     }
-    local {
-        WINDOW_MAXIMIZE => include_str!("../../assets/icons/window-maximize.svg"),
-        WINDOW_RESTORE => include_str!("../../assets/icons/window-restore.svg"),
-    }
+    local {}
 }

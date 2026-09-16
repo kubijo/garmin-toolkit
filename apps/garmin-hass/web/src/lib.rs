@@ -56,7 +56,7 @@ pub fn start() -> Result<(), JsValue> {
                     let render_state = creation.wgpu_render_state.as_ref().ok_or_else(|| {
                         io::Error::other("eframe did not provide the required WGPU render state")
                     })?;
-                    let map_renderer = activity::install_wgpu_map(render_state);
+                    let map_renderer = activity::install_wgpu_map(render_state, 1);
                     Ok(Box::new(App::new(creation.egui_ctx.clone(), map_renderer)?))
                 }),
             )

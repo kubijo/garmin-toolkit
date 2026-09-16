@@ -5,18 +5,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use egui::{Rect, pos2};
-use walkers::{Tile, TileId, TilePiece, Tiles, sources::Attribution};
+use walkers::{Tile, TileId, sources::Attribution};
 
 use crate::activity::{
+    map::camera::MapViewDemand,
     map::gpu_map,
     map_runtime::{Renderer, TileCoordinates},
 };
 
 pub(super) const DECODED_TILE_LIMIT: usize = 256;
 pub(super) const MAX_IN_FLIGHT: usize = 6;
-const SOURCE_TILE_SIZE: u32 = 512;
-pub(super) const WALKERS_TILE_SIZE: u32 = 256;
+pub(in crate::activity) const SOURCE_TILE_SIZE: u32 = 512;
+pub(in crate::activity) const WALKERS_TILE_SIZE: u32 = 256;
 const MAX_TILE_ZOOM: u8 = 14;
 pub(super) const MAX_VIEW_ZOOM: u8 = MAX_TILE_ZOOM + 1;
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
@@ -147,6 +147,8 @@ pub(in crate::activity) struct TileStore {
     order: VecDeque<TileId>,
     pub(super) requests: Vec<MapTileRequest>,
     visible: HashSet<TileId>,
+    demanded: HashSet<TileId>,
+    demand_center: [f64; 2],
     dark_mode: bool,
     generation: u64,
 }
@@ -166,6 +168,8 @@ impl Default for TileStore {
             order: VecDeque::new(),
             requests: Vec::new(),
             visible: HashSet::new(),
+            demanded: HashSet::new(),
+            demand_center: [0.0; 2],
             dark_mode: true,
             generation: 0,
         }
@@ -188,10 +192,52 @@ impl TileStore {
         self.order.clear();
         self.requests.clear();
         self.visible.clear();
+        self.demanded.clear();
+        self.demand_center = [0.0; 2];
     }
 
-    pub(in crate::activity) fn begin_frame(&mut self) {
+    /// Replace the current camera demand and discard work which has not started yet.
+    pub(in crate::activity) fn apply_demand(&mut self, demand: &MapViewDemand) {
+        let coverage = demand.coverage();
+        self.apply_coverage(&coverage.visible, &coverage.requested, coverage.center);
+    }
+
+    fn apply_coverage(&mut self, visible: &[TileId], requested: &[TileId], center: [f64; 2]) {
         self.visible.clear();
+        self.visible.extend(visible.iter().copied());
+        self.demanded.clear();
+        self.demanded.extend(requested.iter().copied());
+        self.demand_center = center;
+
+        self.entries.retain(|id, entry| {
+            !matches!(entry, TileEntry::Desired { .. }) || self.demanded.contains(id)
+        });
+        for id in requested.iter().copied() {
+            self.desire(id);
+        }
+        for id in visible.iter().copied() {
+            if matches!(
+                self.entries.get(&id),
+                Some(TileEntry::Ready(_) | TileEntry::Empty)
+            ) {
+                self.promote(id);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::activity) fn apply_exact_demand(&mut self, visible: &[TileId]) {
+        let count =
+            f64::from(u32::try_from(visible.len()).expect("test tile demand has a bounded length"));
+        let center = if count == 0.0 {
+            [0.0; 2]
+        } else {
+            [
+                visible.iter().map(|id| f64::from(id.x)).sum::<f64>() / count,
+                visible.iter().map(|id| f64::from(id.y)).sum::<f64>() / count,
+            ]
+        };
+        self.apply_coverage(visible, visible, center);
     }
 
     pub(in crate::activity) fn ready_len(&self) -> usize {
@@ -214,10 +260,10 @@ impl TileStore {
             .any(|id| matches!(self.entries.get(id), Some(TileEntry::Failed(_))))
     }
 
-    pub(in crate::activity) fn gpu_tiles(
+    pub(in crate::activity) fn renderable_gpu_tiles(
         &self,
     ) -> impl Iterator<Item = (&TileId, &std::sync::Arc<gpu_map::PreparedGpuTile>)> {
-        self.entries.iter().filter_map(|(id, entry)| {
+        self.visible_entries().filter_map(|(id, entry)| {
             let TileEntry::Ready(PreparedTile {
                 gpu: Some(tile), ..
             }) = entry
@@ -226,6 +272,23 @@ impl TileStore {
             };
             Some((id, tile))
         })
+    }
+
+    pub(in crate::activity) fn renderable_tiles(
+        &self,
+    ) -> impl Iterator<Item = (&TileId, &PreparedTile)> {
+        self.visible_entries().filter_map(|(id, entry)| {
+            let TileEntry::Ready(tile) = entry else {
+                return None;
+            };
+            Some((id, tile))
+        })
+    }
+
+    fn visible_entries(&self) -> impl Iterator<Item = (&TileId, &TileEntry)> {
+        self.visible
+            .iter()
+            .filter_map(|id| self.entries.get_key_value(id))
     }
 
     pub(in crate::activity) fn resolve(
@@ -325,35 +388,34 @@ impl TileStore {
         if capacity == 0 {
             return;
         }
-        let visible_count = f64::from(
-            u32::try_from(self.visible.len())
-                .expect("visible tile count is bounded by the viewport"),
-        );
-        if visible_count == 0.0 {
+        if self.visible.is_empty() {
             return;
         }
-        let center_x = self.visible.iter().map(|id| f64::from(id.x)).sum::<f64>() / visible_count;
-        let center_y = self.visible.iter().map(|id| f64::from(id.y)).sum::<f64>() / visible_count;
         let mut candidates = self
-            .visible
+            .demanded
             .iter()
             .filter_map(|id| {
                 let TileEntry::Desired { attempts } = self.entries.get(id)? else {
                     return None;
                 };
+                let tile_count = 2.0_f64.powi(i32::from(id.zoom));
+                let x_distance = (f64::from(id.x) - self.demand_center[0]).abs();
+                let wrapped_x_distance = x_distance.min((tile_count - x_distance).abs());
                 let distance =
-                    (f64::from(id.x) - center_x).powi(2) + (f64::from(id.y) - center_y).powi(2);
-                Some((*id, *attempts, distance))
+                    wrapped_x_distance.powi(2) + (f64::from(id.y) - self.demand_center[1]).powi(2);
+                Some((*id, *attempts, self.visible.contains(id), distance))
             })
             .collect::<Vec<_>>();
         candidates.sort_by(|left, right| {
-            left.2
-                .total_cmp(&right.2)
+            right
+                .2
+                .cmp(&left.2)
+                .then_with(|| left.3.total_cmp(&right.3))
                 .then_with(|| right.0.zoom.cmp(&left.0.zoom))
                 .then_with(|| left.0.y.cmp(&right.0.y))
                 .then_with(|| left.0.x.cmp(&right.0.x))
         });
-        for (id, attempts, _distance) in candidates.into_iter().take(capacity) {
+        for (id, attempts, _visible, _distance) in candidates.into_iter().take(capacity) {
             self.entries.insert(
                 id,
                 TileEntry::Requested {
@@ -369,6 +431,32 @@ impl TileStore {
                 self.generation,
             ));
         }
+    }
+
+    fn desire(&mut self, tile_id: TileId) {
+        if tile_id.zoom > MAX_TILE_ZOOM {
+            return;
+        }
+        match self.entries.get(&tile_id) {
+            Some(
+                TileEntry::Ready(_)
+                | TileEntry::Empty
+                | TileEntry::Desired { .. }
+                | TileEntry::Requested { .. },
+            ) => return,
+            Some(TileEntry::Failed(failure)) if Instant::now() < failure.retry_at => return,
+            Some(TileEntry::Failed(_)) | None => {}
+        }
+        let attempts = match self.entries.get(&tile_id) {
+            Some(TileEntry::Failed(failure)) => failure.attempts,
+            _ => 0,
+        };
+        self.entries
+            .insert(tile_id, TileEntry::Desired { attempts });
+    }
+
+    pub(in crate::activity) fn attribution() -> Attribution {
+        map_attribution()
     }
 }
 
@@ -402,34 +490,201 @@ fn map_style(dark_mode: bool) -> walkers::Style {
     } else {
         walkers::Style::openmaptiles_basemap_light()
     };
+
     for layer in &mut style.layers {
-        let walkers::Layer::Symbol {
+        let Some((source_layer, filter)) = source_layer_and_filter(layer) else {
+            continue;
+        };
+        let Some(visibility) = BasemapVisibility::classify(source_layer, filter.as_ref()) else {
+            continue;
+        };
+        visibility.apply(filter);
+    }
+    style
+}
+
+/// Explicit `OpenMapTiles` visibility floors. Walkers otherwise tessellates fractional-width local
+/// detail well before it is legible, which turns city-scale views into a dense hairline mesh.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BasemapVisibility {
+    FromZoom(u8),
+    MajorRoads,
+    MinorRoads,
+    Settlements,
+}
+
+impl BasemapVisibility {
+    fn classify(
+        source_layer: &walkers::SourceLayer,
+        filter: Option<&walkers::Filter>,
+    ) -> Option<Self> {
+        let contains = |value| filter.is_some_and(|filter| json_contains(&filter.0, value));
+
+        if source_layer.matches("building") {
+            return Some(Self::FromZoom(14));
+        }
+
+        if source_layer.matches("transportation") {
+            return if contains("taxiway") {
+                Some(Self::FromZoom(14))
+            } else if contains("runway") {
+                Some(Self::FromZoom(10))
+            } else if ["other", "path", "track"].into_iter().any(contains) {
+                Some(Self::FromZoom(14))
+            } else if ["minor_road", "minor", "tertiary"]
+                .into_iter()
+                .any(contains)
+            {
+                Some(Self::MinorRoads)
+            } else if ["major_road", "primary", "secondary"]
+                .into_iter()
+                .any(contains)
+            {
+                Some(Self::MajorRoads)
+            } else if ["highway", "motorway", "trunk"].into_iter().any(contains) {
+                Some(Self::FromZoom(5))
+            } else if ["rail", "transit"].into_iter().any(contains) {
+                Some(Self::FromZoom(9))
+            } else if contains("ramp") {
+                Some(Self::FromZoom(11))
+            } else if contains("pier") {
+                Some(Self::FromZoom(12))
+            } else {
+                None
+            };
+        }
+
+        if source_layer.matches("transportation_name") {
+            return if contains("oneway") {
+                Some(Self::FromZoom(15))
+            } else if contains("shield_text") {
+                Some(Self::FromZoom(8))
+            } else if [
+                "minor_road",
+                "minor",
+                "tertiary",
+                "other",
+                "path",
+                "service",
+                "track",
+            ]
+            .into_iter()
+            .any(contains)
+            {
+                Some(Self::FromZoom(13))
+            } else {
+                Some(Self::FromZoom(11))
+            };
+        }
+
+        if source_layer.matches("place") {
+            return if ["neighbourhood", "macrohood", "suburb", "quarter"]
+                .into_iter()
+                .any(contains)
+            {
+                Some(Self::FromZoom(12))
+            } else if ["locality", "city", "town", "village"]
+                .into_iter()
+                .any(contains)
+            {
+                Some(Self::Settlements)
+            } else {
+                None
+            };
+        }
+
+        if source_layer.matches("poi") {
+            return Some(Self::FromZoom(13));
+        }
+
+        if source_layer.matches("waterway") {
+            return if contains("stream") {
+                Some(Self::FromZoom(12))
+            } else if contains("river") {
+                Some(Self::FromZoom(8))
+            } else {
+                None
+            };
+        }
+
+        None
+    }
+
+    fn apply(self, filter: &mut Option<walkers::Filter>) {
+        let visibility = match self {
+            Self::FromZoom(zoom) => walkers::json!([">=", ["zoom"], zoom]),
+            Self::MajorRoads => walkers::json!([
+                "any",
+                [
+                    "all",
+                    [">=", ["zoom"], 7],
+                    ["in", "class", "major_road", "primary"]
+                ],
+                [
+                    "all",
+                    [">=", ["zoom"], 9],
+                    ["==", ["get", "class"], "secondary"]
+                ]
+            ]),
+            Self::MinorRoads => walkers::json!([
+                "any",
+                [
+                    "all",
+                    [">=", ["zoom"], 11],
+                    ["==", ["get", "class"], "tertiary"]
+                ],
+                [
+                    "all",
+                    [">=", ["zoom"], 13],
+                    ["in", "class", "minor_road", "minor"]
+                ]
+            ]),
+            Self::Settlements => walkers::json!([
+                "any",
+                ["all", [">=", ["zoom"], 4], ["==", ["get", "class"], "city"]],
+                ["all", [">=", ["zoom"], 8], ["==", ["get", "class"], "town"]],
+                [
+                    "all",
+                    [">=", ["zoom"], 11],
+                    ["in", "class", "locality", "village"]
+                ]
+            ]),
+        };
+
+        *filter = Some(walkers::Filter(match filter.take() {
+            Some(existing) => walkers::json!(["all", visibility, existing.0]),
+            None => visibility,
+        }));
+    }
+}
+
+fn source_layer_and_filter(
+    layer: &mut walkers::Layer,
+) -> Option<(&walkers::SourceLayer, &mut Option<walkers::Filter>)> {
+    match layer {
+        walkers::Layer::Fill {
             source_layer,
             filter,
             ..
-        } = layer
-        else {
-            continue;
-        };
-        let minimum_zoom = if source_layer.matches("building") {
-            Some(14)
-        } else if filter
-            .as_ref()
-            .is_some_and(|filter| json_contains(&filter.0, "minor_road"))
-        {
-            Some(12)
-        } else {
-            None
-        };
-        if let Some(minimum_zoom) = minimum_zoom {
-            let zoom_filter = walkers::json!([">=", ["zoom"], minimum_zoom]);
-            *filter = Some(walkers::Filter(match filter.take() {
-                Some(existing) => walkers::json!(["all", zoom_filter, existing.0]),
-                None => zoom_filter,
-            }));
         }
+        | walkers::Layer::Line {
+            source_layer,
+            filter,
+            ..
+        }
+        | walkers::Layer::Symbol {
+            source_layer,
+            filter,
+            ..
+        }
+        | walkers::Layer::Circle {
+            source_layer,
+            filter,
+        } => Some((source_layer, filter)),
+        walkers::Layer::Background { .. }
+        | walkers::Layer::Raster
+        | walkers::Layer::FillExtrusion => None,
     }
-    style
 }
 
 fn json_contains(value: &walkers::Value, expected: &str) -> bool {
@@ -443,43 +698,123 @@ fn json_contains(value: &walkers::Value, expected: &str) -> bool {
     }
 }
 
-impl Tiles for TileStore {
-    fn at(&mut self, tile_id: TileId) -> Option<TilePiece> {
-        if tile_id.zoom > MAX_TILE_ZOOM {
-            return None;
-        }
-        self.visible.insert(tile_id);
-        match self.entries.get(&tile_id) {
-            Some(TileEntry::Ready(prepared)) => {
-                let tile = prepared.tile.clone();
-                self.promote(tile_id);
-                return Some(TilePiece::new(
-                    tile,
-                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                ));
-            }
-            Some(TileEntry::Empty) => {
-                self.promote(tile_id);
-                return None;
-            }
-            Some(TileEntry::Desired { .. } | TileEntry::Requested { .. }) => return None,
-            Some(TileEntry::Failed(failure)) if Instant::now() < failure.retry_at => return None,
-            Some(TileEntry::Failed(_)) | None => {}
-        }
-        let attempts = match self.entries.get(&tile_id) {
-            Some(TileEntry::Failed(failure)) => failure.attempts,
-            _ => 0,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn visibility(source_layer: &str, filter: walkers::Value) -> Option<BasemapVisibility> {
+        BasemapVisibility::classify(
+            &walkers::SourceLayer::from(source_layer),
+            Some(&walkers::Filter(filter)),
+        )
+    }
+
+    fn policy_matches(policy: BasemapVisibility, class: &str, zoom: u8) -> bool {
+        let mut filter = None;
+        policy.apply(&mut filter);
+        let context = walkers::Context::new(
+            "LineString".to_owned(),
+            std::collections::HashMap::from([("class".to_owned(), walkers::json!(class))]),
+            zoom,
+        );
+        filter.is_some_and(|filter| filter.matches(&context))
+    }
+
+    #[test]
+    fn basemap_detail_policy_delays_dense_geometry() {
+        assert_eq!(
+            visibility(
+                "transportation",
+                walkers::json!(["in", "class", "minor_road", "minor", "tertiary"]),
+            ),
+            Some(BasemapVisibility::MinorRoads)
+        );
+        assert_eq!(
+            visibility(
+                "transportation",
+                walkers::json!(["in", "class", "other", "path", "service", "track"]),
+            ),
+            Some(BasemapVisibility::FromZoom(14))
+        );
+        assert_eq!(
+            visibility("building", walkers::json!(["==", "$type", "Polygon"])),
+            Some(BasemapVisibility::FromZoom(14))
+        );
+    }
+
+    #[test]
+    fn basemap_detail_policy_delays_local_labels() {
+        assert_eq!(
+            visibility(
+                "transportation_name",
+                walkers::json!(["in", "class", "minor", "tertiary"]),
+            ),
+            Some(BasemapVisibility::FromZoom(13))
+        );
+        assert_eq!(
+            visibility(
+                "place",
+                walkers::json!(["in", "class", "neighbourhood", "suburb"]),
+            ),
+            Some(BasemapVisibility::FromZoom(12))
+        );
+        assert_eq!(
+            visibility(
+                "place",
+                walkers::json!(["in", "class", "city", "town", "village"]),
+            ),
+            Some(BasemapVisibility::Settlements)
+        );
+    }
+
+    #[test]
+    fn basemap_detail_policy_enforces_hierarchy_at_zoom_boundaries() {
+        assert!(policy_matches(BasemapVisibility::MajorRoads, "primary", 7));
+        assert!(!policy_matches(
+            BasemapVisibility::MajorRoads,
+            "secondary",
+            8
+        ));
+        assert!(policy_matches(
+            BasemapVisibility::MajorRoads,
+            "secondary",
+            9
+        ));
+        assert!(policy_matches(
+            BasemapVisibility::MinorRoads,
+            "tertiary",
+            11
+        ));
+        assert!(!policy_matches(BasemapVisibility::MinorRoads, "minor", 12));
+        assert!(policy_matches(BasemapVisibility::MinorRoads, "minor", 13));
+    }
+
+    #[test]
+    fn render_scene_excludes_cached_tiles_outside_current_demand() {
+        let mut tiles = TileStore::default();
+        let current = TileId {
+            zoom: 9,
+            x: 255,
+            y: 170,
         };
-        self.entries
-            .insert(tile_id, TileEntry::Desired { attempts });
-        None
-    }
+        let cached_from_previous_zoom = TileId {
+            zoom: 14,
+            x: 8_170,
+            y: 5_445,
+        };
+        tiles.entries.insert(current, TileEntry::Empty);
+        tiles
+            .entries
+            .insert(cached_from_previous_zoom, TileEntry::Empty);
 
-    fn attribution(&self) -> Attribution {
-        map_attribution()
-    }
+        tiles.apply_exact_demand(&[current]);
 
-    fn tile_size(&self) -> u32 {
-        SOURCE_TILE_SIZE
+        assert_eq!(
+            tiles
+                .visible_entries()
+                .map(|(id, _entry)| *id)
+                .collect::<Vec<_>>(),
+            vec![current]
+        );
     }
 }

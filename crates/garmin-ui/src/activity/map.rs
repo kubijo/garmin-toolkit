@@ -1,4 +1,4 @@
-//! Host-fed `walkers` activity map and linked route overlay.
+//! Activity-map camera, vector basemap, and linked route overlay.
 
 use std::{
     collections::VecDeque,
@@ -6,21 +6,25 @@ use std::{
 };
 
 use cint::ColorInterop;
-use egui::{Align2, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, Vec2};
+use egui::{Align2, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2};
 use garmin_model::route::Coordinate;
 use garmin_service_api::{ActivityRecordingSnapshot, ActivitySampleSnapshot};
-use walkers::{Map, MapMemory, Tiles, lon_lat, sources::Attribution};
+use walkers::{lon_lat, sources::Attribution};
 
 use super::{
-    map_runtime::{MapPerformanceSample, MapRuntimeHandle, MapSurfaceFrame, MapSurfaceHandle},
+    map_runtime::{MapPerformanceSample, MapRuntimeHandle, MapSurfaceHandle},
     map_style,
     route_index::RouteIndex,
 };
 
+#[path = "map/camera.rs"]
+pub(super) mod camera;
 #[path = "gpu_map.rs"]
 pub(super) mod gpu_map;
 #[path = "map/tile_store.rs"]
-mod tile_store;
+pub(super) mod tile_store;
+
+use camera::{MapCamera, MapProjector, MapViewDemand};
 
 pub(super) use gpu_map::PreparedGpuTile;
 pub use gpu_map::{WgpuMapHandle, install as install_wgpu_map};
@@ -34,6 +38,7 @@ use tile_store::{DECODED_TILE_LIMIT, Failure, MAX_IN_FLIGHT, MapTilePayload, Til
 const ZOOM_BOUND_EPSILON: f64 = 1.0e-6;
 const DEFAULT_ZOOM_SPEED: f64 = 2.0;
 const ROUTE_POINT_SPACING: f32 = 1.5;
+const ENDPOINT_PAIR_DISTANCE: f32 = 16.0;
 
 pub(super) struct Props<'a> {
     pub recording: &'a ActivityRecordingSnapshot,
@@ -48,7 +53,7 @@ pub(super) struct Props<'a> {
 
 pub(super) struct ActivityMap {
     surface: MapSurfaceHandle,
-    memory: MapMemory,
+    camera: MapCamera,
     fit: FitState,
     frame_timing: FrameTiming,
     route_index: RouteIndexCache,
@@ -58,7 +63,7 @@ impl ActivityMap {
     pub fn new(runtime: &MapRuntimeHandle) -> Self {
         Self {
             surface: runtime.surface(),
-            memory: MapMemory::default(),
+            camera: MapCamera::default(),
             fit: FitState::default(),
             frame_timing: FrameTiming::default(),
             route_index: RouteIndexCache::default(),
@@ -70,14 +75,12 @@ impl ActivityMap {
         let size = Vec2::new(ui.available_width(), props.height);
         let (sample_offset, samples) =
             ranged_samples(&props.recording.samples, props.sample_range.clone());
-        let Some(center) = center(samples) else {
-            let _frame = self.surface.frame(ui.ctx(), ui.visuals().dark_mode);
+        let Some(_) = center(samples) else {
+            self.surface.poll(ui.ctx(), ui.visuals().dark_mode);
             return empty_map(ui, size, props.empty);
         };
         self.fit_if_needed(samples, props.fit_key, size);
         self.index_route_if_needed(samples, sample_offset, props.fit_key);
-        let mut surface = self.surface.frame(ui.ctx(), ui.visuals().dark_mode);
-
         let colors = MapColors::new(ui);
         let route_scene = gpu_map::RouteScene {
             key: props.fit_key,
@@ -93,24 +96,24 @@ impl ActivityMap {
             },
         };
         let rendered = Self::render_map(
-            &mut surface,
-            &mut self.memory,
+            &mut self.surface,
+            &mut self.camera,
             self.route_index.current(),
             ui,
             MapRenderInput {
                 size,
-                center,
                 route: &route_scene,
                 colors,
                 selected_coordinate: props.selected_coordinate,
             },
         );
-        if surface.scene().background_unavailable() {
+        if self.surface.scene().background_unavailable() {
             map_status(ui, rendered.rect, props.background_unavailable);
         }
 
-        let scene = surface.scene();
+        let scene = self.surface.scene();
         let performance = self.frame_timing.sample(MapPerfSample {
+            camera_active: rendered.camera_active,
             ui_elapsed: ui_started.elapsed(),
             scene_milliseconds: rendered.scene.milliseconds,
             route_query_microseconds: rendered.route_query_microseconds,
@@ -123,8 +126,12 @@ impl ActivityMap {
             queued_upload_bytes: rendered.scene.queued_upload_bytes,
             uploaded_bytes: rendered.scene.uploaded_bytes,
         });
-        surface.record_performance(performance.sample);
-        attribution(ui, &scene.attribution(), performance.diagnostics.as_deref());
+        self.surface.record_performance(performance.sample);
+        attribution(
+            ui,
+            &TileStore::attribution(),
+            performance.diagnostics.as_deref(),
+        );
         Output {
             hovered: rendered.interaction.hovered,
             clicked: rendered.interaction.clicked,
@@ -135,7 +142,7 @@ impl ActivityMap {
 
     fn fit_if_needed(&mut self, samples: &[ActivitySampleSnapshot], fit_key: &str, size: Vec2) {
         self.fit
-            .apply_if_needed(&mut self.memory, samples, fit_key, size);
+            .apply_if_needed(&mut self.camera, samples, fit_key, size);
     }
 
     fn index_route_if_needed(
@@ -148,23 +155,20 @@ impl ActivityMap {
     }
 
     fn render_map(
-        surface: &mut MapSurfaceFrame<'_>,
-        memory: &mut MapMemory,
+        surface: &mut MapSurfaceHandle,
+        camera: &mut MapCamera,
         route_index: &RouteIndex,
         ui: &mut Ui,
         input: MapRenderInput<'_>,
     ) -> RenderedMap {
         let MapRenderInput {
             size,
-            center,
             route,
             colors,
             selected_coordinate,
         } = input;
-        let projection_center_longitude = memory
-            .detached()
-            .map_or_else(|| center.x(), walkers::Position::x);
-        let map_rect = Rect::from_min_size(ui.next_widget_position(), size);
+        let projection_center_longitude = camera.center().x();
+        let (map_rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
         ui.painter().rect_filled(
             map_rect,
             crate::theme::PANEL_RADIUS,
@@ -174,71 +178,56 @@ impl ActivityMap {
                 .into_cint(),
         );
 
-        let item_spacing = ui.spacing().item_spacing.y;
-        ui.spacing_mut().item_spacing.y = 0.0;
-        let mut route_query_microseconds = 0.0;
-        let mut scene = gpu_map::ScenePerf::default();
-        let inner =
-            ui.allocate_ui_with_layout(size, egui::Layout::top_down(egui::Align::Min), |map_ui| {
-                map_ui.set_min_size(size);
-                let zoom_policy = zoom_policy(map_ui, memory.zoom(), map_rect);
-                let gpu_enabled = surface.gpu_enabled();
-                if let Some(callback) = surface.paint_callback(map_rect) {
-                    map_ui.painter().add(callback);
-                }
-                let overlay_input = OverlayInput {
-                    center,
-                    projection_center_longitude,
-                    gpu_enabled,
-                    route,
-                    colors,
-                    selected_coordinate,
-                };
-                let inner = Map::new(Some(surface as &mut dyn Tiles), memory, center)
-                    .zoom_with_ctrl(false)
-                    .zoom_gesture(zoom_policy.gesture_enabled)
-                    .zoom_speed(zoom_policy.speed)
-                    .panning(true)
-                    .show(map_ui, |overlay, response, projector, memory| {
-                        let output = paint_route_overlay(
-                            overlay,
-                            response,
-                            projector,
-                            memory,
-                            route_index,
-                            overlay_input,
-                        );
-                        route_query_microseconds = output.query_microseconds;
-                        output.interaction
-                    });
-                if gpu_enabled {
-                    surface.paint_labels(map_ui, memory, center, inner.response.rect);
-                    scene = surface.update_scene(
-                        memory,
-                        center,
-                        inner.response.rect,
-                        map_ui.ctx(),
-                        route,
-                    );
-                }
-                inner.inner
-            });
-        ui.spacing_mut().item_spacing.y = item_spacing;
+        let zoom_policy = zoom_policy(ui, camera.zoom(), map_rect);
+        let camera_interaction =
+            camera.interact(ui, &response, zoom_policy.gesture * zoom_policy.speed);
+        let demand = MapViewDemand::new(camera, map_rect);
+        surface.submit_view(ui.ctx(), ui.visuals().dark_mode, &demand);
+        let gpu_enabled = surface.gpu_enabled();
+        if let Some(callback) = surface.paint_callback(map_rect) {
+            ui.painter().add(callback);
+        }
+        let scene = surface.update_scene(camera, map_rect, ui.ctx(), route);
+        surface.paint_labels(ui, camera, map_rect);
+        let projector = MapProjector::new(camera, map_rect);
+        let mut overlay = ui.new_child(
+            UiBuilder::new()
+                .max_rect(map_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        let overlay_input = OverlayInput {
+            projection_center_longitude,
+            gpu_enabled,
+            route,
+            colors,
+            selected_coordinate,
+        };
+        let output = paint_route_overlay(
+            &mut overlay,
+            &response,
+            &projector,
+            camera,
+            route_index,
+            overlay_input,
+        );
         RenderedMap {
-            interaction: inner.inner,
-            rect: inner.response.rect,
-            route_query_microseconds,
+            interaction: output.interaction,
+            rect: response.rect,
+            route_query_microseconds: output.query_microseconds,
+            camera_active: zoom_policy.active
+                || camera_interaction.active
+                || camera_interaction.changed
+                || camera.animating(),
             scene,
         }
     }
 
     pub fn zoom_in(&mut self) {
-        let zoom = (self.memory.zoom() + 1.0).min(f64::from(MAX_VIEW_ZOOM));
-        let _ignored = self.memory.set_zoom(zoom);
+        self.camera.zoom_by(1.0);
     }
 
     pub fn zoom_out(&mut self) {
-        let _ignored = self.memory.zoom_out();
+        self.camera.zoom_by(-1.0);
     }
 
     pub const fn fit(&mut self) {
@@ -262,7 +251,7 @@ struct AppliedFit {
 impl FitState {
     fn apply_if_needed(
         &mut self,
-        memory: &mut MapMemory,
+        camera: &mut MapCamera,
         samples: &[ActivitySampleSnapshot],
         key: &str,
         size: Vec2,
@@ -275,7 +264,7 @@ impl FitState {
         if !self.requested && !invalid {
             return;
         }
-        fit(memory, samples, size);
+        fit(camera, samples, size);
         self.applied = Some(AppliedFit {
             key: key.to_owned(),
             size,
@@ -352,7 +341,6 @@ impl MapColors {
 
 #[derive(Clone, Copy)]
 struct OverlayInput<'frame, 'recording> {
-    center: walkers::Position,
     projection_center_longitude: f64,
     gpu_enabled: bool,
     route: &'frame gpu_map::RouteScene<'recording>,
@@ -363,7 +351,6 @@ struct OverlayInput<'frame, 'recording> {
 #[derive(Clone, Copy)]
 struct MapRenderInput<'recording> {
     size: Vec2,
-    center: walkers::Position,
     route: &'recording gpu_map::RouteScene<'recording>,
     colors: MapColors,
     selected_coordinate: Option<(f64, f64)>,
@@ -378,14 +365,15 @@ struct RenderedMap {
     interaction: RouteInteraction,
     rect: Rect,
     route_query_microseconds: f32,
+    camera_active: bool,
     scene: gpu_map::ScenePerf,
 }
 
 fn paint_route_overlay(
     overlay: &mut Ui,
     response: &egui::Response,
-    projector: &walkers::Projector,
-    memory: &MapMemory,
+    projector: &MapProjector,
+    camera: &MapCamera,
     route_index: &RouteIndex,
     input: OverlayInput<'_, '_>,
 ) -> OverlayOutput {
@@ -396,8 +384,8 @@ fn paint_route_overlay(
     let query_started = Instant::now();
     let indexed_hover = input.gpu_enabled.then(|| {
         pointer.and_then(|pointer| {
-            let center = memory.detached().unwrap_or(input.center);
-            let world_pixels = f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(memory.zoom());
+            let center = camera.center();
+            let world_pixels = camera::world_size(camera.zoom());
             let world_pointer = [
                 center.x() / 360.0
                     + 0.5
@@ -431,7 +419,7 @@ fn paint_route_overlay(
 
 fn paint_software_route(
     overlay: &mut Ui,
-    projector: &walkers::Projector,
+    projector: &MapProjector,
     input: OverlayInput<'_, '_>,
     hit_test: &mut HitTest,
 ) {
@@ -472,7 +460,7 @@ fn paint_software_route(
 
 fn paint_highlighted_route(
     overlay: &mut Ui,
-    projector: &walkers::Projector,
+    projector: &MapProjector,
     input: OverlayInput<'_, '_>,
     base_style: RouteStyle,
 ) {
@@ -519,34 +507,34 @@ fn paint_highlighted_route(
     paint_route_segment(overlay, &highlighted, style, None);
 }
 
-fn paint_route_markers(
-    overlay: &mut Ui,
-    projector: &walkers::Projector,
-    input: OverlayInput<'_, '_>,
-) {
+fn paint_route_markers(overlay: &mut Ui, projector: &MapProjector, input: OverlayInput<'_, '_>) {
     if let Some((start, end)) = route_endpoints(input.route.samples) {
-        paint_endpoint_marker(
-            overlay,
-            project_coordinate(projector, start, input.projection_center_longitude),
-            Endpoint::Start,
-            input.colors.start,
-            input.colors.marker_fill,
-        );
-        paint_endpoint_marker(
-            overlay,
-            project_coordinate(projector, end, input.projection_center_longitude),
-            Endpoint::End,
-            input.colors.end,
-            input.colors.marker_fill,
-        );
+        let start = project_coordinate(projector, start, input.projection_center_longitude);
+        let end = project_coordinate(projector, end, input.projection_center_longitude);
+        if endpoints_share_marker(start, end) {
+            paint_combined_endpoint_marker(overlay, start.lerp(end, 0.5), input.colors);
+        } else {
+            paint_endpoint_marker(
+                overlay,
+                start,
+                Endpoint::Start,
+                input.colors.start,
+                input.colors.marker_fill,
+            );
+            paint_endpoint_marker(
+                overlay,
+                end,
+                Endpoint::End,
+                input.colors.end,
+                input.colors.marker_fill,
+            );
+        }
     }
     if let Some((longitude, latitude)) = input.selected_coordinate {
-        let position = projector
-            .project(lon_lat(
-                wrapped_longitude(longitude, input.projection_center_longitude),
-                latitude,
-            ))
-            .to_pos2();
+        let position = projector.project(lon_lat(
+            wrapped_longitude(longitude, input.projection_center_longitude),
+            latitude,
+        ));
         overlay
             .painter()
             .circle_filled(position, 5.0, input.colors.marker_fill);
@@ -557,19 +545,17 @@ fn paint_route_markers(
 }
 
 fn project_coordinate(
-    projector: &walkers::Projector,
+    projector: &MapProjector,
     coordinate: Coordinate,
     projection_center_longitude: f64,
 ) -> egui::Pos2 {
-    projector
-        .project(lon_lat(
-            wrapped_longitude(
-                coordinate.longitude().as_degrees(),
-                projection_center_longitude,
-            ),
-            coordinate.latitude().as_degrees(),
-        ))
-        .to_pos2()
+    projector.project(lon_lat(
+        wrapped_longitude(
+            coordinate.longitude().as_degrees(),
+            projection_center_longitude,
+        ),
+        coordinate.latitude().as_degrees(),
+    ))
 }
 
 fn set_route_cursor(overlay: &Ui, response: &egui::Response, hovered: Option<usize>) {
@@ -587,8 +573,9 @@ fn set_route_cursor(overlay: &Ui, response: &egui::Response, hovered: Option<usi
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ZoomPolicy {
-    gesture_enabled: bool,
+    gesture: f64,
     speed: f64,
+    active: bool,
 }
 
 fn zoom_policy(ui: &mut Ui, zoom: f64, map_rect: Rect) -> ZoomPolicy {
@@ -601,13 +588,15 @@ fn zoom_policy(ui: &mut Ui, zoom: f64, map_rect: Rect) -> ZoomPolicy {
     });
     let blocked = pointer_over_map && outward_zoom_at_bound(zoom, gesture);
 
-    if blocked && from_scroll {
+    if pointer_over_map && from_scroll && gesture.abs() > f64::EPSILON {
         ui.input_mut(|input| input.smooth_scroll_delta.y = 0.0);
     }
 
+    let accepted = pointer_over_map && !blocked;
     ZoomPolicy {
-        gesture_enabled: !blocked,
+        gesture: if accepted { gesture } else { 0.0 },
         speed: clamped_zoom_speed(zoom, gesture, DEFAULT_ZOOM_SPEED),
+        active: accepted && gesture.abs() > f64::EPSILON,
     }
 }
 
@@ -871,6 +860,28 @@ fn paint_endpoint_marker(
 ) {
     ui.painter().circle_filled(position, 8.0, symbol);
     ui.painter().circle_filled(position, 6.5, color);
+    paint_endpoint_symbol(ui, position, endpoint);
+}
+
+fn endpoints_share_marker(start: egui::Pos2, end: egui::Pos2) -> bool {
+    start.distance_sq(end) <= ENDPOINT_PAIR_DISTANCE.powi(2)
+}
+
+fn paint_combined_endpoint_marker(ui: &Ui, position: egui::Pos2, colors: MapColors) {
+    let background = Rect::from_center_size(position, egui::vec2(34.0, 18.0));
+    ui.painter()
+        .rect_filled(background, 9.0, colors.marker_fill);
+    for (offset, endpoint, color) in [
+        (-8.0, Endpoint::Start, colors.start),
+        (8.0, Endpoint::End, colors.end),
+    ] {
+        let center = position + egui::vec2(offset, 0.0);
+        ui.painter().circle_filled(center, 6.5, color);
+        paint_endpoint_symbol(ui, center, endpoint);
+    }
+}
+
+fn paint_endpoint_symbol(ui: &Ui, position: egui::Pos2, endpoint: Endpoint) {
     match endpoint {
         Endpoint::Start => {
             ui.painter().add(Shape::convex_polygon(
@@ -896,12 +907,14 @@ fn paint_endpoint_marker(
 #[derive(Default)]
 struct FrameTiming {
     previous: Option<Instant>,
+    previous_camera_active: bool,
     smoothed_milliseconds: Option<f32>,
     ui_milliseconds: VecDeque<f32>,
 }
 
 #[derive(Clone, Copy)]
 struct MapPerfSample {
+    camera_active: bool,
     ui_elapsed: Duration,
     scene_milliseconds: f32,
     route_query_microseconds: f32,
@@ -923,6 +936,7 @@ struct FrameTimingOutput {
 impl FrameTiming {
     fn sample(&mut self, sample: MapPerfSample) -> FrameTimingOutput {
         let MapPerfSample {
+            camera_active,
             ui_elapsed,
             scene_milliseconds,
             route_query_microseconds,
@@ -936,12 +950,13 @@ impl FrameTiming {
             uploaded_bytes,
         } = sample;
         let now = Instant::now();
-        let elapsed = self
-            .previous
-            .replace(now)
-            .map(|previous| now - previous)
-            .filter(|elapsed| *elapsed <= Duration::from_millis(250));
-        if let Some(elapsed) = elapsed {
+        let elapsed = self.previous.replace(now).map(|previous| now - previous);
+        // Charge the interval to the preceding frame so a stall that ends inertia is not lost.
+        // Interaction stalls remain uncapped; only idle redraw gaps are suppressed.
+        let interaction_elapsed = elapsed.filter(|_| self.previous_camera_active);
+        let redraw_elapsed = elapsed.filter(|elapsed| *elapsed <= Duration::from_millis(250));
+        self.previous_camera_active = camera_active;
+        if let Some(elapsed) = interaction_elapsed {
             let milliseconds = elapsed.as_secs_f32() * 1_000.0;
             self.smoothed_milliseconds =
                 Some(self.smoothed_milliseconds.map_or(milliseconds, |current| {
@@ -949,7 +964,10 @@ impl FrameTiming {
                 }));
         }
         let sample = MapPerformanceSample {
-            frame_milliseconds: elapsed.map(|elapsed| elapsed.as_secs_f32() * 1_000.0),
+            frame_milliseconds: redraw_elapsed.map(|elapsed| elapsed.as_secs_f32() * 1_000.0),
+            interaction_frame_milliseconds: interaction_elapsed
+                .map(|elapsed| elapsed.as_secs_f32() * 1_000.0),
+            camera_active,
             ui_milliseconds: ui_elapsed.as_secs_f32() * 1_000.0,
             scene_milliseconds,
             route_query_microseconds,
@@ -1057,7 +1075,7 @@ fn center(samples: &[ActivitySampleSnapshot]) -> Option<walkers::Position> {
     ))
 }
 
-fn fit(memory: &mut MapMemory, samples: &[ActivitySampleSnapshot], size: Vec2) {
+fn fit(camera: &mut MapCamera, samples: &[ActivitySampleSnapshot], size: Vec2) {
     let mut points = samples.iter().filter_map(|sample| sample.coordinate);
     let Some(first) = points.next() else {
         return;
@@ -1085,7 +1103,7 @@ fn fit(memory: &mut MapMemory, samples: &[ActivitySampleSnapshot], size: Vec2) {
     let center_y = f64::midpoint(min_y, max_y);
     let center_lon = (center_x * 360.0 + 180.0).rem_euclid(360.0) - 180.0;
     let center_lat = mercator_latitude(center_y);
-    memory.center_at(lon_lat(center_lon, center_lat));
+    camera.center_at(lon_lat(center_lon, center_lat));
     let usable_width = f64::from((size.x - 48.0).max(1.0));
     let usable_height = f64::from((size.y - 48.0).max(1.0));
     let scale_x = usable_width / ((max_x - min_x).abs().max(1.0e-9) * f64::from(WALKERS_TILE_SIZE));
@@ -1095,7 +1113,7 @@ fn fit(memory: &mut MapMemory, samples: &[ActivitySampleSnapshot], size: Vec2) {
         .min(scale_y)
         .log2()
         .clamp(1.0, f64::from(MAX_VIEW_ZOOM));
-    let _ignored = memory.set_zoom(zoom);
+    camera.set_zoom(zoom);
 }
 
 fn mercator_y(latitude: f64) -> f64 {
@@ -1142,19 +1160,27 @@ fn empty_map(ui: &mut Ui, size: Vec2, message: &str) -> Output {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use egui::{Event, MouseWheelUnit, RawInput, Rect, TouchPhase, pos2, vec2};
     use garmin_model::{
         route::{Coordinate, Latitude, Longitude},
         value::Timestamp,
     };
     use garmin_service_api::ActivitySampleSnapshot;
-    use walkers::{Map, MapMemory, Tiles as _, lon_lat};
+    use walkers::lon_lat;
 
     use super::{
-        FitState, RouteIndexCache, RoutePoint, TileStore, center, clamped_zoom_speed,
-        closest_endpoint_on_segment, fit, mercator_latitude, mercator_y, outward_zoom_at_bound,
-        push_route_point, ranged_samples, wrapped_longitude, zoom_policy,
+        FitState, FrameTiming, MapCamera, MapPerfSample, MapViewDemand, RouteIndexCache,
+        RoutePoint, TileStore, center, clamped_zoom_speed, closest_endpoint_on_segment, fit,
+        mercator_latitude, mercator_y, outward_zoom_at_bound, push_route_point, ranged_samples,
+        wrapped_longitude, zoom_policy,
     };
+
+    fn apply_demand(tiles: &mut TileStore, ids: impl IntoIterator<Item = walkers::TileId>) {
+        let visible = ids.into_iter().collect::<Vec<_>>();
+        tiles.apply_exact_demand(&visible);
+    }
 
     fn sample(coordinate: Option<(f64, f64)>) -> ActivitySampleSnapshot {
         ActivitySampleSnapshot {
@@ -1175,6 +1201,63 @@ mod tests {
         }
     }
 
+    fn performance_sample(camera_active: bool) -> MapPerfSample {
+        MapPerfSample {
+            camera_active,
+            ui_elapsed: Duration::from_millis(1),
+            scene_milliseconds: 0.01,
+            route_query_microseconds: 1.0,
+            label_milliseconds: 2.0,
+            label_backlog: 0,
+            stale_work: 0,
+            visible_tiles: 4,
+            ready_tiles: 4,
+            pending_tiles: 0,
+            queued_upload_bytes: 0,
+            uploaded_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn interaction_interval_begins_after_an_active_frame_and_keeps_its_tail() {
+        let mut timing = FrameTiming {
+            previous: Instant::now().checked_sub(Duration::from_millis(16)),
+            ..FrameTiming::default()
+        };
+
+        let first = timing.sample(performance_sample(true));
+        timing.previous = Instant::now().checked_sub(Duration::from_millis(16));
+        let continuous = timing.sample(performance_sample(true));
+        timing.previous = Instant::now().checked_sub(Duration::from_millis(16));
+        let stopped = timing.sample(performance_sample(false));
+        timing.previous = Instant::now().checked_sub(Duration::from_millis(16));
+        let inactive = timing.sample(performance_sample(false));
+
+        assert!(first.sample.interaction_frame_milliseconds.is_none());
+        assert!(continuous.sample.interaction_frame_milliseconds.is_some());
+        assert!(stopped.sample.interaction_frame_milliseconds.is_some());
+        assert!(inactive.sample.interaction_frame_milliseconds.is_none());
+    }
+
+    #[test]
+    fn interaction_interval_retains_a_terminal_stall_after_motion_expires() {
+        let mut timing = FrameTiming {
+            previous: Instant::now().checked_sub(Duration::from_millis(500)),
+            previous_camera_active: true,
+            ..FrameTiming::default()
+        };
+
+        let terminal = timing.sample(performance_sample(false));
+
+        assert!(terminal.sample.frame_milliseconds.is_none());
+        assert!(
+            terminal
+                .sample
+                .interaction_frame_milliseconds
+                .is_some_and(|milliseconds| milliseconds >= 499.0)
+        );
+    }
+
     #[test]
     fn mercator_fit_round_trips_latitude() {
         for latitude in [-80.0, -45.0, 0.0, 60.0, 80.0] {
@@ -1185,19 +1268,19 @@ mod tests {
     #[test]
     fn fit_state_owns_first_fit_resize_reuse_and_explicit_requests() {
         let samples = [sample(Some((60.0, 24.0))), sample(Some((60.1, 24.2)))];
-        let mut memory = MapMemory::default();
+        let mut camera = MapCamera::default();
         let mut state = FitState::default();
 
-        state.apply_if_needed(&mut memory, &samples, "activity", vec2(400.0, 300.0));
+        state.apply_if_needed(&mut camera, &samples, "activity", vec2(400.0, 300.0));
         assert_eq!(state.applications, 1);
-        state.apply_if_needed(&mut memory, &samples, "activity", vec2(440.0, 340.0));
+        state.apply_if_needed(&mut camera, &samples, "activity", vec2(440.0, 340.0));
         assert_eq!(state.applications, 1);
-        state.apply_if_needed(&mut memory, &samples, "activity", vec2(480.0, 380.0));
+        state.apply_if_needed(&mut camera, &samples, "activity", vec2(480.0, 380.0));
         assert_eq!(state.applications, 2);
         state.request();
-        state.apply_if_needed(&mut memory, &samples, "activity", vec2(480.0, 380.0));
+        state.apply_if_needed(&mut camera, &samples, "activity", vec2(480.0, 380.0));
         assert_eq!(state.applications, 3);
-        state.apply_if_needed(&mut memory, &samples, "other", vec2(480.0, 380.0));
+        state.apply_if_needed(&mut camera, &samples, "other", vec2(480.0, 380.0));
         assert_eq!(state.applications, 4);
     }
 
@@ -1225,6 +1308,18 @@ mod tests {
 
         assert_eq!(index, 5);
         assert!((distance - 16.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn endpoint_markers_pair_only_when_their_screen_positions_overlap() {
+        assert!(super::endpoints_share_marker(
+            pos2(10.0, 10.0),
+            pos2(26.0, 10.0)
+        ));
+        assert!(!super::endpoints_share_marker(
+            pos2(10.0, 10.0),
+            pos2(26.1, 10.0)
+        ));
     }
 
     #[test]
@@ -1264,11 +1359,11 @@ mod tests {
     #[test]
     fn outward_wheel_at_maximum_is_consumed_without_moving_the_map() {
         let context = egui::Context::default();
-        let mut memory = MapMemory::default();
+        let mut camera = MapCamera::default();
         let map_center = lon_lat(27.2, 60.6);
-        memory.center_at(map_center);
-        memory.set_zoom(f64::from(super::MAX_VIEW_ZOOM)).unwrap();
-        let center_before = memory.detached().unwrap();
+        camera.center_at(map_center);
+        camera.set_zoom(f64::from(super::MAX_VIEW_ZOOM));
+        let center_before = camera.center();
         let mut scroll_before_policy = 0.0;
         let mut scroll_after_policy = f32::NAN;
         let input = RawInput {
@@ -1288,20 +1383,17 @@ mod tests {
         let output = context.run_ui(input, |ui| {
             let map_rect = ui.available_rect_before_wrap();
             scroll_before_policy = ui.input(|input| input.smooth_scroll_delta.y);
-            let policy = zoom_policy(ui, memory.zoom(), map_rect);
+            let policy = zoom_policy(ui, camera.zoom(), map_rect);
             scroll_after_policy = ui.input(|input| input.smooth_scroll_delta.y);
-            let _map = Map::new(None, &mut memory, map_center)
-                .zoom_with_ctrl(false)
-                .zoom_gesture(policy.gesture_enabled)
-                .zoom_speed(policy.speed)
-                .show(ui, |_, _, _, _| ());
+            let (_rect, response) = ui.allocate_exact_size(map_rect.size(), egui::Sense::drag());
+            let _interaction = camera.interact(ui, &response, policy.gesture * policy.speed);
         });
         output.drop_without_applying_deltas();
 
-        let center_after = memory.detached().unwrap();
+        let center_after = camera.center();
         assert!(scroll_before_policy > 0.0);
         assert!(scroll_after_policy.abs() < f32::EPSILON);
-        assert!((memory.zoom() - f64::from(super::MAX_VIEW_ZOOM)).abs() < f64::EPSILON);
+        assert!((camera.zoom() - f64::from(super::MAX_VIEW_ZOOM)).abs() < f64::EPSILON);
         assert!((center_after.x() - center_before.x()).abs() < f64::EPSILON);
         assert!((center_after.y() - center_before.y()).abs() < f64::EPSILON);
     }
@@ -1316,32 +1408,35 @@ mod tests {
     fn route_fit_uses_the_short_dateline_span() {
         let samples = vec![sample(Some((60.0, 179.0))), sample(Some((60.1, -179.0)))];
         let (_, samples) = ranged_samples(&samples, 0..=1);
-        let mut memory = MapMemory::default();
+        let mut camera = MapCamera::default();
 
-        fit(&mut memory, samples, egui::vec2(640.0, 320.0));
+        fit(&mut camera, samples, egui::vec2(640.0, 320.0));
 
-        let fitted = memory.detached().unwrap();
+        let fitted = camera.center();
         assert!((fitted.x().abs() - 180.0).abs() < 1.0e-9);
-        assert!(memory.zoom() > 1.0);
+        assert!(camera.zoom() > 1.0);
     }
 
     #[test]
     fn recordings_without_coordinates_do_not_create_a_map_center() {
         let samples = vec![sample(None), sample(None)];
         let (_, samples) = ranged_samples(&samples, 0..=1);
-        let mut memory = MapMemory::default();
+        let mut camera = MapCamera::default();
+        let before = (camera.center(), camera.zoom());
 
         assert!(center(samples).is_none());
-        fit(&mut memory, samples, egui::vec2(640.0, 320.0));
-        assert!(memory.detached().is_none());
+        fit(&mut camera, samples, egui::vec2(640.0, 320.0));
+        assert_eq!(camera.center(), before.0);
+        assert!((camera.zoom() - before.1).abs() < f64::EPSILON);
     }
 
     #[test]
     fn tile_requests_respect_the_ui_concurrency_cap() {
         let mut tiles = TileStore::default();
-        for x in 0..8 {
-            let _piece = tiles.at(walkers::TileId { zoom: 4, x, y: 6 });
-        }
+        apply_demand(
+            &mut tiles,
+            (0..8).map(|x| walkers::TileId { zoom: 4, x, y: 6 }),
+        );
         tiles.schedule_requests();
 
         assert_eq!(tiles.requests.len(), super::MAX_IN_FLIGHT);
@@ -1351,11 +1446,10 @@ mod tests {
     #[test]
     fn tile_requests_are_coalesced_and_prioritised_from_the_visible_center() {
         let mut tiles = TileStore::default();
-        for x in 0..8 {
-            let id = walkers::TileId { zoom: 4, x, y: 6 };
-            let _first = tiles.at(id);
-            let _duplicate = tiles.at(id);
-        }
+        apply_demand(
+            &mut tiles,
+            (0..8).map(|x| walkers::TileId { zoom: 4, x, y: 6 }),
+        );
 
         tiles.schedule_requests();
 
@@ -1368,6 +1462,29 @@ mod tests {
         assert_eq!(&requested_x[..2], &[3, 4]);
         assert!(!requested_x.contains(&0));
         assert!(!requested_x.contains(&7));
+    }
+
+    #[test]
+    fn tile_priority_wraps_across_the_dateline() {
+        let mut camera = MapCamera::default();
+        camera.center_at(lon_lat(179.5, 0.0));
+        camera.set_zoom(5.0);
+        let demand = MapViewDemand::new(
+            &camera,
+            Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 300.0)),
+        );
+        let mut tiles = TileStore::default();
+
+        tiles.apply_demand(&demand);
+        tiles.schedule_requests();
+
+        let requested_x = tiles
+            .requests
+            .iter()
+            .map(|request| request.x)
+            .collect::<Vec<_>>();
+        assert_eq!(requested_x[0], 0);
+        assert!(requested_x[..2].contains(&15));
     }
 
     #[test]
@@ -1411,7 +1528,7 @@ mod tests {
             x: 0,
             y: 0,
         };
-        assert!(tiles.at(id).is_none());
+        apply_demand(&mut tiles, [id]);
         tiles.schedule_requests();
         let request = tiles.requests.pop().unwrap();
         tiles.resolve(
@@ -1422,7 +1539,7 @@ mod tests {
             },
         );
 
-        assert!(tiles.at(id).is_none());
+        apply_demand(&mut tiles, [id]);
         assert!(tiles.requests.is_empty());
         assert!(matches!(
             tiles.entries.get(&id),
@@ -1438,12 +1555,12 @@ mod tests {
             x: 8,
             y: 6,
         };
-        assert!(tiles.at(id).is_none());
+        apply_demand(&mut tiles, [id]);
         tiles.schedule_requests();
         let stale = tiles.requests.pop().unwrap();
 
         tiles.set_theme(false);
-        assert!(tiles.at(id).is_none());
+        apply_demand(&mut tiles, [id]);
         tiles.schedule_requests();
         assert_eq!(tiles.pending_len(), 1);
         tiles.resolve(
@@ -1469,13 +1586,13 @@ mod tests {
             x: 8,
             y: 6,
         };
-        assert!(tiles.at(id).is_none());
+        apply_demand(&mut tiles, [id]);
         tiles.schedule_requests();
         let stale = tiles.requests.pop().unwrap();
 
         tiles.set_theme(false);
         tiles.set_theme(true);
-        assert!(tiles.at(id).is_none());
+        apply_demand(&mut tiles, [id]);
         tiles.schedule_requests();
         tiles.resolve(
             &egui::Context::default(),
@@ -1505,8 +1622,7 @@ mod tests {
             x: 9,
             y: 6,
         };
-        assert!(tiles.at(failed_id).is_none());
-        assert!(tiles.at(ready_id).is_none());
+        apply_demand(&mut tiles, [failed_id, ready_id]);
         tiles.schedule_requests();
         let failed_request = tiles
             .requests

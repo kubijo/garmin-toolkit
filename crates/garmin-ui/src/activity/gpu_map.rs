@@ -54,12 +54,22 @@ pub struct WgpuMapHandle {
 }
 
 /// Install the map renderer in eframe's shared WGPU callback resources.
+///
+/// `sample_count` must match the eframe render pass which invokes the callback.
+///
+/// # Panics
+/// Panics unless `sample_count` is 1 or 4, the configurations supported by this renderer.
 #[must_use]
-pub fn install(render_state: &egui_wgpu::RenderState) -> WgpuMapHandle {
+pub fn install(render_state: &egui_wgpu::RenderState, sample_count: u32) -> WgpuMapHandle {
+    assert!(
+        matches!(sample_count, 1 | 4),
+        "WGPU sample count must be either 1 or 4"
+    );
     let context = Arc::new(UploadContext::new(&render_state.device));
     let resources = Resources::new(
         &render_state.device,
         render_state.target_format,
+        sample_count,
         &context.camera_layout,
         &context.tile_layout,
         &context.route_layout,
@@ -483,8 +493,7 @@ impl GpuMap {
     ) -> ScenePerf {
         let crate::activity::map_runtime::SceneFrame {
             scene,
-            memory,
-            followed_position,
+            camera,
             viewport,
             context,
             route,
@@ -493,8 +502,8 @@ impl GpuMap {
         let started = Instant::now();
         let _span = tracing::trace_span!("activity_map_scene_acquisition").entered();
         self.prepare_route(route, context, backend);
-        let center = memory.detached().unwrap_or(followed_position);
-        let zoom = memory.zoom();
+        let center = camera.center();
+        let zoom = camera.zoom();
         let world_size = f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(zoom);
         let center_normalized = [center.x() / 360.0 + 0.5, mercator_y(center.y())];
         let center_x = center_normalized[0] * world_size;
@@ -502,10 +511,10 @@ impl GpuMap {
         let viewport_size = [viewport.width().max(1.0), viewport.height().max(1.0)];
         let mut visible = Vec::new();
 
-        for (id, tile) in scene.gpu_tiles() {
+        for (id, tile) in scene.renderable_gpu_tiles() {
             let tile_size = f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(zoom - f64::from(id.zoom));
-            let left =
-                f64::from(viewport.center().x) + f64::from(id.x).mul_add(tile_size, -center_x);
+            let tile_x = super::camera::tile_x_near_center(*id, center_normalized[0]);
+            let left = f64::from(viewport.center().x) + tile_x.mul_add(tile_size, -center_x);
             let top =
                 f64::from(viewport.center().y) + f64::from(id.y).mul_add(tile_size, -center_y);
             let tile_rect = Rect::from_min_size(
@@ -588,10 +597,10 @@ impl GpuMap {
     ) {
         let crate::activity::map_runtime::LabelFrame {
             ui,
-            memory,
-            followed_position,
+            camera,
             viewport,
             backend,
+            ..
         } = frame;
         while let Some(result) = self.runtime.poll_label() {
             self.labels.apply(result);
@@ -602,7 +611,7 @@ impl GpuMap {
             return;
         }
 
-        let view = LabelView::new(memory, followed_position, viewport);
+        let view = LabelView::new(camera, viewport);
         if !self.labels.request_matches(&visible, view) {
             if let Some(delay) = self.labels.defer_request_for_motion(view, Instant::now()) {
                 ui.ctx().request_repaint_after(delay);
@@ -821,6 +830,9 @@ struct RouteSegment {
     end: [f32; 2],
     speed: [f32; 2],
     sample_indices: [f32; 2],
+    start_join: [f32; 2],
+    end_join: [f32; 2],
+    caps: [f32; 2],
 }
 
 #[derive(Clone)]
@@ -994,6 +1006,7 @@ impl Resources {
     fn new(
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
+        sample_count: u32,
         camera_layout: &wgpu::BindGroupLayout,
         tile_layout: &wgpu::BindGroupLayout,
         route_layout: &wgpu::BindGroupLayout,
@@ -1004,10 +1017,18 @@ impl Resources {
             source: wgpu::ShaderSource::Wgsl(include_str!("gpu_map.wgsl").into()),
         });
         Self {
-            pipeline: tile_pipeline(device, target_format, &shader, camera_layout, tile_layout),
+            pipeline: tile_pipeline(
+                device,
+                target_format,
+                sample_count,
+                &shader,
+                camera_layout,
+                tile_layout,
+            ),
             route_pipeline: route_pipeline(
                 device,
                 target_format,
+                sample_count,
                 &shader,
                 camera_layout,
                 route_layout,
@@ -1191,6 +1212,7 @@ fn uniform_layout<T>(
 fn tile_pipeline(
     device: &wgpu::Device,
     target_format: wgpu::TextureFormat,
+    sample_count: u32,
     shader: &wgpu::ShaderModule,
     camera_layout: &wgpu::BindGroupLayout,
     tile_layout: &wgpu::BindGroupLayout,
@@ -1229,7 +1251,10 @@ fn tile_pipeline(
             ..Default::default()
         },
         depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..Default::default()
+        },
         multiview_mask: None,
         cache: None,
     })
@@ -1268,6 +1293,7 @@ fn route_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
 fn route_pipeline(
     device: &wgpu::Device,
     target_format: wgpu::TextureFormat,
+    sample_count: u32,
     shader: &wgpu::ShaderModule,
     camera_layout: &wgpu::BindGroupLayout,
     route_layout: &wgpu::BindGroupLayout,
@@ -1307,7 +1333,10 @@ fn route_pipeline(
             ..Default::default()
         },
         depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..Default::default()
+        },
         multiview_mask: None,
         cache: None,
     })
@@ -1369,25 +1398,28 @@ mod tests {
         .expect("the test adapter must provide a default WGPU device");
         let context = UploadContext::new(&device);
 
-        for format in [
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-            wgpu::TextureFormat::Rgba8Unorm,
-        ] {
-            let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-            let _resources = Resources::new(
-                &device,
-                format,
-                &context.camera_layout,
-                &context.tile_layout,
-                &context.route_layout,
-                &context.route_style_layout,
-            );
-            let error = futures_lite::future::block_on(error_scope.pop());
+        for sample_count in [1, 4] {
+            for format in [
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+                wgpu::TextureFormat::Rgba8Unorm,
+            ] {
+                let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+                let _resources = Resources::new(
+                    &device,
+                    format,
+                    sample_count,
+                    &context.camera_layout,
+                    &context.tile_layout,
+                    &context.route_layout,
+                    &context.route_style_layout,
+                );
+                let error = futures_lite::future::block_on(error_scope.pop());
 
-            assert!(
-                error.is_none(),
-                "map pipeline validation failed for {format:?}: {error:?}"
-            );
+                assert!(
+                    error.is_none(),
+                    "map pipeline validation failed for {sample_count}x {format:?}: {error:?}"
+                );
+            }
         }
     }
 
@@ -1659,6 +1691,10 @@ mod tests {
                     speed: Some(0.75),
                 },
                 BrowserRouteSample {
+                    coordinate: Some([-0.1248, 51.5075]),
+                    speed: Some(0.5),
+                },
+                BrowserRouteSample {
                     coordinate: None,
                     speed: None,
                 },
@@ -1670,9 +1706,15 @@ mod tests {
         let prepared = decode_browser_route(&result_bytes).unwrap().unwrap();
 
         assert!(prepared.origin.into_iter().all(f64::is_finite));
-        assert_eq!(prepared.route.segments.len(), 1);
+        assert_eq!(prepared.route.segments.len(), 2);
         assert_f32_pair_eq(prepared.route.segments[0].speed, [0.25, 0.75]);
         assert_f32_pair_eq(prepared.route.segments[0].sample_indices, [40.0, 41.0]);
+        assert_f32_pair_eq(prepared.route.segments[0].caps, [1.0, 0.0]);
+        assert_f32_pair_eq(prepared.route.segments[1].caps, [0.0, 1.0]);
+        assert_f32_pair_eq(
+            prepared.route.segments[0].end_join,
+            prepared.route.segments[1].start_join,
+        );
     }
 
     #[test]
@@ -1692,6 +1734,9 @@ mod tests {
                 end: [1.0, 1.0],
                 speed: [0.0, 1.0],
                 sample_indices: [0.0, 1.0],
+                start_join: [0.0, 1.0],
+                end_join: [0.0, 1.0],
+                caps: [1.0, 1.0],
             }],
         };
         assert!(decode_browser_route(&postcard::to_stdvec(&invalid).unwrap()).is_err());
