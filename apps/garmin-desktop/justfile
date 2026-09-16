@@ -13,6 +13,36 @@ run mode:
 
     exec just in-shell cargo run --locked -p garmin-desktop "${features[@]}"
 
+# Record a symbolized production-shaped Samply profile; close the app to finish the capture.
+profile mode OUT='.tmp/profiles/garmin-desktop.json.gz':
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case {{ quote(mode) }} in
+        production) features=() ;;
+        demo) features=(--features demo) ;;
+        *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
+    esac
+
+    profile_path={{ quote(OUT) }}
+    if [[ "$profile_path" != /* ]]; then
+        profile_path={{ quote(repository_root) }}/"$profile_path"
+    fi
+    mkdir -p "$(dirname "$profile_path")"
+
+    RUSTFLAGS="${RUSTFLAGS:+${RUSTFLAGS} }-C force-frame-pointers=yes" \
+        just in-shell cargo build --locked --profile profiling -p garmin-desktop "${features[@]}"
+    exec just in-shell samply record \
+        --save-only \
+        --output "$profile_path" \
+        --profile-name "Garmin Toolkit desktop ({{ mode }})" \
+        --reuse-threads \
+        -- .tmp/cargo-target/profiling/garmin-desktop
+
+# Open an existing Samply capture in the local profiler UI.
+profile-load PROFILE='.tmp/profiles/garmin-desktop.json.gz':
+    just in-shell samply load {{ quote(PROFILE) }}
+
 # Write the selected AppImage to dist.
 appimage mode:
     #!/usr/bin/env bash

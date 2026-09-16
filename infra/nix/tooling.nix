@@ -11,6 +11,8 @@ let
   pythonConfig = ../python/pyproject.toml;
   sqlFluffConfig = ../sqlfluff/pyproject.toml;
   allFormatters = {
+    # The pinned formatter set has no WGSL formatter; Naga validates this shader when WGPU builds it.
+    exclude = [ "crates/garmin-ui/src/activity/gpu_map.wgsl" ];
     html = true;
     javascript = true;
     json = true;

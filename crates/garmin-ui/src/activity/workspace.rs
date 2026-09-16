@@ -31,6 +31,7 @@ const COMPACT_BREAKPOINT: f32 = 760.0;
 const LIST_WIDTH: f32 = 232.0;
 const DETAILS_WIDTH: f32 = 248.0;
 const CHART_HEIGHT: f32 = 112.0;
+const CHART_VIEWPORT_OVERSCAN: f32 = 64.0;
 const PLAYBACK_SECONDS: f64 = 30.0;
 
 /// Inputs shared by desktop, HASS, and embedded FIT preview workspaces.
@@ -47,7 +48,6 @@ pub struct WorkspaceProps<'a> {
 }
 
 /// Stateful activity workspace. Hosts retain one instance for the life of their view.
-#[derive(Default)]
 pub struct Workspace {
     viewer: Viewer,
     compact_panel: Option<CompactPanel>,
@@ -73,6 +73,15 @@ enum CompactPanel {
 }
 
 impl Workspace {
+    /// Create a fully attached activity workspace.
+    #[must_use]
+    pub fn new(runtime: &super::map_runtime::MapRuntimeHandle) -> Self {
+        Self {
+            viewer: Viewer::new(runtime),
+            compact_panel: None,
+        }
+    }
+
     /// Return the sample selection shared by the map, charts, readouts, and laps.
     #[must_use]
     pub const fn cursor(&self) -> ActivityCursor {
@@ -93,16 +102,6 @@ impl Workspace {
     /// Set the lap range from a host interaction or deterministic presentation.
     pub fn set_selected_lap(&mut self, selected_lap: Option<usize>) {
         self.viewer.set_selected_lap(selected_lap);
-    }
-
-    /// Drain newly requested vector tiles for a host-owned fetch queue.
-    pub fn take_map_tile_requests(&mut self) -> Vec<super::MapTileRequest> {
-        self.viewer.map.take_requests()
-    }
-
-    /// Resolve a host tile result into the decoded UI cache.
-    pub fn resolve_map_tile(&mut self, context: &egui::Context, response: super::MapTileResponse) {
-        self.viewer.map.resolve(context, response);
     }
 
     /// Render the workspace and return activity-list selection changes.
@@ -377,44 +376,354 @@ pub struct ActivityCursor {
     pub mode: CursorMode,
 }
 
-/// Stateful single-activity analysis view.
-pub struct Viewer {
-    recording_key: String,
-    cursor: ActivityCursor,
-    axis: Axis,
+struct ViewerInteraction {
+    cursor: InteractionCursor,
     selected_lap: Option<usize>,
     hovered_lap: Option<usize>,
-    playing: bool,
     playback_speed: PlaybackSpeed,
-    playback_position: Option<f64>,
-    domain_cache: Option<(UnitSystem, Domain)>,
-    chart_cache: HashMap<ChartCacheKey, Arc<[Vec<PlotPoint>]>>,
-    map: ActivityMap,
 }
 
-impl Default for Viewer {
-    fn default() -> Self {
-        Self {
-            recording_key: String::new(),
-            cursor: ActivityCursor::default(),
-            axis: Axis::Distance,
-            selected_lap: None,
-            hovered_lap: None,
-            playing: false,
-            playback_speed: PlaybackSpeed::Normal,
-            playback_position: None,
-            domain_cache: None,
-            chart_cache: HashMap::new(),
-            map: ActivityMap::default(),
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum InteractionCursor {
+    #[default]
+    Idle,
+    Hover(usize),
+    Pinned {
+        sample_index: usize,
+        playback_position: Option<f64>,
+    },
+    Playback {
+        sample_index: usize,
+        position: Option<f64>,
+    },
+}
+
+impl InteractionCursor {
+    const fn public(self) -> ActivityCursor {
+        match self {
+            Self::Idle => ActivityCursor {
+                sample_index: None,
+                mode: CursorMode::Idle,
+            },
+            Self::Hover(sample_index) => ActivityCursor {
+                sample_index: Some(sample_index),
+                mode: CursorMode::Hover,
+            },
+            Self::Pinned { sample_index, .. } => ActivityCursor {
+                sample_index: Some(sample_index),
+                mode: CursorMode::Pinned,
+            },
+            Self::Playback { sample_index, .. } => ActivityCursor {
+                sample_index: Some(sample_index),
+                mode: CursorMode::Playback,
+            },
+        }
+    }
+
+    const fn sample_index(self) -> Option<usize> {
+        self.public().sample_index
+    }
+
+    const fn playback_position(self) -> Option<f64> {
+        match self {
+            Self::Pinned {
+                playback_position, ..
+            } => playback_position,
+            Self::Playback { position, .. } => position,
+            Self::Idle | Self::Hover(_) => None,
         }
     }
 }
 
+impl Default for ViewerInteraction {
+    fn default() -> Self {
+        Self {
+            cursor: InteractionCursor::Idle,
+            selected_lap: None,
+            hovered_lap: None,
+            playback_speed: PlaybackSpeed::Normal,
+        }
+    }
+}
+
+impl ViewerInteraction {
+    const fn cursor(&self) -> ActivityCursor {
+        self.cursor.public()
+    }
+
+    fn set_cursor(&mut self, cursor: ActivityCursor) {
+        self.cursor = match (cursor.mode, cursor.sample_index) {
+            (CursorMode::Hover, Some(index)) => InteractionCursor::Hover(index),
+            (CursorMode::Pinned, Some(index)) => InteractionCursor::Pinned {
+                sample_index: index,
+                playback_position: None,
+            },
+            (CursorMode::Playback, Some(index)) => InteractionCursor::Playback {
+                sample_index: index,
+                position: None,
+            },
+            _ => InteractionCursor::Idle,
+        };
+    }
+
+    const fn selected_lap(&self) -> Option<usize> {
+        self.selected_lap
+    }
+
+    const fn hovered_lap(&self) -> Option<usize> {
+        self.hovered_lap
+    }
+
+    fn focused_lap(&self) -> Option<usize> {
+        self.hovered_lap.or(self.selected_lap)
+    }
+
+    fn select_lap(&mut self, selected: Option<usize>) {
+        self.selected_lap = selected;
+        self.hovered_lap = None;
+        self.stop_playback(true);
+    }
+
+    fn select_lap_row(&mut self, selected: usize, sample: Option<usize>) {
+        self.selected_lap = Some(selected);
+        self.stop_playback(true);
+        if let Some(sample) = sample {
+            self.cursor = InteractionCursor::Pinned {
+                sample_index: sample,
+                playback_position: None,
+            };
+        }
+    }
+
+    fn clear_lap_constraint(&mut self) {
+        self.selected_lap = None;
+        self.hovered_lap = None;
+        self.stop_playback(true);
+    }
+
+    fn set_hovered_lap(&mut self, hovered: Option<usize>) -> bool {
+        if self.hovered_lap == hovered {
+            return false;
+        }
+        self.hovered_lap = hovered;
+        true
+    }
+
+    fn repair(&mut self, sample_count: usize, lap_count: usize) {
+        if self
+            .cursor
+            .sample_index()
+            .is_some_and(|index| index >= sample_count)
+        {
+            self.stop_and_clear_cursor();
+        }
+        if self.selected_lap.is_some_and(|index| index >= lap_count) {
+            self.selected_lap = None;
+        }
+        if self.hovered_lap.is_some_and(|index| index >= lap_count) {
+            self.hovered_lap = None;
+        }
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    const fn is_playing(&self) -> bool {
+        matches!(self.cursor, InteractionCursor::Playback { .. })
+    }
+
+    const fn playback_position(&self) -> Option<f64> {
+        self.cursor.playback_position()
+    }
+
+    const fn playback_speed(&self) -> PlaybackSpeed {
+        self.playback_speed
+    }
+
+    fn cycle_playback_speed(&mut self) {
+        self.playback_speed = self.playback_speed.next();
+    }
+
+    fn pause(&mut self) {
+        if let InteractionCursor::Playback {
+            sample_index,
+            position,
+        } = self.cursor
+        {
+            self.cursor = InteractionCursor::Pinned {
+                sample_index,
+                playback_position: position,
+            };
+        }
+    }
+
+    fn stop_playback(&mut self, clear_position: bool) {
+        match self.cursor {
+            InteractionCursor::Playback {
+                sample_index,
+                position,
+            } => {
+                self.cursor = InteractionCursor::Pinned {
+                    sample_index,
+                    playback_position: if clear_position { None } else { position },
+                };
+            }
+            InteractionCursor::Pinned {
+                sample_index,
+                playback_position,
+            } if clear_position && playback_position.is_some() => {
+                self.cursor = InteractionCursor::Pinned {
+                    sample_index,
+                    playback_position: None,
+                };
+            }
+            InteractionCursor::Idle
+            | InteractionCursor::Hover(_)
+            | InteractionCursor::Pinned { .. } => {}
+        }
+    }
+
+    fn stop_and_clear_cursor(&mut self) {
+        self.cursor = InteractionCursor::Idle;
+    }
+
+    fn clear_hover(&mut self) -> bool {
+        if !matches!(self.cursor, InteractionCursor::Hover(_)) {
+            return false;
+        }
+        self.stop_and_clear_cursor();
+        true
+    }
+
+    fn apply_pointer(&mut self, hovered: Option<usize>, clicked: Option<usize>) -> bool {
+        let next = if let Some(index) = clicked {
+            Some(InteractionCursor::Pinned {
+                sample_index: index,
+                playback_position: None,
+            })
+        } else {
+            hovered
+                .filter(|_| !self.is_playing())
+                .map(InteractionCursor::Hover)
+        };
+        if let Some(next) = next
+            && self.cursor != next
+        {
+            self.cursor = next;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn start_playback(
+        &mut self,
+        recording: &ActivityRecordingSnapshot,
+        range: std::ops::RangeInclusive<usize>,
+    ) {
+        let active = active_positions(recording);
+        let start = active.get(*range.start()).copied().unwrap_or(0.0);
+        let end = active.get(*range.end()).copied().unwrap_or(start);
+        let current = self
+            .playback_position()
+            .or_else(|| {
+                self.cursor
+                    .sample_index()
+                    .and_then(|index| active.get(index).copied())
+            })
+            .unwrap_or(start);
+        let position = if current >= end {
+            start
+        } else {
+            current.max(start)
+        };
+        let sample_index = nearest_value_index(&active, position, range);
+        self.cursor = if end > start {
+            sample_index.map_or(InteractionCursor::Idle, |sample_index| {
+                InteractionCursor::Playback {
+                    sample_index,
+                    position: Some(position),
+                }
+            })
+        } else {
+            sample_index.map_or(InteractionCursor::Idle, |sample_index| {
+                InteractionCursor::Pinned {
+                    sample_index,
+                    playback_position: Some(position),
+                }
+            })
+        };
+    }
+
+    fn advance_playback(
+        &mut self,
+        recording: &ActivityRecordingSnapshot,
+        range: std::ops::RangeInclusive<usize>,
+        delta_seconds: f64,
+    ) -> bool {
+        if !self.is_playing() {
+            return false;
+        }
+        if recording.samples.len() < 2 {
+            self.pause();
+            return false;
+        }
+        let active = active_positions(recording);
+        let start = *active.get(*range.start()).unwrap_or(&0.0);
+        let end = *active.get(*range.end()).unwrap_or(&start);
+        let current_index = self
+            .cursor
+            .sample_index()
+            .filter(|index| range.contains(index))
+            .unwrap_or(*range.start());
+        let position = self
+            .playback_position()
+            .unwrap_or_else(|| active.get(current_index).copied().unwrap_or(start));
+        let next = position + playback_delta(end - start, delta_seconds, self.playback_speed);
+        if next >= end {
+            self.cursor = InteractionCursor::Pinned {
+                sample_index: *range.end(),
+                playback_position: Some(end),
+            };
+            false
+        } else {
+            if let Some(sample_index) = nearest_value_index(&active, next, range) {
+                self.cursor = InteractionCursor::Playback {
+                    sample_index,
+                    position: Some(next),
+                };
+            }
+            true
+        }
+    }
+}
+
+/// Stateful single-activity analysis view.
+pub struct Viewer {
+    recording_key: String,
+    recording_revision: u64,
+    interaction: ViewerInteraction,
+    axis: Axis,
+    cache: ViewerCache,
+    map: ActivityMap,
+}
+
 impl Viewer {
+    fn new(runtime: &super::map_runtime::MapRuntimeHandle) -> Self {
+        Self {
+            recording_key: String::new(),
+            recording_revision: 0,
+            interaction: ViewerInteraction::default(),
+            axis: Axis::Distance,
+            cache: ViewerCache::default(),
+            map: ActivityMap::new(runtime),
+        }
+    }
     /// Return the authoritative sample-index cursor.
     #[must_use]
     pub const fn cursor(&self) -> ActivityCursor {
-        self.cursor
+        self.interaction.cursor()
     }
 
     /// Set the authoritative sample-index cursor.
@@ -422,57 +731,29 @@ impl Viewer {
     /// Playback begins from the supplied sample on the next rendered frame. Idle, hover, and
     /// pinned states stop any active playback.
     pub fn set_cursor(&mut self, cursor: ActivityCursor) {
-        self.cursor = cursor;
-        self.playing = cursor.mode == CursorMode::Playback && cursor.sample_index.is_some();
-        self.playback_position = None;
+        self.interaction.set_cursor(cursor);
     }
 
     /// Return the lap currently constraining map, charts, and playback.
     #[must_use]
     pub const fn selected_lap(&self) -> Option<usize> {
-        self.selected_lap
+        self.interaction.selected_lap()
     }
 
     /// Set the lap range from a host interaction or deterministic presentation.
     pub fn set_selected_lap(&mut self, selected_lap: Option<usize>) {
-        self.selected_lap = selected_lap;
-        self.hovered_lap = None;
-        self.playing = false;
-        self.playback_position = None;
+        self.interaction.select_lap(selected_lap);
     }
 
     pub fn show(&mut self, ui: &mut Ui, intl: &Intl, props: &ViewerProps<'_>) {
         self.sync_recording(props.recording_key);
-        if self
-            .cursor
-            .sample_index
-            .is_some_and(|index| index >= props.recording.samples.len())
-        {
-            self.playing = false;
-            self.clear_cursor();
-        }
-        if self
-            .selected_lap
-            .is_some_and(|index| index >= props.recording.laps.len())
-        {
-            self.selected_lap = None;
-        }
+        self.interaction
+            .repair(props.recording.samples.len(), props.recording.laps.len());
         if ui.input(|input| input.key_pressed(Key::Escape)) {
-            self.playing = false;
-            self.clear_cursor();
+            self.interaction.stop_and_clear_cursor();
         }
 
-        if self
-            .domain_cache
-            .as_ref()
-            .is_none_or(|(units, _domain)| *units != props.units)
-        {
-            self.domain_cache = Some((props.units, Domain::new(props.recording, props.units)));
-        }
-        let domain = self.domain_cache.as_ref().map_or_else(
-            || Domain::new(props.recording, props.units),
-            |(_units, domain)| domain.clone(),
-        );
+        let domain = self.cache.domain(props.recording, props.units);
         if self.axis == Axis::Distance && !domain.distance_available {
             self.axis = Axis::Elapsed;
         }
@@ -483,33 +764,37 @@ impl Viewer {
             ui.id().with("activity-analysis-background"),
             Sense::CLICK,
         );
-        ScrollArea::vertical().show(ui, |ui| {
+        ScrollArea::vertical().show_viewport(ui, |ui, _scroll_viewport| {
+            let visible_viewport = ui.clip_rect();
             viewer_inset().show(ui, |ui| {
                 self.header(ui, intl, props, &domain);
             });
             ui.add_space(8.0);
-            let map_height = (ui.available_height() * 0.55).clamp(260.0, 420.0);
+            let map_height = activity_map_height(ui.available_height());
             let route_output = self.route(ui, intl, props.recording, props.no_route, map_height);
             let mut hover_seen = route_output.hovered.is_some();
             if route_output.empty_clicked {
-                self.playing = false;
-                self.clear_cursor();
+                self.interaction.stop_and_clear_cursor();
                 ui.ctx().request_repaint();
-            } else if self.apply_pointer(route_output.hovered, route_output.clicked) {
+            } else if self
+                .interaction
+                .apply_pointer(route_output.hovered, route_output.clicked)
+            {
                 ui.ctx().request_repaint();
             }
             ui.add_space(8.0);
+            let analysis = self.analysis(props, Arc::clone(&domain));
             hover_seen |= viewer_inset()
-                .show(ui, |ui| self.charts(ui, intl, props, &domain))
+                .show(ui, |ui| {
+                    self.charts(ui, intl, props, &analysis, visible_viewport)
+                })
                 .inner;
-            if !hover_seen && self.cursor.mode == CursorMode::Hover {
-                self.clear_cursor();
+            if !hover_seen && self.interaction.clear_hover() {
                 ui.ctx().request_repaint();
             }
         });
         if background.clicked() {
-            self.playing = false;
-            self.clear_cursor();
+            self.interaction.stop_and_clear_cursor();
             ui.ctx().request_repaint();
         }
     }
@@ -520,14 +805,25 @@ impl Viewer {
         }
         self.recording_key.clear();
         self.recording_key.push_str(key);
-        self.cursor = ActivityCursor::default();
+        self.recording_revision = self.recording_revision.wrapping_add(1);
+        self.interaction.reset();
         self.axis = Axis::Distance;
-        self.selected_lap = None;
-        self.hovered_lap = None;
-        self.playing = false;
-        self.playback_position = None;
-        self.domain_cache = None;
-        self.chart_cache.clear();
+        self.cache.clear();
+    }
+
+    fn analysis(&mut self, props: &ViewerProps<'_>, domain: Arc<Domain>) -> Arc<ActivityAnalysis> {
+        let range = self.sample_range(props.recording);
+        self.cache.analysis(
+            ActivityAnalysisKey {
+                recording_revision: self.recording_revision,
+                range: (*range.start(), *range.end()),
+                sport: props.presentation.sport(),
+                units: props.units,
+                domain: self.axis,
+            },
+            props.recording,
+            domain,
+        )
     }
 
     fn header(&mut self, ui: &mut Ui, intl: &Intl, props: &ViewerProps<'_>, domain: &Domain) {
@@ -576,15 +872,20 @@ impl Viewer {
         let range = self.sample_range(recording);
         let selected_coordinate = selected_route_coordinate(
             recording,
-            self.cursor,
-            self.playback_position,
+            self.interaction.cursor(),
+            self.interaction.playback_position(),
             range.clone(),
         );
-        let fit_key = format!("{}:{:?}", self.recording_key, self.selected_lap);
+        let fit_key = format!(
+            "{}:{:?}",
+            self.recording_key,
+            self.interaction.selected_lap()
+        );
         let background_unavailable =
             format_message!(intl, default_message: "Map background unavailable");
         let highlighted_range = self
-            .hovered_lap
+            .interaction
+            .hovered_lap()
             .and_then(|lap| lap_sample_range(recording, lap));
         let mut output = self.map.show(
             ui,
@@ -663,16 +964,14 @@ impl Viewer {
         controls.push(zoom.response.rect);
 
         let can_play = recording.samples.len() > 1;
-        let play_label = if self.playing {
+        let playing = self.interaction.is_playing();
+        let playback_speed = self.interaction.playback_speed();
+        let play_label = if playing {
             format_message!(intl, default_message: "Pause")
         } else {
             format_message!(intl, default_message: "Play")
         };
-        let icon = if self.playing {
-            icons::PAUSE
-        } else {
-            icons::PLAY
-        };
+        let icon = if playing { icons::PAUSE } else { icons::PLAY };
         let playback_width = 6.0 + BUTTON + GAP + 44.0;
         let playback_bounds = egui::Rect::from_min_size(
             egui::pos2(
@@ -684,7 +983,7 @@ impl Viewer {
         let speed_tooltip = format!(
             "{}: {}",
             format_message!(intl, default_message: "Playback speed"),
-            self.playback_speed.label()
+            playback_speed.label()
         );
         let playback = floating_control(
             ui,
@@ -692,25 +991,24 @@ impl Viewer {
             Layout::left_to_right(Align::Center),
             |ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                let play = floating_icon_button(ui, &play_label, icon, self.playing, can_play);
-                let speed =
-                    floating_text_button(ui, self.playback_speed.label(), 44.0, false, can_play)
-                        .on_hover_text(&speed_tooltip);
+                let play = floating_icon_button(ui, &play_label, icon, playing, can_play);
+                let speed = floating_text_button(ui, playback_speed.label(), 44.0, false, can_play)
+                    .on_hover_text(&speed_tooltip);
                 paint_vertical_control_separator(ui, play.rect, GAP);
                 (play, speed)
             },
         );
         if playback.inner.0.clicked() {
-            if self.playing {
-                self.playing = false;
-                self.cursor.mode = CursorMode::Pinned;
+            if playing {
+                self.interaction.pause();
             } else {
-                self.start_playback(recording);
+                let range = self.sample_range(recording);
+                self.interaction.start_playback(recording, range);
             }
             ui.ctx().request_repaint();
         }
         if playback.inner.1.clicked() {
-            self.playback_speed = self.playback_speed.next();
+            self.interaction.cycle_playback_speed();
             ui.ctx().request_repaint();
         }
         controls.push(playback.response.rect);
@@ -730,7 +1028,7 @@ impl Viewer {
         inset: f32,
         frame_size: f32,
     ) -> Option<egui::Rect> {
-        self.selected_lap?;
+        self.interaction.selected_lap()?;
         let full_activity = format_message!(intl, default_message: "Full activity");
         let bounds = egui::Rect::from_min_size(
             egui::pos2(
@@ -743,313 +1041,145 @@ impl Viewer {
             floating_labeled_button(ui, &full_activity, icons::TARGET, 112.0, false, true)
         });
         if control.inner.clicked() {
-            self.selected_lap = None;
-            self.playback_position = None;
+            self.interaction.clear_lap_constraint();
             self.map.fit();
             ui.ctx().request_repaint();
         }
         Some(control.response.rect)
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "each chart must share one cursor, domain, bounds group, and lap overlay in the same render loop"
-    )]
     fn charts(
         &mut self,
         ui: &mut Ui,
         intl: &Intl,
         props: &ViewerProps<'_>,
-        domain: &Domain,
+        analysis: &ActivityAnalysis,
+        viewport: egui::Rect,
     ) -> bool {
-        let visible = ChartKind::ALL
-            .iter()
-            .copied()
-            .filter(|kind| kind.has_values(props.recording, props.presentation.sport()))
-            .collect::<Vec<_>>();
+        let visible = analysis.visible();
         if visible.is_empty() {
             return false;
         }
-        let range = self.sample_range(props.recording);
-        let x_values = domain.values(self.axis);
-        let x_bounds = domain.bounds(self.axis, range.clone());
-        let linked = ui.id().with(("activity-chart-axis", &self.recording_key));
+        let layout_environment = ChartLayoutEnvironment::capture(ui, intl);
+        self.cache.prepare_chart_layout(layout_environment);
+        let frame = ChartFrame::new(ui, intl, props, analysis, self.axis, &self.recording_key);
         let mut hovered = None;
         let mut clicked = None;
-        let palette = crate::theme::palette(ui);
-        let accent = color32(crate::theme::selection_accent(ui));
-        let guide = color32(palette.content().icon_secondary());
-        let plot_surface = color32(palette.surfaces().layer(theme::Level::One));
-        let plot_field = color32(palette.surfaces().background_hover());
-        let plot_grid = color32(palette.borders().subtle()).gamma_multiply(0.42);
         for (chart_index, kind) in visible.iter().copied().enumerate() {
-            let label = kind.label(intl, props.presentation.sport());
-            let chart_color = kind.color(ui);
-            let stats = chart_stats(
-                props.recording,
-                range.clone(),
+            let width = ui.available_width().max(1.0);
+            let layout_key = ChartLayoutKey {
                 kind,
-                props.presentation.sport(),
-                props.units,
+                width_bucket: (width / 16.0).round() as u16,
+                sport: frame.sport,
+                units: frame.units,
+            };
+            if chart_is_outside_viewport(ui, viewport, self.cache.chart_height(layout_key), width) {
+                continue;
+            }
+            let _span = tracing::trace_span!(
+                "activity_chart_construction",
+                chart = ?kind,
+                chart_index
             )
-            .expect("a visible chart has at least one measurement");
-            let baseline = kind.fill_baseline(stats, props.presentation.sport());
-            let value = self
-                .cursor
-                .sample_index
-                .and_then(|index| props.recording.samples.get(index))
-                .and_then(|sample| kind.value(sample, props.presentation.sport(), props.units))
-                .map(|value| kind.format_value(value, props.presentation.sport(), props.units));
-            let max_points = (ui.available_width().max(64.0) * 2.0) as usize;
-            let cache_key = ChartCacheKey {
-                axis: self.axis,
-                kind,
-                sport: props.presentation.sport(),
-                units: props.units,
-                max_points,
-            };
-            let lines = if let Some(lines) = self.chart_cache.get(&cache_key) {
-                Arc::clone(lines)
-            } else {
-                if self.chart_cache.len() >= ChartKind::ALL.len() * 4 {
-                    self.chart_cache.clear();
-                }
-                let lines: Arc<[Vec<PlotPoint>]> = chart_lines(
-                    props.recording,
-                    x_values,
-                    kind,
-                    props.presentation.sport(),
-                    props.units,
-                    max_points,
-                )
-                .into();
-                self.chart_cache.insert(cache_key, Arc::clone(&lines));
-                lines
-            };
-            let selected = self.cursor.sample_index.and_then(|index| {
-                let x = *x_values.get(index)?;
-                let y = kind.value(
-                    props.recording.samples.get(index)?,
-                    props.presentation.sport(),
-                    props.units,
-                )?;
-                Some([x, y])
-            });
-            let lap_bounds = self
-                .hovered_lap
-                .or(self.selected_lap)
-                .and_then(|lap| lap_x_bounds(props.recording, x_values, lap));
-            let axis = self.axis;
-            let units = props.units;
-            let sport = props.presentation.sport();
-            let output = egui::Frame::new()
-                .fill(plot_surface)
-                .inner_margin(12)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(&label).size(14.0).strong());
-                        if let Some(value) = &value {
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(RichText::new(value).color(chart_color).strong());
-                            });
-                        }
-                    });
-                    ui.add_space(8.0);
-                    chart_summary(ui, intl, kind, stats, sport, units);
-                    ui.add_space(8.0);
-                    egui::Frame::new()
-                        .fill(plot_field)
-                        .inner_margin(egui::Margin {
-                            left: 24,
-                            right: 24,
-                            top: 4,
-                            bottom: 4,
-                        })
-                        .show(ui, |ui| {
-                            Plot::new(ui.id().with(("activity-chart", chart_index)))
-                                .height(CHART_HEIGHT)
-                                .allow_drag(false)
-                                .allow_axis_zoom_drag(false)
-                                .allow_scroll(false)
-                                .allow_zoom(false)
-                                .allow_boxed_zoom(false)
-                                .allow_double_click_reset(false)
-                                .show_crosshair(false)
-                                .show_background(false)
-                                .show_grid(egui::Vec2b::new(true, true))
-                                .show_x(false)
-                                .show_y(false)
-                                .show_axes(egui::Vec2b::new(true, false))
-                                .grid_color(plot_grid)
-                                .grid_fade(0.75)
-                                .include_y(baseline)
-                                .invert_y(
-                                    kind == ChartKind::PaceSpeed && sport == ActivitySport::Running,
-                                )
-                                .x_axis_formatter(move |mark, _bounds| {
-                                    format_domain_tick(mark.value, axis, units)
-                                })
-                                .link_axis(linked, egui::Vec2b::new(true, false))
-                                .show(ui, |plot_ui| {
-                                    plot_ui.set_plot_bounds_x(x_bounds.clone());
-                                    if let Some((start, end)) = lap_bounds {
-                                        plot_ui.span(
-                                            Span::new("lap interval", start..=end)
-                                                .fill(accent.gamma_multiply(0.12)),
-                                        );
-                                        plot_ui.vline(VLine::new("lap start", start).color(guide));
-                                        plot_ui.vline(VLine::new("lap end", end).color(guide));
-                                    }
-                                    for (segment_index, points) in lines.iter().enumerate() {
-                                        plot_ui.line(
-                                            Line::new(
-                                                format!("{label}-{segment_index}"),
-                                                points.as_slice(),
-                                            )
-                                            .color(chart_color)
-                                            .width(1.5)
-                                            .fill(baseline as f32)
-                                            .fill_alpha(0.32),
-                                        );
-                                    }
-                                    if let Some(index) = self.cursor.sample_index
-                                        && let Some(x) = x_values.get(index)
-                                    {
-                                        plot_ui.vline(
-                                            VLine::new("sample cursor", *x).color(guide).width(1.0),
-                                        );
-                                    }
-                                    if let Some([x, y]) = selected {
-                                        plot_ui.points(
-                                            Points::new("selected sample", vec![[x, y]])
-                                                .color(chart_color)
-                                                .radius(4.0),
-                                        );
-                                    }
-                                    plot_ui
-                                        .response()
-                                        .hovered()
-                                        .then(|| plot_ui.pointer_coordinate().map(|point| point.x))
-                                        .flatten()
-                                })
-                        })
-                        .inner
-                })
-                .inner;
-            if let Some(x) = output.inner {
-                let index = nearest_index(x_values, x, range.clone());
+            .entered();
+            let chart = self.prepare_chart(ui, kind, chart_index, &frame);
+            let output = show_chart(ui, &chart, &frame);
+            self.cache.record_chart_height(layout_key, output.height);
+            if let Some(x) = output.pointer_x {
+                let index = nearest_index(frame.x_values, x, frame.range.clone());
                 hovered = index;
-                if output.response.clicked()
-                    || output.response.dragged_by(egui::PointerButton::Primary)
-                {
+                if output.select {
                     clicked = index;
                 }
             }
             ui.add_space(8.0);
         }
-        if self.apply_pointer(hovered, clicked) {
+        if self.interaction.apply_pointer(hovered, clicked) {
             ui.ctx().request_repaint();
         }
         hovered.is_some()
     }
 
-    fn apply_pointer(&mut self, hovered: Option<usize>, clicked: Option<usize>) -> bool {
-        let next = if let Some(index) = clicked {
-            self.playing = false;
-            self.playback_position = None;
-            Some(ActivityCursor {
-                sample_index: Some(index),
-                mode: CursorMode::Pinned,
-            })
-        } else {
-            hovered
-                .filter(|_| !self.playing)
-                .map(|index| ActivityCursor {
-                    sample_index: Some(index),
-                    mode: CursorMode::Hover,
-                })
+    fn prepare_chart(
+        &mut self,
+        ui: &Ui,
+        kind: ChartKind,
+        chart_index: usize,
+        frame: &ChartFrame<'_, '_>,
+    ) -> PreparedChart {
+        let max_points = (ui.available_width().max(64.0) * 2.0) as usize;
+        let cache_key = ChartCacheKey {
+            recording_revision: self.recording_revision,
+            axis: self.axis,
+            kind,
+            sport: frame.sport,
+            units: frame.units,
+            max_points,
         };
-        if let Some(next) = next
-            && self.cursor != next
-        {
-            self.cursor = next;
-            true
-        } else {
-            false
+        let lines = self.cache.chart_lines(cache_key, || {
+            Arc::from(chart_lines(
+                frame.props.recording,
+                frame.x_values,
+                kind,
+                frame.sport,
+                frame.units,
+                max_points,
+            ))
+        });
+        let stats = frame
+            .analysis
+            .stats(kind)
+            .expect("a visible chart has cached measurements");
+        PreparedChart {
+            kind,
+            chart_index,
+            label: kind.label(frame.intl, frame.sport),
+            color: kind.color(ui),
+            stats,
+            baseline: kind.fill_baseline(stats, frame.sport),
+            value: self
+                .interaction
+                .cursor()
+                .sample_index
+                .and_then(|index| frame.props.recording.samples.get(index))
+                .and_then(|sample| kind.value(sample, frame.sport, frame.units))
+                .map(|value| kind.format_value(value, frame.sport, frame.units)),
+            lines,
+            selected: self.interaction.cursor().sample_index.and_then(|index| {
+                Some([
+                    *frame.x_values.get(index)?,
+                    kind.value(
+                        frame.props.recording.samples.get(index)?,
+                        frame.sport,
+                        frame.units,
+                    )?,
+                ])
+            }),
+            lap_bounds: self
+                .interaction
+                .focused_lap()
+                .and_then(|lap| lap_x_bounds(frame.props.recording, frame.x_values, lap)),
+            cursor_index: self.interaction.cursor().sample_index,
         }
-    }
-
-    fn clear_cursor(&mut self) {
-        self.cursor = ActivityCursor::default();
-        self.playback_position = None;
-    }
-
-    fn start_playback(&mut self, recording: &ActivityRecordingSnapshot) {
-        let range = self.sample_range(recording);
-        let active = active_positions(recording);
-        let start = active.get(*range.start()).copied().unwrap_or(0.0);
-        let end = active.get(*range.end()).copied().unwrap_or(start);
-        let current = self
-            .playback_position
-            .or_else(|| {
-                self.cursor
-                    .sample_index
-                    .and_then(|index| active.get(index).copied())
-            })
-            .unwrap_or(start);
-        let position = if current >= end {
-            start
-        } else {
-            current.max(start)
-        };
-        self.playback_position = Some(position);
-        self.cursor = ActivityCursor {
-            sample_index: nearest_value_index(&active, position, range),
-            mode: CursorMode::Playback,
-        };
-        self.playing = end > start;
     }
 
     fn sample_range(
         &self,
         recording: &ActivityRecordingSnapshot,
     ) -> std::ops::RangeInclusive<usize> {
-        self.selected_lap
+        self.interaction
+            .selected_lap()
             .and_then(|lap| lap_sample_range(recording, lap))
             .unwrap_or(0..=recording.samples.len().saturating_sub(1))
     }
 
     fn advance_playback(&mut self, ui: &Ui, recording: &ActivityRecordingSnapshot) {
-        if !self.playing || recording.samples.len() < 2 {
-            return;
-        }
-        let active = active_positions(recording);
         let range = self.sample_range(recording);
-        let start = *active.get(*range.start()).unwrap_or(&0.0);
-        let end = *active.get(*range.end()).unwrap_or(&start);
-        let current_index = self
-            .cursor
-            .sample_index
-            .filter(|index| range.contains(index))
-            .unwrap_or(*range.start());
-        let position = self
-            .playback_position
-            .unwrap_or_else(|| active.get(current_index).copied().unwrap_or(start));
         let delta_seconds = f64::from(ui.ctx().input(|input| input.stable_dt));
-        let next = position + playback_delta(end - start, delta_seconds, self.playback_speed);
-        if next >= end {
-            self.playing = false;
-            self.playback_position = Some(end);
-            self.cursor = ActivityCursor {
-                sample_index: Some(*range.end()),
-                mode: CursorMode::Pinned,
-            };
-        } else {
-            self.playback_position = Some(next);
-            self.cursor = ActivityCursor {
-                sample_index: nearest_value_index(&active, next, range),
-                mode: CursorMode::Playback,
-            };
+        if self
+            .interaction
+            .advance_playback(recording, range, delta_seconds)
+        {
             ui.ctx().request_repaint();
         }
     }
@@ -1063,7 +1193,8 @@ impl Viewer {
         units: UnitSystem,
     ) {
         let Some(sample) = self
-            .cursor
+            .interaction
+            .cursor()
             .sample_index
             .and_then(|index| recording.samples.get(index))
         else {
@@ -1109,8 +1240,10 @@ impl Viewer {
         }
         ui.add_space(10.0);
         ui.label(RichText::new(format_message!(intl, default_message: "Laps")).strong());
+        ui.add_space(6.0);
         let active_lap = self
-            .cursor
+            .interaction
+            .cursor()
             .sample_index
             .and_then(|sample| lap_containing_sample(recording, sample));
         let mut hovered = None;
@@ -1129,28 +1262,28 @@ impl Viewer {
                     values: { number: number },
                 );
                 let duration = super::duration(lap.totals.timer().into_milliseconds());
-                let selected = self.selected_lap == Some(index)
-                    || (self.selected_lap.is_none() && active_lap == Some(index));
-                let response = lap_row(ui, &label, &distance, &duration, selected);
+                let selected_lap = self.interaction.selected_lap();
+                let selected = selected_lap == Some(index)
+                    || (selected_lap.is_none() && active_lap == Some(index));
+                let response = lap_row(
+                    ui,
+                    &label,
+                    &number.to_string(),
+                    &distance,
+                    &duration,
+                    selected,
+                );
                 if response.hovered() {
                     hovered = Some(index);
                 }
                 if response.clicked() {
-                    self.selected_lap = Some(index);
-                    self.playing = false;
-                    self.playback_position = None;
-                    if let Some(range) = lap_sample_range(recording, index) {
-                        self.cursor = ActivityCursor {
-                            sample_index: Some(*range.start()),
-                            mode: CursorMode::Pinned,
-                        };
-                    }
+                    let sample = lap_sample_range(recording, index).map(|range| *range.start());
+                    self.interaction.select_lap_row(index, sample);
                     ui.ctx().request_repaint();
                 }
             }
         });
-        if self.hovered_lap != hovered {
-            self.hovered_lap = hovered;
+        if self.interaction.set_hovered_lap(hovered) {
             ui.ctx().request_repaint();
         }
     }
@@ -1324,27 +1457,22 @@ fn map_control_visuals(
 }
 
 fn lap_table_header(ui: &mut Ui, intl: &Intl) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::hover());
     let palette = crate::theme::palette(ui);
-    ui.painter().rect_filled(
-        rect,
-        egui::CornerRadius::ZERO,
-        palette.surfaces().background_hover().into_cint(),
-    );
     let columns = LapColumns::new(rect);
     let color = color32(palette.content().text_secondary());
     let font = egui::TextStyle::Small.resolve(ui.style());
-    paint_lap_columns(ui, rect, columns);
+    paint_lap_row_divider(ui, rect);
     ui.painter().text(
-        egui::pos2(columns.left, rect.center().y),
+        egui::pos2(columns.lap_left, rect.center().y),
         egui::Align2::LEFT_CENTER,
         "#",
         font.clone(),
         color,
     );
     ui.painter().text(
-        egui::pos2(columns.distance_left, rect.center().y),
-        egui::Align2::LEFT_CENTER,
+        egui::pos2(columns.distance_right, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
         format_message!(intl, default_message: "Distance"),
         font.clone(),
         color,
@@ -1360,19 +1488,20 @@ fn lap_table_header(ui: &mut Ui, intl: &Intl) {
 
 fn lap_row(
     ui: &mut Ui,
-    label: &str,
+    accessible_label: &str,
+    number: &str,
     distance: &str,
     duration: &str,
     selected: bool,
 ) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 36.0), Sense::click());
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
             ui.is_enabled(),
-            format!("{label}, {distance}, {duration}"),
+            format!("{accessible_label}, {distance}, {duration}"),
         )
     });
     let palette = crate::theme::palette(ui);
@@ -1388,34 +1517,35 @@ fn lap_row(
     }
     if selected {
         ui.painter().rect_filled(
-            egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height())),
+            egui::Rect::from_min_size(rect.min, egui::vec2(2.0, rect.height())),
             egui::CornerRadius::ZERO,
             crate::theme::selection_accent(ui).into_cint(),
         );
     }
     let columns = LapColumns::new(rect);
-    paint_lap_columns(ui, rect, columns);
+    paint_lap_row_divider(ui, rect);
     let secondary = color32(palette.content().text_secondary());
     let primary = color32(palette.content().text_primary());
+    let font = egui::TextStyle::Body.resolve(ui.style());
     ui.painter().text(
-        egui::pos2(columns.left, rect.center().y),
+        egui::pos2(columns.lap_left, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        label,
-        egui::TextStyle::Button.resolve(ui.style()),
+        number,
+        font.clone(),
         primary,
     );
     ui.painter().text(
-        egui::pos2(columns.distance_left, rect.center().y),
-        egui::Align2::LEFT_CENTER,
+        egui::pos2(columns.distance_right, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
         distance,
-        egui::TextStyle::Small.resolve(ui.style()),
-        secondary,
+        font.clone(),
+        primary,
     );
     ui.painter().text(
         egui::pos2(columns.right, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         duration,
-        egui::TextStyle::Small.resolve(ui.style()),
+        font,
         secondary,
     );
     if response.has_focus() {
@@ -1431,9 +1561,8 @@ fn lap_row(
 
 #[derive(Clone, Copy)]
 struct LapColumns {
-    left: f32,
-    distance_left: f32,
-    time_left: f32,
+    lap_left: f32,
+    distance_right: f32,
     right: f32,
 }
 
@@ -1442,24 +1571,27 @@ impl LapColumns {
         let left = rect.left() + 8.0;
         let right = rect.right() - 8.0;
         Self {
-            left,
-            distance_left: left + 42.0,
-            time_left: right - 58.0,
+            lap_left: left,
+            distance_right: right - 72.0,
             right,
         }
     }
 }
 
-fn paint_lap_columns(ui: &Ui, rect: egui::Rect, columns: LapColumns) {
+fn paint_lap_row_divider(ui: &Ui, rect: egui::Rect) {
     let stroke = egui::Stroke::new(
         1.0,
-        color32(crate::theme::palette(ui).borders().subtle()).gamma_multiply(0.72),
+        color32(crate::theme::palette(ui).borders().subtle()).gamma_multiply(0.56),
     );
-    ui.painter().hline(rect.x_range(), rect.bottom(), stroke);
-    ui.painter()
-        .vline(columns.distance_left - 7.0, rect.y_range(), stroke);
-    ui.painter()
-        .vline(columns.time_left - 7.0, rect.y_range(), stroke);
+    ui.painter().hline(
+        (rect.left() + 8.0)..=(rect.right() - 8.0),
+        rect.bottom(),
+        stroke,
+    );
+}
+
+fn activity_map_height(available_height: f32) -> f32 {
+    (available_height * 0.68).clamp(320.0, 560.0)
 }
 
 fn summary(ui: &mut Ui, presentation: &Presentation) {
@@ -1551,6 +1683,223 @@ fn loading_panel(ui: &mut Ui, intl: &Intl) {
         ui,
         &format_message!(intl, default_message: "Loading activity…"),
     );
+}
+
+#[derive(Clone, Copy)]
+struct ChartVisuals {
+    accent: egui::Color32,
+    guide: egui::Color32,
+    surface: egui::Color32,
+    field: egui::Color32,
+    grid: egui::Color32,
+}
+
+struct ChartFrame<'frame, 'recording> {
+    intl: &'frame Intl,
+    props: &'frame ViewerProps<'recording>,
+    analysis: &'frame ActivityAnalysis,
+    x_values: &'frame [f64],
+    x_bounds: std::ops::RangeInclusive<f64>,
+    range: std::ops::RangeInclusive<usize>,
+    linked: Id,
+    axis: Axis,
+    sport: ActivitySport,
+    units: UnitSystem,
+    visuals: ChartVisuals,
+}
+
+impl<'frame, 'recording> ChartFrame<'frame, 'recording> {
+    fn new(
+        ui: &Ui,
+        intl: &'frame Intl,
+        props: &'frame ViewerProps<'recording>,
+        analysis: &'frame ActivityAnalysis,
+        axis: Axis,
+        recording_key: &str,
+    ) -> Self {
+        let palette = crate::theme::palette(ui);
+        let range = analysis.range();
+        Self {
+            intl,
+            props,
+            analysis,
+            x_values: analysis.domain.values(axis),
+            x_bounds: analysis.domain.bounds(axis, range.clone()),
+            range,
+            linked: ui.id().with(("activity-chart-axis", recording_key)),
+            axis,
+            sport: props.presentation.sport(),
+            units: props.units,
+            visuals: ChartVisuals {
+                accent: color32(crate::theme::selection_accent(ui)),
+                guide: color32(palette.content().icon_secondary()),
+                surface: color32(palette.surfaces().layer(theme::Level::One)),
+                field: color32(palette.surfaces().background_hover()),
+                grid: color32(palette.borders().subtle()).gamma_multiply(0.42),
+            },
+        }
+    }
+}
+
+struct PreparedChart {
+    kind: ChartKind,
+    chart_index: usize,
+    label: String,
+    color: egui::Color32,
+    stats: ChartStats,
+    baseline: f64,
+    value: Option<String>,
+    lines: Arc<[Vec<PlotPoint>]>,
+    selected: Option<[f64; 2]>,
+    lap_bounds: Option<(f64, f64)>,
+    cursor_index: Option<usize>,
+}
+
+struct ChartUiOutput {
+    height: f32,
+    pointer_x: Option<f64>,
+    select: bool,
+}
+
+fn chart_is_outside_viewport(
+    ui: &mut Ui,
+    viewport: egui::Rect,
+    cached_height: Option<f32>,
+    width: f32,
+) -> bool {
+    let Some(height) = cached_height else {
+        return false;
+    };
+    let candidate = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(width, height));
+    if viewport
+        .expand(CHART_VIEWPORT_OVERSCAN)
+        .intersects(candidate)
+    {
+        return false;
+    }
+    ui.allocate_exact_size(candidate.size(), Sense::hover());
+    ui.add_space(8.0);
+    true
+}
+
+fn show_chart(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) -> ChartUiOutput {
+    let rendered = egui::Frame::new()
+        .fill(frame.visuals.surface)
+        .inner_margin(12)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(&chart.label).size(14.0).strong());
+                if let Some(value) = &chart.value {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(RichText::new(value).color(chart.color).strong());
+                    });
+                }
+            });
+            ui.add_space(8.0);
+            chart_summary(
+                ui,
+                frame.intl,
+                chart.kind,
+                chart.stats,
+                frame.sport,
+                frame.units,
+            );
+            ui.add_space(8.0);
+            let plot = egui::Frame::new()
+                .fill(frame.visuals.field)
+                .inner_margin(egui::Margin {
+                    left: 24,
+                    right: 24,
+                    top: 4,
+                    bottom: 4,
+                })
+                .show(ui, |ui| show_chart_plot(ui, chart, frame));
+            (
+                plot.inner,
+                plot.response.clicked() || plot.response.dragged_by(egui::PointerButton::Primary),
+            )
+        });
+    ChartUiOutput {
+        height: rendered.response.rect.height(),
+        pointer_x: rendered.inner.0,
+        select: rendered.inner.1,
+    }
+}
+
+fn show_chart_plot(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) -> Option<f64> {
+    let inverted = chart.kind == ChartKind::PaceSpeed && frame.sport == ActivitySport::Running;
+    Plot::new(ui.id().with(("activity-chart", chart.chart_index)))
+        .height(CHART_HEIGHT)
+        .allow_drag(false)
+        .allow_axis_zoom_drag(false)
+        .allow_scroll(false)
+        .allow_zoom(false)
+        .allow_boxed_zoom(false)
+        .allow_double_click_reset(false)
+        .show_crosshair(false)
+        .show_background(false)
+        .show_grid(egui::Vec2b::new(true, true))
+        .show_x(false)
+        .show_y(false)
+        .show_axes(egui::Vec2b::new(true, false))
+        .grid_color(frame.visuals.grid)
+        .grid_fade(0.75)
+        .include_y(chart.baseline)
+        .invert_y(inverted)
+        .x_axis_formatter(|mark, _bounds| format_domain_tick(mark.value, frame.axis, frame.units))
+        .link_axis(frame.linked, egui::Vec2b::new(true, false))
+        .show(ui, |plot_ui| {
+            plot_ui.set_plot_bounds_x(frame.x_bounds.clone());
+            paint_chart_data(plot_ui, chart, frame);
+            plot_ui
+                .response()
+                .hovered()
+                .then(|| plot_ui.pointer_coordinate().map(|point| point.x))
+                .flatten()
+        })
+        .inner
+}
+
+fn paint_chart_data<'a>(
+    plot_ui: &mut egui_plot::PlotUi<'a>,
+    chart: &'a PreparedChart,
+    frame: &ChartFrame<'_, '_>,
+) {
+    if let Some((start, end)) = chart.lap_bounds {
+        plot_ui.span(
+            Span::new("lap interval", start..=end).fill(frame.visuals.accent.gamma_multiply(0.12)),
+        );
+        plot_ui.vline(VLine::new("lap start", start).color(frame.visuals.guide));
+        plot_ui.vline(VLine::new("lap end", end).color(frame.visuals.guide));
+    }
+    for (segment_index, points) in chart.lines.iter().enumerate() {
+        plot_ui.line(
+            Line::new(
+                format!("{}-{segment_index}", chart.label),
+                points.as_slice(),
+            )
+            .color(chart.color)
+            .width(1.5)
+            .fill(chart.baseline as f32)
+            .fill_alpha(0.32),
+        );
+    }
+    if let Some(index) = chart.cursor_index
+        && let Some(x) = frame.x_values.get(index)
+    {
+        plot_ui.vline(
+            VLine::new("sample cursor", *x)
+                .color(frame.visuals.guide)
+                .width(1.0),
+        );
+    }
+    if let Some([x, y]) = chart.selected {
+        plot_ui.points(
+            Points::new("selected sample", vec![[x, y]])
+                .color(chart.color)
+                .radius(4.0),
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -1696,11 +2045,261 @@ enum ChartKind {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct ChartCacheKey {
+    recording_revision: u64,
     axis: Axis,
     kind: ChartKind,
     sport: ActivitySport,
     units: UnitSystem,
     max_points: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct ChartLayoutKey {
+    kind: ChartKind,
+    width_bucket: u16,
+    sport: ActivitySport,
+    units: UnitSystem,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ChartLayoutEnvironment {
+    locale: String,
+    pixels_per_point: u32,
+    probe_size: [u32; 2],
+}
+
+impl ChartLayoutEnvironment {
+    fn capture(ui: &Ui, intl: &Intl) -> Self {
+        let probe = ui
+            .painter()
+            .layout_no_wrap(
+                "Mg0123456789".to_owned(),
+                egui::FontId::proportional(15.0),
+                egui::Color32::WHITE,
+            )
+            .size();
+        Self::new(
+            intl.locale().to_string(),
+            ui.ctx().pixels_per_point(),
+            probe,
+        )
+    }
+
+    fn new(locale: String, pixels_per_point: f32, probe_size: Vec2) -> Self {
+        Self {
+            locale,
+            pixels_per_point: pixels_per_point.to_bits(),
+            probe_size: [probe_size.x.to_bits(), probe_size.y.to_bits()],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ActivityAnalysisKey {
+    recording_revision: u64,
+    range: (usize, usize),
+    sport: ActivitySport,
+    units: UnitSystem,
+    domain: Axis,
+}
+
+struct ActivityAnalysis {
+    key: ActivityAnalysisKey,
+    domain: Arc<Domain>,
+    stats: [Option<ChartStats>; ChartKind::ALL.len()],
+    visible: Vec<ChartKind>,
+}
+
+impl ActivityAnalysis {
+    fn new(
+        key: ActivityAnalysisKey,
+        recording: &ActivityRecordingSnapshot,
+        domain: Arc<Domain>,
+    ) -> Self {
+        let mut accumulators = [ChartStatsAccumulator::default(); ChartKind::ALL.len()];
+        if let Some(samples) = recording.samples.get(key.range.0..=key.range.1) {
+            for sample in samples {
+                for kind in ChartKind::ALL {
+                    if let Some(value) = kind
+                        .value(sample, key.sport, key.units)
+                        .filter(|value| value.is_finite())
+                    {
+                        accumulators[kind.index()].push(value);
+                    }
+                }
+            }
+        }
+        let stats = accumulators.map(ChartStatsAccumulator::finish);
+        let visible = ChartKind::ALL
+            .into_iter()
+            .filter(|kind| stats[kind.index()].is_some())
+            .collect();
+        Self {
+            key,
+            domain,
+            stats,
+            visible,
+        }
+    }
+
+    fn range(&self) -> std::ops::RangeInclusive<usize> {
+        self.key.range.0..=self.key.range.1
+    }
+
+    fn visible(&self) -> &[ChartKind] {
+        &self.visible
+    }
+
+    fn stats(&self, kind: ChartKind) -> Option<ChartStats> {
+        self.stats[kind.index()]
+    }
+}
+
+#[derive(Default)]
+struct ActivityAnalysisCache {
+    value: Option<Arc<ActivityAnalysis>>,
+    #[cfg(test)]
+    builds: u64,
+}
+
+impl ActivityAnalysisCache {
+    fn resolve(
+        &mut self,
+        key: ActivityAnalysisKey,
+        recording: &ActivityRecordingSnapshot,
+        domain: Arc<Domain>,
+    ) -> Arc<ActivityAnalysis> {
+        if let Some(value) = &self.value
+            && value.key == key
+        {
+            return Arc::clone(value);
+        }
+        let value = Arc::new(ActivityAnalysis::new(key, recording, domain));
+        self.value = Some(Arc::clone(&value));
+        #[cfg(test)]
+        {
+            self.builds += 1;
+        }
+        value
+    }
+
+    fn clear(&mut self) {
+        self.value = None;
+    }
+}
+
+#[derive(Default)]
+struct ViewerCache {
+    domain: Option<CachedDomain>,
+    analysis: ActivityAnalysisCache,
+    chart_lines: HashMap<ChartCacheKey, Arc<[Vec<PlotPoint>]>>,
+    chart_layout: HashMap<ChartLayoutKey, f32>,
+    chart_layout_environment: Option<ChartLayoutEnvironment>,
+}
+
+impl ViewerCache {
+    fn clear(&mut self) {
+        self.domain = None;
+        self.analysis.clear();
+        self.chart_lines.clear();
+        self.chart_layout.clear();
+        self.chart_layout_environment = None;
+    }
+
+    fn domain(&mut self, recording: &ActivityRecordingSnapshot, units: UnitSystem) -> Arc<Domain> {
+        if self
+            .domain
+            .as_ref()
+            .is_none_or(|entry| entry.units != units)
+        {
+            self.domain = Some(CachedDomain {
+                units,
+                value: Arc::new(Domain::new(recording, units)),
+            });
+        }
+        Arc::clone(
+            &self
+                .domain
+                .as_ref()
+                .expect("resolving a domain populates its cache entry")
+                .value,
+        )
+    }
+
+    fn analysis(
+        &mut self,
+        key: ActivityAnalysisKey,
+        recording: &ActivityRecordingSnapshot,
+        domain: Arc<Domain>,
+    ) -> Arc<ActivityAnalysis> {
+        self.analysis.resolve(key, recording, domain)
+    }
+
+    fn chart_lines(
+        &mut self,
+        key: ChartCacheKey,
+        build: impl FnOnce() -> Arc<[Vec<PlotPoint>]>,
+    ) -> Arc<[Vec<PlotPoint>]> {
+        if let Some(lines) = self.chart_lines.get(&key) {
+            return Arc::clone(lines);
+        }
+        if self.chart_lines.len() >= ChartKind::ALL.len() * 4 {
+            self.chart_lines.clear();
+        }
+        let lines = build();
+        self.chart_lines.insert(key, Arc::clone(&lines));
+        lines
+    }
+
+    fn prepare_chart_layout(&mut self, environment: ChartLayoutEnvironment) {
+        if self.chart_layout_environment.as_ref() != Some(&environment) {
+            self.chart_layout.clear();
+            self.chart_layout_environment = Some(environment);
+        }
+    }
+
+    fn chart_height(&self, key: ChartLayoutKey) -> Option<f32> {
+        self.chart_layout.get(&key).copied()
+    }
+
+    fn record_chart_height(&mut self, key: ChartLayoutKey, height: f32) {
+        self.chart_layout.insert(key, height);
+    }
+}
+
+struct CachedDomain {
+    units: UnitSystem,
+    value: Arc<Domain>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct ChartStatsAccumulator {
+    minimum: f64,
+    maximum: f64,
+    total: f64,
+    count: u64,
+}
+
+impl ChartStatsAccumulator {
+    fn push(&mut self, value: f64) {
+        if self.count == 0 {
+            self.minimum = value;
+            self.maximum = value;
+        } else {
+            self.minimum = self.minimum.min(value);
+            self.maximum = self.maximum.max(value);
+        }
+        self.total += value;
+        self.count += 1;
+    }
+
+    fn finish(self) -> Option<ChartStats> {
+        (self.count > 0).then(|| ChartStats {
+            minimum: self.minimum,
+            average: self.total / self.count as f64,
+            maximum: self.maximum,
+        })
+    }
 }
 
 impl ChartKind {
@@ -1712,6 +2311,17 @@ impl ChartKind {
         Self::Power,
         Self::Temperature,
     ];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Elevation => 0,
+            Self::PaceSpeed => 1,
+            Self::HeartRate => 2,
+            Self::Cadence => 3,
+            Self::Power => 4,
+            Self::Temperature => 5,
+        }
+    }
 
     fn label(self, intl: &Intl, sport: ActivitySport) -> String {
         match self {
@@ -1725,13 +2335,6 @@ impl ChartKind {
             Self::Power => format_message!(intl, default_message: "Power"),
             Self::Temperature => format_message!(intl, default_message: "Temperature"),
         }
-    }
-
-    fn has_values(self, recording: &ActivityRecordingSnapshot, sport: ActivitySport) -> bool {
-        recording
-            .samples
-            .iter()
-            .any(|sample| self.value(sample, sport, UnitSystem::Metric).is_some())
     }
 
     fn color(self, ui: &Ui) -> egui::Color32 {
@@ -1827,35 +2430,6 @@ struct ChartStats {
     minimum: f64,
     average: f64,
     maximum: f64,
-}
-
-fn chart_stats(
-    recording: &ActivityRecordingSnapshot,
-    range: std::ops::RangeInclusive<usize>,
-    kind: ChartKind,
-    sport: ActivitySport,
-    units: UnitSystem,
-) -> Option<ChartStats> {
-    let mut values = recording.samples.get(range)?.iter().filter_map(|sample| {
-        kind.value(sample, sport, units)
-            .filter(|value| value.is_finite())
-    });
-    let first = values.next()?;
-    let mut minimum = first;
-    let mut maximum = first;
-    let mut total = first;
-    let mut count = 1_u64;
-    for value in values {
-        minimum = minimum.min(value);
-        maximum = maximum.max(value);
-        total += value;
-        count += 1;
-    }
-    Some(ChartStats {
-        minimum,
-        average: total / count as f64,
-        maximum,
-    })
 }
 
 fn chart_summary(
@@ -2155,6 +2729,8 @@ fn selected_route_coordinate(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use egui_plot::PlotPoint;
     use garmin_model::{
         activity::{
@@ -2170,10 +2746,27 @@ mod tests {
     };
 
     use super::{
-        ActivityCursor, Axis, ChartKind, CursorMode, Viewer, active_positions, chart_lines,
-        distance_domain, downsample, format_pace, lap_sample_range, nearest_index, playback_delta,
-        selected_route_coordinate,
+        ActivityAnalysisCache, ActivityAnalysisKey, ActivityCursor, Axis, ChartKind,
+        ChartLayoutEnvironment, CursorMode, Domain, Viewer, ViewerInteraction, active_positions,
+        activity_map_height, chart_lines, distance_domain, downsample, format_pace,
+        lap_sample_range, nearest_index, playback_delta, selected_route_coordinate,
     };
+
+    struct TestMapBackend;
+
+    impl crate::activity::map_runtime::Backend for TestMapBackend {
+        fn submit(&self, task: crate::activity::map_runtime::TileTask) {
+            task.complete_encoded(Ok(Vec::new()));
+        }
+    }
+
+    fn viewer() -> Viewer {
+        let runtime = crate::activity::map_runtime::MapRuntimeHandle::new(
+            TestMapBackend,
+            crate::activity::map_runtime::Renderer::software(),
+        );
+        Viewer::new(&runtime)
+    }
 
     fn timestamp(milliseconds: i64) -> Timestamp {
         Timestamp::from_unix_milliseconds(milliseconds).unwrap()
@@ -2310,6 +2903,61 @@ mod tests {
     }
 
     #[test]
+    fn map_and_cursor_repaints_reuse_recording_analysis() {
+        let recording = recording(vec![
+            sample(0, Some(0), Some(10.0), None),
+            sample(1_000, Some(1_000), Some(20.0), None),
+            sample(2_000, Some(2_000), Some(30.0), None),
+        ]);
+        let domain = Arc::new(Domain::new(&recording, UnitSystem::Metric));
+        let key = ActivityAnalysisKey {
+            recording_revision: 7,
+            range: (0, 2),
+            sport: ActivitySport::Cycling,
+            units: UnitSystem::Metric,
+            domain: Axis::Distance,
+        };
+        let mut cache = ActivityAnalysisCache::default();
+
+        let first = cache.resolve(key, &recording, Arc::clone(&domain));
+        let repaint = cache.resolve(key, &recording, Arc::clone(&domain));
+
+        assert!(Arc::ptr_eq(&first, &repaint));
+        assert_eq!(cache.builds, 1);
+        assert!((first.stats(ChartKind::Elevation).unwrap().average - 20.0).abs() < f64::EPSILON);
+
+        let lap = cache.resolve(
+            ActivityAnalysisKey {
+                range: (1, 2),
+                ..key
+            },
+            &recording,
+            domain,
+        );
+        assert!(!Arc::ptr_eq(&first, &lap));
+        assert_eq!(cache.builds, 2);
+        assert!((lap.stats(ChartKind::Elevation).unwrap().average - 25.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn chart_layout_environment_tracks_language_font_metrics_and_scale() {
+        let baseline = ChartLayoutEnvironment::new("en".to_owned(), 1.0, egui::vec2(80.0, 16.0));
+
+        assert_ne!(
+            baseline,
+            ChartLayoutEnvironment::new("cs".to_owned(), 1.0, egui::vec2(80.0, 16.0))
+        );
+        assert_ne!(
+            baseline,
+            ChartLayoutEnvironment::new("en".to_owned(), 1.25, egui::vec2(80.0, 16.0))
+        );
+        assert_ne!(
+            baseline,
+            ChartLayoutEnvironment::new("en".to_owned(), 1.0, egui::vec2(84.0, 17.0))
+        );
+    }
+
+    #[test]
     fn active_timeline_omits_stopped_timer_intervals() {
         let mut recording = recording(vec![
             sample(0, None, None, None),
@@ -2355,6 +3003,13 @@ mod tests {
             super::PlaybackSpeed::Double.next(),
             super::PlaybackSpeed::Half
         );
+    }
+
+    #[test]
+    fn activity_map_uses_more_of_the_center_viewport() {
+        assert!((activity_map_height(600.0) - 408.0).abs() < f32::EPSILON);
+        assert!((activity_map_height(200.0) - 320.0).abs() < f32::EPSILON);
+        assert!((activity_map_height(1_000.0) - 560.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -2418,8 +3073,8 @@ mod tests {
 
     #[test]
     fn shared_cursor_reports_hover_pin_and_host_updates() {
-        let mut viewer = Viewer::default();
-        assert!(viewer.apply_pointer(Some(3), None));
+        let mut viewer = viewer();
+        assert!(viewer.interaction.apply_pointer(Some(3), None));
         assert_eq!(
             viewer.cursor(),
             ActivityCursor {
@@ -2428,43 +3083,114 @@ mod tests {
             }
         );
 
-        assert!(viewer.apply_pointer(Some(4), Some(4)));
+        assert!(viewer.interaction.apply_pointer(Some(4), Some(4)));
         assert_eq!(viewer.cursor().mode, CursorMode::Pinned);
         viewer.set_cursor(ActivityCursor {
             sample_index: Some(8),
             mode: CursorMode::Playback,
         });
         assert_eq!(viewer.cursor().sample_index, Some(8));
-        assert!(viewer.playing);
+        assert!(viewer.interaction.is_playing());
 
-        viewer.playback_position = Some(12.0);
         viewer.set_selected_lap(Some(2));
         assert_eq!(viewer.selected_lap(), Some(2));
-        assert!(!viewer.playing);
-        assert_eq!(viewer.playback_position, None);
+        assert!(!viewer.interaction.is_playing());
+        assert_eq!(viewer.interaction.playback_position(), None);
+    }
+
+    #[test]
+    fn interaction_owns_play_pause_restart_end_and_pointer_transitions() {
+        let recording = recording(vec![
+            sample(0, None, None, None),
+            sample(10_000, None, None, None),
+            sample(20_000, None, None, None),
+        ]);
+        let mut interaction = ViewerInteraction::default();
+
+        interaction.start_playback(&recording, 0..=2);
+        assert!(interaction.is_playing());
+        assert_eq!(interaction.cursor().mode, CursorMode::Playback);
+        assert_eq!(interaction.playback_position(), Some(0.0));
+
+        interaction.pause();
+        assert!(!interaction.is_playing());
+        assert_eq!(interaction.cursor().mode, CursorMode::Pinned);
+        assert_eq!(interaction.playback_position(), Some(0.0));
+
+        interaction.start_playback(&recording, 0..=2);
+        assert!(interaction.advance_playback(&recording, 0..=2, 15.0));
+        assert_eq!(interaction.cursor().sample_index, Some(1));
+        assert_eq!(interaction.playback_position(), Some(10_000.0));
+
+        assert!(interaction.apply_pointer(Some(2), Some(2)));
+        assert!(!interaction.is_playing());
+        assert_eq!(
+            interaction.cursor(),
+            ActivityCursor {
+                sample_index: Some(2),
+                mode: CursorMode::Pinned,
+            }
+        );
+        assert_eq!(interaction.playback_position(), None);
+
+        interaction.start_playback(&recording, 0..=2);
+        assert!(!interaction.advance_playback(&recording, 0..=2, 30.0));
+        assert!(!interaction.is_playing());
+        assert_eq!(interaction.cursor().sample_index, Some(2));
+        assert_eq!(interaction.playback_position(), Some(20_000.0));
+
+        interaction.start_playback(&recording, 0..=2);
+        assert!(interaction.is_playing());
+        assert_eq!(interaction.cursor().sample_index, Some(0));
+    }
+
+    #[test]
+    fn interaction_repairs_invalid_indices_and_owns_clearing_transitions() {
+        let mut interaction = ViewerInteraction::default();
+        interaction.set_cursor(ActivityCursor {
+            sample_index: Some(8),
+            mode: CursorMode::Playback,
+        });
+        interaction.select_lap(Some(4));
+        interaction.set_hovered_lap(Some(3));
+
+        interaction.repair(2, 1);
+
+        assert_eq!(interaction.cursor(), ActivityCursor::default());
+        assert_eq!(interaction.selected_lap(), None);
+        assert_eq!(interaction.hovered_lap(), None);
+        assert!(!interaction.is_playing());
+
+        interaction.select_lap_row(0, Some(1));
+        assert_eq!(interaction.selected_lap(), Some(0));
+        assert_eq!(interaction.cursor().sample_index, Some(1));
+        interaction.clear_lap_constraint();
+        assert_eq!(interaction.selected_lap(), None);
+        assert_eq!(interaction.hovered_lap(), None);
+
+        interaction.stop_and_clear_cursor();
+        assert_eq!(interaction.cursor(), ActivityCursor::default());
     }
 
     #[test]
     fn activity_changes_reset_all_linked_interaction_state() {
-        let mut viewer = Viewer::default();
+        let mut viewer = viewer();
         viewer.sync_recording("first");
-        viewer.cursor = ActivityCursor {
+        viewer.set_cursor(ActivityCursor {
             sample_index: Some(8),
-            mode: CursorMode::Pinned,
-        };
+            mode: CursorMode::Playback,
+        });
         viewer.axis = Axis::Elapsed;
-        viewer.selected_lap = Some(2);
-        viewer.hovered_lap = Some(1);
-        viewer.playing = true;
-        viewer.playback_position = Some(42.0);
+        viewer.interaction.select_lap(Some(2));
+        viewer.interaction.set_hovered_lap(Some(1));
 
         viewer.sync_recording("second");
 
-        assert_eq!(viewer.cursor, ActivityCursor::default());
+        assert_eq!(viewer.cursor(), ActivityCursor::default());
         assert_eq!(viewer.axis, Axis::Distance);
-        assert_eq!(viewer.selected_lap, None);
-        assert_eq!(viewer.hovered_lap, None);
-        assert!(!viewer.playing);
-        assert_eq!(viewer.playback_position, None);
+        assert_eq!(viewer.selected_lap(), None);
+        assert_eq!(viewer.interaction.hovered_lap(), None);
+        assert!(!viewer.interaction.is_playing());
+        assert_eq!(viewer.interaction.playback_position(), None);
     }
 }

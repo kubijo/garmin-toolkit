@@ -1,3 +1,4 @@
+use crate::SceneStateKey as _;
 use gallery::prelude::*;
 use garmin_model::{
     activity::{
@@ -14,24 +15,29 @@ use garmin_service_api::{
     DeviceCatalogEntryKind, DeviceFitPreview, DeviceFitPreviewActivity,
 };
 use garmin_ui::{activity, device_fit_preview, icons};
-use std::cell::RefCell;
 
 scene_meta! { title: "Application / Activities" }
 
 const RECORDING_START_MILLISECONDS: i64 = 1_789_453_800_000;
 
 thread_local! {
-    static WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
-    static COMPACT_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
-    static NO_GPS_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
-    static HOVER_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
-    static PINNED_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
-    static PLAYBACK_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
-    static LAP_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
-    static MISSING_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
-    static LOADING_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
-    static FAILURE_WORKSPACE: RefCell<(activity::Workspace, usize)> = RefCell::new((activity::Workspace::default(), 0));
-    static FIT_PREVIEW: RefCell<Option<device_fit_preview::Preview>> = const { RefCell::new(None) };
+    static WORKSPACES: crate::SceneState<(activity::Workspace, usize), 10> = const { crate::SceneState::empty() };
+    static FIT_PREVIEW: crate::SceneState<device_fit_preview::Preview> = const { crate::SceneState::empty() };
+}
+
+#[derive(Clone, Copy)]
+#[repr(usize)]
+enum WorkspaceSlot {
+    Default,
+    Compact,
+    NoGps,
+    Hover,
+    Pinned,
+    Playback,
+    Lap,
+    MissingMetrics,
+    Loading,
+    Failure,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -154,7 +160,7 @@ fn workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         ui,
         globals,
         egui::vec2(1_180.0, 760.0),
-        &WORKSPACE,
+        WorkspaceSlot::Default,
         WorkspaceScene::COMPLETE,
     );
 }
@@ -166,7 +172,7 @@ fn compact_workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globa
         ui,
         globals,
         egui::vec2(620.0, 760.0),
-        &COMPACT_WORKSPACE,
+        WorkspaceSlot::Compact,
         WorkspaceScene::COMPLETE,
     );
 }
@@ -178,7 +184,7 @@ fn no_gps(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         ui,
         globals,
         egui::vec2(1_180.0, 760.0),
-        &NO_GPS_WORKSPACE,
+        WorkspaceSlot::NoGps,
         WorkspaceScene {
             recording: Some(RecordingKind::NoGps),
             ..WorkspaceScene::COMPLETE
@@ -193,7 +199,7 @@ fn synchronized_hover(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
         ui,
         globals,
         egui::vec2(1_180.0, 760.0),
-        &HOVER_WORKSPACE,
+        WorkspaceSlot::Hover,
         WorkspaceScene {
             cursor: Some(activity::ActivityCursor {
                 sample_index: Some(64),
@@ -211,7 +217,7 @@ fn pinned_cursor(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) 
         ui,
         globals,
         egui::vec2(1_180.0, 760.0),
-        &PINNED_WORKSPACE,
+        WorkspaceSlot::Pinned,
         WorkspaceScene {
             cursor: Some(activity::ActivityCursor {
                 sample_index: Some(64),
@@ -229,7 +235,7 @@ fn playback(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         ui,
         globals,
         egui::vec2(1_180.0, 760.0),
-        &PLAYBACK_WORKSPACE,
+        WorkspaceSlot::Playback,
         WorkspaceScene {
             cursor: Some(activity::ActivityCursor {
                 sample_index: Some(32),
@@ -247,7 +253,7 @@ fn selected_lap(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         ui,
         globals,
         egui::vec2(1_180.0, 760.0),
-        &LAP_WORKSPACE,
+        WorkspaceSlot::Lap,
         WorkspaceScene {
             cursor: Some(activity::ActivityCursor {
                 sample_index: Some(61),
@@ -266,7 +272,7 @@ fn missing_metrics(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals
         ui,
         globals,
         egui::vec2(1_180.0, 760.0),
-        &MISSING_WORKSPACE,
+        WorkspaceSlot::MissingMetrics,
         WorkspaceScene {
             recording: Some(RecordingKind::MissingMetrics),
             cursor: Some(activity::ActivityCursor {
@@ -285,7 +291,7 @@ fn loading(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         ui,
         globals,
         egui::vec2(1_180.0, 760.0),
-        &LOADING_WORKSPACE,
+        WorkspaceSlot::Loading,
         WorkspaceScene {
             recording: None,
             ..WorkspaceScene::COMPLETE
@@ -300,7 +306,7 @@ fn provider_failure(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Global
         ui,
         globals,
         egui::vec2(1_180.0, 760.0),
-        &FAILURE_WORKSPACE,
+        WorkspaceSlot::Failure,
         WorkspaceScene {
             fail_tiles: true,
             ..WorkspaceScene::COMPLETE
@@ -316,8 +322,10 @@ fn device_fit_preview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
         Stage::Fixed(egui::vec2(1_800.0, 920.0)).checkerboard(globals.checkerboard()),
         |ui| {
             let intl = globals.intl();
-            FIT_PREVIEW.with_borrow_mut(|preview| {
-                let preview = preview.get_or_insert_with(|| {
+            FIT_PREVIEW.with_scene(
+                0,
+                || {
+                    let runtime = gallery_map_runtime(false);
                     device_fit_preview::Preview::new(
                         DeviceBrowserTarget {
                             storage_id: "internal".to_owned(),
@@ -337,19 +345,13 @@ fn device_fit_preview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
                                 recording: sample_recording(RecordingKind::Complete),
                             }],
                         },
+                        &runtime,
                     )
-                });
-                let _ = preview.show(ui, &intl, false, UnitSystem::Metric);
-                for request in preview.take_map_tile_requests() {
-                    preview.resolve_map_tile(
-                        ui.ctx(),
-                        activity::MapTileResponse::encoded(
-                            request,
-                            Ok(gallery_vector_tile(request)),
-                        ),
-                    );
-                }
-            });
+                },
+                |preview| {
+                    let _ = preview.show(ui, &intl, false, UnitSystem::Metric);
+                },
+            );
         },
     );
 }
@@ -359,7 +361,7 @@ fn show_workspace(
     ui: &mut Ui,
     globals: &crate::Globals,
     size: egui::Vec2,
-    state: &'static std::thread::LocalKey<RefCell<(activity::Workspace, usize)>>,
+    slot: WorkspaceSlot,
     scene: WorkspaceScene,
 ) {
     stage!(
@@ -374,51 +376,71 @@ fn show_workspace(
                 .iter()
                 .map(activity::Presentation::item_props)
                 .collect::<Vec<_>>();
-            state.with_borrow_mut(|(workspace, selected)| {
-                if let Some(cursor) = scene.cursor {
-                    workspace.set_cursor(cursor);
-                }
-                if let Some(selected_lap) = scene.selected_lap {
-                    workspace.set_selected_lap(Some(selected_lap));
-                }
-                if let Some(activity::Action::Select(index)) = workspace.show(
-                    ui,
-                    &intl,
-                    &activity::WorkspaceProps {
-                        items: &items,
-                        presentations: &presentations,
-                        selected: Some(*selected),
-                        recording: recording.as_ref(),
-                        recording_key: scene.recording.map(|kind| match kind {
-                            RecordingKind::Complete => "complete",
-                            RecordingKind::MissingMetrics => "missing-metrics",
-                            RecordingKind::NoGps => "no-gps",
-                        }),
-                        units: UnitSystem::Metric,
-                        empty_list: "No activities yet",
-                        empty_detail: "Select an activity",
-                        no_route: "No recorded route",
-                    },
-                ) {
-                    *selected = index;
-                }
-                for request in workspace.take_map_tile_requests() {
-                    let result = if scene.fail_tiles {
-                        Err("gallery provider unavailable".to_owned())
-                    } else {
-                        Ok(gallery_vector_tile(request))
-                    };
-                    workspace.resolve_map_tile(
-                        ui.ctx(),
-                        activity::MapTileResponse::encoded(request, result),
-                    );
-                }
-            });
+            WORKSPACES.with_scene(
+                slot as usize,
+                || {
+                    let runtime = gallery_map_runtime(scene.fail_tiles);
+                    (activity::Workspace::new(&runtime), 0)
+                },
+                |(workspace, selected)| {
+                    if let Some(cursor) = scene.cursor {
+                        workspace.set_cursor(cursor);
+                    }
+                    if let Some(selected_lap) = scene.selected_lap {
+                        workspace.set_selected_lap(Some(selected_lap));
+                    }
+                    if let Some(activity::Action::Select(index)) = workspace.show(
+                        ui,
+                        &intl,
+                        &activity::WorkspaceProps {
+                            items: &items,
+                            presentations: &presentations,
+                            selected: Some(*selected),
+                            recording: recording.as_ref(),
+                            recording_key: scene.recording.map(|kind| match kind {
+                                RecordingKind::Complete => "complete",
+                                RecordingKind::MissingMetrics => "missing-metrics",
+                                RecordingKind::NoGps => "no-gps",
+                            }),
+                            units: UnitSystem::Metric,
+                            empty_list: "No activities yet",
+                            empty_detail: "Select an activity",
+                            no_route: "No recorded route",
+                        },
+                    ) {
+                        *selected = index;
+                    }
+                },
+            );
         },
     );
 }
 
-fn gallery_vector_tile(request: activity::MapTileRequest) -> Vec<u8> {
+fn gallery_map_runtime(fail_tiles: bool) -> activity::map_runtime::MapRuntimeHandle {
+    activity::map_runtime::MapRuntimeHandle::new(
+        GalleryMapBackend { fail_tiles },
+        activity::map_runtime::Renderer::software(),
+    )
+}
+
+#[derive(Clone, Copy)]
+struct GalleryMapBackend {
+    fail_tiles: bool,
+}
+
+impl activity::map_runtime::Backend for GalleryMapBackend {
+    fn submit(&self, task: activity::map_runtime::TileTask) {
+        let request = task.coordinates();
+        let result = if self.fail_tiles {
+            Err("gallery provider unavailable".to_owned())
+        } else {
+            Ok(gallery_vector_tile(request))
+        };
+        task.complete_encoded(result);
+    }
+}
+
+fn gallery_vector_tile(request: activity::map_runtime::TileCoordinates) -> Vec<u8> {
     let drift = i32::try_from((request.x ^ request.y) % 5).unwrap_or_default() * 90;
     let forest = tile_feature(
         3,
@@ -706,21 +728,109 @@ fn sample(
     )
     .expect("the fixture sample timestamp is valid");
     let angle = fraction * std::f64::consts::TAU;
+    let telemetry = sample_telemetry(fraction, angle);
+    let coordinate = sample_coordinate(kind, index, angle);
+    ActivitySampleSnapshot {
+        timestamp,
+        coordinate,
+        elevation_meters: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(29))
+            .then_some(telemetry.elevation),
+        distance: Some(Distance::from_millimeters(
+            index * 16_800_000 / (sample_count - 1),
+        )),
+        speed: Some(Speed::from_millimeters_per_second(rounded_u32(
+            telemetry.speed * 1_000.0,
+        ))),
+        heart_rate: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(7)).then(
+            || {
+                HeartRate::from_beats_per_minute(
+                    u16::try_from(rounded_u32(telemetry.heart_rate))
+                        .expect("the fixture heart rate fits u16"),
+                )
+            },
+        ),
+        cadence: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(11)).then(|| {
+            Cadence::from_revolutions_per_minute(telemetry.cadence)
+                .expect("the fixture cadence is valid")
+        }),
+        power: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(13))
+            .then(|| Power::from_watts(rounded_u32(telemetry.power))),
+        temperature_millicelsius: (kind != RecordingKind::MissingMetrics
+            || !index.is_multiple_of(17))
+        .then_some(telemetry.temperature_millicelsius),
+    }
+}
+
+struct SampleTelemetry {
+    elevation: f64,
+    speed: f64,
+    heart_rate: f64,
+    cadence: f64,
+    power: f64,
+    temperature_millicelsius: i32,
+}
+
+fn sample_telemetry(fraction: f64, angle: f64) -> SampleTelemetry {
     let climb = bell(fraction, 0.56, 0.11);
-    let elevation = 12.0
-        + (angle * 2.0).sin() * 2.4
-        + (angle * 7.0).sin() * 1.3
-        + climb * 18.0
-        + bell(fraction, 0.78, 0.05) * 7.0;
-    let speed_meters_per_second = (6.5 + (angle * 5.0).sin() * 0.7 + (angle * 13.0).sin() * 0.35
-        - climb * 1.5
-        + bell(fraction, 0.28, 0.04) * 1.2)
+    let elevation = bell(fraction, 0.78, 0.05).mul_add(
+        7.0,
+        climb.mul_add(
+            18.0,
+            (angle * 7.0)
+                .sin()
+                .mul_add(1.3, (angle * 2.0).sin().mul_add(2.4, 12.0)),
+        ),
+    );
+    let speed_meters_per_second = bell(fraction, 0.28, 0.04)
+        .mul_add(
+            1.2,
+            climb.mul_add(
+                -1.5,
+                (angle * 13.0)
+                    .sin()
+                    .mul_add(0.35, (angle * 5.0).sin().mul_add(0.7, 6.5)),
+            ),
+        )
         .clamp(3.0, 11.0);
-    let heart_rate = 118.0 + fraction * 18.0 + (angle * 3.0).sin() * 4.0 + climb * 10.0;
-    let cadence = (82.0 + (angle * 4.0).sin() * 6.0 + (angle * 11.0).sin() * 2.0 - climb * 8.0)
+    let heart_rate = climb.mul_add(
+        10.0,
+        (angle * 3.0)
+            .sin()
+            .mul_add(4.0, fraction.mul_add(18.0, 118.0)),
+    );
+    let cadence = climb
+        .mul_add(
+            -8.0,
+            (angle * 11.0)
+                .sin()
+                .mul_add(2.0, (angle * 4.0).sin().mul_add(6.0, 82.0)),
+        )
         .clamp(55.0, 105.0);
-    let power = 175.0 + (angle * 5.0).sin() * 35.0 + (angle * 17.0).sin() * 18.0 + climb * 65.0;
-    let coordinate = (kind != RecordingKind::NoGps && index != 62).then(|| {
+    let power = climb.mul_add(
+        65.0,
+        (angle * 17.0)
+            .sin()
+            .mul_add(18.0, (angle * 5.0).sin().mul_add(35.0, 175.0)),
+    );
+    let temperature_millicelsius = i32::try_from(rounded_u32(
+        (angle * 2.0)
+            .sin()
+            .mul_add(0.25, fraction.mul_add(-1.4, 19.0))
+            * 1_000.0,
+    ))
+    .expect("the fixture temperature fits i32");
+    SampleTelemetry {
+        elevation,
+        speed: speed_meters_per_second,
+        heart_rate,
+        cadence,
+        power,
+        temperature_millicelsius,
+    }
+}
+
+fn sample_coordinate(kind: RecordingKind, index: u64, angle: f64) -> Option<Coordinate> {
+    (kind != RecordingKind::NoGps && index != 62).then(|| {
         Coordinate::from_parts(
             Latitude::from_degrees(
                 angle
@@ -735,40 +845,7 @@ fn sample(
             )
             .expect("the fixture longitude is valid"),
         )
-    });
-    ActivitySampleSnapshot {
-        timestamp,
-        coordinate,
-        elevation_meters: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(29))
-            .then_some(elevation),
-        distance: Some(Distance::from_millimeters(
-            index * 16_800_000 / (sample_count - 1),
-        )),
-        speed: Some(Speed::from_millimeters_per_second(rounded_u32(
-            speed_meters_per_second * 1_000.0,
-        ))),
-        heart_rate: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(7)).then(
-            || {
-                HeartRate::from_beats_per_minute(
-                    u16::try_from(rounded_u32(heart_rate))
-                        .expect("the fixture heart rate fits u16"),
-                )
-            },
-        ),
-        cadence: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(11)).then(|| {
-            Cadence::from_revolutions_per_minute(cadence).expect("the fixture cadence is valid")
-        }),
-        power: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(13))
-            .then(|| Power::from_watts(rounded_u32(power))),
-        temperature_millicelsius: (kind != RecordingKind::MissingMetrics
-            || !index.is_multiple_of(17))
-        .then(|| {
-            i32::try_from(rounded_u32(
-                (19.0 - fraction * 1.4 + (angle * 2.0).sin() * 0.25) * 1_000.0,
-            ))
-            .expect("the fixture temperature fits i32")
-        }),
-    }
+    })
 }
 
 fn bell(value: f64, center: f64, width: f64) -> f64 {

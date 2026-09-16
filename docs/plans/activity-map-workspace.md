@@ -4,6 +4,10 @@ Replace the activity-detail spike with a dense shared workspace for desktop and 
 row, toolbar, drawer, focus, and selection language. Render the same activity viewer inside device FIT previews. Garmin
 shared links and FitFileViewer are behavioral references only; copy neither their implementation nor visual design.
 
+The current transitional map proves the workspace behavior, but its loading and preparation path still contends with
+eframe's event and render thread. Complete the rendering-isolation refactor below before closing this plan. Build on the
+current staged GPU work in place; do not restore it merely to separate commits.
+
 ## Recording boundary
 
 - Replace coordinate-only detail payloads with one portable recording snapshot containing ordered samples, laps, and
@@ -26,14 +30,110 @@ shared links and FitFileViewer are behavioral references only; copy neither thei
   the vertical guide when the selected sample has no value for a particular chart.
 - Downsample only render series with width-sensitive first/minimum/maximum/last buckets and borrowed plot points. Retain
   the original samples for inspection, laps, and playback.
-- Use [`walkers` 0.59][walkers] with MVT support behind an owned UI tile adapter. The adapter owns a 256-tile decoded
-  LRU, missing/in-flight/empty/failed states, deduplicated requests, six-request concurrency, and bounded retry backoff.
+- Use [`walkers` 0.59][walkers] for MVT decoding and style interpretation behind an owned background map runtime. Do not
+  use its interactive map widget or retain tile scheduling, tessellation, label placement, or response installation in
+  the UI path. The runtime owns a 256-tile prepared LRU, missing/in-flight/empty/failed states, deduplicated requests,
+  six-request concurrency, and bounded retry backoff.
 - Add a separate `garmin-map-tiles` host crate. It discovers and validates OpenFreeMap TileJSON, fetches tiles, and owns
   a 256 MiB HTTP-aware disk cache with atomic writes, freshness metadata, and LRU pruning. Limit TileJSON to 1 MiB and a
   tile to 2 MiB; reject invalid coordinates, non-HTTPS templates, unexpected hosts, and malformed responses.
-- Desktop fetches tiles on a dedicated asynchronous worker. HASS exposes relative same-origin
-  `map/tiles/{z}/{x}/{y}.pbf` routes with explicit ETags/freshness and excludes them from immutable asset handling.
-  Provider failure leaves the activity, charts, imports, and a neutral route canvas usable. Always show attribution.
+- Desktop fetches and prepares tiles on dedicated I/O, CPU, and GPU-upload workers. HASS exposes relative same-origin
+  `map/tiles/{z}/{x}/{y}.pbf` routes with explicit ETags/freshness and excludes them from immutable asset handling; its
+  web frontend fetches and prepares tiles in a dedicated Web Worker. Provider failure leaves the activity, charts,
+  imports, and a neutral route canvas usable. Always show attribution.
+
+## Rendering isolation refactor
+
+### Current contention and target boundary
+
+- Native tile disk/network access, MVT decoding, styling, and initial geometry tessellation are already off-thread, but
+  the UI still drains and installs responses, scans and sorts visible tiles, lays out labels, projects and hit-tests the
+  complete route, creates new WGPU buffers during paint preparation, and reconstructs all chart widgets on every map
+  repaint. Browser MVT decoding and tessellation still run on its main thread.
+- Inertial movement is not currently classified as dragging. It therefore rebuilds labels for every changing camera;
+  `walkers::place_texts` performs font layout and a progressively growing collision scan. A hovered pointer also causes
+  full-route projection and hit testing on every inertial frame.
+- eframe performs application update, egui tessellation, and paint submission sequentially on its event-loop thread.
+  After this refactor that thread may perform only input and camera integration, constant-time route queries, light
+  controls and markers, one camera-uniform update, immutable-scene acquisition, and draw submission.
+- Missing areas remain blank until complete resources are ready. Tile, label, or route publication must never block,
+  reset, jump, or otherwise modify drag, wheel zoom, or inertial camera movement.
+
+### Runtime and public interfaces
+
+- Introduce a shared map-rendering core with `MapCamera`, `MapViewDemand`, `MapRouteSource`, immutable `MapScene`, and
+  `MapPerfSnapshot` types. `MapCamera` alone owns projection, pointer-anchored zoom, hard zoom bounds, drag velocity,
+  and inertial integration.
+- Expose a cloneable `MapRuntimeHandle` and one `MapSurfaceHandle` per activity or FIT-preview map. The UI submits the
+  latest view and route revisions through the surface and reads its latest ready scene and performance snapshot.
+- Remove `MapTileRequest`, `MapTileResponse`, `MapTileDecoder`, `take_map_tile_requests`, and `resolve_map_tile` from
+  the UI-facing host contract after both hosts migrate. Tile discovery, fetching, preparation, caching, and publication
+  are runtime responsibilities rather than activity-workspace responsibilities.
+- Publish complete immutable scenes atomically. Native uses a lock-free `Arc` scene swap; browser uses transferred
+  buffers and a single-thread scene slot. Render callbacks never lock a mutable frame or expose a partially uploaded
+  tile.
+
+### Scheduling and rendering pipeline
+
+- Coalesce camera demands so workers always process the newest generation. Calculate visible XYZ tiles outside the UI,
+  add a one-tile prefetch ring, prioritize them from the viewport center outward, and discard stale queued work while
+  retaining ready cache entries.
+- Split native work into bounded asynchronous cache/network I/O, dedicated CPU preparation, and WGPU resource creation
+  and upload using cloned thread-safe device and queue handles. The WGPU callback receives ready buffers and performs
+  only scissored draws plus one shared camera-uniform update; it creates no tile or route resources.
+- Add a dedicated HASS Web Worker which fetches, decodes, styles, tessellates, performs label layout, and returns
+  transferable POD vertex, index, label, and atlas buffers. This requires neither shared WebAssembly memory nor
+  cross-origin isolation.
+- Keep the existing eframe browser canvas. Split uploads into chunks no larger than 256 KiB and admit at most 512 KiB
+  within a measured 1.5 ms budget per frame. Publish a tile only after every chunk is uploaded. Prepared tiles and
+  labels may appear live during movement without making the camera wait for them.
+- Treat a map-only `OffscreenCanvas` renderer as a worthwhile future slice if profiling after this work shows that GPU
+  upload or eframe painting still causes visible web stalls. Moving the entire eframe application into a worker is
+  disproportionately expensive and is not necessary to fix map interaction.
+- Render tile positions from immutable tile coordinates and the current camera in the shader. Do not rewrite per-tile
+  transform buffers, scan the full cache, or retessellate geometry when the camera changes.
+
+### Routes, labels, and input
+
+- Prepare a route once per activity or selected-lap revision as world-space GPU geometry. Store normalized speed per
+  route vertex and apply the speed colour ramp in the shader; camera movement must not retessellate or deform it.
+- Apply an explicit map-rectangle scissor in the native and browser WGPU backends so tiles, routes, labels, and cursor
+  overlays cannot paint into charts or sidebars. Project start, end, selected-sample, and highlighted-lap overlays from
+  the same camera snapshot used by the map scene.
+- Build a world-space uniform-grid index over route segments once. Convert the pointer to world coordinates and test
+  only nearby segments while preserving exact original sample-index reporting and synchronized map/chart cursors.
+- Perform label sizing, collision placement, and tessellation in workers using the bundled Noto Sans fonts and a spatial
+  collision grid rather than the current quadratic occupied-area scan. Publish atlas changes and label meshes as
+  camera-anchored batches: translate an existing batch during same-zoom movement and omit stale labels after a zoom
+  change until a matching batch is ready.
+- Clamp wheel intent before changing camera zoom. An outward wheel event at either bound is ignored and cannot produce a
+  transient overshoot followed by a snap-back. Loading and texture publication remain independent from inertia.
+
+### Activity-view isolation
+
+- Make the chart scroll area viewport-aware. Offscreen chart cards reserve stable layout space without constructing an
+  `egui_plot` widget, while intersecting cards retain the existing appearance and linked interaction behavior.
+- Cache chart statistics, downsampled series, and layout inputs by activity, axis, lap, units, theme, and width. During
+  map-driven repaint frames, only visible cards and their small cursor or lap overlays may perform chart work.
+- Preserve the authoritative sample cursor, chart appearance, playback, selected-lap behavior, and index-based map/chart
+  synchronization. This refactor changes ownership and scheduling, not those interaction contracts.
+
+### Instrumentation and performance gate
+
+- Expand the debug FPS readout with UI CPU p50/p95, scene generation, worker and upload backlogs, label time,
+  route-query time, uploaded bytes, and stale-work count. Add trace spans around camera update, scene acquisition, chart
+  construction, render preparation, and draw submission.
+- On the bundled 67.92 km activity at roughly 1100 by 720 pixels, sustained dragging, wheel zoom, and inertial movement
+  target 60 FPS with UI CPU p95 below 16.7 ms. No tile-arrival or label-publication stall may exceed 33 ms, and map
+  loading must not alter the camera trajectory.
+- Capture native interaction with `just desktop::profile demo`; close the application after representative panning,
+  wheel zoom, and inertia to write `.tmp/profiles/garmin-desktop.json.gz`, then inspect it with
+  `just desktop::profile-load`. The profiling Cargo profile retains release optimization, debug information, and frame
+  pointers without changing shipped release artifacts.
+- Keep the route stable, clipped, speed-coloured, and synchronized with charts at every zoom while tiles arrive. Verify
+  missing-background behavior by leaving unprepared regions blank rather than falling back to synchronous work.
+- Do not launch a GUI from unattended development or validation commands. Interactive performance evidence is user-run
+  through the debug overlay; automated validation remains headless.
 
 ## Workspace and interaction
 
@@ -43,7 +143,7 @@ shared links and FitFileViewer are behavioral references only; copy neither thei
 - Replace the import slab with a stable command bar using 32-pixel tertiary file/folder actions. The complete workspace
   remains a drop target with a non-shifting drag overlay. Use two-line 52-pixel activity rows, a compact two-column
   label-over-value metric grid, and 32-pixel lap rows.
-- Give the map roughly 55 percent of the center height, clamped to 260--420 pixels. Place independently scrollable,
+- Give the map roughly 68 percent of the center height, clamped to 320--560 pixels. Place independently scrollable,
   aligned chart cards below it in this order when data exists: elevation, running pace or cycling speed, heart rate,
   cadence, power, and temperature. Each card has a quiet inset plotting field, subtle grid, filled series, current
   value, and minimum/average/maximum summary above its 112-pixel plot.
@@ -71,11 +171,18 @@ shared links and FitFileViewer are behavioral references only; copy neither thei
   independently of map behavior.
 - Cover fitting, dateline and no-coordinate paths, route hit testing, hover/pin/play transitions, lap reset, and
   activity changes in shared UI tests.
+- Cover camera projection, pointer-anchored zoom, hard zoom limits, inertia, scene-generation coalescing, center-first
+  tile priority, stale-work rejection, cache eviction, and atomic scene publication with unit tests.
+- Compare uniform-grid route queries against brute-force nearest-segment results, including missing-coordinate segments
+  and wrapped longitudes. Cover deterministic label placement, camera rebasing, and zoom invalidation.
+- Cover browser upload chunking and budget accounting without wall-clock-sensitive CI assertions. Verify that partial
+  uploads cannot become drawable and that the native and browser WGPU paths apply the same map scissor.
 - Cover TileJSON validation, cache freshness and eviction, offline hits/misses, response limits, concurrent
   deduplication, retries, HASS relative routes, ETags, CSP, and cache-policy exclusions with local fixtures and servers.
 - Maintain deterministic gallery scenes for wide/compact and light/dark layouts, synchronized hover, pinning, playback,
   selected laps, missing metrics, no GPS, loading, provider failure, and device FIT preview.
-- Run the repository preflight, tests, lints, gallery checks and captures, then exercise desktop demo and HASS demo.
+- Run formatting, workspace tests, Clippy, native builds, WASM/Trunk builds, and existing Nix validation without opening
+  an application window. The user exercises the desktop and HASS demos for the interactive performance gate.
 
 ## Boundaries and deletion gate
 

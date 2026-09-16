@@ -16,9 +16,12 @@ use crate::{
 };
 
 mod map;
+pub mod map_runtime;
+mod map_style;
+mod route_index;
 mod workspace;
 
-pub use map::{MapTileDecoder, MapTileRequest, MapTileResponse};
+pub use map::{WgpuMapHandle, install_wgpu_map};
 pub use workspace::{ActivityCursor, CursorMode, Viewer, ViewerProps, Workspace, WorkspaceProps};
 
 const ROW_HEIGHT: f32 = 52.0;
@@ -50,20 +53,7 @@ impl Presentation {
         intl: &Intl,
         units: UnitSystem,
     ) -> Self {
-        Self::new(
-            summary.sport(),
-            summary.time().start().to_string(),
-            source,
-            summary.totals().timer().into_milliseconds(),
-            summary.totals().distance().map(Distance::into_millimeters),
-            summary
-                .metrics()
-                .average_heart_rate()
-                .map(HeartRate::into_beats_per_minute),
-            summary.totals().ascent().map(Distance::into_millimeters),
-            intl,
-            units,
-        )
+        Self::new(summary, source, intl, units)
     }
 
     #[must_use]
@@ -71,21 +61,16 @@ impl Presentation {
         Self::from_summary(snapshot.summary, &snapshot.source, intl, units)
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the arguments are the activity summary fields"
-    )]
-    fn new(
-        sport: ActivitySport,
-        started_at: String,
-        source: &str,
-        timer_milliseconds: u64,
-        distance_millimeters: Option<u64>,
-        average_heart_rate: Option<u16>,
-        ascent_millimeters: Option<u64>,
-        intl: &Intl,
-        units: UnitSystem,
-    ) -> Self {
+    fn new(summary: ActivitySummary, source: &str, intl: &Intl, units: UnitSystem) -> Self {
+        let sport = summary.sport();
+        let started_at = summary.time().start().to_string();
+        let timer_milliseconds = summary.totals().timer().into_milliseconds();
+        let distance_millimeters = summary.totals().distance().map(Distance::into_millimeters);
+        let average_heart_rate = summary
+            .metrics()
+            .average_heart_rate()
+            .map(HeartRate::into_beats_per_minute);
+        let ascent_millimeters = summary.totals().ascent().map(Distance::into_millimeters);
         let title = sport_title(sport, intl);
         let subtitle = format_message!(
             intl,

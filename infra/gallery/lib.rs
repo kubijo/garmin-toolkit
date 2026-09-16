@@ -11,11 +11,52 @@
 
 mod terminal_input;
 
-use std::sync::{LazyLock, OnceLock};
+use std::{
+    cell::RefCell,
+    sync::{LazyLock, OnceLock},
+};
 
 use gallery::{CatalogGlobals, Checkerboard, GlobalControls, Icon};
 use garmin_i18n::{Intl, Language as IntlLanguage, Translations};
 use serde::{Deserialize, Serialize};
+
+pub(crate) struct SceneState<T, const N: usize = 1>(RefCell<[Option<T>; N]>);
+
+impl<T, const N: usize> SceneState<T, N> {
+    pub(crate) const fn empty() -> Self {
+        Self(RefCell::new([const { None }; N]))
+    }
+
+    pub(crate) fn with_mut<R>(
+        &self,
+        slot: usize,
+        initialize: impl FnOnce() -> T,
+        use_state: impl FnOnce(&mut T) -> R,
+    ) -> R {
+        let mut state = self.0.borrow_mut();
+        use_state(state[slot].get_or_insert_with(initialize))
+    }
+}
+
+pub(crate) trait SceneStateKey<T, const N: usize> {
+    fn with_scene<R>(
+        &'static self,
+        slot: usize,
+        initialize: impl FnOnce() -> T,
+        use_state: impl FnOnce(&mut T) -> R,
+    ) -> R;
+}
+
+impl<T: 'static, const N: usize> SceneStateKey<T, N> for std::thread::LocalKey<SceneState<T, N>> {
+    fn with_scene<R>(
+        &'static self,
+        slot: usize,
+        initialize: impl FnOnce() -> T,
+        use_state: impl FnOnce(&mut T) -> R,
+    ) -> R {
+        self.with(|state| state.with_mut(slot, initialize, use_state))
+    }
+}
 
 struct GlobalIcons {
     light: Icon,

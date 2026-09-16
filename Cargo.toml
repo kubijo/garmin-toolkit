@@ -39,10 +39,12 @@ publish = false
 
 [workspace.dependencies]
 anyhow = "=1.0.104"
+arc-swap = "=1.9.2"
 async-trait = "=0.1.92"
 axum = "=0.8.9"
 base64 = "=0.23.1"
 blake3 = "=1.8.7"
+bytemuck = { version = "=1.25.2", features = ["derive"] }
 byte-unit = "=5.2.5"
 bytes = "=1.12.1"
 camino = { version = "=1.2.5", features = ["serde1"] }
@@ -53,6 +55,7 @@ crossterm = { version = "=0.29.0", features = ["event-stream"] }
 dirs = "=6.0.0"
 eframe = { version = "=0.36.2", default-features = false }
 egui = { version = "=0.36.2", default-features = false, features = ["cint"] }
+egui-wgpu = "=0.36.2"
 egui_extras = { version = "=0.36.2", default-features = false, features = ["image", "svg"] }
 egui_plot = "=0.37.0"
 embedded-io-adapters = { version = "=0.7.0", features = ["std"] }
@@ -97,6 +100,7 @@ js-sys = "=0.3.103"
 jiff = { version = "=0.2.35", default-features = false, features = ["std", "tz-system"] }
 md-5 = "=0.11.0"
 mediatype = "=0.23.0"
+naga = { version = "=30.0.1", features = ["wgsl-in"] }
 miette = { git = "https://github.com/zkat/miette", rev = "e853bbf9bc78bbe0b225995de54a3108d77dcaf8", default-features = false }
 mtp-rs = "=0.32.0"
 newtype-uuid = { version = "=1.4.0", features = ["serde", "v4"] }
@@ -145,6 +149,7 @@ wasm-bindgen-futures = "=0.4.76"
 web-sys = "=0.3.103"
 websocket-web = "=0.1.9"
 winit = { version = "=0.30.13", default-features = false }
+wgpu = "=30.0.0"
 zip = { version = "=4.6.1", default-features = false }
 
 [workspace.lints.rust]
@@ -164,12 +169,18 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
+# Production-shaped native profiling with source lines and unwindable stacks.
+[profile.profiling]
+inherits = "release"
+debug = 2
+strip = false
+
 # Interactive vector maps are prohibitively slow when
 # their parser and tessellator run fully unoptimized.
 # Keep application code quick to compile while making
 # debug map interaction usable.
 [profile.dev.package.garmin-ui]
-opt-level = 1
+opt-level = 2
 
 [profile.dev.package.walkers]
 opt-level = 3
@@ -193,4 +204,19 @@ opt-level = 3
 opt-level = 3
 
 [profile.dev.package.egui_plot]
+opt-level = 3
+
+[profile.dev.package.egui-wgpu]
+opt-level = 3
+
+[profile.dev.package.wgpu]
+opt-level = 3
+
+[profile.dev.package.wgpu-core]
+opt-level = 3
+
+[profile.dev.package.wgpu-hal]
+opt-level = 3
+
+[profile.dev.package.naga]
 opt-level = 3

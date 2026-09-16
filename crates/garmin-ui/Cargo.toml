@@ -12,24 +12,33 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+arc-swap.workspace = true
+bytemuck.workspace = true
 byte-unit.workspace = true
 camino.workspace = true
 garmin-brand.workspace = true
 cint.workspace = true
 garmin-color.workspace = true
 egui.workspace = true
+egui-wgpu.workspace = true
 egui_ltreeview.workspace = true
 egui_extras.workspace = true
 egui_plot.workspace = true
 garmin-i18n.workspace = true
 garmin-model.workspace = true
 garmin-service-api.workspace = true
+postcard.workspace = true
+serde.workspace = true
+tracing.workspace = true
 walkers.workspace = true
+wgpu.workspace = true
 
 [build-dependencies]
 phosphor-svgs.workspace = true
 usvg.workspace = true
 
 [dev-dependencies]
+futures-lite.workspace = true
+naga.workspace = true
 tempfile.workspace = true
 usvg.workspace = true

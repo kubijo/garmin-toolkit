@@ -202,6 +202,7 @@ let
                   pkgs.gvfs
                   pkgs.just
                   pkgs.pkg-config
+                  pkgs.samply
                   pkgs.ty
                   pkgs.usbutils
                   pkgs.uv

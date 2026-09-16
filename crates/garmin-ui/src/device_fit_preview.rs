@@ -21,25 +21,17 @@ pub enum Action {
 
 impl Preview {
     #[must_use]
-    pub fn new(target: DeviceBrowserTarget, data: DeviceFitPreview) -> Self {
+    pub fn new(
+        target: DeviceBrowserTarget,
+        data: DeviceFitPreview,
+        runtime: &activity::map_runtime::MapRuntimeHandle,
+    ) -> Self {
         Self {
             target,
             data,
             selected: 0,
-            workspace: activity::Workspace::default(),
+            workspace: activity::Workspace::new(runtime),
         }
-    }
-
-    pub fn take_map_tile_requests(&mut self) -> Vec<activity::MapTileRequest> {
-        self.workspace.take_map_tile_requests()
-    }
-
-    pub fn resolve_map_tile(
-        &mut self,
-        context: &egui::Context,
-        response: activity::MapTileResponse,
-    ) {
-        self.workspace.resolve_map_tile(context, response);
     }
 
     pub fn show(
