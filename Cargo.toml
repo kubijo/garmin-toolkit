@@ -172,7 +172,7 @@ strip = true
 # Production-shaped native profiling with source lines and unwindable stacks.
 [profile.profiling]
 inherits = "release"
-debug = 2
+debug = "line-tables-only"
 strip = false
 
 # Interactive vector maps are prohibitively slow when

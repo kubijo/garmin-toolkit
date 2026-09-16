@@ -16,6 +16,7 @@ use thiserror::Error;
 mod device_backend;
 mod map_worker;
 mod mode;
+mod profiling;
 mod view;
 mod window;
 mod worker;
@@ -28,6 +29,7 @@ pub use mode::DataError;
 /// # Errors
 /// [`enum@Error`] when application data or the native window cannot be initialized.
 pub fn run() -> Result<(), Error> {
+    let profiling = profiling::RuntimeMetricsRecorder::from_environment()?;
     let data_root = eframe::storage_dir(mode::APP_ID).ok_or(Error::DataRootUnavailable)?;
     fs::create_dir_all(&data_root)?;
     let storage = block_on(mode::open_storage(mode::database_path(&data_root)))?;
@@ -41,7 +43,8 @@ pub fn run() -> Result<(), Error> {
         .with_inner_size([1_100.0, 720.0])
         .with_min_inner_size([720.0, 480.0]);
 
-    eframe::run_native(
+    let map_metrics = profiling.clone();
+    let window_result = eframe::run_native(
         mode::WINDOW_TITLE,
         eframe::NativeOptions {
             viewport,
@@ -61,9 +64,13 @@ pub fn run() -> Result<(), Error> {
                 device_platform,
                 &data_root,
                 map_renderer,
+                map_metrics,
             )?))
         }),
-    )?;
+    );
+    let profiling_result = profiling.finish();
+    window_result?;
+    profiling_result?;
     Ok(())
 }
 
@@ -84,6 +91,8 @@ pub enum Error {
     Application(#[from] garmin_services::Error),
     #[error(transparent)]
     Localization(#[from] garmin_i18n::Error),
+    #[error(transparent)]
+    Profiling(#[from] profiling::Error),
     #[error(transparent)]
     Window(#[from] eframe::Error),
 }

@@ -379,6 +379,7 @@ impl RouteCache {
 
 pub(in crate::activity) struct GpuMap {
     frame: Arc<ArcSwap<Frame>>,
+    metrics: crate::activity::map_runtime::MapMetrics,
     runtime: WgpuRuntime,
     labels: LabelCache,
     route: RouteCache,
@@ -444,10 +445,14 @@ pub(in crate::activity) struct ScenePerf {
 }
 
 impl GpuMap {
-    pub(in crate::activity) fn new(handle: &WgpuMapHandle) -> Self {
+    pub(in crate::activity) fn new(
+        handle: &WgpuMapHandle,
+        metrics: crate::activity::map_runtime::MapMetrics,
+    ) -> Self {
         let context = Arc::clone(&handle.context);
         Self {
             frame: Arc::new(ArcSwap::from_pointee(Frame::default())),
+            metrics,
             runtime: WgpuRuntime {
                 surface: Arc::new(SurfaceGpu::new(&context)),
                 executor: platform::Executor::new(context),
@@ -462,6 +467,7 @@ impl GpuMap {
             rect,
             Paint {
                 frame: Arc::clone(&self.frame),
+                metrics: self.metrics.clone(),
                 surface: Arc::clone(&self.runtime.surface),
             },
         ))
@@ -662,6 +668,7 @@ fn color(color: Color32) -> [f32; 4] {
 
 struct Paint {
     frame: Arc<ArcSwap<Frame>>,
+    metrics: crate::activity::map_runtime::MapMetrics,
     surface: Arc<SurfaceGpu>,
 }
 
@@ -674,6 +681,7 @@ impl CallbackTrait for Paint {
         _encoder: &mut wgpu::CommandEncoder,
         _resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
+        let started = Instant::now();
         let _span = tracing::trace_span!("activity_map_render_prepare").entered();
         let frame = self.frame.load_full();
         let surface = &self.surface;
@@ -698,6 +706,11 @@ impl CallbackTrait for Paint {
                 );
             }
         }
+        self.metrics
+            .record_render(crate::activity::map_runtime::MapRenderPerformanceSample {
+                phase: crate::activity::map_runtime::MapRenderPhase::Prepare,
+                milliseconds: started.elapsed().as_secs_f32() * 1_000.0,
+            });
         Vec::new()
     }
 
@@ -707,6 +720,7 @@ impl CallbackTrait for Paint {
         render_pass: &mut wgpu::RenderPass<'static>,
         resources: &CallbackResources,
     ) {
+        let started = Instant::now();
         let _span = tracing::trace_span!("activity_map_draw_submission").entered();
         let frame = self.frame.load_full();
         let Some(resources) = resources.get::<Resources>() else {
@@ -760,6 +774,11 @@ impl CallbackTrait for Paint {
                 render_pass.draw(0..6, 0..gpu.segment_count);
             }
         }
+        self.metrics
+            .record_render(crate::activity::map_runtime::MapRenderPerformanceSample {
+                phase: crate::activity::map_runtime::MapRenderPhase::Draw,
+                milliseconds: started.elapsed().as_secs_f32() * 1_000.0,
+            });
     }
 }
 
