@@ -15,6 +15,7 @@ lib.fileset.toSource {
   fileset = lib.fileset.unions (
     [
       workspaceCargoSources
+      (workspaceSrc + "/vendor/fast-mvt")
       (workspaceSrc + "/crates/garmin-brand/assets")
       (workspaceSrc + "/crates/garmin-gpx/tests/fixtures")
       (workspaceSrc + "/crates/garmin-i18n/catalogs")
@@ -26,6 +27,8 @@ lib.fileset.toSource {
       (workspaceSrc + "/apps/garmin-hass/web/index.html")
       (workspaceSrc + "/apps/garmin-hass/web/initializer.js")
       (workspaceSrc + "/apps/garmin-hass/web/map-worker.js")
+      (workspaceSrc + "/apps/garmin-hass/web/worker-codec.js")
+      (workspaceSrc + "/infra/javascript")
       (lib.fileset.maybeMissing (workspaceSrc + "/.sqlx"))
       (lib.fileset.fileFilter (file: file.hasExt "sql") workspaceSrc)
       (lib.fileset.fileFilter (file: file.hasExt "wgsl") workspaceSrc)

@@ -3,11 +3,12 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use egui::{Color32, Rect, Shape, pos2};
 use walkers::TileId;
+use web_time::Instant;
 
 use super::{BrowserText, CpuTileMesh, VisibleTile};
 use crate::activity::map::{WALKERS_TILE_SIZE, camera::MapCamera};
@@ -328,38 +329,34 @@ pub(super) struct DecodedBrowserLabels {
     texture: egui::TextureHandle,
 }
 
-fn label_request(task: &LabelTask) -> LabelRequestWire {
+fn projected_texts(task: &LabelTask) -> Vec<walkers::Text> {
     let world_size = f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(task.view.zoom);
     let expanded = task.view.viewport.expand(96.0);
     let mut texts = Vec::new();
     for tile in &task.visible {
-        let tile_size =
-            f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(task.view.zoom - f64::from(tile.id.zoom));
-        let tile_x = crate::activity::map::camera::tile_x_near_center(tile.id, task.view.center[0]);
-        let left = f64::from(task.view.viewport.center().x)
-            + tile_x.mul_add(tile_size, -task.view.center[0] * world_size);
-        let top = f64::from(task.view.viewport.center().y)
-            + f64::from(tile.id.y).mul_add(tile_size, -task.view.center[1] * world_size);
-        let scale = tile_size as f32 / 512.0;
-        for source in &tile.tile.mesh.texts {
-            let position = [
-                left as f32 + source.position.x * scale,
-                top as f32 + source.position.y * scale,
-            ];
-            if expanded.contains(pos2(position[0], position[1])) {
-                texts.push(BrowserText {
-                    text: source.text.clone(),
-                    position,
-                    font_size: source.font_size,
-                    text_color: source.text_color.to_array(),
-                    halo_color: source.halo_color.to_array(),
-                    halo_width: source.halo_width,
-                    angle: source.angle,
-                    line_placement: source.placement == walkers::Placement::Line,
-                });
+        let placement = crate::activity::map::camera::TilePlacement::new(
+            tile.id,
+            task.view.center,
+            world_size,
+            task.view.viewport,
+        );
+        let scale = placement.size as f32 / 512.0;
+        for world in placement.copies(expanded) {
+            let origin = placement.origin(world);
+            for source in &tile.tile.mesh.texts {
+                let position = origin + source.position.to_vec2() * scale;
+                if expanded.contains(position) {
+                    let mut text = source.clone();
+                    text.position = position;
+                    texts.push(text);
+                }
             }
         }
     }
+    texts
+}
+
+pub(super) fn label_request(task: &LabelTask) -> LabelRequestWire {
     LabelRequestWire {
         version: LABEL_PROTOCOL_VERSION,
         generation: task.generation,
@@ -371,7 +368,19 @@ fn label_request(task: &LabelTask) -> LabelRequestWire {
             task.view.viewport.max.x,
             task.view.viewport.max.y,
         ],
-        texts,
+        texts: projected_texts(task)
+            .into_iter()
+            .map(|text| BrowserText {
+                text: text.text,
+                position: [text.position.x, text.position.y],
+                font_size: text.font_size,
+                text_color: text.text_color.to_array(),
+                halo_color: text.halo_color.to_array(),
+                halo_width: text.halo_width,
+                angle: text.angle,
+                line_placement: text.placement == walkers::Placement::Line,
+            })
+            .collect(),
     }
 }
 
@@ -402,37 +411,10 @@ fn browser_text(text: BrowserText) -> walkers::Text {
     }
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "label positions are screen-space f32 values after bounded Mercator projection"
-)]
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn build_label_result(task: &LabelTask) -> LabelResult {
     let started = Instant::now();
-    let world_size = f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(task.view.zoom);
-    let expanded = task.view.viewport.expand(96.0);
-    let mut texts = Vec::new();
-    for tile in &task.visible {
-        let tile_size =
-            f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(task.view.zoom - f64::from(tile.id.zoom));
-        let tile_x = crate::activity::map::camera::tile_x_near_center(tile.id, task.view.center[0]);
-        let left = f64::from(task.view.viewport.center().x)
-            + tile_x.mul_add(tile_size, -task.view.center[0] * world_size);
-        let top = f64::from(task.view.viewport.center().y)
-            + f64::from(tile.id.y).mul_add(tile_size, -task.view.center[1] * world_size);
-        let scale = tile_size as f32 / 512.0;
-        for source in &tile.tile.mesh.texts {
-            let mut text = source.clone();
-            text.position = pos2(
-                left as f32 + source.position.x * scale,
-                top as f32 + source.position.y * scale,
-            );
-            if expanded.contains(text.position) {
-                texts.push(text);
-            }
-        }
-    }
-    let shapes = place_texts_spatial(texts, &task.context);
+    let shapes = place_texts_spatial(projected_texts(task), &task.context);
     LabelResult {
         generation: task.generation,
         view: task.view,
@@ -637,8 +619,8 @@ pub(super) fn decode_browser_labels(
     context: &egui::Context,
     expected_generation: u64,
 ) -> Result<DecodedBrowserLabels, String> {
-    const MAX_LABEL_RESULT_BYTES: usize = 16 * 1024 * 1024;
-    if bytes.len() > MAX_LABEL_RESULT_BYTES {
+    if bytes.len() > crate::activity::map_runtime::BrowserWorkerTaskKind::Labels.result_byte_limit()
+    {
         return Err("prepared map labels exceeded the 16 MiB browser limit".to_owned());
     }
     let result: LabelResultWire = postcard::from_bytes(bytes).map_err(|error| error.to_string())?;

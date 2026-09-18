@@ -70,9 +70,18 @@
               cargoArtifacts = webCargoArtifacts;
               trunkIndexPath = "apps/garmin-hass/web/index.html";
               wasm-bindgen-cli = pkgs.wasm-bindgen-cli_0_2_126;
+
               buildPhaseCargoCommand = ''
                 ( cd apps/garmin-hass/web && trunk build --release=true index.html )
               '';
+
+              postBuild = ''
+                export GARMIN_TEST_WEB_ROOT="$PWD/apps/garmin-hass/web/dist"
+                for test in infra/javascript/*.test.mjs; do
+                  ${lib.getExe pkgs.nodejs} "$test"
+                done
+              '';
+
               installPhaseCommand = ''
                 webRoot="$out/share/garmin-hass/web"
                 mkdir -p "$webRoot"

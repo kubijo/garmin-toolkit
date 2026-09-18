@@ -2,15 +2,17 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    time::{Duration, Instant},
+    sync::Arc,
+    time::Duration,
 };
 
 use walkers::{Tile, TileId, sources::Attribution};
+use web_time::Instant;
 
 use crate::activity::{
     map::camera::MapViewDemand,
     map::gpu_map,
-    map_runtime::{Renderer, TileCoordinates},
+    map_runtime::{BrowserTilePacket, BrowserTileTransfer, Renderer, TileCoordinates},
 };
 
 pub(super) const DECODED_TILE_LIMIT: usize = 256;
@@ -39,7 +41,7 @@ pub(in crate::activity) struct PreparedTile {
 }
 
 impl PreparedTile {
-    fn new(renderer: &Renderer, id: TileId, tile: Tile) -> Self {
+    fn new(renderer: &Renderer, id: TileId, tile: Tile) -> Result<Self, String> {
         renderer.prepare_tile(id, tile)
     }
 }
@@ -49,23 +51,21 @@ impl MapTileResponse {
     #[must_use]
     pub(in crate::activity) fn prepared(
         request: MapTileRequest,
-        result: Result<Vec<u8>, String>,
+        result: Result<BrowserTilePacket, String>,
         renderer: &Renderer,
     ) -> Self {
-        let result = result.and_then(|bytes| {
-            if bytes.is_empty() {
-                Ok(MapTilePayload::Empty)
-            } else {
-                renderer.prepare_browser_tile(&bytes).map(|gpu| {
+        let result = result.and_then(|packet| {
+            renderer.prepare_browser_tile(packet).map(|gpu| {
+                gpu.map_or(MapTilePayload::Empty, |gpu| {
                     MapTilePayload::Decoded(PreparedTile {
                         tile: Tile::Vector {
                             shapes: Vec::new(),
                             texts: Vec::new(),
                         },
-                        gpu,
+                        gpu: Some(gpu),
                     })
                 })
-            }
+            })
         });
         Self { request, result }
     }
@@ -97,7 +97,7 @@ impl MapTileDecoder {
             if bytes.is_empty() {
                 Ok(MapTilePayload::Empty)
             } else {
-                Tile::from_mvt(
+                super::tile_decode::decode(
                     &bytes,
                     if request.dark_mode() {
                         &self.dark
@@ -107,7 +107,7 @@ impl MapTileDecoder {
                     request.zoom,
                     SOURCE_TILE_SIZE,
                 )
-                .map(|tile| {
+                .and_then(|tile| {
                     let id = TileId {
                         zoom: request.zoom,
                         x: request.x,
@@ -116,7 +116,6 @@ impl MapTileDecoder {
                     PreparedTile::new(renderer, id, tile)
                 })
                 .map(MapTilePayload::Decoded)
-                .map_err(|error| error.to_string())
             }
         });
         MapTileResponse { request, result }
@@ -132,13 +131,15 @@ pub fn prepare_tile_for_browser_worker(
     zoom: u8,
     dark_mode: bool,
     bytes: &[u8],
-) -> Result<Vec<u8>, String> {
+) -> Result<BrowserTileTransfer, String> {
     if bytes.is_empty() {
-        return Ok(Vec::new());
+        return gpu_map::encode_browser_tile(Tile::Vector {
+            shapes: Vec::new(),
+            texts: Vec::new(),
+        });
     }
     let style = map_style(dark_mode);
-    let tile =
-        Tile::from_mvt(bytes, &style, zoom, SOURCE_TILE_SIZE).map_err(|error| error.to_string())?;
+    let tile = super::tile_decode::decode(bytes, &style, zoom, SOURCE_TILE_SIZE)?;
     gpu_map::encode_browser_tile(tile)
 }
 
@@ -151,10 +152,11 @@ pub(in crate::activity) struct TileStore {
     demand_center: [f64; 2],
     dark_mode: bool,
     generation: u64,
+    scene_revision: u64,
 }
 
 pub(super) enum TileEntry {
-    Ready(PreparedTile),
+    Ready(Arc<PreparedTile>),
     Empty,
     Desired { attempts: u8 },
     Requested { attempts: u8, generation: u64 },
@@ -172,6 +174,7 @@ impl Default for TileStore {
             demand_center: [0.0; 2],
             dark_mode: true,
             generation: 0,
+            scene_revision: 0,
         }
     }
 }
@@ -179,6 +182,7 @@ impl Default for TileStore {
 pub(super) struct Failure {
     pub(super) attempts: u8,
     retry_at: Instant,
+    reason: String,
 }
 
 impl TileStore {
@@ -194,6 +198,7 @@ impl TileStore {
         self.visible.clear();
         self.demanded.clear();
         self.demand_center = [0.0; 2];
+        self.mark_scene_changed();
     }
 
     /// Replace the current camera demand and discard work which has not started yet.
@@ -203,6 +208,11 @@ impl TileStore {
     }
 
     fn apply_coverage(&mut self, visible: &[TileId], requested: &[TileId], center: [f64; 2]) {
+        if self.visible.len() != visible.len()
+            || visible.iter().any(|id| !self.visible.contains(id))
+        {
+            self.mark_scene_changed();
+        }
         self.visible.clear();
         self.visible.extend(visible.iter().copied());
         self.demanded.clear();
@@ -254,29 +264,36 @@ impl TileStore {
             .count()
     }
 
-    pub(in crate::activity) fn visible_background_unavailable(&self) -> bool {
+    pub(in crate::activity) fn pending_visible_len(&self) -> usize {
         self.visible
             .iter()
-            .any(|id| matches!(self.entries.get(id), Some(TileEntry::Failed(_))))
+            .filter(|id| {
+                matches!(
+                    self.entries.get(id),
+                    Some(TileEntry::Desired { .. } | TileEntry::Requested { .. })
+                )
+            })
+            .count()
     }
 
-    pub(in crate::activity) fn renderable_gpu_tiles(
-        &self,
-    ) -> impl Iterator<Item = (&TileId, &std::sync::Arc<gpu_map::PreparedGpuTile>)> {
-        self.visible_entries().filter_map(|(id, entry)| {
-            let TileEntry::Ready(PreparedTile {
-                gpu: Some(tile), ..
-            }) = entry
-            else {
-                return None;
-            };
-            Some((id, tile))
-        })
+    pub(in crate::activity) const fn scene_revision(&self) -> u64 {
+        self.scene_revision
+    }
+
+    pub(in crate::activity) fn visible_background_failure(&self) -> Option<String> {
+        self.visible
+            .iter()
+            .filter_map(|id| match self.entries.get(id) {
+                Some(TileEntry::Failed(failure)) => Some((id, failure)),
+                _ => None,
+            })
+            .min_by_key(|(id, _)| (id.zoom, id.y, id.x))
+            .map(|(id, failure)| format!("Tile {}/{}/{}: {}", id.zoom, id.x, id.y, failure.reason))
     }
 
     pub(in crate::activity) fn renderable_tiles(
         &self,
-    ) -> impl Iterator<Item = (&TileId, &PreparedTile)> {
+    ) -> impl Iterator<Item = (&TileId, &Arc<PreparedTile>)> {
         self.visible_entries().filter_map(|(id, entry)| {
             let TileEntry::Ready(tile) = entry else {
                 return None;
@@ -324,17 +341,19 @@ impl TileStore {
                 None
             }
             Ok(MapTilePayload::Decoded(tile)) => {
-                self.entries.insert(id, TileEntry::Ready(tile));
+                self.entries.insert(id, TileEntry::Ready(Arc::new(tile)));
                 self.promote(id);
                 None
             }
-            Err(_reason) => {
-                let (failure, delay) = Failure::after(attempts);
+            Err(reason) => {
+                tracing::warn!(zoom = id.zoom, x = id.x, y = id.y, %reason, "map tile unavailable");
+                let (failure, delay) = Failure::after(attempts, reason);
                 self.entries.insert(id, TileEntry::Failed(failure));
                 self.prune_failures();
                 Some(delay)
             }
         };
+        self.mark_scene_changed();
         if let Some(delay) = retry_after {
             context.request_repaint_after(delay);
         }
@@ -365,6 +384,7 @@ impl TileStore {
     }
 
     pub(super) fn promote(&mut self, id: TileId) {
+        let mut evicted_completed = false;
         self.order.retain(|candidate| *candidate != id);
         self.order.push_back(id);
         while self.order.len() > DECODED_TILE_LIMIT {
@@ -375,7 +395,11 @@ impl TileStore {
                 )
             {
                 self.entries.remove(&evicted);
+                evicted_completed = true;
             }
+        }
+        if evicted_completed {
+            self.mark_scene_changed();
         }
     }
 
@@ -415,6 +439,7 @@ impl TileStore {
                 .then_with(|| left.0.y.cmp(&right.0.y))
                 .then_with(|| left.0.x.cmp(&right.0.x))
         });
+        let mut scheduled = false;
         for (id, attempts, _visible, _distance) in candidates.into_iter().take(capacity) {
             self.entries.insert(
                 id,
@@ -430,6 +455,10 @@ impl TileStore {
                 self.dark_mode,
                 self.generation,
             ));
+            scheduled = true;
+        }
+        if scheduled {
+            self.mark_scene_changed();
         }
     }
 
@@ -453,6 +482,13 @@ impl TileStore {
         };
         self.entries
             .insert(tile_id, TileEntry::Desired { attempts });
+        if self.visible.contains(&tile_id) {
+            self.mark_scene_changed();
+        }
+    }
+
+    fn mark_scene_changed(&mut self) {
+        self.scene_revision = self.scene_revision.wrapping_add(1);
     }
 
     pub(in crate::activity) fn attribution() -> Attribution {
@@ -470,7 +506,7 @@ fn map_attribution() -> Attribution {
 }
 
 impl Failure {
-    pub(super) fn after(previous_attempts: u8) -> (Self, Duration) {
+    pub(super) fn after(previous_attempts: u8, reason: String) -> (Self, Duration) {
         let attempts = previous_attempts.saturating_add(1);
         let shift = u32::from(attempts.saturating_sub(1).min(5));
         let delay = Duration::from_secs(1_u64 << shift).min(MAX_RETRY_DELAY);
@@ -478,13 +514,14 @@ impl Failure {
             Self {
                 attempts,
                 retry_at: Instant::now() + delay,
+                reason,
             },
             delay,
         )
     }
 }
 
-fn map_style(dark_mode: bool) -> walkers::Style {
+pub(super) fn map_style(dark_mode: bool) -> walkers::Style {
     let mut style = if dark_mode {
         walkers::Style::openmaptiles_basemap_dark()
     } else {

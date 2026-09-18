@@ -23,6 +23,7 @@ const PREFETCH_RING: i64 = 1;
 pub(in crate::activity) struct MapCamera {
     center: Position,
     zoom: f64,
+    min_zoom: f64,
     motion: CameraMotion,
 }
 
@@ -50,6 +51,7 @@ impl Default for MapCamera {
         Self {
             center: lon_lat(0.0, 0.0),
             zoom: DEFAULT_ZOOM,
+            min_zoom: MIN_ZOOM,
             motion: CameraMotion::Idle,
         }
     }
@@ -64,13 +66,27 @@ impl MapCamera {
         self.zoom
     }
 
+    pub(super) fn min_zoom(&self) -> f64 {
+        self.min_zoom
+    }
+
+    pub(super) fn set_viewport_size(&mut self, size: Vec2) {
+        // A whole world must span the viewport, not shrink into a repeated strip.
+        self.min_zoom = (f64::from(size.x.max(size.y)) / f64::from(WALKERS_TILE_SIZE))
+            .log2()
+            .clamp(MIN_ZOOM, f64::from(MAX_VIEW_ZOOM));
+        if self.zoom < self.min_zoom {
+            self.set_zoom(self.min_zoom);
+        }
+    }
+
     pub(super) fn center_at(&mut self, position: Position) {
         self.center = canonical_position(position);
         self.motion = CameraMotion::Idle;
     }
 
     pub(super) fn set_zoom(&mut self, zoom: f64) {
-        self.zoom = zoom.clamp(MIN_ZOOM, f64::from(MAX_VIEW_ZOOM));
+        self.zoom = zoom.clamp(self.min_zoom, f64::from(MAX_VIEW_ZOOM));
         self.motion = CameraMotion::Idle;
     }
 
@@ -156,7 +172,7 @@ impl MapCamera {
     }
 
     fn zoom_around(&mut self, anchor: Pos2, viewport: Rect, delta: f64) -> bool {
-        let next_zoom = (self.zoom + delta).clamp(MIN_ZOOM, f64::from(MAX_VIEW_ZOOM));
+        let next_zoom = (self.zoom + delta).clamp(self.min_zoom, f64::from(MAX_VIEW_ZOOM));
         if (next_zoom - self.zoom).abs() <= f64::EPSILON {
             return false;
         }
@@ -208,11 +224,56 @@ pub(in crate::activity) fn world_size(zoom: f64) -> f64 {
     f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(zoom)
 }
 
-/// Return the horizontally wrapped copy of a tile nearest the camera center.
-pub(in crate::activity) fn tile_x_near_center(id: TileId, center_x: f64) -> f64 {
-    let tile_count = 2.0_f64.powi(i32::from(id.zoom));
-    let x = f64::from(id.x);
-    x + ((center_x * tile_count - x) / tile_count).round() * tile_count
+pub(in crate::activity) fn first_visible_world(center_x: f64, world_size: f64, width: f32) -> i32 {
+    (center_x - f64::from(width) / (2.0 * world_size)).floor() as i32
+}
+
+/// One canonical tile, projected into any visible horizontal world copy.
+pub(in crate::activity) struct TilePlacement {
+    left: f64,
+    top: f64,
+    pub(in crate::activity) size: f64,
+    world_size: f64,
+}
+
+impl TilePlacement {
+    pub(in crate::activity) fn new(
+        id: TileId,
+        center: [f64; 2],
+        world_size: f64,
+        viewport: Rect,
+    ) -> Self {
+        let size = world_size / 2.0_f64.powi(i32::from(id.zoom));
+        Self {
+            left: f64::from(viewport.center().x)
+                + f64::from(id.x).mul_add(size, -center[0] * world_size),
+            top: f64::from(viewport.center().y)
+                + f64::from(id.y).mul_add(size, -center[1] * world_size),
+            size,
+            world_size,
+        }
+    }
+
+    pub(in crate::activity) fn copies(&self, clip: Rect) -> std::ops::Range<i32> {
+        if self.top >= f64::from(clip.bottom()) || self.top + self.size <= f64::from(clip.top()) {
+            return 0..0;
+        }
+        let first =
+            ((f64::from(clip.left()) - self.left - self.size) / self.world_size).floor() as i32 + 1;
+        let end = ((f64::from(clip.right()) - self.left) / self.world_size).ceil() as i32;
+        first..end
+    }
+
+    pub(in crate::activity) fn origin(&self, world: i32) -> Pos2 {
+        egui::pos2(
+            (self.left + f64::from(world) * self.world_size) as f32,
+            self.top as f32,
+        )
+    }
+
+    pub(in crate::activity) fn rect(&self, world: i32) -> Rect {
+        Rect::from_min_size(self.origin(world), Vec2::splat(self.size as f32))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -377,6 +438,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn zoom_floor_keeps_a_world_at_least_as_large_as_the_viewport() {
+        for size in [
+            Vec2::new(937.0, 560.0),
+            Vec2::new(400.0, 900.0),
+            Vec2::new(1920.0, 1080.0),
+            Vec2::splat(128.0),
+            Vec2::ZERO,
+        ] {
+            let mut camera = MapCamera::default();
+            camera.set_viewport_size(size);
+            camera.zoom_by(-100.0);
+            let expected_size = f64::from(size.x.max(size.y)).max(256.0);
+            assert!((world_size(camera.zoom()) - expected_size).abs() < 1.0e-9);
+            let viewport = Rect::from_min_size(Pos2::ZERO, size);
+            assert!(!camera.zoom_around(viewport.center(), viewport, -1.0));
+        }
+    }
+
+    #[test]
+    fn viewport_resize_raises_the_floor_without_forcing_zoom_out() {
+        let mut camera = MapCamera::default();
+        camera.set_viewport_size(Vec2::new(512.0, 256.0));
+        camera.set_zoom(0.0);
+        camera.set_viewport_size(Vec2::new(1024.0, 512.0));
+        assert!((camera.zoom() - 2.0).abs() < f64::EPSILON);
+        camera.set_viewport_size(Vec2::new(512.0, 256.0));
+        assert!((camera.zoom() - 2.0).abs() < f64::EPSILON);
+        camera.zoom_by(-1.0);
+        assert!((camera.zoom() - 1.0).abs() < f64::EPSILON);
+        camera.set_zoom(8.0);
+        camera.set_viewport_size(Vec2::new(1024.0, 512.0));
+        assert!((camera.zoom() - 8.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn pointer_zoom_clamps_at_viewport_floor_and_preserves_anchor() {
+        let mut camera = MapCamera::default();
+        let size = Vec2::new(1024.0, 512.0);
+        camera.set_viewport_size(size);
+        camera.set_zoom(3.0);
+        let viewport = Rect::from_min_size(Pos2::ZERO, size);
+        let pointer = egui::pos2(640.0, 300.0);
+        let before = MapProjector::new(&camera, viewport).unproject(pointer);
+        assert!(camera.zoom_around(pointer, viewport, -100.0));
+        assert!((camera.zoom() - 2.0).abs() < f64::EPSILON);
+        let after = MapProjector::new(&camera, viewport).unproject(pointer);
+        assert!((before.x() - after.x()).abs() < 1.0e-9);
+        assert!((before.y() - after.y()).abs() < 1.0e-9);
+    }
+
+    #[test]
     fn projection_round_trips_across_the_dateline() {
         let mut camera = MapCamera::default();
         camera.center_at(lon_lat(179.5, 60.0));
@@ -438,15 +550,70 @@ mod tests {
     }
 
     #[test]
-    fn tile_projection_uses_the_nearest_dateline_copy() {
+    fn tile_projection_selects_visible_dateline_copies() {
         let western_tile = TileId {
             zoom: 4,
             x: 0,
             y: 7,
         };
 
-        assert!((tile_x_near_center(western_tile, 0.99) - 16.0).abs() < f64::EPSILON);
-        assert!(tile_x_near_center(western_tile, 0.01).abs() < f64::EPSILON);
+        let viewport = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
+        for (center_x, expected) in [(0.99, 1..2), (0.01, 0..1)] {
+            let placement =
+                TilePlacement::new(western_tile, [center_x, 0.5], world_size(5.0), viewport);
+            assert_eq!(placement.copies(viewport), expected);
+        }
+    }
+
+    #[test]
+    fn world_tile_copies_cover_wide_and_fractional_zoom_viewports_without_vertical_repetition() {
+        let id = TileId {
+            zoom: 0,
+            x: 0,
+            y: 0,
+        };
+        let viewport = Rect::from_min_size(egui::pos2(50.0, 30.0), Vec2::new(1024.0, 700.0));
+        for zoom in [0.0, 0.3, 1.0] {
+            for center_x in [0.0, 0.01, 0.499, 0.5, 0.501, 0.99, 1.0] {
+                let world_size = world_size(zoom);
+                let placement = TilePlacement::new(id, [center_x, 0.5], world_size, viewport);
+                let copies = placement.copies(viewport);
+                assert!(copies.len() >= 2);
+                let rects = copies
+                    .clone()
+                    .map(|world| placement.rect(world))
+                    .collect::<Vec<_>>();
+                assert!(rects[0].left() <= viewport.left());
+                assert!(rects.last().unwrap().right() >= viewport.right());
+                for pair in rects.windows(2) {
+                    assert!((pair[0].right() - pair[1].left()).abs() < 0.001);
+                    assert!((pair[0].top() - pair[1].top()).abs() < f32::EPSILON);
+                }
+                assert_eq!(
+                    copies.start,
+                    first_visible_world(center_x, world_size, viewport.width())
+                );
+                let outside = viewport.translate(egui::vec2(0.0, 2000.0));
+                assert!(placement.copies(outside).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn wide_world_view_still_requests_each_canonical_tile_only_once() {
+        let mut camera = MapCamera::default();
+        camera.set_zoom(0.0);
+        let viewport = Rect::from_min_size(Pos2::ZERO, Vec2::new(1600.0, 900.0));
+        let coverage = MapViewDemand::new(&camera, viewport).coverage();
+        assert_eq!(
+            coverage.visible,
+            vec![TileId {
+                zoom: 0,
+                x: 0,
+                y: 0
+            }]
+        );
+        assert_eq!(coverage.requested, coverage.visible);
     }
 
     #[test]

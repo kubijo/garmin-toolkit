@@ -14,19 +14,19 @@ mod implementation;
 #[path = "platform/web.rs"]
 mod web_tests;
 
-pub(in crate::activity) use implementation::Executor;
+pub(in crate::activity) use implementation::{Executor, ResourceCreationGate, UploadController};
 
 pub(super) fn upload_visible(
     executor: &Executor,
     visible: &[super::VisibleTile],
 ) -> super::UploadStats {
-    #[cfg(target_arch = "wasm32")]
-    {
-        executor.upload_visible(visible)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = executor;
-        Executor::upload_visible(visible)
-    }
+    executor.upload_visible(visible)
+}
+
+pub(super) fn prepare_uploads(
+    uploads: &UploadController,
+    queue: &wgpu::Queue,
+    metrics: &crate::activity::map_runtime::MapMetrics,
+) {
+    uploads.prepare(queue, metrics);
 }

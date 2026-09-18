@@ -265,7 +265,7 @@ impl Workspace {
             return;
         };
         let Some(recording) = props.recording else {
-            loading_panel(ui, intl);
+            loading_panel(ui, intl, presentation);
             return;
         };
         self.viewer.show(
@@ -293,6 +293,7 @@ impl Workspace {
         ScrollArea::vertical().show(ui, |ui| {
             summary(ui, presentation);
             let Some(recording) = props.recording else {
+                loading_details(ui);
                 return;
             };
             self.viewer
@@ -535,14 +536,6 @@ impl ViewerInteraction {
 
     const fn playback_position(&self) -> Option<f64> {
         self.cursor.playback_position()
-    }
-
-    const fn playback_speed(&self) -> PlaybackSpeed {
-        self.playback_speed
-    }
-
-    fn cycle_playback_speed(&mut self) {
-        self.playback_speed = self.playback_speed.next();
     }
 
     fn pause(&mut self) {
@@ -883,6 +876,7 @@ impl Viewer {
         );
         let background_unavailable =
             format_message!(intl, default_message: "Map background unavailable");
+        let loading_background = format_message!(intl, default_message: "Loading map…");
         let highlighted_range = self
             .interaction
             .hovered_lap()
@@ -896,6 +890,7 @@ impl Viewer {
                 highlighted_range,
                 fit_key: &fit_key,
                 empty: no_route,
+                loading_background: &loading_background,
                 background_unavailable: &background_unavailable,
                 height,
             },
@@ -965,14 +960,13 @@ impl Viewer {
 
         let can_play = recording.samples.len() > 1;
         let playing = self.interaction.is_playing();
-        let playback_speed = self.interaction.playback_speed();
         let play_label = if playing {
-            format_message!(intl, default_message: "Pause")
+            format_message!(intl, default_message: "Stop")
         } else {
             format_message!(intl, default_message: "Play")
         };
-        let icon = if playing { icons::PAUSE } else { icons::PLAY };
-        let playback_width = 6.0 + BUTTON + GAP + 44.0;
+        let icon = if playing { icons::STOP } else { icons::PLAY };
+        let playback_width = 6.0 + BUTTON + 12.0 + 136.0;
         let playback_bounds = egui::Rect::from_min_size(
             egui::pos2(
                 map_rect.center().x - playback_width / 2.0,
@@ -980,11 +974,7 @@ impl Viewer {
             ),
             egui::vec2(playback_width, FRAME),
         );
-        let speed_tooltip = format!(
-            "{}: {}",
-            format_message!(intl, default_message: "Playback speed"),
-            playback_speed.label()
-        );
+        let speed_label = format_message!(intl, default_message: "Playback speed");
         let playback = floating_control(
             ui,
             playback_bounds,
@@ -992,28 +982,34 @@ impl Viewer {
             |ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
                 let play = floating_icon_button(ui, &play_label, icon, playing, can_play);
-                let speed = floating_text_button(ui, playback_speed.label(), 44.0, false, can_play)
-                    .on_hover_text(&speed_tooltip);
-                paint_vertical_control_separator(ui, play.rect, GAP);
+                ui.add_space(10.0);
+                let speed = playback_speed_slider(
+                    ui,
+                    &mut self.interaction.playback_speed,
+                    &speed_label,
+                    can_play,
+                );
+                paint_vertical_control_separator(ui, play.rect, 12.0);
                 (play, speed)
             },
         );
         if playback.inner.0.clicked() {
             if playing {
-                self.interaction.pause();
+                self.interaction.stop_and_clear_cursor();
             } else {
                 let range = self.sample_range(recording);
                 self.interaction.start_playback(recording, range);
             }
             ui.ctx().request_repaint();
         }
-        if playback.inner.1.clicked() {
-            self.interaction.cycle_playback_speed();
+        if playback.inner.1.changed() {
             ui.ctx().request_repaint();
         }
         controls.push(playback.response.rect);
 
-        if let Some(full_activity) = self.full_activity_control(ui, intl, map_rect, INSET, FRAME) {
+        if let Some(full_activity) =
+            self.full_activity_control(ui, intl, map_rect, INSET, FRAME, playback.response.rect)
+        {
             controls.push(full_activity);
         }
 
@@ -1027,16 +1023,20 @@ impl Viewer {
         map_rect: egui::Rect,
         inset: f32,
         frame_size: f32,
+        playback_bounds: egui::Rect,
     ) -> Option<egui::Rect> {
         self.interaction.selected_lap()?;
         let full_activity = format_message!(intl, default_message: "Full activity");
-        let bounds = egui::Rect::from_min_size(
+        let mut bounds = egui::Rect::from_min_size(
             egui::pos2(
                 map_rect.left() + inset,
                 map_rect.bottom() - inset - frame_size,
             ),
             egui::vec2(116.0, frame_size),
         );
+        if bounds.expand(inset).intersects(playback_bounds) {
+            bounds = bounds.translate(egui::vec2(0.0, -frame_size - inset));
+        }
         let control = floating_control(ui, bounds, Layout::left_to_right(Align::Center), |ui| {
             floating_labeled_button(ui, &full_activity, icons::TARGET, 112.0, false, true)
         });
@@ -1305,7 +1305,7 @@ fn floating_control<R>(
     egui::Frame::new()
         .fill(color32(palette.surfaces().layer(theme::Level::One)))
         .stroke(egui::Stroke::new(1.0, color32(palette.borders().subtle())))
-        .corner_radius(egui::CornerRadius::same(8))
+        .corner_radius(crate::theme::FLOATING_RADIUS)
         .shadow(egui::Shadow {
             offset: [0, 2],
             blur: 8,
@@ -1349,14 +1349,109 @@ fn floating_icon_button(
     floating_button(ui, Some(icon), None, 32.0, selected, enabled).on_hover_text(label)
 }
 
-fn floating_text_button(
+fn playback_speed_slider(
     ui: &mut Ui,
+    speed: &mut PlaybackSpeed,
     label: &str,
-    width: f32,
-    selected: bool,
     enabled: bool,
 ) -> egui::Response {
-    floating_button(ui, None, Some(label), width, selected, enabled)
+    ui.add_enabled_ui(enabled, |ui| {
+        let palette = crate::theme::palette(ui);
+        let rail = color32(palette.content().icon_secondary());
+        let foreground = color32(palette.content().icon_primary());
+        ui.spacing_mut().slider_width = 96.0;
+        ui.spacing_mut().interact_size.y = 18.0;
+        let mut step = *speed as usize;
+        // Retain egui's input handling, but paint rail, stops, and knob in that order.
+        let opacity = ui.opacity();
+        ui.set_opacity(0.0);
+        let mut response = ui.add(
+            egui::Slider::new(&mut step, 0..=PlaybackSpeed::ALL.len() - 1)
+                .step_by(1.0)
+                .handle_shape(egui::style::HandleShape::Circle)
+                .trailing_fill(false)
+                .show_value(false),
+        );
+        ui.set_opacity(opacity);
+        // egui's circular slider handle reserves this radius at each end of the rail.
+        let knob_radius = response.rect.height() / 2.5;
+        let positions = response.rect.x_range().shrink(knob_radius);
+        ui.painter().rect_filled(
+            egui::Rect::from_center_size(
+                response.rect.center(),
+                egui::vec2(response.rect.width(), 1.5),
+            ),
+            egui::CornerRadius::ZERO,
+            rail,
+        );
+        let mut stop_hovered = false;
+        for (index, candidate) in PlaybackSpeed::ALL.iter().enumerate() {
+            let center = egui::pos2(
+                egui::lerp(
+                    positions,
+                    index as f32 / (PlaybackSpeed::ALL.len() - 1) as f32,
+                ),
+                response.rect.center().y,
+            );
+            let target = ui.interact(
+                egui::Rect::from_center_size(center, egui::vec2(20.0, 32.0)),
+                response.id.with(("playback-speed-stop", index)),
+                Sense::click(),
+            );
+            let stop_label = format!("{label}: {}", candidate.label());
+            stop_hovered |= target.hovered();
+            target.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &stop_label)
+            });
+            if target.clicked() {
+                if step != index {
+                    step = index;
+                    response.mark_changed();
+                }
+                response.request_focus();
+            }
+            ui.painter().rect_filled(
+                egui::Rect::from_center_size(center, egui::vec2(1.75, 7.0)),
+                egui::CornerRadius::ZERO,
+                rail,
+            );
+            target
+                .on_hover_text(stop_label)
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+        }
+        let knob_color = if response.hovered() || response.dragged() || response.has_focus() {
+            foreground
+        } else {
+            rail
+        };
+        ui.painter().circle(
+            egui::pos2(
+                egui::lerp(
+                    positions,
+                    step as f32 / (PlaybackSpeed::ALL.len() - 1) as f32,
+                ),
+                response.rect.center().y,
+            ),
+            knob_radius,
+            knob_color,
+            egui::Stroke::new(1.5, knob_color),
+        );
+        *speed = PlaybackSpeed::ALL[step];
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label(label);
+            node.set_value(speed.label());
+        });
+        ui.add_sized(
+            [36.0, 32.0],
+            egui::Label::new(RichText::new(speed.label()).size(11.0)),
+        );
+        if stop_hovered {
+            response
+        } else {
+            response.on_hover_text(format!("{label}: {}", speed.label()))
+        }
+    })
+    .inner
 }
 
 fn floating_labeled_button(
@@ -1435,7 +1530,7 @@ fn floating_button(
                 .image_tint_follows_text_color(true)
                 .gap(5.0)
                 .min_size(egui::vec2(width, 32.0))
-                .corner_radius(egui::CornerRadius::same(5)),
+                .corner_radius(CONTROL_RADIUS),
         )
     })
     .inner
@@ -1450,7 +1545,7 @@ fn map_control_visuals(
         bg_fill: background,
         weak_bg_fill: weak_background,
         bg_stroke: egui::Stroke::NONE,
-        corner_radius: egui::CornerRadius::same(5),
+        corner_radius: CONTROL_RADIUS,
         fg_stroke: egui::Stroke::new(1.0, foreground),
         expansion: 0.0,
     }
@@ -1678,11 +1773,89 @@ fn empty_panel(ui: &mut Ui, message: &str) {
     );
 }
 
-fn loading_panel(ui: &mut Ui, intl: &Intl) {
-    empty_panel(
-        ui,
-        &format_message!(intl, default_message: "Loading activity…"),
+fn loading_panel(ui: &mut Ui, intl: &Intl, presentation: &Presentation) {
+    ScrollArea::vertical().show(ui, |ui| {
+        viewer_inset().show(ui, |ui| {
+            ui.label(RichText::new(&presentation.title).size(18.0).strong());
+            ui.label(RichText::new(&presentation.subtitle).small().color(color32(
+                crate::theme::palette(ui).content().text_secondary(),
+            )));
+        });
+        ui.add_space(8.0);
+        let map_height = activity_map_height(ui.available_height());
+        loading_surface(
+            ui,
+            map_height,
+            &format_message!(intl, default_message: "Loading activity data…"),
+        );
+        ui.add_space(8.0);
+        viewer_inset().show(ui, |ui| {
+            loading_chart(ui);
+            ui.add_space(8.0);
+            loading_chart(ui);
+        });
+    });
+}
+
+fn loading_surface(ui: &mut Ui, height: f32, label: &str) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::hover());
+    let palette = crate::theme::palette(ui);
+    ui.painter()
+        .rect_filled(rect, PANEL_RADIUS, color32(palette.surfaces().chrome()));
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::TextStyle::Body.resolve(ui.style()),
+        color32(palette.content().text_secondary()),
     );
+}
+
+fn loading_chart(ui: &mut Ui) {
+    let palette = crate::theme::palette(ui);
+    let surface = color32(palette.surfaces().layer(theme::Level::One));
+    let field = color32(palette.surfaces().background_hover());
+    let placeholder = color32(palette.borders().subtle()).gamma_multiply(0.7);
+    egui::Frame::new()
+        .fill(surface)
+        .inner_margin(12)
+        .show(ui, |ui| {
+            skeleton_block(ui, egui::vec2(96.0, 14.0), placeholder);
+            ui.add_space(20.0);
+            ui.columns(3, |columns| {
+                for column in columns {
+                    let width = column.available_width();
+                    skeleton_block(column, egui::vec2(width.min(64.0), 8.0), placeholder);
+                    column.add_space(5.0);
+                    skeleton_block(column, egui::vec2(width.min(92.0), 14.0), placeholder);
+                }
+            });
+            ui.add_space(12.0);
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), CHART_HEIGHT),
+                Sense::hover(),
+            );
+            ui.painter().rect_filled(rect, CONTROL_RADIUS, field);
+        });
+}
+
+fn loading_details(ui: &mut Ui) {
+    let placeholder = color32(crate::theme::palette(ui).borders().subtle()).gamma_multiply(0.7);
+    ui.add_space(20.0);
+    for width in [0.72, 0.9, 0.64, 0.82] {
+        skeleton_block(
+            ui,
+            egui::vec2(ui.available_width() * width, 12.0),
+            placeholder,
+        );
+        ui.add_space(14.0);
+    }
+}
+
+fn skeleton_block(ui: &mut Ui, size: egui::Vec2, fill: egui::Color32) {
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    ui.painter().rect_filled(rect, CONTROL_RADIUS, fill);
 }
 
 #[derive(Clone, Copy)]
@@ -1808,8 +1981,8 @@ fn show_chart(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) ->
             let plot = egui::Frame::new()
                 .fill(frame.visuals.field)
                 .inner_margin(egui::Margin {
-                    left: 24,
-                    right: 24,
+                    left: 0,
+                    right: 0,
                     top: 4,
                     bottom: 4,
                 })
@@ -2004,6 +2177,8 @@ enum PlaybackSpeed {
 }
 
 impl PlaybackSpeed {
+    const ALL: [Self; 3] = [Self::Half, Self::Normal, Self::Double];
+
     const fn factor(self) -> f64 {
         match self {
             Self::Half => 0.5,
@@ -2017,14 +2192,6 @@ impl PlaybackSpeed {
             Self::Half => "0.5×",
             Self::Normal => "1×",
             Self::Double => "2×",
-        }
-    }
-
-    const fn next(self) -> Self {
-        match self {
-            Self::Half => Self::Normal,
-            Self::Normal => Self::Double,
-            Self::Double => Self::Half,
         }
     }
 }
@@ -2991,18 +3158,374 @@ mod tests {
         assert!(
             (playback_delta(90.0, 1.0, super::PlaybackSpeed::Double) - 6.0).abs() < f64::EPSILON
         );
-        assert_eq!(
-            super::PlaybackSpeed::Half.next(),
-            super::PlaybackSpeed::Normal
+    }
+
+    #[test]
+    fn playback_slider_selects_stops_by_pointer_and_ignores_disabled_input() {
+        use super::PlaybackSpeed;
+
+        let context = egui::Context::default();
+        crate::install(&context);
+        let mut speed = PlaybackSpeed::Normal;
+        let response = speed_slider_frame(&context, &mut speed, Vec::new(), true);
+        for (fraction, expected) in [
+            (0.0, PlaybackSpeed::Half),
+            (0.4, PlaybackSpeed::Normal),
+            (1.0, PlaybackSpeed::Double),
+            (1.0, PlaybackSpeed::Double),
+        ] {
+            let position = egui::pos2(
+                response.rect.left() + response.rect.width() * fraction,
+                response.rect.center().y,
+            );
+            let previous = speed;
+            let response = speed_slider_frame(
+                &context,
+                &mut speed,
+                vec![
+                    egui::Event::PointerMoved(position),
+                    egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                true,
+            );
+            assert_eq!(speed, expected);
+            assert_eq!(response.changed(), previous != expected);
+            speed_slider_frame(
+                &context,
+                &mut speed,
+                vec![egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true,
+            );
+        }
+        speed_slider_frame(&context, &mut speed, Vec::new(), false);
+        let position = response.rect.left_center();
+        let response = speed_slider_frame(
+            &context,
+            &mut speed,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            false,
         );
-        assert_eq!(
-            super::PlaybackSpeed::Normal.next(),
-            super::PlaybackSpeed::Double
+        assert_eq!(speed, PlaybackSpeed::Double);
+        assert!(!response.changed());
+    }
+
+    #[test]
+    fn playback_stops_accept_clicks_off_the_rail_without_blocking_drags() {
+        use super::PlaybackSpeed;
+
+        let context = egui::Context::default();
+        crate::install(&context);
+        let mut speed = PlaybackSpeed::Normal;
+        let slider = speed_slider_frame(&context, &mut speed, Vec::new(), true);
+        let positions = slider.rect.x_range().shrink(slider.rect.height() / 2.5);
+        let pointer_button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for (fraction, expected) in [
+            (0.0, PlaybackSpeed::Half),
+            (0.5, PlaybackSpeed::Normal),
+            (1.0, PlaybackSpeed::Double),
+        ] {
+            let position = egui::pos2(
+                egui::lerp(positions, fraction),
+                slider.rect.center().y + 13.0,
+            );
+            assert!(!slider.rect.contains(position));
+            let response = speed_slider_frame(
+                &context,
+                &mut speed,
+                vec![
+                    egui::Event::PointerMoved(position),
+                    pointer_button(position, true),
+                    pointer_button(position, false),
+                ],
+                true,
+            );
+            assert_eq!(speed, expected);
+            assert!(response.changed());
+        }
+        let start = egui::pos2(positions.min, slider.rect.center().y);
+        speed_slider_frame(
+            &context,
+            &mut speed,
+            vec![
+                egui::Event::PointerMoved(start),
+                pointer_button(start, true),
+            ],
+            true,
         );
-        assert_eq!(
-            super::PlaybackSpeed::Double.next(),
-            super::PlaybackSpeed::Half
+        let end = egui::pos2(positions.max, slider.rect.center().y);
+        speed_slider_frame(
+            &context,
+            &mut speed,
+            vec![egui::Event::PointerMoved(end)],
+            true,
         );
+        assert_eq!(speed, PlaybackSpeed::Double);
+        speed_slider_frame(&context, &mut speed, vec![pointer_button(end, false)], true);
+        assert_eq!(speed, PlaybackSpeed::Double);
+
+        speed_slider_frame(&context, &mut speed, Vec::new(), false);
+        let position = start + egui::vec2(0.0, 13.0);
+        let response = speed_slider_frame(
+            &context,
+            &mut speed,
+            vec![
+                egui::Event::PointerMoved(position),
+                pointer_button(position, true),
+                pointer_button(position, false),
+            ],
+            false,
+        );
+        assert_eq!(speed, PlaybackSpeed::Double);
+        assert!(!response.changed());
+    }
+
+    #[test]
+    fn playback_stop_and_rail_hover_opens_exactly_one_tooltip() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        context.set_theme(egui::ThemePreference::Dark);
+        context.style_mut_of(egui::Theme::Dark, |style| {
+            style.interaction.tooltip_delay = 0.1;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+        let mut speed = super::PlaybackSpeed::Normal;
+        let slider = speed_slider_frame(&context, &mut speed, Vec::new(), true);
+        let positions = slider.rect.x_range().shrink(slider.rect.height() / 2.5);
+        for (fraction, y_offset, stop) in [
+            (0.0, 0.0, Some(0_usize)),
+            (0.25, 0.0, None),
+            (0.5, 0.0, Some(1)),
+            (0.75, 0.0, None),
+            (1.0, 0.0, Some(2)),
+            (0.0, 13.0, Some(0)),
+            (0.5, 13.0, Some(1)),
+            (1.0, 13.0, Some(2)),
+        ] {
+            let position = egui::pos2(
+                egui::lerp(positions, fraction),
+                slider.rect.center().y + y_offset,
+            );
+            speed_slider_frame(
+                &context,
+                &mut speed,
+                vec![egui::Event::PointerMoved(position)],
+                true,
+            );
+            for _ in 0..30 {
+                speed_slider_frame(&context, &mut speed, Vec::new(), true);
+            }
+            let tooltip_ids = std::iter::once(slider.id)
+                .chain((0..3_usize).map(|index| slider.id.with(("playback-speed-stop", index))));
+            let open = tooltip_ids
+                .filter(|id| egui::Tooltip::was_tooltip_open_last_frame(&context, *id))
+                .collect::<Vec<_>>();
+            let expected = stop.map_or(slider.id, |index| {
+                slider.id.with(("playback-speed-stop", index))
+            });
+            assert_eq!(
+                open,
+                vec![expected],
+                "hover must show only the stop's candidate speed or the rail's current speed",
+            );
+            assert_eq!(speed, super::PlaybackSpeed::Normal);
+        }
+    }
+
+    #[test]
+    fn playback_slider_keyboard_steps_stop_at_both_ends() {
+        use super::PlaybackSpeed;
+
+        let context = egui::Context::default();
+        crate::install(&context);
+        let mut speed = PlaybackSpeed::Normal;
+        speed_slider_frame(&context, &mut speed, Vec::new(), true).request_focus();
+        for (key, expected) in [
+            (egui::Key::ArrowRight, PlaybackSpeed::Double),
+            (egui::Key::ArrowRight, PlaybackSpeed::Double),
+            (egui::Key::ArrowLeft, PlaybackSpeed::Normal),
+            (egui::Key::ArrowLeft, PlaybackSpeed::Half),
+            (egui::Key::ArrowLeft, PlaybackSpeed::Half),
+        ] {
+            let previous = speed;
+            let response = speed_slider_frame(
+                &context,
+                &mut speed,
+                vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true,
+            );
+            assert_eq!(speed, expected);
+            assert_eq!(response.changed(), previous != expected);
+        }
+    }
+
+    fn speed_slider_frame(
+        context: &egui::Context,
+        speed: &mut super::PlaybackSpeed,
+        events: Vec<egui::Event>,
+        enabled: bool,
+    ) -> egui::Response {
+        let mut response = None;
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(240.0, 80.0),
+                )),
+                events,
+                ..egui::RawInput::default()
+            },
+            |ui| {
+                let control = super::floating_control(
+                    ui,
+                    egui::Rect::from_min_size(egui::pos2(12.0, 12.0), egui::vec2(186.0, 36.0)),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        let play = super::floating_icon_button(
+                            ui,
+                            "Play",
+                            crate::icons::PLAY,
+                            false,
+                            enabled,
+                        );
+                        ui.add_space(10.0);
+                        let slider =
+                            super::playback_speed_slider(ui, speed, "Playback speed", enabled);
+                        assert!(slider.rect.height() <= play.rect.height());
+                        assert!((slider.rect.center().y - play.rect.center().y).abs() < 1.0);
+                        assert!(slider.rect.left() - play.rect.right() >= 12.0);
+                        slider
+                    },
+                );
+                assert!(control.response.rect.height() <= 38.0);
+                response = Some(control.inner);
+            },
+        );
+        let response = response.unwrap();
+        if enabled {
+            assert_speed_slider_paint(context, &response, &output.shapes);
+        }
+        output.drop_without_applying_deltas();
+        response
+    }
+
+    fn assert_speed_slider_paint(
+        context: &egui::Context,
+        response: &egui::Response,
+        painted: &[egui::epaint::ClippedShape],
+    ) {
+        let shapes = painted
+            .iter()
+            .flat_map(|clipped| match &clipped.shape {
+                egui::Shape::Vec(shapes) => shapes.as_slice(),
+                shape => std::slice::from_ref(shape),
+            })
+            .collect::<Vec<_>>();
+        let (rail_index, rail) = shapes
+            .iter()
+            .enumerate()
+            .find_map(|(index, shape)| match shape {
+                egui::Shape::Rect(rect)
+                    if (rect.rect.width() - response.rect.width()).abs() < 1.0
+                        && rect.rect.height() <= 4.0 =>
+                {
+                    Some((index, rect))
+                }
+                _ => None,
+            })
+            .expect("slider must paint a rail");
+        let palette = if context.theme() == egui::Theme::Dark {
+            &garmin_color::theme::GRAY_100
+        } else {
+            &garmin_color::theme::GRAY_10
+        };
+        let surface =
+            crate::theme::color32(palette.surfaces().layer(garmin_color::theme::Level::One));
+        assert!(rail.fill.is_opaque());
+        assert!(
+            rail.fill.r().abs_diff(surface.r()) >= 32,
+            "rail must contrast with its floating surface"
+        );
+        let secondary = crate::theme::color32(palette.content().icon_secondary());
+        let primary = crate::theme::color32(palette.content().icon_primary());
+        assert!((rail.rect.height() - 1.5).abs() < 0.01);
+        assert_eq!(rail.fill, secondary);
+        for shape in &shapes {
+            if let egui::Shape::Rect(rect) = shape {
+                assert_eq!(rect.corner_radius, egui::CornerRadius::ZERO);
+            }
+            if let egui::Shape::Circle(circle) = shape
+                && response.rect.contains(circle.center)
+            {
+                assert!(
+                    circle.fill == secondary || circle.fill == primary,
+                    "slider hover must use icon colors, not an accent"
+                );
+            }
+        }
+        let knob_index = shapes.iter().position(|shape| matches!(shape,
+            egui::Shape::Circle(circle) if response.rect.contains(circle.center) && circle.radius > 5.0
+        )).expect("slider must paint its value knob");
+        let ticks = shapes
+            .iter()
+            .enumerate()
+            .filter(|(index, shape)| {
+                let is_stop = matches!(shape,
+                    egui::Shape::Rect(rect)
+                        if response.rect.contains_rect(rect.rect)
+                            && (rect.rect.width() - 1.75).abs() < 0.01
+                            && (rect.rect.height() - 7.0).abs() < 0.01
+                            && rect.fill == secondary
+                );
+                if is_stop {
+                    assert!(*index > rail_index, "speed stops must paint above the rail");
+                    assert!(
+                        *index < knob_index,
+                        "value knob must paint above every stop"
+                    );
+                }
+                is_stop
+            })
+            .count();
+        assert_eq!(ticks, 3, "each playback speed needs a visible stop");
+    }
+
+    #[test]
+    fn playback_slider_paints_in_the_light_application_theme() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        context.set_theme(egui::ThemePreference::Light);
+        let mut speed = super::PlaybackSpeed::Normal;
+        speed_slider_frame(&context, &mut speed, Vec::new(), true);
     }
 
     #[test]

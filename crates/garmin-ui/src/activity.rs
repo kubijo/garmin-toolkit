@@ -18,6 +18,8 @@ use crate::{
 mod map;
 pub mod map_runtime;
 mod map_style;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_latest;
 mod route_index;
 mod workspace;
 

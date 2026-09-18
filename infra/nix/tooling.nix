@@ -12,7 +12,11 @@ let
   sqlFluffConfig = ../sqlfluff/pyproject.toml;
   allFormatters = {
     # The pinned formatter set has no WGSL formatter; Naga validates this shader when WGPU builds it.
-    exclude = [ "crates/garmin-ui/src/activity/gpu_map.wgsl" ];
+    exclude = [
+      "crates/garmin-ui/src/activity/gpu_map.wgsl"
+      "infra/javascript/fixtures/*.pbf.hex"
+      "infra/javascript/fixtures/*.pbf"
+    ];
     html = true;
     javascript = true;
     json = true;
@@ -43,6 +47,8 @@ let
       "infra/fixtures/fit/development-activities/recordings/**"
       "old/**"
       "infra/gallery/fonts/**"
+      # Preserve upstream formatting and tooling conventions in vendored dependencies.
+      "vendor/**"
     ];
     format = allFormatters;
     inherit (pkgs) nodejs;
@@ -68,6 +74,10 @@ let
       nix = true;
       python.configFile = pythonConfig;
       extraProjectCheckers = {
+        map-worker-tests.command = pkgs.writeShellScript "map-worker-tests" ''
+          ${lib.getExe pkgs.nodejs} infra/javascript/map-worker.test.mjs || exit $?
+          exec ${lib.getExe pkgs.nodejs} infra/javascript/initializer.test.mjs
+        '';
         python-lock.command = pkgs.writeShellScript "python-lock-check" ''
           exec ${lib.getExe pkgs.uv} lock --check --offline \
             --python ${pythonToolsEnv}/bin/python \

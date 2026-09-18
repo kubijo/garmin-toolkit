@@ -403,7 +403,7 @@ def print_analysis(analysis: ReportAnalysis) -> None:
     print(f'  Redraw interval       {format_distribution(runtime.redraw_frame, "ms")}')
     print(f'  Desktop UI            {format_distribution(runtime.desktop_ui, "ms")}')
     print(f'  Map UI                {format_distribution(runtime.map_ui, "ms")}')
-    print(f'  Scene acquisition     {format_distribution(runtime.scene, "ms")}')
+    print(f'  Frame assembly        {format_distribution(runtime.scene, "ms")}')
     print(f'  Route query           {format_distribution(runtime.route_query, "µs")}')
     print(f'  Render prepare        {format_distribution(runtime.render_prepare, "ms")}')
     print(f'  Render draw           {format_distribution(runtime.render_draw, "ms")}')
@@ -510,7 +510,7 @@ def print_comparison(analyses: list[ReportAnalysis], *, allow_incomparable: bool
         ('interaction_map_ui', 'Interaction map p95', ' ms'),
         ('map_ui', 'Map UI p95', ' ms'),
         ('desktop_ui', 'Desktop UI p95', ' ms'),
-        ('scene', 'Scene p95', ' ms'),
+        ('scene', 'Frame assembly p95', ' ms'),
         ('route_query', 'Route query p95', ' µs'),
         ('render_draw', 'Render draw p95', ' ms'),
     )

@@ -1,18 +1,16 @@
 //! Activity-map camera, vector basemap, and linked route overlay.
 
-use std::{
-    collections::VecDeque,
-    time::{Duration, Instant},
-};
+use std::{collections::VecDeque, time::Duration};
 
 use cint::ColorInterop;
 use egui::{Align2, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2};
 use garmin_model::route::Coordinate;
 use garmin_service_api::{ActivityRecordingSnapshot, ActivitySampleSnapshot};
 use walkers::{lon_lat, sources::Attribution};
+use web_time::Instant;
 
 use super::{
-    map_runtime::{MapPerformanceSample, MapRuntimeHandle, MapSurfaceHandle},
+    map_runtime::{MapPerformanceSample, MapRuntimeHandle, MapScene, MapSurfaceHandle},
     map_style,
     route_index::RouteIndex,
 };
@@ -21,6 +19,8 @@ use super::{
 pub(super) mod camera;
 #[path = "gpu_map.rs"]
 pub(super) mod gpu_map;
+#[path = "map/tile_decode.rs"]
+mod tile_decode;
 #[path = "map/tile_store.rs"]
 pub(super) mod tile_store;
 
@@ -47,6 +47,7 @@ pub(super) struct Props<'a> {
     pub highlighted_range: Option<std::ops::RangeInclusive<usize>>,
     pub fit_key: &'a str,
     pub empty: &'a str,
+    pub loading_background: &'a str,
     pub background_unavailable: &'a str,
     pub height: f32,
 }
@@ -107,11 +108,15 @@ impl ActivityMap {
                 selected_coordinate: props.selected_coordinate,
             },
         );
-        if self.surface.scene().background_unavailable() {
-            map_status(ui, rendered.rect, props.background_unavailable);
+        if let Some(reason) = rendered.snapshot.background_failure() {
+            map_status(ui, rendered.rect, props.background_unavailable, reason);
+        } else if rendered.scene.visible_tiles == 0
+            && (rendered.snapshot.pending_visible_tiles() > 0
+                || rendered.scene.pending_upload_tiles > 0)
+        {
+            map_loading_status(ui, rendered.rect, props.loading_background);
         }
 
-        let scene = self.surface.scene();
         let performance = self.frame_timing.sample(MapPerfSample {
             camera_active: rendered.camera_active,
             ui_elapsed: ui_started.elapsed(),
@@ -119,12 +124,20 @@ impl ActivityMap {
             route_query_microseconds: rendered.route_query_microseconds,
             label_milliseconds: rendered.scene.label_milliseconds,
             label_backlog: rendered.scene.label_backlog,
-            stale_work: rendered.scene.stale_work,
+            stale_work: rendered
+                .scene
+                .stale_work
+                .saturating_add(self.surface.discarded_views()),
             visible_tiles: rendered.scene.visible_tiles,
-            ready_tiles: scene.ready_tiles(),
-            pending_tiles: scene.pending_tiles(),
+            ready_tiles: rendered.snapshot.ready_tiles(),
+            pending_tiles: rendered.snapshot.pending_tiles(),
             queued_upload_bytes: rendered.scene.queued_upload_bytes,
             uploaded_bytes: rendered.scene.uploaded_bytes,
+            pending_upload_tiles: rendered.scene.pending_upload_tiles,
+            partial_upload_tiles: rendered.scene.partial_upload_tiles,
+            completed_upload_tiles: rendered.scene.completed_upload_tiles,
+            upload_milliseconds: rendered.scene.upload_milliseconds,
+            upload_budget_overruns: rendered.scene.upload_budget_overruns,
         });
         self.surface.record_performance(performance.sample);
         attribution(
@@ -172,23 +185,21 @@ impl ActivityMap {
         ui.painter().rect_filled(
             map_rect,
             crate::theme::PANEL_RADIUS,
-            crate::theme::palette(ui)
-                .surfaces()
-                .layer(garmin_color::theme::Level::One)
-                .into_cint(),
+            crate::theme::palette(ui).surfaces().chrome().into_cint(),
         );
 
-        let zoom_policy = zoom_policy(ui, camera.zoom(), map_rect);
+        let zoom_policy = zoom_policy(ui, camera, map_rect);
         let camera_interaction =
             camera.interact(ui, &response, zoom_policy.gesture * zoom_policy.speed);
         let demand = MapViewDemand::new(camera, map_rect);
         surface.submit_view(ui.ctx(), ui.visuals().dark_mode, &demand);
+        let snapshot = surface.scene();
         let gpu_enabled = surface.gpu_enabled();
         if let Some(callback) = surface.paint_callback(map_rect) {
             ui.painter().add(callback);
         }
-        let scene = surface.update_scene(camera, map_rect, ui.ctx(), route);
-        surface.paint_labels(ui, camera, map_rect);
+        let scene = surface.update_scene(&snapshot, camera, map_rect, ui.ctx(), route);
+        surface.paint_labels(&snapshot, ui, camera, map_rect);
         let projector = MapProjector::new(camera, map_rect);
         let mut overlay = ui.new_child(
             UiBuilder::new()
@@ -219,6 +230,7 @@ impl ActivityMap {
                 || camera_interaction.changed
                 || camera.animating(),
             scene,
+            snapshot,
         }
     }
 
@@ -256,6 +268,7 @@ impl FitState {
         key: &str,
         size: Vec2,
     ) {
+        camera.set_viewport_size(size);
         let invalid = self.applied.as_ref().is_none_or(|applied| {
             applied.key != key
                 || (applied.size.x - size.x).abs() > 64.0
@@ -367,6 +380,7 @@ struct RenderedMap {
     route_query_microseconds: f32,
     camera_active: bool,
     scene: gpu_map::ScenePerf,
+    snapshot: MapScene,
 }
 
 fn paint_route_overlay(
@@ -578,7 +592,7 @@ struct ZoomPolicy {
     active: bool,
 }
 
-fn zoom_policy(ui: &mut Ui, zoom: f64, map_rect: Rect) -> ZoomPolicy {
+fn zoom_policy(ui: &mut Ui, camera: &MapCamera, map_rect: Rect) -> ZoomPolicy {
     let (gesture, from_scroll) = zoom_gesture(ui);
     let pointer_over_map = ui.input(|input| {
         input
@@ -586,7 +600,8 @@ fn zoom_policy(ui: &mut Ui, zoom: f64, map_rect: Rect) -> ZoomPolicy {
             .hover_pos()
             .is_some_and(|pointer| map_rect.contains(pointer))
     });
-    let blocked = pointer_over_map && outward_zoom_at_bound(zoom, gesture);
+    let blocked =
+        pointer_over_map && outward_zoom_at_bound(camera.zoom(), camera.min_zoom(), gesture);
 
     if pointer_over_map && from_scroll && gesture.abs() > f64::EPSILON {
         ui.input_mut(|input| input.smooth_scroll_delta.y = 0.0);
@@ -595,7 +610,12 @@ fn zoom_policy(ui: &mut Ui, zoom: f64, map_rect: Rect) -> ZoomPolicy {
     let accepted = pointer_over_map && !blocked;
     ZoomPolicy {
         gesture: if accepted { gesture } else { 0.0 },
-        speed: clamped_zoom_speed(zoom, gesture, DEFAULT_ZOOM_SPEED),
+        speed: clamped_zoom_speed(
+            camera.zoom(),
+            camera.min_zoom(),
+            gesture,
+            DEFAULT_ZOOM_SPEED,
+        ),
         active: accepted && gesture.abs() > f64::EPSILON,
     }
 }
@@ -616,16 +636,16 @@ fn zoom_gesture(ui: &Ui) -> (f64, bool) {
     (gesture, true)
 }
 
-fn outward_zoom_at_bound(zoom: f64, gesture: f64) -> bool {
+fn outward_zoom_at_bound(zoom: f64, min_zoom: f64, gesture: f64) -> bool {
     (gesture > 0.0 && zoom >= f64::from(MAX_VIEW_ZOOM) - ZOOM_BOUND_EPSILON)
-        || (gesture < 0.0 && zoom <= ZOOM_BOUND_EPSILON)
+        || (gesture < 0.0 && zoom <= min_zoom + ZOOM_BOUND_EPSILON)
 }
 
-fn clamped_zoom_speed(zoom: f64, gesture: f64, default_speed: f64) -> f64 {
+fn clamped_zoom_speed(zoom: f64, min_zoom: f64, gesture: f64, default_speed: f64) -> f64 {
     if gesture > 0.0 {
         default_speed.min((f64::from(MAX_VIEW_ZOOM) - zoom).max(0.0) / gesture)
     } else if gesture < 0.0 {
-        default_speed.min(zoom.max(0.0) / -gesture)
+        default_speed.min((zoom - min_zoom).max(0.0) / -gesture)
     } else {
         default_speed
     }
@@ -661,7 +681,7 @@ fn attribution(ui: &mut Ui, source: &Attribution, performance: Option<&str>) {
     }
 }
 
-fn map_status(ui: &mut Ui, map_rect: Rect, label: &str) {
+fn map_status(ui: &mut Ui, map_rect: Rect, label: &str, detail: &str) {
     let size = egui::vec2(map_rect.width().min(240.0), 28.0);
     let rect = Rect::from_min_size(
         egui::pos2(map_rect.left() + 4.0, map_rect.top() + 48.0),
@@ -681,8 +701,18 @@ fn map_status(ui: &mut Ui, map_rect: Rect, label: &str) {
         .corner_radius(crate::theme::CONTROL_RADIUS)
         .inner_margin(4)
         .show(&mut status_ui, |ui| {
-            ui.label(RichText::new(label).small());
+            ui.label(RichText::new(label).small()).on_hover_text(detail);
         });
+}
+
+fn map_loading_status(ui: &mut Ui, map_rect: Rect, label: &str) {
+    ui.painter().text(
+        map_rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        egui::TextStyle::Body.resolve(ui.style()),
+        crate::theme::color32(crate::theme::palette(ui).content().text_secondary()),
+    );
 }
 
 #[derive(Clone, Copy)]
@@ -926,6 +956,11 @@ struct MapPerfSample {
     pending_tiles: usize,
     queued_upload_bytes: usize,
     uploaded_bytes: usize,
+    pending_upload_tiles: usize,
+    partial_upload_tiles: usize,
+    completed_upload_tiles: usize,
+    upload_milliseconds: f32,
+    upload_budget_overruns: u64,
 }
 
 struct FrameTimingOutput {
@@ -948,6 +983,11 @@ impl FrameTiming {
             pending_tiles,
             queued_upload_bytes,
             uploaded_bytes,
+            pending_upload_tiles,
+            partial_upload_tiles,
+            completed_upload_tiles,
+            upload_milliseconds,
+            upload_budget_overruns,
         } = sample;
         let now = Instant::now();
         let elapsed = self.previous.replace(now).map(|previous| now - previous);
@@ -996,7 +1036,7 @@ impl FrameTiming {
             .filter(|milliseconds| *milliseconds > 0.0)
             .map(|milliseconds| {
                 format!(
-                    "{:.0} FPS · UI {ui_p50:.1}/{ui_p95:.1} ms · scene {scene_milliseconds:.2} ms · labels {label_milliseconds:.1} ms/{label_backlog} · route {route_query_microseconds:.0} µs · tiles {visible_tiles}/{ready_tiles}+{pending_tiles} · upload {uploaded_bytes}/{queued_upload_bytes} B · stale {stale_work}",
+                    "{:.0} FPS · UI {ui_p50:.1}/{ui_p95:.1} ms · scene {scene_milliseconds:.2} ms · labels {label_milliseconds:.1} ms/{label_backlog} · route {route_query_microseconds:.0} µs · tiles {visible_tiles}/{ready_tiles}+{pending_tiles} · upload {uploaded_bytes}/{queued_upload_bytes} B {partial_upload_tiles}/{pending_upload_tiles} partial {completed_upload_tiles} ready {upload_milliseconds:.2} ms/{upload_budget_overruns} over · stale {stale_work}",
                     1_000.0 / milliseconds,
                 )
             })
@@ -1109,11 +1149,7 @@ fn fit(camera: &mut MapCamera, samples: &[ActivitySampleSnapshot], size: Vec2) {
     let scale_x = usable_width / ((max_x - min_x).abs().max(1.0e-9) * f64::from(WALKERS_TILE_SIZE));
     let scale_y =
         usable_height / ((max_y - min_y).abs().max(1.0e-9) * f64::from(WALKERS_TILE_SIZE));
-    let zoom = scale_x
-        .min(scale_y)
-        .log2()
-        .clamp(1.0, f64::from(MAX_VIEW_ZOOM));
-    camera.set_zoom(zoom);
+    camera.set_zoom(scale_x.min(scale_y).log2());
 }
 
 fn mercator_y(latitude: f64) -> f64 {
@@ -1172,9 +1208,9 @@ mod tests {
 
     use super::{
         FitState, FrameTiming, MapCamera, MapPerfSample, MapViewDemand, RouteIndexCache,
-        RoutePoint, TileStore, center, clamped_zoom_speed, closest_endpoint_on_segment, fit,
-        mercator_latitude, mercator_y, outward_zoom_at_bound, push_route_point, ranged_samples,
-        wrapped_longitude, zoom_policy,
+        RoutePoint, TileStore, camera, center, clamped_zoom_speed, closest_endpoint_on_segment,
+        fit, mercator_latitude, mercator_y, outward_zoom_at_bound, push_route_point,
+        ranged_samples, wrapped_longitude, zoom_policy,
     };
 
     fn apply_demand(tiles: &mut TileStore, ids: impl IntoIterator<Item = walkers::TileId>) {
@@ -1215,6 +1251,11 @@ mod tests {
             pending_tiles: 0,
             queued_upload_bytes: 0,
             uploaded_bytes: 0,
+            pending_upload_tiles: 0,
+            partial_upload_tiles: 0,
+            completed_upload_tiles: 0,
+            upload_milliseconds: 0.0,
+            upload_budget_overruns: 0,
         }
     }
 
@@ -1285,6 +1326,18 @@ mod tests {
     }
 
     #[test]
+    fn global_route_fit_and_small_resizes_obey_viewport_zoom_floor() {
+        let samples = [sample(Some((-80.0, -80.0))), sample(Some((80.0, 80.0)))];
+        let mut camera = MapCamera::default();
+        let mut state = FitState::default();
+        state.apply_if_needed(&mut camera, &samples, "global", vec2(1024.0, 512.0));
+        assert!((camera::world_size(camera.zoom()) - 1024.0).abs() < 1.0e-9);
+        state.apply_if_needed(&mut camera, &samples, "global", vec2(1056.0, 512.0));
+        assert_eq!(state.applications, 1);
+        assert!((camera::world_size(camera.zoom()) - 1056.0).abs() < 1.0e-9);
+    }
+
+    #[test]
     fn route_index_cache_rebuilds_only_for_a_new_source_identity() {
         let samples = [sample(Some((60.0, 24.0))), sample(Some((60.1, 24.2)))];
         let mut cache = RouteIndexCache::default();
@@ -1346,23 +1399,40 @@ mod tests {
     #[test]
     fn zoom_policy_stops_at_bounds_without_overshooting() {
         let maximum = f64::from(super::MAX_VIEW_ZOOM);
-        assert!(outward_zoom_at_bound(maximum, 0.25));
-        assert!(outward_zoom_at_bound(0.0, -0.25));
-        assert!(!outward_zoom_at_bound(maximum, -0.25));
-        assert!(!outward_zoom_at_bound(0.0, 0.25));
-        assert!(clamped_zoom_speed(maximum, 0.25, 2.0).abs() < f64::EPSILON);
-        assert!(clamped_zoom_speed(0.0, -0.25, 2.0).abs() < f64::EPSILON);
-        assert!((clamped_zoom_speed(maximum, -0.25, 2.0) - 2.0).abs() < f64::EPSILON);
-        assert!((clamped_zoom_speed(maximum - 0.1, 0.2, 2.0) - 0.5).abs() < 1.0e-6);
+        let minimum = 2.0;
+        assert!(outward_zoom_at_bound(maximum, minimum, 0.25));
+        assert!(outward_zoom_at_bound(minimum, minimum, -0.25));
+        assert!(!outward_zoom_at_bound(maximum, minimum, -0.25));
+        assert!(!outward_zoom_at_bound(minimum, minimum, 0.25));
+        assert!(clamped_zoom_speed(maximum, minimum, 0.25, 2.0).abs() < f64::EPSILON);
+        assert!(clamped_zoom_speed(minimum, minimum, -0.25, 2.0).abs() < f64::EPSILON);
+        assert!((clamped_zoom_speed(maximum, minimum, -0.25, 2.0) - 2.0).abs() < f64::EPSILON);
+        assert!((clamped_zoom_speed(maximum - 0.1, minimum, 0.2, 2.0) - 0.5).abs() < 1.0e-6);
+        assert!((clamped_zoom_speed(minimum + 0.1, minimum, -0.2, 2.0) - 0.5).abs() < 1.0e-6);
     }
 
     #[test]
     fn outward_wheel_at_maximum_is_consumed_without_moving_the_map() {
+        assert_outward_wheel_is_consumed(true);
+    }
+
+    #[test]
+    fn outward_wheel_at_viewport_minimum_is_consumed_without_moving_the_map() {
+        assert_outward_wheel_is_consumed(false);
+    }
+
+    fn assert_outward_wheel_is_consumed(at_maximum: bool) {
         let context = egui::Context::default();
         let mut camera = MapCamera::default();
         let map_center = lon_lat(27.2, 60.6);
         camera.center_at(map_center);
-        camera.set_zoom(f64::from(super::MAX_VIEW_ZOOM));
+        camera.set_viewport_size(vec2(320.0, 240.0));
+        let bound = if at_maximum {
+            f64::from(super::MAX_VIEW_ZOOM)
+        } else {
+            camera.min_zoom()
+        };
+        camera.set_zoom(bound);
         let center_before = camera.center();
         let mut scroll_before_policy = 0.0;
         let mut scroll_after_policy = f32::NAN;
@@ -1372,7 +1442,7 @@ mod tests {
                 Event::PointerMoved(pos2(160.0, 120.0)),
                 Event::MouseWheel {
                     unit: MouseWheelUnit::Point,
-                    delta: vec2(0.0, 120.0),
+                    delta: vec2(0.0, if at_maximum { 120.0 } else { -120.0 }),
                     modifiers: egui::Modifiers::NONE,
                     phase: TouchPhase::Move,
                 },
@@ -1383,17 +1453,19 @@ mod tests {
         let output = context.run_ui(input, |ui| {
             let map_rect = ui.available_rect_before_wrap();
             scroll_before_policy = ui.input(|input| input.smooth_scroll_delta.y);
-            let policy = zoom_policy(ui, camera.zoom(), map_rect);
+            let policy = zoom_policy(ui, &camera, map_rect);
+            assert!(!policy.active);
             scroll_after_policy = ui.input(|input| input.smooth_scroll_delta.y);
             let (_rect, response) = ui.allocate_exact_size(map_rect.size(), egui::Sense::drag());
-            let _interaction = camera.interact(ui, &response, policy.gesture * policy.speed);
+            let interaction = camera.interact(ui, &response, policy.gesture * policy.speed);
+            assert!(!interaction.active && !interaction.changed);
         });
         output.drop_without_applying_deltas();
 
         let center_after = camera.center();
-        assert!(scroll_before_policy > 0.0);
+        assert!(scroll_before_policy.abs() > 0.0);
         assert!(scroll_after_policy.abs() < f32::EPSILON);
-        assert!((camera.zoom() - f64::from(super::MAX_VIEW_ZOOM)).abs() < f64::EPSILON);
+        assert!((camera.zoom() - bound).abs() < f64::EPSILON);
         assert!((center_after.x() - center_before.x()).abs() < f64::EPSILON);
         assert!((center_after.y() - center_before.y()).abs() < f64::EPSILON);
     }
@@ -1510,7 +1582,7 @@ mod tests {
         let mut attempts = 0;
         let mut delays = Vec::new();
         for _ in 0..11 {
-            let (failure, delay) = super::Failure::after(attempts);
+            let (failure, delay) = super::Failure::after(attempts, "fixture failure".to_owned());
             attempts = failure.attempts;
             delays.push(delay);
         }
@@ -1644,7 +1716,10 @@ mod tests {
                 result: Err("provider unavailable".to_owned()),
             },
         );
-        assert!(tiles.visible_background_unavailable());
+        assert_eq!(
+            tiles.visible_background_failure().as_deref(),
+            Some("Tile 4/8/6: provider unavailable")
+        );
         tiles.resolve(
             &egui::Context::default(),
             super::MapTileResponse {
@@ -1653,6 +1728,9 @@ mod tests {
             },
         );
 
-        assert!(tiles.visible_background_unavailable());
+        assert_eq!(
+            tiles.visible_background_failure().as_deref(),
+            Some("Tile 4/8/6: provider unavailable")
+        );
     }
 }

@@ -1,41 +1,75 @@
 //! Browser map worker transport and local fallback.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 use garmin_ui::activity;
 use wasm_bindgen::{JsCast as _, prelude::*};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
-const MAX_MAP_TILE_BYTES: usize = 2 * 1024 * 1024;
+mod admission;
+mod codec;
+use admission::Step as BrowserTileAdmissionStep;
+
 const MAP_WORKER_INITIALIZATION_TIMEOUT_MILLISECONDS: i32 = 10_000;
 const MAP_WORKER_TASK_TIMEOUT_MILLISECONDS: i32 = 20_000;
+
+/// Authoritative worker protocol version used to reject mixed browser assets.
+#[wasm_bindgen]
+pub fn browser_worker_protocol_version() -> u8 {
+    activity::map_runtime::BROWSER_WORKER_PROTOCOL_VERSION
+}
 
 /// Worker entry point for MVT parsing, styling, and geometry tessellation.
 #[wasm_bindgen]
 pub fn prepare_map_tile(
     zoom: u8,
     dark_mode: bool,
-    bytes: Vec<u8>,
-) -> Result<js_sys::Uint8Array, JsValue> {
+    bytes: &js_sys::Uint8Array,
+) -> Result<js_sys::Array, JsValue> {
+    activity::map_runtime::BrowserTileLimits::check_encoded_bytes(bytes.length() as usize)
+        .map_err(|error| js_error(&error))?;
+    let bytes = bytes.to_vec();
     let prepared = activity::map_runtime::prepare_tile_for_browser_worker(zoom, dark_mode, &bytes)
         .map_err(|error| js_error(&error))?;
-    Ok(js_sys::Uint8Array::from(prepared.as_slice()))
+    let parts = js_sys::Array::new();
+    for part in prepared.parts() {
+        parts.push(&js_sys::Uint8Array::from(part));
+    }
+    Ok(parts)
 }
 
 /// Worker entry point for map-label shaping, collision placement, and tessellation.
 #[wasm_bindgen]
-pub fn prepare_map_labels(bytes: Vec<u8>) -> Result<js_sys::Uint8Array, JsValue> {
-    let prepared = activity::map_runtime::prepare_labels_for_browser_worker(&bytes)
+pub fn prepare_map_labels(bytes: &[u8]) -> Result<js_sys::Uint8Array, JsValue> {
+    let prepared = activity::map_runtime::prepare_labels_for_browser_worker(bytes)
         .map_err(|error| js_error(&error))?;
+    check_data_result(
+        activity::map_runtime::BrowserWorkerTaskKind::Labels,
+        prepared.len(),
+    )?;
     Ok(js_sys::Uint8Array::from(prepared.as_slice()))
 }
 
 /// Worker entry point for activity-route projection and segmentation.
 #[wasm_bindgen]
-pub fn prepare_map_route(bytes: Vec<u8>) -> Result<js_sys::Uint8Array, JsValue> {
-    let prepared = activity::map_runtime::prepare_route_for_browser_worker(&bytes)
+pub fn prepare_map_route(bytes: &[u8]) -> Result<js_sys::Uint8Array, JsValue> {
+    let prepared = activity::map_runtime::prepare_route_for_browser_worker(bytes)
         .map_err(|error| js_error(&error))?;
+    check_data_result(
+        activity::map_runtime::BrowserWorkerTaskKind::Route,
+        prepared.len(),
+    )?;
     Ok(js_sys::Uint8Array::from(prepared.as_slice()))
+}
+
+fn check_data_result(
+    kind: activity::map_runtime::BrowserWorkerTaskKind,
+    bytes: usize,
+) -> Result<(), JsValue> {
+    if bytes > kind.result_byte_limit() {
+        return Err(js_error("prepared map data exceeded its transfer limit"));
+    }
+    Ok(())
 }
 
 fn fetch_map_tile(task: activity::map_runtime::TileTask) {
@@ -65,13 +99,15 @@ async fn fetch_map_tile_bytes(
     let buffer = JsFuture::from(response.array_buffer().map_err(map_fetch_error)?)
         .await
         .map_err(map_fetch_error)?;
-    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
-    if bytes.len() > MAX_MAP_TILE_BYTES {
-        return Err("map tile exceeded the 2 MiB browser limit".to_owned());
-    }
-    Ok(bytes)
+    let bytes = js_sys::Uint8Array::new(&buffer);
+    activity::map_runtime::BrowserTileLimits::check_encoded_bytes(bytes.length() as usize)?;
+    Ok(bytes.to_vec())
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "used as a Result::map_err callback"
+)]
 fn map_fetch_error(value: JsValue) -> String {
     value
         .as_string()
@@ -100,40 +136,59 @@ impl BrowserMapTask {
     }
 
     fn post(&self, worker: &web_sys::Worker, id: u32) -> Result<(), JsValue> {
-        let message = js_sys::Array::new();
-        message.push(&JsValue::from_f64(f64::from(
-            activity::map_runtime::BROWSER_WORKER_PROTOCOL_VERSION,
-        )));
-        message.push(&JsValue::from_str("task"));
-        message.push(&JsValue::from_f64(f64::from(id)));
-        message.push(&JsValue::from_str(self.kind().wire_name()));
+        let version = activity::map_runtime::BROWSER_WORKER_PROTOCOL_VERSION;
         match self {
             Self::Tile(task) => {
                 let request = task.coordinates();
-                message.push(&JsValue::from_f64(f64::from(request.zoom)));
-                message.push(&JsValue::from_f64(f64::from(request.x)));
-                message.push(&JsValue::from_f64(f64::from(request.y)));
-                message.push(&JsValue::from_bool(request.dark_mode()));
+                let message = codec::tile_task(
+                    version,
+                    id,
+                    request.zoom,
+                    request.x,
+                    request.y,
+                    request.dark_mode(),
+                )?;
                 worker.post_message(&message)
             }
             Self::Labels { request, .. } | Self::Route { request, .. } => {
                 let request = js_sys::Uint8Array::from(request.as_slice());
                 let buffer = request.buffer();
-                message.push(&buffer);
+                let message = codec::data_task(version, id, self.kind().wire_name(), &buffer)?;
                 worker.post_message_with_transfer(&message, &js_sys::Array::of1(&buffer))
             }
         }
     }
 
-    fn complete(self, result: Result<Vec<u8>, String>) {
+    fn complete_data(self, result: Result<Vec<u8>, String>) {
         match self {
-            Self::Tile(task) => task.complete_prepared(result),
+            Self::Tile(task) => task.complete_prepared(Err(
+                "browser map worker returned encoded data for a tile task".to_owned(),
+            )),
             Self::Labels { task, .. } => task.complete(result),
             Self::Route { task, .. } => task.complete(result),
         }
     }
 
+    fn complete_error(self, error: String) {
+        match self {
+            Self::Tile(task) => {
+                let coordinates = task.coordinates();
+                web_sys::console::warn_1(
+                    &format!(
+                        "Map tile {}/{}/{} failed: {error}",
+                        coordinates.zoom, coordinates.x, coordinates.y
+                    )
+                    .into(),
+                );
+                task.complete_prepared(Err(error));
+            }
+            Self::Labels { task, .. } => task.complete(Err(error)),
+            Self::Route { task, .. } => task.complete(Err(error)),
+        }
+    }
+
     fn fallback(self) {
+        crate::browser_timing::measure_duration("garmin.map.worker-fallback", 0.0);
         match self {
             Self::Tile(task) => fetch_map_tile(task),
             Self::Labels { task, request } => task.complete(
@@ -146,9 +201,192 @@ impl BrowserMapTask {
     }
 }
 
+struct BrowserTileBuffers {
+    vertices: js_sys::Uint8Array,
+    indices: js_sys::Uint8Array,
+    text_records: js_sys::Uint8Array,
+    strings: js_sys::Uint8Array,
+}
+
+impl BrowserTileBuffers {
+    fn lengths(&self) -> [usize; 4] {
+        [
+            self.vertices.length() as usize,
+            self.indices.length() as usize,
+            self.text_records.length() as usize,
+            self.strings.length() as usize,
+        ]
+    }
+
+    fn source(&self, section: activity::map_runtime::BrowserTileSection) -> &js_sys::Uint8Array {
+        match section {
+            activity::map_runtime::BrowserTileSection::Vertices => &self.vertices,
+            activity::map_runtime::BrowserTileSection::Indices => &self.indices,
+            activity::map_runtime::BrowserTileSection::TextRecords => &self.text_records,
+            activity::map_runtime::BrowserTileSection::Strings => &self.strings,
+        }
+    }
+}
+
+struct PendingBrowserTile {
+    task: activity::map_runtime::TileTask,
+    builder: activity::map_runtime::BrowserTilePacketBuilder,
+    sources: BrowserTileBuffers,
+    offsets: BrowserTileOffsets,
+    queued_at: f64,
+    first_step: bool,
+}
+
+#[derive(Default)]
+struct BrowserTileOffsets {
+    vertices: usize,
+    indices: usize,
+    text_records: usize,
+    strings: usize,
+}
+
+impl BrowserTileOffsets {
+    fn get_mut(&mut self, section: activity::map_runtime::BrowserTileSection) -> &mut usize {
+        match section {
+            activity::map_runtime::BrowserTileSection::Vertices => &mut self.vertices,
+            activity::map_runtime::BrowserTileSection::Indices => &mut self.indices,
+            activity::map_runtime::BrowserTileSection::TextRecords => &mut self.text_records,
+            activity::map_runtime::BrowserTileSection::Strings => &mut self.strings,
+        }
+    }
+}
+
+impl PendingBrowserTile {
+    fn new(
+        task: activity::map_runtime::TileTask,
+        sources: BrowserTileBuffers,
+    ) -> Result<Self, (activity::map_runtime::TileTask, String)> {
+        let [vertices, indices, text_records, strings] = sources.lengths();
+        let builder = match activity::map_runtime::BrowserTilePacketBuilder::new(
+            vertices,
+            indices,
+            text_records,
+            strings,
+        ) {
+            Ok(builder) => builder,
+            Err(error) => return Err((task, error)),
+        };
+        Ok(Self {
+            task,
+            builder,
+            sources,
+            offsets: BrowserTileOffsets::default(),
+            queued_at: crate::browser_timing::now(),
+            first_step: true,
+        })
+    }
+
+    fn is_complete(&self) -> bool {
+        self.builder.next_section().is_none()
+    }
+
+    fn advance(
+        &mut self,
+        maximum_bytes: usize,
+        scratch: &mut Vec<u8>,
+    ) -> Result<BrowserTileAdmissionStep, String> {
+        let started = crate::browser_timing::now();
+        if std::mem::take(&mut self.first_step) {
+            crate::browser_timing::measure_duration(
+                "garmin.map.tile-admission-wait",
+                started - self.queued_at,
+            );
+        }
+        let allocation = self.builder.allocate_next();
+        if !matches!(allocation, Ok(None)) {
+            crate::browser_timing::measure_duration(
+                "garmin.map.tile-allocation",
+                crate::browser_timing::now() - started,
+            );
+            allocation?;
+            return Ok(BrowserTileAdmissionStep::Allocated);
+        }
+        let Some((section, length)) = self.builder.next_chunk(maximum_bytes) else {
+            return Ok(BrowserTileAdmissionStep::Deferred);
+        };
+        let offset = self.offsets.get_mut(section);
+        let start = *offset;
+        let end = start
+            .checked_add(length)
+            .ok_or_else(|| "browser tile admission offset overflowed".to_owned())?;
+        let source = self.sources.source(section);
+        if end > source.length() as usize {
+            return Err("browser tile admission exceeded a transferred buffer".to_owned());
+        }
+        let chunk = source.subarray(
+            u32::try_from(start).unwrap_or(u32::MAX),
+            u32::try_from(end).unwrap_or(u32::MAX),
+        );
+        let text_started = (section == activity::map_runtime::BrowserTileSection::TextRecords)
+            .then(crate::browser_timing::now);
+        if text_started.is_some() {
+            scratch.resize(length, 0);
+            chunk.copy_to(scratch);
+            self.builder.append(section, scratch)?;
+        } else {
+            self.builder
+                .append_from(section, length, |destination| chunk.copy_to(destination))?;
+        }
+        *offset = end;
+        Ok(BrowserTileAdmissionStep::Copied {
+            bytes: length,
+            text_milliseconds: text_started
+                .map_or(0.0, |started| crate::browser_timing::now() - started),
+        })
+    }
+
+    fn finish(
+        self,
+    ) -> (
+        activity::map_runtime::TileTask,
+        Result<activity::map_runtime::BrowserTilePacket, String>,
+    ) {
+        let result = self.builder.finish();
+        if result.is_ok() {
+            crate::browser_timing::measure_duration(
+                "garmin.map.tile-admission-latency",
+                crate::browser_timing::now() - self.queued_at,
+            );
+        }
+        (self.task, result)
+    }
+}
+
+type BrowserTileAdmission = admission::Admission<PendingBrowserTile>;
+
+impl admission::Work for PendingBrowserTile {
+    fn retained_bytes(&self) -> usize {
+        self.builder.retained_bytes()
+    }
+    fn is_complete(&self) -> bool {
+        self.is_complete()
+    }
+    fn advance(
+        &mut self,
+        maximum: usize,
+        scratch: &mut Vec<u8>,
+    ) -> Result<admission::Step, String> {
+        self.advance(maximum, scratch)
+    }
+}
+
 struct BrowserMapWorkerShared {
     worker: web_sys::Worker,
     state: RefCell<activity::map_runtime::BrowserWorkerState<BrowserMapTask>>,
+    admission: RefCell<BrowserTileAdmission>,
+    data: RefCell<VecDeque<PendingBrowserData>>,
+}
+
+struct PendingBrowserData {
+    version: u8,
+    id: u32,
+    kind: activity::map_runtime::BrowserWorkerTaskKind,
+    bytes: js_sys::Uint8Array,
 }
 
 impl BrowserMapWorkerShared {
@@ -179,7 +417,7 @@ impl BrowserMapWorkerShared {
             .task(id)
             .map_or(Ok(()), |task| task.post(&self.worker, id));
         if let Err(error) = result {
-            self.transport_failure(format!(
+            self.transport_failure(&format!(
                 "could not dispatch browser map worker task: {}",
                 js_reason(&error)
             ));
@@ -196,20 +434,20 @@ impl BrowserMapWorkerShared {
 
     fn handle_message(self: &Rc<Self>, value: JsValue) {
         let Some(message) = worker_message(value) else {
-            self.transport_failure("browser map worker sent a malformed message".to_owned());
+            self.transport_failure("browser map worker sent a malformed message");
             return;
         };
         match message {
             BrowserWorkerMessage::Ready { version } => {
                 let transition = self.state.borrow_mut().ready(version);
                 self.apply_transition(
-                    "browser map worker protocol version did not match".to_owned(),
+                    "browser map worker protocol version did not match",
                     transition,
                 );
             }
             BrowserWorkerMessage::Fatal { version, reason } => {
                 let transition = self.state.borrow_mut().fatal(version);
-                self.apply_transition(reason, transition);
+                self.apply_transition(&reason, transition);
             }
             BrowserWorkerMessage::Result {
                 version,
@@ -217,15 +455,42 @@ impl BrowserMapWorkerShared {
                 kind,
                 result,
             } => {
+                if let Ok(BrowserWorkerResult::Data(bytes)) = &result
+                    && bytes.length() as usize <= kind.result_byte_limit()
+                {
+                    let receipt = self.state.borrow_mut().receive(version, id, kind);
+                    match receipt {
+                        activity::map_runtime::BrowserWorkerReceipt::Accepted => {}
+                        activity::map_runtime::BrowserWorkerReceipt::Stale => return,
+                        activity::map_runtime::BrowserWorkerReceipt::Fallback(tasks) => {
+                            self.enter_fallback(
+                                "browser map worker response violated the protocol",
+                                tasks,
+                            );
+                            return;
+                        }
+                    }
+                    let mut data = self.data.borrow_mut();
+                    data.retain(|pending| pending.kind != kind);
+                    data.push_back(PendingBrowserData {
+                        version,
+                        id,
+                        kind,
+                        bytes: bytes.clone(),
+                    });
+                    drop(data);
+                    self.schedule_admission();
+                    return;
+                }
                 let completion = self.state.borrow_mut().complete(version, id, kind);
                 match completion {
                     activity::map_runtime::BrowserWorkerCompletion::Publish(task) => {
-                        task.complete(result);
+                        self.publish_worker_result(task, result);
                     }
                     activity::map_runtime::BrowserWorkerCompletion::Stale => {}
                     activity::map_runtime::BrowserWorkerCompletion::Fallback(tasks) => {
                         self.enter_fallback(
-                            "browser map worker response violated the protocol".to_owned(),
+                            "browser map worker response violated the protocol",
                             tasks,
                         );
                     }
@@ -234,30 +499,133 @@ impl BrowserMapWorkerShared {
         }
     }
 
+    fn publish_worker_result(
+        self: &Rc<Self>,
+        task: BrowserMapTask,
+        result: Result<BrowserWorkerResult, String>,
+    ) {
+        match (task, result) {
+            (BrowserMapTask::Tile(task), Ok(BrowserWorkerResult::Tile(buffers))) => {
+                let pending = match PendingBrowserTile::new(task, buffers) {
+                    Ok(pending) => pending,
+                    Err((task, error)) => {
+                        BrowserMapTask::Tile(task).complete_error(error);
+                        return;
+                    }
+                };
+                if let Err(pending) = self.admission.borrow_mut().enqueue(pending) {
+                    let task = pending.task;
+                    let error =
+                        "browser tile admission queue exceeded its retention limit".to_owned();
+                    BrowserMapTask::Tile(task).complete_error(error);
+                    return;
+                }
+                self.schedule_admission();
+            }
+            (
+                task @ (BrowserMapTask::Labels { .. } | BrowserMapTask::Route { .. }),
+                Ok(BrowserWorkerResult::Data(_)),
+            ) => {
+                // Valid data responses are admitted on the animation clock above.
+                task.complete_error(
+                    "browser map worker data exceeded its transfer limit".to_owned(),
+                );
+            }
+            (task, Err(error)) => task.complete_error(error),
+            (task, Ok(_)) => {
+                task.fallback();
+                self.transport_failure("browser map worker returned the wrong payload for a task");
+            }
+        }
+    }
+
+    fn schedule_admission(self: &Rc<Self>) {
+        if !self
+            .admission
+            .borrow_mut()
+            .schedule(!self.data.borrow().is_empty())
+        {
+            return;
+        }
+        let shared = Rc::downgrade(self);
+        spawn_local(async move {
+            next_animation_frame().await;
+            if let Some(shared) = shared.upgrade() {
+                shared.advance_admission();
+            }
+        });
+    }
+
+    fn advance_admission(self: &Rc<Self>) {
+        let started = crate::browser_timing::now();
+        let pending = self.data.borrow_mut().pop_front();
+        if let Some(pending) = pending {
+            let completion =
+                self.state
+                    .borrow_mut()
+                    .complete(pending.version, pending.id, pending.kind);
+            if let activity::map_runtime::BrowserWorkerCompletion::Publish(task) = completion {
+                task.complete_data(Ok(pending.bytes.to_vec()));
+                crate::browser_timing::measure_duration(
+                    "garmin.map.data-admission",
+                    crate::browser_timing::now() - started,
+                );
+            }
+        }
+        let tile_started = crate::browser_timing::now();
+        let frame = self
+            .admission
+            .borrow_mut()
+            .advance_frame(started, crate::browser_timing::now);
+        if frame.text_milliseconds > 0.0 {
+            crate::browser_timing::measure_duration(
+                "garmin.map.tile-text-reconstruction",
+                frame.text_milliseconds,
+            );
+        }
+        let tile_work = frame.did_work;
+        for (pending, result) in frame.completed {
+            match result {
+                Ok(()) => {
+                    let (task, result) = pending.finish();
+                    match result {
+                        Ok(packet) => task.complete_prepared(Ok(packet)),
+                        Err(error) => BrowserMapTask::Tile(task).complete_error(error),
+                    }
+                }
+                Err(error) => BrowserMapTask::Tile(pending.task).complete_error(error),
+            }
+        }
+        if tile_work {
+            crate::browser_timing::measure_duration(
+                "garmin.map.tile-admission",
+                crate::browser_timing::now() - tile_started,
+            );
+        }
+        self.schedule_admission();
+    }
+
     fn initialization_timeout(self: &Rc<Self>) {
         let transition = self.state.borrow_mut().initialization_timeout();
-        self.apply_transition(
-            "browser map worker initialization timed out".to_owned(),
-            transition,
-        );
+        self.apply_transition("browser map worker initialization timed out", transition);
     }
 
     fn task_timeout(self: &Rc<Self>, id: u32) {
         let transition = self.state.borrow_mut().task_timeout(id);
         self.apply_transition(
-            format!("browser map worker task {id} timed out"),
+            &format!("browser map worker task {id} timed out"),
             transition,
         );
     }
 
-    fn transport_failure(self: &Rc<Self>, reason: String) {
+    fn transport_failure(self: &Rc<Self>, reason: &str) {
         let transition = self.state.borrow_mut().transport_failure();
         self.apply_transition(reason, transition);
     }
 
     fn apply_transition(
         self: &Rc<Self>,
-        reason: String,
+        reason: &str,
         transition: activity::map_runtime::BrowserWorkerTransition<BrowserMapTask>,
     ) {
         match transition {
@@ -273,9 +641,10 @@ impl BrowserMapWorkerShared {
         }
     }
 
-    fn enter_fallback(&self, reason: String, tasks: Vec<BrowserMapTask>) {
+    fn enter_fallback(&self, reason: &str, tasks: Vec<BrowserMapTask>) {
         tracing::warn!(%reason, "browser map worker failed; using local fallback");
         self.worker.terminate();
+        self.data.borrow_mut().clear();
         for task in tasks {
             task.fallback();
         }
@@ -294,63 +663,56 @@ enum BrowserWorkerMessage {
         version: u8,
         id: u32,
         kind: activity::map_runtime::BrowserWorkerTaskKind,
-        result: Result<Vec<u8>, String>,
+        result: Result<BrowserWorkerResult, String>,
     },
 }
 
+enum BrowserWorkerResult {
+    Tile(BrowserTileBuffers),
+    Data(js_sys::Uint8Array),
+}
+
 fn worker_message(value: JsValue) -> Option<BrowserWorkerMessage> {
-    if !js_sys::Array::is_array(&value) {
-        return None;
-    }
-    let message = js_sys::Array::from(&value);
-    let version = wire_u8(&message.get(0))?;
-    match message.get(1).as_string()?.as_str() {
-        "ready" if message.length() == 2 => Some(BrowserWorkerMessage::Ready { version }),
-        "fatal" if message.length() == 3 => Some(BrowserWorkerMessage::Fatal {
+    let message = codec::decode(value).ok()?;
+    let version = message.version();
+    match message.message_type().as_str() {
+        "ready" => Some(BrowserWorkerMessage::Ready { version }),
+        "fatal" => Some(BrowserWorkerMessage::Fatal {
             version,
-            reason: message.get(2).as_string()?,
+            reason: message.reason(),
         }),
-        "result" if message.length() == 5 => {
-            let buffer = message.get(4).dyn_into::<js_sys::ArrayBuffer>().ok()?;
-            worker_result_message(
+        "result" | "task-error" => {
+            let kind =
+                activity::map_runtime::BrowserWorkerTaskKind::from_wire_name(&message.kind())?;
+            let result = if message.message_type() == "task-error" {
+                Err(message.reason())
+            } else {
+                let buffers = message.buffers();
+                let buffer = |index| js_sys::Uint8Array::new(&buffers.get(index));
+                Ok(match kind {
+                    activity::map_runtime::BrowserWorkerTaskKind::Tile => {
+                        BrowserWorkerResult::Tile(BrowserTileBuffers {
+                            vertices: buffer(0),
+                            indices: buffer(1),
+                            text_records: buffer(2),
+                            strings: buffer(3),
+                        })
+                    }
+                    _ => BrowserWorkerResult::Data(buffer(0)),
+                })
+            };
+            Some(BrowserWorkerMessage::Result {
                 version,
-                &message,
-                Ok(js_sys::Uint8Array::new(&buffer).to_vec()),
-            )
-        }
-        "task-error" if message.length() == 5 => {
-            worker_result_message(version, &message, Err(message.get(4).as_string()?))
+                id: message.id(),
+                kind,
+                result,
+            })
         }
         _ => None,
     }
 }
 
-fn worker_result_message(
-    version: u8,
-    message: &js_sys::Array,
-    result: Result<Vec<u8>, String>,
-) -> Option<BrowserWorkerMessage> {
-    Some(BrowserWorkerMessage::Result {
-        version,
-        id: wire_u32(&message.get(2))?,
-        kind: activity::map_runtime::BrowserWorkerTaskKind::from_wire_name(
-            &message.get(3).as_string()?,
-        )?,
-        result,
-    })
-}
-
-fn wire_u8(value: &JsValue) -> Option<u8> {
-    wire_u32(value).and_then(|value| u8::try_from(value).ok())
-}
-
-fn wire_u32(value: &JsValue) -> Option<u32> {
-    let value = value.as_f64()?;
-    (value.is_finite() && value.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(&value))
-        .then(|| value as u32)
-}
-
-struct BrowserMapWorker {
+pub(super) struct BrowserMapWorker {
     shared: Rc<BrowserMapWorkerShared>,
     _on_message: Closure<dyn FnMut(web_sys::MessageEvent)>,
     _on_error: Closure<dyn FnMut(web_sys::ErrorEvent)>,
@@ -358,20 +720,29 @@ struct BrowserMapWorker {
 
 impl BrowserMapWorker {
     fn new() -> Result<Self, JsValue> {
-        let module_url = web_sys::window()
+        let document = web_sys::window()
             .and_then(|window| window.document())
-            .and_then(|document| {
-                document
-                    .query_selector("link[rel=\"modulepreload\"]")
-                    .ok()
-                    .flatten()
-            })
-            .and_then(|link| link.get_attribute("href"))
-            .ok_or_else(|| js_error("the browser application module URL is unavailable"))?;
-        let worker = web_sys::Worker::new("map-worker.js")?;
+            .ok_or_else(|| js_error("the browser document is unavailable"))?;
+        let asset_url = |selector: &str| -> Result<String, JsValue> {
+            document
+                .query_selector(selector)?
+                .and_then(|link| link.dyn_into::<web_sys::HtmlLinkElement>().ok())
+                .map(|link| link.href())
+                .filter(|href| !href.is_empty())
+                .ok_or_else(|| {
+                    js_error(&format!("browser application asset is missing: {selector}"))
+                })
+        };
+        let module_url = asset_url("link[rel=\"modulepreload\"]")?;
+        let wasm_url = asset_url("link[rel=\"preload\"][as=\"fetch\"][type=\"application/wasm\"]")?;
+        let options = web_sys::WorkerOptions::new();
+        options.set_type(web_sys::WorkerType::Module);
+        let worker = web_sys::Worker::new_with_options("map-worker.js", &options)?;
         let shared = Rc::new(BrowserMapWorkerShared {
             worker,
             state: RefCell::new(activity::map_runtime::BrowserWorkerState::default()),
+            admission: RefCell::new(BrowserTileAdmission::default()),
+            data: RefCell::new(VecDeque::new()),
         });
 
         let message_shared = Rc::downgrade(&shared);
@@ -387,19 +758,18 @@ impl BrowserMapWorker {
         let error_shared = Rc::downgrade(&shared);
         let on_error = Closure::wrap(Box::new(move |event: web_sys::ErrorEvent| {
             if let Some(shared) = error_shared.upgrade() {
-                shared.transport_failure(event.message());
+                shared.transport_failure(&event.message());
             }
         }) as Box<dyn FnMut(_)>);
         shared
             .worker
             .set_onerror(Some(on_error.as_ref().unchecked_ref()));
 
-        let initialization = js_sys::Array::new();
-        initialization.push(&JsValue::from_f64(f64::from(
+        let initialization = codec::init_message(
             activity::map_runtime::BROWSER_WORKER_PROTOCOL_VERSION,
-        )));
-        initialization.push(&JsValue::from_str("init"));
-        initialization.push(&JsValue::from_str(&module_url));
+            &module_url,
+            &wasm_url,
+        )?;
         shared.worker.post_message(&initialization)?;
 
         let timeout_shared = Rc::downgrade(&shared);
@@ -493,6 +863,20 @@ async fn wait_milliseconds(milliseconds: i32) {
         let scheduled = web_sys::window().is_some_and(|window| {
             window
                 .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds)
+                .is_ok()
+        });
+        if !scheduled {
+            let _ignored = resolve.call0(&JsValue::UNDEFINED);
+        }
+    });
+    let _ignored = JsFuture::from(promise).await;
+}
+
+async fn next_animation_frame() {
+    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+        let scheduled = web_sys::window().is_some_and(|window| {
+            window
+                .request_animation_frame(resolve.unchecked_ref())
                 .is_ok()
         });
         if !scheduled {

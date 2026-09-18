@@ -8,4 +8,4 @@ mod implementation;
 mod implementation;
 
 pub use implementation::Backend;
-pub(super) use implementation::{ResponseQueue, Shared};
+pub(super) use implementation::{ResponseQueue, SceneSlot, Shared, SurfaceRuntime};
