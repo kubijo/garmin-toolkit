@@ -708,6 +708,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "buffa"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a92f2f5df67a9d5ccfc65237bfc954c56328aee40a04a9b92381ecba370be246"
+dependencies = [
+ "bytes",
+ "foldhash 0.1.5",
+ "hashbrown 0.15.5",
+ "once_cell",
+ "rustversion",
+ "serde",
+ "serde_json",
+ "smoothutf8",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1957,6 +1974,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fast-mvt"
+version = "0.6.2"
+dependencies = [
+ "buffa",
+ "geo-types",
+ "thiserror 2.0.20",
+ "usize_cast",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2391,8 +2418,8 @@ dependencies = [
 
 [[package]]
 name = "gallery"
-version = "0.11.0"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.11.0#6d2327ecf3b25127338c9cb3bebf2ba219429375"
+version = "0.12.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.12.0#172877332372a05b78d5339a6bd94c77eb60534d"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2434,8 +2461,8 @@ dependencies = [
 
 [[package]]
 name = "gallery-build"
-version = "0.11.0"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.11.0#6d2327ecf3b25127338c9cb3bebf2ba219429375"
+version = "0.12.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.12.0#172877332372a05b78d5339a6bd94c77eb60534d"
 dependencies = [
  "camino",
  "glob",
@@ -2445,8 +2472,8 @@ dependencies = [
 
 [[package]]
 name = "gallery-macros"
-version = "0.11.0"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.11.0#6d2327ecf3b25127338c9cb3bebf2ba219429375"
+version = "0.12.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.12.0#172877332372a05b78d5339a6bd94c77eb60534d"
 dependencies = [
  "heck",
  "prettyplease",
@@ -2617,6 +2644,7 @@ name = "garmin-ui"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
+ "buffa",
  "byte-unit",
  "bytemuck",
  "camino",
@@ -2626,17 +2654,23 @@ dependencies = [
  "egui_extras",
  "egui_ltreeview",
  "egui_plot",
+ "fast-mvt",
  "garmin-brand",
  "garmin-color",
  "garmin-i18n",
  "garmin-model",
  "garmin-service-api",
+ "geo",
+ "geo-types",
+ "lyon_path",
  "phosphor-svgs",
  "postcard",
  "serde",
+ "serde_json",
  "tracing",
  "usvg 0.45.1",
  "walkers",
+ "web-time",
  "wgpu 30.0.0",
 ]
 
@@ -7005,6 +7039,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "smoothutf8"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b4ec95892483d6d94284caccfddb9b77111a4dcac33ed25d624248def0fa5f1"
+dependencies = [
+ "simdutf8",
+]
+
+[[package]]
 name = "socket2"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7799,6 +7842,12 @@ dependencies = [
  "serde",
  "serde_derive",
 ]
+
+[[package]]
+name = "usize_cast"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "810f3a98a85147e3ad2a1331aa6dac66490e802d65fa0ab283c383058e3f9751"
 
 [[package]]
 name = "usvg"

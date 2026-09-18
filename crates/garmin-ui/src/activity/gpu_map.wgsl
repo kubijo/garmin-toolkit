@@ -1,8 +1,8 @@
 struct CameraUniform {
     // xy: high center, zw: low center in normalized Web Mercator coordinates.
     center_high_low: vec4<f32>,
-    // xy: viewport size in points, z: pixels per normalized coordinate.
-    viewport_world_size_padding: vec4<f32>,
+    // xy: viewport size, z: pixels per world, w: first visible horizontal world.
+    viewport_world_size_first_world: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -29,13 +29,13 @@ struct VertexOutput {
 const ROUTE_ANTIALIAS_MARGIN_POINTS: f32 = 2.0;
 
 struct RouteSegment {
-    start: vec2<f32>,
-    end: vec2<f32>,
-    speed: vec2<f32>,
-    sample_indices: vec2<f32>,
-    start_join: vec2<f32>,
-    end_join: vec2<f32>,
-    caps: vec2<f32>,
+    @location(0) start: vec2<f32>,
+    @location(1) end: vec2<f32>,
+    @location(2) speed: vec2<f32>,
+    @location(3) sample_indices: vec2<f32>,
+    @location(4) start_join: vec2<f32>,
+    @location(5) end_join: vec2<f32>,
+    @location(6) caps: vec2<f32>,
 };
 
 struct RouteSourceUniform {
@@ -44,9 +44,6 @@ struct RouteSourceUniform {
 };
 
 @group(1) @binding(0)
-var<storage, read> route_segments: array<RouteSegment>;
-
-@group(1) @binding(1)
 var<uniform> route_source: RouteSourceUniform;
 
 struct RouteStyleUniform {
@@ -62,18 +59,22 @@ struct RouteStyleUniform {
 var<uniform> route_style: RouteStyleUniform;
 
 fn viewport() -> vec2<f32> {
-    return camera.viewport_world_size_padding.xy;
+    return camera.viewport_world_size_first_world.xy;
 }
 
 fn world_size() -> f32 {
-    return camera.viewport_world_size_padding.z;
+    return camera.viewport_world_size_first_world.z;
+}
+
+fn origin_delta(origin_high_low: vec4<f32>) -> vec2<f32> {
+    // Subtract the split values before adding. Recombining each f64 value first
+    // discards the low component at street-level zooms and visibly deforms routes.
+    return (origin_high_low.xy - camera.center_high_low.xy)
+        + (origin_high_low.zw - camera.center_high_low.zw);
 }
 
 fn wrapped_delta(origin_high_low: vec4<f32>) -> vec2<f32> {
-    // Subtract the split values before adding. Recombining each f64 value first
-    // discards the low component at street-level zooms and visibly deforms routes.
-    var delta = (origin_high_low.xy - camera.center_high_low.xy)
-        + (origin_high_low.zw - camera.center_high_low.zw);
+    var delta = origin_delta(origin_high_low);
     delta.x = delta.x - round(delta.x);
     return delta;
 }
@@ -90,11 +91,14 @@ fn clip_position(point: vec2<f32>) -> vec4<f32> {
 
 @vertex
 fn vertex_main(
+    @builtin(instance_index) instance_index: u32,
     @location(0) position: vec2<f32>,
     @location(1) color: vec4<f32>,
 ) -> VertexOutput {
     let local = position * tile.normalized_point_scale_padding.x;
-    let point = (wrapped_delta(tile.origin_high_low) + local) * world_size() + viewport() * 0.5;
+    var delta = origin_delta(tile.origin_high_low);
+    delta.x += camera.viewport_world_size_first_world.w + f32(instance_index);
+    let point = (delta + local) * world_size() + viewport() * 0.5;
 
     var output: VertexOutput;
     output.position = clip_position(point);
@@ -119,9 +123,8 @@ fn route_speed_color(speed: f32) -> vec3<f32> {
 @vertex
 fn route_vertex(
     @builtin(vertex_index) vertex_index: u32,
-    @builtin(instance_index) instance_index: u32,
+    segment: RouteSegment,
 ) -> VertexOutput {
-    let segment = route_segments[instance_index];
     let corners = array<vec2<f32>, 6>(
         vec2<f32>(0.0, -1.0),
         vec2<f32>(1.0, -1.0),

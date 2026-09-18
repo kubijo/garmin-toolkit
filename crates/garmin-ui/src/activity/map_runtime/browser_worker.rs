@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 /// Wire-protocol version shared by the browser map worker and its host.
-pub const BROWSER_WORKER_PROTOCOL_VERSION: u8 = 1;
+pub const BROWSER_WORKER_PROTOCOL_VERSION: u8 = 2;
 
 /// Kind of work accepted by the browser map worker.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -15,6 +15,16 @@ pub enum BrowserWorkerTaskKind {
 }
 
 impl BrowserWorkerTaskKind {
+    /// Maximum serialized completion size, checked before copying into WASM memory.
+    #[must_use]
+    pub const fn result_byte_limit(self) -> usize {
+        match self {
+            Self::Tile => super::BrowserTileLimits::upload_byte_limit(),
+            Self::Labels => 16 * 1024 * 1024,
+            Self::Route => 32 * 1024 * 1024,
+        }
+    }
+
     /// Stable task name used by the JavaScript wire protocol.
     #[must_use]
     pub const fn wire_name(self) -> &'static str {
@@ -80,6 +90,23 @@ pub enum BrowserWorkerTransition<T> {
 struct PendingTask<T> {
     kind: BrowserWorkerTaskKind,
     payload: T,
+    phase: TaskPhase,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TaskPhase {
+    AwaitingResponse,
+    AwaitingAdmission,
+}
+
+/// Receipt validates transport identity without publishing deferred data.
+pub enum BrowserWorkerReceipt<T> {
+    /// Retain the response for admission; its transport deadline is retired.
+    Accepted,
+    /// The request was replaced or its response was already received.
+    Stale,
+    /// Invalid transport identity transfers live tasks to local fallback.
+    Fallback(Vec<T>),
 }
 
 /// Payload-owning request ledger and lifecycle for the dedicated browser map worker.
@@ -120,7 +147,14 @@ impl<T> BrowserWorkerState<T> {
             self.pending.retain(|_id, task| task.kind != kind);
         }
         let id = self.next_request_id();
-        self.pending.insert(id, PendingTask { kind, payload });
+        self.pending.insert(
+            id,
+            PendingTask {
+                kind,
+                payload,
+                phase: TaskPhase::AwaitingResponse,
+            },
+        );
         match self.phase {
             BrowserWorkerPhase::Initializing => BrowserWorkerRegistration::Queued(id),
             BrowserWorkerPhase::Active => BrowserWorkerRegistration::Dispatch(id),
@@ -175,6 +209,31 @@ impl<T> BrowserWorkerState<T> {
         }
     }
 
+    /// Retire a response deadline while keeping the payload cancellable until admission.
+    pub fn receive(
+        &mut self,
+        version: u8,
+        id: u32,
+        kind: BrowserWorkerTaskKind,
+    ) -> BrowserWorkerReceipt<T> {
+        if self.phase == BrowserWorkerPhase::Fallback {
+            return BrowserWorkerReceipt::Stale;
+        }
+        if version != BROWSER_WORKER_PROTOCOL_VERSION {
+            return BrowserWorkerReceipt::Fallback(self.drain_to_fallback());
+        }
+        match self.pending.get_mut(&id) {
+            Some(task) if task.kind != kind => {
+                BrowserWorkerReceipt::Fallback(self.drain_to_fallback())
+            }
+            Some(task) if task.phase == TaskPhase::AwaitingResponse => {
+                task.phase = TaskPhase::AwaitingAdmission;
+                BrowserWorkerReceipt::Accepted
+            }
+            _ => BrowserWorkerReceipt::Stale,
+        }
+    }
+
     /// Enter permanent fallback after an explicit fatal worker message.
     pub fn fatal(&mut self, _version: u8) -> BrowserWorkerTransition<T> {
         self.enter_fallback()
@@ -191,7 +250,11 @@ impl<T> BrowserWorkerState<T> {
 
     /// Enter permanent fallback when a live task stops responding.
     pub fn task_timeout(&mut self, id: u32) -> BrowserWorkerTransition<T> {
-        if self.pending.contains_key(&id) {
+        if self
+            .pending
+            .get(&id)
+            .is_some_and(|task| task.phase == TaskPhase::AwaitingResponse)
+        {
             self.enter_fallback()
         } else {
             BrowserWorkerTransition::None
@@ -231,6 +294,73 @@ impl<T> BrowserWorkerState<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn received_response_retires_timeout_but_remains_replaceable() {
+        for kind in [BrowserWorkerTaskKind::Route, BrowserWorkerTaskKind::Labels] {
+            let mut state = BrowserWorkerState::default();
+            state.ready(BROWSER_WORKER_PROTOCOL_VERSION);
+            let BrowserWorkerRegistration::Dispatch(id) = state.register(kind, "old", true) else {
+                panic!("active")
+            };
+            assert!(matches!(
+                state.receive(BROWSER_WORKER_PROTOCOL_VERSION, id, kind),
+                BrowserWorkerReceipt::Accepted
+            ));
+            assert!(matches!(
+                state.receive(BROWSER_WORKER_PROTOCOL_VERSION, id, kind),
+                BrowserWorkerReceipt::Stale
+            ));
+            assert_eq!(state.task_timeout(id), BrowserWorkerTransition::None);
+            assert_eq!(
+                state.complete(BROWSER_WORKER_PROTOCOL_VERSION, id, kind),
+                BrowserWorkerCompletion::Publish("old")
+            );
+
+            let BrowserWorkerRegistration::Dispatch(id) = state.register(kind, "received", true)
+            else {
+                panic!("active")
+            };
+            assert!(matches!(
+                state.receive(BROWSER_WORKER_PROTOCOL_VERSION, id, kind),
+                BrowserWorkerReceipt::Accepted
+            ));
+            let BrowserWorkerRegistration::Dispatch(new_id) =
+                state.register(kind, "replacement", true)
+            else {
+                panic!("active")
+            };
+            assert_eq!(state.task_timeout(id), BrowserWorkerTransition::None);
+            assert_eq!(
+                state.complete(BROWSER_WORKER_PROTOCOL_VERSION, id, kind),
+                BrowserWorkerCompletion::Stale
+            );
+            assert_eq!(
+                state.task_timeout(new_id),
+                BrowserWorkerTransition::Fallback(vec!["replacement"])
+            );
+        }
+    }
+
+    #[test]
+    fn deferred_receipt_validates_version_and_kind_before_queueing() {
+        for (version, kind) in [
+            (0, BrowserWorkerTaskKind::Labels),
+            (BROWSER_WORKER_PROTOCOL_VERSION, BrowserWorkerTaskKind::Tile),
+        ] {
+            let mut state = BrowserWorkerState::default();
+            state.ready(BROWSER_WORKER_PROTOCOL_VERSION);
+            let BrowserWorkerRegistration::Dispatch(id) =
+                state.register(BrowserWorkerTaskKind::Labels, "labels", true)
+            else {
+                panic!("active")
+            };
+            let BrowserWorkerReceipt::Fallback(tasks) = state.receive(version, id, kind) else {
+                panic!("invalid identity accepted")
+            };
+            assert_eq!(tasks, vec!["labels"]);
+        }
+    }
 
     #[test]
     fn ready_dispatches_queued_tasks_only_for_the_matching_version() {

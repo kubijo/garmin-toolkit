@@ -120,6 +120,7 @@ let
               pkgs
               pythonToolsEnv
               toolchain
+              wasmToolchain
               ;
             craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
             galleryRuntimeLibraries = galleryTarget.runtimeLibraries;

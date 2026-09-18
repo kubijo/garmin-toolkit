@@ -41,6 +41,7 @@ icon_catalog! {
         POWER => phosphor_svgs::style::regular::POWER,
         ROUTE => phosphor_svgs::style::regular::MAP_PIN_LINE,
         SIGN_OUT => phosphor_svgs::style::regular::SIGN_OUT,
+        STOP => phosphor_svgs::style::regular::STOP,
         SUN => phosphor_svgs::style::regular::SUN,
         TARGET => phosphor_svgs::style::regular::TARGET,
         TEXT_INDENT => phosphor_svgs::style::regular::TEXT_INDENT,

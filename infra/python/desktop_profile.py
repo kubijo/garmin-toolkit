@@ -228,7 +228,7 @@ COUNTERS = (
     ),
     CounterSpec('Camera active', 'Map interaction', 'camera_active', 'yellow', True, 'map_frame'),
     CounterSpec('Map UI', 'Map frame timing (ms)', 'ui_milliseconds', 'teal', False, 'map_frame'),
-    CounterSpec('Scene acquisition', 'Map frame timing (ms)', 'scene_milliseconds', 'green', False, 'map_frame'),
+    CounterSpec('Frame assembly', 'Map frame timing (ms)', 'scene_milliseconds', 'green', False, 'map_frame'),
     CounterSpec('Route query', 'Route query (µs)', 'route_query_microseconds', 'purple', False, 'map_frame'),
     CounterSpec('Label layout', 'Map frame timing (ms)', 'label_milliseconds', 'orange', False, 'map_frame'),
     CounterSpec('Label backlog', 'Map work', 'label_backlog', 'yellow', True, 'map_frame'),

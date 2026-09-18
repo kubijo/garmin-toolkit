@@ -1,58 +1,233 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use web_time::Instant;
 
 use super::super::{
-    BrowserLabelTask, BrowserRouteTask, GpuTile, LabelResult, LabelTask, PreparedGpuTile,
-    RouteResult, RouteTask, UploadContext, UploadStats, Vertex, VisibleTile,
+    BrowserLabelTask, BrowserRouteTask, CpuTileMesh, GpuTile, LabelResult, LabelTask,
+    PreparedGpuTile, RouteResult, RouteTask, UploadContext, UploadStats, VisibleTile, tile_binding,
 };
 use crate::activity::map_runtime::Backend;
 
-const BROWSER_UPLOAD_BUDGET_BYTES: usize = 8 * 1024 * 1024;
+#[cfg(test)]
+use super::super::Vertex;
+
+const BROWSER_UPLOAD_CHUNK_BYTES: usize = 256 * 1024;
+const BROWSER_UPLOAD_FRAME_BYTES: usize = 4 * 1024 * 1024;
+const BROWSER_UPLOAD_FRAME_TIME: Duration = Duration::from_micros(1_500);
+const RETAINED_UPLOAD_LIMIT: usize = 32;
+const RETAINED_UPLOAD_BYTES: usize = 16 * 1024 * 1024;
+
+pub(in crate::activity) struct ResourceCreationGate;
+
+impl ResourceCreationGate {
+    pub(in crate::activity) const fn new() -> Self {
+        Self
+    }
+
+    pub(in crate::activity) const fn enter(&self) -> &Self {
+        self
+    }
+}
+
+struct GpuTileUpload {
+    source: Arc<CpuTileMesh>,
+    vertices: wgpu::Buffer,
+    indices: wgpu::Buffer,
+    uniform: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    cursor: UploadCursor,
+}
+
+impl GpuTileUpload {
+    fn allocate_vertices(context: &UploadContext, source: &CpuTileMesh) -> wgpu::Buffer {
+        context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("activity map tile vertices"),
+            size: u64::try_from(vertex_bytes(source)).unwrap_or(u64::MAX),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
+
+    fn allocate_indices(context: &UploadContext, source: &CpuTileMesh) -> wgpu::Buffer {
+        context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("activity map tile indices"),
+            size: u64::try_from(index_bytes(source)).unwrap_or(u64::MAX),
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
+
+    fn finish_allocation(
+        context: &UploadContext,
+        id: walkers::TileId,
+        source: Arc<CpuTileMesh>,
+        vertices: wgpu::Buffer,
+        indices: wgpu::Buffer,
+    ) -> Self {
+        let (uniform, bind_group) = tile_binding(context, id);
+        let cursor = UploadCursor::new(vertex_bytes(&source), index_bytes(&source));
+        Self {
+            source,
+            vertices,
+            indices,
+            uniform,
+            bind_group,
+            cursor,
+        }
+    }
+
+    fn remaining_bytes(&self) -> usize {
+        self.cursor.remaining_bytes()
+    }
+
+    fn write_next(&mut self, queue: &wgpu::Queue, maximum_bytes: usize) -> usize {
+        let Some(chunk) = self.cursor.take(maximum_bytes) else {
+            return 0;
+        };
+        let (buffer, source) = match chunk.buffer {
+            TileBuffer::Vertices => (&self.vertices, self.source.vertices.as_bytes()),
+            TileBuffer::Indices => (&self.indices, self.source.indices.as_bytes()),
+        };
+        debug_assert_eq!(chunk.offset % wgpu::COPY_BUFFER_ALIGNMENT as usize, 0);
+        debug_assert_eq!(chunk.length % wgpu::COPY_BUFFER_ALIGNMENT as usize, 0);
+        queue.write_buffer(
+            buffer,
+            u64::try_from(chunk.offset).unwrap_or(u64::MAX),
+            &source[chunk.offset..chunk.offset + chunk.length],
+        );
+        chunk.length
+    }
+
+    fn finish(self) -> GpuTile {
+        GpuTile {
+            index_count: u32::try_from(self.source.indices.len()).unwrap_or(u32::MAX),
+            _source: self.source,
+            vertices: self.vertices,
+            indices: self.indices,
+            _uniform: self.uniform,
+            bind_group: self.bind_group,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TileBuffer {
+    Vertices,
+    Indices,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct UploadChunk {
+    buffer: TileBuffer,
+    offset: usize,
+    length: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct UploadCursor {
+    vertex_bytes: usize,
+    index_bytes: usize,
+    vertex_offset: usize,
+    index_offset: usize,
+}
+
+impl UploadCursor {
+    const fn new(vertex_bytes: usize, index_bytes: usize) -> Self {
+        Self {
+            vertex_bytes,
+            index_bytes,
+            vertex_offset: 0,
+            index_offset: 0,
+        }
+    }
+
+    fn remaining_bytes(self) -> usize {
+        self.vertex_bytes
+            .saturating_sub(self.vertex_offset)
+            .saturating_add(self.index_bytes.saturating_sub(self.index_offset))
+    }
+
+    fn take(&mut self, maximum_bytes: usize) -> Option<UploadChunk> {
+        if self.vertex_offset < self.vertex_bytes {
+            let length = self
+                .vertex_bytes
+                .saturating_sub(self.vertex_offset)
+                .min(maximum_bytes);
+            let chunk = UploadChunk {
+                buffer: TileBuffer::Vertices,
+                offset: self.vertex_offset,
+                length,
+            };
+            self.vertex_offset = self.vertex_offset.saturating_add(length);
+            return (length > 0).then_some(chunk);
+        }
+        let length = self
+            .index_bytes
+            .saturating_sub(self.index_offset)
+            .min(maximum_bytes);
+        let chunk = UploadChunk {
+            buffer: TileBuffer::Indices,
+            offset: self.index_offset,
+            length,
+        };
+        self.index_offset = self.index_offset.saturating_add(length);
+        (length > 0).then_some(chunk)
+    }
+}
+
+fn upload_bytes(source: &CpuTileMesh) -> usize {
+    vertex_bytes(source).saturating_add(index_bytes(source))
+}
+
+fn vertex_bytes(source: &CpuTileMesh) -> usize {
+    source.vertices.as_bytes().len()
+}
+
+fn index_bytes(source: &CpuTileMesh) -> usize {
+    source.indices.as_bytes().len()
+}
+
+fn source_retained_bytes(source: &CpuTileMesh) -> usize {
+    source
+        .vertices
+        .retained_bytes()
+        .saturating_add(source.indices.retained_bytes())
+        .saturating_add(
+            source
+                .texts
+                .capacity()
+                .saturating_mul(std::mem::size_of::<walkers::Text>()),
+        )
+        .saturating_add(source.texts.iter().fold(0_usize, |bytes, text| {
+            bytes.saturating_add(text.text.capacity())
+        }))
+}
 
 pub(in crate::activity) struct Executor {
-    context: Arc<UploadContext>,
-    label_results: Arc<Mutex<std::collections::VecDeque<LabelResult>>>,
-    route_results: Arc<Mutex<std::collections::VecDeque<RouteResult>>>,
+    uploads: UploadController,
+    label_results: Arc<Mutex<VecDeque<LabelResult>>>,
+    route_results: Arc<Mutex<VecDeque<RouteResult>>>,
 }
 
 impl Executor {
     pub(in crate::activity) fn new(context: Arc<UploadContext>) -> Self {
         Self {
-            context,
-            label_results: Arc::new(Mutex::new(std::collections::VecDeque::new())),
-            route_results: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            uploads: UploadController::new(context),
+            label_results: Arc::new(Mutex::new(VecDeque::new())),
+            route_results: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
+    pub(in crate::activity) fn upload_controller(&self) -> UploadController {
+        self.uploads.clone()
+    }
+
     pub(in crate::activity) fn upload_visible(&self, visible: &[VisibleTile]) -> UploadStats {
-        let pending = visible
-            .iter()
-            .enumerate()
-            .filter(|(_index, tile)| needs_upload(&tile.tile))
-            .map(|(index, tile)| (index, upload_bytes(&tile.tile)))
-            .collect::<Vec<_>>();
-        let queued_bytes = pending.iter().map(|(_index, bytes)| bytes).sum();
-        let costs = pending
-            .iter()
-            .map(|(_index, bytes)| *bytes)
-            .collect::<Vec<_>>();
-        let selected = select_uploads(&costs, BROWSER_UPLOAD_BUDGET_BYTES);
-        let mut uploaded_bytes = 0;
-        for pending_index in selected {
-            let index = pending[pending_index].0;
-            let tile = &visible[index].tile;
-            let bytes = upload_bytes(tile);
-            let gpu = Arc::new(GpuTile::new(
-                &self.context,
-                visible[index].id,
-                Arc::clone(&tile.mesh),
-            ));
-            tile.gpu.store(Some(gpu));
-            uploaded_bytes += bytes;
-        }
-        UploadStats {
-            queued_bytes,
-            uploaded_bytes,
-        }
+        self.uploads.reconcile(visible)
     }
 
     pub(in crate::activity) fn poll_label(&self) -> Option<LabelResult> {
@@ -85,54 +260,500 @@ impl Executor {
         backend.submit_route(BrowserRouteTask {
             task,
             results: Arc::clone(&self.route_results),
-            upload: Arc::clone(&self.context),
+            upload: Arc::clone(&self.uploads.context),
         });
     }
 }
 
-fn upload_bytes(tile: &PreparedGpuTile) -> usize {
-    tile.mesh
-        .vertices
-        .len()
-        .saturating_mul(std::mem::size_of::<Vertex>())
-        .saturating_add(
-            tile.mesh
-                .indices
-                .len()
-                .saturating_mul(std::mem::size_of::<u32>()),
+#[derive(Clone)]
+pub(in crate::activity) struct UploadController {
+    context: Arc<UploadContext>,
+    queue: Arc<Mutex<BrowserUploadQueue>>,
+}
+
+impl UploadController {
+    fn new(context: Arc<UploadContext>) -> Self {
+        Self {
+            context,
+            queue: Arc::new(Mutex::new(BrowserUploadQueue::default())),
+        }
+    }
+
+    fn reconcile(&self, visible: &[VisibleTile]) -> UploadStats {
+        self.queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .reconcile(visible)
+    }
+
+    pub(super) fn prepare(
+        &self,
+        queue: &wgpu::Queue,
+        metrics: &crate::activity::map_runtime::MapMetrics,
+    ) {
+        self.queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .advance(&self.context, queue, metrics);
+    }
+}
+
+#[derive(Default)]
+struct BrowserUploadQueue {
+    entries: HashMap<walkers::TileId, TileUpload>,
+    priority: VecDeque<walkers::TileId>,
+    current: HashSet<walkers::TileId>,
+    generation: u64,
+    last_frame: UploadFrameStats,
+    budget_overruns: u64,
+}
+
+impl BrowserUploadQueue {
+    fn reconcile(&mut self, visible: &[VisibleTile]) -> UploadStats {
+        self.generation = self.generation.saturating_add(1);
+        let mut current = std::mem::take(&mut self.current);
+        current.clear();
+        current.reserve(visible.len());
+        let mut priority = std::mem::take(&mut self.priority);
+        priority.clear();
+        priority.reserve(visible.len());
+        for candidate in visible {
+            if !needs_upload(&candidate.tile) || !current.insert(candidate.id) {
+                continue;
+            }
+            priority.push_back(candidate.id);
+            match self.entries.get_mut(&candidate.id) {
+                Some(upload) if Arc::ptr_eq(&upload.tile, &candidate.tile) => {
+                    upload.last_visible = self.generation;
+                }
+                Some(upload) => {
+                    *upload = TileUpload::new(Arc::clone(&candidate.tile), self.generation);
+                }
+                None => {
+                    self.entries.insert(
+                        candidate.id,
+                        TileUpload::new(Arc::clone(&candidate.tile), self.generation),
+                    );
+                }
+            }
+        }
+        self.priority = priority;
+        self.prune_retained(&current);
+        self.current = current;
+        self.stats()
+    }
+
+    fn advance(
+        &mut self,
+        context: &UploadContext,
+        queue: &wgpu::Queue,
+        metrics: &crate::activity::map_runtime::MapMetrics,
+    ) {
+        let started = Instant::now();
+        let mut budget = UploadBudget::default();
+        let mut completed_tiles = 0;
+        while budget.can_advance(started.elapsed()) {
+            let Some(id) = self.priority.front().copied() else {
+                break;
+            };
+            let Some(upload) = self.entries.get_mut(&id) else {
+                self.priority.pop_front();
+                continue;
+            };
+            match upload.advance(context, queue, id, budget.chunk_bytes()) {
+                UploadAdvance::Advanced => {}
+                UploadAdvance::Wrote(0) => break,
+                UploadAdvance::Wrote(bytes) => budget.record(bytes),
+                UploadAdvance::Published => {
+                    metrics.record_upload(upload.queued_at.elapsed().as_secs_f64() * 1_000.0);
+                    completed_tiles += 1;
+                    self.entries.remove(&id);
+                    self.priority.pop_front();
+                }
+            }
+        }
+        let elapsed = started.elapsed();
+        if elapsed > BROWSER_UPLOAD_FRAME_TIME {
+            self.budget_overruns = self.budget_overruns.saturating_add(1);
+        }
+        self.last_frame = UploadFrameStats {
+            uploaded_bytes: budget.uploaded_bytes,
+            completed_tiles,
+            milliseconds: elapsed.as_secs_f32() * 1_000.0,
+        };
+    }
+
+    fn stats(&self) -> UploadStats {
+        let mut queued_bytes = 0;
+        let mut pending_tiles = 0;
+        let mut partial_tiles = 0;
+        for upload in self.priority.iter().filter_map(|id| self.entries.get(id)) {
+            queued_bytes += upload.remaining_bytes();
+            pending_tiles += 1;
+            partial_tiles += usize::from(upload.is_partial());
+        }
+        UploadStats {
+            queued_bytes,
+            uploaded_bytes: self.last_frame.uploaded_bytes,
+            pending_tiles,
+            partial_tiles,
+            completed_tiles: self.last_frame.completed_tiles,
+            milliseconds: self.last_frame.milliseconds,
+            budget_overruns: self.budget_overruns,
+        }
+    }
+
+    fn prune_retained(&mut self, current: &HashSet<walkers::TileId>) {
+        let (retained_count, retained_bytes) = self
+            .entries
+            .iter()
+            .filter(|(id, _upload)| !current.contains(id))
+            .fold((0_usize, 0_usize), |(count, bytes), (_id, upload)| {
+                (
+                    count.saturating_add(1),
+                    bytes.saturating_add(upload.retained_bytes()),
+                )
+            });
+        if retained_count <= RETAINED_UPLOAD_LIMIT && retained_bytes <= RETAINED_UPLOAD_BYTES {
+            return;
+        }
+        let mut retained = self
+            .entries
+            .iter()
+            .filter(|(id, _upload)| !current.contains(id))
+            .map(|(id, upload)| {
+                (
+                    *id,
+                    upload.is_partial(),
+                    upload.last_visible,
+                    upload.retained_bytes(),
+                )
+            })
+            .collect::<Vec<_>>();
+        retained.sort_unstable_by_key(|(id, is_partial, generation, _bytes)| {
+            (*is_partial, *generation, id.zoom, id.y, id.x)
+        });
+        let mut retained_bytes = retained_bytes;
+        let mut retained_count = retained_count;
+        for (id, _is_partial, _generation, bytes) in retained {
+            if retained_count <= RETAINED_UPLOAD_LIMIT && retained_bytes <= RETAINED_UPLOAD_BYTES {
+                break;
+            }
+            self.entries.remove(&id);
+            retained_count = retained_count.saturating_sub(1);
+            retained_bytes = retained_bytes.saturating_sub(bytes);
+        }
+    }
+}
+
+#[derive(Default)]
+struct UploadBudget {
+    uploaded_bytes: usize,
+}
+
+impl UploadBudget {
+    fn can_advance(&self, elapsed: Duration) -> bool {
+        self.uploaded_bytes < BROWSER_UPLOAD_FRAME_BYTES && elapsed < BROWSER_UPLOAD_FRAME_TIME
+    }
+
+    fn chunk_bytes(&self) -> usize {
+        BROWSER_UPLOAD_CHUNK_BYTES
+            .min(BROWSER_UPLOAD_FRAME_BYTES.saturating_sub(self.uploaded_bytes))
+    }
+
+    fn record(&mut self, bytes: usize) {
+        debug_assert!(bytes <= self.chunk_bytes());
+        self.uploaded_bytes = self.uploaded_bytes.saturating_add(bytes);
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct UploadFrameStats {
+    uploaded_bytes: usize,
+    completed_tiles: usize,
+    milliseconds: f32,
+}
+
+struct TileUpload {
+    tile: Arc<PreparedGpuTile>,
+    state: TileUploadState,
+    last_visible: u64,
+    queued_at: Instant,
+}
+
+impl TileUpload {
+    fn new(tile: Arc<PreparedGpuTile>, last_visible: u64) -> Self {
+        Self {
+            tile,
+            state: TileUploadState::AllocateVertices,
+            last_visible,
+            queued_at: Instant::now(),
+        }
+    }
+
+    fn retained_bytes(&self) -> usize {
+        let partial = if self.is_partial() {
+            upload_bytes(&self.tile.mesh)
+        } else {
+            0
+        };
+        source_retained_bytes(&self.tile.mesh).saturating_add(partial)
+    }
+
+    fn remaining_bytes(&self) -> usize {
+        match &self.state {
+            TileUploadState::AllocateVertices
+            | TileUploadState::AllocateIndices { .. }
+            | TileUploadState::AllocateBindings { .. } => upload_bytes(&self.tile.mesh),
+            TileUploadState::Uploading(upload) | TileUploadState::Finalizing(upload) => {
+                upload.remaining_bytes()
+            }
+            TileUploadState::Ready => 0,
+        }
+    }
+
+    fn is_partial(&self) -> bool {
+        !matches!(
+            &self.state,
+            TileUploadState::AllocateVertices | TileUploadState::Ready
         )
+    }
+
+    fn advance(
+        &mut self,
+        context: &UploadContext,
+        queue: &wgpu::Queue,
+        id: walkers::TileId,
+        maximum_bytes: usize,
+    ) -> UploadAdvance {
+        let state = std::mem::replace(&mut self.state, TileUploadState::Ready);
+        match state {
+            TileUploadState::AllocateVertices => {
+                self.state = TileUploadState::AllocateIndices {
+                    vertices: GpuTileUpload::allocate_vertices(context, &self.tile.mesh),
+                };
+                UploadAdvance::Advanced
+            }
+            TileUploadState::AllocateIndices { vertices } => {
+                self.state = TileUploadState::AllocateBindings {
+                    vertices,
+                    indices: GpuTileUpload::allocate_indices(context, &self.tile.mesh),
+                };
+                UploadAdvance::Advanced
+            }
+            TileUploadState::AllocateBindings { vertices, indices } => {
+                self.state = TileUploadState::Uploading(GpuTileUpload::finish_allocation(
+                    context,
+                    id,
+                    Arc::clone(&self.tile.mesh),
+                    vertices,
+                    indices,
+                ));
+                UploadAdvance::Advanced
+            }
+            TileUploadState::Uploading(mut upload) if upload.remaining_bytes() > 0 => {
+                let written = upload.write_next(queue, maximum_bytes);
+                self.state = TileUploadState::Uploading(upload);
+                UploadAdvance::Wrote(written)
+            }
+            TileUploadState::Uploading(upload) => {
+                self.state = TileUploadState::Finalizing(upload);
+                UploadAdvance::Advanced
+            }
+            TileUploadState::Finalizing(upload) => {
+                self.tile.gpu.store(Some(Arc::new(upload.finish())));
+                UploadAdvance::Published
+            }
+            TileUploadState::Ready => UploadAdvance::Published,
+        }
+    }
+}
+
+enum TileUploadState {
+    AllocateVertices,
+    AllocateIndices {
+        vertices: wgpu::Buffer,
+    },
+    AllocateBindings {
+        vertices: wgpu::Buffer,
+        indices: wgpu::Buffer,
+    },
+    Uploading(GpuTileUpload),
+    Finalizing(GpuTileUpload),
+    Ready,
+}
+
+enum UploadAdvance {
+    Advanced,
+    Wrote(usize),
+    Published,
 }
 
 fn needs_upload(tile: &PreparedGpuTile) -> bool {
     !tile.mesh.indices.is_empty() && tile.gpu.load().is_none()
 }
 
-fn select_uploads(costs: &[usize], budget: usize) -> Vec<usize> {
-    let mut remaining = budget;
-    costs
-        .iter()
-        .enumerate()
-        .filter_map(|(index, cost)| {
-            if *cost > remaining {
-                return None;
-            }
-            remaining -= *cost;
-            Some(index)
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::select_uploads;
+    use super::*;
+    use crate::activity::map::gpu_map::MeshBuffer;
+    use arc_swap::ArcSwapOption;
+
+    fn tile(id: u32, bytes: usize) -> VisibleTile {
+        let vertex_count = bytes / std::mem::size_of::<Vertex>();
+        VisibleTile {
+            instances: 0..1,
+            id: walkers::TileId {
+                x: id,
+                y: 0,
+                zoom: 1,
+            },
+            tile: Arc::new(PreparedGpuTile {
+                mesh: Arc::new(CpuTileMesh {
+                    vertices: MeshBuffer::typed(vec![
+                        Vertex {
+                            position: [0.0; 2],
+                            color: [0; 4],
+                        };
+                        vertex_count.max(1)
+                    ]),
+                    indices: MeshBuffer::typed(vec![0, 0, 0]),
+                    texts: Vec::new(),
+                }),
+                gpu: ArcSwapOption::empty(),
+            }),
+        }
+    }
 
     #[test]
-    fn upload_selection_never_exceeds_the_frame_budget() {
-        let costs = [3, 5, 2, 7];
-        let selected = select_uploads(&costs, 7);
-        let uploaded = selected.iter().map(|index| costs[*index]).sum::<usize>();
+    fn reconciliation_preserves_the_callers_center_first_order() {
+        let mut queue = BrowserUploadQueue::default();
+        let visible = [tile(4, 64), tile(2, 64), tile(8, 64)];
 
-        assert_eq!(selected, [0, 2]);
-        assert!(uploaded <= 7);
+        let stats = queue.reconcile(&visible);
+
+        assert_eq!(
+            queue.priority.iter().map(|id| id.x).collect::<Vec<_>>(),
+            [4, 2, 8]
+        );
+        assert_eq!(stats.pending_tiles, 3);
+    }
+
+    #[test]
+    fn reconciliation_retains_hidden_work_and_replaces_stale_tiles() {
+        let mut queue = BrowserUploadQueue::default();
+        let original = tile(1, 64);
+        let retained = tile(2, 64);
+        queue.reconcile(&[original.clone(), retained.clone()]);
+        let replacement = tile(2, 128);
+
+        queue.reconcile(std::slice::from_ref(&replacement));
+
+        assert_eq!(queue.entries.len(), 2);
+        assert!(Arc::ptr_eq(
+            &queue.entries[&replacement.id].tile,
+            &replacement.tile
+        ));
+        assert!(queue.entries.contains_key(&original.id));
+        assert_eq!(
+            queue.priority.iter().map(|id| id.x).collect::<Vec<_>>(),
+            [2]
+        );
+    }
+
+    #[test]
+    fn upload_budget_stops_at_the_byte_and_time_limits() {
+        let mut budget = UploadBudget::default();
+
+        assert_eq!(budget.chunk_bytes(), BROWSER_UPLOAD_CHUNK_BYTES);
+        assert!(budget.can_advance(Duration::from_micros(1_499)));
+        assert!(!budget.can_advance(BROWSER_UPLOAD_FRAME_TIME));
+
+        while budget.can_advance(Duration::ZERO) {
+            let chunk = budget.chunk_bytes();
+            assert!(chunk > 0 && chunk <= 256 * 1024);
+            budget.record(chunk);
+        }
+
+        assert_eq!(budget.uploaded_bytes, 4 * 1024 * 1024);
+        assert_eq!(budget.chunk_bytes(), 0);
+        assert!(!budget.can_advance(Duration::ZERO));
+    }
+
+    #[test]
+    fn slow_uploads_stop_before_the_byte_ceiling() {
+        let mut budget = UploadBudget::default();
+        let mut elapsed = Duration::ZERO;
+        while budget.can_advance(elapsed) {
+            budget.record(budget.chunk_bytes());
+            elapsed += Duration::from_millis(1);
+        }
+        assert_eq!(budget.uploaded_bytes, 512 * 1024);
+        assert!(!budget.can_advance(elapsed));
+        assert!(budget.can_advance(Duration::ZERO));
+    }
+
+    #[test]
+    fn upload_cursor_never_crosses_a_buffer_or_chunk_boundary() {
+        let vertex_bytes = BROWSER_UPLOAD_CHUNK_BYTES + 16;
+        let mut cursor = UploadCursor::new(vertex_bytes, 32);
+
+        assert_eq!(
+            cursor.take(BROWSER_UPLOAD_CHUNK_BYTES),
+            Some(UploadChunk {
+                buffer: TileBuffer::Vertices,
+                offset: 0,
+                length: BROWSER_UPLOAD_CHUNK_BYTES,
+            })
+        );
+        assert_eq!(
+            cursor.take(BROWSER_UPLOAD_CHUNK_BYTES),
+            Some(UploadChunk {
+                buffer: TileBuffer::Vertices,
+                offset: BROWSER_UPLOAD_CHUNK_BYTES,
+                length: 16,
+            })
+        );
+        assert_eq!(
+            cursor.take(BROWSER_UPLOAD_CHUNK_BYTES),
+            Some(UploadChunk {
+                buffer: TileBuffer::Indices,
+                offset: 0,
+                length: 32,
+            })
+        );
+        assert_eq!(cursor.take(BROWSER_UPLOAD_CHUNK_BYTES), None);
+        assert_eq!(cursor.remaining_bytes(), 0);
+    }
+
+    #[test]
+    fn newly_queued_tile_is_not_publishable() {
+        let candidate = tile(1, BROWSER_UPLOAD_CHUNK_BYTES + 64);
+        let mut queue = BrowserUploadQueue::default();
+
+        queue.reconcile(std::slice::from_ref(&candidate));
+
+        assert!(!candidate.tile.is_publishable());
+        assert_eq!(queue.entries.len(), 1);
+        assert!(matches!(
+            &queue.entries[&candidate.id].state,
+            TileUploadState::AllocateVertices
+        ));
+        assert!(queue.stats().queued_bytes > BROWSER_UPLOAD_CHUNK_BYTES);
+    }
+
+    #[test]
+    fn hidden_upload_retention_is_bounded() {
+        let mut queue = BrowserUploadQueue::default();
+        let visible = (0..(RETAINED_UPLOAD_LIMIT as u32 + 4))
+            .map(|id| tile(id, 64))
+            .collect::<Vec<_>>();
+        queue.reconcile(&visible);
+
+        let stats = queue.reconcile(&[]);
+
+        assert_eq!(queue.entries.len(), RETAINED_UPLOAD_LIMIT);
+        assert_eq!(stats.pending_tiles, 0);
+        assert_eq!(stats.queued_bytes, 0);
     }
 }

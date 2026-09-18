@@ -10,6 +10,7 @@
   pkgs,
   pythonToolsEnv,
   toolchain,
+  wasmToolchain,
   workspaceSrc,
 }:
 
@@ -248,6 +249,11 @@ let
           crates/garmin-i18n/translations/cs.json
       '';
 
+  wasmLint = mkApp "wasm-lint" [ wasmToolchain ] ''
+    ${lib.getExe' wasmToolchain "cargo"} clippy --locked -p garmin-hass-web \
+      --target wasm32-unknown-unknown --lib -- --deny warnings
+  '';
+
   projectLint =
     mkApp "project-lint"
       [
@@ -268,6 +274,7 @@ let
         run_step "FormatJS catalogs" ${lib.getExe i18nCheck}
         run_step "cargo sqlx prepare --check" ${lib.getExe sqlxCheck}
         run_step "cargo clippy" ${cargoCommand clippyArgs}
+        run_step "cargo clippy (WASM)" ${lib.getExe wasmLint}
         run_step "cargo doc" env RUSTDOCFLAGS='-D warnings' ${cargoCommand docArgs}
         run_step "cargo nextest" ${cargoCommand testArgs}
         run_step "license bundles" ${lib.getExe licenseChecker}
@@ -420,6 +427,8 @@ in
     '';
 
     project-lint = projectLint;
+
+    wasm-lint = wasmLint;
 
     i18n-check = i18nCheck;
 

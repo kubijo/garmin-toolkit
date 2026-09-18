@@ -20,7 +20,7 @@ path = "main.rs"
 
 [dependencies]
 crossterm = "=0.29.0"
-gallery = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.11.0", features = ["extras-svg"] }
+gallery = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.12.0", features = ["extras-svg"] }
 garmin-cli-tui = { path = "../../apps/garmin-cli/tui", features = ["gallery"] }
 garmin-color = { path = "../../crates/garmin-color" }
 garmin-i18n = { path = "../../crates/garmin-i18n" }
@@ -36,12 +36,15 @@ ratatui = "=0.30.2"
 serde = { version = "=1.0.229", features = ["derive"] }
 
 [build-dependencies]
-gallery-build = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.11.0", package = "gallery-build" }
+gallery-build = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.12.0", package = "gallery-build" }
 
 [dev-dependencies]
 egui_kittest = { version = "=0.36.2", features = ["eframe"] }
 
 [workspace]
+
+[patch.crates-io]
+fast-mvt = { path = "../../vendor/fast-mvt" }
 
 [profile.dev]
 opt-level = 1

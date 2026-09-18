@@ -918,6 +918,10 @@
     "source": "Back",
     "translation": "Zpět"
   },
+  "czI42JRuTk": {
+    "source": "Loading map…",
+    "translation": "Načítání mapy…"
+  },
   "d18HtpGPo6": {
     "source": "Item removed",
     "translation": "Položka odebrána"
@@ -1078,6 +1082,10 @@
     "source": "Request cancellation at the next safe checkpoint?",
     "translation": "Požádat o přerušení v nejbližším bezpečném bodě?"
   },
+  "l0ACpR6HTS": {
+    "source": "Loading activity data…",
+    "translation": "Načítání dat aktivity…"
+  },
   "l9Co77Oehu": {
     "source": "Clearing stalled MTP state, then waiting quietly.",
     "translation": "Vyčištění zaseknutého stavu MTP a následné čekání."
@@ -1151,10 +1159,6 @@
     "source": "Current directory contents",
     "translation": "Obsah aktuální složky"
   },
-  "ovRK9Z7BLM": {
-    "source": "Loading activity…",
-    "translation": "Načítání aktivity…"
-  },
   "oxpz0TpIVD": {
     "source": "Enter a profile name",
     "translation": "Zadejte název profilu"
@@ -1175,6 +1179,10 @@
     "source": "Contacting the map-update service.",
     "translation": "Kontaktování služby pro aktualizaci map."
   },
+  "q/uwLTb3Zf": {
+    "source": "Stop",
+    "translation": "Zastavit"
+  },
   "q5Xl0MIdUj": {
     "source": "Verify",
     "translation": "Ověření"
@@ -1186,6 +1194,10 @@
   "qSYDHD3Pb0": {
     "source": "Inspection error",
     "translation": "Chyba kontroly"
+  },
+  "qh4LLO2afn": {
+    "source": "Playback speed",
+    "translation": "Rychlost přehrávání"
   },
   "qj71j1QRTA": {
     "source": "Query",
@@ -1266,10 +1278,6 @@
   "t9FrgUkP3A": {
     "source": "Import FIT",
     "translation": "Importovat FIT"
-  },
-  "tFFMkFDBMO": {
-    "source": "Pause",
-    "translation": "Pozastavit"
   },
   "tOdNiYuuag": {
     "source": "Dark",

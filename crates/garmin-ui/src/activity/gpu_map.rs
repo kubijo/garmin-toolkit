@@ -7,7 +7,7 @@
     reason = "bounded GPU coordinates, indices, and grid cells intentionally use f32/i32"
 )]
 
-use std::{num::NonZeroU64, sync::Arc, time::Instant};
+use std::{marker::PhantomData, num::NonZeroU64, sync::Arc};
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use bytemuck::{Pod, Zeroable};
@@ -15,6 +15,7 @@ use egui::{Color32, Rect, Shape, pos2};
 use egui_wgpu::{Callback, CallbackResources, CallbackTrait, ScreenDescriptor};
 use garmin_service_api::ActivitySampleSnapshot;
 use walkers::{Tile, TileId};
+use web_time::Instant;
 use wgpu::util::DeviceExt as _;
 
 use super::{WALKERS_TILE_SIZE, mercator_y, speed_bounds};
@@ -24,15 +25,18 @@ use crate::activity::map_style;
 mod labels;
 #[path = "gpu_map/platform.rs"]
 mod platform;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "gpu_map/render_tests.rs"]
+mod render_tests;
 #[path = "gpu_map/route.rs"]
 mod route;
+#[path = "gpu_map/tile_budget.rs"]
+mod tile_budget;
+pub use tile_budget::BrowserTileLimits;
+pub(in crate::activity) use tile_budget::{TileBudget, TileDecodeBudget};
 
-#[cfg(not(target_arch = "wasm32"))]
-use labels::build_label_result;
 pub use labels::{BrowserLabelTask, prepare_labels_for_browser_worker};
 use labels::{LabelCache, LabelResult, LabelTask, LabelView};
-#[cfg(not(target_arch = "wasm32"))]
-use route::build_route;
 pub use route::{BrowserRouteTask, prepare_route_for_browser_worker};
 use route::{RouteOutcome, RouteResult, RouteSample, RouteTask};
 
@@ -72,7 +76,7 @@ pub fn install(render_state: &egui_wgpu::RenderState, sample_count: u32) -> Wgpu
         sample_count,
         &context.camera_layout,
         &context.tile_layout,
-        &context.route_layout,
+        &context.route_source_layout,
         &context.route_style_layout,
     );
     render_state
@@ -85,26 +89,496 @@ pub fn install(render_state: &egui_wgpu::RenderState, sample_count: u32) -> Wgpu
 
 #[derive(Clone)]
 struct CpuTileMesh {
-    vertices: Vec<Vertex>,
-    indices: Vec<u32>,
+    vertices: MeshBuffer<Vertex>,
+    indices: MeshBuffer<u32>,
     texts: Vec<walkers::Text>,
 }
 
-const BROWSER_TILE_PROTOCOL_VERSION: u8 = 1;
-const MAX_BROWSER_TILE_UPLOAD_BYTES: usize = 8 * 1024 * 1024;
-
-#[derive(serde::Deserialize, serde::Serialize)]
-struct BrowserPreparedTile {
-    version: u8,
-    vertices: Vec<BrowserVertex>,
-    indices: Vec<u32>,
-    texts: Vec<BrowserText>,
+#[derive(Clone)]
+enum MeshBuffer<T> {
+    Typed(Vec<T>),
+    Packed {
+        bytes: Vec<u8>,
+        marker: PhantomData<T>,
+    },
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
-struct BrowserVertex {
+impl<T: Pod> MeshBuffer<T> {
+    fn typed(values: Vec<T>) -> Self {
+        Self::Typed(values)
+    }
+
+    fn packed(bytes: Vec<u8>) -> Result<Self, String> {
+        if !bytes.len().is_multiple_of(std::mem::size_of::<T>()) {
+            return Err("packed map geometry had a partial element".to_owned());
+        }
+        Ok(Self::Packed {
+            bytes,
+            marker: PhantomData,
+        })
+    }
+
+    fn len(&self) -> usize {
+        self.as_bytes().len() / std::mem::size_of::<T>()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.as_bytes().is_empty()
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::Typed(values) => bytemuck::cast_slice(values),
+            Self::Packed { bytes, .. } => bytes,
+        }
+    }
+
+    fn retained_bytes(&self) -> usize {
+        match self {
+            Self::Typed(values) => values.capacity().saturating_mul(std::mem::size_of::<T>()),
+            Self::Packed { bytes, .. } => bytes.capacity(),
+        }
+    }
+
+    #[cfg(test)]
+    fn get(&self, index: usize) -> Option<T> {
+        let width = std::mem::size_of::<T>();
+        let start = index.checked_mul(width)?;
+        let end = start.checked_add(width)?;
+        self.as_bytes()
+            .get(start..end)
+            .map(bytemuck::pod_read_unaligned)
+    }
+}
+
+/// One transferable browser-worker tile split into upload-ready geometry and text storage.
+pub struct BrowserTileTransfer {
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+    text_records: Vec<BrowserTextRecord>,
+    strings: Vec<u8>,
+}
+
+impl BrowserTileTransfer {
+    /// Borrow upload-ready bytes without allocating intermediate byte vectors.
+    #[must_use]
+    pub fn parts(&self) -> [&[u8]; 4] {
+        [
+            bytemuck::cast_slice(&self.vertices),
+            bytemuck::cast_slice(&self.indices),
+            bytemuck::cast_slice(&self.text_records),
+            &self.strings,
+        ]
+    }
+}
+
+/// Section of a browser tile packet admitted independently on the animation clock.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrowserTileSection {
+    /// Packed WGPU vertices.
+    Vertices,
+    /// Packed triangle indices.
+    Indices,
+    /// Fixed-width text metadata records.
+    TextRecords,
+    /// UTF-8 storage referenced by the text records.
+    Strings,
+}
+
+impl BrowserTileSection {
+    const ORDER: [Self; 4] = [
+        Self::Strings,
+        Self::TextRecords,
+        Self::Vertices,
+        Self::Indices,
+    ];
+}
+
+/// Validated browser tile ready for atomic runtime publication.
+pub struct BrowserTilePacket {
+    prepared: Option<Arc<PreparedGpuTile>>,
+}
+
+impl BrowserTilePacket {
+    pub(in crate::activity) fn into_prepared(self) -> Option<Arc<PreparedGpuTile>> {
+        self.prepared
+    }
+}
+
+/// Incremental owner of browser tile transfer buffers, validation, and text reconstruction.
+pub struct BrowserTilePacketBuilder {
+    expected: BrowserTileLengths,
+    vertices: Vec<u8>,
+    indices: Vec<u8>,
+    strings: Vec<u8>,
+    texts: Vec<walkers::Text>,
+    section_index: usize,
+    allocation_index: usize,
+    decoded_string_bytes: usize,
+}
+
+struct BrowserTileLengths {
+    vertices: usize,
+    indices: usize,
+    text_records: usize,
+    strings: usize,
+}
+
+impl BrowserTileLengths {
+    const fn get(&self, section: BrowserTileSection) -> usize {
+        match section {
+            BrowserTileSection::Vertices => self.vertices,
+            BrowserTileSection::Indices => self.indices,
+            BrowserTileSection::TextRecords => self.text_records,
+            BrowserTileSection::Strings => self.strings,
+        }
+    }
+}
+
+impl BrowserTilePacketBuilder {
+    /// Validate transfer lengths before allocating or copying worker output.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for malformed element boundaries or a packet above the upload limit.
+    pub fn new(
+        vertex_bytes: usize,
+        index_bytes: usize,
+        text_record_bytes: usize,
+        string_bytes: usize,
+    ) -> Result<Self, String> {
+        if !vertex_bytes.is_multiple_of(std::mem::size_of::<Vertex>()) {
+            return Err("browser tile vertex storage had a partial element".to_owned());
+        }
+        if !index_bytes.is_multiple_of(std::mem::size_of::<u32>())
+            || !(index_bytes / std::mem::size_of::<u32>()).is_multiple_of(3)
+        {
+            return Err("browser tile index storage did not contain complete triangles".to_owned());
+        }
+        if !text_record_bytes.is_multiple_of(std::mem::size_of::<BrowserTextRecord>()) {
+            return Err("browser tile text storage had a partial record".to_owned());
+        }
+        let total = vertex_bytes
+            .checked_add(index_bytes)
+            .and_then(|bytes| bytes.checked_add(text_record_bytes))
+            .and_then(|bytes| bytes.checked_add(string_bytes))
+            .ok_or_else(|| "browser tile transfer length overflowed".to_owned())?;
+        BrowserTileLimits::check_upload(total)?;
+        let mut builder = Self {
+            expected: BrowserTileLengths {
+                vertices: vertex_bytes,
+                indices: index_bytes,
+                text_records: text_record_bytes,
+                strings: string_bytes,
+            },
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            strings: Vec::new(),
+            texts: Vec::new(),
+            section_index: 0,
+            allocation_index: 0,
+            decoded_string_bytes: 0,
+        };
+        builder.skip_empty_sections();
+        Ok(builder)
+    }
+
+    /// Payload retention allowance: transferred sources, destination vectors, and decoded strings.
+    /// Allocator metadata, capacity rounding, and transport objects are not included.
+    #[must_use]
+    pub fn retained_bytes(&self) -> usize {
+        let geometry = self.expected.vertices + self.expected.indices;
+        let texts = self.expected.text_records / std::mem::size_of::<BrowserTextRecord>();
+        2 * geometry
+            + self.expected.text_records
+            + 3 * self.expected.strings
+            + texts * std::mem::size_of::<walkers::Text>()
+    }
+
+    /// Reserve one destination vector during timed admission, returning its requested byte size.
+    /// An allocation is indivisible and may exceed the admission time target.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the allocator cannot reserve the requested capacity.
+    pub fn allocate_next(&mut self) -> Result<Option<usize>, String> {
+        while let Some(section) = BrowserTileSection::ORDER
+            .get(self.allocation_index)
+            .copied()
+        {
+            let bytes = self.expected.get(section);
+            if bytes == 0 {
+                self.allocation_index += 1;
+                continue;
+            }
+            let (result, requested) = match section {
+                BrowserTileSection::Strings => (self.strings.try_reserve_exact(bytes), bytes),
+                BrowserTileSection::Vertices => (self.vertices.try_reserve_exact(bytes), bytes),
+                BrowserTileSection::Indices => (self.indices.try_reserve_exact(bytes), bytes),
+                BrowserTileSection::TextRecords => {
+                    let count = bytes / std::mem::size_of::<BrowserTextRecord>();
+                    (
+                        self.texts.try_reserve_exact(count),
+                        count * std::mem::size_of::<walkers::Text>(),
+                    )
+                }
+            };
+            result.map_err(|error| format!("could not allocate browser tile: {error}"))?;
+            self.allocation_index += 1;
+            return Ok(Some(requested));
+        }
+        Ok(None)
+    }
+
+    /// Return the next section that must be admitted and the bytes still outstanding.
+    #[must_use]
+    pub fn next_section(&self) -> Option<(BrowserTileSection, usize)> {
+        let section = *BrowserTileSection::ORDER.get(self.section_index)?;
+        Some((section, self.remaining(section)))
+    }
+
+    /// Choose a bounded chunk without splitting a fixed-width wire element.
+    #[must_use]
+    pub fn next_chunk(&self, maximum_bytes: usize) -> Option<(BrowserTileSection, usize)> {
+        let (section, remaining) = self.next_section()?;
+        let alignment = match section {
+            BrowserTileSection::Strings => 1,
+            BrowserTileSection::TextRecords => std::mem::size_of::<BrowserTextRecord>(),
+            BrowserTileSection::Vertices => std::mem::align_of::<Vertex>(),
+            BrowserTileSection::Indices => std::mem::size_of::<u32>(),
+        };
+        let bounded = if section == BrowserTileSection::TextRecords {
+            remaining.min(maximum_bytes).min(alignment)
+        } else {
+            remaining.min(maximum_bytes)
+        };
+        let length = if bounded == remaining {
+            bounded
+        } else {
+            bounded - bounded % alignment
+        };
+        (length > 0).then_some((section, length))
+    }
+
+    /// Append one bounded chunk to the current section.
+    ///
+    /// Text records are reconstructed immediately, after their UTF-8 storage has arrived.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for out-of-order, oversized, malformed, or invalid data.
+    pub fn append(&mut self, section: BrowserTileSection, bytes: &[u8]) -> Result<(), String> {
+        let remaining = self.check_append(section, bytes.len())?;
+        match section {
+            BrowserTileSection::Strings => self.strings.extend_from_slice(bytes),
+            BrowserTileSection::TextRecords => self.append_text_records(bytes)?,
+            BrowserTileSection::Vertices => self.vertices.extend_from_slice(bytes),
+            BrowserTileSection::Indices => {
+                Self::validate_indices(
+                    bytes,
+                    self.expected.vertices / std::mem::size_of::<Vertex>(),
+                )?;
+                self.indices.extend_from_slice(bytes);
+            }
+        }
+        self.advance_section(bytes.len(), remaining);
+        Ok(())
+    }
+
+    /// Copy geometry or UTF-8 directly into its reserved destination, without a scratch copy.
+    ///
+    /// # Errors
+    /// Returns an error for invalid lengths, section order, or triangle indices.
+    pub fn append_from(
+        &mut self,
+        section: BrowserTileSection,
+        length: usize,
+        copy: impl FnOnce(&mut [u8]),
+    ) -> Result<(), String> {
+        let remaining = self.check_append(section, length)?;
+        let destination = match section {
+            BrowserTileSection::Strings => &mut self.strings,
+            BrowserTileSection::Vertices => &mut self.vertices,
+            BrowserTileSection::Indices => &mut self.indices,
+            BrowserTileSection::TextRecords => {
+                return Err("text records require reconstruction".to_owned());
+            }
+        };
+        let start = destination.len();
+        destination.resize(start + length, 0);
+        copy(&mut destination[start..]);
+        if section == BrowserTileSection::Indices
+            && let Err(error) = Self::validate_indices(
+                &destination[start..],
+                self.expected.vertices / std::mem::size_of::<Vertex>(),
+            )
+        {
+            destination.truncate(start);
+            return Err(error);
+        }
+        self.advance_section(length, remaining);
+        Ok(())
+    }
+
+    fn check_append(&self, section: BrowserTileSection, length: usize) -> Result<usize, String> {
+        if self.allocation_index != BrowserTileSection::ORDER.len() {
+            return Err("browser tile destinations have not been allocated".to_owned());
+        }
+        let Some((expected_section, remaining)) = self.next_section() else {
+            return Err("browser tile packet received trailing data".to_owned());
+        };
+        if section != expected_section {
+            return Err("browser tile packet sections arrived out of order".to_owned());
+        }
+        if length == 0 || length > remaining {
+            return Err("browser tile packet chunk had an invalid length".to_owned());
+        }
+        Ok(remaining)
+    }
+
+    fn advance_section(&mut self, length: usize, remaining: usize) {
+        if length == remaining {
+            self.section_index += 1;
+            self.skip_empty_sections();
+        }
+    }
+
+    /// Finish the fully admitted packet and make it eligible for publication.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error while any declared bytes remain outstanding.
+    pub fn finish(self) -> Result<BrowserTilePacket, String> {
+        if self.next_section().is_some() {
+            return Err("browser tile packet was incomplete".to_owned());
+        }
+        let vertices = MeshBuffer::packed(self.vertices)?;
+        let indices = MeshBuffer::packed(self.indices)?;
+        let prepared = (!indices.is_empty() || !self.texts.is_empty()).then(|| {
+            Arc::new(PreparedGpuTile {
+                mesh: Arc::new(CpuTileMesh {
+                    vertices,
+                    indices,
+                    texts: self.texts,
+                }),
+                gpu: ArcSwapOption::empty(),
+            })
+        });
+        Ok(BrowserTilePacket { prepared })
+    }
+
+    fn append_text_records(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let width = std::mem::size_of::<BrowserTextRecord>();
+        if !bytes.len().is_multiple_of(width) {
+            return Err("browser tile admission split a text record".to_owned());
+        }
+        for record in bytes.chunks_exact(width) {
+            let record: BrowserTextRecord = bytemuck::pod_read_unaligned(record);
+            let decoded = self
+                .decoded_string_bytes
+                .checked_add(record.string_length as usize)
+                .filter(|&bytes| bytes <= self.expected.strings)
+                .ok_or_else(|| {
+                    "browser tile decoded strings exceeded transferred storage".to_owned()
+                })?;
+            self.texts.push(record.to_text(&self.strings)?);
+            self.decoded_string_bytes = decoded;
+        }
+        Ok(())
+    }
+
+    fn validate_indices(bytes: &[u8], vertex_count: usize) -> Result<(), String> {
+        if !bytes.len().is_multiple_of(std::mem::size_of::<u32>()) {
+            return Err("browser tile admission split an index".to_owned());
+        }
+        let (indices, remainder) = bytes.as_chunks::<{ std::mem::size_of::<u32>() }>();
+        debug_assert!(remainder.is_empty());
+        if indices
+            .iter()
+            .map(|bytes| u32::from_le_bytes(*bytes))
+            .any(|index| index as usize >= vertex_count)
+        {
+            return Err("prepared map tile contained invalid triangle indices".to_owned());
+        }
+        Ok(())
+    }
+
+    fn remaining(&self, section: BrowserTileSection) -> usize {
+        let admitted = match section {
+            BrowserTileSection::Strings => self.strings.len(),
+            BrowserTileSection::TextRecords => self
+                .texts
+                .len()
+                .saturating_mul(std::mem::size_of::<BrowserTextRecord>()),
+            BrowserTileSection::Vertices => self.vertices.len(),
+            BrowserTileSection::Indices => self.indices.len(),
+        };
+        self.expected.get(section).saturating_sub(admitted)
+    }
+
+    fn skip_empty_sections(&mut self) {
+        while BrowserTileSection::ORDER
+            .get(self.section_index)
+            .is_some_and(|section| self.expected.get(*section) == 0)
+        {
+            self.section_index += 1;
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct BrowserTextRecord {
+    string_offset: u32,
+    string_length: u32,
     position: [f32; 2],
-    color: [u8; 4],
+    font_size: f32,
+    text_color: [u8; 4],
+    halo_color: [u8; 4],
+    halo_width: f32,
+    angle: f32,
+    line_placement: u32,
+}
+
+impl BrowserTextRecord {
+    fn to_text(self, strings: &[u8]) -> Result<walkers::Text, String> {
+        BrowserTileLimits::check_text(self.string_length as usize)?;
+        let start = self.string_offset as usize;
+        let end = start
+            .checked_add(self.string_length as usize)
+            .filter(|end| *end <= strings.len())
+            .ok_or_else(|| {
+                "browser tile text referenced bytes outside its string table".to_owned()
+            })?;
+        let text = std::str::from_utf8(&strings[start..end])
+            .map_err(|_| "browser tile text was not valid UTF-8".to_owned())?
+            .to_owned();
+        let placement = match self.line_placement {
+            0 => walkers::Placement::Point,
+            1 => walkers::Placement::Line,
+            _ => return Err("browser tile text had an invalid placement".to_owned()),
+        };
+        Ok(walkers::Text {
+            text,
+            position: pos2(self.position[0], self.position[1]),
+            font_size: self.font_size,
+            text_color: Color32::from_rgba_premultiplied(
+                self.text_color[0],
+                self.text_color[1],
+                self.text_color[2],
+                self.text_color[3],
+            ),
+            halo_color: Color32::from_rgba_premultiplied(
+                self.halo_color[0],
+                self.halo_color[1],
+                self.halo_color[2],
+                self.halo_color[3],
+            ),
+            halo_width: self.halo_width,
+            angle: self.angle,
+            placement,
+        })
+    }
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -119,11 +593,90 @@ struct BrowserText {
     line_placement: bool,
 }
 
-/// Tessellate a worker tile directly into the versioned POD format consumed by WGPU.
-pub(in crate::activity) fn encode_browser_tile(tile: Tile) -> Result<Vec<u8>, String> {
+struct BrowserTileGeometry {
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+    texts: Vec<walkers::Text>,
+}
+
+fn tessellate_browser_tile(tile: Tile) -> Result<BrowserTileGeometry, String> {
     let Tile::Vector { shapes, texts } = tile else {
         return Err("the vector map worker received a raster tile".to_owned());
     };
+    let mut budget = TileBudget::default();
+    budget.shapes(&shapes)?;
+    for text in &texts {
+        budget.text(text.text.len())?;
+    }
+    let (vertices, indices) = tessellate_tile(shapes, |mesh| budget.mesh(mesh))?;
+    Ok(BrowserTileGeometry {
+        vertices,
+        indices,
+        texts,
+    })
+}
+
+/// Tessellate a worker tile into independently transferable WGPU and text buffers.
+pub(in crate::activity) fn encode_browser_tile(tile: Tile) -> Result<BrowserTileTransfer, String> {
+    let BrowserTileGeometry {
+        vertices,
+        indices,
+        texts,
+    } = tessellate_browser_tile(tile)?;
+    let mut strings = Vec::new();
+    let mut text_records = Vec::with_capacity(texts.len());
+    for text in texts {
+        let string_offset = u32::try_from(strings.len())
+            .map_err(|_| "browser tile string table exceeded 4 GiB".to_owned())?;
+        let string_length = u32::try_from(text.text.len())
+            .map_err(|_| "browser tile text exceeded 4 GiB".to_owned())?;
+        strings.extend_from_slice(text.text.as_bytes());
+        text_records.push(BrowserTextRecord {
+            string_offset,
+            string_length,
+            position: [text.position.x, text.position.y],
+            font_size: text.font_size,
+            text_color: text.text_color.to_array(),
+            halo_color: text.halo_color.to_array(),
+            halo_width: text.halo_width,
+            angle: text.angle,
+            line_placement: u32::from(text.placement == walkers::Placement::Line),
+        });
+    }
+    Ok(BrowserTileTransfer {
+        vertices,
+        indices,
+        text_records,
+        strings,
+    })
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub(in crate::activity) fn prepare_local_browser_tile(
+    tile: Tile,
+) -> Result<BrowserTilePacket, String> {
+    let BrowserTileGeometry {
+        vertices,
+        indices,
+        texts,
+    } = tessellate_browser_tile(tile)?;
+    let prepared = (!indices.is_empty() || !texts.is_empty()).then(|| {
+        Arc::new(PreparedGpuTile {
+            mesh: Arc::new(CpuTileMesh {
+                vertices: MeshBuffer::typed(vertices),
+                indices: MeshBuffer::typed(indices),
+                texts,
+            }),
+            gpu: ArcSwapOption::empty(),
+        })
+    });
+    Ok(BrowserTilePacket { prepared })
+}
+
+fn tessellate_tile<E>(
+    shapes: Vec<Shape>,
+    mut check: impl FnMut(&egui::Mesh) -> Result<(), E>,
+) -> Result<(Vec<Vertex>, Vec<u32>), E> {
     let mut tessellator = egui::epaint::tessellator::Tessellator::new(
         1.0,
         egui::epaint::tessellator::TessellationOptions::default(),
@@ -133,107 +686,21 @@ pub(in crate::activity) fn encode_browser_tile(tile: Tile) -> Result<Vec<u8>, St
     let mut mesh = egui::Mesh::default();
     for shape in shapes {
         tessellator.tessellate_shape(shape, &mut mesh);
+        check(&mesh)?;
     }
-    let prepared = BrowserPreparedTile {
-        version: BROWSER_TILE_PROTOCOL_VERSION,
-        vertices: mesh
-            .vertices
-            .into_iter()
-            .map(|vertex| BrowserVertex {
-                position: [vertex.pos.x, vertex.pos.y],
-                color: vertex.color.to_array(),
-            })
-            .collect(),
-        indices: mesh.indices,
-        texts: texts
-            .into_iter()
-            .map(|text| BrowserText {
-                text: text.text,
-                position: [text.position.x, text.position.y],
-                font_size: text.font_size,
-                text_color: text.text_color.to_array(),
-                halo_color: text.halo_color.to_array(),
-                halo_width: text.halo_width,
-                angle: text.angle,
-                line_placement: text.placement == walkers::Placement::Line,
-            })
-            .collect(),
-    };
-    postcard::to_stdvec(&prepared).map_err(|error| error.to_string())
-}
-
-pub(in crate::activity) fn decode_browser_tile(
-    bytes: &[u8],
-) -> Result<Option<Arc<PreparedGpuTile>>, String> {
-    if bytes.len() > MAX_BROWSER_TILE_UPLOAD_BYTES {
-        return Err("prepared map tile exceeded the 8 MiB upload limit".to_owned());
-    }
-    let prepared: BrowserPreparedTile =
-        postcard::from_bytes(bytes).map_err(|error| error.to_string())?;
-    if prepared.version != BROWSER_TILE_PROTOCOL_VERSION {
-        return Err(format!(
-            "unsupported map tile protocol version {}",
-            prepared.version
-        ));
-    }
-    if !prepared.indices.len().is_multiple_of(3)
-        || prepared
-            .indices
-            .iter()
-            .any(|index| *index as usize >= prepared.vertices.len())
-    {
-        return Err("prepared map tile contained invalid triangle indices".to_owned());
-    }
-    let mesh = CpuTileMesh {
-        vertices: prepared
-            .vertices
-            .into_iter()
-            .map(|vertex| Vertex {
-                position: vertex.position,
-                color: vertex.color,
-            })
-            .collect(),
-        indices: prepared.indices,
-        texts: prepared
-            .texts
-            .into_iter()
-            .map(|text| walkers::Text {
-                text: text.text,
-                position: pos2(text.position[0], text.position[1]),
-                font_size: text.font_size,
-                text_color: Color32::from_rgba_premultiplied(
-                    text.text_color[0],
-                    text.text_color[1],
-                    text.text_color[2],
-                    text.text_color[3],
-                ),
-                halo_color: Color32::from_rgba_premultiplied(
-                    text.halo_color[0],
-                    text.halo_color[1],
-                    text.halo_color[2],
-                    text.halo_color[3],
-                ),
-                halo_width: text.halo_width,
-                angle: text.angle,
-                placement: if text.line_placement {
-                    walkers::Placement::Line
-                } else {
-                    walkers::Placement::Point
-                },
-            })
-            .collect(),
-    };
-    Ok(
-        (!mesh.indices.is_empty() || !mesh.texts.is_empty()).then(|| {
-            Arc::new(PreparedGpuTile {
-                mesh: Arc::new(mesh),
-                gpu: ArcSwapOption::empty(),
-            })
-        }),
-    )
+    let vertices = mesh
+        .vertices
+        .into_iter()
+        .map(|vertex| Vertex {
+            position: [vertex.pos.x, vertex.pos.y],
+            color: vertex.color.to_array(),
+        })
+        .collect();
+    Ok((vertices, mesh.indices))
 }
 
 /// Tessellate tile-local shapes once and retain only text in the walkers fallback tile.
+#[cfg(not(target_arch = "wasm32"))]
 pub(in crate::activity) fn prepare_tile(
     handle: &WgpuMapHandle,
     id: TileId,
@@ -241,28 +708,13 @@ pub(in crate::activity) fn prepare_tile(
 ) -> (Tile, Option<Arc<PreparedGpuTile>>) {
     match tile {
         Tile::Vector { shapes, texts } => {
-            let mut tessellator = egui::epaint::tessellator::Tessellator::new(
-                1.0,
-                egui::epaint::tessellator::TessellationOptions::default(),
-                [1, 1],
-                Vec::new(),
-            );
-            let mut mesh = egui::Mesh::default();
-            for shape in shapes {
-                tessellator.tessellate_shape(shape, &mut mesh);
-            }
-            let vertices = mesh
-                .vertices
-                .into_iter()
-                .map(|vertex| Vertex {
-                    position: [vertex.pos.x, vertex.pos.y],
-                    color: vertex.color.to_array(),
-                })
-                .collect();
-            let prepared = (!mesh.indices.is_empty() || !texts.is_empty()).then(|| {
+            let (vertices, indices) =
+                tessellate_tile(shapes, |_| Ok::<_, std::convert::Infallible>(()))
+                    .unwrap_or_else(|never| match never {});
+            let prepared = (!indices.is_empty() || !texts.is_empty()).then(|| {
                 let mesh = Arc::new(CpuTileMesh {
-                    vertices,
-                    indices: mesh.indices,
+                    vertices: MeshBuffer::typed(vertices),
+                    indices: MeshBuffer::typed(indices),
                     texts,
                 });
                 let gpu = (!mesh.indices.is_empty())
@@ -300,12 +752,16 @@ struct Frame {
     camera: CameraUniform,
     visible: Vec<VisibleTile>,
     route: Option<VisibleRoute>,
+    visible_tiles_settling: bool,
 }
 
 #[derive(Clone)]
 struct VisibleTile {
     id: TileId,
     tile: Arc<PreparedGpuTile>,
+    // Relative to the camera uniform's first visible world,
+    // not duplicated tile resources.
+    instances: std::ops::Range<u32>,
 }
 
 #[derive(Clone)]
@@ -385,6 +841,49 @@ impl RouteCache {
             RoutePreparation::Pending { key } | RoutePreparation::Ready { key, .. } => Some(key),
         }
     }
+
+    fn visible(&self, scene: &RouteScene<'_>) -> Option<VisibleRoute> {
+        self.source().map(|source| {
+            let fallback = color(scene.color);
+            let highlight = scene.highlighted_range.as_ref().map(|range| {
+                let index_range_padding = [*range.start() as f32, *range.end() as f32, 0.0, 0.0];
+                HighlightStyles {
+                    outline: RouteStyleUniform::new(
+                        map_style::HIGHLIGHT_OUTLINE_WIDTH,
+                        1.0,
+                        2.0,
+                        color(scene.outline),
+                        index_range_padding,
+                    ),
+                    color: RouteStyleUniform::new(
+                        map_style::HIGHLIGHT_WIDTH,
+                        1.0,
+                        3.0,
+                        fallback,
+                        index_range_padding,
+                    ),
+                }
+            });
+            VisibleRoute {
+                resource: Arc::clone(&source.resource),
+                outline: RouteStyleUniform::new(
+                    map_style::ROUTE_OUTLINE_WIDTH,
+                    scene.opacity.max(map_style::MINIMUM_OUTLINE_OPACITY),
+                    0.0,
+                    color(scene.outline),
+                    [0.0; 4],
+                ),
+                color: RouteStyleUniform::new(
+                    map_style::ROUTE_WIDTH,
+                    scene.opacity,
+                    1.0,
+                    fallback,
+                    [0.0; 4],
+                ),
+                highlight,
+            }
+        })
+    }
 }
 
 pub(in crate::activity) struct GpuMap {
@@ -430,6 +929,11 @@ impl WgpuRuntime {
 struct UploadStats {
     queued_bytes: usize,
     uploaded_bytes: usize,
+    pending_tiles: usize,
+    partial_tiles: usize,
+    completed_tiles: usize,
+    milliseconds: f32,
+    budget_overruns: u64,
 }
 
 #[derive(Clone)]
@@ -452,6 +956,80 @@ pub(in crate::activity) struct ScenePerf {
     pub stale_work: u64,
     pub queued_upload_bytes: usize,
     pub uploaded_bytes: usize,
+    pub pending_upload_tiles: usize,
+    pub partial_upload_tiles: usize,
+    pub completed_upload_tiles: usize,
+    pub upload_milliseconds: f32,
+    pub upload_budget_overruns: u64,
+}
+
+struct TileFrameAssembly {
+    camera: CameraUniform,
+    visible: Vec<VisibleTile>,
+    upload_candidates: Vec<VisibleTile>,
+}
+
+fn assemble_tile_frame<'a>(
+    tiles: impl IntoIterator<Item = (&'a TileId, &'a Arc<PreparedGpuTile>)>,
+    camera: &super::camera::MapCamera,
+    viewport: Rect,
+) -> TileFrameAssembly {
+    let center = camera.center();
+    let zoom = camera.zoom();
+    let world_size = f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(zoom);
+    let center_normalized = [center.x() / 360.0 + 0.5, mercator_y(center.y())];
+    let viewport_size = [viewport.width().max(1.0), viewport.height().max(1.0)];
+    let first_world =
+        super::camera::first_visible_world(center_normalized[0], world_size, viewport_size[0]);
+    let mut visible = Vec::new();
+    let mut upload_candidates = Vec::new();
+
+    for (id, tile) in tiles {
+        let placement =
+            super::camera::TilePlacement::new(*id, center_normalized, world_size, viewport);
+        let copies = placement.copies(viewport);
+        if copies.is_empty() {
+            continue;
+        }
+        let visible_tile = VisibleTile {
+            id: *id,
+            tile: Arc::clone(tile),
+            instances: u32::try_from(copies.start - first_world)
+                .expect("visible copy follows first world")
+                ..u32::try_from(copies.end - first_world)
+                    .expect("visible copy follows first world"),
+        };
+        upload_candidates.push((
+            copies
+                .map(|world| {
+                    placement
+                        .rect(world)
+                        .center()
+                        .distance_sq(viewport.center())
+                })
+                .fold(f32::INFINITY, f32::min),
+            visible_tile.clone(),
+        ));
+        visible.push(visible_tile);
+    }
+
+    upload_candidates.sort_unstable_by(|left, right| {
+        left.0.total_cmp(&right.0).then_with(|| {
+            (left.1.id.zoom, left.1.id.y, left.1.id.x).cmp(&(
+                right.1.id.zoom,
+                right.1.id.y,
+                right.1.id.x,
+            ))
+        })
+    });
+    TileFrameAssembly {
+        camera: CameraUniform::new(center_normalized, viewport_size, world_size, first_world),
+        visible,
+        upload_candidates: upload_candidates
+            .into_iter()
+            .map(|(_distance, tile)| tile)
+            .collect(),
+    }
 }
 
 impl GpuMap {
@@ -460,12 +1038,13 @@ impl GpuMap {
         metrics: crate::activity::map_runtime::MapMetrics,
     ) -> Self {
         let context = Arc::clone(&handle.context);
+        let executor = platform::Executor::new(Arc::clone(&context));
         Self {
             frame: Arc::new(ArcSwap::from_pointee(Frame::default())),
             metrics,
             runtime: WgpuRuntime {
                 surface: Arc::new(SurfaceGpu::new(&context)),
-                executor: platform::Executor::new(context),
+                executor,
             },
             labels: LabelCache::default(),
             route: RouteCache::default(),
@@ -479,14 +1058,11 @@ impl GpuMap {
                 frame: Arc::clone(&self.frame),
                 metrics: self.metrics.clone(),
                 surface: Arc::clone(&self.runtime.surface),
+                uploads: self.runtime.executor.upload_controller(),
             },
         ))
     }
 
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "egui and WGPU viewport coordinates are f32 after bounded f64 Mercator projection"
-    )]
     pub(in crate::activity) fn update(
         &mut self,
         frame: crate::activity::map_runtime::SceneFrame<'_, '_>,
@@ -500,84 +1076,26 @@ impl GpuMap {
             backend,
         } = frame;
         let started = Instant::now();
-        let _span = tracing::trace_span!("activity_map_scene_acquisition").entered();
+        let _span = tracing::trace_span!("activity_map_frame_assembly").entered();
         self.prepare_route(route, context, backend);
-        let center = camera.center();
-        let zoom = camera.zoom();
-        let world_size = f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(zoom);
-        let center_normalized = [center.x() / 360.0 + 0.5, mercator_y(center.y())];
-        let center_x = center_normalized[0] * world_size;
-        let center_y = center_normalized[1] * world_size;
-        let viewport_size = [viewport.width().max(1.0), viewport.height().max(1.0)];
-        let mut visible = Vec::new();
-
-        for (id, tile) in scene.renderable_gpu_tiles() {
-            let tile_size = f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(zoom - f64::from(id.zoom));
-            let tile_x = super::camera::tile_x_near_center(*id, center_normalized[0]);
-            let left = f64::from(viewport.center().x) + tile_x.mul_add(tile_size, -center_x);
-            let top =
-                f64::from(viewport.center().y) + f64::from(id.y).mul_add(tile_size, -center_y);
-            let tile_rect = Rect::from_min_size(
-                egui::pos2(left as f32, top as f32),
-                egui::Vec2::splat(tile_size as f32),
-            );
-            if !viewport.intersects(tile_rect) {
-                continue;
-            }
-            visible.push(VisibleTile {
-                id: *id,
-                tile: Arc::clone(tile),
-            });
+        let TileFrameAssembly {
+            camera,
+            mut visible,
+            upload_candidates,
+        } = assemble_tile_frame(scene.renderable_gpu_tiles(), camera, viewport);
+        let upload = self.runtime.upload_visible(&upload_candidates);
+        if upload.pending_tiles > 0 {
+            context.request_repaint();
         }
-
-        visible.sort_unstable_by_key(|tile| (tile.id.zoom, tile.id.y, tile.id.x));
-        let upload = self.runtime.upload_visible(&visible);
+        let visible_tiles_settling = upload.pending_tiles > 0;
         visible.retain(|tile| tile.tile.is_publishable());
-        let route = self.route.source().map(|source| {
-            let fallback = color(route.color);
-            let highlight = route.highlighted_range.as_ref().map(|range| {
-                let index_range_padding = [*range.start() as f32, *range.end() as f32, 0.0, 0.0];
-                HighlightStyles {
-                    outline: RouteStyleUniform::new(
-                        map_style::HIGHLIGHT_OUTLINE_WIDTH,
-                        1.0,
-                        2.0,
-                        color(route.outline),
-                        index_range_padding,
-                    ),
-                    color: RouteStyleUniform::new(
-                        map_style::HIGHLIGHT_WIDTH,
-                        1.0,
-                        3.0,
-                        fallback,
-                        index_range_padding,
-                    ),
-                }
-            });
-            VisibleRoute {
-                resource: Arc::clone(&source.resource),
-                outline: RouteStyleUniform::new(
-                    map_style::ROUTE_OUTLINE_WIDTH,
-                    route.opacity.max(map_style::MINIMUM_OUTLINE_OPACITY),
-                    0.0,
-                    color(route.outline),
-                    [0.0; 4],
-                ),
-                color: RouteStyleUniform::new(
-                    map_style::ROUTE_WIDTH,
-                    route.opacity,
-                    1.0,
-                    fallback,
-                    [0.0; 4],
-                ),
-                highlight,
-            }
-        });
+        let route = self.route.visible(route);
         let visible_tiles = visible.len();
         self.frame.store(Arc::new(Frame {
-            camera: CameraUniform::new(center_normalized, viewport_size, world_size),
+            camera,
             visible,
             route,
+            visible_tiles_settling,
         }));
         let label_metrics = self.labels.metrics();
         ScenePerf {
@@ -588,6 +1106,11 @@ impl GpuMap {
             stale_work: label_metrics.stale_work,
             queued_upload_bytes: upload.queued_bytes,
             uploaded_bytes: upload.uploaded_bytes,
+            pending_upload_tiles: upload.pending_tiles,
+            partial_upload_tiles: upload.partial_tiles,
+            completed_upload_tiles: upload.completed_tiles,
+            upload_milliseconds: upload.milliseconds,
+            upload_budget_overruns: upload.budget_overruns,
         }
     }
 
@@ -597,10 +1120,10 @@ impl GpuMap {
     ) {
         let crate::activity::map_runtime::LabelFrame {
             ui,
+            scene,
             camera,
             viewport,
             backend,
-            ..
         } = frame;
         while let Some(result) = self.runtime.poll_label() {
             self.labels.apply(result);
@@ -612,6 +1135,10 @@ impl GpuMap {
         }
 
         let view = LabelView::new(camera, viewport);
+        if scene.pending_visible_tiles() > 0 || frame.visible_tiles_settling {
+            self.labels.paint(ui, view, viewport);
+            return;
+        }
         if !self.labels.request_matches(&visible, view) {
             if let Some(delay) = self.labels.defer_request_for_motion(view, Instant::now()) {
                 ui.ctx().request_repaint_after(delay);
@@ -679,6 +1206,7 @@ struct Paint {
     frame: Arc<ArcSwap<Frame>>,
     metrics: crate::activity::map_runtime::MapMetrics,
     surface: Arc<SurfaceGpu>,
+    uploads: platform::UploadController,
 }
 
 impl CallbackTrait for Paint {
@@ -692,6 +1220,7 @@ impl CallbackTrait for Paint {
     ) -> Vec<wgpu::CommandBuffer> {
         let started = Instant::now();
         let _span = tracing::trace_span!("activity_map_render_prepare").entered();
+        platform::prepare_uploads(&self.uploads, queue, &self.metrics);
         let frame = self.frame.load_full();
         let surface = &self.surface;
         queue.write_buffer(&surface.camera, 0, bytemuck::bytes_of(&frame.camera));
@@ -756,22 +1285,13 @@ impl CallbackTrait for Paint {
             return;
         }
         render_pass.set_scissor_rect(left, top, width, height);
-        render_pass.set_pipeline(&resources.pipeline);
-        render_pass.set_bind_group(0, &surface.camera_bind_group, &[]);
-        for tile in &frame.visible {
-            let Some(gpu) = tile.tile.gpu.load_full() else {
-                continue;
-            };
-            render_pass.set_bind_group(1, &gpu.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, gpu.vertices.slice(..));
-            render_pass.set_index_buffer(gpu.indices.slice(..), wgpu::IndexFormat::Uint32);
-            render_pass.draw_indexed(0..gpu.index_count, 0, 0..1);
-        }
+        draw_tiles(&frame, surface, resources, render_pass);
         if let Some(route) = &frame.route {
             let gpu = &route.resource;
             render_pass.set_pipeline(&resources.route_pipeline);
             render_pass.set_bind_group(0, &surface.camera_bind_group, &[]);
-            render_pass.set_bind_group(1, &gpu.bind_group, &[]);
+            render_pass.set_bind_group(1, &gpu.origin_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, gpu.segments.slice(..));
             render_pass.set_bind_group(2, &surface.outline_bind_group, &[]);
             render_pass.draw(0..6, 0..gpu.segment_count);
             render_pass.set_bind_group(2, &surface.color_bind_group, &[]);
@@ -791,20 +1311,44 @@ impl CallbackTrait for Paint {
     }
 }
 
+fn draw_tiles(
+    frame: &Frame,
+    surface: &SurfaceGpu,
+    resources: &Resources,
+    render_pass: &mut wgpu::RenderPass<'_>,
+) {
+    render_pass.set_pipeline(&resources.pipeline);
+    render_pass.set_bind_group(0, &surface.camera_bind_group, &[]);
+    for tile in &frame.visible {
+        let Some(gpu) = tile.tile.gpu.load_full() else {
+            continue;
+        };
+        render_pass.set_bind_group(1, &gpu.bind_group, &[]);
+        render_pass.set_vertex_buffer(0, gpu.vertices.slice(..));
+        render_pass.set_index_buffer(gpu.indices.slice(..), wgpu::IndexFormat::Uint32);
+        render_pass.draw_indexed(0..gpu.index_count, 0, tile.instances.clone());
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Default, Pod, Zeroable)]
 struct CameraUniform {
     center_high_low: [f32; 4],
-    viewport_world_size_padding: [f32; 4],
+    viewport_world_size_first_world: [f32; 4],
 }
 
 impl CameraUniform {
-    fn new(center: [f64; 2], viewport: [f32; 2], world_size: f64) -> Self {
+    fn new(center: [f64; 2], viewport: [f32; 2], world_size: f64, first_world: i32) -> Self {
         let (center_x_high, center_x_low) = split_f64(center[0]);
         let (center_y_high, center_y_low) = split_f64(center[1]);
         Self {
             center_high_low: [center_x_high, center_y_high, center_x_low, center_y_low],
-            viewport_world_size_padding: [viewport[0], viewport[1], world_size as f32, 0.0],
+            viewport_world_size_first_world: [
+                viewport[0],
+                viewport[1],
+                world_size as f32,
+                first_world as f32,
+            ],
         }
     }
 }
@@ -882,47 +1426,23 @@ struct GpuTile {
 }
 
 impl GpuTile {
+    #[cfg(not(target_arch = "wasm32"))]
     fn new(context: &UploadContext, id: TileId, source: Arc<CpuTileMesh>) -> Self {
-        #[cfg(not(target_arch = "wasm32"))]
-        let _creation = context
-            .resource_creation
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        debug_assert!(source.vertices.retained_bytes() >= source.vertices.as_bytes().len());
+        debug_assert!(source.indices.retained_bytes() >= source.indices.as_bytes().len());
+        let _creation = context.resource_creation.enter();
         let device = &context.device;
         let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("activity map tile vertices"),
-            contents: bytemuck::cast_slice(&source.vertices),
+            contents: source.vertices.as_bytes(),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("activity map tile indices"),
-            contents: bytemuck::cast_slice(&source.indices),
+            contents: source.indices.as_bytes(),
             usage: wgpu::BufferUsages::INDEX,
         });
-        let tile_count = 2.0_f64.powi(i32::from(id.zoom));
-        let (origin_x_high, origin_x_low) = split_f64(f64::from(id.x) / tile_count);
-        let (origin_y_high, origin_y_low) = split_f64(f64::from(id.y) / tile_count);
-        let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("activity map tile uniform"),
-            contents: bytemuck::bytes_of(&TileUniform {
-                origin_high_low: [origin_x_high, origin_y_high, origin_x_low, origin_y_low],
-                normalized_point_scale_padding: [
-                    (1.0 / (tile_count * 512.0)) as f32,
-                    0.0,
-                    0.0,
-                    0.0,
-                ],
-            }),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("activity map tile bind group"),
-            layout: &context.tile_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform.as_entire_binding(),
-            }],
-        });
+        let (uniform, bind_group) = tile_binding(context, id);
         Self {
             index_count: u32::try_from(source.indices.len()).unwrap_or(u32::MAX),
             _source: source,
@@ -934,26 +1454,46 @@ impl GpuTile {
     }
 }
 
+fn tile_binding(context: &UploadContext, id: TileId) -> (wgpu::Buffer, wgpu::BindGroup) {
+    let device = &context.device;
+    let tile_count = 2.0_f64.powi(i32::from(id.zoom));
+    let (origin_x_high, origin_x_low) = split_f64(f64::from(id.x) / tile_count);
+    let (origin_y_high, origin_y_low) = split_f64(f64::from(id.y) / tile_count);
+    let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("activity map tile uniform"),
+        contents: bytemuck::bytes_of(&TileUniform {
+            origin_high_low: [origin_x_high, origin_y_high, origin_x_low, origin_y_low],
+            normalized_point_scale_padding: [(1.0 / (tile_count * 512.0)) as f32, 0.0, 0.0, 0.0],
+        }),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("activity map tile bind group"),
+        layout: &context.tile_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: uniform.as_entire_binding(),
+        }],
+    });
+    (uniform, bind_group)
+}
+
 struct GpuRoute {
     _source: Arc<CpuRoute>,
-    bind_group: wgpu::BindGroup,
+    origin_bind_group: wgpu::BindGroup,
     segment_count: u32,
-    _segments: wgpu::Buffer,
+    segments: wgpu::Buffer,
     _origin: wgpu::Buffer,
 }
 
 impl GpuRoute {
     fn new(context: &UploadContext, origin: [f64; 2], source: Arc<CpuRoute>) -> Self {
-        #[cfg(not(target_arch = "wasm32"))]
-        let _creation = context
-            .resource_creation
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _creation = context.resource_creation.enter();
         let device = &context.device;
         let segments = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("activity route segments"),
             contents: bytemuck::cast_slice(&source.segments),
-            usage: wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::VERTEX,
         });
         let (origin_x_high, origin_x_low) = split_f64(origin[0]);
         let (origin_y_high, origin_y_low) = split_f64(origin[1]);
@@ -964,36 +1504,30 @@ impl GpuRoute {
             }),
             usage: wgpu::BufferUsages::UNIFORM,
         });
-        let bind_group = route_bind_group(device, &context.route_layout, &segments, &origin);
+        let origin_bind_group =
+            route_origin_bind_group(device, &context.route_source_layout, &origin);
         Self {
             segment_count: u32::try_from(source.segments.len()).unwrap_or(u32::MAX),
             _source: source,
-            bind_group,
-            _segments: segments,
+            origin_bind_group,
+            segments,
             _origin: origin,
         }
     }
 }
 
-fn route_bind_group(
+fn route_origin_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
-    segments: &wgpu::Buffer,
     origin: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("activity route source bind group"),
+        label: Some("activity route origin bind group"),
         layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: segments.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: origin.as_entire_binding(),
-            },
-        ],
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: origin.as_entire_binding(),
+        }],
     })
 }
 
@@ -1009,7 +1543,7 @@ impl Resources {
         sample_count: u32,
         camera_layout: &wgpu::BindGroupLayout,
         tile_layout: &wgpu::BindGroupLayout,
-        route_layout: &wgpu::BindGroupLayout,
+        route_source_layout: &wgpu::BindGroupLayout,
         route_style_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1031,7 +1565,7 @@ impl Resources {
                 sample_count,
                 &shader,
                 camera_layout,
-                route_layout,
+                route_source_layout,
                 route_style_layout,
             ),
         }
@@ -1040,11 +1574,10 @@ impl Resources {
 
 struct UploadContext {
     device: wgpu::Device,
-    #[cfg(not(target_arch = "wasm32"))]
-    resource_creation: std::sync::Mutex<()>,
+    resource_creation: platform::ResourceCreationGate,
     camera_layout: wgpu::BindGroupLayout,
     tile_layout: wgpu::BindGroupLayout,
-    route_layout: wgpu::BindGroupLayout,
+    route_source_layout: wgpu::BindGroupLayout,
     route_style_layout: wgpu::BindGroupLayout,
 }
 
@@ -1052,11 +1585,10 @@ impl UploadContext {
     fn new(device: &wgpu::Device) -> Self {
         Self {
             device: device.clone(),
-            #[cfg(not(target_arch = "wasm32"))]
-            resource_creation: std::sync::Mutex::new(()),
+            resource_creation: platform::ResourceCreationGate::new(),
             camera_layout: camera_layout(device),
             tile_layout: tile_uniform_layout(device),
-            route_layout: route_layout(device),
+            route_source_layout: route_source_layout(device),
             route_style_layout: route_style_layout(device),
         }
     }
@@ -1260,34 +1792,12 @@ fn tile_pipeline(
     })
 }
 
-fn route_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("activity route layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: NonZeroU64::new(core::mem::size_of::<RouteSegment>() as u64),
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: NonZeroU64::new(
-                        core::mem::size_of::<RouteSourceUniform>() as u64
-                    ),
-                },
-                count: None,
-            },
-        ],
-    })
+fn route_source_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    uniform_layout::<RouteSourceUniform>(
+        device,
+        "activity route source layout",
+        wgpu::ShaderStages::VERTEX,
+    )
 }
 
 fn route_pipeline(
@@ -1296,14 +1806,14 @@ fn route_pipeline(
     sample_count: u32,
     shader: &wgpu::ShaderModule,
     camera_layout: &wgpu::BindGroupLayout,
-    route_layout: &wgpu::BindGroupLayout,
+    route_source_layout: &wgpu::BindGroupLayout,
     route_style_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("activity route pipeline layout"),
         bind_group_layouts: &[
             Some(camera_layout),
-            Some(route_layout),
+            Some(route_source_layout),
             Some(route_style_layout),
         ],
         immediate_size: 0,
@@ -1315,7 +1825,19 @@ fn route_pipeline(
             module: shader,
             entry_point: Some("route_vertex"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[],
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: core::mem::size_of::<RouteSegment>() as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &wgpu::vertex_attr_array![
+                    0 => Float32x2,
+                    1 => Float32x2,
+                    2 => Float32x2,
+                    3 => Float32x2,
+                    4 => Float32x2,
+                    5 => Float32x2,
+                    6 => Float32x2
+                ],
+            })],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -1365,6 +1887,86 @@ fn color_target(format: wgpu::TextureFormat) -> wgpu::ColorTargetState {
 mod tests {
     use super::*;
 
+    fn labelled_world_tile() -> Arc<PreparedGpuTile> {
+        prepare_local_browser_tile(Tile::Vector {
+            shapes: vec![Shape::rect_filled(
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(512.0, 512.0)),
+                0.0,
+                Color32::BLUE,
+            )],
+            texts: vec![walkers::Text {
+                text: "World".to_owned(),
+                position: pos2(256.0, 256.0),
+                font_size: 12.0,
+                text_color: Color32::WHITE,
+                halo_color: Color32::BLACK,
+                halo_width: 0.0,
+                angle: 0.0,
+                placement: walkers::Placement::Point,
+            }],
+        })
+        .unwrap()
+        .into_prepared()
+        .unwrap()
+    }
+
+    #[test]
+    fn world_copies_share_one_upload_and_repeat_labels_with_geometry() {
+        let id = TileId {
+            zoom: 0,
+            x: 0,
+            y: 0,
+        };
+        let tile = labelled_world_tile();
+        let mut camera = super::super::camera::MapCamera::default();
+        camera.set_zoom(0.0);
+        let viewport = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(1024.0, 700.0));
+        let frame = assemble_tile_frame([(&id, &tile)], &camera, viewport);
+        assert_eq!(frame.visible.len(), 1);
+        assert_eq!(frame.upload_candidates.len(), 1);
+        assert!(Arc::ptr_eq(&frame.visible[0].tile, &tile));
+        assert!(Arc::ptr_eq(&frame.upload_candidates[0].tile, &tile));
+        assert_eq!(frame.visible[0].instances, 0..5);
+        assert!((frame.camera.viewport_world_size_first_world[3] + 2.0).abs() < f32::EPSILON);
+
+        let mut cache = LabelCache::default();
+        let task = cache.request(
+            &frame.visible,
+            LabelView::new(&camera, viewport),
+            egui::Context::default(),
+        );
+        let request = labels::label_request(&task);
+        assert_eq!(request.texts.len(), 5);
+        for (text, x) in request.texts.iter().zip([0.0, 256.0, 512.0, 768.0, 1024.0]) {
+            assert_eq!(text.text, "World");
+            assert_f32_pair_eq(text.position, [x, 350.0]);
+        }
+    }
+
+    #[test]
+    fn dateline_tiles_select_different_instances_without_duplicate_uploads() {
+        let west = TileId {
+            zoom: 2,
+            x: 0,
+            y: 1,
+        };
+        let east = TileId {
+            zoom: 2,
+            x: 3,
+            y: 1,
+        };
+        let tile = labelled_world_tile();
+        let mut camera = super::super::camera::MapCamera::default();
+        camera.center_at(walkers::lon_lat(176.4, 0.0));
+        camera.set_zoom(3.0);
+        let viewport = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(256.0, 512.0));
+        let frame = assemble_tile_frame([(&west, &tile), (&east, &tile)], &camera, viewport);
+        assert_eq!(frame.visible.len(), 2);
+        assert_eq!(frame.upload_candidates.len(), 2);
+        assert_eq!(frame.visible[0].instances, 1..2);
+        assert_eq!(frame.visible[1].instances, 0..1);
+    }
+
     fn assert_f32_pair_eq(actual: [f32; 2], expected: [f32; 2]) {
         for (actual, expected) in actual.into_iter().zip(expected) {
             assert!((actual - expected).abs() < f32::EPSILON);
@@ -1410,7 +2012,7 @@ mod tests {
                     sample_count,
                     &context.camera_layout,
                     &context.tile_layout,
-                    &context.route_layout,
+                    &context.route_source_layout,
                     &context.route_style_layout,
                 );
                 let error = futures_lite::future::block_on(error_scope.pop());
@@ -1471,41 +2073,379 @@ mod tests {
                 vertices,
                 texture_id: egui::TextureId::default(),
             })],
-            texts: Vec::new(),
+            texts: vec![walkers::Text {
+                text: "Helsinki 🚲".to_owned(),
+                position: pos2(7.0, 8.0),
+                font_size: 13.0,
+                text_color: Color32::WHITE,
+                halo_color: Color32::BLACK,
+                halo_width: 1.0,
+                angle: 0.25,
+                placement: walkers::Placement::Line,
+            }],
         };
 
-        let bytes = encode_browser_tile(tile).unwrap();
-        let decoded = decode_browser_tile(&bytes).unwrap().unwrap();
+        let transfer = encode_browser_tile(tile).unwrap();
+        let decoded = admit_browser_tile(&transfer, 64)
+            .unwrap()
+            .into_prepared()
+            .unwrap();
 
         assert_eq!(decoded.mesh.vertices.len(), 3);
-        assert_f32_pair_eq(decoded.mesh.vertices[2].position, [5.0, 6.0]);
-        assert_eq!(decoded.mesh.indices, [0, 1, 2]);
+        assert_f32_pair_eq(decoded.mesh.vertices.get(2).unwrap().position, [5.0, 6.0]);
+        assert_eq!(decoded.mesh.indices.get(0), Some(0));
+        assert_eq!(decoded.mesh.indices.get(2), Some(2));
+        assert_eq!(decoded.mesh.texts[0].text, "Helsinki 🚲");
+        assert_eq!(decoded.mesh.texts[0].placement, walkers::Placement::Line);
         assert!(decoded.gpu.load().is_none());
         assert!(!decoded.is_publishable());
     }
 
     #[test]
-    fn browser_protocol_rejects_unknown_versions_and_invalid_indices() {
-        let unknown = BrowserPreparedTile {
-            version: BROWSER_TILE_PROTOCOL_VERSION + 1,
-            vertices: Vec::new(),
-            indices: Vec::new(),
-            texts: Vec::new(),
+    fn browser_producer_rejects_complexity_and_text_before_encoding() {
+        let tile = |shapes, texts| Tile::Vector { shapes, texts };
+        assert!(
+            encode_browser_tile(tile(
+                vec![
+                    Shape::Noop;
+                    BrowserTileLimits::BROWSER.prepared_bytes / std::mem::size_of::<Shape>() + 1
+                ],
+                vec![]
+            ))
+            .is_err()
+        );
+        let path = Shape::line(
+            vec![pos2(0.0, 0.0); BrowserTileLimits::BROWSER.path_points + 1],
+            egui::Stroke::new(1.0, Color32::WHITE),
+        );
+        assert!(encode_browser_tile(tile(vec![path], vec![])).is_err());
+        let text = walkers::Text {
+            text: "x".repeat(BrowserTileLimits::BROWSER.text_bytes + 1),
+            position: pos2(0.0, 0.0),
+            font_size: 12.0,
+            text_color: Color32::WHITE,
+            halo_color: Color32::BLACK,
+            halo_width: 1.0,
+            angle: 0.0,
+            placement: walkers::Placement::Point,
         };
-        let bytes = postcard::to_stdvec(&unknown).unwrap();
-        assert!(decode_browser_tile(&bytes).is_err());
+        assert!(encode_browser_tile(tile(vec![], vec![text.clone()])).is_err());
+        assert!(prepare_local_browser_tile(tile(vec![], vec![text])).is_err());
+    }
 
-        let invalid = BrowserPreparedTile {
-            version: BROWSER_TILE_PROTOCOL_VERSION,
-            vertices: vec![BrowserVertex {
-                position: [0.0, 0.0],
-                color: [255; 4],
-            }],
-            indices: vec![0, 1, 2],
+    #[test]
+    fn browser_local_preparation_matches_worker_and_leaves_upload_pending() {
+        let tile = Tile::Vector {
+            shapes: vec![Shape::rect_filled(
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(10.0, 10.0)),
+                0.0,
+                Color32::WHITE,
+            )],
             texts: Vec::new(),
         };
-        let bytes = postcard::to_stdvec(&invalid).unwrap();
-        assert!(decode_browser_tile(&bytes).is_err());
+        let local = prepare_local_browser_tile(tile.clone())
+            .unwrap()
+            .into_prepared()
+            .unwrap();
+        let worker = admit_browser_tile(&encode_browser_tile(tile).unwrap(), 64)
+            .unwrap()
+            .into_prepared()
+            .unwrap();
+        assert_eq!(
+            local.mesh.vertices.as_bytes(),
+            worker.mesh.vertices.as_bytes()
+        );
+        assert_eq!(
+            local.mesh.indices.as_bytes(),
+            worker.mesh.indices.as_bytes()
+        );
+        assert!(!local.mesh.indices.is_empty());
+        assert!(local.gpu.load().is_none());
+        assert!(!local.is_publishable());
+    }
+
+    #[test]
+    fn browser_protocol_rejects_malformed_lengths_and_indices() {
+        assert!(BrowserTilePacketBuilder::new(1, 0, 0, 0).is_err());
+        assert!(BrowserTilePacketBuilder::new(0, 4, 0, 0).is_err());
+        assert!(BrowserTilePacketBuilder::new(0, 0, 1, 0).is_err());
+
+        let vertex = Vertex {
+            position: [0.0; 2],
+            color: [255; 4],
+        };
+        let indices = [0_u32, 1, 2];
+        let mut builder = BrowserTilePacketBuilder::new(
+            std::mem::size_of::<Vertex>(),
+            std::mem::size_of_val(&indices),
+            0,
+            0,
+        )
+        .unwrap();
+        allocate_browser_tile(&mut builder);
+        builder
+            .append(BrowserTileSection::Vertices, bytemuck::bytes_of(&vertex))
+            .unwrap();
+        assert!(
+            builder
+                .append(BrowserTileSection::Indices, bytemuck::cast_slice(&indices))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn browser_direct_copy_validates_indices_without_advancing_on_failure() {
+        let mut builder = BrowserTilePacketBuilder::new(12, 12, 0, 0).unwrap();
+        allocate_browser_tile(&mut builder);
+        builder
+            .append_from(BrowserTileSection::Vertices, 12, |out| out.fill(0))
+            .unwrap();
+        assert!(
+            builder
+                .append_from(BrowserTileSection::Indices, 12, |out| out.fill(255))
+                .is_err()
+        );
+        assert_eq!(
+            builder.next_section(),
+            Some((BrowserTileSection::Indices, 12))
+        );
+        builder
+            .append_from(BrowserTileSection::Indices, 12, |out| out.fill(0))
+            .unwrap();
+        let mesh = builder.finish().unwrap().into_prepared().unwrap();
+        assert_eq!(mesh.mesh.indices.get(0), Some(0));
+        assert_eq!(mesh.mesh.indices.len(), 3);
+    }
+
+    #[test]
+    fn browser_protocol_rejects_oversized_worker_completions_before_decoding() {
+        assert_eq!(
+            BrowserTilePacketBuilder::new(
+                BrowserTileLimits::BROWSER.upload_bytes
+                    - BrowserTileLimits::BROWSER.upload_bytes % std::mem::size_of::<Vertex>()
+                    + std::mem::size_of::<Vertex>(),
+                0,
+                0,
+                0
+            )
+            .err()
+            .as_deref(),
+            Some("prepared map tile exceeded the 16 MiB upload limit")
+        );
+    }
+
+    #[test]
+    fn browser_protocol_rejects_invalid_utf8_ranges_and_oversized_text() {
+        let invalid_utf8 = BrowserTextRecord {
+            string_offset: 0,
+            string_length: 1,
+            position: [0.0; 2],
+            font_size: 12.0,
+            text_color: [255; 4],
+            halo_color: [0; 4],
+            halo_width: 1.0,
+            angle: 0.0,
+            line_placement: 0,
+        };
+        let mut builder =
+            BrowserTilePacketBuilder::new(0, 0, std::mem::size_of::<BrowserTextRecord>(), 1)
+                .unwrap();
+        allocate_browser_tile(&mut builder);
+        builder
+            .append(BrowserTileSection::Strings, &[0xff])
+            .unwrap();
+        assert!(
+            builder
+                .append(
+                    BrowserTileSection::TextRecords,
+                    bytemuck::bytes_of(&invalid_utf8)
+                )
+                .is_err()
+        );
+
+        let outside = BrowserTextRecord {
+            string_offset: 1,
+            ..invalid_utf8
+        };
+        let mut builder =
+            BrowserTilePacketBuilder::new(0, 0, std::mem::size_of::<BrowserTextRecord>(), 1)
+                .unwrap();
+        allocate_browser_tile(&mut builder);
+        builder.append(BrowserTileSection::Strings, b"a").unwrap();
+        assert!(
+            builder
+                .append(
+                    BrowserTileSection::TextRecords,
+                    bytemuck::bytes_of(&outside)
+                )
+                .is_err()
+        );
+
+        let oversized = BrowserTextRecord {
+            string_offset: 0,
+            string_length: u32::try_from(BrowserTileLimits::BROWSER.text_bytes + 1).unwrap(),
+            ..invalid_utf8
+        };
+        let strings = vec![b'a'; BrowserTileLimits::BROWSER.text_bytes + 1];
+        let mut builder = BrowserTilePacketBuilder::new(
+            0,
+            0,
+            std::mem::size_of::<BrowserTextRecord>(),
+            strings.len(),
+        )
+        .unwrap();
+        allocate_browser_tile(&mut builder);
+        builder
+            .append(BrowserTileSection::Strings, &strings)
+            .unwrap();
+        assert!(
+            builder
+                .append(
+                    BrowserTileSection::TextRecords,
+                    bytemuck::bytes_of(&oversized)
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn browser_admission_is_bounded_and_publishes_only_complete_packets() {
+        let vertices = vec![0; std::mem::size_of::<Vertex>() * 100];
+        let builder = BrowserTilePacketBuilder::new(vertices.len(), 0, 0, 0).unwrap();
+        assert!(builder.finish().is_err());
+
+        let mut builder = BrowserTilePacketBuilder::new(vertices.len(), 0, 0, 0).unwrap();
+        allocate_browser_tile(&mut builder);
+        while let Some((section, length)) = builder.next_chunk(64) {
+            assert!(length <= 64);
+            let offset = vertices.len() - builder.next_section().unwrap().1;
+            builder
+                .append(section, &vertices[offset..offset + length])
+                .unwrap();
+        }
+        assert!(builder.finish().is_ok());
+
+        assert!(
+            BrowserTilePacketBuilder::new(0, 0, 0, 0)
+                .unwrap()
+                .finish()
+                .unwrap()
+                .into_prepared()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn typed_and_browser_packed_mesh_buffers_have_identical_gpu_bytes() {
+        let vertices = vec![
+            Vertex {
+                position: [1.0, 2.0],
+                color: [1, 2, 3, 4],
+            },
+            Vertex {
+                position: [3.0, 4.0],
+                color: [5, 6, 7, 8],
+            },
+        ];
+        let typed = MeshBuffer::typed(vertices.clone());
+        let packed =
+            MeshBuffer::<Vertex>::packed(bytemuck::cast_slice(&vertices).to_vec()).unwrap();
+
+        assert_eq!(typed.len(), packed.len());
+        assert_eq!(typed.as_bytes(), packed.as_bytes());
+    }
+
+    fn allocate_browser_tile(builder: &mut BrowserTilePacketBuilder) {
+        while builder.allocate_next().unwrap().is_some() {}
+    }
+
+    #[test]
+    fn browser_packet_construction_defers_all_destination_allocations() {
+        let mut builder = BrowserTilePacketBuilder::new(12 * 100_000, 12, 40, 4).unwrap();
+        assert_eq!(builder.vertices.capacity(), 0);
+        assert_eq!(builder.indices.capacity(), 0);
+        assert_eq!(builder.strings.capacity(), 0);
+        assert_eq!(builder.texts.capacity(), 0);
+        assert!(
+            builder
+                .append(BrowserTileSection::Strings, b"text")
+                .is_err()
+        );
+        assert_eq!(
+            builder.retained_bytes(),
+            2 * (12 * 100_000 + 12) + 40 + 12 + std::mem::size_of::<walkers::Text>()
+        );
+        assert_eq!(builder.allocate_next().unwrap(), Some(4));
+        assert_eq!(builder.vertices.capacity(), 0);
+        assert_eq!(builder.texts.capacity(), 0);
+        assert_eq!(
+            builder.allocate_next().unwrap(),
+            Some(std::mem::size_of::<walkers::Text>())
+        );
+        assert_eq!(builder.vertices.capacity(), 0);
+        assert_eq!(builder.allocate_next().unwrap(), Some(12 * 100_000));
+        assert_eq!(builder.indices.capacity(), 0);
+        assert_eq!(builder.allocate_next().unwrap(), Some(12));
+        assert_eq!(builder.allocate_next().unwrap(), None);
+        builder
+            .append(BrowserTileSection::Strings, b"text")
+            .unwrap();
+    }
+
+    #[test]
+    fn browser_packet_rejects_string_expansion_beyond_retention_allowance() {
+        let record = BrowserTextRecord {
+            string_offset: 0,
+            string_length: 1,
+            position: [0.0; 2],
+            font_size: 12.0,
+            text_color: [255; 4],
+            halo_color: [0; 4],
+            halo_width: 1.0,
+            angle: 0.0,
+            line_placement: 0,
+        };
+        let mut builder = BrowserTilePacketBuilder::new(0, 0, 80, 1).unwrap();
+        allocate_browser_tile(&mut builder);
+        builder.append(BrowserTileSection::Strings, b"a").unwrap();
+        builder
+            .append(BrowserTileSection::TextRecords, bytemuck::bytes_of(&record))
+            .unwrap();
+        assert_eq!(
+            builder
+                .append(BrowserTileSection::TextRecords, bytemuck::bytes_of(&record))
+                .unwrap_err(),
+            "browser tile decoded strings exceeded transferred storage"
+        );
+    }
+
+    fn admit_browser_tile(
+        transfer: &BrowserTileTransfer,
+        maximum_chunk: usize,
+    ) -> Result<BrowserTilePacket, String> {
+        let sources = transfer.parts();
+        let [vertices, indices, text_records, strings] = sources;
+        let mut offsets = [0; 4];
+        let mut builder = BrowserTilePacketBuilder::new(
+            vertices.len(),
+            indices.len(),
+            text_records.len(),
+            strings.len(),
+        )?;
+        allocate_browser_tile(&mut builder);
+        while let Some((section, length)) = builder.next_chunk(maximum_chunk) {
+            let slot = match section {
+                BrowserTileSection::Vertices => 0,
+                BrowserTileSection::Indices => 1,
+                BrowserTileSection::TextRecords => 2,
+                BrowserTileSection::Strings => 3,
+            };
+            let start = offsets[slot];
+            let end = start + length;
+            builder.append(section, &sources[slot][start..end])?;
+            offsets[slot] = end;
+        }
+        builder.finish()
     }
 
     #[test]

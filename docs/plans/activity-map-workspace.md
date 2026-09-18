@@ -8,6 +8,34 @@ The current transitional map proves the workspace behavior, but its loading and 
 eframe's event and render thread. Complete the rendering-isolation refactor below before closing this plan. Build on the
 current staged GPU work in place; do not restore it merely to separate commits.
 
+## Current-slice closing gate (2026-09-18)
+
+Scope is frozen to correctness, security, performance, and maintenance blockers in the complete working-tree diff.
+OffscreenCanvas and the subsequent semantic interaction runner remain follow-up work, not additions to this batch.
+
+- [ ] Resolve the upload-latency tail in `Trace-20260919T000106.json.gz`: distinguish retained offscreen time from
+  visible-tile waiting before treating the 2.669-second maximum as a loading regression or accepting throughput.
+
+On 2026-09-19 the user confirmed a fresh demo data directory and disappearance of the duplicate tooltip, and approved
+committing this slice with the upload-latency investigation retained as follow-up work.
+
+Browser acceptance on 2026-09-18 used the current Nix demo package
+`x5gc9r077g4kjsjj8aybi1sc7635bcj5-garmin-hass-demo-0.1.0`, with emitted asset hash `a149a11cfeeb1a33`. All eight
+initializer/worker tests passed against that package with no skips. At 1440 by 1000, Chrome rendered complete maps after
+cache-bypassed and warm reloads, repeated rapid zoom cycles, and world-wrap panning. Playback, speed-stop clicks, slider
+dragging, and sustained hover worked without a panic. Morocco labels included Arabic and Tifinagh glyphs.
+Screenshot-guided synthetic DOM input exercised these checks; it was not semantic automation or a trusted-input latency
+measurement. The original 3389 by 1324 viewport was restored afterward.
+
+Chrome used WebGL2 through ANGLE on the RTX 4090. The only captured warning was WebGPU adapter discovery reporting
+`No available adapters.` No tile-decoder errors or missing-background warnings appeared during the checks. Sustained
+speed-stop hover did expose two overlapping tooltips, recorded above.
+
+MCP's raw-trace export remains unavailable because of its configured workspace roots. The user supplied
+`Trace-20260919T000106.json.gz`, analyzed with the maintained tool on 2026-09-19; see performance evidence below. Its
+mixed browser-cache results do not independently establish the server-cache state; the fresh-directory confirmation
+comes from the user.
+
 ## Recording boundary
 
 - Replace coordinate-only detail payloads with one portable recording snapshot containing ordered samples, laps, and
@@ -42,138 +70,166 @@ current staged GPU work in place; do not restore it merely to separate commits.
   web frontend fetches and prepares tiles in a dedicated Web Worker. Provider failure leaves the activity, charts,
   imports, and a neutral route canvas usable. Always show attribution.
 
-## Rendering isolation refactor
+## Rendering isolation
 
-### Landed boundary
+### Landed
 
-- The activity UI owns one coherent `MapCamera`; `walkers::Map`, `MapMemory`, UI-side `Tiles::at` traversal, and
-  destructor-triggered request dispatch have been removed. Camera projection, pointer-anchored hard-bounded zoom,
-  panning velocity, inertia, and dateline wrapping now share that state machine.
-- The UI submits a compact `MapViewDemand` camera snapshot. The surface runtime derives visible XYZ coverage and a
-  one-tile prefetch ring, replaces stale unstarted demand, prioritizes visible tiles from the viewport center, and
-  renders only the current visible set rather than every cached zoom level.
-- Remaining work in this section is still real: the host contract exposes tile tasks and decoders, response installation
-  still occurs at the surface boundary on the event-loop thread, scenes are not yet atomically published immutable
-  `Arc`s, and browser GPU uploads still create a complete tile synchronously under an 8 MiB byte cap instead of the
-  specified chunk and time budgets.
+- `MapCamera` alone owns projection, bounded pointer-anchored zoom, panning, inertia, and dateline wrapping. Tile
+  loading cannot alter camera state.
+- The zoom-out floor keeps one world at least as large as the viewport's longest side. Buttons, gestures, route fitting,
+  and resizing share that floor; shrinking the viewport does not force zoom-out.
+- Tile placement enumerates visible horizontal world copies; GPU instancing reuses one upload per canonical tile.
+  Native/browser labels and software painting share the placement calculation. Regressions cover wide views, fractional
+  zoom, dateline crossings, fetch/upload deduplication, and actual GPU pixel readback.
+- The UI submits a latest-only `MapViewDemand` and acquires one immutable `MapScene` per frame. That snapshot feeds GPU
+  assembly, labels, status, and metrics; later publications cannot mutate an acquired scene.
+- On native targets, a per-surface worker owns `TileStore`, installs completions, derives visible and prefetched XYZ
+  coverage, schedules center-first requests, and publishes through `ArcSwap`. Prepared resources are shared rather than
+  copied. The event loop retains input, route lookup, overlays, frame assembly, and draw submission.
+- The browser uses the same surface driver and scene contract on its single thread. Its Web Worker already performs
+  fetch, decode, styling, tessellation, route preparation, and label preparation with transferred owned buffers.
+- Host and module worker share one envelope codec. `BrowserTileLimits` bounds encoded input, preparation complexity, and
+  output. One bounded MVT decode checks geometry before styling; native and browser preparation share tessellation.
+- Low-zoom multilingual dictionaries have an 8 MiB codec-element budget and 131,072 property-reference limit, calibrated
+  against world, Europe/Africa, and Asia tiles. Encoded input and expanded-property bytes remain capped at 2 MiB and 8
+  MiB. Real-tile regressions preserve both themes' styling and preparation; synthetic inputs still reject amplification.
+- Bundled Arabic and Tifinagh font fallbacks cover the reported North African label boxes without changing map names.
+  The main UI and label worker share these fonts; other Unicode scripts are not universally covered.
+- Browser tiles cross one versioned four-buffer boundary: packed vertices, packed indices, fixed-width text records, and
+  UTF-8 text storage. One admission state machine owns the transferred buffers, validation, cursors, scratch space,
+  frame budget, and final task. Its message callback only validates and enqueues, without allocating destination
+  buffers. The queue retains at most 64 packets and 64 MiB of accounted payload (sources, destinations, and
+  reconstructed text; allocator and transport overhead are additional). Animation frames reserve one destination vector
+  per step, copy at most 256 KiB per chunk and 4 MiB per frame, and stop starting steps after 1.5 ms. Allocations are
+  indivisible and can exceed that soft time target; separate allocation timings and the total admission timer include
+  their cost. Frames reconstruct text incrementally, validate every index, and publish only a complete valid packet. The
+  packed geometry then enters the existing staged WGPU uploader without another geometry decode or whole-tile copy.
+- Route/label replies retain JS buffers until animation-frame admission. The request ledger rejects stale ownership
+  before copying, with at most one result completed per frame. Copy/decode/completion remains indivisible; the size caps
+  and shared soft time budget do not guarantee a maximum frame duration.
+- Browser tile uploads use one per-surface state machine in the WGPU preparation callback. Resource allocation is split
+  into bounded stages, writes are at most 256 KiB, each frame admits at most 4 MiB within a measured 1.5 ms budget, and
+  partial tiles remain unpublished. Hidden partial uploads are retained behind byte and entry limits so a flick does not
+  discard useful work.
+- Routes are immutable world-space GPU geometry with shader speed colours and antialiasing. Tile placement is derived
+  from immutable coordinates and the current camera. Rendering is clipped to the map, hover uses a persistent spatial
+  index, labels wait for camera motion to settle, and outward wheel input at a zoom bound is ignored.
 
-### Current contention and target boundary
+### Remaining current-slice acceptance
 
-- Native tile disk/network access, MVT decoding, styling, initial geometry tessellation, route preparation, and label
-  preparation are already off-thread. The event-loop surface boundary still drains completions, derives a small tile
-  coverage set, and admits browser uploads; browser uploads still create complete WGPU resources synchronously.
-- Inertial movement is classified as camera motion and label work waits for the camera to settle. Route hover uses the
-  persistent uniform-grid index instead of projecting and hit-testing the complete route; the remaining concern is
-  scene publication and upload work at the event-loop boundary rather than route-query complexity.
-- eframe performs application update, egui tessellation, and paint submission sequentially on its event-loop thread.
-  After this refactor that thread may perform only input and camera integration, constant-time route queries, light
-  controls and markers, one camera-uniform update, immutable-scene acquisition, and draw submission.
-- Missing areas remain blank until complete resources are ready. Tile, label, or route publication must never block,
-  reset, jump, or otherwise modify drag, wheel zoom, or inertial camera movement.
+- The user confirmed horizontal world repetition and the viewport zoom floor visually. Rebuild and recheck these,
+  low-zoom coverage, and mixed-script labels against the final browser bundle. The low-zoom fixtures also run in the
+  emitted-WASM worker test during the HASS build; native tests do not replace that check or visual acceptance. Native
+  GPU pixel readback passes; the separate headless GL run could not create a device.
+- Repeat throughput acceptance after restoring low-zoom coverage. The new lifecycle markers are present in
+  `broken.json.gz`, but rejected tiles prevent a complete loading comparison. Upload latency ends at GPU resource
+  publication, not screen presentation.
+- Repeat the deterministic browser interaction trace against the bounded admission path. User Timing exposes transfer
+  admission, allocation, text reconstruction, WGPU preparation, and WGPU draw as separate trace events. Analyze the raw
+  trace with `just hass::profile-analyze TRACE`; the analyzer selects the HASS renderer process from the page URL
+  instead of a browser or tool-provided headline. Require tile-admission and tile-allocation events and no
+  worker-fallback events or main-thread tile requests before attributing results to worker execution.
+- The analyzer also reports tile request latency/cache outcomes and worker task activity. Use
+  `just hass::profile-analyze TRACE --timeline` for one-second loading windows, or `--json` for request-level data.
+  Request latency includes event delivery; worker replies include route/label results. End-to-end per-tile
+  time-to-visible still needs correlated application markers.
 
-### Runtime and public interfaces
+### Deferred renderer work (not part of this closing batch)
 
-- Introduce a shared map-rendering core with `MapCamera`, `MapViewDemand`, `MapRouteSource`, immutable `MapScene`, and
-  `MapPerfSnapshot` types. `MapCamera` alone owns projection, pointer-anchored zoom, hard zoom bounds, drag velocity,
-  and inertial integration.
-- Expose a cloneable `MapRuntimeHandle` and one `MapSurfaceHandle` per activity or FIT-preview map. The UI submits the
-  latest view and route revisions through the surface and reads its latest ready scene and performance snapshot.
-- Remove `MapTileRequest`, `MapTileResponse`, `MapTileDecoder`, `take_map_tile_requests`, and `resolve_map_tile` from
-  the UI-facing host contract after both hosts migrate. Tile discovery, fetching, preparation, caching, and publication
-  are runtime responsibilities rather than activity-workspace responsibilities.
-- Publish complete immutable scenes atomically. Native uses a lock-free `Arc` scene swap; browser uses transferred
-  buffers and a single-thread scene slot. Render callbacks never lock a mutable frame or expose a partially uploaded
-  tile.
+- Route and label ready state remains painter-owned. Move it into the immutable runtime scene, replace the quadratic
+  label collision scan with a spatial grid, and retain same-zoom label translation plus zoom invalidation.
+- Remove the public tile task/decoder completion API after desktop and HASS hosts move behind the runtime. Hosts should
+  provide transport and cache services, not manipulate activity-view tile state.
+- After closing the current browser slice, move map GPU uploads and drawing to a worker-owned `OffscreenCanvas`. Extract
+  the renderer from egui callbacks first and verify parity, then transfer a map-only canvas and retain prepared geometry
+  and GPU resources in the worker. Keep application UI on the main thread. Verify canvas placement, clipping, input
+  alignment, resize/DPR changes, teardown, and device-loss reporting. Native 4x MSAA remains unchanged.
+- Keep offscreen chart cards dormant and cache chart analysis by activity, axis, lap, units, theme, and width.
+  Map-driven repaints must preserve the shared cursor, playback, lap selection, and map/chart sample-index
+  synchronization.
 
-### Scheduling and rendering pipeline
+### Deferred UI issues (not part of this closing batch)
 
-- Coalesce camera demands so workers always process the newest generation. Calculate visible XYZ tiles outside the UI,
-  add a one-tile prefetch ring, prioritize them from the viewport center outward, and discard stale queued work while
-  retaining ready cache entries.
-- Split native work into bounded asynchronous cache/network I/O, dedicated CPU preparation, and WGPU resource creation
-  and upload using cloned thread-safe device and queue handles. The WGPU callback receives ready buffers and performs
-  only scissored draws plus one shared camera-uniform update; it creates no tile or route resources.
-- Add a dedicated HASS Web Worker which fetches, decodes, styles, tessellates, performs label layout, and returns
-  transferable POD vertex, index, label, and atlas buffers. This requires neither shared WebAssembly memory nor
-  cross-origin isolation.
-- Keep the existing eframe browser canvas. Split uploads into chunks no larger than 256 KiB and admit at most 512 KiB
-  within a measured 1.5 ms budget per frame. Publish a tile only after every chunk is uploaded. Prepared tiles and
-  labels may appear live during movement without making the camera wait for them.
-- Treat a map-only `OffscreenCanvas` renderer as a worthwhile future slice if profiling after this work shows that GPU
-  upload or eframe painting still causes visible web stalls. Moving the entire eframe application into a worker is
-  disproportionately expensive and is not necessary to fix map interaction. Native 4x antialiasing currently uses
-  eframe's existing full-window multisampled WGPU target and resolve path, so it requires no private offscreen
-  compositor but does charge every native UI frame for the multisampled target. Eframe's web painter remains
-  single-sampled; implementing map-only web MSAA would therefore trigger the map-only `OffscreenCanvas` slice rather
-  than moving the complete application.
-- Render tile positions from immutable tile coordinates and the current camera in the shader. Do not rewrite per-tile
-  transform buffers, scan the full cache, or retessellate geometry when the camera changes.
+- [ ] Keep chart endpoint tick labels inside the chart card's content bounds. Reported on 2026-09-18: the elevation
+  chart's `0.0 km` label extends left beyond the plot/content edge. Check both endpoints, narrow layouts, and time and
+  distance axes; add a visual regression check when fixing the layout.
 
-### Routes, labels, and input
+### Next step after OffscreenCanvas: semantic interaction runner
 
-- Prepare a route once per activity or selected-lap revision as world-space GPU geometry. Store normalized speed per
-  route vertex and apply the speed colour ramp in the shader; camera movement must not retessellate or deform it. Build
-  shared, miter-limited join offsets during route preparation and analytically antialias both lateral edges and exposed
-  caps so independent segment rectangles cannot leave cracks or translucent overlap wedges at route bends.
-- Apply an explicit map-rectangle scissor in the native and browser WGPU backends so tiles, routes, labels, and cursor
-  overlays cannot paint into charts or sidebars. Project start, end, selected-sample, and highlighted-lap overlays from
-  the same camera snapshot used by the map scene.
-- Build a world-space uniform-grid index over route segments once. Convert the pointer to world coordinates and test
-  only nearby segments while preserving exact original sample-index reporting and synchronized map/chart cursors.
-- Perform label sizing, collision placement, and tessellation in workers using the bundled Noto Sans fonts and a spatial
-  collision grid rather than the current quadratic occupied-area scan. Publish atlas changes and label meshes as
-  camera-anchored batches: translate an existing batch during same-zoom movement and omit stale labels after a zoom
-  change until a matching batch is ready.
-- Clamp wheel intent before changing camera zoom. An outward wheel event at either bound is ignored and cannot produce a
-  transient overshoot followed by a snap-back. Loading and texture publication remain independent from inertia.
+Order: close the browser acceptance checks above, complete and validate the map-only OffscreenCanvas slice, then
+implement this runner. It is not a prerequisite for OffscreenCanvas.
 
-### Activity-view isolation
+- Reuse egui's AccessKit semantics and `egui_kittest`/`kittest` queries. Complete custom-widget semantics and use stable
+  identifiers where labels are ambiguous or translated; do not build a second widget lookup tree.
+- Share one scenario runner between built-in demos and automated stress tests. Target controls, maps, and charts
+  semantically; resolve current bounds for clicks, drags, flicks, wheel zoom, and scrubbing. Inject normal input rather
+  than directly changing application or camera state. Include readiness waits, assertions, deadlines, cancellation, and
+  explicit failure results. Restrict automation to explicitly enabled demo/test sessions.
+- Provide a small browser control API for starting a named scenario, reading status/results, and cancelling it. Chrome
+  DevTools MCP starts a trace with automatic stopping disabled, starts the scenario, observes completion or failure, and
+  stops/saves the trace. Do not use per-gesture MCP round trips to pace the workload.
+- Emit scenario/phase timing markers and record viewport, DPR, graphics backend, scheduled versus actual action timing,
+  missed deadlines, and completed workload. Keep warm-cache interaction and tile-arrival stress separate. A stalled run
+  must not pass by silently executing fewer actions. Measure the runner's overhead.
+- Initial coverage: select a demo activity, pan/flick/zoom, operate playback, select/reset a lap, and scrub linked
+  charts. Reuse scenarios as regression tests for subsequent renderer changes. Input injected inside egui does not
+  validate browser event dispatch latency, trusted gestures, or native dialogs; test those separately.
 
-- Make the chart scroll area viewport-aware. Offscreen chart cards reserve stable layout space without constructing an
-  `egui_plot` widget, while intersecting cards retain the existing appearance and linked interaction behavior.
-- Cache chart statistics, downsampled series, and layout inputs by activity, axis, lap, units, theme, and width. During
-  map-driven repaint frames, only visible cards and their small cursor or lap overlays may perform chart work.
-- Preserve the authoritative sample cursor, chart appearance, playback, selected-lap behavior, and index-based map/chart
-  synchronization. This refactor changes ownership and scheduling, not those interaction contracts.
+### Performance evidence
 
-### Instrumentation and performance gate
-
-- Expand the debug FPS readout with UI CPU p50/p95, scene generation, worker and upload backlogs, label time,
-  route-query time, uploaded bytes, and stale-work count. Add trace spans around camera update, scene acquisition, chart
-  construction, render preparation, and draw submission.
-- On the bundled 67.92 km activity at roughly 1100 by 720 pixels, sustained dragging, wheel zoom, and inertial movement
-  target 60 FPS with UI CPU p95 below 16.7 ms. No tile-arrival or label-publication stall may exceed 33 ms, and map
-  loading must not alter the camera trajectory.
-- Capture native interaction with `just desktop::profile demo 00-baseline`; close the application after representative
-  panning, wheel zoom, and inertia, then inspect it with `just desktop::profile-load 00-baseline`. Captures require
-  unrestricted Linux perf events rather than silently accepting incomplete samples. The first accurate profiling build
-  recompiles the optimized dependency graph with frame pointers and line-table debug information, and may be pre-warmed
-  with `just desktop::profile-build demo`; interrupted builds retain Cargo's completed work and create no report. Each
-  named report retains the raw Samply profile, presymbolication data, runtime measurements, and provenance manifest
-  unchanged, then derives a separate `combined.json.gz` with desktop frame timing, map UI/scene/query/label timing,
-  render callback timing, worker backlog, tile state, upload pressure, and stale-work counters. Cancellation after
-  capture starts is a terminal report state and preserves raw evidence without a traceback. The profiling Cargo profile
-  retains release optimization, debug information, and frame pointers without changing shipped release artifacts.
-- Summarize a capture headlessly with `just desktop::profile-analyze 00-baseline` and compare phases with
-  `just desktop::profile-compare 00-baseline 01-antialiasing`. The analyzer resolves Samply's preserved symbol sidecar,
-  including inline frames, reports per-stack inclusive and self CPU samples, verifies every artifact against the
-  manifest, and refuses incompatible comparisons by default. Idle redraw gaps remain separate from uncapped intervals
-  following dragging, wheel zoom, or inertial camera movement. At least 120 samples and two seconds of camera motion are
-  required before evaluating the 16.7 ms/33 ms interaction gate.
-- The user-captured `01-antialiasing` report measured 433 interaction intervals across 7.25 seconds: p95 was 17.544 ms,
-  maximum was 34.638 ms, complete desktop UI p95 was 1.022 ms, and map UI p95 was 0.709 ms. It therefore narrowly failed
-  the strict interaction gate despite remaining visually smooth. Its sampled CPU/core comparison with `00-baseline` is
-  only directional because the captures used different user-driven durations.
-- The clean `02-route-aa` capture after route joins and corrected interaction-tail telemetry covered 1,006 interaction
-  intervals across 17.1 seconds. Interaction p95 was 21.086 ms and the maximum was 34.196 ms, while complete desktop UI
-  p95 remained 1.145 ms, map UI p95 was 0.838 ms, render draw p95 was 0.049 ms, and sampled CPU averaged 0.291 cores.
-  The strict cadence gate still fails, but the application-side measurements and the user's smooth subjective result do
-  not implicate map CPU or draw submission as the limiting work. Retain native 4x MSAA and investigate window-system or
-  presentation cadence only if interaction becomes visibly uneven.
-- Keep the route stable, clipped, speed-coloured, and synchronized with charts at every zoom while tiles arrive. Verify
-  missing-background behavior by leaving unprepared regions blank rather than falling back to synchronous work.
-- Do not launch a GUI from unattended development or validation commands. Interactive performance evidence is user-run
-  through the debug overlay; automated validation remains headless.
+- `Trace-20260919T000106.json.gz`: 368 interaction frame intervals, p95 16.71 ms, maximum 16.99 ms, none above 33 ms;
+  one gap of 37.86 ms among all 1,428 intervals, outside the analyzer's interaction windows. No blocking microtasks
+  above one 60 Hz frame and no worker-fallback markers. All 342 tile requests originated in the worker and returned HTTP
+  200, with no transport failures or unfinished requests; 254 were browser-cached and 88 uncached. This confirms near-60
+  Hz interaction, not a literal pass of the documented 16.7 ms p95 ceiling or proof of presentation FPS. Admission work
+  p95/max was 1.50/1.90 ms, allocation max 0.20 ms, WGPU preparation max 1.50 ms, and draw max 0.20 ms.
+  Request-to-finish p95/max was 277.53/611.37 ms. Upload queue-to-publication p95/p99/max was 34.00/1,467.50/2,669.00 ms
+  across 145 publications. The upload timer keeps running while retained tiles are offscreen; these durations are not
+  main-thread blocking time. Without per-tile visibility correlation, the trace cannot establish whether the tail is
+  harmless retention or delayed visible coverage. The user separately confirmed a fresh demo data directory and post-fix
+  tooltip appearance.
+- `broken.json.gz` contains all three new lifecycle markers. Admission wait/total p95 is 16.6/22.0 ms; upload latency
+  p95 is 17.5 ms. All 314 tile GETs returned HTTP 200, with no recorded transport failures. Interaction intervals have
+  p95 16.73 ms, maximum 24.84 ms, and none above 33 ms. Across all frames, 215 intervals exceed 33 ms; the trace does
+  not by itself attribute these gaps to tile work. Low-zoom decoder failures keep browser acceptance open.
+- The user confirmed reliable coverage after the tile-admission and polygon-limit fixes. The accompanying trace,
+  `Trace-20260918T145001.json.gz`, has 264 worker tile GETs (239 cached), 3.18 ms median request-to-finish time, and
+  admission median/p95 of 0.2/0.5 ms. Interaction-frame intervals have p95 16.71 ms, maximum 21.61 ms, and none above 33
+  ms. The user reported slow tile arrival under the former 512 KiB/frame ceilings. This is the baseline for the pending
+  throughput comparison.
+- The interaction target is 60 FPS, UI CPU p95 below 16.7 ms, and no tile or label publication stall above 33 ms on the
+  bundled 67.92 km activity at roughly 1100 by 720 pixels. Missing resources leave blank map regions and never disturb
+  drag, wheel, or inertia.
+- Capture with `just desktop::profile demo NAME --gfx`; analyze with `just desktop::profile-analyze NAME`; compare with
+  `just desktop::profile-compare BEFORE AFTER`. Reports preserve raw Samply data and provenance while adding runtime
+  counters. The gate requires at least 120 interaction intervals and two seconds of camera motion.
+- `01-antialiasing` recorded 433 interaction intervals over 7.25 seconds: 17.544 ms p95, 34.638 ms maximum, 1.022 ms UI
+  p95, and 0.709 ms map UI p95. `02-route-aa` recorded 1,006 intervals over 17.1 seconds: 21.086 ms p95, 34.196 ms
+  maximum, 1.145 ms UI p95, 0.838 ms map UI p95, 0.049 ms render-draw p95, and 0.291 sampled CPU cores. Both narrowly
+  fail the cadence gate while application CPU and draw measurements remain low; investigate presentation cadence only if
+  interaction becomes visibly uneven.
+- The 2026-09-17 browser trace before bounded admission recorded smooth panning near 16.77 ms p95, then tile-completion
+  bursts at 75.77--152.76 ms p95 with a 224.88 ms maximum. Forty-two blocking completion microtasks consumed 2.396
+  seconds in total and reached 168.69 ms. Pointer and wheel dispatch stayed below 0.24 ms, GPU tasks below 14.53 ms, and
+  compositor tasks below 0.54 ms. The completion callback, not input, compositing, or GPU execution, was the identified
+  bottleneck. The repeat trace must keep interaction p95 at or below 16.7 ms, contain no tile-publication stall above 33
+  ms, and leave GPU/compositor cost materially unchanged.
+- Never launch a GUI from unattended validation. Interactive profiling is user-run; automated checks remain headless.
+- The 27.2-second `longer.gz` capture had 245 main-thread tile requests, no tile-admission events, and completion
+  microtasks reaching 70.97 ms. Its preceding startup capture shows the worker requesting the unhashed WASM filename and
+  receiving HTTP 404. These captures exercised local fallback, not bounded admission. Worker initialization now receives
+  the emitted JS and WASM URLs from the document's preload links.
+- `Trace-20260917T220636.json.gz` confirms worker execution over 35.2 seconds: 343 worker tile requests, zero
+  main-thread tile requests, and no fallback events. Reanalysis using separate pointer-contact and wheel-burst windows
+  selects 457 overlapping frame intervals: 16.71 ms p95, 16.80 ms p99, and 20.53 ms maximum. Wheel windows include a 200
+  ms tail; these are input-based windows, not measured camera motion or presentation FPS. Across all 2,047 frame
+  intervals, the maximum was 31.57 ms. No main-thread task exceeded 33 ms and no microtask exceeded 16.7 ms. Tile
+  admission measured 0.30 ms p95 and 0.80 ms maximum across 771 events, before destination allocation moved into that
+  timer. A new capture is needed to validate the allocation-inclusive timing. The two manual captures are not identical
+  workloads.
+- `GARMIN_TEST_WEB_ROOT=/path/to/built/share/garmin-hass/web node infra/javascript/map-worker.test.mjs` checks the
+  emitted WASM's ready handshake and four-buffer tile transfer headlessly, with fetch responses supplied by the test.
+  Analyzer regression tests cover navigation, paired and zero-duration Chrome measures, and fallback diagnostics.
 
 ## Workspace and interaction
 
@@ -194,8 +250,8 @@ current staged GPU work in place; do not restore it merely to separate commits.
   space clears. Missing measurements omit only their point marker.
 - Lap hover highlights its interval without moving the viewport. Lap click selects and fits its map/chart range and
   restricts playback. A full-activity action resets the range.
-- Put quiet floating control clusters on the map: fit at top-left, vertical zoom at top-right, play/pause with a cycling
-  0.5x/1x/2x speed control at bottom-center, and full-activity reset at bottom-left when a lap is selected. Direct wheel
+- Put quiet floating control clusters on the map: fit at top-left, vertical zoom at top-right, play/stop with a stepped
+  0.5x/1x/2x speed slider at bottom-center, and full-activity reset at bottom-left when a lap is selected. Direct wheel
   zooms the map. Playback drives the shared sample index over 30 seconds at 1x, skips timer-stopped intervals, begins at
   the pinned/paused sample, and restarts after completion. Passive hover cannot override playback; clicking or scrubbing
   pauses and pins. Keep the fitted viewport stable and interpolate the map marker only between adjacent valid
@@ -215,8 +271,10 @@ current staged GPU work in place; do not restore it merely to separate commits.
   tile priority, stale-work rejection, cache eviction, and atomic scene publication with unit tests.
 - Compare uniform-grid route queries against brute-force nearest-segment results, including missing-coordinate segments
   and wrapped longitudes. Cover deterministic label placement, camera rebasing, and zoom invalidation.
-- Cover browser upload chunking and budget accounting without wall-clock-sensitive CI assertions. Verify that partial
-  uploads cannot become drawable and that the native and browser WGPU paths apply the same map scissor.
+- Cover browser transfer versioning, malformed lengths, indices and UTF-8, empty and oversized packets, bounded
+  admission, stale completions, and atomic publication. Cover browser upload chunking and budget accounting without
+  wall-clock-sensitive CI assertions. Verify that native typed geometry and browser packed geometry expose identical
+  WGPU bytes, partial uploads cannot become drawable, and both paths apply the same map scissor.
 - Cover TileJSON validation, cache freshness and eviction, offline hits/misses, response limits, concurrent
   deduplication, retries, HASS relative routes, ETags, CSP, and cache-policy exclusions with local fixtures and servers.
 - Maintain deterministic gallery scenes for wide/compact and light/dark layouts, synchronized hover, pinning, playback,

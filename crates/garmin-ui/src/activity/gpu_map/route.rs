@@ -177,8 +177,8 @@ pub(super) fn encode_browser_route(bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 pub(super) fn decode_browser_route(bytes: &[u8]) -> Result<Option<PreparedCpuRoute>, String> {
-    const MAX_ROUTE_RESULT_BYTES: usize = 32 * 1024 * 1024;
-    if bytes.len() > MAX_ROUTE_RESULT_BYTES {
+    if bytes.len() > crate::activity::map_runtime::BrowserWorkerTaskKind::Route.result_byte_limit()
+    {
         return Err("prepared map route exceeded the 32 MiB browser limit".to_owned());
     }
     let result: RouteResultWire = postcard::from_bytes(bytes).map_err(|error| error.to_string())?;

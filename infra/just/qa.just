@@ -9,6 +9,10 @@ full:
     just in-shell nix run {{ flake }}#validate
     just in-shell nix run {{ flake }}#project-lint
 
+# Lint the actual browser target using the pinned Nix WASM toolchain.
+wasm:
+    just in-shell nix run {{ flake }}#wasm-lint
+
 # Evaluate and build every pure Nix flake check.
 check:
     just in-shell nix flake check {{ flake }}

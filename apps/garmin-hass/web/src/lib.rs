@@ -1,5 +1,6 @@
 #![cfg(target_arch = "wasm32")]
 
+mod browser_timing;
 mod map_worker;
 
 use bytes::Bytes;
@@ -34,12 +35,35 @@ const MAX_AVATAR_UPLOAD_BYTES: f64 = 10.0 * 1024.0 * 1024.0;
 
 use map_worker::BrowserMapBackend;
 
+struct BrowserMapMetrics;
+
+impl activity::map_runtime::MapMetricsSink for BrowserMapMetrics {
+    fn record(&self, _sample: activity::map_runtime::MapPerformanceSample) {}
+
+    fn record_upload(&self, milliseconds: f64) {
+        browser_timing::measure_duration("garmin.map.tile-upload-latency", milliseconds);
+    }
+
+    fn record_render(&self, sample: activity::map_runtime::MapRenderPerformanceSample) {
+        let name = match sample.phase {
+            activity::map_runtime::MapRenderPhase::Prepare => "garmin.map.wgpu-prepare",
+            activity::map_runtime::MapRenderPhase::Draw => "garmin.map.wgpu-draw",
+        };
+        browser_timing::measure_duration(name, f64::from(sample.milliseconds));
+    }
+}
+
+/// Start the browser application, or leave initialization to the map worker.
+///
+/// # Errors
+/// Returns an error when the application's canvas is missing or has the wrong element type.
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
     let Some(window) = web_sys::window() else {
         // The same generated module is loaded by the dedicated map worker.
         return Ok(());
     };
+    install_browser_panic_surface();
     let canvas = window
         .document()
         .and_then(|document| document.get_element_by_id(CANVAS_ID))
@@ -56,6 +80,7 @@ pub fn start() -> Result<(), JsValue> {
                     let render_state = creation.wgpu_render_state.as_ref().ok_or_else(|| {
                         io::Error::other("eframe did not provide the required WGPU render state")
                     })?;
+                    report_graphics_adapter(render_state);
                     let map_renderer = activity::install_wgpu_map(render_state, 1);
                     Ok(Box::new(App::new(creation.egui_ctx.clone(), map_renderer)?))
                 }),
@@ -63,13 +88,21 @@ pub fn start() -> Result<(), JsValue> {
             .await;
         match result {
             Ok(()) => identify_text_agent(&canvas),
-            Err(error) => show_startup_error(&format!(
-                "Could not start Garmin Toolkit: {}",
-                js_reason(&error)
-            )),
+            Err(error) => show_browser_failure(&js_reason(&error)),
         }
     });
     Ok(())
+}
+
+fn report_graphics_adapter(render_state: &eframe::egui_wgpu::RenderState) {
+    let adapter = render_state.adapter.get_info();
+    web_sys::console::info_1(
+        &format!(
+            "Garmin Toolkit graphics backend: {:?} ({})",
+            adapter.backend, adapter.name
+        )
+        .into(),
+    );
 }
 
 fn identify_text_agent(canvas: &web_sys::HtmlCanvasElement) {
@@ -118,7 +151,8 @@ impl App {
         let map_runtime = activity::map_runtime::MapRuntimeHandle::new(
             BrowserMapBackend::new(),
             activity::map_runtime::Renderer::wgpu(map_renderer),
-        );
+        )
+        .with_metrics(BrowserMapMetrics);
         let activity_workspace = activity::Workspace::new(&map_runtime);
         Ok(Self {
             context,
@@ -210,7 +244,6 @@ impl App {
         &mut self,
         ui: &mut Ui,
         product_name: &str,
-        profiles: &[ProfileSnapshot],
         loaded: bool,
         connected: bool,
         error: Option<&str>,
@@ -287,7 +320,10 @@ impl App {
             },
         );
         match output.inner {
-            Some(profile::Action::Select(index)) => self.select_profile(index, profiles),
+            Some(profile::Action::Select(index)) => {
+                let profiles = Rc::clone(&self.profiles);
+                self.select_profile(index, &profiles);
+            }
             Some(profile::Action::Create) => {
                 self.create_profile = Some(profile::CreateState::default());
             }
@@ -300,12 +336,12 @@ impl App {
         &mut self,
         ui: &mut Ui,
         product_name: &str,
-        profiles: &[ProfileSnapshot],
         devices: &[DeviceSnapshot],
         preferences_saving: bool,
         device_catalog_loading: Option<&str>,
         notice: Option<&Notice>,
     ) {
+        let profiles = Rc::clone(&self.profiles);
         let mut device_browser = self.device_browser.take();
         let Some(profile_index) = self
             .selected_profile
@@ -385,15 +421,19 @@ impl App {
             _ => None,
         };
         self.device_browser = device_browser;
-        self.handle_page_action(output.inner, profiles);
-        self.handle_shell_action(output.action, profiles, devices);
+        self.handle_page_action(output.inner, &profiles);
+        self.handle_shell_action(output.action, &profiles, devices);
         if let Some(action) = browser_action {
             self.handle_device_browser_action(action);
         }
     }
 
     fn show_offline(&self, ui: &Ui, since_milliseconds: f64) {
-        let seconds = ((js_sys::Date::now() - since_milliseconds).max(0.0) / 1_000.0) as u64;
+        let seconds = Duration::try_from_secs_f64(
+            (js_sys::Date::now() - since_milliseconds).max(0.0) / 1_000.0,
+        )
+        .unwrap_or_default()
+        .as_secs();
         let duration = offline::format_duration(seconds);
         let title = format_message!(&self.intl, default_message: "Connection lost");
         let message = format_message!(
@@ -458,6 +498,14 @@ impl App {
         else {
             return;
         };
+        self.dispatch_device_browser_action(action, device_key);
+    }
+
+    fn dispatch_device_browser_action(
+        &mut self,
+        action: device_browser::Action,
+        device_key: String,
+    ) {
         match action {
             device_browser::Action::Download(selection) => spawn_device_download(
                 Rc::clone(&self.shared),
@@ -822,65 +870,12 @@ impl App {
     }
 }
 
-impl eframe::App for App {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        if self.first_frame {
-            self.first_frame = false;
-            remove_loading_overlay();
-        }
-        let (
-            devices,
-            profiles,
-            loaded,
-            connected,
-            error,
-            notice,
-            activity_detail,
-            preferences_saving,
-            avatar_saving,
-            avatar_draft,
-            avatar_finished,
-            device_catalog,
-            device_catalog_loading,
-            device_browser_refresh,
-            device_fit_preview,
-            device_fit_import,
-            created,
-            creating,
-            create_problem,
-            disconnected_since,
-            deployment_mode,
-        ) = {
+impl App {
+    fn apply_avatar_results(&mut self) {
+        let (avatar_draft, avatar_finished) = {
             let mut state = self.shared.borrow_mut();
-            (
-                Rc::clone(&state.snapshots),
-                Rc::clone(&state.profiles),
-                state.profiles_loaded,
-                state.client.is_some(),
-                state.error.clone(),
-                state.notice.clone(),
-                state.activity_detail.as_ref().map(Rc::clone),
-                state.preferences_saving,
-                state.avatar_saving,
-                state.avatar_draft.take(),
-                state.avatar_finished.take(),
-                state.device_catalog.take(),
-                state.device_catalog_loading.clone(),
-                state.device_browser_refresh.take(),
-                state.device_fit_preview.take(),
-                state.device_fit_import.take(),
-                state.created_profile,
-                state.profile_creating,
-                state.profile_create_problem.clone(),
-                state.disconnected_since_milliseconds,
-                state.deployment_mode,
-            )
+            (state.avatar_draft.take(), state.avatar_finished.take())
         };
-        let product_name = match deployment_mode {
-            DeploymentMode::Production => "Garmin Toolkit",
-            DeploymentMode::Demo => "Garmin Toolkit Demo",
-        };
-        self.sync_profiles(profiles);
         if let Some(draft) = avatar_draft {
             self.avatar_editor = Some(AvatarEditor::from_draft(&self.context, draft));
         }
@@ -891,6 +886,16 @@ impl eframe::App for App {
                 editor.submitting = false;
             }
         }
+    }
+
+    fn apply_device_catalogs(&mut self, devices: &[DeviceSnapshot]) {
+        let (device_catalog, device_browser_refresh) = {
+            let mut state = self.shared.borrow_mut();
+            (
+                state.device_catalog.take(),
+                state.device_browser_refresh.take(),
+            )
+        };
         if let Some((requested_key, result)) = device_catalog
             && matches!(&self.page, Page::Device(key) if key == &requested_key)
         {
@@ -942,6 +947,16 @@ impl eframe::App for App {
                 }
             }
         }
+    }
+
+    fn apply_device_fit_results(&mut self) {
+        let (device_fit_preview, device_fit_import) = {
+            let mut state = self.shared.borrow_mut();
+            (
+                state.device_fit_preview.take(),
+                state.device_fit_import.take(),
+            )
+        };
         if let Some((requested_key, target, result)) = device_fit_preview
             && self
                 .device_browser
@@ -983,6 +998,82 @@ impl eframe::App for App {
             });
             self.context.request_repaint();
         }
+    }
+
+    fn apply_profile_creation(&mut self, profiles: &[ProfileSnapshot]) {
+        let (created, creating, create_problem) = {
+            let state = self.shared.borrow();
+            (
+                state.created_profile,
+                state.profile_creating,
+                state.profile_create_problem.clone(),
+            )
+        };
+        if let Some(user_id) = created {
+            if let Some(index) = profiles
+                .iter()
+                .position(|profile| profile.user.id() == user_id)
+            {
+                self.select_profile(index, profiles);
+                self.create_profile = None;
+                self.shared.borrow_mut().created_profile = None;
+            }
+        } else if let Some(problem) = create_problem {
+            if let Some(dialog) = self.create_profile.as_mut() {
+                dialog.set_problem(problem);
+            }
+            self.shared.borrow_mut().profile_create_problem = None;
+        } else if !creating
+            && let Some(dialog) = self.create_profile.as_mut()
+            && dialog.is_submitting()
+        {
+            dialog.set_submitting(false);
+        }
+    }
+}
+
+impl eframe::App for App {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        if self.first_frame {
+            self.first_frame = false;
+            hide_loading_overlay();
+        }
+        let (
+            devices,
+            profiles,
+            loaded,
+            connected,
+            error,
+            notice,
+            activity_detail,
+            preferences_saving,
+            device_catalog_loading,
+            disconnected_since,
+            deployment_mode,
+        ) = {
+            let state = self.shared.borrow();
+            (
+                Rc::clone(&state.snapshots),
+                Rc::clone(&state.profiles),
+                state.profiles_loaded,
+                state.client.is_some(),
+                state.error.clone(),
+                state.notice.clone(),
+                state.activity_detail.as_ref().map(Rc::clone),
+                state.preferences_saving || state.avatar_saving,
+                state.device_catalog_loading.clone(),
+                state.disconnected_since_milliseconds,
+                state.deployment_mode,
+            )
+        };
+        let product_name = match deployment_mode {
+            DeploymentMode::Production => "Garmin Toolkit",
+            DeploymentMode::Demo => "Garmin Toolkit Demo",
+        };
+        self.sync_profiles(profiles);
+        self.apply_avatar_results();
+        self.apply_device_catalogs(&devices);
+        self.apply_device_fit_results();
         self.sync_activity_detail(activity_detail);
         let profiles = Rc::clone(&self.profiles);
         if matches!(&self.page, Page::Device(key) if !devices.iter().any(|device| &device.key == key))
@@ -996,30 +1087,7 @@ impl eframe::App for App {
                 .selected_activity
                 .min(profile.activities.len().saturating_sub(1));
         }
-        if let Some(user_id) = created {
-            if let Some(index) = profiles
-                .iter()
-                .position(|profile| profile.user.id() == user_id)
-            {
-                self.select_profile(index, profiles.as_slice());
-                self.create_profile = None;
-                self.shared.borrow_mut().created_profile = None;
-            }
-        } else if let Some(problem) = create_problem {
-            if let Some(dialog) = self.create_profile.as_mut() {
-                dialog.set_problem(problem);
-            }
-            self.shared.borrow_mut().profile_create_problem = None;
-        } else if !creating
-            && self
-                .create_profile
-                .as_ref()
-                .is_some_and(profile::CreateState::is_submitting)
-        {
-            if let Some(dialog) = self.create_profile.as_mut() {
-                dialog.set_submitting(false);
-            }
-        }
+        self.apply_profile_creation(&profiles);
         self.sync_selected_preferences();
         let offline = loaded && disconnected_since.is_some();
         if offline {
@@ -1029,16 +1097,14 @@ impl eframe::App for App {
             Some(_) => self.show_application(
                 ui,
                 product_name,
-                profiles.as_slice(),
                 devices.as_slice(),
-                preferences_saving || avatar_saving,
+                preferences_saving,
                 device_catalog_loading.as_deref(),
                 notice.as_ref(),
             ),
             None => self.show_chooser(
                 ui,
                 product_name,
-                profiles.as_slice(),
                 loaded,
                 connected,
                 error.as_deref(),
@@ -1127,6 +1193,10 @@ fn set_profile_preferences(snapshot: &mut ProfileSnapshot, preferences: ProfileP
 }
 
 #[derive(Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "profile readiness and three independent asynchronous operations may overlap"
+)]
 struct State {
     client: Option<ApplicationServiceClient>,
     deployment_mode: DeploymentMode,
@@ -1301,18 +1371,18 @@ fn avatar_draft(user_id: UserId, file_name: String, bytes: Vec<u8>) -> Result<Av
     let mut decoder = reader.into_decoder().map_err(|error| error.to_string())?;
     let orientation =
         image::ImageDecoder::orientation(&mut decoder).map_err(|error| error.to_string())?;
-    let mut decoded =
+    let mut oriented =
         image::DynamicImage::from_decoder(decoder).map_err(|error| error.to_string())?;
-    decoded.apply_orientation(orientation);
-    let width = usize::try_from(decoded.width()).map_err(|error| error.to_string())?;
-    let height = usize::try_from(decoded.height()).map_err(|error| error.to_string())?;
-    let rgba = decoded.to_rgba8();
+    oriented.apply_orientation(orientation);
+    let width = usize::try_from(oriented.width()).map_err(|error| error.to_string())?;
+    let height = usize::try_from(oriented.height()).map_err(|error| error.to_string())?;
+    let rgba = oriented.to_rgba8();
     Ok(AvatarDraft {
         user_id,
         file_name,
         bytes,
         image: ColorImage::from_rgba_unmultiplied([width, height], rgba.as_raw()),
-        source_size: [decoded.width(), decoded.height()],
+        source_size: [oriented.width(), oriented.height()],
     })
 }
 
@@ -1435,14 +1505,19 @@ fn spawn_device_upload(
             return;
         };
         let file_name = file.file_name();
-        let size = file.inner().size() as u64;
-        let (sender, receiver) = remoc::rch::io::sized::<remoc::codec::Default>(size);
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "File.size is a nonnegative integer, checked above against the 512 MiB limit"
+        )]
+        let size = file.inner().size() as u32;
+        let (sender, receiver) = remoc::rch::io::sized::<remoc::codec::Default>(u64::from(size));
         let request = DeviceBrowserUpload {
             device_key: device_key.clone(),
             storage_id,
             directory,
             file_name,
-            size,
+            size: u64::from(size),
         };
         let rpc = async move {
             client
@@ -1452,7 +1527,7 @@ fn spawn_device_upload(
                 .and_then(|result| result.map_err(ConnectError::domain))
                 .map_err(|error| error.to_string())
         };
-        let stream = stream_browser_upload(file.inner().clone(), sender);
+        let stream = stream_browser_upload(file.inner().clone(), size, sender);
         let result = future::try_join(rpc, stream)
             .await
             .map(|(catalog, ())| catalog);
@@ -1474,15 +1549,15 @@ fn spawn_device_upload(
 
 async fn stream_browser_upload(
     file: web_sys::File,
+    size: u32,
     mut sender: remoc::rch::io::Sender,
 ) -> Result<(), String> {
-    const CHUNK_BYTES: u64 = 1024 * 1024;
-    let size = file.size() as u64;
-    let mut offset = 0_u64;
+    const CHUNK_BYTES: u32 = 1024 * 1024;
+    let mut offset = 0_u32;
     while offset < size {
         let end = offset.saturating_add(CHUNK_BYTES).min(size);
         let blob = file
-            .slice_with_f64_and_f64(offset as f64, end as f64)
+            .slice_with_f64_and_f64(f64::from(offset), f64::from(end))
             .map_err(|error| format!("could not read the selected file: {}", js_reason(&error)))?;
         let buffer = JsFuture::from(blob.array_buffer())
             .await
@@ -2046,22 +2121,32 @@ impl fmt::Display for ConnectError {
     }
 }
 
-fn remove_loading_overlay() {
-    if let Some(overlay) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id("loading"))
-    {
-        overlay.remove();
-    }
+fn hide_loading_overlay() {
+    dispatch_loader_event("garmin-toolkit-ready", &JsValue::NULL);
 }
 
-fn show_startup_error(message: &str) {
-    web_sys::console::error_1(&JsValue::from_str(message));
-    if let Some(overlay) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id("loading-message"))
-    {
-        overlay.set_text_content(Some(message));
+fn install_browser_panic_surface() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic| {
+        show_browser_failure(&panic.to_string());
+        previous(panic);
+    }));
+}
+
+/// Report a fatal application error through the loader's terminal failure transition.
+#[wasm_bindgen]
+pub fn show_browser_failure(message: &str) {
+    dispatch_loader_event("garmin-toolkit-failure", &JsValue::from_str(message));
+}
+
+fn dispatch_loader_event(name: &str, detail: &JsValue) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let options = web_sys::CustomEventInit::new();
+    options.set_detail(detail);
+    if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict(name, &options) {
+        let _ignored = window.dispatch_event(&event);
     }
 }
 

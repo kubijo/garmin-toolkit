@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 arc-swap.workspace = true
 bytemuck.workspace = true
+buffa.workspace = true
 byte-unit.workspace = true
 camino.workspace = true
 garmin-brand.workspace = true
@@ -27,10 +28,16 @@ egui_plot.workspace = true
 garmin-i18n.workspace = true
 garmin-model.workspace = true
 garmin-service-api.workspace = true
+geo-types.workspace = true
+fast-mvt.workspace = true
+geo.workspace = true
+lyon_path.workspace = true
+serde_json.workspace = true
 postcard.workspace = true
 serde.workspace = true
 tracing.workspace = true
 walkers.workspace = true
+web-time.workspace = true
 wgpu.workspace = true
 
 [build-dependencies]
