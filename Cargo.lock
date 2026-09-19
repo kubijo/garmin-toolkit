@@ -2550,6 +2550,7 @@ dependencies = [
  "anyhow",
  "axum",
  "blake3",
+ "clap",
  "futures-lite",
  "futures-util",
  "garmin-device",

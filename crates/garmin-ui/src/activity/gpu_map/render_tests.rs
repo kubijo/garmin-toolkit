@@ -96,8 +96,8 @@ fn render_row(
     ));
     trace.begin_work();
     trace.published();
-    let gpu = GpuTile::new(context, id, Arc::clone(&tile.mesh));
-    *gpu.first_draw.lock().unwrap() = Some(trace);
+    let mut gpu = GpuTile::new(context, id, Arc::clone(&tile.mesh));
+    gpu.first_draw = Some(std::sync::Mutex::new(Some(trace)));
     tile.gpu.store(Some(Arc::new(gpu)));
     let viewport = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(WIDTH as f32, HEIGHT as f32));
     let assembly = assemble_tile_frame([(&id, &tile)], camera, viewport);

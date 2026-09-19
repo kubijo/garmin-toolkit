@@ -39,13 +39,13 @@ pub async fn prepare_storage(data_root: impl AsRef<Path>) -> Result<Storage, Err
 /// Runs the device host and browser service until shutdown.
 /// # Errors
 /// [`enum@Error`] when persistent state cannot be prepared.
-pub async fn run() -> Result<(), Error> {
+pub async fn run(map_upload_telemetry: bool) -> Result<(), Error> {
     let data_root = deployment_data_root();
     let storage = prepare_storage(&data_root).await?;
     let devices = devices::Host::new(mode::device_source(&data_root)?, Application::new(storage));
     let map_tiles = garmin_map_tiles::Service::new(data_root.join("cache/activity-map"))?;
     devices.start();
-    server::serve(devices, map_tiles).await?;
+    server::serve(devices, map_tiles, map_upload_telemetry).await?;
     Ok(())
 }
 

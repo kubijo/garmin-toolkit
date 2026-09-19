@@ -18,6 +18,7 @@ workspace = true
 anyhow.workspace = true
 axum = { workspace = true, features = ["ws"] }
 blake3.workspace = true
+clap.workspace = true
 futures-lite.workspace = true
 futures-util.workspace = true
 garmin-device.workspace = true

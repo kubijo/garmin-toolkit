@@ -6,16 +6,28 @@ interaction, and rendering contracts live in [activity map architecture](../arch
 The bounded browser map is implemented. GPU upload and map draw submission still run on the event/render thread;
 complete the rendering-isolation work below before closing the overall workspace plan.
 
-## Current telemetry slice (2026-09-19)
+## Telemetry comparison control (2026-09-19)
 
-The bounded-browser-map implementation was committed as `10234ef`. This slice adds correlated upload telemetry and
-regression coverage; OffscreenCanvas and the semantic interaction runner remain separate follow-ups.
+The bounded-browser-map implementation was committed as `10234ef`; correlated upload telemetry followed in `11dcba8`.
+HASS now provides a comparison switch. The next implementation slice is renderer extraction, followed by OffscreenCanvas
+and the semantic interaction runner.
 
-- [ ] Measure telemetry overhead with a controlled comparison before claiming it is negligible. Existing captures do not
-  isolate instrumentation cost. Keep production upload budgets unchanged.
+Overhead measurement is deferred until the semantic interaction runner after OffscreenCanvas; it is not a blocker for
+renderer extraction. Do not claim negligible instrumentation cost or change production upload budgets on the existing
+evidence.
 
-The user reported the requested full QA, audit, and sandboxed Rust verification gates green on 2026-09-19. This is
-user-reported acceptance, not a second assistant-run verification; see the
+The comparison control is HASS's `--no-map-upload-telemetry` flag, forwarded by `just hass::run`. It disables upload
+observers and their clocks/locks/serialization, not existing render/latency timings or upload budgets. The no-store
+entrypoint supplies the startup choice to the browser; reload after changing the host flag. A
+`garmin.map.upload-telemetry` mark records the choice, viewport, DPR, and graphics backend. The user rebuilt HASS; live
+verification confirmed the disabled flag and a fully rendered map. The user reported `just qa::full` green after the
+missing test import was fixed. No overhead measurement is claimed. Manual on/off captures validate both modes but have
+different viewports and workloads, so they cannot isolate instrumentation cost. No further manual comparison captures
+are requested. MCP raw export remains unavailable. See the
+[capture record](../research/browser-map.md#telemetry-overhead-comparison).
+
+The user reported full QA, audit, and sandboxed Rust verification gates green for the preceding slice on 2026-09-19,
+before the comparison switch. This is user-reported acceptance, not verification of the current changes; see the
 [evidence record](../research/browser-map.md).
 
 [Browser map evidence](../research/browser-map.md#telemetry-review-resolution) records the resolved review and CI
@@ -67,8 +79,8 @@ The [renderer architecture](../architecture/activity-map.md#rendering-boundary) 
 
 ### Next step after OffscreenCanvas: semantic interaction runner
 
-Order: close the browser acceptance checks above, complete and validate the map-only OffscreenCanvas slice, then
-implement this runner. It is not a prerequisite for OffscreenCanvas.
+Order: extract the renderer, complete and validate the map-only OffscreenCanvas slice, then implement this runner. It is
+not a prerequisite for OffscreenCanvas.
 
 - Reuse egui's AccessKit semantics and `egui_kittest`/`kittest` queries. Complete custom-widget semantics and use stable
   identifiers where labels are ambiguous or translated; do not build a second widget lookup tree.
@@ -82,6 +94,13 @@ implement this runner. It is not a prerequisite for OffscreenCanvas.
 - Emit scenario/phase timing markers and record viewport, DPR, graphics backend, scheduled versus actual action timing,
   missed deadlines, and completed workload. Keep warm-cache interaction and tile-arrival stress separate. A stalled run
   must not pass by silently executing fewer actions. Measure the runner's overhead.
+- [ ] Resume the deferred upload-telemetry overhead comparison using scripted stationary tile arrival. Use one built
+  package and data/cache directory, warm the cache, and fix activity, viewport, theme, DPR, backend, and capture
+  settings. Repeat alternating on/off blocks with equal workload windows; require matching tile sets, cache status, and
+  publication counts without failures or fallback. Analyze with `just hass::profile-analyze TRACE --json`, comparing
+  prepare/draw CPU distributions and run variation, not queue wall time or presentation FPS. The disabled baseline
+  retains option checks and existing profiling; it is not instrumentation-free. Re-establish both baselines after
+  renderer changes.
 - Initial coverage: select a demo activity, pan/flick/zoom, operate playback, select/reset a lap, and scrub linked
   charts. Reuse scenarios as regression tests for subsequent renderer changes. Input injected inside egui does not
   validate browser event dispatch latency, trusted gestures, or native dialogs; test those separately.

@@ -1331,11 +1331,11 @@ fn draw_tiles(
         render_pass.set_index_buffer(gpu.indices.slice(..), wgpu::IndexFormat::Uint32);
         render_pass.draw_indexed(0..gpu.index_count, 0, tile.instances.clone());
         #[cfg(any(target_arch = "wasm32", test))]
-        if let Some(trace) = gpu
-            .first_draw
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
+        if let Some(first_draw) = &gpu.first_draw
+            && let Some(trace) = first_draw
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
         {
             trace.drawn();
         }
@@ -1430,7 +1430,7 @@ impl RouteStyleUniform {
 
 struct GpuTile {
     #[cfg(any(target_arch = "wasm32", test))]
-    first_draw: std::sync::Mutex<Option<Arc<upload_trace::UploadTrace>>>,
+    first_draw: Option<std::sync::Mutex<Option<Arc<upload_trace::UploadTrace>>>>,
     _source: Arc<CpuTileMesh>,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
@@ -1460,7 +1460,7 @@ impl GpuTile {
         Self {
             index_count: u32::try_from(source.indices.len()).unwrap_or(u32::MAX),
             #[cfg(test)]
-            first_draw: std::sync::Mutex::new(None),
+            first_draw: None,
             _source: source,
             vertices,
             indices,

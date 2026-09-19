@@ -30,16 +30,18 @@ const ADDRESS_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_ADDRESS";
 const WEB_ROOT_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_WEB_ROOT";
 const CSP_REPORT_LIMIT: usize = 32 * 1024;
 const CSP_NONCE_PLACEHOLDER: &str = "GARMIN_TOOLKIT_CSP_NONCE";
+const UPLOAD_TELEMETRY_PLACEHOLDER: &str = "GARMIN_TOOLKIT_MAP_UPLOAD_TELEMETRY";
 
 pub(super) async fn serve(
     host: Arc<Host>,
     map_tiles: garmin_map_tiles::Service,
+    map_upload_telemetry: bool,
 ) -> Result<(), std::io::Error> {
     let address = std::env::var(ADDRESS_ENVIRONMENT)
         .unwrap_or_else(|_| "127.0.0.1:8099".to_owned())
         .parse::<SocketAddr>()
         .map_err(std::io::Error::other)?;
-    let app = router(host, map_tiles)?;
+    let app = router(host, map_tiles, map_upload_telemetry)?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     announce_server(address, crate::mode::PRODUCT_NAME)?;
     axum::serve(listener, app)
@@ -104,7 +106,7 @@ fn web_link(web_url: &str) -> AnsiString<'_> {
 struct WebIndex(Arc<str>);
 
 impl WebIndex {
-    fn load(root: &Path) -> io::Result<Self> {
+    fn load(root: &Path, map_upload_telemetry: bool) -> io::Result<Self> {
         let html = std::fs::read_to_string(root.join("index.html"))?;
         if !html.contains(CSP_NONCE_PLACEHOLDER) {
             return Err(io::Error::new(
@@ -112,7 +114,17 @@ impl WebIndex {
                 "browser index lacks the CSP nonce placeholder",
             ));
         }
-        Ok(Self(html.into()))
+        if !html.contains(UPLOAD_TELEMETRY_PLACEHOLDER) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "browser index lacks the map upload telemetry placeholder",
+            ));
+        }
+        let telemetry = serde_json::to_string(&map_upload_telemetry)?;
+        Ok(Self(
+            html.replace(UPLOAD_TELEMETRY_PLACEHOLDER, &telemetry)
+                .into(),
+        ))
     }
 
     fn render(&self, nonce: &Nonce) -> String {
@@ -127,7 +139,11 @@ async fn web_index(
     Html(index.render(&nonce))
 }
 
-fn router(host: Arc<Host>, map_tiles: garmin_map_tiles::Service) -> io::Result<Router> {
+fn router(
+    host: Arc<Host>,
+    map_tiles: garmin_map_tiles::Service,
+    map_upload_telemetry: bool,
+) -> io::Result<Router> {
     let app = Router::new()
         .route("/remoc", any(websocket))
         .route("/device-download/{token}", get(device_download))
@@ -141,7 +157,7 @@ fn router(host: Arc<Host>, map_tiles: garmin_map_tiles::Service) -> io::Result<R
             .route("/", get(web_index))
             .route("/index.html", get(web_index))
             .fallback_service(ServeDir::new(&root).append_index_html_on_directories(true))
-            .layer(Extension(WebIndex::load(&root)?)),
+            .layer(Extension(WebIndex::load(&root, map_upload_telemetry)?)),
         None => app.route(
             "/",
             get(|| async {
@@ -487,9 +503,9 @@ async fn serve_client(socket: WebSocket, host: Arc<Host>) -> anyhow::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::{
-        CSP_NONCE_PLACEHOLDER, WebIndex, browser_asset_policy, browser_entry_point,
-        browser_origin_allowed, content_security_policy, csp_report, request_etag_matches, router,
-        startup_banner, web_link,
+        CSP_NONCE_PLACEHOLDER, UPLOAD_TELEMETRY_PLACEHOLDER, WebIndex, browser_asset_policy,
+        browser_entry_point, browser_origin_allowed, content_security_policy, csp_report,
+        request_etag_matches, router, startup_banner, web_link,
     };
     use crate::devices::{Host, demo::DemoSource};
     use axum::body::Bytes;
@@ -588,6 +604,41 @@ mod tests {
     }
 
     #[test]
+    fn web_index_embeds_the_startup_telemetry_choice_without_changing_assets() -> anyhow::Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        let source = include_str!("../web/index.html");
+        let html = format!(
+            "{source}<script nonce=\"{CSP_NONCE_PLACEHOLDER}\" src=\"app-hash.js\"></script>"
+        );
+        std::fs::write(root.path().join("index.html"), html)?;
+        let nonce = Nonce::from_encoded("dGVzdA==")?;
+        for enabled in [true, false] {
+            let rendered = WebIndex::load(root.path(), enabled)?.render(&nonce);
+            let value = rendered
+                .split("data-map-upload-telemetry=\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap();
+            assert_eq!(serde_json::from_str::<bool>(value)?, enabled);
+            assert!(rendered.contains("src=\"app-hash.js\""));
+            assert!(rendered.contains("nonce=\"dGVzdA==\""));
+            assert!(!rendered.contains(UPLOAD_TELEMETRY_PLACEHOLDER));
+        }
+        std::fs::write(
+            root.path().join("index.html"),
+            format!("<script nonce=\"{CSP_NONCE_PLACEHOLDER}\"></script>"),
+        )?;
+        assert!(
+            WebIndex::load(root.path(), false).is_err(),
+            "a stale bundle cannot silently ignore the control"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn stable_browser_worker_is_never_cached_as_an_immutable_asset() {
         assert!(browser_entry_point("/map-worker.js"));
         assert_eq!(browser_asset_policy(false, StatusCode::OK), "no-store");
@@ -642,6 +693,7 @@ mod tests {
                 Application::new(storage),
             ),
             garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+            true,
         )?;
         Ok(())
     }
@@ -675,6 +727,7 @@ mod tests {
                 Application::new(storage),
             ),
             garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+            true,
         )?;
         let server = tokio::spawn(async move { axum::serve(listener, app).await });
         let client = reqwest::Client::new();
@@ -756,6 +809,7 @@ mod tests {
         let app = router(
             host,
             garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+            true,
         )?;
         let server = tokio::spawn(async move { axum::serve(listener, app).await });
         let url = format!("http://{address}/device-download/{}", ticket.token);
@@ -797,6 +851,7 @@ mod tests {
                 Application::new(storage),
             ),
             garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+            true,
         )?;
         let server = tokio::spawn(async move { axum::serve(listener, app).await });
         let (socket, response) = connect_async(format!("ws://{address}/remoc")).await?;
