@@ -24,6 +24,7 @@ js-sys.workspace = true
 image.workspace = true
 rfd = { workspace = true, features = ["file-handle-inner"] }
 remoc = { workspace = true, features = ["js"] }
+serde_json.workspace = true
 tokio-wasm-io.workspace = true
 tracing.workspace = true
 wasm-bindgen.workspace = true

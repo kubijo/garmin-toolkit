@@ -1,9 +1,11 @@
 """License generator tests."""
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
-from generate import bundle_document, resolve_linked
+from generate import bundle_document, expanded_entries, resolve_linked
 
 
 class LicenseGenerationTests(unittest.TestCase):
@@ -69,6 +71,24 @@ class LicenseGenerationTests(unittest.TestCase):
             'targets': [{'kind': kinds}],
             'version': '1',
         }
+
+    def test_notice_diagnostics_compare_text_not_table_indices(self) -> None:
+        entry = {
+            'name': 'example',
+            'version': '1',
+            'license': 'MIT',
+            'source': {'kind': 'cargo'},
+            'notices': [{'license': 'MIT', 'text_index': 0}],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'bundle.json'
+            path.write_text(json.dumps({'entries': [entry], 'license_texts': ['notice']}))
+            before = expanded_entries(path)
+            entry['notices'][0]['text_index'] = 1
+            path.write_text(json.dumps({'entries': [entry], 'license_texts': ['unrelated', 'notice']}))
+            self.assertEqual(before, expanded_entries(path))
+            path.write_text(json.dumps({'entries': [entry], 'license_texts': ['unrelated', 'changed']}))
+            self.assertNotEqual(before, expanded_entries(path))
 
     @staticmethod
     def dependency(package: str, kind: str | None) -> dict[str, object]:

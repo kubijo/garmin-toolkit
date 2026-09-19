@@ -2596,6 +2596,7 @@ dependencies = [
  "js-sys",
  "remoc",
  "rfd",
+ "serde_json",
  "tokio",
  "tracing",
  "wasm-bindgen",

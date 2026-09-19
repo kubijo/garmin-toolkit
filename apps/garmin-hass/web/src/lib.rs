@@ -44,6 +44,12 @@ impl activity::map_runtime::MapMetricsSink for BrowserMapMetrics {
         browser_timing::measure_duration("garmin.map.tile-upload-latency", milliseconds);
     }
 
+    fn record_upload_event(&self, event: activity::map_runtime::MapUploadEvent) {
+        if let Ok(detail) = serde_json::to_string(&event) {
+            browser_timing::mark_detail("garmin.map.upload", &detail);
+        }
+    }
+
     fn record_render(&self, sample: activity::map_runtime::MapRenderPerformanceSample) {
         let name = match sample.phase {
             activity::map_runtime::MapRenderPhase::Prepare => "garmin.map.wgpu-prepare",

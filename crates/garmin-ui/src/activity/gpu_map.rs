@@ -32,6 +32,9 @@ mod render_tests;
 mod route;
 #[path = "gpu_map/tile_budget.rs"]
 mod tile_budget;
+#[cfg(any(target_arch = "wasm32", test))]
+#[path = "gpu_map/upload_trace.rs"]
+mod upload_trace;
 pub use tile_budget::BrowserTileLimits;
 pub(in crate::activity) use tile_budget::{TileBudget, TileDecodeBudget};
 
@@ -1038,7 +1041,7 @@ impl GpuMap {
         metrics: crate::activity::map_runtime::MapMetrics,
     ) -> Self {
         let context = Arc::clone(&handle.context);
-        let executor = platform::Executor::new(Arc::clone(&context));
+        let executor = platform::Executor::new(Arc::clone(&context), metrics.clone());
         Self {
             frame: Arc::new(ArcSwap::from_pointee(Frame::default())),
             metrics,
@@ -1327,6 +1330,15 @@ fn draw_tiles(
         render_pass.set_vertex_buffer(0, gpu.vertices.slice(..));
         render_pass.set_index_buffer(gpu.indices.slice(..), wgpu::IndexFormat::Uint32);
         render_pass.draw_indexed(0..gpu.index_count, 0, tile.instances.clone());
+        #[cfg(any(target_arch = "wasm32", test))]
+        if let Some(trace) = gpu
+            .first_draw
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            trace.drawn();
+        }
     }
 }
 
@@ -1417,6 +1429,8 @@ impl RouteStyleUniform {
 }
 
 struct GpuTile {
+    #[cfg(any(target_arch = "wasm32", test))]
+    first_draw: std::sync::Mutex<Option<Arc<upload_trace::UploadTrace>>>,
     _source: Arc<CpuTileMesh>,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
@@ -1445,6 +1459,8 @@ impl GpuTile {
         let (uniform, bind_group) = tile_binding(context, id);
         Self {
             index_count: u32::try_from(source.indices.len()).unwrap_or(u32::MAX),
+            #[cfg(test)]
+            first_draw: std::sync::Mutex::new(None),
             _source: source,
             vertices,
             indices,
