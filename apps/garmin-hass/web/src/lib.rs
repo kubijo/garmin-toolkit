@@ -35,10 +35,16 @@ const MAX_AVATAR_UPLOAD_BYTES: f64 = 10.0 * 1024.0 * 1024.0;
 
 use map_worker::BrowserMapBackend;
 
-struct BrowserMapMetrics;
+struct BrowserMapMetrics {
+    upload_events: bool,
+}
 
 impl activity::map_runtime::MapMetricsSink for BrowserMapMetrics {
     fn record(&self, _sample: activity::map_runtime::MapPerformanceSample) {}
+
+    fn upload_events_enabled(&self) -> bool {
+        self.upload_events
+    }
 
     fn record_upload(&self, milliseconds: f64) {
         browser_timing::measure_duration("garmin.map.tile-upload-latency", milliseconds);
@@ -75,20 +81,36 @@ pub fn start() -> Result<(), JsValue> {
         .and_then(|document| document.get_element_by_id(CANVAS_ID))
         .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
         .ok_or_else(|| js_error("the application canvas is missing"))?;
+    let map_upload_telemetry: bool = serde_json::from_str(
+        &canvas
+            .get_attribute("data-map-upload-telemetry")
+            .ok_or_else(|| js_error("the map upload telemetry configuration is missing"))?,
+    )
+    .map_err(|_| js_error("the map upload telemetry configuration is invalid"))?;
 
     spawn_local(async move {
         let result = eframe::WebRunner::new()
             .start(
                 canvas.clone(),
                 eframe::WebOptions::default(),
-                Box::new(|creation| {
+                Box::new(move |creation| {
                     garmin_ui::install(&creation.egui_ctx);
                     let render_state = creation.wgpu_render_state.as_ref().ok_or_else(|| {
                         io::Error::other("eframe did not provide the required WGPU render state")
                     })?;
                     report_graphics_adapter(render_state);
+                    browser_timing::mark_detail(
+                        "garmin.map.upload-telemetry",
+                        &serde_json::json!({
+                            "version": 1,
+                            "enabled": map_upload_telemetry,
+                            "backend": format!("{:?}", render_state.adapter.get_info().backend),
+                            "viewport": [window.inner_width().ok().and_then(|v| v.as_f64()), window.inner_height().ok().and_then(|v| v.as_f64())],
+                            "dpr": window.device_pixel_ratio(),
+                        }).to_string(),
+                    );
                     let map_renderer = activity::install_wgpu_map(render_state, 1);
-                    Ok(Box::new(App::new(creation.egui_ctx.clone(), map_renderer)?))
+                    Ok(Box::new(App::new(creation.egui_ctx.clone(), map_renderer, map_upload_telemetry)?))
                 }),
             )
             .await;
@@ -149,6 +171,7 @@ impl App {
     fn new(
         context: eframe::egui::Context,
         map_renderer: activity::WgpuMapHandle,
+        map_upload_telemetry: bool,
     ) -> Result<Self, garmin_i18n::Error> {
         let translations = Translations::bundled()?;
         let intl = translations.formatter(Language::English)?;
@@ -158,7 +181,9 @@ impl App {
             BrowserMapBackend::new(),
             activity::map_runtime::Renderer::wgpu(map_renderer),
         )
-        .with_metrics(BrowserMapMetrics);
+        .with_metrics(BrowserMapMetrics {
+            upload_events: map_upload_telemetry,
+        });
         let activity_workspace = activity::Workspace::new(&map_runtime);
         Ok(Self {
             context,

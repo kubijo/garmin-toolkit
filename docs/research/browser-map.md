@@ -8,6 +8,60 @@ This is an evidence record, not a completion checklist. Open work lives in the
 Raw traces remain private local inputs, not committed fixtures. Measurements concern the bundled synthetic demo route.
 Use the maintained `infra/python/browser_trace_analysis.py` via `just hass::profile-analyze` to reproduce summaries.
 
+## Telemetry overhead comparison
+
+The user rebuilt HASS and started the demo with `--no-map-upload-telemetry`, using the dedicated `.tmp/hass-telemetry`
+data directory. Live inspection confirmed asset `b16287233d847358`, backend `Gl`, DPR 1, and `enabled: false` in the
+startup configuration mark. After warming the map, a fresh load at 1440 by 1000 selected Alex Rider's first cycling
+activity using screenshot-guided DOM pointer events. Playback remained paused; the completed map had no visible gaps.
+The console reported `No available adapters.` while the configuration identified `Gl`; no console errors were listed.
+
+MCP reported starting and stopping a recording, but refused raw export to both repository and Downloads paths. The user
+confirmed no recording was available in their DevTools. No raw artifact was obtained from that attempt; the earlier
+instruction to save an existing recording was incorrect. Its live checks establish only the flag and visual state, not
+raw-trace evidence.
+
+The user instead supplied `Trace-20260919T132634.json.gz`. The maintained analyzer found 112 worker tile requests, all
+HTTP 200 and completed, with no main-thread tile requests or worker-fallback timing. Of these, 107 were browser-cached
+and 5 uncached. Interaction frame intervals had p95 18.75 ms and maximum 21.97 ms across 206 intervals; none exceeded 33
+ms. These are main-thread frame intervals, not presentation FPS. Upload-latency timings had 43 samples, p95 24.10 ms and
+maximum 51.10 ms. Preparation callbacks peaked at 1.60 ms; worker tasks peaked at 138.83 ms.
+
+This replacement includes 14 wheel events and requests across multiple zoom levels, not the stationary comparison
+workload. Neither the startup telemetry configuration nor correlated upload lifecycles were captured. Their absence is
+consistent with the previously inspected disabled session, but does not independently establish that mode for this
+recording. It is useful interaction evidence, not an accepted overhead baseline.
+
+The subsequent `telemetry-off-01.json.gz` is a usable first stationary disabled capture. Its startup mark confirms
+`enabled: false`, backend `Gl`, DPR 1, and viewport 1761 by 1324; the emitted asset is still `b16287233d847358`. This
+differs from the earlier MCP viewport, so enabled comparisons must match this manual capture's layout instead. It
+includes one click and no wheel events. All 20 tile requests originate in the worker, are browser-cached, and complete
+with HTTP 200; no worker fallback or correlated upload lifecycle marks are recorded. The requested tile set is zoom 11,
+x 1020 through 1024, y 679 through 682. Six upload-latency samples complete with maximum 19.00 ms.
+
+Across 28 preparation/draw callbacks, measured preparation totals 5.20 ms (p95 1.20 ms, maximum 1.50 ms); drawing totals
+0.199 ms (maximum 0.10 ms). These short measurements include many zero-valued samples and are limited by clock
+resolution. The last preparation marker is 2.078 seconds after the configuration mark; renderer events continue to 4.906
+seconds, so the capture contains a settled tail but is shorter than the requested ten-second workload. Two main-thread
+microtasks exceed 16.67 ms, with maximum 64.07 ms; whole-trace frame gaps include startup and idle time and are not a
+map-animation FPS result. This single disabled run establishes neither instrumentation overhead nor its variability. An
+overhead conclusion would require matched workloads and repeated controlled blocks.
+
+`telemetry-on-01.json.gz` confirms enabled telemetry with the same asset, backend, and DPR, but its startup viewport is
+2367 by 1324 rather than 1761 by 1324. It requests 28 cached worker tiles instead of 20, adding x columns 1019 and 1025
+at the same zoom and y range. All requests complete with HTTP 200; no worker fallback is recorded. Ten valid upload
+lifecycles reach first draw, compared with six upload-latency completions in the disabled capture. Preparation totals
+9.90 ms over 46 callbacks, with maximum 1.60 ms; maximum visible upload lifetime is 68.80 ms. The unequal viewport and
+workload invalidate this pair for overhead attribution. Neither the higher preparation total nor the longer queue
+lifetime measures telemetry cost. Both captures remain functional evidence. Further manual comparison captures are
+deferred: resume the measurement after OffscreenCanvas with the planned semantic interaction runner controlling the
+viewport, workload, and repeated trials. This unresolved measurement does not block renderer extraction and does not
+support a negligible-overhead claim. New renderer code will require fresh on/off baselines.
+
+Closing verification: the missing `UPLOAD_TELEMETRY_PLACEHOLDER` test import was fixed, and assistant-run preflight
+passed with no formatting changes. The user then reported `just qa::full` green for the comparison switch. This is
+user-reported full-gate acceptance, not an independent rerun or an overhead measurement.
+
 ## Correlated telemetry and current evidence
 
 The upload investigation adds versioned `garmin.map.upload` marks with a unique upload ID and XYZ coordinates: queued,

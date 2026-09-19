@@ -125,12 +125,21 @@ pub trait MapMetricsSink: Send + Sync {
 
     /// Record a bounded upload lifecycle event, without retaining it in the renderer.
     fn record_upload_event(&self, _event: MapUploadEvent) {}
+
+    /// Whether to construct upload lifecycle observers. Fixed for the lifetime of a runtime.
+    fn upload_events_enabled(&self) -> bool {
+        true
+    }
 }
 
 struct DiscardMapMetrics;
 
 impl MapMetricsSink for DiscardMapMetrics {
     fn record(&self, _sample: MapPerformanceSample) {}
+
+    fn upload_events_enabled(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone)]
@@ -167,6 +176,11 @@ impl MapMetrics {
     #[cfg(any(target_arch = "wasm32", test))]
     pub(super) fn record_upload_event(&self, event: MapUploadEvent) {
         self.0.record_upload_event(event);
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(super) fn upload_events_enabled(&self) -> bool {
+        self.0.upload_events_enabled()
     }
 }
 

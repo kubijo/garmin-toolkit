@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from browser_upload_analysis import UploadAnalysis, analyze_uploads, finite_number
+from browser_upload_analysis import UploadAnalysis, analyze_uploads, decode_mark_detail, finite_number
 
 DEFAULT_URL_PREFIX = 'http://127.0.0.1:8099/'
 FRAME_TARGET_MILLISECONDS = 1_000.0 / 60.0
@@ -78,6 +78,7 @@ class BrowserTraceSummary:
     tile_loading: TileLoading
     diagnostics: list[str]
     uploads: UploadAnalysis
+    upload_telemetry: bool | None
 
 
 @dataclass(frozen=True)
@@ -345,11 +346,27 @@ def gesture_windows(events: list[dict[str, Any]]) -> list[tuple[float, float]]:
     return merged
 
 
+def upload_telemetry_mode(events: list[dict[str, Any]]) -> bool | None:
+    configuration = [event for event in events if event.get('name') == 'garmin.map.upload-telemetry']
+    if not configuration:
+        return None
+    if len(configuration) != 1:
+        raise TraceError('Expected one startup telemetry configuration; capture one page load per trace.')
+    try:
+        detail = decode_mark_detail(configuration[0])
+    except (ValueError, TypeError) as error:
+        raise TraceError('Malformed upload telemetry configuration.') from error
+    if type(detail.get('version')) is not int or detail['version'] != 1 or type(detail.get('enabled')) is not bool:
+        raise TraceError('Unsupported upload telemetry configuration.')
+    return detail['enabled']
+
+
 def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PREFIX) -> BrowserTraceSummary:
     renderer_pid, page_url = renderer_for_url(events, url_prefix)
     renderer_tid = renderer_main_thread(events, renderer_pid)
     renderer = [event for event in events if event.get('pid') == renderer_pid]
     raw_main = [event for event in renderer if event.get('tid') == renderer_tid]
+    upload_telemetry = upload_telemetry_mode(raw_main)
     timed = [event for event in renderer if finite_number(event.get('ts'))]
     main = [event for event in timed if event.get('tid') == renderer_tid]
     loading = tile_loading(timed, renderer_tid)
@@ -406,7 +423,9 @@ def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PR
     invalid_timestamps = sum(event.get('ph') != 'M' and not finite_number(event.get('ts')) for event in renderer)
     if invalid_timestamps:
         diagnostics.append(f'{invalid_timestamps} events have invalid timestamps; timing coverage is incomplete.')
-    if not uploads.uploads:
+    if upload_telemetry is False and (uploads.uploads or uploads.malformed_events or uploads.partial_events):
+        raise TraceError('Upload lifecycle events were captured despite disabled telemetry.')
+    if not uploads.uploads and upload_telemetry is not False:
         diagnostics.append(
             'No correlated upload lifecycles; visible waiting cannot be separated from offscreen retention.'
         )
@@ -453,6 +472,7 @@ def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PR
         tile_loading=loading,
         diagnostics=diagnostics,
         uploads=uploads,
+        upload_telemetry=upload_telemetry,
     )
 
 
@@ -469,6 +489,8 @@ def print_summary(summary: BrowserTraceSummary, *, timeline: bool = False) -> No
     print('Browser map trace')
     print(f'  page       {summary.page_url}')
     print(f'  renderer   pid {summary.renderer_pid}, tid {summary.renderer_tid}')
+    mode = {True: 'on', False: 'off', None: 'not recorded'}[summary.upload_telemetry]
+    print(f'  upload telemetry {mode}')
     print(f'  interaction {format_distribution(summary.interaction_frame_intervals)}')
     print('              pointer contact / wheel bursts + 200 ms; overlapping frame intervals, not presentation FPS')
     print(f'  interact >33 ms {summary.interaction_frame_stalls}')

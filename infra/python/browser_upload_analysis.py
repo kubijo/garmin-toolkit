@@ -108,7 +108,8 @@ class _Pending:
         self.last_ms = elapsed
 
 
-def _decode_detail(event: dict[str, Any]) -> dict[str, Any]:
+def decode_mark_detail(event: dict[str, Any]) -> dict[str, Any]:
+    """Decode Chrome's representation of JSON detail from the shared browser timing bridge."""
     args = event.get('args', {})
     if not isinstance(args, dict):
         raise ValueError('invalid mark arguments')
@@ -162,7 +163,7 @@ def analyze_uploads(events: list[dict[str, Any]]) -> UploadAnalysis:
     for event in (item for item in events if item.get('name') == MARK):
         identity = None
         try:
-            detail = _decode_detail(event)
+            detail = decode_mark_detail(event)
             raw_identity = detail.get('upload_id')
             if type(raw_identity) is int and raw_identity >= 0:
                 identity = raw_identity

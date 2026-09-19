@@ -4,7 +4,7 @@ import unittest
 from contextlib import redirect_stdout
 from dataclasses import asdict
 
-from browser_trace_analysis import TraceError, analyze_trace, print_summary, renderer_for_url
+from browser_trace_analysis import TraceError, analyze_trace, print_summary, renderer_for_url, upload_telemetry_mode
 from test_browser_upload_analysis import mark
 
 
@@ -16,6 +16,46 @@ def event(name, pid, tid, *, duration=None, timestamp=0, args=None, phase='X'):
 
 
 class BrowserTraceAnalysisTest(unittest.TestCase):
+    def test_disabled_upload_telemetry_is_explicit_and_does_not_remove_renderer_timings(self):
+        self.events.append(
+            event(
+                'garmin.map.upload-telemetry',
+                30,
+                7,
+                phase='I',
+                args={'detail': json.dumps(json.dumps({'version': 1, 'enabled': False}))},
+            )
+        )
+        self.events.append(event('garmin.map.wgpu-prepare', 30, 7, duration=300))
+        summary = analyze_trace(self.events)
+        self.assertIs(summary.upload_telemetry, False)
+        self.assertEqual(summary.user_timings['garmin.map.wgpu-prepare'].count, 1)
+        self.assertFalse(any('No correlated upload' in warning for warning in summary.diagnostics))
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_summary(summary)
+        self.assertIn('upload telemetry off', output.getvalue())
+        self.events.append({**mark('queued', 0), 'pid': 30, 'tid': 7})
+        with self.assertRaisesRegex(TraceError, 'despite disabled'):
+            analyze_trace(self.events)
+
+    def test_telemetry_configuration_rejects_ambiguity_and_invalid_types(self):
+        self.assertIsNone(upload_telemetry_mode([]))
+        valid = event(
+            'garmin.map.upload-telemetry', 30, 7, phase='I', args={'data': {'detail': {'version': 1, 'enabled': True}}}
+        )
+        self.assertIs(upload_telemetry_mode([valid]), True)
+        with self.assertRaisesRegex(TraceError, 'one startup'):
+            upload_telemetry_mode([valid, valid])
+        for detail in (
+            {'version': True, 'enabled': False},
+            {'version': 1, 'enabled': 0},
+            {'version': 2, 'enabled': True},
+            'broken JSON',
+        ):
+            with self.subTest(detail=detail), self.assertRaises(TraceError):
+                upload_telemetry_mode([{**valid, 'args': {'detail': detail}}])
+
     def setUp(self):
         self.events = [
             event('thread_name', 20, 1, phase='M', args={'name': 'CrRendererMain'}),

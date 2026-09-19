@@ -104,9 +104,9 @@ impl GpuTileUpload {
         chunk.length
     }
 
-    fn finish(self, trace: Arc<UploadTrace>) -> GpuTile {
+    fn finish(self, trace: Option<Arc<UploadTrace>>) -> GpuTile {
         GpuTile {
-            first_draw: Mutex::new(Some(trace)),
+            first_draw: trace.map(|trace| Mutex::new(Some(trace))),
             index_count: u32::try_from(self.source.indices.len()).unwrap_or(u32::MAX),
             _source: self.source,
             vertices: self.vertices,
@@ -355,7 +355,9 @@ impl BrowserUploadQueue {
             }
         }
         for (id, upload) in &self.entries {
-            upload.trace.visible(current.contains(id));
+            if let Some(trace) = &upload.trace {
+                trace.visible(current.contains(id));
+            }
         }
         self.priority = priority;
         self.prune_retained(&current);
@@ -380,23 +382,29 @@ impl BrowserUploadQueue {
                 self.priority.pop_front();
                 continue;
             };
-            upload.trace.begin_work();
-            let work_started = Instant::now();
+            let work_started = upload.trace.as_ref().map(|trace| {
+                trace.begin_work();
+                Instant::now()
+            });
             let result = upload.advance(context, queue, id, budget.chunk_bytes());
-            upload.trace.work(
-                work_started.elapsed().as_secs_f64() * 1_000.0,
-                if let UploadAdvance::Wrote(bytes) = result {
-                    bytes
-                } else {
-                    0
-                },
-            );
+            if let (Some(trace), Some(work_started)) = (&upload.trace, work_started) {
+                trace.work(
+                    work_started.elapsed().as_secs_f64() * 1_000.0,
+                    if let UploadAdvance::Wrote(bytes) = result {
+                        bytes
+                    } else {
+                        0
+                    },
+                );
+            }
             match result {
                 UploadAdvance::Advanced => {}
                 UploadAdvance::Wrote(0) => break,
                 UploadAdvance::Wrote(bytes) => budget.record(bytes),
                 UploadAdvance::Published => {
-                    upload.trace.published();
+                    if let Some(trace) = &upload.trace {
+                        trace.published();
+                    }
                     metrics.record_upload(upload.queued_at.elapsed().as_secs_f64() * 1_000.0);
                     completed_tiles += 1;
                     self.entries.remove(&id);
@@ -405,7 +413,9 @@ impl BrowserUploadQueue {
             }
         }
         for upload in self.entries.values() {
-            upload.trace.flush();
+            if let Some(trace) = &upload.trace {
+                trace.flush();
+            }
         }
         let elapsed = started.elapsed();
         if elapsed > BROWSER_UPLOAD_FRAME_TIME {
@@ -510,7 +520,7 @@ struct UploadFrameStats {
 }
 
 struct TileUpload {
-    trace: Arc<UploadTrace>,
+    trace: Option<Arc<UploadTrace>>,
     tile: Arc<PreparedGpuTile>,
     state: TileUploadState,
     last_visible: u64,
@@ -525,7 +535,9 @@ impl TileUpload {
         metrics: MapMetrics,
     ) -> Self {
         Self {
-            trace: Arc::new(UploadTrace::new(id, metrics)),
+            trace: metrics
+                .upload_events_enabled()
+                .then(|| Arc::new(UploadTrace::new(id, metrics))),
             tile,
             state: TileUploadState::AllocateVertices,
             last_visible,
@@ -605,7 +617,7 @@ impl TileUpload {
             TileUploadState::Finalizing(upload) => {
                 self.tile
                     .gpu
-                    .store(Some(Arc::new(upload.finish(Arc::clone(&self.trace)))));
+                    .store(Some(Arc::new(upload.finish(self.trace.clone()))));
                 UploadAdvance::Published
             }
             TileUploadState::Ready => UploadAdvance::Published,
@@ -765,6 +777,66 @@ mod tests {
     }
 
     #[test]
+    fn disabled_telemetry_still_uploads_and_publishes_with_latency_measurement() {
+        use crate::activity::map_runtime::{MapMetricsSink, MapPerformanceSample, MapUploadEvent};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        #[derive(Clone, Default)]
+        struct Disabled(Arc<AtomicUsize>);
+        impl MapMetricsSink for Disabled {
+            fn record(&self, _: MapPerformanceSample) {}
+            fn upload_events_enabled(&self) -> bool {
+                false
+            }
+            fn record_upload_event(&self, _: MapUploadEvent) {
+                panic!("disabled telemetry emitted an event");
+            }
+            fn record_upload(&self, milliseconds: f64) {
+                assert!(milliseconds.is_finite() && milliseconds >= 0.0);
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = futures_lite::future::block_on(
+            instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
+        )
+        .expect("upload telemetry regression requires a WGPU adapter");
+        let (device, gpu_queue) = futures_lite::future::block_on(
+            adapter.request_device(&wgpu::DeviceDescriptor::default()),
+        )
+        .unwrap();
+        let context = UploadContext::new(&device);
+        let sink = Disabled::default();
+        let metrics = MapMetrics::new(sink.clone());
+        let mut uploads = BrowserUploadQueue {
+            metrics: metrics.clone(),
+            ..BrowserUploadQueue::default()
+        };
+        let candidate = tile(1, BROWSER_UPLOAD_CHUNK_BYTES + 16);
+        uploads.reconcile(std::slice::from_ref(&candidate));
+        assert!(uploads.entries[&candidate.id].trace.is_none());
+        uploads.reconcile(&[]);
+        uploads.advance(&context, &gpu_queue, &metrics);
+        assert_eq!(uploads.stats().uploaded_bytes, 0);
+        uploads.reconcile(&[candidate.clone(), candidate.clone()]);
+        let mut written = 0;
+        for _ in 0..128 {
+            uploads.advance(&context, &gpu_queue, &metrics);
+            written += uploads.stats().uploaded_bytes;
+            if candidate.tile.is_publishable() {
+                break;
+            }
+        }
+        assert!(candidate.tile.is_publishable());
+        assert_eq!(written, upload_bytes(&candidate.tile.mesh));
+        assert_eq!(sink.0.load(Ordering::Relaxed), 1);
+        assert!(candidate.tile.gpu.load_full().unwrap().first_draw.is_none());
+        assert!(uploads.entries.is_empty());
+    }
+
+    #[test]
     fn partially_written_upload_survives_hidden_frames_and_resumes_without_reupload() {
         use crate::activity::map::gpu_map::upload_trace::tests::Capture;
         use crate::activity::map_runtime::MapUploadPhase;
@@ -802,9 +874,17 @@ mod tests {
 
         uploads.reconcile(&[]);
         let before_hidden_frames = capture.0.lock().unwrap().len();
-        Arc::get_mut(&mut uploads.entries.get_mut(&candidate.id).unwrap().trace)
-            .unwrap()
-            .advance_clock(Duration::from_millis(2_600));
+        Arc::get_mut(
+            uploads
+                .entries
+                .get_mut(&candidate.id)
+                .unwrap()
+                .trace
+                .as_mut()
+                .unwrap(),
+        )
+        .unwrap()
+        .advance_clock(Duration::from_millis(2_600));
         for _ in 0..10 {
             uploads.advance(&context, &gpu_queue, &metrics);
             assert_eq!(uploads.stats().uploaded_bytes, 0);
