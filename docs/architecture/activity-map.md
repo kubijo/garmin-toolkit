@@ -83,9 +83,18 @@ deduplicated requests, scheduling, and retry state belong to that runtime.
   from immutable coordinates and the current camera. Rendering is clipped to the map, hover uses a persistent spatial
   index, labels wait for camera motion to settle, and outward wheel input at a zoom bound is ignored.
 
-GPU uploads and map draw submission still run through egui's event/render-thread callbacks. Route and label ready state
-also remains painter-owned. A worker-owned map-only OffscreenCanvas and further scene/label isolation are planned, not
-current capabilities.
+GPU uploads and map draw submission use a renderer-owned prepare/draw boundary. Its host supplies one frame snapshot and
+full physical-pixel projection and target-bounded viewport/scissor, plus a WGPU queue and render pass. The shared shader
+remaps clip coordinates into the bounded viewport, preserving geometry scale and alignment when the map extends beyond
+the render target. Device handles own pipelines; map surfaces own uniforms and upload controllers. The egui adapter
+converts logical placement and invokes this boundary on the event/render thread, retaining the same frame through
+preparation and drawing. It no longer stores pipelines in egui callback resources. Route and label ready state remains
+painter-owned. A worker-owned map-only OffscreenCanvas and further scene/label isolation are planned, not current
+capabilities. If egui transforms a callback rectangle after construction, painting uses the final placement with an
+immutable corrected camera binding. It does not rewrite the prepared surface buffer, which earlier draws may still
+reference. Unchanged placement keeps the reusable surface buffers; late-transform allocation is included in draw CPU
+timing. Rebuilt-browser smoke acceptance and its visual-verification limits are recorded in the
+[capture evidence](../research/browser-map.md#post-review-browser-capture).
 
 ## Regression contracts
 

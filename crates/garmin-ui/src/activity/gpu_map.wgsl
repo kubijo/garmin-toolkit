@@ -3,6 +3,8 @@ struct CameraUniform {
     center_high_low: vec4<f32>,
     // xy: viewport size, z: pixels per world, w: first visible horizontal world.
     viewport_world_size_first_world: vec4<f32>,
+    // Map the full projection into the target-bounded viewport without compressing it.
+    projection_scale_offset: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -82,8 +84,8 @@ fn wrapped_delta(origin_high_low: vec4<f32>) -> vec2<f32> {
 fn clip_position(point: vec2<f32>) -> vec4<f32> {
     let normalized = point / viewport();
     return vec4<f32>(
-        normalized.x * 2.0 - 1.0,
-        1.0 - normalized.y * 2.0,
+        (normalized.x * 2.0 - 1.0) * camera.projection_scale_offset.x + camera.projection_scale_offset.z,
+        (1.0 - normalized.y * 2.0) * camera.projection_scale_offset.y + camera.projection_scale_offset.w,
         0.0,
         1.0,
     );
