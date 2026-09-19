@@ -3,6 +3,8 @@
 The root flake pins Rust 1.98, dependencies, checks, and deliverables. App flakes own target packaging; the root
 supplies filtered workspace source and re-exports their outputs.
 
+Follow the [development safeguards](../development.md) before launching builds, applications, or physical-device checks.
+
 Main packages:
 
 - `garmin-cli`, the default package;
@@ -25,5 +27,8 @@ replaces it with per-owner floors while retaining imported 80% floors.
 
 `crates/garmin-brand/assets/icon.svg` is the sole app-icon source. Generated license bundles live under
 `assets/licenses`. Ambient Cargo uses `.tmp/cargo-target`; Nix shells use `.tmp/nix-cargo-target`.
+
+Linux Nix test applications, sandboxed Rust tests, and coverage select the pinned Mesa software Vulkan ICD for headless
+renderer tests. Those tests must not silently skip when an adapter is unavailable.
 
 Connect IQ remains a future, local-only integration under ADR 0009.

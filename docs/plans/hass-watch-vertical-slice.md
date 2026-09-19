@@ -10,9 +10,8 @@ HASS host, typed browser boundary, packaging, deployment, and hardware proof.
 
 ## Shared host foundation
 
-Use the Hyundai rewrite's native-server/WASM deployment pattern, not its vehicle API. Reference points are
-`crates/bin/server`, `crates/targets/web`, and `nix/hass.nix` in that project. Keep Garmin's
-[typed service boundary](../decisions/0024-remoc-service-boundary.md); JSON polling is not a replacement decision.
+Keep the native-server/WASM deployment and [typed service boundary](../decisions/0024-remoc-service-boundary.md); JSON
+polling is not a replacement decision.
 
 Continue from the [validated device-capacity foundation](../research/device-capacity-and-recovery.md):
 
@@ -28,8 +27,15 @@ Continue from the [validated device-capacity foundation](../research/device-capa
    its trust boundary before enabling mutations. Compose host device access through existing traits; do not assume
    desktop GIO mounts exist inside the add-on. Prove permissions, ownership, and disconnects on the Raspberry Pi 5.
 
-Do not copy the vehicle poller, bundled telemetry service, credential defaults, or exposed telemetry port. The first
-slice is device capacity and map management; the watch workflow below builds on the same host and client boundary.
+The watch workflow below builds on the existing device capacity and map-host boundary.
+
+## Browser and process acceptance
+
+- Verify a normal reload receives the favicon and current entrypoint without DevTools cache bypass. Keep HTML and the
+  initializer `no-store` and content-hashed static assets immutable.
+- Remove or justify duplicate/unused WASM preload warnings. Loader prose must describe actual download/startup phases.
+- Verify `Ctrl+C` through `just hass::run` exits cleanly after application-owned SIGINT/SIGTERM shutdown, without Just
+  reporting `error: interrupted by SIGINT`.
 
 ## Ordered proof
 
@@ -37,7 +43,7 @@ slice is device capacity and map management; the watch workflow below builds on 
 02. Pair a profile through the on-device marker; prove verified creation, updates, reconnect, and reassociation.
 03. Import selected FIT read-only with interruption recovery and idempotent retries.
 04. Extend the shared service boundary to watch import and route operations.
-05. Add [proxied vector maps](../decisions/0025-proxied-online-vector-maps.md) with activity and route overlays.
+05. Extend the existing [proxied vector map](../architecture/activity-map.md) to route-plan editing and overlays.
 06. Complete [route planning](../decisions/0028-user-owned-route-plans.md): GPX selection, freehand geometry, revisions,
     reverse, trim, split, and geographic simplification.
 07. Prove preflight and recovery, then transfer one FIT Course with confirmation, readback, acceptance status, and

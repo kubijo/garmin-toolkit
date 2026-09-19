@@ -62,8 +62,8 @@ just qa::full
 just qa::audit
 ```
 
-See [architecture](docs/architecture/), [decisions](docs/decisions/), and [active plans](docs/plans/). The gallery
-renders terminal and desktop states without entering a shipped binary.
+See the [documentation index](docs/README.md) and [development safeguards](docs/development.md). The gallery renders
+terminal and desktop states without entering a shipped binary.
 
 ## License
 

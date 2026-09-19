@@ -18,6 +18,38 @@ state formats directly rather than adding compatibility branches.
    user-visible prose through typed FormatJS descriptors, and reject unregistered copy mechanically. Review English
    source prose before translating it; do not preserve poor wording merely to keep a catalog ID stable.
 
+### Translation tooling: pseudo-locale coverage
+
+Use synthetic locale `en-XA` to expose translation bypasses and layout assumptions. Carry forward these technical
+lessons when implementing the translation-adoption gate:
+
+- Generate pseudo catalogs through the existing FormatJS extractor/compiler (`compile --ast --pseudo-locale en-XA`), not
+  a second ICU parser or a transform over already formatted messages. Preserve interpolation values and plural
+  structure. Keep locale metadata in one shared descriptor and reject conflicting messages under the same ID when
+  merging surfaces.
+- Treat pseudo mode as a non-persisted testing override, not a production language choice. Test entering and leaving it
+  even when the underlying language remains English; cached formatters and labels created outside rendering can
+  otherwise retain stale text.
+- Account for locale-generated dates outside message catalogs and verify the actual font stack shapes every pseudo
+  letter without missing glyphs. Otherwise ordinary date output or missing-glyph boxes can masquerade as untranslated
+  copy or clipping.
+- Inspect expanded text for fixed-English-width layouts, character-budget truncation, clipped brackets, and missing
+  wrapping space. Keep deliberate verbatim values distinct from untranslated prose; inspect reasons and captions
+  crossing API boundaries too.
+- Cover native/gallery and browser surfaces, including overlays and interaction states, with capture dimensions that
+  actually include the content. Capture tall gallery catalogs separately and browser pages at desktop/mobile widths.
+  English-versus-pseudo image differences are expected, but capture/build failures must remain failures. Pin the
+  headless software renderer and browser/driver pairing through Nix.
+- Prove checks fail on deliberately untranslated copy and clipped text before trusting green results. Guessed DOM
+  selectors can produce false positives and false negatives; checks must not depend on warnings omitted from production
+  builds. For this egui app, use semantic/rendering evidence rather than assuming DOM text scraping covers canvas
+  content.
+
+Evidence boundary: screenshots support inspection but do not assert translation coverage. Image-comparison failures are
+not counts of translation defects, and successful captures do not prove coverage. Keep catalog parity, observed UI
+coverage, layout review, and the future mechanical bypass gate separate; do not close this item on successful capture
+alone.
+
 ## Exit criteria
 
 - Current state and persisted plans use one versioned format without pre-release compatibility branches.

@@ -8,24 +8,25 @@ plan owns user-visible workflow parity between its browser client and the native
 
 ## Shared work
 
-01. Populate each device page through automatic bounded inspection, then give it explicit FIT import, route upload, map
-    management, and asset-management entry points. File transfer and mutation require separate confirmation.
-02. Stage FIT ingress before persistence. Pre-parse selected or dropped files and present their activities, metadata,
-    duplicates, warnings, and failures for review. Import nothing until the user explicitly confirms the staged set.
-03. Confine drag and drop to visible, enabled targets. Show clear accept or reject feedback while hovering. A drop
-    target cannot remain active elsewhere in the window or application.
-04. Add a consented mounted-device browser behind an owned `garmin-ui` model. Render storages separately and treat
-    optional volume icons as bounded untrusted input.
-05. Replace the activity-detail spike through the shared [activity map workspace](activity-map-workspace.md), including
-    maps, laps, charts, measurements, device data, and provenance.
-06. Report mutations through the notification host. Success follows persistence; failures remain visible and actionable
-    across reconnects.
-07. Prove offline sync, visualization, export, snapshot and restore, and one confirmed upload through both clients.
-08. Use only original or individually licensed artwork with generated attribution.
-09. Complete a keyboard-only audit of both shells, including focus visibility, traversal order, modal trapping, and
-    reconnect recovery.
-10. Add redacted structured diagnostics with configurable startup verbosity, bounded live history, rotated log files,
-    shared filtering, and explicit download from the UI.
+1. Populate each device page through automatic bounded inspection, then give it explicit FIT import, route upload, map
+   management, and asset-management entry points. File transfer and mutation require separate confirmation.
+2. Stage FIT ingress before persistence. Pre-parse selected or dropped files and present their activities, metadata,
+   duplicates, warnings, and failures for review. Import nothing until the user explicitly confirms the staged set.
+3. Confine drag and drop to visible, enabled targets. Show clear accept or reject feedback while hovering. A drop target
+   cannot remain active elsewhere in the window or application.
+4. Complete the [activity map workspace](activity-map-workspace.md) acceptance and rendering-isolation work without
+   duplicating its implementation checklist here.
+5. Report mutations through the notification host. Success follows persistence; failures remain visible and actionable
+   across reconnects.
+6. Prove offline sync, visualization, export, snapshot and restore, and one confirmed upload through both clients.
+7. Use only original or individually licensed artwork with generated attribution.
+8. Complete a keyboard-only audit of both shells, including the explorer window, focus visibility, traversal order,
+   modal trapping, and reconnect overlay/recovery.
+9. Add redacted structured diagnostics with configurable startup verbosity, bounded live history, rotated log files,
+   shared filtering, and explicit download from the UI.
+
+The mounted-device browser is implemented; [device inspection](device-state.md) owns its remaining hardware acceptance.
+Its current boundary is documented in [device explorer architecture](../architecture/device-explorer.md).
 
 ## Target edges
 

@@ -1,7 +1,8 @@
 # Connectivity architecture
 
 `garmin-device` owns consent-gated Garmin file access. Target adapters list attachments; a shared coordinator reconciles
-initial state, arrivals, and departures because host events are not durable. Contents remain unread until consent.
+initial state, arrivals, and departures because host events are not durable. Attaching or mounting a recognizable Garmin
+authorizes bounded manifest/storage inspection; file catalog, transfer, network contact, and mutation remain explicit.
 
 `garmin-device` provides raw MTP through `mtp-rs` and Linux system mounts through GIO. Current CLI composition selects
 either adapter; desktop and HASS attachment views use the system mount. A HASS add-on must compose raw MTP explicitly
@@ -27,9 +28,14 @@ arbitrary USB device. Identities for which retained hardware evidence disproved 
 physical-reconnect instruction. The rejected MTP class-reset request is not used, healthy sessions are not reset, and a
 quiet interval separates any reset from the sole retry.
 
-After consent, each storage is searched for canonical `GarminDevice.xml`. The shared parser exposes only allowlisted FIT
-capabilities; transport handles and paths stay private. Unsafe hierarchies, incomplete listings, ambiguous manifests,
-and changed candidates fail closed.
+During bounded inspection, each storage is searched for canonical `GarminDevice.xml`. The shared parser exposes only
+allowlisted FIT capabilities; transport handles and paths stay private. Unsafe hierarchies, incomplete listings,
+ambiguous manifests, and changed candidates fail closed.
+
+Manifest detection dispatches by XML root and namespace to a format-specific parser. GarminDevice v2 is the only
+supported format; its wire representation and normalization live separately under `manifest/garmin/v2`, behind one
+transport-neutral model. Unsupported formats fail explicitly. Metadata discovery remains Garmin-specific; adding a
+parser does not imply support for another manufacturer's filenames or device operations.
 
 Files stream into caller-owned staging and must match the MTP size. Failures leave only a discardable unpublished prefix
 and cancel the stream. Reads never delete device objects.

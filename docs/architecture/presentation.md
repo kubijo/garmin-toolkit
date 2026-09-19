@@ -19,9 +19,11 @@ backdrop dismissal.
 The UI embeds hinted Noto Sans 2.015 Regular and SemiBold. Named egui families carry weight because egui lacks a
 font-weight field.
 
-The activity browser lazily loads details and renders each continuous coordinate sequence through a map-ready path
-preview. Online tiles remain separate work. Desktop runs application services on one worker thread and accepts native
-selection or file drops. Demo recreates an isolated database and seeds it through the production importer.
+The [activity workspace](activity-map.md) lazily loads recording details and links map, charts, laps, and playback
+through one sample cursor. Online vector tiles use a bounded preparation and rendering pipeline. Desktop runs
+application services on a worker thread and accepts native selection or file drops. Demo recreates an isolated database
+and seeds it through the production importer. The [device explorer](device-explorer.md) reuses the viewer for FIT
+previews.
 
 The borderless shell owns drag space and window controls; the compositor moves and resizes. Close and `Ctrl+Q` exit;
 `Ctrl+W` does nothing. Active work is named before aborting, and shutdown waits between atomic imports.
