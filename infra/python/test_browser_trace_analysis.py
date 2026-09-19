@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 from dataclasses import asdict
 
 from browser_trace_analysis import TraceError, analyze_trace, print_summary, renderer_for_url
+from test_browser_upload_analysis import mark
 
 
 def event(name, pid, tid, *, duration=None, timestamp=0, args=None, phase='X'):
@@ -80,6 +81,51 @@ class BrowserTraceAnalysisTest(unittest.TestCase):
 
     def test_selects_renderer_by_page_url_not_an_unrelated_trace_frame(self):
         self.assertEqual(renderer_for_url(self.events, 'http://127.0.0.1:8099/'), (30, 'http://127.0.0.1:8099/'))
+
+    def test_correlated_upload_report_uses_only_selected_main_thread(self):
+        lifecycle = [
+            mark('queued', 0),
+            mark('first_work', 1),
+            mark('progress', 2, size=12),
+            mark('published', 20),
+            mark('first_draw', 30),
+        ]
+        self.events.extend(dict(item, pid=30, tid=7) for item in lifecycle)
+        self.events.extend(dict(item, pid=20, tid=1) for item in lifecycle)
+        self.events.extend(dict(item, pid=30, tid=42) for item in lifecycle)
+        summary = analyze_trace(self.events)
+        self.assertEqual(len(summary.uploads.uploads), 1)
+        self.assertEqual(summary.uploads.uploads[0].published_ms, 20)
+        encoded = json.loads(json.dumps(asdict(summary)))
+        self.assertEqual(encoded['uploads']['uploads'][0]['first_draw_ms'], 30)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_summary(summary)
+        self.assertIn('publication to first draw', output.getvalue())
+        self.assertIn('offscreen retention', output.getvalue())
+
+    def test_old_traces_explicitly_report_missing_upload_correlation(self):
+        self.assertTrue(any('No correlated upload' in message for message in analyze_trace(self.events).diagnostics))
+
+    def test_bad_upload_payload_and_timestamp_do_not_enter_report_percentiles(self):
+        for bad in (mark('progress', 3, work=-1), dict(mark('progress', 3, size=12), ts='3000')):
+            with self.subTest(bad=bad):
+                lifecycle = [
+                    mark('queued', 0),
+                    mark('first_work', 1),
+                    mark('progress', 2, size=12),
+                    bad,
+                    mark('published', 10),
+                    mark('first_draw', 20),
+                ]
+                events = self.events + [dict(item, pid=30, tid=7) for item in lifecycle]
+                summary = analyze_trace(events)
+                self.assertEqual(summary.uploads.uploads[0].status, 'invalid')
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    print_summary(summary)
+                self.assertIn('visible queue lifetime     none', output.getvalue())
+                self.assertTrue(any('lifecycle gaps' in warning for warning in summary.diagnostics))
 
     def test_summarizes_frames_stalls_input_tiles_and_user_timing(self):
         summary = analyze_trace(self.events)

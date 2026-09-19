@@ -16,6 +16,12 @@
 
 let
   cargo = lib.getExe' toolchain "cargo";
+  # The ordinary test suite includes real GPU upload/readback regressions. Pin a
+  # software Vulkan implementation instead of relying on host drivers or /dev/dri.
+  headlessGpuEnv = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+    WGPU_BACKEND = "vulkan";
+    VK_DRIVER_FILES = "${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.parsed.cpu.name}.json";
+  };
   formatjs = lib.getExe formatjsCli;
   sqlx = lib.getExe pkgs.sqlx-cli;
   # Gallery snapshots exercise immediate-mode rendering outside llvm-cov.
@@ -138,6 +144,7 @@ let
       runtimeEnv = {
         CARGO_TARGET_DIR = nixCargoTargetDir;
       }
+      // headlessGpuEnv
       // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
         LD_LIBRARY_PATH = lib.makeLibraryPath galleryRuntimeLibraries;
       };
@@ -474,6 +481,7 @@ in
 
     rust-coverage = craneLib.cargoNextest (
       commonArgs
+      // headlessGpuEnv
       // {
         inherit cargoArtifacts;
         CARGO_PROFILE = "dev";
@@ -570,6 +578,7 @@ in
 
     rust-tests = craneLib.cargoNextest (
       commonArgs
+      // headlessGpuEnv
       // {
         inherit cargoArtifacts;
         cargoExtraArgs = lib.escapeShellArgs (lib.drop 2 testArgs);

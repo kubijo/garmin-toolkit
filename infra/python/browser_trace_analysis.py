@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from browser_upload_analysis import UploadAnalysis, analyze_uploads, finite_number
+
 DEFAULT_URL_PREFIX = 'http://127.0.0.1:8099/'
 FRAME_TARGET_MILLISECONDS = 1_000.0 / 60.0
 STALL_LIMIT_MILLISECONDS = 33.0
@@ -75,6 +77,7 @@ class BrowserTraceSummary:
     worker_tile_requests: int
     tile_loading: TileLoading
     diagnostics: list[str]
+    uploads: UploadAnalysis
 
 
 @dataclass(frozen=True)
@@ -345,8 +348,11 @@ def gesture_windows(events: list[dict[str, Any]]) -> list[tuple[float, float]]:
 def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PREFIX) -> BrowserTraceSummary:
     renderer_pid, page_url = renderer_for_url(events, url_prefix)
     renderer_tid = renderer_main_thread(events, renderer_pid)
-    main = [event for event in events if event.get('pid') == renderer_pid and event.get('tid') == renderer_tid]
-    loading = tile_loading([event for event in events if event.get('pid') == renderer_pid], renderer_tid)
+    renderer = [event for event in events if event.get('pid') == renderer_pid]
+    raw_main = [event for event in renderer if event.get('tid') == renderer_tid]
+    timed = [event for event in renderer if finite_number(event.get('ts'))]
+    main = [event for event in timed if event.get('tid') == renderer_tid]
+    loading = tile_loading(timed, renderer_tid)
 
     frame_times = sorted(
         float(event['ts'])
@@ -394,6 +400,20 @@ def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PR
                     worker_tile_requests += 1
 
     diagnostics = []
+    # Keep raw upload marks for lifecycle invalidation, but never sort malformed
+    # timestamps in frame, gesture, or network analysis. Metadata need not be timed.
+    uploads = analyze_uploads(raw_main)
+    invalid_timestamps = sum(event.get('ph') != 'M' and not finite_number(event.get('ts')) for event in renderer)
+    if invalid_timestamps:
+        diagnostics.append(f'{invalid_timestamps} events have invalid timestamps; timing coverage is incomplete.')
+    if not uploads.uploads:
+        diagnostics.append(
+            'No correlated upload lifecycles; visible waiting cannot be separated from offscreen retention.'
+        )
+    if uploads.malformed_events or uploads.partial_events:
+        diagnostics.append(
+            f'Upload lifecycle gaps: {uploads.malformed_events} malformed and {uploads.partial_events} partial events.'
+        )
     if len(loading.requests) != tile_requests + worker_tile_requests:
         diagnostics.append(
             'Some tile GETs lack request identities or repeat them; latency covers matched identities only.'
@@ -432,6 +452,7 @@ def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PR
         worker_tile_requests=worker_tile_requests,
         tile_loading=loading,
         diagnostics=diagnostics,
+        uploads=uploads,
     )
 
 
@@ -471,6 +492,34 @@ def print_summary(summary: BrowserTraceSummary, *, timeline: bool = False) -> No
         print('\nInput dispatch')
         for name, distribution in sorted(summary.event_dispatch.items()):
             print(f'  {name:<16} {format_distribution(distribution)}')
+    if summary.uploads.uploads:
+        rows = summary.uploads.uploads
+        print('\nCorrelated upload lifecycles (publication and draw submission, not presentation)')
+        print(f'  states {dict(Counter(row.status for row in rows))}')
+        complete = [row for row in rows if row.status in {'drawn', 'published'}]
+        for label, values in (
+            ('visible queue lifetime', [row.visible_ms for row in complete]),
+            ('visible wait excluding CPU', [row.visible_wait_ms for row in complete]),
+            ('offscreen retention', [row.hidden_ms for row in complete]),
+            ('active CPU work', [row.work_ms for row in complete]),
+            ('last visible to publish', [row.last_visible_to_publish_ms for row in complete]),
+            ('publication to first draw', [row.publication_to_draw_ms for row in complete]),
+        ):
+            print(
+                f'  {label:<26} {format_distribution(Distribution.from_values([v for v in values if v is not None]))}'
+            )
+        print(
+            '  Slowest completed uploads: id tile total-ms visible-ms hidden-ms work-ms last-visible-ms draw-delay-ms'
+        )
+        for row in sorted(complete, key=lambda row: row.published_ms or 0, reverse=True)[:10]:
+            draw = 'pending' if row.publication_to_draw_ms is None else f'{row.publication_to_draw_ms:.2f}'
+            print(
+                f'  {row.upload_id} {row.tile} {row.published_ms:.2f} {row.visible_ms:.2f} {row.hidden_ms:.2f}'
+                f' {row.work_ms:.2f} {row.last_visible_to_publish_ms:.2f} {draw}'
+            )
+        print(
+            '  Visible lifetime includes active work and frame scheduling; incomplete/released rows are excluded above.'
+        )
     if timeline:
         print('\nLoading timeline (seconds from first tile GET; inactive windows omitted)')
         print('  second   GETs finishes replies alloc-calls admission-frames worker-busy-ms')

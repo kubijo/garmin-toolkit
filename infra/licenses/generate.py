@@ -173,8 +173,31 @@ def check(config: dict[str, Any], output: Path) -> bool:
         stale |= {name for name in expected & present if not filecmp.cmp(output / name, fresh / name, shallow=False)}
         if stale:
             print(f'license bundles are stale: {", ".join(sorted(stale))}')
+            for name in sorted(stale & expected & present):
+                before = expanded_entries(output / name)
+                after = expanded_entries(fresh / name)
+                changed = sorted(key for key in before.keys() | after.keys() if before.get(key) != after.get(key))
+                print(f'  {name}: changed packages: {", ".join(changed) or "bundle encoding"}')
             return False
     return True
+
+
+def expanded_entries(path: Path) -> dict[str, Any]:
+    """Compare actual notices rather than shifted indices into the shared text table."""
+    bundle = json.loads(path.read_text())
+    return {
+        f'{entry["name"]} {entry["version"]}': {
+            **entry,
+            'notices': [
+                {
+                    'license': notice['license'],
+                    'text': bundle['license_texts'][notice['text_index']],
+                }
+                for notice in entry['notices']
+            ],
+        }
+        for entry in bundle['entries']
+    }
 
 
 def main() -> int:

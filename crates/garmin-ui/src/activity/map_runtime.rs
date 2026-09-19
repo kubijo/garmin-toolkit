@@ -83,6 +83,35 @@ pub enum MapRenderPhase {
     Draw,
 }
 
+/// Correlated browser upload event. Times are milliseconds since this upload was queued.
+/// Queue visibility ends at publication; first draw is command encoding, not presentation.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct MapUploadEvent {
+    pub version: u8,
+    pub upload_id: usize,
+    pub zoom: u8,
+    pub x: u32,
+    pub y: u32,
+    pub elapsed_ms: f64,
+    pub event: MapUploadPhase,
+    /// CPU time in allocation/write steps since the previous progress event.
+    pub work_ms: f64,
+    pub bytes: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MapUploadPhase {
+    Queued,
+    Hidden,
+    Visible,
+    FirstWork,
+    Progress,
+    Published,
+    FirstDraw,
+    Released,
+}
+
 /// Host-owned destination for activity-map performance measurements.
 pub trait MapMetricsSink: Send + Sync {
     /// Record one map frame without delaying rendering.
@@ -93,6 +122,9 @@ pub trait MapMetricsSink: Send + Sync {
 
     /// Wall time from enqueueing a tile for upload to GPU resource publication, not screen presentation.
     fn record_upload(&self, _milliseconds: f64) {}
+
+    /// Record a bounded upload lifecycle event, without retaining it in the renderer.
+    fn record_upload_event(&self, _event: MapUploadEvent) {}
 }
 
 struct DiscardMapMetrics;
@@ -104,12 +136,18 @@ impl MapMetricsSink for DiscardMapMetrics {
 #[derive(Clone)]
 pub(super) struct MapMetrics(Arc<dyn MapMetricsSink>);
 
+impl Default for MapMetrics {
+    fn default() -> Self {
+        Self::discard()
+    }
+}
+
 impl MapMetrics {
     fn discard() -> Self {
         Self(Arc::new(DiscardMapMetrics))
     }
 
-    fn new(metrics: impl MapMetricsSink + 'static) -> Self {
+    pub(super) fn new(metrics: impl MapMetricsSink + 'static) -> Self {
         Self(Arc::new(metrics))
     }
 
@@ -124,6 +162,11 @@ impl MapMetrics {
     #[cfg(any(target_arch = "wasm32", test))]
     pub(super) fn record_upload(&self, milliseconds: f64) {
         self.0.record_upload(milliseconds);
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(super) fn record_upload_event(&self, event: MapUploadEvent) {
+        self.0.record_upload_event(event);
     }
 }
 

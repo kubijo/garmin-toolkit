@@ -47,7 +47,10 @@ impl UploadController {
 }
 
 impl Executor {
-    pub(in crate::activity) fn new(context: Arc<UploadContext>) -> Self {
+    pub(in crate::activity) fn new(
+        context: Arc<UploadContext>,
+        _metrics: crate::activity::map_runtime::MapMetrics,
+    ) -> Self {
         Self {
             uploads: UploadController,
             route_worker: RouteWorker::spawn(context),

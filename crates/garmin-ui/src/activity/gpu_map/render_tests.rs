@@ -89,11 +89,16 @@ fn render_row(
     .unwrap()
     .into_prepared()
     .unwrap();
-    tile.gpu.store(Some(Arc::new(GpuTile::new(
-        context,
+    let capture = upload_trace::tests::Capture::default();
+    let trace = Arc::new(upload_trace::UploadTrace::new(
         id,
-        Arc::clone(&tile.mesh),
-    ))));
+        crate::activity::map_runtime::MapMetrics::new(capture.clone()),
+    ));
+    trace.begin_work();
+    trace.published();
+    let gpu = GpuTile::new(context, id, Arc::clone(&tile.mesh));
+    *gpu.first_draw.lock().unwrap() = Some(trace);
+    tile.gpu.store(Some(Arc::new(gpu)));
     let viewport = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(WIDTH as f32, HEIGHT as f32));
     let assembly = assemble_tile_frame([(&id, &tile)], camera, viewport);
     let frame = Frame {
@@ -133,7 +138,19 @@ fn render_row(
             ..Default::default()
         });
         draw_tiles(&frame, &surface, resources, &mut pass);
+        draw_tiles(&frame, &surface, resources, &mut pass);
     }
+    assert_eq!(
+        capture
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.event == crate::activity::map_runtime::MapUploadPhase::FirstDraw)
+            .count(),
+        1,
+        "wrapped instances and repeated draws must report first submission only once"
+    );
     read_row(device, queue, encoder, &texture)
 }
 

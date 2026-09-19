@@ -156,6 +156,9 @@ let
     root = workspaceSrc;
     fileset = lib.fileset.unions [
       (craneLib.fileset.commonCargoSources workspaceSrc)
+      # Path dependencies are not Cargo registry downloads: keep their notices in
+      # the sandbox source, just as in the build source closure.
+      (workspaceSrc + "/vendor/fast-mvt")
       (workspaceSrc + "/infra/licenses")
       (lib.fileset.maybeMissing (workspaceSrc + "/assets/licenses"))
     ];
