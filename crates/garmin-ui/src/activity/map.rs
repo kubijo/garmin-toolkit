@@ -195,10 +195,10 @@ impl ActivityMap {
         surface.submit_view(ui.ctx(), ui.visuals().dark_mode, &demand);
         let snapshot = surface.scene();
         let gpu_enabled = surface.gpu_enabled();
+        let scene = surface.update_scene(&snapshot, camera, map_rect, ui.ctx(), route);
         if let Some(callback) = surface.paint_callback(map_rect) {
             ui.painter().add(callback);
         }
-        let scene = surface.update_scene(&snapshot, camera, map_rect, ui.ctx(), route);
         surface.paint_labels(&snapshot, ui, camera, map_rect);
         let projector = MapProjector::new(camera, map_rect);
         let mut overlay = ui.new_child(

@@ -9,10 +9,9 @@
 
 use std::{marker::PhantomData, num::NonZeroU64, sync::Arc};
 
-use arc_swap::{ArcSwap, ArcSwapOption};
+use arc_swap::ArcSwapOption;
 use bytemuck::{Pod, Zeroable};
 use egui::{Color32, Rect, Shape, pos2};
-use egui_wgpu::{Callback, CallbackResources, CallbackTrait, ScreenDescriptor};
 use garmin_service_api::ActivitySampleSnapshot;
 use walkers::{Tile, TileId};
 use web_time::Instant;
@@ -21,6 +20,8 @@ use wgpu::util::DeviceExt as _;
 use super::{WALKERS_TILE_SIZE, mercator_y, speed_bounds};
 use crate::activity::map_style;
 
+#[path = "gpu_map/egui_adapter.rs"]
+mod egui_adapter;
 #[path = "gpu_map/labels.rs"]
 mod labels;
 #[path = "gpu_map/platform.rs"]
@@ -28,6 +29,8 @@ mod platform;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "gpu_map/render_tests.rs"]
 mod render_tests;
+#[path = "gpu_map/renderer.rs"]
+mod renderer;
 #[path = "gpu_map/route.rs"]
 mod route;
 #[path = "gpu_map/tile_budget.rs"]
@@ -35,6 +38,7 @@ mod tile_budget;
 #[cfg(any(target_arch = "wasm32", test))]
 #[path = "gpu_map/upload_trace.rs"]
 mod upload_trace;
+pub use egui_adapter::install;
 pub use tile_budget::BrowserTileLimits;
 pub(in crate::activity) use tile_budget::{TileBudget, TileDecodeBudget};
 
@@ -58,36 +62,7 @@ use route::{
 #[derive(Clone)]
 pub struct WgpuMapHandle {
     context: Arc<UploadContext>,
-}
-
-/// Install the map renderer in eframe's shared WGPU callback resources.
-///
-/// `sample_count` must match the eframe render pass which invokes the callback.
-///
-/// # Panics
-/// Panics unless `sample_count` is 1 or 4, the configurations supported by this renderer.
-#[must_use]
-pub fn install(render_state: &egui_wgpu::RenderState, sample_count: u32) -> WgpuMapHandle {
-    assert!(
-        matches!(sample_count, 1 | 4),
-        "WGPU sample count must be either 1 or 4"
-    );
-    let context = Arc::new(UploadContext::new(&render_state.device));
-    let resources = Resources::new(
-        &render_state.device,
-        render_state.target_format,
-        sample_count,
-        &context.camera_layout,
-        &context.tile_layout,
-        &context.route_source_layout,
-        &context.route_style_layout,
-    );
-    render_state
-        .renderer
-        .write()
-        .callback_resources
-        .insert(resources);
-    WgpuMapHandle { context }
+    resources: Arc<Resources>,
 }
 
 #[derive(Clone)]
@@ -890,15 +865,14 @@ impl RouteCache {
 }
 
 pub(in crate::activity) struct GpuMap {
-    frame: Arc<ArcSwap<Frame>>,
-    metrics: crate::activity::map_runtime::MapMetrics,
+    frame: Arc<Frame>,
     runtime: WgpuRuntime,
     labels: LabelCache,
     route: RouteCache,
 }
 
 struct WgpuRuntime {
-    surface: Arc<SurfaceGpu>,
+    renderer: Arc<renderer::Renderer>,
     executor: platform::Executor,
 }
 
@@ -1042,28 +1016,25 @@ impl GpuMap {
     ) -> Self {
         let context = Arc::clone(&handle.context);
         let executor = platform::Executor::new(Arc::clone(&context), metrics.clone());
-        Self {
-            frame: Arc::new(ArcSwap::from_pointee(Frame::default())),
+        let renderer = Arc::new(renderer::Renderer::new(
+            handle,
+            executor.upload_controller(),
             metrics,
-            runtime: WgpuRuntime {
-                surface: Arc::new(SurfaceGpu::new(&context)),
-                executor,
-            },
+        ));
+        Self {
+            frame: Arc::new(Frame::default()),
+            runtime: WgpuRuntime { renderer, executor },
             labels: LabelCache::default(),
             route: RouteCache::default(),
         }
     }
 
     pub(in crate::activity) fn paint_callback(&self, rect: Rect) -> Shape {
-        Shape::Callback(Callback::new_paint_callback(
+        egui_adapter::paint_callback(
             rect,
-            Paint {
-                frame: Arc::clone(&self.frame),
-                metrics: self.metrics.clone(),
-                surface: Arc::clone(&self.runtime.surface),
-                uploads: self.runtime.executor.upload_controller(),
-            },
-        ))
+            Arc::clone(&self.frame),
+            Arc::clone(&self.runtime.renderer),
+        )
     }
 
     pub(in crate::activity) fn update(
@@ -1094,12 +1065,12 @@ impl GpuMap {
         visible.retain(|tile| tile.tile.is_publishable());
         let route = self.route.visible(route);
         let visible_tiles = visible.len();
-        self.frame.store(Arc::new(Frame {
+        self.frame = Arc::new(Frame {
             camera,
             visible,
             route,
             visible_tiles_settling,
-        }));
+        });
         let label_metrics = self.labels.metrics();
         ScenePerf {
             milliseconds: started.elapsed().as_secs_f32() * 1_000.0,
@@ -1131,7 +1102,7 @@ impl GpuMap {
         while let Some(result) = self.runtime.poll_label() {
             self.labels.apply(result);
         }
-        let frame = self.frame.load_full();
+        let frame = &self.frame;
         let visible = frame.visible.clone();
         if visible.is_empty() {
             return;
@@ -1205,148 +1176,12 @@ fn color(color: Color32) -> [f32; 4] {
     color.to_array().map(|channel| f32::from(channel) / 255.0)
 }
 
-struct Paint {
-    frame: Arc<ArcSwap<Frame>>,
-    metrics: crate::activity::map_runtime::MapMetrics,
-    surface: Arc<SurfaceGpu>,
-    uploads: platform::UploadController,
-}
-
-impl CallbackTrait for Paint {
-    fn prepare(
-        &self,
-        _device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        _screen_descriptor: &ScreenDescriptor,
-        _encoder: &mut wgpu::CommandEncoder,
-        _resources: &mut CallbackResources,
-    ) -> Vec<wgpu::CommandBuffer> {
-        let started = Instant::now();
-        let _span = tracing::trace_span!("activity_map_render_prepare").entered();
-        platform::prepare_uploads(&self.uploads, queue, &self.metrics);
-        let frame = self.frame.load_full();
-        let surface = &self.surface;
-        queue.write_buffer(&surface.camera, 0, bytemuck::bytes_of(&frame.camera));
-        if let Some(route) = &frame.route {
-            queue.write_buffer(
-                &surface.outline_style,
-                0,
-                bytemuck::bytes_of(&route.outline),
-            );
-            queue.write_buffer(&surface.color_style, 0, bytemuck::bytes_of(&route.color));
-            if let Some(highlight) = &route.highlight {
-                queue.write_buffer(
-                    &surface.highlight_outline_style,
-                    0,
-                    bytemuck::bytes_of(&highlight.outline),
-                );
-                queue.write_buffer(
-                    &surface.highlight_color_style,
-                    0,
-                    bytemuck::bytes_of(&highlight.color),
-                );
-            }
-        }
-        self.metrics
-            .record_render(crate::activity::map_runtime::MapRenderPerformanceSample {
-                phase: crate::activity::map_runtime::MapRenderPhase::Prepare,
-                milliseconds: started.elapsed().as_secs_f32() * 1_000.0,
-            });
-        Vec::new()
-    }
-
-    fn paint(
-        &self,
-        info: egui::epaint::PaintCallbackInfo,
-        render_pass: &mut wgpu::RenderPass<'static>,
-        resources: &CallbackResources,
-    ) {
-        let started = Instant::now();
-        let _span = tracing::trace_span!("activity_map_draw_submission").entered();
-        let frame = self.frame.load_full();
-        let Some(resources) = resources.get::<Resources>() else {
-            return;
-        };
-        let surface = &self.surface;
-        let clip = map_style::clip_rect(info.viewport, info.clip_rect);
-        let clip = egui::epaint::PaintCallbackInfo {
-            viewport: clip,
-            clip_rect: clip,
-            pixels_per_point: info.pixels_per_point,
-            screen_size_px: info.screen_size_px,
-        }
-        .viewport_in_pixels();
-        let (Ok(left), Ok(top), Ok(width), Ok(height)) = (
-            u32::try_from(clip.left_px),
-            u32::try_from(clip.top_px),
-            u32::try_from(clip.width_px),
-            u32::try_from(clip.height_px),
-        ) else {
-            return;
-        };
-        if width == 0 || height == 0 {
-            return;
-        }
-        render_pass.set_scissor_rect(left, top, width, height);
-        draw_tiles(&frame, surface, resources, render_pass);
-        if let Some(route) = &frame.route {
-            let gpu = &route.resource;
-            render_pass.set_pipeline(&resources.route_pipeline);
-            render_pass.set_bind_group(0, &surface.camera_bind_group, &[]);
-            render_pass.set_bind_group(1, &gpu.origin_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, gpu.segments.slice(..));
-            render_pass.set_bind_group(2, &surface.outline_bind_group, &[]);
-            render_pass.draw(0..6, 0..gpu.segment_count);
-            render_pass.set_bind_group(2, &surface.color_bind_group, &[]);
-            render_pass.draw(0..6, 0..gpu.segment_count);
-            if route.highlight.is_some() {
-                render_pass.set_bind_group(2, &surface.highlight_outline_bind_group, &[]);
-                render_pass.draw(0..6, 0..gpu.segment_count);
-                render_pass.set_bind_group(2, &surface.highlight_color_bind_group, &[]);
-                render_pass.draw(0..6, 0..gpu.segment_count);
-            }
-        }
-        self.metrics
-            .record_render(crate::activity::map_runtime::MapRenderPerformanceSample {
-                phase: crate::activity::map_runtime::MapRenderPhase::Draw,
-                milliseconds: started.elapsed().as_secs_f32() * 1_000.0,
-            });
-    }
-}
-
-fn draw_tiles(
-    frame: &Frame,
-    surface: &SurfaceGpu,
-    resources: &Resources,
-    render_pass: &mut wgpu::RenderPass<'_>,
-) {
-    render_pass.set_pipeline(&resources.pipeline);
-    render_pass.set_bind_group(0, &surface.camera_bind_group, &[]);
-    for tile in &frame.visible {
-        let Some(gpu) = tile.tile.gpu.load_full() else {
-            continue;
-        };
-        render_pass.set_bind_group(1, &gpu.bind_group, &[]);
-        render_pass.set_vertex_buffer(0, gpu.vertices.slice(..));
-        render_pass.set_index_buffer(gpu.indices.slice(..), wgpu::IndexFormat::Uint32);
-        render_pass.draw_indexed(0..gpu.index_count, 0, tile.instances.clone());
-        #[cfg(any(target_arch = "wasm32", test))]
-        if let Some(first_draw) = &gpu.first_draw
-            && let Some(trace) = first_draw
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take()
-        {
-            trace.drawn();
-        }
-    }
-}
-
 #[repr(C)]
 #[derive(Clone, Copy, Default, Pod, Zeroable)]
 struct CameraUniform {
     center_high_low: [f32; 4],
     viewport_world_size_first_world: [f32; 4],
+    projection_scale_offset: [f32; 4],
 }
 
 impl CameraUniform {
@@ -1355,6 +1190,7 @@ impl CameraUniform {
         let (center_y_high, center_y_low) = split_f64(center[1]);
         Self {
             center_high_low: [center_x_high, center_y_high, center_x_low, center_y_low],
+            projection_scale_offset: [1.0, 1.0, 0.0, 0.0],
             viewport_world_size_first_world: [
                 viewport[0],
                 viewport[1],

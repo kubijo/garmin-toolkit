@@ -1,12 +1,131 @@
 # Browser map evidence
 
-Recorded 2026-09-19. Scope: the bounded map committed as `10234ef` and the subsequent working-tree upload telemetry.
-This is an evidence record, not a completion checklist. Open work lives in the
+Recorded 2026-09-19. Scope: the bounded map committed as `10234ef`, subsequent upload telemetry, and renderer
+extraction. This is an evidence record, not a completion checklist. Open work lives in the
 [activity map plan](../plans/activity-map-workspace.md). Current renderer ownership and limits live in
 [activity map architecture](../architecture/activity-map.md).
 
 Raw traces remain private local inputs, not committed fixtures. Measurements concern the bundled synthetic demo route.
 Use the maintained `infra/python/browser_trace_analysis.py` via `just hass::profile-analyze` to reproduce summaries.
+
+## Renderer extraction verification
+
+The working-tree extraction moves GPU prepare/draw work behind a renderer-owned API. The egui adapter provides physical
+viewport/scissor placement and retains one frame for preparation and drawing. Frame assembly now precedes callback
+creation; replacing the latest frame cannot change an already prepared callback. Pipelines are owned by device handles
+instead of egui's callback resources. The initial extraction left upload scheduling, shaders, sample counts, and worker
+ownership unchanged; the subsequent clipping correction below changes the projection uniform and shared vertex shader.
+
+Assistant-run verification on 2026-09-19 passed all 203 `garmin-ui` library tests, including 47 renderer tests. GPU
+tests used headless software Vulkan with the host Lavapipe ICD. Direct pixel readback covers wrapped tile copies and
+first-draw deduplication, nonzero viewport placement, partial/empty clipping, route/highlight passes, removal of a
+previous highlight, uniform updates, and 1x/4x MSAA. Adapter regressions cover fractional DPR, target-bound clipping,
+and replacing the latest frame between prepare and paint: the existing callback still renders its retained frame and the
+next callback renders the replacement. These are deterministic synthetic pixel checks, not a performance measurement.
+
+Strict `cargo clippy --locked --offline -p garmin-ui --all-targets -- --deny warnings` and `just qa::wasm` passed. The
+latter checks the actual HASS WASM target with the pinned Nix toolchain. Two needless-by-value arguments and two
+array-chunk lint findings were fixed, then the complete UI test suite was rerun successfully. Rust commands used one
+build job under a systemd scope with 4 GiB memory high, 6 GiB memory maximum, and 1 GiB swap maximum. Native tests ran
+with one test thread. No GUI or HASS server was launched, and no dependency or upload-budget changes were made.
+
+Native GPU checks and WASM compilation do not establish browser parity or OffscreenCanvas support. The new capture below
+matches the live emitted build, and the user subsequently confirmed that interaction looked good. This closes the
+extraction's browser smoke acceptance, not controlled performance validation. Earlier browser captures describe the
+pre-extraction build.
+
+### Extraction review fixes
+
+The hostile review found inherited projection compression at render-target boundaries, newly codified by a test, and
+missing coverage of production scene-update/callback ordering. The renderer now remaps the full physical projection into
+a target-bounded viewport using a scale/offset in the camera uniform. Tile, route, and highlight passes share the same
+shader transform; geographic camera state, world-copy selection, upload budgets, and MSAA configuration are unchanged.
+Callback preparation uses the retained map rectangle and current screen descriptor.
+
+The new pixel regression compares clipped output against a translated unclipped reference across all four edges, two
+corners, and a fully offscreen case, at DPR 1, 1.5, and 2 with 1x/4x MSAA. A separate test drives production
+`ActivityMap::show` with a capturing painter and checks current-camera output on the first frame and after a refit. It
+tests emitted scene content, not source text or a prescribed sequence of mock calls.
+
+Regression sensitivity was checked by temporarily disabling the projection correction and restoring the old
+callback-before-update order. Exactly the two new tests failed (203 passed): a translated blue pixel became green, and
+the first scene captured the stale camera at zero. Test cleanup was corrected so failed assertions do not cause an egui
+texture-delta destructor abort. Both mutations were then removed, and all 205 UI library tests passed. Strict native
+Clippy and the pinned HASS WASM check passed, using the same single-job memory limits recorded above. Rebuilt-browser
+visual verification was still open at that point; the earlier smoke acceptance did not cover this shader change.
+Subsequent rebuilt-browser evidence and user acceptance are recorded below.
+
+The subsequent review found that egui can transform a callback's outer rectangle after construction, leaving its
+captured preparation rectangle unchanged. The adapter now detects changed placement and uses an immutable camera binding
+computed from the final paint rectangle. Projection math is shared with normal preparation. The late-transform path
+allocates one camera buffer/binding per visible draw, without rewriting a shared uniform or retaining a growing cache;
+its CPU cost is included in draw timing. Unchanged placement retains the existing reusable-buffer path.
+
+A regression uses egui's actual WGPU callback renderer and transformed `Shape` objects, comparing pixels against
+callbacks created at their final placements on independent surfaces. It covers translation, scales 0.5/1/1.5, target
+edges, an offscreen callback returning to view, and multiple transformed copies sharing a renderer in one submission.
+Both tiles and route/highlight content are present, at DPR 1/1.5/2 and 1x/4x MSAA. After this fix, all 206 UI library
+tests, strict native Clippy, and the pinned HASS WASM check passed under the same memory limits. The subsequent browser
+capture below verifies ordinary interaction and settled appearance; subsequent user confirmation closes browser smoke
+acceptance, with the assistant's targeted scroll/resize limitation recorded explicitly.
+
+### Post-review browser capture
+
+`Trace-20260919T194959.json.gz` records emitted asset `815b37b00ce1ca6d`, also confirmed in the live browser. All 399
+worker tile requests completed with HTTP 200 (299 cached, 100 uncached), with no main-thread tile requests or
+worker-fallback timing. Across 347 interaction frame intervals, p95 was 18.47 ms and maximum 23.49 ms; none exceeded 33
+ms. Across the entire recording, 31 of 1,753 intervals exceeded 33 ms, with a maximum of 46.40 ms. These are main-thread
+frame intervals, not presentation FPS or a matched performance comparison. Preparation peaked at 1.60 ms, draw
+submission at 0.20 ms, and tile admission at 1.70 ms. Worker tasks peaked at 65.00 ms.
+
+Upload lifecycles contain 174 drawn, 10 published-but-not-drawn, 2 released, and 8 incomplete entries, with no malformed
+or partial events. Among published/drawn entries, visible queue lifetime has p95 35.50 ms and maximum 95.90 ms; measured
+upload CPU work peaks at 1.80 ms. The 1,079.70 ms publication tail consists of 1,051.20 ms hidden and 28.50 ms visible,
+with no recorded first draw for that tile. Recorded publication-to-first-draw delay peaks at 20.40 ms. Incomplete and
+released entries do not establish successful completion. The older unexplained tail and deferred controlled performance
+validation remain open.
+
+The startup configuration mark is absent from the trace, although correlated upload events are present. Live inspection
+independently confirms enabled telemetry, backend `Gl`, and DPR 1. Its current viewport/canvas is 2367 by 1268; the
+startup mark records 3389 by 1324, so neither is assumed to be the unchanged capture viewport. No warning/error console
+messages were returned. Eleven sampled trace screenshots show initial loading and subsequent map navigation. A live
+screenshot shows the settled route, labels, controls, and map background without visible tile gaps. The attempted
+scroll/resize check did not establish a changed rendered state: a resize briefly reported a narrower viewport, but
+subsequent inspection returned the original dimensions and unchanged appearance. Consequently this is ordinary browser
+smoke evidence, not independent visual verification of partially offscreen projection or late callback transforms.
+
+The user subsequently confirmed that it still works fine. Together with the scoped GPU regressions, rebuilt trace, and
+live settled-map inspection, this closes browser smoke acceptance for the review fixes. It does not establish that the
+user exercised every clipping/transform case, or replace deferred controlled performance validation. No further manual
+recording is requested.
+
+### Post-extraction interaction capture
+
+The user supplied `Trace-20260919T162515.json.gz`, recording emitted asset `3cc8fd55eb581c95`. The maintained analyzer
+found 411 completed worker tile requests, all HTTP 200 (284 cached and 127 uncached), no main-thread tile requests, and
+no worker-fallback timing. Across 351 interaction frame intervals, p95 was 18.67 ms and maximum 24.26 ms; none exceeded
+33 ms. These are main-thread frame intervals, not presentation FPS. Preparation peaked at 1.50 ms, draw submission at
+0.30 ms, and tile admission at 1.70 ms. Worker tasks peaked at 65.05 ms.
+
+Correlated telemetry contains 173 drawn, 14 released, 11 published-but-not-drawn, and 4 incomplete uploads, with no
+malformed or partial events. All four incomplete lifecycles end with a hidden marker, not a successful completion. There
+are 25 pending-upload visibility transitions. Among published/drawn lifecycles, visible queue lifetime has p95 34.30 ms
+and maximum 100.50 ms; measured upload CPU work peaks at 2.40 ms. One drawn tile spends 1,385.00 ms hidden within a
+1,482.40 ms enqueue-to-publication lifetime. The longest upload-latency timing, approximately 1,819.50 ms, correlates
+with an upload spending 1,784.20 ms hidden, publishing, then being released without a recorded first draw. This
+establishes offscreen retention as the dominant contributor to these particular tails, not to the historical
+2.669-second observation.
+
+Publication-to-first-draw delay reaches 2,120.20 ms. Pending-upload visibility accounting stops at publication, so the
+recording does not establish whether that delay represents an offscreen tile or a visible rendering delay. Neither this
+tail nor the 100.50 ms visible queue maximum is a performance acceptance. The startup configuration mark is absent;
+upload events establish active instrumentation during capture, but do not establish its initial viewport, DPR, or
+backend. Live inspection independently confirms the same `3cc8fd55eb581c95` JS/WASM asset, enabled telemetry, backend
+`Gl`, and DPR 1. The current canvas and viewport are 2367 by 1324; the startup mark records 3389 by 1324, so they must
+not be treated as an unchanged capture viewport. No warning/error console messages were returned. Screenshot capture
+timed out, so the assistant did not independently inspect appearance. The user subsequently reported that interaction
+looked good. Combined with the scoped tests, live build check, and trace, this closes browser smoke acceptance for the
+extraction. The latency observations and deferred controlled performance measurements remain open.
 
 ## Telemetry overhead comparison
 

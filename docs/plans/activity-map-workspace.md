@@ -9,8 +9,8 @@ complete the rendering-isolation work below before closing the overall workspace
 ## Telemetry comparison control (2026-09-19)
 
 The bounded-browser-map implementation was committed as `10234ef`; correlated upload telemetry followed in `11dcba8`.
-HASS now provides a comparison switch. The next implementation slice is renderer extraction, followed by OffscreenCanvas
-and the semantic interaction runner.
+HASS now provides a comparison switch. Renderer extraction has passed scoped checks and browser smoke acceptance; the
+next implementation slice is OffscreenCanvas, followed by the semantic interaction runner.
 
 Overhead measurement is deferred until the semantic interaction runner after OffscreenCanvas; it is not a blocker for
 renderer extraction. Do not claim negligible instrumentation cost or change production upload budgets on the existing
@@ -35,10 +35,12 @@ license failure. The exact sandboxed license check passes; the entire workflow h
 
 ### Unresolved historical observation
 
-The 2.669-second upload tail in `Trace-20260919T000106.json.gz` remains unreproduced, not fixed. New stationary and
-pan/return recordings have short visible upload lifetimes but no pending-upload visibility transitions. The real-GPU
-regression verifies retention/resumption, not the cause of that historical spike. Do not request another ordinary manual
-pan or increase upload budgets on this evidence. Attribute a future reproduction using correlated visibility markers.
+The 2.669-second upload tail in `Trace-20260919T000106.json.gz` remains unreproduced, not fixed. The initial stationary
+and pan/return recordings had no pending-upload visibility transitions. The post-extraction capture does record them,
+attributing particular long queue tails to offscreen retention; it does not retrospectively explain the historical
+spike. Visible queue lifetime still reaches 100.50 ms, and post-publication visibility is not measured. See the
+[capture evidence](../research/browser-map.md#post-extraction-interaction-capture). Do not request another ordinary
+manual pan or increase upload budgets on this evidence; retain these observations for scripted validation.
 
 Browser acceptance, trace measurements, telemetry semantics, test results, and implementation context are maintained in
 [Browser map evidence](../research/browser-map.md). Completed checks are not additional work items here.
@@ -46,6 +48,24 @@ Browser acceptance, trace measurements, telemetry semantics, test results, and i
 ## Rendering isolation
 
 The [renderer architecture](../architecture/activity-map.md#rendering-boundary) records the existing boundaries.
+
+### Extraction boundary and closing verification
+
+GPU preparation and draw submission are extracted from egui callbacks without changing upload budgets, sample counts, or
+worker ownership. The renderer accepts a frame, full physical-pixel projection, and target-bounded viewport/scissor; the
+egui adapter owns logical-coordinate conversion. Callback preparation and drawing retain the same frame snapshot.
+Pipelines belong to the device handle, and uniforms remain per map surface. This is not yet an OffscreenCanvas
+implementation.
+
+The closing review's clipping defect and missing production-ordering test are addressed. The shader now preserves the
+full projection at target edges, and regressions cover translated pixel output and current-frame UI assembly. See the
+[fix evidence](../research/browser-map.md#extraction-review-fixes).
+
+Browser smoke acceptance is closed with the rebuilt capture, live settled-map inspection, and the user's confirmation
+that it still works fine. The assistant did not independently verify the targeted scroll/resize case; deterministic
+pixel regressions cover clipping and late transforms. See the
+[capture evidence](../research/browser-map.md#post-review-browser-capture). Controlled performance validation remains
+deferred to the scripted interaction runner.
 
 ### Verification rules for subsequent changes
 
@@ -63,10 +83,10 @@ The [renderer architecture](../architecture/activity-map.md#rendering-boundary) 
   label collision scan with a spatial grid, and retain same-zoom label translation plus zoom invalidation.
 - Remove the public tile task/decoder completion API after desktop and HASS hosts move behind the runtime. Hosts should
   provide transport and cache services, not manipulate activity-view tile state.
-- After closing the current browser slice, move map GPU uploads and drawing to a worker-owned `OffscreenCanvas`. Extract
-  the renderer from egui callbacks first and verify parity, then transfer a map-only canvas and retain prepared geometry
-  and GPU resources in the worker. Keep application UI on the main thread. Verify canvas placement, clipping, input
-  alignment, resize/DPR changes, teardown, and device-loss reporting. Native 4x MSAA remains unchanged.
+- Next, move map GPU uploads and drawing to a worker-owned `OffscreenCanvas`. Use the accepted renderer boundary to
+  transfer a map-only canvas and retain prepared geometry and GPU resources in the worker. Keep application UI on the
+  main thread. Verify canvas placement, clipping, input alignment, resize/DPR changes, teardown, and device-loss
+  reporting. Native 4x MSAA remains unchanged.
 - Keep offscreen chart cards dormant and cache chart analysis by activity, axis, lap, units, theme, and width.
   Map-driven repaints must preserve the shared cursor, playback, lap selection, and map/chart sample-index
   synchronization.

@@ -782,6 +782,10 @@ impl TileTask {
 }
 
 #[cfg(test)]
+#[path = "map_runtime/scene_tests.rs"]
+mod scene_tests;
+
+#[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
 
