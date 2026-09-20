@@ -88,7 +88,7 @@ impl CallbackTrait for Paint {
     }
 }
 
-fn draw_region(info: &PaintCallbackInfo) -> Option<DrawRegion> {
+pub(in crate::activity) fn draw_region(info: &PaintCallbackInfo) -> Option<DrawRegion> {
     let viewport = pixels(&info.viewport_in_pixels())?;
     let clip = map_style::clip_rect(info.viewport, info.clip_rect);
     let scissor = pixels(
@@ -127,6 +127,80 @@ fn pixels(rect: &egui::epaint::ViewportInPixels) -> Option<[u32; 4]> {
 mod tests {
     use super::*;
     use egui::pos2;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn composition_opening_replaces_alpha_at_final_clipped_placement() {
+        use crate::activity::map_composition::{CompositionPlugin, Host, Placement};
+        use std::sync::Mutex;
+
+        struct RecordingHost(Arc<Mutex<Vec<Placement>>>);
+        impl Host for RecordingHost {
+            fn begin_pass(&self) {}
+            fn begin_paint(&self) {}
+            fn painted(&self, placement: Placement) {
+                self.0.lock().unwrap().push(placement);
+            }
+        }
+
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = futures_lite::future::block_on(
+            instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
+        )
+        .unwrap();
+        let (device, queue) = futures_lite::future::block_on(
+            adapter.request_device(&wgpu::DeviceDescriptor::default()),
+        )
+        .unwrap();
+        for samples in [1, 4] {
+            for (dpr, twice_dpr) in [(1.0, 2_usize), (1.5, 3), (2.0, 4)] {
+                let placements = Arc::new(Mutex::new(Vec::new()));
+                let plugin = CompositionPlugin::new(
+                    &device,
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    samples,
+                    RecordingHost(Arc::clone(&placements)),
+                );
+                let mut opening = plugin.opening(Rect::from_min_size(
+                    pos2(-20.0, 20.0),
+                    egui::vec2(120.0, 60.0),
+                ));
+                opening.translate(egui::vec2(10.0, 20.0));
+                let image = capture_shapes(
+                    &[opening],
+                    &ScreenDescriptor {
+                        size_in_pixels: [768, 256],
+                        pixels_per_point: dpr,
+                    },
+                    samples,
+                    &device,
+                    &queue,
+                );
+                // An opaque-black target must become transparent ONLY inside the final opening.
+                // Source-over blending a transparent rectangle would leave every alpha opaque.
+                for (index, pixel) in image.as_chunks::<4>().0.iter().enumerate() {
+                    let x = index % 768;
+                    let y = index / 768;
+                    let inside = x < 110 * twice_dpr / 2
+                        && (40 * twice_dpr / 2..100 * twice_dpr / 2).contains(&y);
+                    assert_eq!(
+                        pixel[3],
+                        if inside { 0 } else { 255 },
+                        "alpha at ({x}, {y}), DPR={dpr}, MSAA={samples}"
+                    );
+                }
+                let placements = placements.lock().unwrap();
+                assert_eq!(placements.len(), 1);
+                assert_eq!(
+                    placements[0].projection.map(f32::to_bits),
+                    [-10.0 * dpr, 40.0 * dpr, 120.0 * dpr, 60.0 * dpr].map(f32::to_bits)
+                );
+                assert_eq!(placements[0].clip[0], 0);
+                assert_eq!(placements[0].screen, [768, 256]);
+            }
+        }
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]

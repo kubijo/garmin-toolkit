@@ -49,6 +49,48 @@ Browser acceptance, trace measurements, telemetry semantics, test results, and i
 
 The [renderer architecture](../architecture/activity-map.md#rendering-boundary) records the existing boundaries.
 
+### Active: opt-in OffscreenCanvas vertical experiment
+
+Approved 2026-09-20. Keep normal browser rendering and native 4x MSAA unchanged. No upstream patches, per-frame image
+handoffs, complete UI paint-list transfers, or shared-memory deployment requirements. An experiment is not a production
+migration or evidence of a speedup.
+
+1. **Composition gate (conditional go: worker-GL):** demo-only `--map-render-experiment`; matched WebGL2 UI baseline and
+   independently selected worker backend. Prove a directly presented worker canvas beneath the real egui renderer, using
+   a typed plugin and a replacement-blend paint callback. Validate final callback placement, clipping, controls,
+   tooltips, modals, resize, UI zoom, and DPR. Stop before pipeline migration if composition fails. Source, scoped
+   Rust/GPU tests, strict native/WASM lint, and emitted-bundle checks are complete; the isolated fixture is served on
+   port 8100. Live GL clipping, resize, UI zoom, light/dark themes, overlays, modal input blocking, hide/show, and
+   teardown pass. The DPR mismatch reproduces on plain HTML under Chrome emulation, independently of this plugin; do not
+   patch application sizing to compensate. Native HiDPI browser acceptance and background-tab lifecycle capture remain
+   unverified (deterministic pixel/transport regressions cover those paths). WebGPU returns no adapter here. These
+   coverage limits permit the next opt-in GL experiment, not a production migration or cross-browser acceptance. See the
+   [gate evidence](../research/browser-map.md#offscreencanvas-composition-gate-2026-09-20).
+2. **In progress: real map vertical path (worker-GL):** one activity map; main retains UI, input/camera and chart state;
+   render worker owns scheduling, admission, uploads, map/label/marker presentation; a separate preparation worker sends
+   bulk results directly to it. Reuse existing renderer, algorithms, codecs, and budgets. Route data crosses once per
+   revision; dynamic updates are at most 2 KiB, one in flight plus one replaceable pending update. No main-thread
+   fallback or silent backend substitution. Initialization/device/protocol failures leave the rest of the UI usable. The
+   path passes an initial live worker-GL smoke check: tiles, labels, route, pan/zoom, and control overlays. First-frame
+   texture-delta consumption and failure-reporting defects are fixed. The complete asset graph uses dependency-aware
+   hashed filenames; ordinary cached reloads load the rebuilt modules. The checker fixture remains available through
+   `map-composition-proof=1`; its logic-only click flicker fix passes live inspection. These checks do not replace the
+   bounded replay, lifecycle/resource acceptance, or performance comparison below.
+3. **Bounded replay and acceptance (pending):** demo-only camera-demand replay with start/status/cancel; stationary
+   arrival, warm pan/zoom/return, playback, replacement and teardown. Record deadlines, coalescing, completed workload,
+   both thread timelines, message bytes, cache/resource bounds and submission age. Compare five alternating matched
+   main-GL/worker-GL pairs; worker-WebGPU is a separate backend experiment, not evidence of offloading alone. This
+   replay does not replace the later semantic interaction runner or prove browser input latency.
+4. **Close (pending):** emitted-WASM, browser composition/interaction, resource cleanup, native/default-mode regression
+   checks and adversarial review. Record an explicit go/no-go/inconclusive result in the research owner. Require a
+   main-thread improvement beyond run variation without worse visible responsiveness or unacceptable memory growth.
+
+Use one built package and warmed server cache, matching activity, viewport, DPR, theme, backend, instrumentation, tile
+identities and content hashes. Keep submission acknowledgements distinct from presentation. No claim of zero copies
+inside the browser compositor. Unsupported concurrent maps and device FIT previews are outside the experimental slice.
+Do not create another temporary tracker; research and captures belong in the existing evidence owner and ignored
+artifact directories. Builds and isolated server runs still follow the development safeguards.
+
 ### Extraction boundary and closing verification
 
 GPU preparation and draw submission are extracted from egui callbacks without changing upload budgets, sample counts, or

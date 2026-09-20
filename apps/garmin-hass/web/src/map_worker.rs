@@ -13,6 +13,20 @@ use admission::Step as BrowserTileAdmissionStep;
 const MAP_WORKER_INITIALIZATION_TIMEOUT_MILLISECONDS: i32 = 10_000;
 const MAP_WORKER_TASK_TIMEOUT_MILLISECONDS: i32 = 20_000;
 
+#[wasm_bindgen(module = "/browser-assets.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = assetUrl, catch)]
+    fn asset_url(name: &str) -> Result<String, JsValue>;
+}
+
+#[wasm_bindgen(module = "/map-clock.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = waitMilliseconds)]
+    fn wait_on_clock(milliseconds: i32) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = nextMapFrame)]
+    fn next_frame_on_clock() -> js_sys::Promise;
+}
+
 /// Authoritative worker protocol version used to reject mixed browser assets.
 #[wasm_bindgen]
 pub fn browser_worker_protocol_version() -> u8 {
@@ -377,6 +391,7 @@ impl admission::Work for PendingBrowserTile {
 
 struct BrowserMapWorkerShared {
     worker: web_sys::Worker,
+    allow_fallback: bool,
     state: RefCell<activity::map_runtime::BrowserWorkerState<BrowserMapTask>>,
     admission: RefCell<BrowserTileAdmission>,
     data: RefCell<VecDeque<PendingBrowserData>>,
@@ -402,7 +417,13 @@ impl BrowserMapWorkerShared {
             .borrow_mut()
             .register(kind, task, replace_pending);
         match registration {
-            activity::map_runtime::BrowserWorkerRegistration::Fallback(task) => task.fallback(),
+            activity::map_runtime::BrowserWorkerRegistration::Fallback(task) => {
+                if self.allow_fallback {
+                    task.fallback();
+                } else {
+                    task.complete_error("map preparation worker is unavailable".to_owned());
+                }
+            }
             activity::map_runtime::BrowserWorkerRegistration::Queued(_id) => {}
             activity::map_runtime::BrowserWorkerRegistration::Dispatch(id) => {
                 self.dispatch(id);
@@ -642,11 +663,18 @@ impl BrowserMapWorkerShared {
     }
 
     fn enter_fallback(&self, reason: &str, tasks: Vec<BrowserMapTask>) {
-        tracing::warn!(%reason, "browser map worker failed; using local fallback");
+        tracing::warn!(%reason, fallback = self.allow_fallback, "browser map worker failed");
         self.worker.terminate();
         self.data.borrow_mut().clear();
         for task in tasks {
-            task.fallback();
+            if self.allow_fallback {
+                task.fallback();
+            } else {
+                task.complete_error(reason.to_owned());
+            }
+        }
+        if !self.allow_fallback {
+            crate::map_experiment::renderer::report_failure(reason);
         }
     }
 }
@@ -720,26 +748,26 @@ pub(super) struct BrowserMapWorker {
 
 impl BrowserMapWorker {
     fn new() -> Result<Self, JsValue> {
-        let document = web_sys::window()
-            .and_then(|window| window.document())
-            .ok_or_else(|| js_error("the browser document is unavailable"))?;
-        let asset_url = |selector: &str| -> Result<String, JsValue> {
-            document
-                .query_selector(selector)?
-                .and_then(|link| link.dyn_into::<web_sys::HtmlLinkElement>().ok())
-                .map(|link| link.href())
-                .filter(|href| !href.is_empty())
-                .ok_or_else(|| {
-                    js_error(&format!("browser application asset is missing: {selector}"))
-                })
-        };
-        let module_url = asset_url("link[rel=\"modulepreload\"]")?;
-        let wasm_url = asset_url("link[rel=\"preload\"][as=\"fetch\"][type=\"application/wasm\"]")?;
+        Self::from_assets(
+            &asset_url("module")?,
+            &asset_url("wasm")?,
+            &asset_url("map-worker")?,
+            true,
+        )
+    }
+
+    fn from_assets(
+        module_url: &str,
+        wasm_url: &str,
+        worker_url: &str,
+        allow_fallback: bool,
+    ) -> Result<Self, JsValue> {
         let options = web_sys::WorkerOptions::new();
         options.set_type(web_sys::WorkerType::Module);
-        let worker = web_sys::Worker::new_with_options("map-worker.js", &options)?;
+        let worker = web_sys::Worker::new_with_options(worker_url, &options)?;
         let shared = Rc::new(BrowserMapWorkerShared {
             worker,
+            allow_fallback,
             state: RefCell::new(activity::map_runtime::BrowserWorkerState::default()),
             admission: RefCell::new(BrowserTileAdmission::default()),
             data: RefCell::new(VecDeque::new()),
@@ -757,6 +785,7 @@ impl BrowserMapWorker {
 
         let error_shared = Rc::downgrade(&shared);
         let on_error = Closure::wrap(Box::new(move |event: web_sys::ErrorEvent| {
+            event.prevent_default();
             if let Some(shared) = error_shared.upgrade() {
                 shared.transport_failure(&event.message());
             }
@@ -767,8 +796,8 @@ impl BrowserMapWorker {
 
         let initialization = codec::init_message(
             activity::map_runtime::BROWSER_WORKER_PROTOCOL_VERSION,
-            &module_url,
-            &wasm_url,
+            module_url,
+            wasm_url,
         )?;
         shared.worker.post_message(&initialization)?;
 
@@ -815,9 +844,20 @@ impl Drop for BrowserMapWorker {
 pub(super) enum BrowserMapBackend {
     Worker(BrowserMapWorker),
     Fallback,
+    Remote,
 }
 
 impl BrowserMapBackend {
+    /// The render worker owns its preparation worker directly; no bulk payload visits Window.
+    /// Failure remains local to the opt-in map and never starts a local preparation fallback.
+    pub(super) fn for_render_worker(
+        module_url: &str,
+        wasm_url: &str,
+        worker_url: &str,
+    ) -> Result<Self, JsValue> {
+        BrowserMapWorker::from_assets(module_url, wasm_url, worker_url, false).map(Self::Worker)
+    }
+
     pub(super) fn new() -> Self {
         match BrowserMapWorker::new() {
             Ok(worker) => Self::Worker(worker),
@@ -834,12 +874,16 @@ impl activity::map_runtime::Backend for BrowserMapBackend {
         match self {
             Self::Worker(worker) => worker.request(task),
             Self::Fallback => BrowserMapTask::Tile(task).fallback(),
+            Self::Remote => {
+                task.complete_prepared(Err("map content belongs to the render worker".to_owned()));
+            }
         }
     }
 
     fn submit_labels(&self, task: activity::map_runtime::BrowserLabelTask) {
         match self {
             Self::Worker(worker) => worker.request_labels(task),
+            Self::Remote => task.complete(Err("map labels belong to the render worker".to_owned())),
             Self::Fallback => match task.request() {
                 Ok(request) => BrowserMapTask::Labels { task, request }.fallback(),
                 Err(error) => task.complete(Err(error)),
@@ -850,6 +894,7 @@ impl activity::map_runtime::Backend for BrowserMapBackend {
     fn submit_route(&self, task: activity::map_runtime::BrowserRouteTask) {
         match self {
             Self::Worker(worker) => worker.request_route(task),
+            Self::Remote => task.complete(Err("map route belongs to the render worker".to_owned())),
             Self::Fallback => match task.request() {
                 Ok(request) => BrowserMapTask::Route { task, request }.fallback(),
                 Err(error) => task.complete(Err(error)),
@@ -859,31 +904,11 @@ impl activity::map_runtime::Backend for BrowserMapBackend {
 }
 
 async fn wait_milliseconds(milliseconds: i32) {
-    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-        let scheduled = web_sys::window().is_some_and(|window| {
-            window
-                .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds)
-                .is_ok()
-        });
-        if !scheduled {
-            let _ignored = resolve.call0(&JsValue::UNDEFINED);
-        }
-    });
-    let _ignored = JsFuture::from(promise).await;
+    let _ignored = JsFuture::from(wait_on_clock(milliseconds)).await;
 }
 
 async fn next_animation_frame() {
-    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-        let scheduled = web_sys::window().is_some_and(|window| {
-            window
-                .request_animation_frame(resolve.unchecked_ref())
-                .is_ok()
-        });
-        if !scheduled {
-            let _ignored = resolve.call0(&JsValue::UNDEFINED);
-        }
-    });
-    let _ignored = JsFuture::from(promise).await;
+    let _ignored = JsFuture::from(next_frame_on_clock()).await;
 }
 
 fn js_error(message: &str) -> JsValue {

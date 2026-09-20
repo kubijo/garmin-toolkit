@@ -107,8 +107,8 @@ test('emitted WASM reports the original failure through the Rust CustomEvent bri
 }, async t => {
     const root = process.env.GARMIN_TEST_WEB_ROOT;
     const html = await readFile(join(root, 'index.html'), 'utf8');
-    const js = html.match(/garmin-hass-web-[a-z0-9]+\.js/)?.[0];
-    const wasm = html.match(/garmin-hass-web-[a-z0-9]+_bg\.wasm/)?.[0];
+    const { browserAssetPaths } = await import('./fingerprint-web.mjs');
+    const { module: js, wasm } = browserAssetPaths(html);
     assert.ok(js && wasm);
     // Initialize as a worker (no Window) so this test does not start a renderer.
     const module = await import(pathToFileURL(join(root, js)).href);

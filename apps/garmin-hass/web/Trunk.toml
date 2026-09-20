@@ -2,6 +2,12 @@
 public_url = "./"
 filehash = true
 no_sri = true
-minify = "on_release"
+# The final JS bundler minifies after resolving the complete dependency graph.
+minify = "never"
 create_nonce = true
 nonce_placeholder = "GARMIN_TOOLKIT_CSP_NONCE"
+
+[[hooks]]
+stage = "post_build"
+command = "node"
+command_arguments = ["../../../infra/javascript/fingerprint-web.mjs"]

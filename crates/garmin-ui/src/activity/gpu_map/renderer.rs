@@ -41,7 +41,7 @@ impl WgpuMapHandle {
 /// Full projection and target-bounded viewport/scissor in physical pixels.
 /// Each rectangle is [left, top, width, height]. Clipping must not change the map projection.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct DrawRegion {
+pub(in crate::activity) struct DrawRegion {
     /// Full physical-pixel projection [left, top, width, height], possibly outside the target.
     pub projection: [f32; 4],
     pub viewport: [u32; 4],

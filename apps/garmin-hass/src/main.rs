@@ -15,6 +15,9 @@ struct Args {
     /// Disable browser map upload lifecycle telemetry for controlled profiling comparisons.
     #[arg(long)]
     no_map_upload_telemetry: bool,
+    /// Enable the isolated browser map experiment (demo builds only).
+    #[arg(long)]
+    map_render_experiment: bool,
 }
 
 #[tokio::main]
@@ -28,12 +31,30 @@ async fn main() -> Result<(), garmin_hass::Error> {
                 .unwrap_or_else(|_| EnvFilter::new("garmin_hass=info")),
         )
         .init();
-    garmin_hass::run(!args.no_map_upload_telemetry).await
+    garmin_hass::run(garmin_hass::BrowserOptions {
+        map_upload_telemetry: !args.no_map_upload_telemetry,
+        map_render_experiment: args.map_render_experiment,
+    })
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn map_experiment_requires_an_explicit_flag() {
+        assert!(
+            !Args::try_parse_from(["garmin-hass"])
+                .unwrap()
+                .map_render_experiment
+        );
+        assert!(
+            Args::try_parse_from(["garmin-hass", "--map-render-experiment"])
+                .unwrap()
+                .map_render_experiment
+        );
+    }
 
     #[test]
     fn upload_telemetry_is_enabled_unless_explicitly_disabled() {

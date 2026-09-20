@@ -6,6 +6,7 @@
         <title>Garmin Toolkit</title>
         <link data-trunk rel="rust" data-wasm-opt="0" data-initializer="initializer.js">
         <link data-trunk rel="copy-file" href="map-worker.js">
+        <link data-trunk rel="copy-file" href="map-render-worker.js">
         <link data-trunk rel="copy-file" href="worker-codec.js">
         <link data-trunk rel="icon" href="../../../crates/garmin-brand/assets/icon.svg">
         <style>
@@ -30,6 +31,7 @@
         }
         #loading {
             position: fixed;
+            z-index: 2;
             inset: 0;
             display: grid;
             place-items: center;
@@ -190,7 +192,11 @@
         </style>
     </head>
     <body>
-        <canvas id="garmin-toolkit" data-map-upload-telemetry="GARMIN_TOOLKIT_MAP_UPLOAD_TELEMETRY"></canvas>
+        <canvas
+            id="garmin-toolkit"
+            data-map-upload-telemetry="GARMIN_TOOLKIT_MAP_UPLOAD_TELEMETRY"
+            data-map-render-experiment="GARMIN_TOOLKIT_MAP_RENDER_EXPERIMENT"
+        ></canvas>
         <main id="loading" aria-live="polite" aria-busy="true">
             <section id="loading-panel" aria-labelledby="loading-message">
                 <div id="loading-state" aria-hidden="true">

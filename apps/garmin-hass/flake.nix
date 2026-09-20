@@ -70,6 +70,10 @@
               cargoArtifacts = webCargoArtifacts;
               trunkIndexPath = "apps/garmin-hass/web/index.html";
               wasm-bindgen-cli = pkgs.wasm-bindgen-cli_0_2_126;
+              nativeBuildInputs = [
+                pkgs.nodejs
+                pkgs.esbuild
+              ];
 
               buildPhaseCargoCommand = ''
                 ( cd apps/garmin-hass/web && trunk build --release=true index.html )
@@ -155,6 +159,10 @@
           devShell = craneLib.devShell {
             CARGO_TARGET_DIR = nixCargoTargetDir;
             checks = { inherit package; };
+            packages = [
+              pkgs.nodejs
+              pkgs.esbuild
+            ];
           };
         };
     };
