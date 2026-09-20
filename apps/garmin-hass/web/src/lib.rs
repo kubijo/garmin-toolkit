@@ -1,6 +1,7 @@
 #![cfg(target_arch = "wasm32")]
 
 mod browser_timing;
+mod map_experiment;
 mod map_worker;
 
 use bytes::Bytes;
@@ -87,18 +88,32 @@ pub fn start() -> Result<(), JsValue> {
             .ok_or_else(|| js_error("the map upload telemetry configuration is missing"))?,
     )
     .map_err(|_| js_error("the map upload telemetry configuration is invalid"))?;
+    let experiment_mode = map_experiment::mode(&canvas)?;
 
     spawn_local(async move {
+        let fixture_canvas = canvas.clone();
         let result = eframe::WebRunner::new()
             .start(
                 canvas.clone(),
-                eframe::WebOptions::default(),
+                map_experiment::options(&experiment_mode),
                 Box::new(move |creation| {
                     garmin_ui::install(&creation.egui_ctx);
                     let render_state = creation.wgpu_render_state.as_ref().ok_or_else(|| {
                         io::Error::other("eframe did not provide the required WGPU render state")
                     })?;
-                    report_graphics_adapter(render_state);
+                    let adapter = render_state.adapter.get_info();
+                    map_experiment::report_startup(
+                        &experiment_mode,
+                        &format!("{:?}", adapter.backend),
+                        &adapter.name,
+                        map_upload_telemetry,
+                    );
+                    if experiment_mode.starts_with("worker-") && map_experiment::is_fixture() {
+                        return Ok(Box::new(map_experiment::Fixture::new(creation, &fixture_canvas, &experiment_mode)?));
+                    }
+                    if experiment_mode.starts_with("worker-") {
+                        map_experiment::install_map(creation, &fixture_canvas, &experiment_mode)?;
+                    }
                     browser_timing::mark_detail(
                         "garmin.map.upload-telemetry",
                         &serde_json::json!({
@@ -120,17 +135,6 @@ pub fn start() -> Result<(), JsValue> {
         }
     });
     Ok(())
-}
-
-fn report_graphics_adapter(render_state: &eframe::egui_wgpu::RenderState) {
-    let adapter = render_state.adapter.get_info();
-    web_sys::console::info_1(
-        &format!(
-            "Garmin Toolkit graphics backend: {:?} ({})",
-            adapter.backend, adapter.name
-        )
-        .into(),
-    );
 }
 
 fn identify_text_agent(canvas: &web_sys::HtmlCanvasElement) {
@@ -178,7 +182,14 @@ impl App {
         let shared = Rc::new(RefCell::new(State::default()));
         spawn_connection(Rc::clone(&shared), context.clone());
         let map_runtime = activity::map_runtime::MapRuntimeHandle::new(
-            BrowserMapBackend::new(),
+            if context
+                .plugin_opt::<activity::map_remote::RemoteMapPlugin>()
+                .is_some()
+            {
+                BrowserMapBackend::Remote
+            } else {
+                BrowserMapBackend::new()
+            },
             activity::map_runtime::Renderer::wgpu(map_renderer),
         )
         .with_metrics(BrowserMapMetrics {
@@ -1065,6 +1076,7 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        map_experiment::update_diagnostics(ui.ctx());
         if self.first_frame {
             self.first_frame = false;
             hide_loading_overlay();

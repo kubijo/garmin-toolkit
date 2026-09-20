@@ -166,6 +166,28 @@ fn workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
 }
 
 #[scene]
+fn renderer_diagnostics(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(
+        ctx,
+        ui,
+        Stage::Fixed(egui::vec2(320.0, 150.0)).checkerboard(globals.checkerboard()),
+        |ui| {
+            for (label, backend, error) in [
+                ("main-gl · ready", "WebGL2", ""),
+                ("worker-gl · initializing", "pending", ""),
+                ("worker-gl · ready", "WebGL2", ""),
+                ("worker-webgpu · failed", "pending", "No compatible adapter"),
+            ] {
+                activity::map_diagnostics::RendererDiagnostics {
+                label: label.to_owned(),
+                detail: format!("mapBackend: {backend}\nuiBackend: WebGL2\nuiAdapter: ANGLE (NVIDIA GeForce RTX 4090)\nerror: {error}"),
+            }.show(ui);
+            }
+        }
+    );
+}
+
+#[scene]
 fn compact_workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     show_workspace(
         ctx,

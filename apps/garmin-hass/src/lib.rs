@@ -24,6 +24,35 @@ const DATA_BASE: &str = "/data";
 const DATABASE_FILE: &str = "storage.sqlite3";
 const DATA_BASE_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_DATA_BASE";
 
+/// Startup-only browser controls, embedded in the uncached entry point.
+#[derive(Clone, Copy, Debug)]
+pub struct BrowserOptions {
+    /// Record map upload lifecycle telemetry.
+    pub map_upload_telemetry: bool,
+    /// Enable the isolated map composition experiment in demo builds only.
+    pub map_render_experiment: bool,
+}
+
+impl Default for BrowserOptions {
+    fn default() -> Self {
+        Self {
+            map_upload_telemetry: true,
+            map_render_experiment: false,
+        }
+    }
+}
+
+impl BrowserOptions {
+    fn validate(self) -> std::io::Result<()> {
+        if self.map_render_experiment && !cfg!(feature = "demo") {
+            return Err(std::io::Error::other(
+                "--map-render-experiment requires a demo build",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Prepares the deployment database.
 ///
 /// Production opens existing user data or creates an empty database. The `demo` build seeds
@@ -39,13 +68,14 @@ pub async fn prepare_storage(data_root: impl AsRef<Path>) -> Result<Storage, Err
 /// Runs the device host and browser service until shutdown.
 /// # Errors
 /// [`enum@Error`] when persistent state cannot be prepared.
-pub async fn run(map_upload_telemetry: bool) -> Result<(), Error> {
+pub async fn run(browser: BrowserOptions) -> Result<(), Error> {
+    browser.validate()?;
     let data_root = deployment_data_root();
     let storage = prepare_storage(&data_root).await?;
     let devices = devices::Host::new(mode::device_source(&data_root)?, Application::new(storage));
     let map_tiles = garmin_map_tiles::Service::new(data_root.join("cache/activity-map"))?;
     devices.start();
-    server::serve(devices, map_tiles, map_upload_telemetry).await?;
+    server::serve(devices, map_tiles, browser).await?;
     Ok(())
 }
 
@@ -77,6 +107,19 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{DATA_BASE, configured_data_base, prepare_storage};
+
+    #[test]
+    fn browser_experiment_requires_demo_without_changing_normal_defaults() {
+        let defaults = super::BrowserOptions::default();
+        assert!(defaults.validate().is_ok());
+        assert!(defaults.map_upload_telemetry);
+        assert!(!defaults.map_render_experiment);
+        let experiment = super::BrowserOptions {
+            map_render_experiment: true,
+            ..defaults
+        };
+        assert_eq!(experiment.validate().is_ok(), cfg!(feature = "demo"));
+    }
 
     #[test]
     fn configured_data_base_overrides_the_default() {

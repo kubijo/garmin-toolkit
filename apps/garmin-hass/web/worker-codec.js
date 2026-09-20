@@ -56,3 +56,88 @@ export const ready = version => checked([version, 'ready']);
 export const fatal = (version, reason) => checked([version, 'fatal', reason]);
 export const result = (version, id, kind, buffers) => checked([version, 'result', id, kind, ...buffers]);
 export const taskError = (version, id, kind, reason) => checked([version, 'task-error', id, kind, reason]);
+
+// Composition gate messages deliberately share this codec between browser host and worker.
+// This is not the future route/view protocol: no rendered images or paint lists are accepted.
+const MAX_COMPOSITION_PIXELS = 16 * 1024 * 1024;
+
+export function decodeComposition(value) {
+    if (!Array.isArray(value) || value[0] !== 1) throw Error('invalid composition protocol');
+    const [, type, ...payload] = value;
+    if (['composition-init', 'map-init'].includes(type) && payload.length === (type === 'map-init' ? 5 : 4)) {
+        const [mode, moduleUrl, wasmUrl, canvas, preparationUrl] = payload;
+        if (
+            ['worker-gl', 'worker-webgpu'].includes(mode) &&
+            typeof moduleUrl === 'string' &&
+            moduleUrl &&
+            typeof wasmUrl === 'string' &&
+            wasmUrl &&
+            canvas !== null &&
+            typeof canvas === 'object' &&
+            (type !== 'map-init' || (typeof preparationUrl === 'string' && preparationUrl))
+        )
+            return { type, mode, moduleUrl, wasmUrl, canvas, preparationUrl };
+    }
+    if (type === 'map-active' && payload.length === 1 && typeof payload[0] === 'boolean') {
+        return { type, active: payload[0] };
+    }
+    if (type === 'map-frame' && payload.length === 5) {
+        const [id, width, height, view, route] = payload;
+        decodeComposition([1, 'composition-size', id, width, height]);
+        if (
+            typeof view !== 'string' ||
+            new TextEncoder().encode(view).length > 1536 ||
+            new TextEncoder().encode(JSON.stringify([1, type, id, width, height, view, null])).length > 2048 ||
+            (route !== null && (!(route instanceof ArrayBuffer) || route.byteLength > 32 * 1024 * 1024))
+        )
+            throw Error('invalid remote map payload');
+        return { type, id, width, height, view, route };
+    }
+    if (type === 'composition-ready' && payload.length === 2) {
+        const [backend, maximumSize] = payload;
+        if (['Gl', 'BrowserWebGpu'].includes(backend) && integer(maximumSize, 32768) && maximumSize > 0) {
+            return { type, backend, maximumSize };
+        }
+    }
+    if (['composition-size', 'composition-drawn'].includes(type) && payload.length === 3) {
+        const [id, width, height] = payload;
+        if (
+            integer(id, 0xffffffff) &&
+            id > 0 &&
+            [width, height].every(v => integer(v, 32768) && v > 0) &&
+            width * height <= MAX_COMPOSITION_PIXELS
+        ) {
+            return { type, id, width, height };
+        }
+    }
+    if (
+        type === 'composition-failed' &&
+        payload.length === 1 &&
+        typeof payload[0] === 'string' &&
+        payload[0].length <= 1024
+    ) {
+        return { type, reason: payload[0] };
+    }
+    throw Error('malformed composition message');
+}
+
+export function compositionMessage(type, ...payload) {
+    const message = [1, type, ...payload];
+    decodeComposition(message);
+    return message;
+}
+
+// Called by worker-local wgpu device-loss/error callbacks. No DOM or browser-host dependency.
+export function compositionWorkerFailure(reason) {
+    globalThis.postMessage(compositionMessage('composition-failed', String(reason).slice(0, 1024)));
+}
+
+// The render-worker controller owns scheduling; Rust never captures JS handles in egui callbacks.
+const mapDrawRequest = Symbol.for('garmin.map.draw-request');
+// wasm-bindgen emits a second URL for this module. Both copies share this worker-local hook.
+export function installMapDrawRequest(callback) {
+    globalThis[mapDrawRequest] = callback;
+}
+export function requestMapDraw(milliseconds) {
+    globalThis[mapDrawRequest]?.(milliseconds);
+}

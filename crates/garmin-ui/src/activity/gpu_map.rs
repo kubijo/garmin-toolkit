@@ -21,7 +21,7 @@ use super::{WALKERS_TILE_SIZE, mercator_y, speed_bounds};
 use crate::activity::map_style;
 
 #[path = "gpu_map/egui_adapter.rs"]
-mod egui_adapter;
+pub(in crate::activity) mod egui_adapter;
 #[path = "gpu_map/labels.rs"]
 mod labels;
 #[path = "gpu_map/platform.rs"]
@@ -30,7 +30,7 @@ mod platform;
 #[path = "gpu_map/render_tests.rs"]
 mod render_tests;
 #[path = "gpu_map/renderer.rs"]
-mod renderer;
+pub(in crate::activity) mod renderer;
 #[path = "gpu_map/route.rs"]
 mod route;
 #[path = "gpu_map/tile_budget.rs"]
@@ -63,6 +63,16 @@ use route::{
 pub struct WgpuMapHandle {
     context: Arc<UploadContext>,
     resources: Arc<Resources>,
+}
+
+impl WgpuMapHandle {
+    /// Install the production map pipelines on an independently owned render target.
+    /// # Panics
+    /// Panics unless the target sample count is 1 or 4.
+    #[must_use]
+    pub fn for_target(device: &wgpu::Device, format: wgpu::TextureFormat, samples: u32) -> Self {
+        Self::new(device, format, samples)
+    }
 }
 
 #[derive(Clone)]

@@ -3,14 +3,19 @@
 use wasm_bindgen::{JsCast, JsValue};
 
 pub(super) fn now() -> f64 {
-    web_sys::window()
-        .and_then(|window| window.performance())
-        .map_or(0.0, |performance| performance.now())
+    performance().map_or(0.0, |performance| performance.now())
+}
+
+fn performance() -> Option<web_sys::Performance> {
+    js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("performance"))
+        .ok()?
+        .dyn_into()
+        .ok()
 }
 
 /// A stable mark name with JSON detail keeps the browser's retained timeline bounded.
 pub(super) fn mark_detail(name: &str, detail: &str) {
-    let Some(performance) = web_sys::window().and_then(|window| window.performance()) else {
+    let Some(performance) = performance() else {
         return;
     };
     let options = js_sys::Object::new();
@@ -36,7 +41,7 @@ pub(super) fn mark_detail(name: &str, detail: &str) {
 }
 
 pub(super) fn measure_duration(name: &str, milliseconds: f64) {
-    let Some(performance) = web_sys::window().and_then(|window| window.performance()) else {
+    let Some(performance) = performance() else {
         return;
     };
     let options = js_sys::Object::new();

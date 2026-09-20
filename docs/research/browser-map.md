@@ -8,6 +8,136 @@ extraction. This is an evidence record, not a completion checklist. Open work li
 Raw traces remain private local inputs, not committed fixtures. Measurements concern the bundled synthetic demo route.
 Use the maintained `infra/python/browser_trace_analysis.py` via `just hass::profile-analyze` to reproduce summaries.
 
+## OffscreenCanvas composition gate (2026-09-20)
+
+The initial experiment implemented the first gate only. Demo hosts can opt in with `--map-render-experiment`; without
+the flag, the browser ignores `map-render-mode`. The default experimental mode is `worker-gl`;
+`?map-render-mode=worker-webgpu` selects the worker's other explicit backend. Both force a WebGL2 egui UI canvas.
+`?map-render-mode=main-gl` currently opens the ordinary activity application with that same UI backend, not a matched
+composition fixture or a valid performance comparison.
+
+At that gate, worker modes opened a labelled composition fixture, not the activity map. A typed egui plugin publishes
+final paint-callback placement and erases the clipped map rectangle using replacement blending. A separate worker owns a
+directly transferred canvas and a real WGPU pattern renderer. The application passes initialization and bounded resize
+control messages, not frame images or UI paint lists. It coalesces resize demand behind one outstanding submission,
+hides absent surfaces, rejects stale replies and backend substitutions, and terminates failed workers. Submission
+acknowledgements do not establish compositor presentation or zero-copy browser internals.
+
+After explicit execution approval, assistant-run verification against the working tree based on `6219a99` passed:
+
+- All 208 `garmin-ui` library tests, serially with software Vulkan. The new pixel regression proves alpha replacement
+  only inside the transformed/clipped opening at DPR 1/1.5/2 and 1x/4x MSAA; the composition shader also validates.
+- All 28 demo HASS library/CLI tests, including startup flag and entrypoint configuration checks; a separate production
+  build unit test confirms rejection of the demo-only experiment flag without starting a production server.
+- Strict native Clippy for `garmin-ui` and demo `garmin-hass`, all targets, and the pinned `wasm-lint` entrypoint.
+- A development-mode Trunk bundle and demo executable; all 19 JavaScript tests against those emitted assets, with zero
+  skips. The emitted-WASM checks exercise initialization and the existing preparation worker, not a real GPU render
+  worker. The 11 composition checks still use mocked browser transport.
+- The pinned `validate` entrypoint: formatting, file checks, and Grit. This is not a full `qa::full` run.
+
+Builds ran with one Cargo job in verified systemd scopes: 4 GiB memory high, 6 GiB hard maximum, 1 GiB swap maximum. The
+WASM build uses the pinned Nix toolchain; native checks use repository Rust 1.98.0. Validation fixed a wgpu 30
+presentation API mismatch and strict-lint findings without relaxing checks. The bundle is under
+`.tmp/offscreen-composition-web`. The isolated demo was started on `127.0.0.1:8100` with fresh
+`.tmp/offscreen-composition-data.qlzuEU` data. HTTP checks confirmed the opt-in configuration and `no-store`
+render-worker entrypoint. Existing HASS servers/data were not touched.
+
+### First live composition checks
+
+Chrome subsequently connected. At 1200x900, DPR 1, worker-GL initially failed because the default device descriptor
+requested compute limits unsupported by WebGL2. The proof now requests raster-only WebGL2-compatible limits. After
+rebuilding, the worker submitted one 760x400 surface and stayed at one submission while stationary. The patterned
+surface and an egui overlay control were visible; clicking the control opened an egui window. Pixel readback of the
+worker canvas confirmed the intended 32-pixel horizontal pattern spacing. This does not establish final-compositor pixel
+parity or the full clipping/overlay acceptance matrix.
+
+Worker-WebGPU failed with a null-adapter `info` exception. A separate browser `navigator.gpu.requestAdapter()` probe
+also returned null despite the API being exposed. WebGPU success is therefore unverified on this browser; no fallback
+was substituted. The error uncovered two application defects: the failure panel was below the egui canvas (hit-testing
+its Reload button returned the canvas), and an already-handled worker error propagated into the global startup handler.
+The panel now has an explicit layer above both canvases, and the worker error handler cancels that propagation while
+retaining its local error state. Live checks confirmed the worker failure leaves the global panel hidden. Deliberately
+triggering a global failure produced an opaque panel; hit-testing reached Reload and activating it reloaded the page. A
+transport regression covers error cancellation and worker cleanup; the composition suite now has 12 passing tests.
+Strict WASM lint and emitted initializer checks were rerun successfully after these fixes.
+
+DPR-2 emulation exposed a sizing mismatch independently of the application: a plain 100-CSS-pixel HTML element reported
+100 physical pixels through `ResizeObserver.devicePixelContentBoxSize`, while `devicePixelRatio` reported 2. At 1200x900
+the UI observer likewise reported 1200x900, which eframe used as its physical backing size. This emulation setup is not
+a valid native-HiDPI acceptance test. No upstream patch or application sizing workaround was introduced. Native GPU
+tests cover DPR 1/1.5/2, and the host coordinate test covers differing CSS and physical canvas sizes; a real HiDPI
+browser run remains unverified.
+
+### Composition closing pass
+
+Chrome 153 on Linux, worker-GL, native DPR 1, development bundle, fixture UI in English:
+
+- Scrolling preserved the full projection (top 123, height 400) while clipping presentation to top 203, height 320. The
+  worker stayed at one submission: placement changes did not redraw or transfer frame images.
+- A dragged egui window and its shadow appeared above the worker surface. Light-theme tooltips did likewise.
+- The light-theme check found a dark fixed background; the fixture now clears with the active theme's panel color in
+  eframe's required gamma space. Rebuilt light and dark views were inspected.
+- An explicit fixture UI-zoom control exercised 2x scale: the 760x400 logical surface became 1520x800, clipped to
+  1000x40 and then 1200x440 as the viewport changed. There were two submissions total, not another for clipping alone.
+- A real egui modal dimmed the worker surface. Clicking the underlying show-surface control dismissed the modal without
+  changing surface visibility, establishing input blocking rather than visual layering alone.
+- Hide/show removed and restored the underlay without a resize submission. Disposal reduced the canvas count from two to
+  one, removed the wrapper and experiment API, and restored the UI canvas inline style. Reload recovered successfully.
+
+The closing source review found that dimension-only limits permitted excessive surface area and that a failed request
+remained reported as in-flight. The shared host/worker codec now limits surfaces to 16 megapixels; failure clears the
+outstanding request. Fake-clock tests cover initialization/submission timeouts, resource release and late reply
+rejection. The final bundle passes all 22 JavaScript/emitted-WASM tests (14 composition), with no skips, plus strict
+WASM lint. No production budgets or default renderer selection changed.
+
+**Decision: conditional go for the opt-in worker-GL real-map slice.** This proves the composition mechanism, not map
+rendering throughput, zero-copy compositor internals, or production readiness. WebGPU success, native HiDPI browser
+coverage, and a live background-tab lifecycle capture remain open; the background-tab attempt could not establish a
+stable hidden state through MCP, so only the deterministic lifecycle test is counted. Screenshots were inspected through
+MCP, but its file tool rejected the repository artifact path; no gallery capture files were saved. The final tested demo
+remains on port 8100 at 1200x1100, DPR 1, with the worker ready and no outstanding request.
+
+### Real-map integration and asset cache identity (2026-09-20)
+
+The subsequent working tree routes the opt-in worker modes to the real activity viewer; add `map-composition-proof=1` to
+revisit the checker fixture. Main-thread egui retains input, camera, controls, and charts. The render worker owns the
+production map renderer and a nested preparation worker; immutable route revisions and bounded coalesced view updates
+cross from the application, not frame images or complete UI paint lists.
+
+Live integration found and resolved three defects:
+
+- Stable copied worker-codec URLs could combine cached old code with rebuilt workers. Trunk's final esbuild gate now
+  hashes the entire dependency graph and supplies paths through generated HTML metadata. Synthetic A/B cache tests cover
+  dependency-only and WASM-only changes, repeat-build stability, and implicit WASM URL resolution. Live normal reloads,
+  without cache clearing, loaded the rebuilt modules. HTTP checks found immutable caching on all four declared hashed
+  assets, `no-store` on HTML, and a `no-store` 404 for the obsolete `/worker-codec.js` alias.
+- Logic-only egui pointer passes hid the presented underlay before a GPU paint. Placement is now committed from actual
+  paint callbacks. Three live fixture clicks, including opening its overlay window, produced no hidden-style transitions
+  and retained exactly one worker submission. The overlay and checker were inspected in screenshots.
+- The first real-map draw applied egui texture updates without consuming their delta collections, triggering a debug
+  assertion on drop. The worker now drains applied updates and frees. A worker panic hook preserves the Rust cause;
+  terminal failure no longer calls `free()` on a potentially still-borrowed WASM object, which previously masked the
+  original error. Host termination releases the failed worker. A transport regression verifies original-error
+  preservation and rejection of subsequent work.
+
+Chrome worker-GL at 3389x1268, native DPR 1, English/dark demo UI rendered complete tiles, labels, and the synthetic
+cycling route. Screenshot-guided DOM pan, wheel zoom, and clicks settled at 37 acknowledged view submissions, with no
+in-flight update, hidden-style transition, console warning, or error. The main-GL baseline also rendered the complete
+map with one canvas and no experiment host or console errors. These are submission and smoke checks, not presentation
+timings or matched performance evidence. Screenshots were inspected inline; no capture files were saved. Strict WASM
+lint, 13 HASS server tests, and all 28 JavaScript/emitted-bundle tests passed with no skips. Three native remote-view
+protocol tests also passed. This is not full QA or completion of the vertical experiment; bounded replay,
+resource/lifecycle acceptance, and the earlier HiDPI/WebGPU coverage limits remain open.
+
+The checkpoint also adds an automatic startup console table and a map-footer renderer identity with hover details, both
+driven by the same state snapshot. Confirmed worker readiness and failure update that snapshot; idle frames do not
+serialize it again. All 29 JavaScript/emitted-bundle tests and strict WASM lint passed. The English dark worker-GL
+footer and tooltip were inspected live at 1311x1248, DPR 1. The maintained `activity::Renderer Diagnostics` gallery
+scene was captured and inspected in dark/light themes using `renderer-diagnostics.capture.toml`; its sheet is under
+`.tmp/gallery/renderer-diagnostics/`. The later baseline-footer check and gallery Clippy were interrupted by a desktop
+session OOM kill and are not recorded as passed. Full QA and controlled performance acceptance remain pending; this is
+an opt-in experimental checkpoint, not default-renderer promotion.
+
 ## Renderer extraction verification
 
 The working-tree extraction moves GPU prepare/draw work behind a renderer-owned API. The egui adapter provides physical

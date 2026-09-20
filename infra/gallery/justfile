@@ -45,6 +45,7 @@ capture FILE='components.capture.toml' OUT='':
 capture-all:
     just capture components.capture.toml
     just capture activity-map.capture.toml
+    just capture renderer-diagnostics.capture.toml
     just capture device-explorer.capture.toml
     just capture visual-language.capture.toml
     just capture desktop.capture.toml

@@ -16,7 +16,10 @@ use crate::{
 };
 
 mod map;
+pub mod map_composition;
+pub mod map_diagnostics;
 pub mod map_runtime;
+pub use map::remote as map_remote;
 mod map_style;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_latest;

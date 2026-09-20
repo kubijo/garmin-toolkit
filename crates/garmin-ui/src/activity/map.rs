@@ -19,6 +19,7 @@ use super::{
 pub(super) mod camera;
 #[path = "gpu_map.rs"]
 pub(super) mod gpu_map;
+pub mod remote;
 #[path = "map/tile_decode.rs"]
 mod tile_decode;
 #[path = "map/tile_store.rs"]
@@ -106,6 +107,7 @@ impl ActivityMap {
                 route: &route_scene,
                 colors,
                 selected_coordinate: props.selected_coordinate,
+                failure_label: props.background_unavailable,
             },
         );
         if let Some(reason) = rendered.snapshot.background_failure() {
@@ -179,6 +181,7 @@ impl ActivityMap {
             route,
             colors,
             selected_coordinate,
+            failure_label,
         } = input;
         let projection_center_longitude = camera.center().x();
         let (map_rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
@@ -191,15 +194,31 @@ impl ActivityMap {
         let zoom_policy = zoom_policy(ui, camera, map_rect);
         let camera_interaction =
             camera.interact(ui, &response, zoom_policy.gesture * zoom_policy.speed);
-        let demand = MapViewDemand::new(camera, map_rect);
-        surface.submit_view(ui.ctx(), ui.visuals().dark_mode, &demand);
-        let snapshot = surface.scene();
-        let gpu_enabled = surface.gpu_enabled();
-        let scene = surface.update_scene(&snapshot, camera, map_rect, ui.ctx(), route);
-        if let Some(callback) = surface.paint_callback(map_rect) {
-            ui.painter().add(callback);
+        let remote = ui.ctx().plugin_opt::<remote::RemoteMapPlugin>();
+        if remote.is_none() {
+            let demand = MapViewDemand::new(camera, map_rect);
+            surface.submit_view(ui.ctx(), ui.visuals().dark_mode, &demand);
         }
-        surface.paint_labels(&snapshot, ui, camera, map_rect);
+        let snapshot = surface.scene();
+        let gpu_enabled = remote.is_some() || surface.gpu_enabled();
+        let scene = if let Some(remote) = &remote {
+            remote
+                .lock()
+                .publish(ui, camera, map_rect, route, selected_coordinate);
+            ui.painter().add(
+                ui.ctx()
+                    .plugin::<super::map_composition::CompositionPlugin>()
+                    .lock()
+                    .opening(map_rect),
+            );
+            let failure = remote.lock().failure();
+            if !failure.is_empty() {
+                map_status(ui, map_rect, failure_label, &failure);
+            }
+            gpu_map::ScenePerf::default()
+        } else {
+            paint_scene(surface, &snapshot, camera, map_rect, ui, route)
+        };
         let projector = MapProjector::new(camera, map_rect);
         let mut overlay = ui.new_child(
             UiBuilder::new()
@@ -220,6 +239,7 @@ impl ActivityMap {
             camera,
             route_index,
             overlay_input,
+            remote.is_none(),
         );
         RenderedMap {
             interaction: output.interaction,
@@ -245,6 +265,22 @@ impl ActivityMap {
     pub const fn fit(&mut self) {
         self.fit.request();
     }
+}
+
+fn paint_scene(
+    surface: &mut MapSurfaceHandle,
+    snapshot: &MapScene,
+    camera: &MapCamera,
+    rect: Rect,
+    ui: &Ui,
+    route: &gpu_map::RouteScene<'_>,
+) -> gpu_map::ScenePerf {
+    let scene = surface.update_scene(snapshot, camera, rect, ui.ctx(), route);
+    if let Some(callback) = surface.paint_callback(rect) {
+        ui.painter().add(callback);
+    }
+    surface.paint_labels(snapshot, ui, camera, rect);
+    scene
 }
 
 #[derive(Default)]
@@ -367,6 +403,7 @@ struct MapRenderInput<'recording> {
     route: &'recording gpu_map::RouteScene<'recording>,
     colors: MapColors,
     selected_coordinate: Option<(f64, f64)>,
+    failure_label: &'recording str,
 }
 
 struct OverlayOutput {
@@ -390,6 +427,7 @@ fn paint_route_overlay(
     camera: &MapCamera,
     route_index: &RouteIndex,
     input: OverlayInput<'_, '_>,
+    paint_markers: bool,
 ) -> OverlayOutput {
     overlay.set_clip_rect(map_style::clip_rect(response.rect, overlay.clip_rect()));
     let pointer = (!response.is_pointer_button_down_on())
@@ -419,7 +457,9 @@ fn paint_route_overlay(
     if !input.gpu_enabled {
         paint_software_route(overlay, projector, input, &mut hit_test);
     }
-    paint_route_markers(overlay, projector, input);
+    if paint_markers {
+        paint_route_markers(overlay, projector, input);
+    }
     set_route_cursor(overlay, response, hit_test.hovered);
     OverlayOutput {
         interaction: RouteInteraction {
@@ -652,6 +692,7 @@ fn clamped_zoom_speed(zoom: f64, min_zoom: f64, gesture: f64, default_speed: f64
 }
 
 fn attribution(ui: &mut Ui, source: &Attribution, performance: Option<&str>) {
+    super::map_diagnostics::RendererDiagnostics::show_installed(ui);
     let palette = crate::theme::palette(ui);
     let color = crate::theme::color32(palette.content().text_helper());
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 12.0), Sense::hover());

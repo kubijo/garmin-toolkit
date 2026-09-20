@@ -14,6 +14,7 @@ let
     # The pinned formatter set has no WGSL formatter; Naga validates this shader when WGPU builds it.
     exclude = [
       "crates/garmin-ui/src/activity/gpu_map.wgsl"
+      "crates/garmin-ui/src/activity/map_composition.wgsl"
       "infra/javascript/fixtures/*.pbf.hex"
       "infra/javascript/fixtures/*.pbf"
     ];
@@ -75,7 +76,9 @@ let
       python.configFile = pythonConfig;
       extraProjectCheckers = {
         map-worker-tests.command = pkgs.writeShellScript "map-worker-tests" ''
+          ESBUILD=${lib.getExe pkgs.esbuild} ${lib.getExe pkgs.nodejs} infra/javascript/fingerprint-web.test.mjs || exit $?
           ${lib.getExe pkgs.nodejs} infra/javascript/map-worker.test.mjs || exit $?
+          ${lib.getExe pkgs.nodejs} infra/javascript/map-composition.test.mjs || exit $?
           exec ${lib.getExe pkgs.nodejs} infra/javascript/initializer.test.mjs
         '';
         python-lock.command = pkgs.writeShellScript "python-lock-check" ''

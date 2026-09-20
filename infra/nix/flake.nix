@@ -202,6 +202,8 @@ let
                   pkgs.glib
                   pkgs.gvfs
                   pkgs.just
+                  pkgs.nodejs
+                  pkgs.esbuild
                   pkgs.pkg-config
                   pkgs.samply
                   pkgs.ty

@@ -31,4 +31,23 @@ replaces it with per-owner floors while retaining imported 80% floors.
 Linux Nix test applications, sandboxed Rust tests, and coverage select the pinned Mesa software Vulkan ICD for headless
 renderer tests. Those tests must not silently skip when an adapter is unavailable.
 
+## Browser asset graph
+
+Trunk compiles WASM and generates the entrypoint. Its post-build hook runs the pinned esbuild with dependency-aware
+`[hash]` entry, chunk, and file-loader names. Trunk's `copy-file` outputs and wasm-bindgen snippet directory names alone
+are not sufficient cache identities. The final gate includes all copied modules, snippets, WASM, and static resources;
+esbuild rewrites JavaScript imports and supplies emitted paths through its metafile. Release builds minify at this final
+bundling step.
+
+The gate rewrites the generated HTML and publishes `garmin-module`, `garmin-wasm`, `garmin-map-worker`, and
+`garmin-map-render-worker` meta entries. Browser startup and both worker tiers consume these paths; they must not guess
+filenames. The bindgen implicit WASM URL is adapted to a file-loader import, with a build failure if its generated shape
+changes. No unhashed asset aliases are published. HASS serves HTML and unsuccessful responses with `no-store`; only
+recognized fingerprinted static assets receive immutable caching. Deploy the complete bundle and restart HASS, which
+loads its entrypoint at startup.
+
+`infra/javascript/fingerprint-web.test.mjs` exercises cached build-A/build-B dependency changes, binary changes,
+repeat-build stability, implicit WASM resolution, and the emitted bundle inventory. Run emitted checks with
+`GARMIN_TEST_WEB_ROOT` pointing at the final distribution.
+
 Connect IQ remains a future, local-only integration under ADR 0009.

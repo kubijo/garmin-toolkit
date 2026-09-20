@@ -5,6 +5,7 @@ import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { installMapWorker } from '../../apps/garmin-hass/web/map-worker.js';
 import * as codec from '../../apps/garmin-hass/web/worker-codec.js';
+import { browserAssetPaths } from './fingerprint-web.mjs';
 
 function worker(install = installMapWorker) {
     const messages = [];
@@ -45,9 +46,10 @@ test('initializes emitted WASM and transfers empty and nonempty tiles', {
 }, async () => {
     const root = process.env.GARMIN_TEST_WEB_ROOT;
     const html = await readFile(join(root, 'index.html'), 'utf8');
-    const { installMapWorker: emittedWorker } = await import(pathToFileURL(join(root, 'map-worker.js')).href);
-    const moduleName = html.match(/garmin-hass-web-[a-z0-9]+\.js/)?.[0];
-    const wasmName = html.match(/garmin-hass-web-[a-z0-9]+_bg\.wasm/)?.[0];
+    const assets = browserAssetPaths(html);
+    const { installMapWorker: emittedWorker } = await import(pathToFileURL(join(root, assets['map-worker'])).href);
+    const moduleName = assets.module;
+    const wasmName = assets.wasm;
     assert.ok(moduleName, 'built HTML names a hashed JS module');
     assert.ok(wasmName, 'built HTML names a hashed WASM module');
     const moduleUrl = pathToFileURL(join(root, moduleName)).href;

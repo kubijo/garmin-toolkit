@@ -28,6 +28,7 @@ lib.fileset.toSource {
       (workspaceSrc + "/apps/garmin-hass/web/initializer.js")
       (workspaceSrc + "/apps/garmin-hass/web/map-worker.js")
       (workspaceSrc + "/apps/garmin-hass/web/worker-codec.js")
+      (lib.fileset.fileFilter (file: file.hasExt "js") (workspaceSrc + "/apps/garmin-hass/web"))
       (workspaceSrc + "/infra/javascript")
       (lib.fileset.maybeMissing (workspaceSrc + "/.sqlx"))
       (lib.fileset.fileFilter (file: file.hasExt "sql") workspaceSrc)
