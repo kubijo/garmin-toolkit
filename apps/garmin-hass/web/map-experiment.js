@@ -233,6 +233,12 @@ export function startComposition(canvas, mode, repaint, map = false) {
                     state.flight = null;
                     flush(state);
                     state.repaint();
+                } else if (message.type === 'map-readiness' && state.map) {
+                    // Older draws may finish while a newer view is already in flight.
+                    if (message.id === state.drawn?.id) {
+                        state.readiness = message;
+                        state.repaint();
+                    }
                 } else if (message.type === 'composition-failed') {
                     fail(message.reason);
                 } else {
@@ -339,6 +345,13 @@ function setActive(state, active) {
     if (!state.map || state.status !== 'ready' || state.active === active) return;
     state.active = active;
     state.worker.postMessage(compositionMessage('map-active', active));
+}
+
+export function mapReadiness() {
+    if (host?.error) return `failed:${host.error}`;
+    if (!host || host.flight || host.drawn?.view !== host.view || host.readiness?.id !== host.drawn?.id)
+        return 'pending';
+    return host.readiness?.state ?? 'pending';
 }
 
 export function compositionStatus() {

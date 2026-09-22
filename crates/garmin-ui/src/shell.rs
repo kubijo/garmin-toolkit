@@ -108,6 +108,7 @@ pub struct Output<R> {
 #[derive(Clone, Copy)]
 struct HeaderSelectors {
     profile: Rect,
+    automation: Option<Rect>,
 }
 
 #[must_use]
@@ -234,7 +235,14 @@ fn header_contents(
     let product_left = header_product_left(header, toggle_rect);
     let product_rect = Rect::from_min_max(
         egui::pos2(product_left, header.top()),
-        egui::pos2(selectors.profile.left().max(product_left), header.bottom()),
+        egui::pos2(
+            selectors
+                .automation
+                .unwrap_or(selectors.profile)
+                .left()
+                .max(product_left),
+            header.bottom(),
+        ),
     );
     ui.painter().with_clip_rect(product_rect).text(
         egui::pos2(product_rect.left(), product_rect.center().y),
@@ -245,6 +253,11 @@ fn header_contents(
     );
 
     let window_action = header_window_action(ui, header, product_rect, props.window_controls);
+
+    #[cfg(any(test, feature = "automation"))]
+    if let Some(rect) = selectors.automation {
+        crate::automation::header_button(ui, rect);
+    }
 
     let profile_clicked = props.profile_selector.is_some_and(|selector| {
         profile::header(ui, selectors.profile, selector, props.profile_label).clicked()
@@ -273,7 +286,17 @@ fn header_selectors(ui: &Ui, header: Rect, props: &Props<'_>) -> HeaderSelectors
         egui::pos2(profile_right - profile_width, header.top()),
         egui::pos2(profile_right, header.bottom()),
     );
-    HeaderSelectors { profile }
+    #[cfg(any(test, feature = "automation"))]
+    let automation = ui
+        .ctx()
+        .plugin_opt::<crate::automation::Driver>()
+        .map(|_| crate::automation::header_rect(ui, profile, header.left()));
+    #[cfg(not(any(test, feature = "automation")))]
+    let automation = None;
+    HeaderSelectors {
+        profile,
+        automation,
+    }
 }
 
 fn header_window_action(

@@ -43,8 +43,8 @@
             strictDeps = true;
           };
           nativeArgs = commonArgs // {
-            buildInputs = [ pkgs.glib ];
-            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.glib ];
+            nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
           };
           cargoArtifacts = craneLib.buildDepsOnly (
             nativeArgs
@@ -101,6 +101,19 @@
             { demo }:
             let
               cargoExtraArgs = "-p garmin-hass" + lib.optionalString demo " --features demo";
+              runtimeWrapperArgs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+                "--prefix"
+                "GIO_EXTRA_MODULES"
+                ":"
+                "${pkgs.gvfs}/lib/gio/modules"
+                "--prefix"
+                "LD_LIBRARY_PATH"
+                ":"
+                (lib.makeLibraryPath [
+                  pkgs.glib
+                  pkgs.gvfs
+                ])
+              ];
             in
             craneLib.buildPackage (
               nativeArgs
@@ -122,13 +135,7 @@
                 postFixup = ''
                   wrapProgram "$out/bin/garmin-hass" \
                     --set-default GARMIN_TOOLKIT_HASS_WEB_ROOT "$out/share/garmin-hass/web" \
-                    --prefix GIO_EXTRA_MODULES : "${pkgs.gvfs}/lib/gio/modules" \
-                    --prefix LD_LIBRARY_PATH : "${
-                      lib.makeLibraryPath [
-                        pkgs.glib
-                        pkgs.gvfs
-                      ]
-                    }"
+                    ${lib.escapeShellArgs runtimeWrapperArgs}
                 '';
               }
             );
@@ -156,12 +163,15 @@
             find ${demoPackage}/share/garmin-hass/web -maxdepth 1 -name '*.wasm' -print -quit | grep -q .
             touch "$out"
           '';
-          devShell = craneLib.devShell {
+          devShell = wasmCraneLib.devShell {
             CARGO_TARGET_DIR = nixCargoTargetDir;
             checks = { inherit package; };
             packages = [
               pkgs.nodejs
               pkgs.esbuild
+              pkgs.trunk
+              pkgs.wasm-bindgen-cli_0_2_126
+              pkgs.just
             ];
           };
         };

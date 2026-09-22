@@ -79,6 +79,7 @@ class BrowserTraceSummary:
     diagnostics: list[str]
     uploads: UploadAnalysis
     upload_telemetry: bool | None
+    automation: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -361,12 +362,60 @@ def upload_telemetry_mode(events: list[dict[str, Any]]) -> bool | None:
     return detail['enabled']
 
 
+def automation_report(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Retain the built-in runner's evidence without confusing egui input with DOM events."""
+    starts = [event for event in events if event.get('name') == 'garmin.automation.start']
+    phases = [event for event in events if event.get('name') == 'garmin.automation.phase']
+    if not starts and not phases:
+        return None
+    if len(starts) != 1:
+        raise TraceError('Expected one automation start per trace.')
+    try:
+        name = decode_mark_detail(starts[0])['name']
+        if not isinstance(name, str) or not name or len(name) > 80:
+            raise ValueError('invalid scenario name')
+        reports = [decode_mark_detail(event) for event in sorted(phases, key=lambda event: event.get('ts', 0))]
+        for report in reports:
+            if type(report.get('version')) is not int or report['version'] != 1 or report.get('scenario') != name:
+                raise ValueError('unsupported or mismatched scenario')
+        terminals = [report for report in reports if report.get('state') != 'running']
+        if not terminals:
+            return {**(reports[-1] if reports else {}), 'scenario': name, 'state': 'incomplete'}
+        if len(terminals) != 1 or reports[-1] is not terminals[0]:
+            raise ValueError('multiple terminals or activity after termination')
+        report = terminals[0]
+        if report['state'] not in {'passed', 'failed', 'cancelled'}:
+            raise ValueError('unknown outcome')
+        if report['state'] == 'passed':
+            total = report.get('total')
+            actions = report.get('actions')
+            if (
+                type(total) is not int
+                or not 0 < total <= 128
+                or type(report.get('completed')) is not int
+                or report['completed'] != total
+                or not isinstance(actions, list)
+                or len(actions) != total
+            ):
+                raise ValueError('passing report has incomplete workload')
+            for action in actions:
+                if not isinstance(action, dict) or any(
+                    not finite_number(action.get(key)) or action[key] < 0
+                    for key in ['scheduled_seconds', 'actual_seconds', 'lateness_seconds']
+                ):
+                    raise ValueError('invalid action timing')
+        return report
+    except (KeyError, ValueError, TypeError) as error:
+        raise TraceError(f'Malformed automation evidence: {error}') from error
+
+
 def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PREFIX) -> BrowserTraceSummary:
     renderer_pid, page_url = renderer_for_url(events, url_prefix)
     renderer_tid = renderer_main_thread(events, renderer_pid)
     renderer = [event for event in events if event.get('pid') == renderer_pid]
     raw_main = [event for event in renderer if event.get('tid') == renderer_tid]
     upload_telemetry = upload_telemetry_mode(raw_main)
+    automation = automation_report(raw_main)
     timed = [event for event in renderer if finite_number(event.get('ts'))]
     main = [event for event in timed if event.get('tid') == renderer_tid]
     loading = tile_loading(timed, renderer_tid)
@@ -417,6 +466,10 @@ def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PR
                     worker_tile_requests += 1
 
     diagnostics = []
+    if automation is not None:
+        diagnostics.append('Scripted egui input bypasses DOM events; DOM interaction-frame statistics do not cover it.')
+        if automation['state'] != 'passed':
+            diagnostics.append(f'Automation did not pass: {automation["state"]}.')
     # Keep raw upload marks for lifecycle invalidation, but never sort malformed
     # timestamps in frame, gesture, or network analysis. Metadata need not be timed.
     uploads = analyze_uploads(raw_main)
@@ -473,6 +526,7 @@ def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PR
         diagnostics=diagnostics,
         uploads=uploads,
         upload_telemetry=upload_telemetry,
+        automation=automation,
     )
 
 
@@ -491,6 +545,9 @@ def print_summary(summary: BrowserTraceSummary, *, timeline: bool = False) -> No
     print(f'  renderer   pid {summary.renderer_pid}, tid {summary.renderer_tid}')
     mode = {True: 'on', False: 'off', None: 'not recorded'}[summary.upload_telemetry]
     print(f'  upload telemetry {mode}')
+    if summary.automation is not None:
+        run = summary.automation
+        print(f'  automation {run["scenario"]}: {run["state"]} ({run.get("completed", 0)}/{run.get("total", "?")})')
     print(f'  interaction {format_distribution(summary.interaction_frame_intervals)}')
     print('              pointer contact / wheel bursts + 200 ms; overlapping frame intervals, not presentation FPS')
     print(f'  interact >33 ms {summary.interaction_frame_stalls}')

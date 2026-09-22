@@ -15,9 +15,12 @@ struct Args {
     /// Disable browser map upload lifecycle telemetry for controlled profiling comparisons.
     #[arg(long)]
     no_map_upload_telemetry: bool,
-    /// Enable the isolated browser map experiment (demo builds only).
+    /// Use the original main-thread browser map renderer instead of the worker.
     #[arg(long)]
-    map_render_experiment: bool,
+    no_map_render_worker: bool,
+    /// Enable built-in semantic UI scenarios (demo builds only).
+    #[arg(long)]
+    ui_automation: bool,
 }
 
 #[tokio::main]
@@ -33,7 +36,8 @@ async fn main() -> Result<(), garmin_hass::Error> {
         .init();
     garmin_hass::run(garmin_hass::BrowserOptions {
         map_upload_telemetry: !args.no_map_upload_telemetry,
-        map_render_experiment: args.map_render_experiment,
+        map_render_experiment: !args.no_map_render_worker,
+        ui_automation: args.ui_automation,
     })
     .await
 }
@@ -43,17 +47,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn map_experiment_requires_an_explicit_flag() {
+    fn worker_map_is_enabled_unless_explicitly_disabled() {
         assert!(
             !Args::try_parse_from(["garmin-hass"])
                 .unwrap()
-                .map_render_experiment
+                .no_map_render_worker
         );
         assert!(
-            Args::try_parse_from(["garmin-hass", "--map-render-experiment"])
+            Args::try_parse_from(["garmin-hass", "--no-map-render-worker"])
                 .unwrap()
-                .map_render_experiment
+                .no_map_render_worker
         );
+        assert!(Args::try_parse_from(["garmin-hass", "--map-render-experiment"]).is_err());
+    }
+
+    #[test]
+    fn automation_flag_is_independent() {
+        assert!(!Args::try_parse_from(["garmin-hass"]).unwrap().ui_automation);
+        let args = Args::try_parse_from(["garmin-hass", "--ui-automation"]).unwrap();
+        assert!(args.ui_automation);
+        assert!(!args.no_map_render_worker);
     }
 
     #[test]

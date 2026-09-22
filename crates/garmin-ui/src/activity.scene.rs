@@ -188,6 +188,139 @@ fn renderer_diagnostics(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Gl
 }
 
 #[scene]
+fn automation_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, Stage::Fixed(egui::vec2(600.0, 280.0)), |ui| {
+        let profiles = [garmin_ui::profile::ProfileProps {
+            display_name: "Alex Rider",
+            accent: garmin_color::swatch::cyan::G40,
+            avatar: None,
+        }];
+        let intl = globals.intl();
+        let rect = ui.max_rect();
+        let profile = egui::Rect::from_min_size(
+            egui::pos2(rect.right() - 144.0, rect.top()),
+            egui::vec2(144.0, 32.0),
+        );
+        let _ = garmin_ui::profile::header(
+            ui,
+            profile,
+            &garmin_ui::profile::SelectorProps {
+                intl: &intl,
+                profiles: &profiles,
+                selected: Some(0),
+                expanded: false,
+            },
+            "Profile",
+        );
+        let button = garmin_ui::automation::header_rect(ui, profile, rect.left());
+        let selected_id = ui.id().with("preview-scenario");
+        let selected = ui.data(|data| data.get_temp::<String>(selected_id));
+        if selected.is_none() {
+            egui::Popup::open_id(ui.ctx(), ui.make_persistent_id("automation-menu"));
+        }
+        if let Some(name) = garmin_ui::automation::launcher(ui, button, false, None) {
+            ui.data_mut(|data| data.insert_temp(selected_id, name.to_owned()));
+        }
+        ui.add_space(220.0);
+        if let Some(name) = selected {
+            ui.label(format!("Selected: {name}"));
+            if ui.button("Reopen menu").clicked() {
+                ui.data_mut(|data| data.remove::<String>(selected_id));
+            }
+        }
+    });
+}
+
+#[scene]
+fn automation_status(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(
+        ctx,
+        ui,
+        Stage::Fixed(egui::vec2(350.0, 480.0)).checkerboard(globals.checkerboard()),
+        |ui| {
+            let cancelled_id = ui.id().with("automation-preview-cancelled");
+            let cancelled = ui
+                .data(|data| data.get_temp::<bool>(cancelled_id))
+                .unwrap_or_default();
+            for (state, phase, completed, reason) in [
+                (
+                    if cancelled { "cancelled" } else { "running" },
+                    "arrival",
+                    4,
+                    None,
+                ),
+                ("passed", "return", 10, None),
+                (
+                    "cancelled",
+                    "warm",
+                    6,
+                    Some("Document hidden; synthetic input released."),
+                ),
+                (
+                    "failed",
+                    "chart",
+                    7,
+                    Some("Target missing, disabled or clipped: chart.0"),
+                ),
+            ] {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    if garmin_ui::automation::status_view(ui, state, phase, completed, 10, reason) {
+                        ui.data_mut(|data| data.insert_temp(cancelled_id, true));
+                    }
+                });
+                ui.add_space(8.0);
+            }
+            if ui.button("Restart preview").clicked() {
+                ui.data_mut(|data| data.insert_temp(cancelled_id, false));
+            }
+        }
+    );
+}
+
+#[scene]
+fn automation_target(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(
+        ctx,
+        ui,
+        Stage::Fixed(egui::vec2(480.0, 240.0)).checkerboard(globals.checkerboard()),
+        |ui| {
+            ui.label("Last injected input — logical coordinates");
+            ui.add_space(40.0);
+            let response = ui.add_sized([440.0, 64.0], egui::Button::new("Alex Rider"));
+            let clicked_id = ui.id().with("automation-target-clicked");
+            if response.clicked() {
+                ui.data_mut(|data| data.insert_temp(clicked_id, true));
+            }
+            let rect = ui
+                .ctx()
+                .layer_transform_to_global(ui.layer_id())
+                .unwrap_or_default()
+                .mul_rect(response.rect);
+            garmin_ui::automation::ActionTiming {
+                phase: "setup".into(),
+                kind: "click".into(),
+                target: "profile.0".into(),
+                scheduled_seconds: 0.1,
+                actual_seconds: 0.1,
+                lateness_seconds: 0.0,
+                target_bounds: [rect.left(), rect.top(), rect.right(), rect.bottom()],
+                pointer_position: Some([rect.center().x, rect.center().y]),
+            }
+            .highlight(ui.ctx());
+            ui.add_space(16.0);
+            if ui
+                .data(|data| data.get_temp::<bool>(clicked_id))
+                .unwrap_or(false)
+            {
+                ui.label("Underlying profile button received the click.");
+            } else {
+                ui.label("The overlay does not capture input. Click the profile.");
+            }
+        }
+    );
+}
+
+#[scene]
 fn compact_workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     show_workspace(
         ctx,

@@ -29,6 +29,13 @@ pub struct CompositionRenderer {
 
 #[wasm_bindgen]
 impl CompositionRenderer {
+    /// Visible content preparation/upload readiness; does not prove presentation.
+    #[must_use]
+    pub fn readiness(&self) -> String {
+        self.map
+            .as_ref()
+            .map_or_else(|| "pending".into(), map::WorkerMap::readiness)
+    }
     /// Initialize the explicitly requested backend. No silent fallback.
     /// # Errors
     /// Returns the original adapter/device/surface initialization failure.

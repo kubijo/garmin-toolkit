@@ -12,11 +12,10 @@ use thiserror::Error;
 use walkdir::WalkDir;
 
 use crate::manifest::{
-    DataType, ManifestError, ParsedManifest as Manifest, TransferDirection, parse_document,
-    paths_equal,
+    DataType, ManifestError, ParsedManifest as Manifest, TransferDirection, is_device_manifest,
+    parse_document,
 };
 
-const GARMIN_DEVICE_MANIFEST: &str = "GARMIN/GarminDevice.xml";
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 
 /// A consented, already-mounted device root.
@@ -41,9 +40,7 @@ impl Device {
         let entries = entries(&self.root)?;
         let manifests = entries
             .iter()
-            .filter(|entry| {
-                entry.is_file && paths_equal(&entry.relative, Path::new(GARMIN_DEVICE_MANIFEST))
-            })
+            .filter(|entry| entry.is_file && is_device_manifest(&entry.relative))
             .collect::<Vec<_>>();
         let manifest_entry = match manifests.as_slice() {
             [] => return Err(Error::ManifestMissing),

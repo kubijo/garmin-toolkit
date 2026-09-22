@@ -200,7 +200,7 @@ class DesktopProfileTests(unittest.TestCase):
             finalize(report)
 
     def test_perf_guard_rejects_restricted_linux_sampling(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory() as temporary, patch('desktop_profile.sys.platform', 'linux'):
             setting = Path(temporary) / 'perf_event_paranoid'
             setting.write_text('4\n')
 
@@ -209,6 +209,11 @@ class DesktopProfileTests(unittest.TestCase):
 
             setting.write_text('-1\n')
             self.assertEqual(require_perf_access(setting), '-1')
+
+    def test_perf_guard_does_not_require_linux_settings_on_macos(self) -> None:
+        with patch('desktop_profile.sys.platform', 'darwin'), patch('desktop_profile.Path.exists') as exists:
+            self.assertIsNone(require_perf_access())
+            exists.assert_not_called()
 
     def test_interrupted_build_creates_no_report(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

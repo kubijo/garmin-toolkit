@@ -4,7 +4,14 @@ import unittest
 from contextlib import redirect_stdout
 from dataclasses import asdict
 
-from browser_trace_analysis import TraceError, analyze_trace, print_summary, renderer_for_url, upload_telemetry_mode
+from browser_trace_analysis import (
+    TraceError,
+    analyze_trace,
+    automation_report,
+    print_summary,
+    renderer_for_url,
+    upload_telemetry_mode,
+)
 from test_browser_upload_analysis import mark
 
 
@@ -16,6 +23,29 @@ def event(name, pid, tid, *, duration=None, timestamp=0, args=None, phase='X'):
 
 
 class BrowserTraceAnalysisTest(unittest.TestCase):
+    def test_automation_evidence_rejects_shortened_or_ambiguous_workloads(self):
+        start = event('garmin.automation.start', 30, 7, args={'detail': {'name': 'stationary-arrival'}})
+        report = {
+            'version': 1,
+            'scenario': 'stationary-arrival',
+            'state': 'passed',
+            'completed': 1,
+            'total': 1,
+            'actions': [{'scheduled_seconds': 1.0, 'actual_seconds': 1.01, 'lateness_seconds': 0.01}],
+        }
+        terminal = event('garmin.automation.phase', 30, 7, timestamp=10, args={'detail': report})
+        self.assertEqual(automation_report([start, terminal]), report)
+        incomplete = automation_report([start])
+        assert incomplete is not None
+        self.assertEqual(incomplete['state'], 'incomplete')
+        with self.assertRaises(TraceError):
+            automation_report([start, start, terminal])
+        with self.assertRaises(TraceError):
+            automation_report([start, terminal, terminal])
+        report['completed'] = 0
+        with self.assertRaises(TraceError):
+            automation_report([start, terminal])
+
     def test_disabled_upload_telemetry_is_explicit_and_does_not_remove_renderer_timings(self):
         self.events.append(
             event(

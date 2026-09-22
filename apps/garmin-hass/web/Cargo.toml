@@ -19,7 +19,7 @@ futures-util.workspace = true
 garmin-i18n.workspace = true
 garmin-model.workspace = true
 garmin-service-api.workspace = true
-garmin-ui.workspace = true
+garmin-ui = { workspace = true, features = ["automation"] }
 js-sys.workspace = true
 image.workspace = true
 rfd = { workspace = true, features = ["file-handle-inner"] }

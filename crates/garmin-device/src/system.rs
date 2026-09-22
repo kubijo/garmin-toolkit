@@ -45,7 +45,7 @@ mod implementation {
 #[path = "system_unsupported.rs"]
 mod implementation;
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 #[expect(
     dead_code,
     reason = "compile-check the inactive system adapter on the Linux test host"

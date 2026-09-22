@@ -3,111 +3,64 @@
 Close the shared activity viewer's telemetry and rendering-isolation work for desktop and HASS. Current recording,
 interaction, and rendering contracts live in [activity map architecture](../architecture/activity-map.md).
 
-The bounded browser map is implemented. GPU upload and map draw submission still run on the event/render thread;
-complete the rendering-isolation work below before closing the overall workspace plan.
+HASS uses worker-GL by default; `--no-map-render-worker` restores the original renderer. The semantic interaction runner
+is demo-only and opt-in. This plan owns the remaining lifecycle, resource, and performance questions.
 
-## Telemetry comparison control (2026-09-19)
+## Browser verification
 
-The bounded-browser-map implementation was committed as `10234ef`; correlated upload telemetry followed in `11dcba8`.
-HASS now provides a comparison switch. Renderer extraction has passed scoped checks and browser smoke acceptance; the
-next implementation slice is OffscreenCanvas, followed by the semantic interaction runner.
+Use the [run contract](../architecture/build-system.md#opt-in-browser-interaction-runs) and
+[development safeguards](../development.md). Renderer ownership is described in the
+[map architecture](../architecture/activity-map.md); empirical findings live in
+[browser map evidence](../research/browser-map.md#semantic-interaction-findings).
 
-Overhead measurement is deferred until the semantic interaction runner after OffscreenCanvas; it is not a blocker for
-renderer extraction. Do not claim negligible instrumentation cost or change production upload budgets on the existing
-evidence.
+### Open questions
 
-The comparison control is HASS's `--no-map-upload-telemetry` flag, forwarded by `just hass::run`. It disables upload
-observers and their clocks/locks/serialization, not existing render/latency timings or upload budgets. The no-store
-entrypoint supplies the startup choice to the browser; reload after changing the host flag. A
-`garmin.map.upload-telemetry` mark records the choice, viewport, DPR, and graphics backend. The user rebuilt HASS; live
-verification confirmed the disabled flag and a fully rendered map. The user reported `just qa::full` green after the
-missing test import was fixed. No overhead measurement is claimed. Manual on/off captures validate both modes but have
-different viewports and workloads, so they cannot isolate instrumentation cost. No further manual comparison captures
-are requested. MCP raw export remains unavailable. See the
-[capture record](../research/browser-map.md#telemetry-overhead-comparison).
+- Does a fresh HASS launch without renderer flags select worker-GL and display the activity map?
+- Do real pointer, wheel, and keyboard events remain isolated during a run, with ordinary input restored after Stop?
+  Exercise the Automation menu and Stop button through browser input, including cancellation during a held drag.
+- Do focus loss and hidden tabs cancel promptly, release held input, and recover correctly when the page returns?
+- Are worker resources released across activity replacement, map removal, page teardown, and renderer failure?
+- Does worker-GL reduce main-thread work without worse visible responsiveness or unacceptable memory growth?
+- What is the CPU cost of upload telemetry and of the scenario runner itself?
 
-The user reported full QA, audit, and sandboxed Rust verification gates green for the preceding slice on 2026-09-19,
-before the comparison switch. This is user-reported acceptance, not verification of the current changes; see the
-[evidence record](../research/browser-map.md).
+### Comparison procedure
 
-[Browser map evidence](../research/browser-map.md#telemetry-review-resolution) records the resolved review and CI
-license failure. The exact sandboxed license check passes; the entire workflow has not been rerun.
+Resolve the input/lifecycle questions before collecting timed comparisons. Run the real activity viewer, not the
+composition fixture. Use the same build/server, warmed data/cache directory, activity, viewport, DPR, theme,
+instrumentation, and tile identities for both modes. Compare worker-GL with `?map-render-mode=main-gl`; worker-WebGPU
+changes both thread ownership and graphics backend and is a separate experiment.
 
-### Unresolved historical observation
+Collect five alternating matched pairs, keeping stationary arrival and warm interaction separate. Reload to the profile
+chooser before each run. Start a Chrome trace before launching the scenario, with automatic stopping disabled. The Rust
+runner owns gesture pacing; browser tooling only starts, observes, and stops the run. After the terminal result, save
+the trace and JSON report together, labelled by renderer, scenario, pair, and revision.
 
-The 2.669-second upload tail in `Trace-20260919T000106.json.gz` remains unreproduced, not fixed. The initial stationary
-and pan/return recordings had no pending-upload visibility transitions. The post-extraction capture does record them,
-attributing particular long queue tails to offscreen retention; it does not retrospectively explain the historical
-spike. Visible queue lifetime still reaches 100.50 ms, and post-publication visibility is not measured. See the
-[capture evidence](../research/browser-map.md#post-extraction-interaction-capture). Do not request another ordinary
-manual pan or increase upload budgets on this evidence; retain these observations for scripted validation.
+Analyze traces with `just hass::profile-analyze TRACE --json`. Compare completed workloads, CPU distributions, memory,
+and run variation. Readiness records preparation/upload completion; compositor presentation and browser input latency
+require separate measurements. Reported driver/tree-hook timing excludes AccessKit generation and overlay painting.
 
-Browser acceptance, trace measurements, telemetry semantics, test results, and implementation context are maintained in
-[Browser map evidence](../research/browser-map.md). Completed checks are not additional work items here.
+## Telemetry overhead
+
+Measure upload-telemetry overhead with alternating on/off runs using `--no-map-upload-telemetry`. This switch disables
+upload observers and their clocks, locks, and serialization; existing render timings and upload budgets stay enabled.
+The startup mark records the setting, viewport, DPR, and backend. Reload after changing the host option.
+
+Use scripted stationary arrival with matching tile sets, cache status, and publication counts. Compare prepare/draw CPU
+distributions and run variation. Re-establish both baselines after renderer changes.
+
+Separate visible queue time from hidden retention before attributing upload delays to GPU work. The post-extraction
+capture observes hidden retention directly; its visible queue maximum is 100.50 ms. See
+[capture evidence](../research/browser-map.md#post-extraction-interaction-capture).
 
 ## Rendering isolation
 
 The [renderer architecture](../architecture/activity-map.md#rendering-boundary) records the existing boundaries.
 
-### Active: opt-in OffscreenCanvas vertical experiment
+### Renderer constraints
 
-Approved 2026-09-20. Keep normal browser rendering and native 4x MSAA unchanged. No upstream patches, per-frame image
-handoffs, complete UI paint-list transfers, or shared-memory deployment requirements. An experiment is not a production
-migration or evidence of a speedup.
-
-1. **Composition gate (conditional go: worker-GL):** demo-only `--map-render-experiment`; matched WebGL2 UI baseline and
-   independently selected worker backend. Prove a directly presented worker canvas beneath the real egui renderer, using
-   a typed plugin and a replacement-blend paint callback. Validate final callback placement, clipping, controls,
-   tooltips, modals, resize, UI zoom, and DPR. Stop before pipeline migration if composition fails. Source, scoped
-   Rust/GPU tests, strict native/WASM lint, and emitted-bundle checks are complete; the isolated fixture is served on
-   port 8100. Live GL clipping, resize, UI zoom, light/dark themes, overlays, modal input blocking, hide/show, and
-   teardown pass. The DPR mismatch reproduces on plain HTML under Chrome emulation, independently of this plugin; do not
-   patch application sizing to compensate. Native HiDPI browser acceptance and background-tab lifecycle capture remain
-   unverified (deterministic pixel/transport regressions cover those paths). WebGPU returns no adapter here. These
-   coverage limits permit the next opt-in GL experiment, not a production migration or cross-browser acceptance. See the
-   [gate evidence](../research/browser-map.md#offscreencanvas-composition-gate-2026-09-20).
-2. **In progress: real map vertical path (worker-GL):** one activity map; main retains UI, input/camera and chart state;
-   render worker owns scheduling, admission, uploads, map/label/marker presentation; a separate preparation worker sends
-   bulk results directly to it. Reuse existing renderer, algorithms, codecs, and budgets. Route data crosses once per
-   revision; dynamic updates are at most 2 KiB, one in flight plus one replaceable pending update. No main-thread
-   fallback or silent backend substitution. Initialization/device/protocol failures leave the rest of the UI usable. The
-   path passes an initial live worker-GL smoke check: tiles, labels, route, pan/zoom, and control overlays. First-frame
-   texture-delta consumption and failure-reporting defects are fixed. The complete asset graph uses dependency-aware
-   hashed filenames; ordinary cached reloads load the rebuilt modules. The checker fixture remains available through
-   `map-composition-proof=1`; its logic-only click flicker fix passes live inspection. These checks do not replace the
-   bounded replay, lifecycle/resource acceptance, or performance comparison below.
-3. **Bounded replay and acceptance (pending):** demo-only camera-demand replay with start/status/cancel; stationary
-   arrival, warm pan/zoom/return, playback, replacement and teardown. Record deadlines, coalescing, completed workload,
-   both thread timelines, message bytes, cache/resource bounds and submission age. Compare five alternating matched
-   main-GL/worker-GL pairs; worker-WebGPU is a separate backend experiment, not evidence of offloading alone. This
-   replay does not replace the later semantic interaction runner or prove browser input latency.
-4. **Close (pending):** emitted-WASM, browser composition/interaction, resource cleanup, native/default-mode regression
-   checks and adversarial review. Record an explicit go/no-go/inconclusive result in the research owner. Require a
-   main-thread improvement beyond run variation without worse visible responsiveness or unacceptable memory growth.
-
-Use one built package and warmed server cache, matching activity, viewport, DPR, theme, backend, instrumentation, tile
-identities and content hashes. Keep submission acknowledgements distinct from presentation. No claim of zero copies
-inside the browser compositor. Unsupported concurrent maps and device FIT previews are outside the experimental slice.
-Do not create another temporary tracker; research and captures belong in the existing evidence owner and ignored
-artifact directories. Builds and isolated server runs still follow the development safeguards.
-
-### Extraction boundary and closing verification
-
-GPU preparation and draw submission are extracted from egui callbacks without changing upload budgets, sample counts, or
-worker ownership. The renderer accepts a frame, full physical-pixel projection, and target-bounded viewport/scissor; the
-egui adapter owns logical-coordinate conversion. Callback preparation and drawing retain the same frame snapshot.
-Pipelines belong to the device handle, and uniforms remain per map surface. This is not yet an OffscreenCanvas
-implementation.
-
-The closing review's clipping defect and missing production-ordering test are addressed. The shader now preserves the
-full projection at target edges, and regressions cover translated pixel output and current-frame UI assembly. See the
-[fix evidence](../research/browser-map.md#extraction-review-fixes).
-
-Browser smoke acceptance is closed with the rebuilt capture, live settled-map inspection, and the user's confirmation
-that it still works fine. The assistant did not independently verify the targeted scroll/resize case; deterministic
-pixel regressions cover clipping and late transforms. See the
-[capture evidence](../research/browser-map.md#post-review-browser-capture). Controlled performance validation remains
-deferred to the scripted interaction runner.
+Keep native 4x MSAA and existing upload budgets unchanged. Transfer route data once per revision and bound dynamic
+updates to one in flight plus one replaceable pending update. Keep renderer failures explicit. Do not introduce
+per-frame image transfers, whole-UI paint-list transfers, or shared-memory deployment requirements.
 
 ### Verification rules for subsequent changes
 
@@ -119,53 +72,26 @@ deferred to the scripted interaction runner.
   delivery. First draw is command encoding, not screen presentation; incomplete or malformed lifecycles must not support
   successful completion claims.
 
-### Deferred renderer work (not part of this closing batch)
+### Deferred renderer work
 
 - Route and label ready state remains painter-owned. Move it into the immutable runtime scene, replace the quadratic
   label collision scan with a spatial grid, and retain same-zoom label translation plus zoom invalidation.
 - Remove the public tile task/decoder completion API after desktop and HASS hosts move behind the runtime. Hosts should
   provide transport and cache services, not manipulate activity-view tile state.
-- Next, move map GPU uploads and drawing to a worker-owned `OffscreenCanvas`. Use the accepted renderer boundary to
-  transfer a map-only canvas and retain prepared geometry and GPU resources in the worker. Keep application UI on the
-  main thread. Verify canvas placement, clipping, input alignment, resize/DPR changes, teardown, and device-loss
-  reporting. Native 4x MSAA remains unchanged.
 - Keep offscreen chart cards dormant and cache chart analysis by activity, axis, lap, units, theme, and width.
   Map-driven repaints must preserve the shared cursor, playback, lap selection, and map/chart sample-index
   synchronization.
 
-### Deferred UI issues (not part of this closing batch)
+### Deferred UI issues
 
+- [ ] Investigate the faint rectangular grid reported over rural map fills in worker-GL on 2026-09-20. Compare the same
+  view in main-GL and worker-GL at fractional zoom/DPR; add an adjacent-tile pixel regression before changing coverage.
+  Source inspection found feathered tile-background rectangles and no per-tile clipping of buffered geometry; these are
+  candidates, not a confirmed diagnosis of the screenshot. Do not mask the defect with overlapping tiles or globally
+  disable antialiasing.
 - [ ] Keep chart endpoint tick labels inside the chart card's content bounds. Reported on 2026-09-18: the elevation
   chart's `0.0 km` label extends left beyond the plot/content edge. Check both endpoints, narrow layouts, and time and
   distance axes; add a visual regression check when fixing the layout.
-
-### Next step after OffscreenCanvas: semantic interaction runner
-
-Order: extract the renderer, complete and validate the map-only OffscreenCanvas slice, then implement this runner. It is
-not a prerequisite for OffscreenCanvas.
-
-- Reuse egui's AccessKit semantics and `egui_kittest`/`kittest` queries. Complete custom-widget semantics and use stable
-  identifiers where labels are ambiguous or translated; do not build a second widget lookup tree.
-- Share one scenario runner between built-in demos and automated stress tests. Target controls, maps, and charts
-  semantically; resolve current bounds for clicks, drags, flicks, wheel zoom, and scrubbing. Inject normal input rather
-  than directly changing application or camera state. Include readiness waits, assertions, deadlines, cancellation, and
-  explicit failure results. Restrict automation to explicitly enabled demo/test sessions.
-- Provide a small browser control API for starting a named scenario, reading status/results, and cancelling it. Chrome
-  DevTools MCP starts a trace with automatic stopping disabled, starts the scenario, observes completion or failure, and
-  stops/saves the trace. Do not use per-gesture MCP round trips to pace the workload.
-- Emit scenario/phase timing markers and record viewport, DPR, graphics backend, scheduled versus actual action timing,
-  missed deadlines, and completed workload. Keep warm-cache interaction and tile-arrival stress separate. A stalled run
-  must not pass by silently executing fewer actions. Measure the runner's overhead.
-- [ ] Resume the deferred upload-telemetry overhead comparison using scripted stationary tile arrival. Use one built
-  package and data/cache directory, warm the cache, and fix activity, viewport, theme, DPR, backend, and capture
-  settings. Repeat alternating on/off blocks with equal workload windows; require matching tile sets, cache status, and
-  publication counts without failures or fallback. Analyze with `just hass::profile-analyze TRACE --json`, comparing
-  prepare/draw CPU distributions and run variation, not queue wall time or presentation FPS. The disabled baseline
-  retains option checks and existing profiling; it is not instrumentation-free. Re-establish both baselines after
-  renderer changes.
-- Initial coverage: select a demo activity, pan/flick/zoom, operate playback, select/reset a lap, and scrub linked
-  charts. Reuse scenarios as regression tests for subsequent renderer changes. Input injected inside egui does not
-  validate browser event dispatch latency, trusted gestures, or native dialogs; test those separately.
 
 ### Performance acceptance
 

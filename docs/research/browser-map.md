@@ -8,196 +8,44 @@ extraction. This is an evidence record, not a completion checklist. Open work li
 Raw traces remain private local inputs, not committed fixtures. Measurements concern the bundled synthetic demo route.
 Use the maintained `infra/python/browser_trace_analysis.py` via `just hass::profile-analyze` to reproduce summaries.
 
-## OffscreenCanvas composition gate (2026-09-20)
+## Semantic interaction findings
 
-The initial experiment implemented the first gate only. Demo hosts can opt in with `--map-render-experiment`; without
-the flag, the browser ignores `map-render-mode`. The default experimental mode is `worker-gl`;
-`?map-render-mode=worker-webgpu` selects the worker's other explicit backend. Both force a WebGL2 egui UI canvas.
-`?map-render-mode=main-gl` currently opens the ordinary activity application with that same UI backend, not a matched
-composition fixture or a valid performance comparison.
+The runner resolves AccessKit author IDs to current clipped bounds and injects ordinary egui input. AccessKit applies
+its root pixel-scale transform to bounding boxes; input coordinates are logical points. Removing that transform before
+clipping fixes the HiDPI profile-selection miss. The coordinate contract and diagnostic overlay are documented in the
+[run contract](../architecture/build-system.md#opt-in-browser-interaction-runs).
 
-At that gate, worker modes opened a labelled composition fixture, not the activity map. A typed egui plugin publishes
-final paint-callback placement and erases the clipped map rectangle using replacement blending. A separate worker owns a
-directly transferred canvas and a real WGPU pattern renderer. The application passes initialization and bounded resize
-control messages, not frame images or UI paint lists. It coalesces resize demand behind one outstanding submission,
-hides absent surfaces, rejects stale replies and backend substitutions, and terminates failed workers. Submission
-acknowledgements do not establish compositor presentation or zero-copy browser internals.
+On Chrome 153 / Apple M3 Max at native DPR 2 and a 1200x999 logical viewport, stationary arrival, warm pan/zoom/fit, and
+activity smoke complete in both worker-GL and main-GL. Activity smoke exercises playback, speed selection, laps, charts,
+indoor-activity replacement, and map restoration. Main-GL also cancels a drag with Escape and completes a subsequent run
+from an active profile.
 
-After explicit execution approval, assistant-run verification against the working tree based on `6219a99` passed:
+Remaining input/lifecycle and performance questions live in the
+[browser verification plan](../plans/activity-map-workspace.md#browser-verification).
 
-- All 208 `garmin-ui` library tests, serially with software Vulkan. The new pixel regression proves alpha replacement
-  only inside the transformed/clipped opening at DPR 1/1.5/2 and 1x/4x MSAA; the composition shader also validates.
-- All 28 demo HASS library/CLI tests, including startup flag and entrypoint configuration checks; a separate production
-  build unit test confirms rejection of the demo-only experiment flag without starting a production server.
-- Strict native Clippy for `garmin-ui` and demo `garmin-hass`, all targets, and the pinned `wasm-lint` entrypoint.
-- A development-mode Trunk bundle and demo executable; all 19 JavaScript tests against those emitted assets, with zero
-  skips. The emitted-WASM checks exercise initialization and the existing preparation worker, not a real GPU render
-  worker. The 11 composition checks still use mocked browser transport.
-- The pinned `validate` entrypoint: formatting, file checks, and Grit. This is not a full `qa::full` run.
+## Browser rendering constraints
 
-Builds ran with one Cargo job in verified systemd scopes: 4 GiB memory high, 6 GiB hard maximum, 1 GiB swap maximum. The
-WASM build uses the pinned Nix toolchain; native checks use repository Rust 1.98.0. Validation fixed a wgpu 30
-presentation API mismatch and strict-lint findings without relaxing checks. The bundle is under
-`.tmp/offscreen-composition-web`. The isolated demo was started on `127.0.0.1:8100` with fresh
-`.tmp/offscreen-composition-data.qlzuEU` data. HTTP checks confirmed the opt-in configuration and `no-store`
-render-worker entrypoint. Existing HASS servers/data were not touched.
+WebGL2 requires raster-only device limits; requesting compute limits prevents worker initialization. On the tested
+Chrome/ANGLE setup, WebGPU exposed its API but returned no adapter. Renderer selection must report that failure rather
+than substitute a backend.
 
-### First live composition checks
+Chrome DPR emulation returned inconsistent physical sizes: a 100-CSS-pixel element reported 100 physical pixels through
+`ResizeObserver.devicePixelContentBoxSize` while `devicePixelRatio` was 2. Use native-DPR testing for canvas alignment
+rather than compensating in application sizing.
 
-Chrome subsequently connected. At 1200x900, DPR 1, worker-GL initially failed because the default device descriptor
-requested compute limits unsupported by WebGL2. The proof now requests raster-only WebGL2-compatible limits. After
-rebuilding, the worker submitted one 760x400 surface and stayed at one submission while stationary. The patterned
-surface and an egui overlay control were visible; clicking the control opened an egui window. Pixel readback of the
-worker canvas confirmed the intended 32-pixel horizontal pattern spacing. This does not establish final-compositor pixel
-parity or the full clipping/overlay acceptance matrix.
+Worker errors must stay local to the map. Terminate the failed worker, preserve the original error, and place recovery
+controls above both canvases. A WASM panic may leave an object borrowed, so calling `free()` during failure handling can
+mask the original cause. Applied egui texture deltas must be drained before their collections are dropped.
 
-Worker-WebGPU failed with a null-adapter `info` exception. A separate browser `navigator.gpu.requestAdapter()` probe
-also returned null despite the API being exposed. WebGPU success is therefore unverified on this browser; no fallback
-was substituted. The error uncovered two application defects: the failure panel was below the egui canvas (hit-testing
-its Reload button returned the canvas), and an already-handled worker error propagated into the global startup handler.
-The panel now has an explicit layer above both canvases, and the worker error handler cancels that propagation while
-retaining its local error state. Live checks confirmed the worker failure leaves the global panel hidden. Deliberately
-triggering a global failure produced an opaque panel; hit-testing reached Reload and activating it reloaded the page. A
-transport regression covers error cancellation and worker cleanup; the composition suite now has 12 passing tests.
-Strict WASM lint and emitted initializer checks were rerun successfully after these fixes.
+## Renderer projection
 
-DPR-2 emulation exposed a sizing mismatch independently of the application: a plain 100-CSS-pixel HTML element reported
-100 physical pixels through `ResizeObserver.devicePixelContentBoxSize`, while `devicePixelRatio` reported 2. At 1200x900
-the UI observer likewise reported 1200x900, which eframe used as its physical backing size. This emulation setup is not
-a valid native-HiDPI acceptance test. No upstream patch or application sizing workaround was introduced. Native GPU
-tests cover DPR 1/1.5/2, and the host coordinate test covers differing CSS and physical canvas sizes; a real HiDPI
-browser run remains unverified.
+Clipping must preserve the full map projection. Remap it into the target-bounded viewport with a scale/offset uniform
+shared by tiles, routes, and highlights. Build the scene before constructing callbacks, and retain the same frame for
+preparation and drawing.
 
-### Composition closing pass
-
-Chrome 153 on Linux, worker-GL, native DPR 1, development bundle, fixture UI in English:
-
-- Scrolling preserved the full projection (top 123, height 400) while clipping presentation to top 203, height 320. The
-  worker stayed at one submission: placement changes did not redraw or transfer frame images.
-- A dragged egui window and its shadow appeared above the worker surface. Light-theme tooltips did likewise.
-- The light-theme check found a dark fixed background; the fixture now clears with the active theme's panel color in
-  eframe's required gamma space. Rebuilt light and dark views were inspected.
-- An explicit fixture UI-zoom control exercised 2x scale: the 760x400 logical surface became 1520x800, clipped to
-  1000x40 and then 1200x440 as the viewport changed. There were two submissions total, not another for clipping alone.
-- A real egui modal dimmed the worker surface. Clicking the underlying show-surface control dismissed the modal without
-  changing surface visibility, establishing input blocking rather than visual layering alone.
-- Hide/show removed and restored the underlay without a resize submission. Disposal reduced the canvas count from two to
-  one, removed the wrapper and experiment API, and restored the UI canvas inline style. Reload recovered successfully.
-
-The closing source review found that dimension-only limits permitted excessive surface area and that a failed request
-remained reported as in-flight. The shared host/worker codec now limits surfaces to 16 megapixels; failure clears the
-outstanding request. Fake-clock tests cover initialization/submission timeouts, resource release and late reply
-rejection. The final bundle passes all 22 JavaScript/emitted-WASM tests (14 composition), with no skips, plus strict
-WASM lint. No production budgets or default renderer selection changed.
-
-**Decision: conditional go for the opt-in worker-GL real-map slice.** This proves the composition mechanism, not map
-rendering throughput, zero-copy compositor internals, or production readiness. WebGPU success, native HiDPI browser
-coverage, and a live background-tab lifecycle capture remain open; the background-tab attempt could not establish a
-stable hidden state through MCP, so only the deterministic lifecycle test is counted. Screenshots were inspected through
-MCP, but its file tool rejected the repository artifact path; no gallery capture files were saved. The final tested demo
-remains on port 8100 at 1200x1100, DPR 1, with the worker ready and no outstanding request.
-
-### Real-map integration and asset cache identity (2026-09-20)
-
-The subsequent working tree routes the opt-in worker modes to the real activity viewer; add `map-composition-proof=1` to
-revisit the checker fixture. Main-thread egui retains input, camera, controls, and charts. The render worker owns the
-production map renderer and a nested preparation worker; immutable route revisions and bounded coalesced view updates
-cross from the application, not frame images or complete UI paint lists.
-
-Live integration found and resolved three defects:
-
-- Stable copied worker-codec URLs could combine cached old code with rebuilt workers. Trunk's final esbuild gate now
-  hashes the entire dependency graph and supplies paths through generated HTML metadata. Synthetic A/B cache tests cover
-  dependency-only and WASM-only changes, repeat-build stability, and implicit WASM URL resolution. Live normal reloads,
-  without cache clearing, loaded the rebuilt modules. HTTP checks found immutable caching on all four declared hashed
-  assets, `no-store` on HTML, and a `no-store` 404 for the obsolete `/worker-codec.js` alias.
-- Logic-only egui pointer passes hid the presented underlay before a GPU paint. Placement is now committed from actual
-  paint callbacks. Three live fixture clicks, including opening its overlay window, produced no hidden-style transitions
-  and retained exactly one worker submission. The overlay and checker were inspected in screenshots.
-- The first real-map draw applied egui texture updates without consuming their delta collections, triggering a debug
-  assertion on drop. The worker now drains applied updates and frees. A worker panic hook preserves the Rust cause;
-  terminal failure no longer calls `free()` on a potentially still-borrowed WASM object, which previously masked the
-  original error. Host termination releases the failed worker. A transport regression verifies original-error
-  preservation and rejection of subsequent work.
-
-Chrome worker-GL at 3389x1268, native DPR 1, English/dark demo UI rendered complete tiles, labels, and the synthetic
-cycling route. Screenshot-guided DOM pan, wheel zoom, and clicks settled at 37 acknowledged view submissions, with no
-in-flight update, hidden-style transition, console warning, or error. The main-GL baseline also rendered the complete
-map with one canvas and no experiment host or console errors. These are submission and smoke checks, not presentation
-timings or matched performance evidence. Screenshots were inspected inline; no capture files were saved. Strict WASM
-lint, 13 HASS server tests, and all 28 JavaScript/emitted-bundle tests passed with no skips. Three native remote-view
-protocol tests also passed. This is not full QA or completion of the vertical experiment; bounded replay,
-resource/lifecycle acceptance, and the earlier HiDPI/WebGPU coverage limits remain open.
-
-The checkpoint also adds an automatic startup console table and a map-footer renderer identity with hover details, both
-driven by the same state snapshot. Confirmed worker readiness and failure update that snapshot; idle frames do not
-serialize it again. All 29 JavaScript/emitted-bundle tests and strict WASM lint passed. The English dark worker-GL
-footer and tooltip were inspected live at 1311x1248, DPR 1. The maintained `activity::Renderer Diagnostics` gallery
-scene was captured and inspected in dark/light themes using `renderer-diagnostics.capture.toml`; its sheet is under
-`.tmp/gallery/renderer-diagnostics/`. The later baseline-footer check and gallery Clippy were interrupted by a desktop
-session OOM kill and are not recorded as passed. Full QA and controlled performance acceptance remain pending; this is
-an opt-in experimental checkpoint, not default-renderer promotion.
-
-## Renderer extraction verification
-
-The working-tree extraction moves GPU prepare/draw work behind a renderer-owned API. The egui adapter provides physical
-viewport/scissor placement and retains one frame for preparation and drawing. Frame assembly now precedes callback
-creation; replacing the latest frame cannot change an already prepared callback. Pipelines are owned by device handles
-instead of egui's callback resources. The initial extraction left upload scheduling, shaders, sample counts, and worker
-ownership unchanged; the subsequent clipping correction below changes the projection uniform and shared vertex shader.
-
-Assistant-run verification on 2026-09-19 passed all 203 `garmin-ui` library tests, including 47 renderer tests. GPU
-tests used headless software Vulkan with the host Lavapipe ICD. Direct pixel readback covers wrapped tile copies and
-first-draw deduplication, nonzero viewport placement, partial/empty clipping, route/highlight passes, removal of a
-previous highlight, uniform updates, and 1x/4x MSAA. Adapter regressions cover fractional DPR, target-bound clipping,
-and replacing the latest frame between prepare and paint: the existing callback still renders its retained frame and the
-next callback renders the replacement. These are deterministic synthetic pixel checks, not a performance measurement.
-
-Strict `cargo clippy --locked --offline -p garmin-ui --all-targets -- --deny warnings` and `just qa::wasm` passed. The
-latter checks the actual HASS WASM target with the pinned Nix toolchain. Two needless-by-value arguments and two
-array-chunk lint findings were fixed, then the complete UI test suite was rerun successfully. Rust commands used one
-build job under a systemd scope with 4 GiB memory high, 6 GiB memory maximum, and 1 GiB swap maximum. Native tests ran
-with one test thread. No GUI or HASS server was launched, and no dependency or upload-budget changes were made.
-
-Native GPU checks and WASM compilation do not establish browser parity or OffscreenCanvas support. The new capture below
-matches the live emitted build, and the user subsequently confirmed that interaction looked good. This closes the
-extraction's browser smoke acceptance, not controlled performance validation. Earlier browser captures describe the
-pre-extraction build.
-
-### Extraction review fixes
-
-The hostile review found inherited projection compression at render-target boundaries, newly codified by a test, and
-missing coverage of production scene-update/callback ordering. The renderer now remaps the full physical projection into
-a target-bounded viewport using a scale/offset in the camera uniform. Tile, route, and highlight passes share the same
-shader transform; geographic camera state, world-copy selection, upload budgets, and MSAA configuration are unchanged.
-Callback preparation uses the retained map rectangle and current screen descriptor.
-
-The new pixel regression compares clipped output against a translated unclipped reference across all four edges, two
-corners, and a fully offscreen case, at DPR 1, 1.5, and 2 with 1x/4x MSAA. A separate test drives production
-`ActivityMap::show` with a capturing painter and checks current-camera output on the first frame and after a refit. It
-tests emitted scene content, not source text or a prescribed sequence of mock calls.
-
-Regression sensitivity was checked by temporarily disabling the projection correction and restoring the old
-callback-before-update order. Exactly the two new tests failed (203 passed): a translated blue pixel became green, and
-the first scene captured the stale camera at zero. Test cleanup was corrected so failed assertions do not cause an egui
-texture-delta destructor abort. Both mutations were then removed, and all 205 UI library tests passed. Strict native
-Clippy and the pinned HASS WASM check passed, using the same single-job memory limits recorded above. Rebuilt-browser
-visual verification was still open at that point; the earlier smoke acceptance did not cover this shader change.
-Subsequent rebuilt-browser evidence and user acceptance are recorded below.
-
-The subsequent review found that egui can transform a callback's outer rectangle after construction, leaving its
-captured preparation rectangle unchanged. The adapter now detects changed placement and uses an immutable camera binding
-computed from the final paint rectangle. Projection math is shared with normal preparation. The late-transform path
-allocates one camera buffer/binding per visible draw, without rewriting a shared uniform or retaining a growing cache;
-its CPU cost is included in draw timing. Unchanged placement retains the existing reusable-buffer path.
-
-A regression uses egui's actual WGPU callback renderer and transformed `Shape` objects, comparing pixels against
-callbacks created at their final placements on independent surfaces. It covers translation, scales 0.5/1/1.5, target
-edges, an offscreen callback returning to view, and multiple transformed copies sharing a renderer in one submission.
-Both tiles and route/highlight content are present, at DPR 1/1.5/2 and 1x/4x MSAA. After this fix, all 206 UI library
-tests, strict native Clippy, and the pinned HASS WASM check passed under the same memory limits. The subsequent browser
-capture below verifies ordinary interaction and settled appearance; subsequent user confirmation closes browser smoke
-acceptance, with the assistant's targeted scroll/resize limitation recorded explicitly.
+Egui can transform a callback rectangle after preparation. Use the final paint rectangle to create an immutable camera
+binding for that draw; rewriting a shared uniform would alter earlier draws in the same submission. Unchanged placement
+reuses the surface buffer. Late-transform allocation contributes to draw CPU timing.
 
 ### Post-review browser capture
 
@@ -307,10 +155,6 @@ deferred: resume the measurement after OffscreenCanvas with the planned semantic
 viewport, workload, and repeated trials. This unresolved measurement does not block renderer extraction and does not
 support a negligible-overhead claim. New renderer code will require fresh on/off baselines.
 
-Closing verification: the missing `UPLOAD_TELEMETRY_PLACEHOLDER` test import was fixed, and assistant-run preflight
-passed with no formatting changes. The user then reported `just qa::full` green for the comparison switch. This is
-user-reported full-gate acceptance, not an independent rerun or an overhead measurement.
-
 ## Correlated telemetry and current evidence
 
 The upload investigation adds versioned `garmin.map.upload` marks with a unique upload ID and XYZ coordinates: queued,
@@ -348,58 +192,12 @@ during pan/return. Upload preparation callbacks reached 3.10 ms. These observati
 overhead, nor do they justify larger upload budgets. The 2.669-second historical tail remains unreproduced: neither
 capture exercised retained pending uploads moving offscreen and back, so offscreen retention is still a hypothesis.
 
-Focused verification on 2026-09-19 added a real-WGPU regression through the production browser upload queue. A tile
-larger than the per-frame byte budget is partially written, hidden for ten upload frames with a test-only 2.6-second
-clock advance, and returned with duplicate visible copies. Hidden frames write no bytes and emit no progress; the
-remaining byte count and upload identity survive unchanged. Resumption publishes once, and total written bytes equal the
-original mesh size (no restart or duplicate upload). The test requires an adapter and passed without skipping on this
-host. The adversarial review identified missing headless adapter provisioning; the follow-up below records the fix. All
-202 UI tests (including 42 renderer tests) and 28 trace-analysis tests passed, including the existing analyzer test that
-separates multiple hidden intervals from visible waiting. Strict UI Clippy, Rust formatting, and diff whitespace checks
-passed. No sleeps, production scheduling changes, or budget changes were introduced. The hidden-duration offset is
-simulated, but upload advancement still uses the production wall clock; this is not a wholly virtual-clock scheduler
-test. Code inspection confirms progress marks are batched per pending upload per frame and browser retention is bounded
-to one mark; this is an allocation/history bound, not a measurement of CPU overhead.
+Hidden uploads retain their identity and remaining bytes without writing progress. The production-queue regression
+simulates a 2.6-second hidden interval and verifies a single publication after resumption. Upload advancement still uses
+the production clock. Progress marks are batched per frame and browser retention is bounded to one mark.
 
-Follow-up verification on 2026-09-19 passed all 42 renderer tests with the pinned Mesa software Vulkan ICD and no
-display. Linux Nix test/coverage environments now provision this driver. Analyzer payload/timestamp hardening passed 55
-Python tooling tests, including report-level rejection of damaged cohorts; valid zero-duration work and relative
-timestamps remain supported. Both supplied recordings still have 6/18 valid completed uploads with no malformed marks.
-The sandboxed license check passed after restoring vendored license files to its source closure; bundles were unchanged.
-The full sandboxed Rust test build was stopped during its cold dependency build after dependency checking, so it is not
-recorded as passed. Analyzer Ruff/type checks, three license-generator tests, and repository validation also passed.
+## Trace validity rules
 
-Subsequently, on 2026-09-19, the user reported the requested full QA, audit, and sandboxed Rust verification gates green
-and authorized committing this slice. No command output from that run was supplied or independently rerun. This updates
-the earlier verification limit by user report; it does not measure telemetry overhead or establish a new CI run.
-
-On 2026-09-19 the user confirmed a fresh demo data directory and disappearance of the duplicate tooltip, and approved
-the bounded-map commit `10234ef` with the upload-latency investigation retained as follow-up work. This does not imply
-that the subsequent telemetry diff has been committed or accepted.
-
-Browser acceptance on 2026-09-18 used the current Nix demo package
-`x5gc9r077g4kjsjj8aybi1sc7635bcj5-garmin-hass-demo-0.1.0`, with emitted asset hash `a149a11cfeeb1a33`. All eight
-initializer/worker tests passed against that package with no skips. At 1440 by 1000, Chrome rendered complete maps after
-cache-bypassed and warm reloads, repeated rapid zoom cycles, and world-wrap panning. Playback, speed-stop clicks, slider
-dragging, and sustained hover worked without a panic. Morocco labels included Arabic and Tifinagh glyphs.
-Screenshot-guided synthetic DOM input exercised these checks; it was not semantic automation or a trusted-input latency
-measurement. The original 3389 by 1324 viewport was restored afterward.
-
-Chrome used WebGL2 through ANGLE on the RTX 4090. The only captured warning was WebGPU adapter discovery reporting
-`No available adapters.` No tile-decoder errors or missing-background warnings appeared during the checks. Sustained
-speed-stop hover initially exposed overlapping tooltips; the user subsequently confirmed the fix.
-
-The user supplied `Trace-20260919T000106.json.gz`, analyzed with the maintained tool on 2026-09-19; see performance
-evidence below. Its mixed browser-cache results do not independently establish the server-cache state; the
-fresh-directory confirmation comes from the user.
-
-## Telemetry review resolution
-
-The 2026-09-19 staged and unstaged telemetry review against `10234ef` found three implementation issues, now addressed:
-
-- Linux Nix test applications, sandboxed Rust tests, and coverage select the pinned Mesa software Vulkan ICD. The
-  retention regression remains mandatory; the 42 headless renderer tests passed. The assistant's full sandboxed run was
-  incomplete; the user's subsequent green-gate report is recorded above.
 - Malformed identifiable events invalidate that upload ID's cohort; unidentifiable gaps invalidate every upload cohort
   in the recording. If IDs repeat after navigation, uncertain malformed events invalidate every occurrence rather than
   guessing an epoch. Publication requires nonzero uploaded bytes; zero-duration CPU work remains valid. Invalid cohorts
@@ -407,12 +205,6 @@ The 2026-09-19 staged and unstaged telemetry review against `10234ef` found thre
 - Finite numeric, non-boolean timestamps are validated before sorting. Invalid timestamps are excluded from frame and
   network analysis but retained for upload invalidation and diagnostics. Signed finite timestamps remain valid for
   relative traces. Regression tests cover parsing and report output.
-
-[Actions job 105767514106](https://github.com/kubijo/garmin-toolkit/actions/runs/35396838899/job/105767514106) failed
-because the sandboxed license check's Cargo-only source filter omitted `vendor/fast-mvt/LICENSE-MIT` and
-`LICENSE-APACHE`. Including the vendored source fixed the local/sandbox mismatch without regenerating or weakening the
-committed bundle. The exact sandboxed license check passed; package-level mismatch diagnostics and a notice-comparison
-regression were added to the maintained generator. This does not establish success of the entire CI workflow.
 
 ## Earlier profiling evidence
 

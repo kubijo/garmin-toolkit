@@ -76,6 +76,11 @@ impl MountedMtpError {
         false
     }
 
+    pub(crate) const fn is_verification_failure(&self) -> bool {
+        let Self::Unsupported = self;
+        false
+    }
+
     #[must_use]
     pub const fn probe_failure(&self) -> Option<crate::system::MountedMtpProbeFailure> {
         let Self::Unsupported = self;

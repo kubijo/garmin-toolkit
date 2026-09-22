@@ -89,11 +89,19 @@ remaps clip coordinates into the bounded viewport, preserving geometry scale and
 the render target. Device handles own pipelines; map surfaces own uniforms and upload controllers. The egui adapter
 converts logical placement and invokes this boundary on the event/render thread, retaining the same frame through
 preparation and drawing. It no longer stores pipelines in egui callback resources. Route and label ready state remains
-painter-owned. A worker-owned map-only OffscreenCanvas and further scene/label isolation are planned, not current
-capabilities. If egui transforms a callback rectangle after construction, painting uses the final placement with an
-immutable corrected camera binding. It does not rewrite the prepared surface buffer, which earlier draws may still
-reference. Unchanged placement keeps the reusable surface buffers; late-transform allocation is included in draw CPU
-timing. Rebuilt-browser smoke acceptance and its visual-verification limits are recorded in the
+painter-owned in this native/main-thread path. HASS instead defaults to a worker-owned map-only OffscreenCanvas using
+WebGL2. The main thread retains egui, camera/input, and chart state; the render worker owns map scheduling, uploads,
+labels, markers, and presentation. A separate preparation worker transfers bulk results directly to the render worker.
+The egui composition callback supplies final placement and a transparent replacement-blend hole over the worker canvas.
+`?map-render-mode=main-gl` retains the matched WebGL2 baseline; `--no-map-render-worker` restores the original host
+path. Worker initialization failures are explicit, with no silent backend substitution. Native rendering is unchanged.
+Functional native-DPR scenario evidence and remaining lifecycle/performance limits are recorded in
+[browser evidence](../research/browser-map.md#semantic-interaction-findings).
+
+If egui transforms a callback rectangle after construction, painting uses the final placement with an immutable
+corrected camera binding. It does not rewrite the prepared surface buffer, which earlier draws may still reference.
+Unchanged placement keeps the reusable surface buffers; late-transform allocation is included in draw CPU timing.
+Rebuilt-browser smoke acceptance and its visual-verification limits are recorded in the
 [capture evidence](../research/browser-map.md#post-review-browser-capture).
 
 ## Regression contracts

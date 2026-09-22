@@ -19,12 +19,11 @@ use mtp_rs::{
 use thiserror::Error;
 
 use crate::manifest::{
-    DataType, ManifestError, ParsedManifest as Manifest, TransferDirection, parse_document,
-    paths_equal,
+    DataType, ManifestError, ParsedManifest as Manifest, TransferDirection, is_device_manifest,
+    parse_document,
 };
 use crate::mtp::{GARMIN_USB_VENDOR_ID, KNOWN_GARMIN_MTP};
 
-const GARMIN_DEVICE_MANIFEST: &str = "GARMIN/GarminDevice.xml";
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 
 /// An attached Garmin MTP candidate.
@@ -394,7 +393,7 @@ async fn scan_storage(storage: Storage) -> Result<Option<Catalog>, Error> {
             object.is_file()
                 && paths
                     .get(&object.handle)
-                    .is_some_and(|path| paths_equal(path, Path::new(GARMIN_DEVICE_MANIFEST)))
+                    .is_some_and(|path| is_device_manifest(path))
         })
         .collect::<Vec<_>>();
     let manifest_object = match manifests.as_slice() {

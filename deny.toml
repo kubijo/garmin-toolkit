@@ -32,7 +32,7 @@ private = { ignore = false }
 
 # The pinned crate bundles Unicode v3 text but declares the older SPDX identifier.
 [[licenses.clarify]]
-crate = "finl_unicode@1.4.0"
+crate = "finl_unicode@1.5.0"
 expression = "(MIT OR Apache-2.0) AND Unicode-3.0"
 license-files = [
     { path = "LICENSE-MIT", hash = 0x386ca1bc },
@@ -76,12 +76,13 @@ skip = [
     { crate = "quick-xml@0.41.0", reason = "Wayland generation uses quick-xml 0.41; Garmin XML uses 0.42" },
     { crate = "rustc-hash@1.1.0", reason = "wgpu and type-map use adjacent rustc-hash releases" },
     { crate = "rustix@0.38.44", reason = "the Wayland stack and nusb use adjacent rustix generations" },
-    { crate = "rand@0.10.2", reason = "Walkers' Geo dependency uses rand 0.10; the WebSocket stack uses rand 0.9" },
+    { crate = "rand@0.10.3", reason = "Walkers' Geo dependency uses rand 0.10; the WebSocket stack uses rand 0.9" },
     { crate = "rand_core@0.10.1", reason = "Walkers' Geo dependency and the WebSocket stack use adjacent rand_core releases" },
     { crate = "reqwest@0.12.28", reason = "Walkers is pinned to reqwest 0.12; toolkit services use reqwest 0.13" },
     { crate = "sha2@0.11.0", reason = "FormatJS and toolkit verification use adjacent SHA-2 releases" },
     { crate = "smithay-client-toolkit@0.19.2", reason = "winit and clipboard use adjacent Wayland client stacks" },
     { crate = "syn@2.0.119", reason = "platform and SQLx macros use syn 2 while current derives use syn 3" },
+    { crate = "synstructure@0.13.2", reason = "Remoc's custom_debug derives use synstructure 0.13; ICU's derives use 0.14" },
     { crate = "thiserror@1.0.69", reason = "the older Wayland client stack still uses thiserror 1" },
     { crate = "thiserror-impl@1.0.69", reason = "the older Wayland client stack still uses thiserror 1" },
     { crate = "unicode-width@0.1.14", reason = "Walkers' native HTTP cache uses miette 5 and unicode-width 0.1; the toolkit uses unicode-width 0.2" },

@@ -38,6 +38,11 @@ appimage mode:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    if [[ $(uname -s) != Linux ]]; then
+        printf 'AppImage packaging requires Linux.\n' >&2
+        exit 64
+    fi
+
     case {{ quote(mode) }} in
         production) app=desktop-appimage ;;
         demo) app=desktop-demo-appimage ;;
@@ -50,6 +55,11 @@ appimage mode:
 flatpak mode:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    if [[ $(uname -s) != Linux ]]; then
+        printf 'Flatpak packaging requires Linux.\n' >&2
+        exit 64
+    fi
 
     case {{ quote(mode) }} in
         production) app=desktop-flatpak ;;

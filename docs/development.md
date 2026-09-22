@@ -15,7 +15,10 @@ Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands an
   deliberately made-up identities.
 - Use filtered flake/Just entrypoints, never `nix build path:.`.
 - Cargo and heavyweight Rust/Nix builds require explicit permission. Scope authorized commands, use low parallelism, and
-  run under a hard memory-limited cgroup; an unconstrained workload previously caused an OOM session loss.
+  on Linux run under a hard memory-limited cgroup; an unconstrained workload previously caused an OOM session loss.
+  Apple Silicon macOS development has an approved exception: the maintained wrapper forces one Cargo job, one Nix build
+  at a time, and one core per Nix builder. This is a parallelism limit, not a hard RAM limit. Run heavyweight commands
+  serially through the Just recipes or `infra/just/memory-capped.sh`; do not run concurrent builds.
 - Keep diagnostics and analysis in maintained tooling, not disposable scripts. Temporary outputs belong under the
   repository's ignored `.tmp/` directories; gallery captures belong under `.tmp/gallery/`.
 - Real-device manifest comparisons require a separately approved anonymization procedure. Never commit raw device
@@ -25,5 +28,7 @@ Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands an
 
 Keep current contracts in architecture, accepted choices in decisions, reproducible results and uncertainty in research,
 and unresolved work in its owning plan. Do not create a second session checklist for an existing owner. After resolving
-a review, preserve its unique evidence, update incoming links, and remove the temporary review file. Historical test
-counts establish only their recorded scope and revision, not acceptance of later changes.
+a review, preserve its unique evidence, update incoming links, and remove the temporary review file. Keep session
+narratives, routine test counts, command logs, and resolved checklists out of persistent documentation. Explain current
+behavior and design constraints directly; keep open questions concrete and remove them when answered. Retain empirical
+measurements and reproduction methods when they inform unresolved work.

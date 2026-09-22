@@ -12,6 +12,9 @@ pub(super) struct WorkerMap {
 }
 
 impl WorkerMap {
+    pub(super) fn readiness(&self) -> String {
+        self.surface.readiness().into()
+    }
     pub(super) fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,

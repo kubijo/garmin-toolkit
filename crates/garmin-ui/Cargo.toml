@@ -11,6 +11,9 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+automation = ["dep:kittest"]
+
 [dependencies]
 arc-swap.workspace = true
 bytemuck.workspace = true
@@ -25,6 +28,7 @@ egui-wgpu.workspace = true
 egui_ltreeview.workspace = true
 egui_extras.workspace = true
 egui_plot.workspace = true
+kittest = { workspace = true, optional = true }
 garmin-i18n.workspace = true
 garmin-model.workspace = true
 garmin-service-api.workspace = true
@@ -45,6 +49,7 @@ phosphor-svgs.workspace = true
 usvg.workspace = true
 
 [dev-dependencies]
+kittest.workspace = true
 futures-lite.workspace = true
 naga.workspace = true
 tempfile.workspace = true

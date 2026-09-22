@@ -6,6 +6,8 @@
 )]
 
 pub mod activity;
+#[cfg(any(test, feature = "automation"))]
+pub mod automation;
 pub mod brand;
 pub mod button;
 pub mod capacity;
@@ -26,6 +28,7 @@ pub mod profile;
 pub mod profile_settings;
 pub mod progress;
 pub mod select;
+pub mod semantics;
 pub mod shell;
 mod size;
 mod text;

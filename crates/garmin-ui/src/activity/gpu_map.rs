@@ -936,6 +936,7 @@ pub(in crate::activity) struct RouteScene<'a> {
 
 #[derive(Default)]
 pub(in crate::activity) struct ScenePerf {
+    pub route_ready: bool,
     pub milliseconds: f32,
     pub visible_tiles: usize,
     pub label_milliseconds: f32,
@@ -1073,6 +1074,7 @@ impl GpuMap {
         }
         let visible_tiles_settling = upload.pending_tiles > 0;
         visible.retain(|tile| tile.tile.is_publishable());
+        let route_ready = matches!(self.route.state, RoutePreparation::Ready { .. });
         let route = self.route.visible(route);
         let visible_tiles = visible.len();
         self.frame = Arc::new(Frame {
@@ -1083,6 +1085,7 @@ impl GpuMap {
         });
         let label_metrics = self.labels.metrics();
         ScenePerf {
+            route_ready,
             milliseconds: started.elapsed().as_secs_f32() * 1_000.0,
             visible_tiles,
             label_milliseconds: label_metrics.milliseconds,

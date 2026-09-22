@@ -27,6 +27,10 @@ pub trait Host: Send + Sync + 'static {
     fn fail(&self, reason: &str);
     /// Current map-local failure, leaving the surrounding application usable.
     fn failure(&self) -> String;
+    /// Current preparation/upload readiness, never a presentation acknowledgement.
+    fn readiness(&self) -> String {
+        "pending".into()
+    }
 }
 
 /// Main-thread publisher. The source identity matches the existing route cache contract.
@@ -106,6 +110,10 @@ impl RemoteMapPlugin {
     pub(super) fn failure(&self) -> String {
         self.host.failure()
     }
+
+    pub(super) fn readiness(&self) -> String {
+        self.host.readiness()
+    }
 }
 
 impl egui::plugin::Plugin for RemoteMapPlugin {
@@ -161,6 +169,7 @@ impl View {
 
 /// Worker-owned production map state. No camera interaction or main-thread paint-list transfer.
 pub struct MapSurface {
+    readiness: String,
     surface: MapSurfaceHandle,
     samples: Vec<ActivitySampleSnapshot>,
     revision: u32,
@@ -174,6 +183,7 @@ impl MapSurface {
     pub fn new(runtime: &MapRuntimeHandle) -> Self {
         Self {
             surface: runtime.surface(),
+            readiness: "pending".into(),
             samples: Vec::new(),
             revision: 0,
             key: String::new(),
@@ -208,6 +218,7 @@ impl MapSurface {
             return Err("remote view references a missing route".to_owned());
         }
         self.view = Some(view);
+        self.readiness = "pending".into();
         Ok(())
     }
 
@@ -217,6 +228,12 @@ impl MapSurface {
         self.view
             .as_ref()
             .map(|v| (v.size, v.pixels_per_point, v.dark))
+    }
+
+    /// Visible map preparation and upload state, not compositor presentation.
+    #[must_use]
+    pub fn readiness(&self) -> &str {
+        &self.readiness
     }
 
     /// Paint only map content using the production scene and marker paths.
@@ -246,7 +263,8 @@ impl MapSurface {
         self.surface
             .submit_view(ui.ctx(), view.dark, &MapViewDemand::new(&camera, rect));
         let scene = self.surface.scene();
-        super::paint_scene(&mut self.surface, &scene, &camera, rect, ui, &route);
+        let performance = super::paint_scene(&mut self.surface, &scene, &camera, rect, ui, &route);
+        self.readiness = super::map_readiness(&scene, &performance);
         super::paint_route_markers(
             ui,
             &MapProjector::new(&camera, rect),

@@ -140,11 +140,32 @@ let
   mkApp =
     name: runtimeInputs: text:
     pkgs.writeShellApplication {
-      inherit name runtimeInputs text;
+      inherit name;
+      text =
+        lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+          export NIX_LDFLAGS="-L${lib.getLib pkgs.libiconv}/lib ''${NIX_LDFLAGS:-}"
+        ''
+        + text;
+      runtimeInputs =
+        runtimeInputs
+        ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+          pkgs.stdenv.cc
+          pkgs.cmake
+          pkgs.gnumake
+        ];
       runtimeEnv = {
         CARGO_TARGET_DIR = nixCargoTargetDir;
       }
       // headlessGpuEnv
+      // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+        CC = lib.getExe' pkgs.stdenv.cc "cc";
+        CXX = lib.getExe' pkgs.stdenv.cc "c++";
+        DEVELOPER_DIR = "${pkgs.apple-sdk}";
+        SDKROOT = "${pkgs.apple-sdk}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
+        MACOSX_DEPLOYMENT_TARGET = pkgs.stdenv.hostPlatform.darwinMinVersion;
+        "NIX_CC_WRAPPER_TARGET_HOST_${pkgs.stdenv.cc.suffixSalt}" = "1";
+        "NIX_BINTOOLS_WRAPPER_TARGET_HOST_${pkgs.stdenv.cc.bintools.suffixSalt}" = "1";
+      }
       // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
         LD_LIBRARY_PATH = lib.makeLibraryPath galleryRuntimeLibraries;
       };
@@ -154,7 +175,10 @@ let
   };
   i18nSrc = import ./cargo-source.nix {
     inherit craneLib lib workspaceSrc;
-    extraFilesets = [ (workspaceSrc + "/infra/python") ];
+    extraFilesets = [
+      (workspaceSrc + "/infra/python")
+      (workspaceSrc + "/infra/just/memory-capped.sh")
+    ];
   };
   commonArgs = {
     inherit src;
@@ -199,7 +223,8 @@ let
     trap 'rm -rf "$i18n_dir"' EXIT
 
     ${extractSourceCatalog "$i18n_dir/en-source.json"}
-    ${pythonToolsEnv}/bin/python -m unittest discover -q --start-directory infra/python --pattern 'test_*.py'
+    PATH=${lib.makeBinPath [ pkgs.bash ]}:$PATH \
+      ${pythonToolsEnv}/bin/python -m unittest discover -q --start-directory infra/python --pattern 'test_*.py'
     ${pythonToolsEnv}/bin/python infra/python/check_translation_metadata.py \
       "$i18n_dir/en-source.json" \
       crates/garmin-i18n/translations/cs.json
@@ -261,6 +286,10 @@ let
       --target wasm32-unknown-unknown --lib -- --deny warnings
   '';
 
+  galleryLint = mkApp "gallery-lint" [ toolchain ] ''
+    ${cargoCommand galleryClippyArgs}
+  '';
+
   projectLint =
     mkApp "project-lint"
       [
@@ -287,7 +316,7 @@ let
         run_step "license bundles" ${lib.getExe licenseChecker}
         run_step "cargo deny" ${cargoCommand denyArgs}
         run_step "cargo machete" ${cargoCommand [ "machete" ]}
-        run_step "gallery clippy" ${cargoCommand galleryClippyArgs}
+        run_step "gallery clippy" ${lib.getExe galleryLint}
         run_step "gallery doc" env RUSTDOCFLAGS='-D warnings' ${cargoCommand galleryDocArgs}
         run_step "gallery nextest" ${cargoCommand galleryTestArgs}
         run_step "gallery deny" ${cargoCommand galleryDenyArgs}
@@ -434,6 +463,7 @@ in
     '';
 
     project-lint = projectLint;
+    gallery-lint = galleryLint;
 
     wasm-lint = wasmLint;
 

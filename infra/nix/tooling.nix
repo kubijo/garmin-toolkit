@@ -79,6 +79,7 @@ let
           ESBUILD=${lib.getExe pkgs.esbuild} ${lib.getExe pkgs.nodejs} infra/javascript/fingerprint-web.test.mjs || exit $?
           ${lib.getExe pkgs.nodejs} infra/javascript/map-worker.test.mjs || exit $?
           ${lib.getExe pkgs.nodejs} infra/javascript/map-composition.test.mjs || exit $?
+          ${lib.getExe pkgs.nodejs} infra/javascript/ui-automation.test.mjs || exit $?
           exec ${lib.getExe pkgs.nodejs} infra/javascript/initializer.test.mjs
         '';
         python-lock.command = pkgs.writeShellScript "python-lock-check" ''
@@ -87,6 +88,7 @@ let
             --project infra/python
         '';
         python-tests.command = pkgs.writeShellScript "python-tests" ''
+          export PATH=${lib.makeBinPath [ pkgs.bash ]}:$PATH
           exec ${pythonToolsEnv}/bin/python -m unittest discover -q \
             --start-directory infra/python \
             --pattern 'test_*.py'
