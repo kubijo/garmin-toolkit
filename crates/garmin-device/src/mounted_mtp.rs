@@ -2412,6 +2412,15 @@ impl MountedMtpError {
         matches!(self, Self::Cancelled)
     }
 
+    pub(crate) const fn is_verification_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::RemovalObjectSize { .. }
+                | Self::RemovalObjectChecksum(_)
+                | Self::UploadMetadata(_)
+        )
+    }
+
     #[must_use]
     pub fn probe_failure(&self) -> Option<MountedMtpProbeFailure> {
         match self {

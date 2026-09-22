@@ -1,6 +1,7 @@
 import '../just/common.just'
 
 export CARGO_TARGET_DIR := repository_root / "target/gallery"
+gallery_backend := env('WGPU_BACKEND', if os() == 'macos' { 'metal' } else { 'vulkan' })
 
 # Run the native gallery from the current development environment.
 run:
@@ -29,14 +30,14 @@ build:
 
 # Render one scene without opening a window.
 render SCENE OUT SIZE='1280x720':
-    {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 WGPU_BACKEND=vulkan \
+    {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 WGPU_BACKEND={{ quote(gallery_backend) }} \
         cargo run --quiet \
         --manifest-path Cargo.toml --all-features -- \
         --scene "{{ SCENE }}" --render "{{ OUT }}" --size {{ SIZE }}
 
 # Render one maintained capture set without opening a window.
 capture FILE='components.capture.toml' OUT='':
-    {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 WGPU_BACKEND=vulkan \
+    {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 WGPU_BACKEND={{ quote(gallery_backend) }} \
         cargo run --quiet \
         --manifest-path Cargo.toml --all-features -- \
         --capture "{{ FILE }}" {{ if OUT == '' { '' } else { '--out "' + OUT + '"' } }}
@@ -54,15 +55,15 @@ capture-all:
 
 # Reproduce one maintained capture set inside the pinned Nix environment.
 capture-nix FILE='components.capture.toml' OUT='':
-    {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 WGPU_BACKEND=vulkan \
-        nix develop --command cargo run --quiet \
+    {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 WGPU_BACKEND={{ quote(gallery_backend) }} \
+        nix develop {{ flake }}#gallery --command cargo run --quiet \
         --manifest-path Cargo.toml --all-features -- \
         --capture "{{ FILE }}" {{ if OUT == '' { '' } else { '--out "' + OUT + '"' } }}
 
 # Build the isolated gallery and its lints through Nix.
 ci:
     {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 \
-        nix build -L {{ flake }}#checks.{{ arch() }}-linux.gallery
+        nix build -L {{ flake }}#checks.{{ arch() }}-{{ if os() == 'macos' { 'darwin' } else { 'linux' } }}.gallery
 
 # List a scene's configurable capture values.
 knobs SCENE:

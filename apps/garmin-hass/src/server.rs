@@ -33,6 +33,7 @@ const CSP_REPORT_LIMIT: usize = 32 * 1024;
 const CSP_NONCE_PLACEHOLDER: &str = "GARMIN_TOOLKIT_CSP_NONCE";
 const UPLOAD_TELEMETRY_PLACEHOLDER: &str = "GARMIN_TOOLKIT_MAP_UPLOAD_TELEMETRY";
 const MAP_EXPERIMENT_PLACEHOLDER: &str = "GARMIN_TOOLKIT_MAP_RENDER_EXPERIMENT";
+const UI_AUTOMATION_PLACEHOLDER: &str = "GARMIN_TOOLKIT_UI_AUTOMATION";
 
 pub(super) async fn serve(
     host: Arc<Host>,
@@ -129,10 +130,18 @@ impl WebIndex {
             ));
         }
         let telemetry = serde_json::to_string(&browser.map_upload_telemetry)?;
+        if !html.contains(UI_AUTOMATION_PLACEHOLDER) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "browser index lacks the UI automation placeholder",
+            ));
+        }
+        let automation = serde_json::to_string(&browser.ui_automation)?;
         let experiment = serde_json::to_string(&browser.map_render_experiment)?;
         Ok(Self(
             html.replace(UPLOAD_TELEMETRY_PLACEHOLDER, &telemetry)
                 .replace(MAP_EXPERIMENT_PLACEHOLDER, &experiment)
+                .replace(UI_AUTOMATION_PLACEHOLDER, &automation)
                 .into(),
         ))
     }
@@ -737,9 +746,40 @@ mod tests {
             assert!(rendered.contains(&format!("data-map-render-experiment=\"{enabled}\"")));
             assert!(!rendered.contains(MAP_EXPERIMENT_PLACEHOLDER));
         }
+        let defaults = WebIndex::load(root.path(), BrowserOptions::default())?.render(&nonce);
+        assert!(defaults.contains("data-map-render-experiment=\"true\""));
         std::fs::write(
             root.path().join("index.html"),
             source.replace(MAP_EXPERIMENT_PLACEHOLDER, "false"),
+        )?;
+        assert!(WebIndex::load(root.path(), BrowserOptions::default()).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn web_index_embeds_automation_only_when_requested() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let source = format!(
+            "{}<script nonce=\"{CSP_NONCE_PLACEHOLDER}\"></script>",
+            include_str!("../web/index.html")
+        );
+        std::fs::write(root.path().join("index.html"), &source)?;
+        let nonce = Nonce::from_encoded("dGVzdA==")?;
+        for enabled in [false, true] {
+            let rendered = WebIndex::load(
+                root.path(),
+                BrowserOptions {
+                    ui_automation: enabled,
+                    ..Default::default()
+                },
+            )?
+            .render(&nonce);
+            assert!(rendered.contains(&format!("data-ui-automation=\"{enabled}\"")));
+            assert!(!rendered.contains(super::UI_AUTOMATION_PLACEHOLDER));
+        }
+        std::fs::write(
+            root.path().join("index.html"),
+            source.replace(super::UI_AUTOMATION_PLACEHOLDER, "false"),
         )?;
         assert!(WebIndex::load(root.path(), BrowserOptions::default()).is_err());
         Ok(())

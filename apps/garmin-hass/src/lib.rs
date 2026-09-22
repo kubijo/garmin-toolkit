@@ -29,24 +29,27 @@ const DATA_BASE_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_DATA_BASE";
 pub struct BrowserOptions {
     /// Record map upload lifecycle telemetry.
     pub map_upload_telemetry: bool,
-    /// Enable the isolated map composition experiment in demo builds only.
+    /// Enable isolated worker map rendering.
     pub map_render_experiment: bool,
+    /// Expose named semantic interaction scenarios in demo builds only.
+    pub ui_automation: bool,
 }
 
 impl Default for BrowserOptions {
     fn default() -> Self {
         Self {
             map_upload_telemetry: true,
-            map_render_experiment: false,
+            map_render_experiment: true,
+            ui_automation: false,
         }
     }
 }
 
 impl BrowserOptions {
     fn validate(self) -> std::io::Result<()> {
-        if self.map_render_experiment && !cfg!(feature = "demo") {
+        if self.ui_automation && !cfg!(feature = "demo") {
             return Err(std::io::Error::other(
-                "--map-render-experiment requires a demo build",
+                "--ui-automation requires a demo build",
             ));
         }
         Ok(())
@@ -109,16 +112,16 @@ mod tests {
     use super::{DATA_BASE, configured_data_base, prepare_storage};
 
     #[test]
-    fn browser_experiment_requires_demo_without_changing_normal_defaults() {
+    fn worker_map_is_default_in_both_deployment_modes() {
         let defaults = super::BrowserOptions::default();
         assert!(defaults.validate().is_ok());
         assert!(defaults.map_upload_telemetry);
-        assert!(!defaults.map_render_experiment);
-        let experiment = super::BrowserOptions {
-            map_render_experiment: true,
+        assert!(defaults.map_render_experiment);
+        let rollback = super::BrowserOptions {
+            map_render_experiment: false,
             ..defaults
         };
-        assert_eq!(experiment.validate().is_ok(), cfg!(feature = "demo"));
+        assert!(rollback.validate().is_ok());
     }
 
     #[test]
@@ -128,6 +131,18 @@ mod tests {
             Path::new("current")
         );
         assert_eq!(configured_data_base(None), Path::new(DATA_BASE));
+    }
+
+    #[test]
+    fn automation_is_independently_opt_in_and_demo_only() {
+        let defaults = super::BrowserOptions::default();
+        assert!(!defaults.ui_automation);
+        let automation = super::BrowserOptions {
+            ui_automation: true,
+            ..defaults
+        };
+        assert!(automation.map_render_experiment);
+        assert_eq!(automation.validate().is_ok(), cfg!(feature = "demo"));
     }
 
     #[test]

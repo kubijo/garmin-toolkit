@@ -64,6 +64,18 @@ const MAX_COMPOSITION_PIXELS = 16 * 1024 * 1024;
 export function decodeComposition(value) {
     if (!Array.isArray(value) || value[0] !== 1) throw Error('invalid composition protocol');
     const [, type, ...payload] = value;
+    if (type === 'map-readiness' && payload.length === 2) {
+        const [id, state] = payload;
+        if (
+            integer(id, 0xffffffff) &&
+            id > 0 &&
+            typeof state === 'string' &&
+            state.length <= 1024 &&
+            (['pending', 'ready'].includes(state) || state.startsWith('failed:'))
+        )
+            return { type, id, state };
+        throw Error('invalid map readiness');
+    }
     if (['composition-init', 'map-init'].includes(type) && payload.length === (type === 'map-init' ? 5 : 4)) {
         const [mode, moduleUrl, wasmUrl, canvas, preparationUrl] = payload;
         if (

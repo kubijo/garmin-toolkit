@@ -2418,8 +2418,8 @@ dependencies = [
 
 [[package]]
 name = "gallery"
-version = "0.12.0"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.12.0#172877332372a05b78d5339a6bd94c77eb60534d"
+version = "0.13.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.13.0#1e7a7555b68a27643630d8236f187f09b8f6f69c"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2461,8 +2461,8 @@ dependencies = [
 
 [[package]]
 name = "gallery-build"
-version = "0.12.0"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.12.0#172877332372a05b78d5339a6bd94c77eb60534d"
+version = "0.13.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.13.0#1e7a7555b68a27643630d8236f187f09b8f6f69c"
 dependencies = [
  "camino",
  "glob",
@@ -2472,8 +2472,8 @@ dependencies = [
 
 [[package]]
 name = "gallery-macros"
-version = "0.12.0"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.12.0#172877332372a05b78d5339a6bd94c77eb60534d"
+version = "0.13.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.13.0#1e7a7555b68a27643630d8236f187f09b8f6f69c"
 dependencies = [
  "heck",
  "prettyplease",
@@ -2662,6 +2662,7 @@ dependencies = [
  "garmin-service-api",
  "geo",
  "geo-types",
+ "kittest",
  "lyon_path",
  "phosphor-svgs",
  "postcard",

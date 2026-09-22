@@ -757,6 +757,11 @@ impl Viewer {
             ui.id().with("activity-analysis-background"),
             Sense::CLICK,
         );
+        let viewer_label = format_message!(intl, default_message: "Activities");
+        background.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Other, ui.is_enabled(), &viewer_label)
+        });
+        crate::semantics::target(ui, &background, "activity.viewer");
         ScrollArea::vertical().show_viewport(ui, |ui, _scroll_viewport| {
             let visible_viewport = ui.clip_rect();
             viewer_inset().show(ui, |ui| {
@@ -877,6 +882,7 @@ impl Viewer {
         let background_unavailable =
             format_message!(intl, default_message: "Map background unavailable");
         let loading_background = format_message!(intl, default_message: "Loading map…");
+        let map_label = format_message!(intl, default_message: "Activity map");
         let highlighted_range = self
             .interaction
             .hovered_lap()
@@ -884,6 +890,7 @@ impl Viewer {
         let mut output = self.map.show(
             ui,
             &map::Props {
+                label: &map_label,
                 recording,
                 selected_coordinate,
                 sample_range: range,
@@ -929,6 +936,7 @@ impl Viewer {
         let fit = floating_control(ui, fit_bounds, Layout::left_to_right(Align::Center), |ui| {
             floating_icon_button(ui, &fit_route, icons::TARGET, false, true)
         });
+        crate::semantics::target(ui, &fit.inner, "map.fit");
         if fit.inner.clicked() {
             self.map.fit();
             ui.ctx().request_repaint();
@@ -948,6 +956,8 @@ impl Viewer {
             paint_horizontal_control_separator(ui, zoom_in.rect, GAP);
             (zoom_in, zoom_out)
         });
+        crate::semantics::target(ui, &zoom.inner.0, "map.zoom-in");
+        crate::semantics::target(ui, &zoom.inner.1, "map.zoom-out");
         if zoom.inner.0.clicked() {
             self.map.zoom_in();
             ui.ctx().request_repaint();
@@ -993,13 +1003,13 @@ impl Viewer {
                 (play, speed)
             },
         );
+        crate::semantics::target(ui, &playback.inner.0, "playback.toggle");
+        crate::semantics::value(
+            &playback.inner.0,
+            if playing { "playing" } else { "stopped" },
+        );
         if playback.inner.0.clicked() {
-            if playing {
-                self.interaction.stop_and_clear_cursor();
-            } else {
-                let range = self.sample_range(recording);
-                self.interaction.start_playback(recording, range);
-            }
+            self.toggle_playback(recording);
             ui.ctx().request_repaint();
         }
         if playback.inner.1.changed() {
@@ -1014,6 +1024,15 @@ impl Viewer {
         }
 
         controls
+    }
+
+    fn toggle_playback(&mut self, recording: &ActivityRecordingSnapshot) {
+        if self.interaction.is_playing() {
+            self.interaction.stop_and_clear_cursor();
+        } else {
+            let range = self.sample_range(recording);
+            self.interaction.start_playback(recording, range);
+        }
     }
 
     fn full_activity_control(
@@ -1040,6 +1059,7 @@ impl Viewer {
         let control = floating_control(ui, bounds, Layout::left_to_right(Align::Center), |ui| {
             floating_labeled_button(ui, &full_activity, icons::TARGET, 112.0, false, true)
         });
+        crate::semantics::target(ui, &control.inner, "map.full-activity");
         if control.inner.clicked() {
             self.interaction.clear_lap_constraint();
             self.map.fit();
@@ -1273,6 +1293,7 @@ impl Viewer {
                     &duration,
                     selected,
                 );
+                crate::semantics::target(ui, &response, format!("lap.{index}"));
                 if response.hovered() {
                     hovered = Some(index);
                 }
@@ -1403,6 +1424,7 @@ fn playback_speed_slider(
             target.widget_info(|| {
                 egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &stop_label)
             });
+            crate::semantics::target(ui, &target, format!("playback.speed.{index}"));
             if target.clicked() {
                 if step != index {
                     step = index;
@@ -1437,6 +1459,7 @@ fn playback_speed_slider(
             egui::Stroke::new(1.5, knob_color),
         );
         *speed = PlaybackSpeed::ALL[step];
+        crate::semantics::target(ui, &response, "playback.speed");
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_label(label);
             node.set_value(speed.label());
@@ -2001,7 +2024,7 @@ fn show_chart(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) ->
 
 fn show_chart_plot(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) -> Option<f64> {
     let inverted = chart.kind == ChartKind::PaceSpeed && frame.sport == ActivitySport::Running;
-    Plot::new(ui.id().with(("activity-chart", chart.chart_index)))
+    let plot = Plot::new(ui.id().with(("activity-chart", chart.chart_index)))
         .height(CHART_HEIGHT)
         .allow_drag(false)
         .allow_axis_zoom_drag(false)
@@ -2029,8 +2052,12 @@ fn show_chart_plot(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_
                 .hovered()
                 .then(|| plot_ui.pointer_coordinate().map(|point| point.x))
                 .flatten()
-        })
-        .inner
+        });
+    plot.response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Other, ui.is_enabled(), &chart.label)
+    });
+    crate::semantics::target(ui, &plot.response, format!("chart.{}", chart.chart_index));
+    plot.inner
 }
 
 fn paint_chart_data<'a>(

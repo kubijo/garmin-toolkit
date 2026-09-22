@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { compositionMessage, decodeComposition } from '../../apps/garmin-hass/web/worker-codec.js';
+import { compositionMessage, decodeComposition, requestMapDraw } from '../../apps/garmin-hass/web/worker-codec.js';
 import { installCompositionWorker } from '../../apps/garmin-hass/web/map-render-worker.js';
 import { waitMilliseconds, nextMapFrame } from '../../apps/garmin-hass/web/map-clock.js';
 import {
@@ -19,13 +19,15 @@ import {
     rendererSnapshot,
     rendererDiagnostics,
     takeRendererDiagnostics,
+    mapReadiness,
 } from '../../apps/garmin-hass/web/map-experiment.js';
 
 test.beforeEach(t => {
     t.mock.method(console, 'table', () => {});
 });
 
-test('experiment cannot be enabled by a URL without the host flag', () => {
+test('worker GL is the default and URL selection respects host rollback', () => {
+    assert.equal(experimentMode(false, ''), '');
     assert.equal(experimentMode(false, '?map-render-mode=worker-gl'), '');
     assert.equal(experimentMode(false, '?map-render-mode=invalid'), '');
     assert.equal(experimentMode(true, ''), 'worker-gl');
@@ -256,6 +258,27 @@ test('map transport coalesces view demand and transfers each route revision once
     assert.deepEqual(new Uint8Array(frames()[2].transfer[0]), new Uint8Array([9]));
 });
 
+test('readiness belongs to the current fully submitted view, not a draw acknowledgement', async t => {
+    const b = browser(t, true);
+    b.worker.send('composition-ready', 'Gl', 8192);
+    setMapRoute(1, new Uint8Array([1]));
+    await b.draw(600, 400, { revision: 1, zoom: 10 });
+    b.worker.send('composition-drawn', 1, 600, 400);
+    assert.equal(mapReadiness(), 'pending');
+    b.worker.send('map-readiness', 1, 'ready');
+    assert.equal(mapReadiness(), 'ready');
+    await b.draw(600, 400, { revision: 1, zoom: 11 });
+    assert.equal(mapReadiness(), 'pending');
+    b.worker.send('map-readiness', 1, 'ready');
+    assert.equal(mapReadiness(), 'pending');
+    b.worker.send('composition-drawn', 2, 600, 400);
+    assert.equal(mapReadiness(), 'pending');
+    b.worker.send('map-readiness', 2, 'ready');
+    assert.equal(mapReadiness(), 'ready');
+    assert.throws(() => compositionMessage('map-readiness', 2, 'x'.repeat(1025)));
+    assert.throws(() => compositionMessage('map-readiness', 0, 'ready'));
+});
+
 test('worker admission clocks yield without a Window or animation-frame API', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     let timeout = false,
@@ -413,4 +436,36 @@ test('render worker initializes the requested WASM and acknowledges actual submi
     assert.equal(messages[2][2], 'Error: incorrect draw size', 'cleanup must not mask the original WASM failure');
     await scope.onmessage({ data: compositionMessage('composition-size', 3, 120, 80) });
     assert.equal(messages.length, 3, 'the failed renderer must never be used again');
+});
+
+test('worker reports bounded readiness transitions for asynchronous map draws', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const moduleUrl = `data:text/javascript,${encodeURIComponent(`
+        export default async function() {}
+        export class CompositionRenderer {
+            static async create() { return new CompositionRenderer(); }
+            backend() { return 'Gl'; }
+            maximum_size() { return 8192; }
+            enable_map() {}
+            update_map() { this.draws = 0; }
+            draw() { this.draws++; }
+            readiness() { return this.draws > 1 ? 'ready' : 'pending'; }
+        }
+    `)}`;
+    const messages = [];
+    const scope = { postMessage: message => messages.push(message) };
+    installCompositionWorker(scope);
+    await scope.onmessage({
+        data: compositionMessage('map-init', 'worker-gl', moduleUrl, 'fixture.wasm', {}, 'prepare.js'),
+    });
+    await scope.onmessage({ data: compositionMessage('map-frame', 1, 120, 80, '{}', new ArrayBuffer(0)) });
+    assert.deepEqual(messages.at(-1), [1, 'map-readiness', 1, 'pending']);
+    requestMapDraw(0);
+    t.mock.timers.tick(16);
+    assert.deepEqual(messages.at(-1), [1, 'map-readiness', 1, 'ready']);
+    const count = messages.length;
+    requestMapDraw(0);
+    t.mock.timers.tick(16);
+    assert.equal(messages.length, count, 'idle draws do not repeat readiness reports');
+    await scope.onmessage({ data: compositionMessage('map-active', false) });
 });

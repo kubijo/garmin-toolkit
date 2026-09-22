@@ -19,6 +19,7 @@ let
       [
         "x86_64-linux"
         "aarch64-linux"
+        "aarch64-darwin"
       ]
       (
         system:
@@ -157,6 +158,8 @@ let
               };
               garmin-cli = flake-utils.lib.mkApp { drv = build.garminCli; };
               default = self.apps.${system}.garmin-cli;
+            }
+            // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               desktop-appimage = {
                 type = "app";
                 program = lib.getExe desktopTarget.distribution.appImageExporter;
@@ -188,34 +191,45 @@ let
           inherit (tooling) formatter;
 
           devShells = {
-            default = pkgs.mkShellNoCC {
-              packages =
-                tooling.packages
-                ++ galleryTarget.runtimeLibraries
-                ++ [
-                  pkgs.cargo-deny
-                  pkgs.cargo-llvm-cov
-                  pkgs.cargo-machete
-                  pkgs.cargo-nextest
-                  pkgs.cargo-outdated
-                  pkgs.gitleaks
-                  pkgs.glib
-                  pkgs.gvfs
-                  pkgs.just
-                  pkgs.nodejs
-                  pkgs.esbuild
-                  pkgs.pkg-config
-                  pkgs.samply
-                  pkgs.ty
-                  pkgs.usbutils
-                  pkgs.uv
-                  pkgs.wrapGAppsNoGuiHook
-                  pythonToolsEnv
-                  toolchain
-                ];
-              GIO_EXTRA_MODULES = "${pkgs.gvfs}/lib/gio/modules";
-              LD_LIBRARY_PATH = lib.makeLibraryPath galleryTarget.runtimeLibraries;
-            };
+            default = pkgs.mkShell (
+              {
+                buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.libiconv ];
+                packages =
+                  tooling.packages
+                  ++ galleryTarget.runtimeLibraries
+                  ++ [
+                    pkgs.bash
+                    pkgs.cmake
+                    pkgs.cargo-deny
+                    pkgs.cargo-llvm-cov
+                    pkgs.cargo-machete
+                    pkgs.cargo-nextest
+                    pkgs.cargo-outdated
+                    pkgs.gitleaks
+                    pkgs.just
+                    pkgs.nodejs
+                    pkgs.esbuild
+                    pkgs.pkg-config
+                    pkgs.samply
+                    pkgs.ty
+                    pkgs.uv
+                    pkgs.trunk
+                    pkgs.wasm-bindgen-cli_0_2_126
+                    pythonToolsEnv
+                    wasmToolchain
+                  ]
+                  ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+                    pkgs.glib
+                    pkgs.gvfs
+                    pkgs.usbutils
+                    pkgs.wrapGAppsNoGuiHook
+                  ];
+              }
+              // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+                GIO_EXTRA_MODULES = "${pkgs.gvfs}/lib/gio/modules";
+                LD_LIBRARY_PATH = lib.makeLibraryPath galleryTarget.runtimeLibraries;
+              }
+            );
             desktop = desktopTarget.devShell;
             gallery = galleryTarget.devShell;
             hass = hassTarget.devShell;

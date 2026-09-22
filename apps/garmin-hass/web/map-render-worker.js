@@ -10,6 +10,17 @@ export function installCompositionWorker(scope) {
     let dimensions;
     let timer;
     let due = Infinity;
+    let viewId = 0;
+    let readiness;
+
+    function reportReadiness() {
+        if (!map || !viewId) return;
+        const state = renderer.readiness().slice(0, 1024);
+        const key = `${viewId}:${state}`;
+        if (key === readiness) return;
+        readiness = key;
+        scope.postMessage(compositionMessage('map-readiness', viewId, state));
+    }
 
     function schedule(milliseconds) {
         if (!map || !active || failed || !dimensions || !Number.isFinite(milliseconds)) return;
@@ -22,6 +33,7 @@ export function installCompositionWorker(scope) {
                 due = Infinity;
                 try {
                     renderer.draw(...dimensions);
+                    reportReadiness();
                 } catch (error) {
                     fail(error);
                 }
@@ -75,8 +87,10 @@ export function installCompositionWorker(scope) {
                 );
                 dimensions = [message.width, message.height];
                 active = true;
+                viewId = message.id;
                 renderer.draw(...dimensions);
                 scope.postMessage(compositionMessage('composition-drawn', message.id, ...dimensions));
+                reportReadiness();
             } else if (message.type === 'composition-size' && !map && renderer) {
                 renderer.draw(message.width, message.height);
                 // Acknowledges submission, NOT compositor presentation.

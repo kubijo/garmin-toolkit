@@ -11,7 +11,6 @@ use quick_xml::{events::Event, name::ResolveResult, reader::NsReader};
 use crate::{DeviceManifest, DeviceSummary, TransportKind};
 
 pub use error::ManifestError;
-pub(crate) use model::paths_equal;
 pub use model::{
     DataType, DeviceId, DeviceModel, FileCapability, ManifestFormat, ManifestQuirk,
     OperationHandle, ParsedManifest, SoftwareVersion, TransferDirection,

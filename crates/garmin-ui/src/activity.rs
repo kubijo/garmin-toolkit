@@ -315,6 +315,13 @@ pub fn list(ui: &mut Ui, props: &ListProps<'_>) -> Option<Action> {
         );
         row_top += ROW_HEIGHT;
         let response = row_response(ui, row, index, item.title);
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_value(if props.selected == Some(index) {
+                "selected"
+            } else {
+                "unselected"
+            });
+        });
         paint_row(ui, row, item, props.selected == Some(index), &response);
         if index + 1 < props.items.len() {
             ui.painter().hline(
@@ -451,6 +458,7 @@ fn row_response(ui: &Ui, rect: Rect, index: usize, label: &str) -> Response {
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
+    crate::semantics::target(ui, &response, format!("activity.{index}"));
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         response.highlight()

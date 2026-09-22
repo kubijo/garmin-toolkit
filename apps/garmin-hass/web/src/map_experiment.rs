@@ -27,6 +27,8 @@ extern "C" {
     fn map_fail(reason: &str);
     #[wasm_bindgen(js_name = mapFailure)]
     fn map_failure() -> String;
+    #[wasm_bindgen(js_name = mapReadiness)]
+    fn map_readiness() -> String;
     #[wasm_bindgen(js_name = compositionFixture)]
     fn composition_fixture() -> bool;
     #[wasm_bindgen(js_name = experimentMode, catch)]
@@ -70,6 +72,9 @@ impl garmin_ui::activity::map_remote::Host for BrowserHost {
     }
     fn failure(&self) -> String {
         map_failure()
+    }
+    fn readiness(&self) -> String {
+        map_readiness()
     }
 }
 

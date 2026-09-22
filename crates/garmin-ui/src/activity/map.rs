@@ -42,6 +42,7 @@ const ROUTE_POINT_SPACING: f32 = 1.5;
 const ENDPOINT_PAIR_DISTANCE: f32 = 16.0;
 
 pub(super) struct Props<'a> {
+    pub label: &'a str,
     pub recording: &'a ActivityRecordingSnapshot,
     pub selected_coordinate: Option<(f64, f64)>,
     pub sample_range: std::ops::RangeInclusive<usize>,
@@ -103,6 +104,7 @@ impl ActivityMap {
             self.route_index.current(),
             ui,
             MapRenderInput {
+                label: props.label,
                 size,
                 route: &route_scene,
                 colors,
@@ -177,6 +179,7 @@ impl ActivityMap {
         input: MapRenderInput<'_>,
     ) -> RenderedMap {
         let MapRenderInput {
+            label,
             size,
             route,
             colors,
@@ -219,6 +222,16 @@ impl ActivityMap {
         } else {
             paint_scene(surface, &snapshot, camera, map_rect, ui, route)
         };
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Other, ui.is_enabled(), label)
+        });
+        crate::semantics::target(ui, &response, "map");
+        let readiness = remote.as_ref().map_or_else(
+            || map_readiness(&snapshot, &scene),
+            |remote| remote.lock().readiness(),
+        );
+        ui.ctx()
+            .accesskit_node_builder(response.id, |node| node.set_value(readiness));
         let projector = MapProjector::new(camera, map_rect);
         let mut overlay = ui.new_child(
             UiBuilder::new()
@@ -264,6 +277,24 @@ impl ActivityMap {
 
     pub const fn fit(&mut self) {
         self.fit.request();
+    }
+}
+
+fn map_readiness(
+    snapshot: &crate::activity::map_runtime::MapScene,
+    scene: &gpu_map::ScenePerf,
+) -> String {
+    if let Some(reason) = snapshot.background_failure() {
+        format!("failed:{reason}")
+    } else if scene.visible_tiles > 0
+        && snapshot.pending_visible_tiles() == 0
+        && scene.pending_upload_tiles == 0
+        && scene.label_backlog == 0
+        && scene.route_ready
+    {
+        "ready".into()
+    } else {
+        "pending".into()
     }
 }
 
@@ -399,6 +430,7 @@ struct OverlayInput<'frame, 'recording> {
 
 #[derive(Clone, Copy)]
 struct MapRenderInput<'recording> {
+    label: &'recording str,
     size: Vec2,
     route: &'recording gpu_map::RouteScene<'recording>,
     colors: MapColors,
@@ -1211,6 +1243,11 @@ fn wrapped_longitude(longitude: f64, reference: f64) -> f64 {
 
 fn empty_map(ui: &mut Ui, size: Vec2, message: &str) -> Output {
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Other, ui.is_enabled(), message)
+    });
+    crate::semantics::target(ui, &response, "map.empty");
+    crate::semantics::value(&response, "empty");
     let palette = crate::theme::palette(ui);
     ui.painter().rect_filled(
         rect,

@@ -59,6 +59,7 @@ egui = { version = "=0.36.2", default-features = false, features = ["cint"] }
 egui-wgpu = "=0.36.2"
 egui_extras = { version = "=0.36.2", default-features = false, features = ["image", "svg"] }
 egui_plot = "=0.37.0"
+kittest = "=0.4.0"
 embedded-io-adapters = { version = "=0.7.0", features = ["std"] }
 formatjs_intl = "=0.5.0"
 fs2 = "=0.4.3"

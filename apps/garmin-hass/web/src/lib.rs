@@ -1,5 +1,6 @@
 #![cfg(target_arch = "wasm32")]
 
+mod automation;
 mod browser_timing;
 mod map_experiment;
 mod map_worker;
@@ -89,6 +90,12 @@ pub fn start() -> Result<(), JsValue> {
     )
     .map_err(|_| js_error("the map upload telemetry configuration is invalid"))?;
     let experiment_mode = map_experiment::mode(&canvas)?;
+    let ui_automation: bool = serde_json::from_str(
+        &canvas
+            .get_attribute("data-ui-automation")
+            .ok_or_else(|| js_error("UI automation configuration is missing"))?,
+    )
+    .map_err(|_| js_error("UI automation configuration is invalid"))?;
 
     spawn_local(async move {
         let fixture_canvas = canvas.clone();
@@ -125,7 +132,9 @@ pub fn start() -> Result<(), JsValue> {
                         }).to_string(),
                     );
                     let map_renderer = activity::install_wgpu_map(render_state, 1);
-                    Ok(Box::new(App::new(creation.egui_ctx.clone(), map_renderer, map_upload_telemetry)?))
+                    let app = App::new(creation.egui_ctx.clone(), map_renderer, map_upload_telemetry)?;
+                    if ui_automation { automation::install(&creation.egui_ctx); }
+                    Ok(Box::new(app))
                 }),
             )
             .await;
@@ -1077,6 +1086,7 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         map_experiment::update_diagnostics(ui.ctx());
+        garmin_ui::automation::show_status(ui.ctx());
         if self.first_frame {
             self.first_frame = false;
             hide_loading_overlay();
@@ -1162,6 +1172,7 @@ impl eframe::App for App {
         if let Some(since) = disconnected_since.filter(|_| loaded) {
             self.show_offline(ui, since);
         }
+        automation::dispatch_menu(ui.ctx());
     }
 }
 

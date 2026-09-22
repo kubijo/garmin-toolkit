@@ -253,7 +253,7 @@ pub enum Action {
 pub fn header(ui: &mut Ui, rect: egui::Rect, props: &SelectorProps<'_>, label: &str) -> Response {
     let selected = props.selected.and_then(|index| props.profiles.get(index));
     let palette = crate::theme::palette(ui);
-    header_selector::control(
+    let response = header_selector::control(
         ui,
         rect,
         ui.make_persistent_id("active-profile"),
@@ -284,7 +284,9 @@ pub fn header(ui: &mut Ui, rect: egui::Rect, props: &SelectorProps<'_>, label: &
                 .show(ui);
             }
         },
-    )
+    );
+    crate::semantics::target(ui, &response, "profile.toggle");
+    response
 }
 
 pub(crate) fn preferred_header_width(ui: &Ui, props: &SelectorProps<'_>) -> f32 {
@@ -340,7 +342,9 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
                     ui.add_space(16.0);
                 } else {
                     for (index, profile) in props.profiles.iter().enumerate() {
-                        if chooser_profile_row(ui, profile).clicked() {
+                        let response = chooser_profile_row(ui, profile);
+                        crate::semantics::target(ui, &response, format!("profile.{index}"));
+                        if response.clicked() {
                             action = Some(Action::Select(index));
                         }
                         ui.add_space(8.0);
@@ -487,15 +491,15 @@ pub fn menu(ui: &mut Ui, props: &MenuProps<'_>) -> Option<Action> {
             {
                 action = Some(Action::Settings);
             }
-            if action_row(
+            let logout = action_row(
                 ui,
                 &logout,
                 icons::SIGN_OUT,
                 header_selector::RowKind::Danger,
                 true,
-            )
-            .clicked()
-            {
+            );
+            crate::semantics::target(ui, &logout, "profile.logout");
+            if logout.clicked() {
                 action = Some(Action::Logout);
             }
         });

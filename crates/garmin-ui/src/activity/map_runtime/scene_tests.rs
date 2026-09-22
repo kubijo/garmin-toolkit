@@ -103,6 +103,7 @@ fn activity_map_captures_current_camera_on_first_frame_and_after_refit() {
                 map.show(
                     ui,
                     &Props {
+                        label: "Activity map",
                         recording: &recording,
                         selected_coordinate: None,
                         sample_range: 0..=0,
