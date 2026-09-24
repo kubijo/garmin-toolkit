@@ -1,7 +1,7 @@
 import '../../infra/just/common.just'
 
 # Run production data or an isolated, deterministic demo corpus.
-run mode:
+run mode *options:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -11,7 +11,8 @@ run mode:
         *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
     esac
 
-    exec just in-shell cargo run --locked -p garmin-desktop "${features[@]}"
+    shift
+    exec just in-shell cargo run --locked -p garmin-desktop "${features[@]}" -- "$@"
 
 # Pre-warm the exact optimized binary used by a profiling capture.
 profile-build mode:

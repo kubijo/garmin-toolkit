@@ -28,6 +28,11 @@ replaces it with per-owner floors while retaining imported 80% floors.
 `crates/garmin-brand/assets/icon.svg` is the sole app-icon source. Generated license bundles live under
 `assets/licenses`. Ambient Cargo uses `.tmp/cargo-target`; Nix shells use `.tmp/nix-cargo-target`.
 
+Cargo patches in `vendor/` apply to both the root workspace and the standalone gallery. `fast-mvt` contains bounded
+decoding fixes; `winit` supplies Wayland activation for existing child windows. Each directory records its changes in
+`PATCHES.md`. Nix build and license sources include these directories in full, including upstream notices and non-Rust
+resources.
+
 Linux Nix test applications, sandboxed Rust tests, and coverage select the pinned Mesa software Vulkan ICD for headless
 renderer tests. Those tests must not silently skip when an adapter is unavailable.
 
@@ -90,22 +95,26 @@ worker initialization reports a renderer error rather than silently substituting
 Demo HASS builds accept `--ui-automation`; production hosts reject it before opening storage. It is independent of
 renderer selection. Without it, the driver plugin and `window.garminAutomation` API are not installed.
 
-Use the automation button immediately left of the profile control to select a scenario, or call the browser API. Both
-launch paths use the same bridge, metadata and trace markers. The button only exists when the opt-in driver is
-installed; it is also available on the profile chooser. Keep the page visible/focused and use a wide desktop viewport.
-From an active profile, the runner first operates the profile menu and Log out using ordinary input, then selects the
-demo profile again. This reset phase is included in the action report. For matched captures, start every run from the
-same screen (prefer a reload to the chooser). The built-in scenarios select the first demo profile/activity using
-locale-independent AccessKit author IDs. The same Rust scenario engine runs in headless tests and the live egui
-application. It queries the current accessibility tree, uses clipped logical bounds, and injects ordinary pointer input.
-It does not call camera setters or replace the application event loop.
+Open Developer tools using the icon beside Profiles and select a scenario in Automation, or call the browser API. Both
+launch paths use the same bridge, metadata and trace markers. Developer tools is always available, including on the
+profile chooser; automation requires the opt-in driver. Use a wide desktop viewport. Focus changes do not stop a run;
+hidden tabs pause it. From an active profile, the runner first operates the profile menu and Log out using ordinary
+input, then selects the demo profile again. This reset phase is included in the action report. For matched captures,
+start every run from the same screen (prefer a reload to the chooser). The built-in scenarios select the first demo
+profile/activity using locale-independent AccessKit author IDs. The same Rust scenario engine runs in headless tests and
+the live egui application. It queries the current accessibility tree, uses clipped logical bounds, and injects ordinary
+pointer input. It does not call camera setters or replace the application event loop.
 
-The browser API provides `list()`, `start(name)`, `status()`, `result()` and `cancel()`. Available names:
+The browser API provides `list()`, `start(name)`, `status()`, `result()`, `cancel()`, `targets()`, `action(request)`,
+and `sequence(actions)`. The [developer tools contract](developer-tools.md) describes individual actions, native HTTP
+control, and application logs. Available names:
 
 - `stationary-arrival`: visible content preparation/upload readiness, then eight seconds of stationary observation;
 - `warm-interaction`: readiness, four fixed pan/zoom/fit cycles, then returned-view readiness;
 - `activity-smoke`: the warm workload followed by playback/speed assertions, lap selection/reset, chart scrubbing,
-  replacement with the indoor/no-GPS ride, and restoration of the original map.
+  replacement with the indoor/no-GPS ride, and restoration of the original map;
+- `responsive-layout`: selection, drawer access, and playback checks across narrow/wide layouts; functional evidence
+  only.
 
 Start one Chrome trace with automatic stopping disabled, start one scenario through the API, poll its terminal result,
 then stop and save the trace and JSON result together. Reload before the next run. MCP should not pace individual
@@ -120,14 +129,15 @@ explicitly calls out that limitation.
 
 Action reports retain `target_bounds` (`left, top, right, bottom`) and the latest injected `pointer_position`, in egui
 logical points. The opt-in status view highlights the last pointer action with a target outline, semantic ID, and
-crosshair on egui's debug paint layer. It creates no input region, follows injected drags, and retains the last attempt
-after failure. AccessKit's root pixel-scale transform is removed before clipping or injecting input. Emitting a click
-does not prove its target accepted it; subsequent semantic assertions establish the expected transition. Overlay
-painting is instrumentation and is not included in the input/tree-hook CPU counters.
+crosshair on egui's debug paint layer. It creates no input region and follows injected drags during the run. AccessKit's
+root pixel-scale transform is removed before clipping or injecting input. Emitting a click does not prove its target
+accepted it; subsequent semantic assertions establish the expected transition. Overlay painting is instrumentation and
+is not included in the input/tree-hook CPU counters.
 
 During a run the Rust egui input hook blocks real pointer, keyboard, wheel and touch input; Stop or Escape cancels.
-Focus loss or hidden tabs also cancel. Synthetic button state is released without completing a pending click or drag on
-the next egui input frame. Normal input resumes after the run. Viewport/DPR changes, a two-second frame/action deadline,
-missing/ambiguous targets, map failures and readiness timeouts fail the run. A successful content-readiness result is
-not proof of compositor presentation. Compact-layout navigation, native interactive automation and matched browser
-performance acceptance remain in the activity-map plan.
+Focus loss does not cancel. Hidden browser tabs pause and resume; their pauses invalidate uninterrupted performance
+comparisons. Synthetic button state is released without completing a pending click or drag on the next egui input frame.
+Normal input resumes after the run. Viewport/DPR changes trigger layout settling and target resolution; they exclude the
+run from fixed-geometry performance comparisons. Frame/action deadlines, missing/ambiguous targets, map failures, and
+readiness timeouts fail the run. Content readiness does not prove compositor presentation. Remaining lifecycle and
+performance acceptance belongs to the [activity-map plan](../plans/activity-map-workspace.md).

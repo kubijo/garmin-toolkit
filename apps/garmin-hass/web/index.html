@@ -8,6 +8,7 @@
         <link data-trunk rel="copy-file" href="map-worker.js">
         <link data-trunk rel="copy-file" href="map-render-worker.js">
         <link data-trunk rel="copy-file" href="worker-codec.js">
+        <link data-trunk rel="copy-file" href="logging.js">
         <link data-trunk rel="icon" href="../../../crates/garmin-brand/assets/icon.svg">
         <style>
         :root {
@@ -195,7 +196,7 @@
         <canvas
             id="garmin-toolkit"
             data-map-upload-telemetry="GARMIN_TOOLKIT_MAP_UPLOAD_TELEMETRY"
-            data-map-render-experiment="GARMIN_TOOLKIT_MAP_RENDER_EXPERIMENT"
+            data-map-render-worker="GARMIN_TOOLKIT_MAP_RENDER_WORKER"
             data-ui-automation="GARMIN_TOOLKIT_UI_AUTOMATION"
         ></canvas>
         <main id="loading" aria-live="polite" aria-busy="true">

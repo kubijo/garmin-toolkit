@@ -1,0 +1,15 @@
+out = "../../.tmp/gallery/developer-header"
+size = "360x180"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "dark"
+scene = "developer::Header Button"
+
+[[shot]]
+name = "light"
+scene = "developer::Header Button"
+[shot.globals]
+Theme = "Light"

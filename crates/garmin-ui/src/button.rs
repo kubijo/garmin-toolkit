@@ -253,6 +253,8 @@ impl IconProps<'_> {
         let response = ui
             .scope(|ui| {
                 ui.spacing_mut().interact_size = egui::Vec2::splat(dimension);
+                ui.spacing_mut().button_padding =
+                    egui::Vec2::splat(((dimension - icon_size) / 2.0).max(0.0));
                 let visuals = &mut ui.style_mut().visuals;
                 visuals.widgets.inactive =
                     icon_state_visuals(self.kind, states.rest(), content.icon_secondary());

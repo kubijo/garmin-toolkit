@@ -326,6 +326,7 @@ impl Toasts {
         let display: Vec<_> = (0..self.entries.len()).rev().collect();
         let output = egui::Area::new(id)
             .order(Order::Tooltip)
+            .constrain_to(bounds)
             .fixed_pos(bounds.right_top() + egui::vec2(-STACK_MARGIN, STACK_MARGIN))
             .pivot(Align2::RIGHT_TOP)
             .movable(false)
@@ -369,7 +370,7 @@ impl Toasts {
                         egui::vec2(TOAST_WIDTH - inset * 2.0, height),
                     );
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-                    child.set_clip_rect(rect.expand(TOAST_SHADOW_CLIP_MARGIN));
+                    child.set_clip_rect(rect.expand(TOAST_SHADOW_CLIP_MARGIN).intersect(bounds));
                     child.set_opacity(visibility);
                     if let Some(action) = render_surface(
                         &mut child,
@@ -618,6 +619,49 @@ fn close_button(ui: &mut Ui, color: Color) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toast_paint_stays_below_header_during_animation_expansion_and_resize() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        let id = Id::new("header-dead-zone");
+        let mut toasts = Toasts::default();
+        for _ in 0..4 {
+            toasts.push(Toast::new(Kind::Success, "Device inspected").persistent());
+        }
+        for height in [600.0, 100.0, 400.0] {
+            let root = Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(400.0, height));
+            let bounds = crate::shell::overlay_bounds(root);
+            for mode in [
+                StackMode::Automatic,
+                StackMode::Collapsed,
+                StackMode::Expanded,
+            ] {
+                let mut painted = false;
+                for _ in 0..3 {
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(root),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let _ = toasts.show_in(ui.ctx(), id, bounds, mode);
+                        },
+                    );
+                    let mut inside_bounds = true;
+                    for shape in &output.shapes {
+                        if !matches!(shape.shape, egui::epaint::Shape::Noop) {
+                            painted = true;
+                            inside_bounds &= shape.clip_rect.top() >= bounds.top();
+                        }
+                    }
+                    output.drop_without_applying_deltas();
+                    assert!(inside_bounds);
+                }
+                assert!(painted);
+            }
+        }
+    }
 
     #[test]
     fn actions_make_toasts_persistent() {

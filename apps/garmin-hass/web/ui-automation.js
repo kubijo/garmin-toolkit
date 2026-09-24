@@ -1,4 +1,4 @@
-import { rendererSnapshot } from './map-experiment.js';
+import { rendererSnapshot } from './map-composition.js';
 
 export function launchAutomation(name, browser = window) {
     browser.garminAutomation.start(name);
@@ -10,6 +10,8 @@ export function installAutomation(command, browser = window) {
     let phase;
     let environment;
     let startedAt;
+    let pausedAt;
+    let pausedMs = 0;
     const invoke = (operation, argument = '') => {
         const response = JSON.parse(command(operation, argument));
         if (response.error) throw Error(response.error);
@@ -27,7 +29,7 @@ export function installAutomation(command, browser = window) {
     const observe = () => {
         let report = status();
         if (!report) return;
-        if (report.state === 'running' && browser.performance.now() - startedAt > 125000) {
+        if (report.state === 'running' && browser.performance.now() - startedAt - pausedMs > 125000) {
             invoke('cancel', 'scenario watchdog expired');
             report = status();
         }
@@ -36,7 +38,7 @@ export function installAutomation(command, browser = window) {
             phase = next;
             browser.performance.mark('garmin.automation.phase', { detail: report });
         }
-        if (report.state !== 'running') {
+        if (!['running', 'paused'].includes(report.state)) {
             browser.clearInterval(timer);
             timer = undefined;
         }
@@ -45,29 +47,48 @@ export function installAutomation(command, browser = window) {
         invoke('cancel', reason);
         observe();
     };
-    browser.addEventListener('blur', () => cancel('window lost focus'));
     browser.document.addEventListener('visibilitychange', () => {
-        if (browser.document.hidden) cancel('document hidden');
+        const now = browser.performance.now();
+        if (browser.document.hidden) {
+            if (pausedAt === undefined) pausedAt = now;
+            invoke('pause', JSON.stringify(now / 1000));
+        } else {
+            if (pausedAt !== undefined) pausedMs += now - pausedAt;
+            pausedAt = undefined;
+            invoke('resume', JSON.stringify(now / 1000));
+        }
+        observe();
     });
+    const begin = (operation, argument, name) => {
+        invoke(operation, argument);
+        startedAt = browser.performance.now();
+        pausedMs = 0;
+        pausedAt = undefined;
+        environment = metadata();
+        phase = undefined;
+        browser.performance.mark('garmin.automation.start', { detail: { name, ...environment } });
+        if (browser.document.hidden) {
+            pausedAt = startedAt;
+            invoke('pause', JSON.stringify(startedAt / 1000));
+        }
+        browser.clearInterval(timer);
+        timer = browser.setInterval(observe, 100);
+        observe();
+        return status();
+    };
     browser.garminAutomation = Object.freeze({
         list: () => invoke('list'),
+        targets: () => invoke('targets'),
+        action: action => begin('action', JSON.stringify(action), 'individual-action'),
+        sequence: actions => begin('sequence', JSON.stringify(actions), 'custom-sequence'),
         start(name) {
             if (typeof name !== 'string') throw Error('scenario name must be a string');
-            if (browser.document.hidden || !browser.document.hasFocus())
-                throw Error('page must be visible and focused');
-            invoke('start', name);
-            startedAt = browser.performance.now();
-            environment = metadata();
-            phase = undefined;
-            browser.performance.mark('garmin.automation.start', { detail: { name, ...environment } });
-            timer = browser.setInterval(observe, 100);
-            observe();
-            return status();
+            return begin('start', name, name);
         },
         status,
         result() {
             const report = status();
-            return report?.state !== 'running' ? report : null;
+            return report && !['running', 'paused'].includes(report.state) ? report : null;
         },
         cancel: () => cancel(),
     });

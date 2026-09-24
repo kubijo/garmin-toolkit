@@ -80,6 +80,7 @@ let
           ${lib.getExe pkgs.nodejs} infra/javascript/map-worker.test.mjs || exit $?
           ${lib.getExe pkgs.nodejs} infra/javascript/map-composition.test.mjs || exit $?
           ${lib.getExe pkgs.nodejs} infra/javascript/ui-automation.test.mjs || exit $?
+          ${lib.getExe pkgs.nodejs} infra/javascript/logging.test.mjs || exit $?
           exec ${lib.getExe pkgs.nodejs} infra/javascript/initializer.test.mjs
         '';
         python-lock.command = pkgs.writeShellScript "python-lock-check" ''

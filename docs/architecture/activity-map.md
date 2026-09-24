@@ -95,8 +95,11 @@ labels, markers, and presentation. A separate preparation worker transfers bulk 
 The egui composition callback supplies final placement and a transparent replacement-blend hole over the worker canvas.
 `?map-render-mode=main-gl` retains the matched WebGL2 baseline; `--no-map-render-worker` restores the original host
 path. Worker initialization failures are explicit, with no silent backend substitution. Native rendering is unchanged.
-Functional native-DPR scenario evidence and remaining lifecycle/performance limits are recorded in
-[browser evidence](../research/browser-map.md#semantic-interaction-findings).
+The browser integration lives in the `map_composition` Rust module and `map-composition.js`; the host's
+`map_render_worker` setting selects the default worker path. The composition host exposes `window.garminMapComposition`
+for status and disposal. Worker-WebGPU is an experimental alternative, selected explicitly with
+`?map-render-mode=worker-webgpu`. Functional native-DPR scenario evidence and remaining lifecycle/performance limits are
+recorded in [browser evidence](../research/browser-map.md#semantic-interaction-findings).
 
 If egui transforms a callback rectangle after construction, painting uses the final placement with an immutable
 corrected camera binding. It does not rewrite the prepared surface buffer, which earlier draws may still reference.

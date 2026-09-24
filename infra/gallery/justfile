@@ -47,11 +47,26 @@ capture-all:
     just capture components.capture.toml
     just capture activity-map.capture.toml
     just capture renderer-diagnostics.capture.toml
+    just capture developer-tools.capture.toml
+    just capture developer-header.capture.toml
+    just capture notifications.capture.toml
     just capture device-explorer.capture.toml
     just capture visual-language.capture.toml
     just capture desktop.capture.toml
     just capture web.capture.toml
     just capture tui.capture.toml
+
+# Exercise expanded developer log details and capture narrow/wide views in both themes.
+capture-developer-details:
+    {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 WGPU_BACKEND={{ quote(gallery_backend) }} \
+        cargo test --manifest-path Cargo.toml --test developer_panel capture_expanded_log_details \
+        -- --ignored --test-threads=1
+
+# Capture the expanded browser-control and resize documentation in both themes.
+capture-developer-controls:
+    {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 WGPU_BACKEND={{ quote(gallery_backend) }} \
+        cargo test --manifest-path Cargo.toml --test developer_panel capture_browser_controls \
+        -- --ignored --test-threads=1
 
 # Reproduce one maintained capture set inside the pinned Nix environment.
 capture-nix FILE='components.capture.toml' OUT='':

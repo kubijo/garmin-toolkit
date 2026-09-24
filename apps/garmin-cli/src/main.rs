@@ -384,6 +384,15 @@ struct OptionalTargetArgs {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    struct FlushLogs;
+    impl Drop for FlushLogs {
+        fn drop(&mut self) {
+            if let Some(logs) = garmin_logging::Store::global() {
+                logs.flush();
+            }
+        }
+    }
+    let _flush_logs = FlushLogs;
     let cli = Cli::parse();
     OUTPUT_COLOR.get_or_init(|| cli.color);
     if let Err(error) = diagnostic::install(error_color_enabled()) {
@@ -642,29 +651,35 @@ async fn run_cli(cli: Cli, capture: Option<SessionCapture>) -> Result<()> {
 }
 
 fn initialize_tracing(capture: Option<&SessionCapture>, terminal_ui: bool) -> Result<()> {
-    if let Some(capture) = capture {
-        let log = capture.create_log()?;
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::new("trace"))
-            .with_ansi(false)
-            .with_writer(log)
-            .try_init()
-            .map_err(|error| anyhow::anyhow!("cannot initialize logging: {error}"))?;
-    } else if terminal_ui {
-        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into());
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_writer(std::io::sink)
-            .try_init()
-            .map_err(|error| anyhow::anyhow!("cannot initialize logging: {error}"))?;
+    use tracing_subscriber::prelude::*;
+    let directory = dirs::state_dir()
+        .or_else(dirs::data_local_dir)
+        .context("application log directory unavailable")?
+        .join("garmin-toolkit/cli/logs");
+    let logs = garmin_logging::Store::open(directory, "cli")?;
+    logs.install_global();
+    let filter = if capture.is_some() {
+        EnvFilter::new("trace")
     } else {
-        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into());
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_writer(std::io::stderr)
-            .try_init()
-            .map_err(|error| anyhow::anyhow!("cannot initialize logging: {error}"))?;
-    }
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into())
+    };
+    let writer: Box<dyn std::io::Write + Send + Sync> = if let Some(capture) = capture {
+        Box::new(capture.create_log()?)
+    } else if terminal_ui {
+        Box::new(std::io::sink())
+    } else {
+        Box::new(std::io::stderr())
+    };
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(logs)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(std::sync::Mutex::new(writer)),
+        )
+        .try_init()
+        .map_err(|error| anyhow::anyhow!("cannot initialize logging: {error}"))?;
     Ok(())
 }
 

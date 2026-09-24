@@ -16,6 +16,7 @@ lib.fileset.toSource {
     [
       workspaceCargoSources
       (workspaceSrc + "/vendor/fast-mvt")
+      (workspaceSrc + "/vendor/winit")
       (workspaceSrc + "/crates/garmin-brand/assets")
       (workspaceSrc + "/crates/garmin-gpx/tests/fixtures")
       (workspaceSrc + "/crates/garmin-i18n/catalogs")

@@ -1,0 +1,35 @@
+out = "../../.tmp/gallery/developer-tools"
+size = "720x720"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "browser-dark"
+scene = "developer::Browser"
+
+[[shot]]
+name = "browser-light"
+scene = "developer::Browser"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "disconnected-dark"
+scene = "developer::Disconnected"
+
+[[shot]]
+name = "disconnected-light"
+scene = "developer::Disconnected"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "desktop-dark"
+scene = "developer::Desktop"
+
+[[shot]]
+name = "desktop-light"
+scene = "developer::Desktop"
+[shot.globals]
+Theme = "Light"

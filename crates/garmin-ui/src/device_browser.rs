@@ -78,7 +78,7 @@ const DETAILS_ACTION_BOTTOM_INSET: f32 = 12.0;
 const TOOLKIT_CONTENT_OPACITY: f32 = 0.62;
 
 /// One entry selected in the device explorer.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Selection {
     pub storage_id: String,
     pub storage_label: String,
@@ -112,7 +112,7 @@ impl Selection {
 }
 
 /// An explicit operation requested from the explorer.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Action {
     Close,
     Open(Selection),
@@ -129,6 +129,8 @@ pub enum Action {
         name: String,
     },
     Remove(Selection),
+    /// Reload the device catalogue while preserving the current directory and selection.
+    Refresh,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -327,6 +329,7 @@ struct WindowPresentation<'a> {
 struct PathHeaderProps<'a> {
     back_label: &'a str,
     forward_label: &'a str,
+    refresh_label: &'a str,
     can_go_back: bool,
     can_go_forward: bool,
     compact_controls: Option<(&'a str, &'a str, Option<CompactPane>)>,
@@ -424,6 +427,12 @@ impl Browser {
     #[must_use]
     pub fn device_key(&self) -> &str {
         &self.catalog.device_key
+    }
+
+    /// Current validated catalogue for a secondary window snapshot.
+    #[must_use]
+    pub fn catalog(&self) -> &DeviceCatalogSnapshot {
+        &self.catalog
     }
 
     /// Replace the bounded catalog after a host mutation while retaining the nearest valid view.
@@ -804,8 +813,10 @@ impl Browser {
             .cloned()
             .collect::<Vec<_>>();
 
-        if self.show_breadcrumbs(ui, intl, compact, close_label, window_drag_delta) {
-            return Some(Action::Close);
+        if let Some(action) =
+            self.show_breadcrumbs(ui, intl, compact, close_label, window_drag_delta)
+        {
+            return Some(action);
         }
         let upload = self.show_upload_action(ui, intl);
         if upload.is_some() {
@@ -1077,20 +1088,22 @@ impl Browser {
         compact: bool,
         close_label: Option<&str>,
         window_drag_delta: Option<&Cell<egui::Vec2>>,
-    ) -> bool {
+    ) -> Option<Action> {
         let storage_index = self.current.storage_index;
         let storage_label = self.catalog.storages[storage_index].label.clone();
         let current_path = self.current.path.clone();
         let back_label = format_message!(intl, default_message: "Back");
         let forward_label = format_message!(intl, default_message: "Forward");
+        let refresh_label = format_message!(intl, default_message: "Refresh");
         let storage_control_label = format_message!(intl, default_message: "Storage");
         let details_control_label = format_message!(intl, default_message: "Details");
         let mut target = None;
-        let (history_move, compact_pane, close) = path_header(
+        let (history_move, compact_pane, action) = path_header(
             ui,
             &PathHeaderProps {
                 back_label: &back_label,
                 forward_label: &forward_label,
+                refresh_label: &refresh_label,
                 can_go_back: !self.back_stack.is_empty(),
                 can_go_forward: !self.forward_stack.is_empty(),
                 compact_controls: compact.then_some((
@@ -1138,7 +1151,7 @@ impl Browser {
                 }
             }
         }
-        close
+        action
     }
 
     fn show_compact_pane(
@@ -1630,7 +1643,7 @@ fn path_header(
     ui: &mut Ui,
     props: &PathHeaderProps<'_>,
     content: impl FnOnce(&mut Ui),
-) -> (Option<HistoryMove>, Option<CompactPane>, bool) {
+) -> (Option<HistoryMove>, Option<CompactPane>, Option<Action>) {
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PANE_HEADER_HEIGHT),
         Sense::hover(),
@@ -1690,6 +1703,18 @@ fn path_header(
         icons::CARET_RIGHT,
         props.can_go_forward,
     );
+    let refresh_rect = forward_rect.translate(egui::vec2(
+        BREADCRUMB_HEIGHT + PATH_NAVIGATION_ITEM_GAP,
+        0.0,
+    ));
+    let refresh = path_icon_button(
+        ui,
+        refresh_rect,
+        "refresh",
+        props.refresh_label,
+        icons::ARROWS_CLOCKWISE,
+        false,
+    );
     let history_move = if back_clicked {
         Some(HistoryMove::Back)
     } else if forward_clicked {
@@ -1711,7 +1736,12 @@ fn path_header(
     child.spacing_mut().button_padding = egui::vec2(BREADCRUMB_ITEM_PADDING, 0.0);
     child.spacing_mut().interact_size.y = BREADCRUMB_HEIGHT;
     content(&mut child);
-    (history_move, compact_pane, close)
+    let action = if close {
+        Some(Action::Close)
+    } else {
+        refresh.then_some(Action::Refresh)
+    };
+    (history_move, compact_pane, action)
 }
 
 fn show_path_trailing_controls(
@@ -1759,7 +1789,7 @@ fn path_header_rects(rect: Rect, compact: bool, close: bool) -> (Rect, Rect, Rec
         0.0
     };
     let navigation_width =
-        BREADCRUMB_HEIGHT.mul_add(2.0, PATH_NAVIGATION_ITEM_GAP) + compact_navigation_width;
+        BREADCRUMB_HEIGHT.mul_add(3.0, 2.0 * PATH_NAVIGATION_ITEM_GAP) + compact_navigation_width;
     let navigation = Rect::from_min_max(
         header.min,
         egui::pos2(

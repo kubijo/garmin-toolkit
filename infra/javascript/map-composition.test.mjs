@@ -5,7 +5,7 @@ import { compositionMessage, decodeComposition, requestMapDraw } from '../../app
 import { installCompositionWorker } from '../../apps/garmin-hass/web/map-render-worker.js';
 import { waitMilliseconds, nextMapFrame } from '../../apps/garmin-hass/web/map-clock.js';
 import {
-    experimentMode,
+    rendererMode,
     placementStyle,
     startComposition,
     beginCompositionPass,
@@ -20,22 +20,22 @@ import {
     rendererDiagnostics,
     takeRendererDiagnostics,
     mapReadiness,
-} from '../../apps/garmin-hass/web/map-experiment.js';
+} from '../../apps/garmin-hass/web/map-composition.js';
 
 test.beforeEach(t => {
     t.mock.method(console, 'table', () => {});
 });
 
 test('worker GL is the default and URL selection respects host rollback', () => {
-    assert.equal(experimentMode(false, ''), '');
-    assert.equal(experimentMode(false, '?map-render-mode=worker-gl'), '');
-    assert.equal(experimentMode(false, '?map-render-mode=invalid'), '');
-    assert.equal(experimentMode(true, ''), 'worker-gl');
+    assert.equal(rendererMode(false, ''), '');
+    assert.equal(rendererMode(false, '?map-render-mode=worker-gl'), '');
+    assert.equal(rendererMode(false, '?map-render-mode=invalid'), '');
+    assert.equal(rendererMode(true, ''), 'worker-gl');
     for (const mode of ['main-gl', 'worker-gl', 'worker-webgpu']) {
-        assert.equal(experimentMode(true, `?map-render-mode=${mode}`), mode);
+        assert.equal(rendererMode(true, `?map-render-mode=${mode}`), mode);
     }
-    assert.throws(() => experimentMode(true, '?map-render-mode=invalid'));
-    assert.throws(() => experimentMode(true, '?map-render-mode=main-gl&map-render-mode=worker-gl'));
+    assert.throws(() => rendererMode(true, '?map-render-mode=invalid'));
+    assert.throws(() => rendererMode(true, '?map-render-mode=main-gl&map-render-mode=worker-gl'));
 });
 
 test('startup table distinguishes baseline, initializing worker, confirmed worker and failure', t => {
@@ -394,7 +394,7 @@ test('disposal releases the DOM surface and ignores late worker events', t => {
     assert.equal(b.wrapper.removed, true);
     assert.equal(b.worker.terminated, true);
     assert.deepEqual(compositionStatus(), { state: 'disposed' });
-    assert.equal(window.garminMapExperiment, undefined);
+    assert.equal(window.garminMapComposition, undefined);
 });
 
 test('render worker rejects early work and remains terminal after failure', async () => {

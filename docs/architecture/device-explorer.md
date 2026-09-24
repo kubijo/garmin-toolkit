@@ -1,18 +1,25 @@
 # Device explorer
 
-The mounted-device explorer is an application-owned, resizable egui window over the active device page, not a native or
-browser file picker. Its identity, navigation, and close controls belong to the storage, file, and details pane headers
-respectively. The native host owns attached storage; browser clients receive opaque device-relative models.
+The mounted-device explorer uses the [shared window host](application-windows.md): a native secondary viewport on
+desktop and an independent browser popup in HASS. The shared Rust/egui explorer fills that window; it is not a system
+file picker. It stays open when the main app navigates away from the device page. Its identity, navigation, and close
+controls belong to the storage, file, and details pane headers respectively. The native host owns attached storage;
+browser clients receive opaque device-relative models.
 
 `egui_ltreeview` provides storage/directory navigation and `egui_extras::TableBuilder` virtualizes the current
 directory. Garmin UI primitives own icons, breadcrumbs, actions, and details. The bounded catalog contains at most 4,096
 entries; its action model is independent of those UI crates. `rfd` selects a client-side upload file only.
 
+Refresh beside Back and Forward reloads the device catalogue in both shells. It preserves the current folder and any
+still-valid selection, falling back to the nearest surviving folder when necessary. Refresh is disabled during file
+operations and catalogue requests; it does not repeat an interrupted write.
+
 At narrow widths the subordinate panes become Storage and Details drawers without compressing the listing. Bookmarks
 include only recognized directories present in the catalog; the toolkit namespace remains visible but browse-only. Tree,
 table, toolbar, and context-menu interactions dispatch the same typed actions. Popups inherit the invoking pane's
 palette, including locally scoped gallery themes. The whole window and foreground popups stay inside the caller-owned
-viewport.
+viewport. The in-canvas `show_window` wrapper remains available for component previews; application hosts use `show`
+inside their platform window.
 
 One bounded host operation layer handles file download, directory ZIP, upload, folder creation, and recursive removal.
 FIT Open uses that checked boundary for the shared activity preview; Import uses the duplicate-aware importer. Removal
@@ -23,6 +30,11 @@ Browser downloads stage bounded results behind random one-use tickets lasting at
 `<a download>` retrieves an attachment-only, `no-store`, MIME-sniffing-disabled response; file bytes do not travel
 through WASM or a generic save dialog. Demo HASS uses an isolated mutable directory transport through the same
 operations, including toolkit-namespace protection, refreshed catalogs, and restart/symlink containment.
+
+HASS invalidates pending file operations when either service or parent-window connectivity changes. It does not retry
+them automatically. An interruption notice survives reconnect and catalogue refresh, explaining that completion was not
+confirmed and directing the user to refresh and check device contents before retrying. Errors received just before
+disconnect also remain visible; a lost reply does not establish whether a write committed.
 
 ## Composition rationale
 

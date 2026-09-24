@@ -68,6 +68,38 @@ pub struct WindowControls<'a> {
     pub close_label: &'a str,
 }
 
+/// Translated labels shared by root and secondary native windows.
+pub struct WindowLabels {
+    minimize: String,
+    maximize: String,
+    restore: String,
+    close: String,
+}
+
+impl WindowLabels {
+    #[must_use]
+    pub fn new(intl: &garmin_i18n::Intl) -> Self {
+        use garmin_i18n::format_message;
+        Self {
+            minimize: format_message!(intl, default_message: "Minimize window"),
+            maximize: format_message!(intl, default_message: "Maximize window"),
+            restore: format_message!(intl, default_message: "Restore window"),
+            close: format_message!(intl, default_message: "Close window"),
+        }
+    }
+
+    #[must_use]
+    pub fn props<'a>(&'a self, context: &egui::Context) -> WindowControls<'a> {
+        WindowControls {
+            maximized: context.input(|input| input.viewport().maximized.unwrap_or_default()),
+            minimize_label: &self.minimize,
+            maximize_label: &self.maximize,
+            restore_label: &self.restore,
+            close_label: &self.close,
+        }
+    }
+}
+
 /// Shell inputs.
 pub struct Props<'a> {
     pub product_name: &'a str,
@@ -109,6 +141,52 @@ pub struct Output<R> {
 struct HeaderSelectors {
     profile: Rect,
     automation: Option<Rect>,
+}
+
+/// Bounds for transient overlays, excluding the header and its window controls.
+#[must_use]
+pub fn overlay_bounds(root: Rect) -> Rect {
+    Rect::from_min_max(
+        egui::pos2(root.left(), (root.top() + HEADER_HEIGHT).min(root.bottom())),
+        root.right_bottom(),
+    )
+}
+
+/// The application's title bar, without navigation or profile controls.
+pub fn window_header(
+    ui: &mut Ui,
+    title: &str,
+    controls: &WindowControls<'_>,
+) -> Option<WindowAction> {
+    egui::Panel::top("native-window-header")
+        .exact_size(HEADER_HEIGHT)
+        .show_separator_line(false)
+        .frame(egui::Frame::NONE)
+        .show(ui, |ui| {
+            let header = ui.max_rect();
+            let palette = crate::theme::palette(ui);
+            ui.painter()
+                .rect_filled(header, 0.0, color32(palette.surfaces().chrome()));
+            let title_rect = Rect::from_min_max(
+                header.min,
+                egui::pos2(
+                    (header.right() - WINDOW_CONTROLS_WIDTH).max(header.left()),
+                    header.bottom(),
+                ),
+            );
+            ui.painter().with_clip_rect(title_rect).text(
+                egui::pos2(title_rect.left() + 12.0, title_rect.center().y),
+                Align2::LEFT_CENTER,
+                title,
+                typography::font(14.0, typography::Weight::SemiBold),
+                color32(palette.content().text_primary()),
+            );
+            match header_window_action(ui, header, title_rect, Some(controls)) {
+                Some(Action::Window(action)) => Some(action),
+                _ => None,
+            }
+        })
+        .inner
 }
 
 #[must_use]
@@ -254,9 +332,8 @@ fn header_contents(
 
     let window_action = header_window_action(ui, header, product_rect, props.window_controls);
 
-    #[cfg(any(test, feature = "automation"))]
     if let Some(rect) = selectors.automation {
-        crate::automation::header_button(ui, rect);
+        crate::developer::header_button(ui, rect);
     }
 
     let profile_clicked = props.profile_selector.is_some_and(|selector| {
@@ -286,13 +363,10 @@ fn header_selectors(ui: &Ui, header: Rect, props: &Props<'_>) -> HeaderSelectors
         egui::pos2(profile_right - profile_width, header.top()),
         egui::pos2(profile_right, header.bottom()),
     );
-    #[cfg(any(test, feature = "automation"))]
-    let automation = ui
-        .ctx()
-        .plugin_opt::<crate::automation::Driver>()
-        .map(|_| crate::automation::header_rect(ui, profile, header.left()));
-    #[cfg(not(any(test, feature = "automation")))]
-    let automation = None;
+    let automation = Some(Rect::from_min_max(
+        egui::pos2((profile.left() - 34.0).max(header.left()), header.top()),
+        egui::pos2(profile.left().max(header.left()), header.bottom()),
+    ));
     HeaderSelectors {
         profile,
         automation,
@@ -312,10 +386,10 @@ fn header_window_action(
             ui.make_persistent_id("shell-window-drag"),
             Sense::click_and_drag(),
         );
-        if drag.is_pointer_button_down_on() {
+        if drag.dragged_by(egui::PointerButton::Primary) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         } else if drag.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
         }
         let menu_position = if drag.contains_pointer() {
             ui.input(|input| secondary_press(&input.events, drag.rect))

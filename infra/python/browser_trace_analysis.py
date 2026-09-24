@@ -376,9 +376,13 @@ def automation_report(events: list[dict[str, Any]]) -> dict[str, Any] | None:
             raise ValueError('invalid scenario name')
         reports = [decode_mark_detail(event) for event in sorted(phases, key=lambda event: event.get('ts', 0))]
         for report in reports:
-            if type(report.get('version')) is not int or report['version'] != 1 or report.get('scenario') != name:
+            if (
+                type(report.get('version')) is not int
+                or report['version'] not in {1, 2}
+                or report.get('scenario') != name
+            ):
                 raise ValueError('unsupported or mismatched scenario')
-        terminals = [report for report in reports if report.get('state') != 'running']
+        terminals = [report for report in reports if report.get('state') not in {'running', 'paused'}]
         if not terminals:
             return {**(reports[-1] if reports else {}), 'scenario': name, 'state': 'incomplete'}
         if len(terminals) != 1 or reports[-1] is not terminals[0]:
@@ -404,6 +408,20 @@ def automation_report(events: list[dict[str, Any]]) -> dict[str, Any] | None:
                     for key in ['scheduled_seconds', 'actual_seconds', 'lateness_seconds']
                 ):
                     raise ValueError('invalid action timing')
+        if report.get('version') == 2:
+            pauses = report.get('pauses')
+            if not isinstance(pauses, list) or type(report.get('performance_eligible')) is not bool:
+                raise ValueError('invalid pause evidence')
+            for pause in pauses:
+                if not isinstance(pause, dict) or any(
+                    not finite_number(pause.get(key)) or pause[key] < 0
+                    for key in ['started_seconds', 'duration_seconds']
+                ):
+                    raise ValueError('invalid pause interval')
+            if pauses and report['performance_eligible']:
+                raise ValueError('paused run claimed uninterrupted performance eligibility')
+            if report.get('viewport_changes') and report['performance_eligible']:
+                raise ValueError('resized run claimed uninterrupted performance eligibility')
         return report
     except (KeyError, ValueError, TypeError) as error:
         raise TraceError(f'Malformed automation evidence: {error}') from error
@@ -468,6 +486,11 @@ def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PR
     diagnostics = []
     if automation is not None:
         diagnostics.append('Scripted egui input bypasses DOM events; DOM interaction-frame statistics do not cover it.')
+        if automation.get('performance_eligible') is False:
+            diagnostics.append(
+                'Automation was interrupted or resized; '
+                'this run is ineligible for uninterrupted performance comparisons.'
+            )
         if automation['state'] != 'passed':
             diagnostics.append(f'Automation did not pass: {automation["state"]}.')
     # Keep raw upload marks for lifecycle invalidation, but never sort malformed

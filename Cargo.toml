@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-exclude = ["vendor/fast-mvt"]
+exclude = ["vendor/fast-mvt", "vendor/winit"]
 members = [
   "apps/garmin-cli",
   "apps/garmin-cli/tui",
@@ -20,6 +20,7 @@ members = [
   "crates/garmin-map-tiles",
   "crates/garmin-macros",
   "crates/garmin-model",
+  "crates/garmin-logging",
   "crates/garmin-progress",
   "crates/garmin-route",
   "crates/garmin-service-api",
@@ -81,6 +82,7 @@ garmin-importer = { version = "0.1.0", path = "crates/garmin-importer" }
 garmin-map-service = { version = "0.1.0", path = "crates/garmin-map-service" }
 garmin-map-tiles = { version = "0.1.0", path = "crates/garmin-map-tiles" }
 garmin-macros = { version = "0.1.0", path = "crates/garmin-macros" }
+garmin-logging = { version = "0.1.0", path = "crates/garmin-logging" }
 garmin-model = { version = "0.1.0", path = "crates/garmin-model" }
 garmin-progress = { version = "0.1.0", path = "crates/garmin-progress" }
 garmin-route = { version = "0.1.0", path = "crates/garmin-route" }
@@ -164,6 +166,7 @@ unsafe_code = "forbid"
 
 [patch.crates-io]
 fast-mvt = { path = "vendor/fast-mvt" }
+winit = { path = "vendor/winit" }
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }

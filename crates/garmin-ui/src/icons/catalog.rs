@@ -11,6 +11,7 @@ icon_catalog! {
         CARET_RIGHT => phosphor_svgs::style::regular::CARET_RIGHT,
         CHART_LINE => phosphor_svgs::style::regular::CHART_LINE,
         CHECK => phosphor_svgs::style::regular::CHECK,
+        CODE => phosphor_svgs::style::regular::CODE,
         DATABASE => phosphor_svgs::style::regular::DATABASE,
         DESKTOP => phosphor_svgs::style::regular::DESKTOP,
         DOWNLOAD_SIMPLE => phosphor_svgs::style::regular::DOWNLOAD_SIMPLE,

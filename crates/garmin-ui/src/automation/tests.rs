@@ -164,7 +164,12 @@ fn an_active_profile_returns_to_the_chooser_using_normal_clicks() {
     }
 }
 
-fn frame(context: &Context, time: f64, events: Vec<Event>, value: &str) -> egui::FullOutput {
+pub(super) fn frame(
+    context: &Context,
+    time: f64,
+    events: Vec<Event>,
+    value: &str,
+) -> egui::FullOutput {
     frame_at_scale(context, time, events, value, 1.0)
 }
 
@@ -175,9 +180,12 @@ fn frame_at_scale(
     value: &str,
     scale: f32,
 ) -> egui::FullOutput {
+    let size = context
+        .data(|data| data.get_temp::<egui::Vec2>(egui::Id::new("test-viewport-size")))
+        .unwrap_or(egui::vec2(1000.0, 900.0));
     let mut input = RawInput {
         time: Some(time),
-        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 900.0))),
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
         events,
         focused: true,
         ..Default::default()
@@ -189,6 +197,14 @@ fn frame_at_scale(
         .native_pixels_per_point = Some(scale);
     let mut output = context.run_ui(input, |ui| {
         show_status(ui.ctx());
+        let responsive = context
+            .plugin::<Driver>()
+            .lock()
+            .report()
+            .is_some_and(|report| report.scenario == "responsive-layout");
+        if responsive {
+            responsive_controls(ui, size);
+        }
         for target in [
             "profile.0",
             "activity.0",
@@ -204,6 +220,15 @@ fn frame_at_scale(
             "activity.viewer",
             "map.empty",
         ] {
+            if responsive
+                && size.x < 1000.0
+                && target == "activity.0"
+                && !ui
+                    .data(|data| data.get_temp::<bool>(egui::Id::new("activity.list.toggle")))
+                    .unwrap_or(false)
+            {
+                continue;
+            }
             let response = ui.add_sized([200.0, 40.0], egui::Button::new("Translated label"));
             let playing_id = egui::Id::new("test-playing");
             let mut playing = ui
@@ -231,8 +256,120 @@ fn frame_at_scale(
             });
         }
     });
+    for command in &output.viewport_output[&egui::ViewportId::ROOT].commands {
+        if let egui::ViewportCommand::InnerSize(size) = command {
+            context.data_mut(|data| data.insert_temp(egui::Id::new("test-viewport-size"), *size));
+        }
+    }
     output.textures_delta.clear();
     output
+}
+
+fn responsive_controls(ui: &mut egui::Ui, size: egui::Vec2) {
+    let response = ui.put(
+        Rect::from_min_size(egui::pos2(size.x - 100.0, 0.0), egui::vec2(90.0, 24.0)),
+        egui::Button::new("Profile"),
+    );
+    crate::semantics::target(ui, &response, "profile.toggle");
+    if size.x >= 1000.0 {
+        return;
+    }
+    for (target, x) in [
+        ("activity.list.toggle", 230.0),
+        ("activity.details.toggle", 380.0),
+    ] {
+        let id = egui::Id::new(target);
+        let mut open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
+        let response = ui.put(
+            Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(130.0, 24.0)),
+            egui::Button::new(target),
+        );
+        if response.clicked() {
+            open = !open;
+            ui.data_mut(|data| data.insert_temp(id, open));
+        }
+        crate::semantics::target(ui, &response, target);
+        crate::semantics::value(&response, if open { "open" } else { "closed" });
+    }
+}
+
+#[test]
+fn secondary_window_frames_do_not_drive_or_replace_the_root_workload() {
+    for name in SCENARIOS {
+        let context = Context::default();
+        context.add_plugin(Driver::default());
+        let _ = frame(&context, 0.0, vec![], "ready");
+        context.plugin::<Driver>().lock().start(name).unwrap();
+        let secondary = egui::ViewportId::from_hash_of("developer-tools-window");
+        for tick in 1..2000 {
+            let now = f64::from(tick) / 60.0;
+            let _ = frame(&context, now, vec![], "ready");
+            let before =
+                serde_json::to_string(&context.plugin::<Driver>().lock().report()).unwrap();
+            let event = Event::PointerMoved(egui::pos2(20.0, 20.0));
+            let mut input = RawInput {
+                viewport_id: secondary,
+                time: Some(now + 1.0 / 120.0),
+                screen_rect: Some(Rect::from_min_size(
+                    Pos2::ZERO,
+                    egui::vec2(if tick % 2 == 0 { 680.0 } else { 720.0 }, 640.0),
+                )),
+                events: vec![event.clone()],
+                ..Default::default()
+            };
+            input.viewports.insert(
+                secondary,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    native_pixels_per_point: Some(2.0),
+                    ..Default::default()
+                },
+            );
+            let mut received = Vec::new();
+            context
+                .run_ui(input, |ui| {
+                    received = ui.input(|input| input.raw.events.clone());
+                    let response = ui.button("Secondary window target");
+                    crate::semantics::target(ui, &response, "secondary.only");
+                })
+                .drop_without_applying_deltas();
+            let plugin = context.plugin::<Driver>();
+            let driver = plugin.lock();
+            assert_eq!(
+                received,
+                vec![event],
+                "secondary input must remain untouched"
+            );
+            assert_eq!(serde_json::to_string(&driver.report()).unwrap(), before);
+            assert!(
+                lookup(driver.tree.as_ref(), "secondary.only", Rect::EVERYTHING)
+                    .unwrap()
+                    .is_none()
+            );
+            if !driver.running() {
+                assert_eq!(
+                    driver.report().unwrap().state,
+                    "passed",
+                    "{name}: {:?}",
+                    driver.report().unwrap().failure
+                );
+                break;
+            }
+        }
+        let plugin = context.plugin::<Driver>();
+        let driver = plugin.lock();
+        let report = driver.report().unwrap();
+        assert_eq!(report.state, "passed", "{name}: {:?}", report.failure);
+        let expected = if *name == "responsive-layout" {
+            [1100.0, 720.0]
+        } else {
+            [1000.0, 900.0]
+        };
+        assert!((report.viewport[0] - expected[0]).abs() < f32::EPSILON);
+        assert!((report.viewport[1] - expected[1]).abs() < f32::EPSILON);
+        assert!((report.pixels_per_point - 1.0).abs() < f32::EPSILON);
+        assert_eq!(report.completed, report.total);
+    }
 }
 
 #[test]
@@ -404,6 +541,7 @@ fn escape_cancels_without_completing_a_synthetic_click_or_drag() {
     let driver = plugin.lock();
     assert_eq!(driver.report().unwrap().state, "cancelled");
     assert!(driver.held.is_none());
+    assert!(!context.input(|input| input.pointer.primary_down()));
     assert!(!context.input(|input| input.pointer.primary_down()));
     assert!(!context.input(|input| input.pointer.any_click()));
     assert_eq!(
@@ -693,7 +831,7 @@ fn author_ids_survive_translation_and_bounds_follow_layout() {
 }
 
 #[test]
-fn focus_loss_and_explicit_cancel_release_held_input() {
+fn explicit_cancel_releases_held_input_even_without_focus() {
     for focused in [true, false] {
         let context = Context::default();
         context.add_plugin(Driver::default());
@@ -705,9 +843,7 @@ fn focus_loss_and_explicit_cancel_release_held_input() {
         for time in [0.0, 0.1, 0.2] {
             let _ = frame(&context, time, vec![], "ready");
         }
-        if focused {
-            context.plugin::<Driver>().lock().cancel("API cancellation");
-        }
+        context.plugin::<Driver>().lock().cancel("API cancellation");
         let mut input = RawInput {
             time: Some(0.3),
             focused,
@@ -732,7 +868,7 @@ fn focus_loss_and_explicit_cancel_release_held_input() {
 }
 
 #[test]
-fn viewport_changes_fail_and_terminal_reports_stop_accumulating_overhead() {
+fn focus_loss_keeps_the_workload_running() {
     let context = Context::default();
     context.add_plugin(Driver::default());
     context
@@ -743,8 +879,7 @@ fn viewport_changes_fail_and_terminal_reports_stop_accumulating_overhead() {
     let _ = frame(&context, 0.0, vec![], "ready");
     let mut input = RawInput {
         time: Some(0.1),
-        focused: true,
-        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1200.0, 900.0))),
+        focused: false,
         ..Default::default()
     };
     egui::plugin::Plugin::input_hook(
@@ -752,10 +887,239 @@ fn viewport_changes_fail_and_terminal_reports_stop_accumulating_overhead() {
         &context,
         &mut input,
     );
+    assert!(context.plugin::<Driver>().lock().running());
+}
+
+#[test]
+fn individual_actions_use_semantic_targets_and_reject_overlapping_work() {
+    let context = Context::default();
+    assert!(command(&context, "targets", &serde_json::Value::Null).is_err());
+    context.add_plugin(Driver::default());
+    let _ = frame(&context, 0.0, vec![], "ready");
+    let targets = command(&context, "targets", &serde_json::Value::Null).unwrap();
+    assert!(
+        targets
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|target| target["id"] == "profile.0")
+    );
+    let action = serde_json::json!({"kind":"click", "target":"profile.0"});
+    command(&context, "action", &action).unwrap();
+    assert!(command(&context, "action", &action).is_err());
+    for time in [0.1, 0.2, 0.3] {
+        let _ = frame(&context, time, vec![], "ready");
+    }
+    let result = command(&context, "result", &serde_json::Value::Null).unwrap();
+    assert_eq!(result["state"], "passed");
+    assert_eq!(result["completed"], 1);
+    assert!(
+        command(
+            &context,
+            "action",
+            &serde_json::json!({"kind":"click", "target":"missing"})
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn hidden_pause_releases_a_click_and_excludes_suspended_time() {
+    let context = Context::default();
+    context.add_plugin(Driver::default());
+    context
+        .plugin::<Driver>()
+        .lock()
+        .start("stationary-arrival")
+        .unwrap();
+    for time in [0.0, 0.1, 0.2] {
+        let _ = frame(&context, time, vec![], "ready");
+    }
+    command(&context, "pause", &serde_json::json!(0.2)).unwrap();
+    assert_eq!(
+        context.plugin::<Driver>().lock().report().unwrap().state,
+        "paused"
+    );
+    assert!(command(&context, "start", &serde_json::json!("stationary-arrival")).is_err());
+    command(&context, "resume", &serde_json::json!(200.2)).unwrap();
+    let _ = frame(&context, 200.2, vec![], "ready");
+    let plugin = context.plugin::<Driver>();
+    let driver = plugin.lock();
+    let report = driver.report().unwrap();
+    assert_eq!(report.state, "running", "{:?}", report.failure);
+    assert_eq!(report.pauses.len(), 1);
+    assert!(!report.performance_eligible);
+    assert!(report.elapsed_seconds < 1.0);
+    assert!(driver.held.is_none());
+    assert!(!context.input(|input| input.pointer.primary_down()));
+}
+
+#[test]
+fn resizing_and_dpi_changes_reanchor_clicks_and_drags() {
+    for (action, change_at) in [
+        (Action::Click, 1),
+        (Action::Click, 3),
+        (Action::Drag { x: 0.9, y: 0.8 }, 1),
+        (Action::Drag { x: 0.9, y: 0.8 }, 8),
+    ] {
+        for (resize, scale) in [(true, 1.0), (false, 2.0), (true, 2.0)] {
+            check_layout_change(&action, change_at, resize, scale);
+        }
+    }
+}
+
+fn check_layout_change(action: &Action, change_at: usize, resize: bool, scale: f32) {
+    let context = Context::default();
+    context.add_plugin(Driver::default());
+    context
+        .plugin::<Driver>()
+        .lock()
+        .start_steps(
+            "resize",
+            vec![
+                Step {
+                    phase: "test",
+                    target: "target".into(),
+                    action: Action::Wait,
+                    after: 0.0,
+                },
+                Step {
+                    phase: "test",
+                    target: "target".into(),
+                    action: action.clone(),
+                    after: 0.0,
+                },
+            ],
+        )
+        .unwrap();
+    let mut clicks = 0;
+    let mut latest_target = Rect::NOTHING;
+    for tick in 0..150_u32 {
+        let changed = usize::try_from(tick).unwrap() >= change_at;
+        let size = if changed && resize {
+            egui::vec2(600.0, 500.0)
+        } else {
+            egui::vec2(1000.0, 900.0)
+        };
+        let mut input = RawInput {
+            time: Some(f64::from(tick) / 60.0),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+            focused: true,
+            ..Default::default()
+        };
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .native_pixels_per_point = Some(if changed { scale } else { 1.0 });
+        context
+            .run_ui(input, |ui| {
+                latest_target = Rect::from_min_size(
+                    (size - egui::vec2(240.0, 160.0)).to_pos2(),
+                    egui::vec2(200.0, 100.0),
+                );
+                let response = ui.put(
+                    latest_target,
+                    egui::Button::new("Target").sense(egui::Sense::click_and_drag()),
+                );
+                crate::semantics::target(ui, &response, "target");
+                clicks += usize::from(response.clicked());
+            })
+            .drop_without_applying_deltas();
+        if usize::try_from(tick).unwrap() == change_at {
+            assert!(!context.input(|input| input.pointer.primary_down()));
+            assert_eq!(clicks, 0, "releasing during resize must not click through");
+        }
+        if !context.plugin::<Driver>().lock().running() {
+            break;
+        }
+    }
+    let plugin = context.plugin::<Driver>();
+    let driver = plugin.lock();
+    let report = driver.report().unwrap();
+    assert_eq!(report.state, "passed", "{:?}", report.failure);
+    assert!(!report.performance_eligible);
+    assert_eq!(report.viewport_changes.len(), 1);
+    assert_eq!(report.completed, 2);
+    assert_eq!(report.actions.len(), 2);
+    assert_eq!(
+        report.interrupted_attempts.len(),
+        usize::from(change_at > 1)
+    );
+    assert!(driver.held.is_none());
+    assert!(!context.input(|input| input.pointer.primary_down()));
+    let pointer = report.actions.last().unwrap().pointer_position.unwrap();
+    let expected = if matches!(action, Action::Click) {
+        latest_target.center()
+    } else {
+        latest_target.min + latest_target.size() * egui::vec2(0.9, 0.8)
+    };
+    assert!((egui::pos2(pointer[0], pointer[1]) - expected).length() < 0.1);
+    assert_eq!(clicks, usize::from(matches!(action, Action::Click)));
+}
+
+#[test]
+fn resized_stationary_observation_waits_for_readiness_and_restarts_its_interval() {
+    let context = Context::default();
+    context.add_plugin(Driver::default());
+    let _ = frame(&context, 0.0, vec![], "ready");
+    context
+        .plugin::<Driver>()
+        .lock()
+        .start_steps(
+            "observe-resize",
+            vec![Step {
+                phase: "stationary",
+                target: "map".into(),
+                action: Action::Observe(0.2),
+                after: 0.0,
+            }],
+        )
+        .unwrap();
+    for tick in 1..60 {
+        let _ = frame_at_scale(
+            &context,
+            f64::from(tick) / 60.0,
+            vec![],
+            if (3..10).contains(&tick) {
+                "loading"
+            } else {
+                "ready"
+            },
+            if tick >= 3 { 2.0 } else { 1.0 },
+        );
+        if !context.plugin::<Driver>().lock().running() {
+            break;
+        }
+    }
+    let plugin = context.plugin::<Driver>();
+    let driver = plugin.lock();
+    let report = driver.report().unwrap();
+    assert_eq!(report.state, "passed", "{:?}", report.failure);
+    assert_eq!(report.viewport_changes.len(), 1);
+    assert!(!report.performance_eligible);
+    assert_eq!(report.actions.len(), 1);
+    assert!(report.elapsed_seconds >= 0.35);
+}
+
+#[test]
+fn terminal_reports_stop_accumulating_overhead() {
+    let context = Context::default();
+    context.add_plugin(Driver::default());
+    context
+        .plugin::<Driver>()
+        .lock()
+        .start("stationary-arrival")
+        .unwrap();
+    let _ = frame(&context, 0.0, vec![], "ready");
+    context
+        .plugin::<Driver>()
+        .lock()
+        .cancel("test cancellation");
     let before = serde_json::to_string(&context.plugin::<Driver>().lock().report()).unwrap();
     assert_eq!(
         context.plugin::<Driver>().lock().report().unwrap().state,
-        "failed"
+        "cancelled"
     );
     let _ = frame(&context, 0.2, vec![], "ready");
     assert_eq!(

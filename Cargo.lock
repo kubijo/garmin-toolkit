@@ -2402,6 +2402,7 @@ dependencies = [
  "garmin-cli-tui",
  "garmin-device",
  "garmin-i18n",
+ "garmin-logging",
  "garmin-map-service",
  "garmin-model",
  "garmin-progress",
@@ -2458,8 +2459,10 @@ dependencies = [
 name = "garmin-desktop"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "blake3",
  "camino",
+ "clap",
  "eframe",
  "futures-lite",
  "garmin-color",
@@ -2468,6 +2471,7 @@ dependencies = [
  "garmin-fixtures",
  "garmin-i18n",
  "garmin-importer",
+ "garmin-logging",
  "garmin-map-tiles",
  "garmin-model",
  "garmin-progress",
@@ -2482,6 +2486,8 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
  "walkdir",
  "winit",
@@ -2567,6 +2573,7 @@ dependencies = [
  "garmin-fit",
  "garmin-fixtures",
  "garmin-importer",
+ "garmin-logging",
  "garmin-map-tiles",
  "garmin-model",
  "garmin-progress",
@@ -2607,9 +2614,11 @@ dependencies = [
  "js-sys",
  "remoc",
  "rfd",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -2638,6 +2647,21 @@ dependencies = [
  "newtype-uuid",
  "tempfile",
  "thiserror 2.0.20",
+ "uuid",
+]
+
+[[package]]
+name = "garmin-logging"
+version = "0.1.0"
+dependencies = [
+ "garmin-model",
+ "garmin-service-api",
+ "remoc",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -9324,8 +9348,6 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 [[package]]
 name = "winit"
 version = "0.30.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6755fa58a9f8350bd1e472d4c3fcc25f824ec358933bba33306d0b63df5978d"
 dependencies = [
  "ahash",
  "android-activity",

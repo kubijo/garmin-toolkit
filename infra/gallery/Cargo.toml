@@ -45,6 +45,7 @@ egui_kittest = { version = "=0.36.2", features = ["eframe"] }
 
 [patch.crates-io]
 fast-mvt = { path = "../../vendor/fast-mvt" }
+winit = { path = "../../vendor/winit" }
 
 [profile.dev]
 opt-level = 1

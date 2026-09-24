@@ -159,6 +159,7 @@ let
       # Path dependencies are not Cargo registry downloads: keep their notices in
       # the sandbox source, just as in the build source closure.
       (workspaceSrc + "/vendor/fast-mvt")
+      (workspaceSrc + "/vendor/winit")
       (workspaceSrc + "/infra/licenses")
       (lib.fileset.maybeMissing (workspaceSrc + "/assets/licenses"))
     ];

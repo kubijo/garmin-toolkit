@@ -1,6 +1,7 @@
+import { recordLog } from './logging.js';
 import { compositionMessage, decodeComposition, installMapDrawRequest } from './worker-codec.js';
 
-// Worker-owned wgpu surface for the composition fixture and production map experiment.
+// Worker-owned wgpu surface for the composition fixture and activity map renderer.
 export function installCompositionWorker(scope) {
     let renderer;
     let initialized = false;
@@ -46,6 +47,7 @@ export function installCompositionWorker(scope) {
     function fail(error) {
         if (failed) return;
         failed = true;
+        recordLog('Error', 'map-render-worker', String(error), 'render-worker');
         clearTimeout(timer);
         // A WASM trap can leave the Rust borrow guard held. Calling free() then throws
         // again and hides the original failure. The host terminates this failed worker,

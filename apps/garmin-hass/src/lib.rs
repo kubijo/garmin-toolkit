@@ -13,6 +13,7 @@ use std::{
 use garmin_services::Application;
 use garmin_storage::Storage;
 use thiserror::Error;
+use tracing_subscriber::prelude::*;
 
 mod devices;
 mod mode;
@@ -30,7 +31,7 @@ pub struct BrowserOptions {
     /// Record map upload lifecycle telemetry.
     pub map_upload_telemetry: bool,
     /// Enable isolated worker map rendering.
-    pub map_render_experiment: bool,
+    pub map_render_worker: bool,
     /// Expose named semantic interaction scenarios in demo builds only.
     pub ui_automation: bool,
 }
@@ -39,7 +40,7 @@ impl Default for BrowserOptions {
     fn default() -> Self {
         Self {
             map_upload_telemetry: true,
-            map_render_experiment: true,
+            map_render_worker: true,
             ui_automation: false,
         }
     }
@@ -74,11 +75,30 @@ pub async fn prepare_storage(data_root: impl AsRef<Path>) -> Result<Storage, Err
 pub async fn run(browser: BrowserOptions) -> Result<(), Error> {
     browser.validate()?;
     let data_root = deployment_data_root();
+    let logs = garmin_logging::Store::open(data_root.join("logs"), "hass")?;
+    logs.install_global();
+    let _ = tracing_subscriber::registry()
+        .with(logs)
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "warn,garmin=info".into()),
+        )
+        .with(
+            tracing_logfmt::builder()
+                .layer()
+                .with_writer(std::io::stderr),
+        )
+        .try_init();
+    tracing::info!("HASS starting");
     let storage = prepare_storage(&data_root).await?;
     let devices = devices::Host::new(mode::device_source(&data_root)?, Application::new(storage));
     let map_tiles = garmin_map_tiles::Service::new(data_root.join("cache/activity-map"))?;
     devices.start();
-    server::serve(devices, map_tiles, browser).await?;
+    let result = server::serve(devices, map_tiles, browser).await;
+    if let Some(logs) = garmin_logging::Store::global() {
+        logs.flush();
+    }
+    result?;
     Ok(())
 }
 
@@ -116,9 +136,9 @@ mod tests {
         let defaults = super::BrowserOptions::default();
         assert!(defaults.validate().is_ok());
         assert!(defaults.map_upload_telemetry);
-        assert!(defaults.map_render_experiment);
+        assert!(defaults.map_render_worker);
         let rollback = super::BrowserOptions {
-            map_render_experiment: false,
+            map_render_worker: false,
             ..defaults
         };
         assert!(rollback.validate().is_ok());
@@ -141,7 +161,7 @@ mod tests {
             ui_automation: true,
             ..defaults
         };
-        assert!(automation.map_render_experiment);
+        assert!(automation.map_render_worker);
         assert_eq!(automation.validate().is_ok(), cfg!(feature = "demo"));
     }
 

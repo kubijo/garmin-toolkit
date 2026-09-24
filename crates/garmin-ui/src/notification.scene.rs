@@ -1,7 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 
 use gallery::prelude::*;
-use garmin_ui::notification;
+use garmin_ui::{notification, shell};
 
 scene_meta! { title: "Components / Feedback / Notifications" }
 
@@ -117,6 +117,45 @@ fn toast_stack_narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 #[derive(Default)]
 struct ToastScene {
     toasts: notification::Toasts,
+}
+
+#[scene]
+fn desktop_toasts(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+    let expanded = ctx.toggle("expanded", false);
+    let height = ctx.slider("height", 300.0, 180.0, 600.0, 1.0);
+    stage!(ctx, ui, (400.0, height), |ui| {
+        let bounds = shell::overlay_bounds(ui.available_rect_before_wrap());
+        let _ = shell::show(
+            ui,
+            &shell::Props {
+                product_name: "Garmin Toolbox",
+                navigation_groups: &[],
+                active: None,
+                navigation: shell::Navigation::Rail,
+                profile_selector: None,
+                toggle_label: "",
+                profile_label: "",
+                window_controls: Some(&shell::WindowControls {
+                    maximized: false,
+                    minimize_label: "Minimize",
+                    maximize_label: "Maximize",
+                    restore_label: "Restore",
+                    close_label: "Close",
+                }),
+            },
+            |_| {},
+        );
+        let _ = seeded_toast_scene().toasts.show_in(
+            ui.ctx(),
+            egui::Id::new("desktop-toast-gallery"),
+            bounds,
+            if expanded {
+                notification::StackMode::Expanded
+            } else {
+                notification::StackMode::Collapsed
+            },
+        );
+    });
 }
 
 fn toast_scene() -> &'static Mutex<ToastScene> {
