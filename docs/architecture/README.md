@@ -18,6 +18,8 @@
 ## Presentation
 
 - [Shared presentation](presentation.md)
+- [Application windows](application-windows.md)
+- [Developer tools and logs](developer-tools.md)
 - [Visual language](visual-language.md)
 - [Activity workspace and map rendering](activity-map.md)
 

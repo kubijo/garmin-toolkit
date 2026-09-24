@@ -35,6 +35,10 @@
     "source": "Zoom out",
     "translation": "Oddálit"
   },
+  "/quHYgXvvj": {
+    "source": "The connection was lost, so the result is unknown. The operation wasn’t retried.",
+    "translation": "Spojení bylo přerušeno, proto není výsledek znám. Operace nebyla zopakována."
+  },
   "/r6LEP1upO": {
     "source": "Offline for {duration}",
     "translation": "Bez připojení {duration}"
@@ -938,6 +942,10 @@
     "source": "Loading profiles",
     "translation": "Načítání profilů"
   },
+  "dgqFvY9MdV": {
+    "source": "Device operation interrupted",
+    "translation": "Operace se zařízením přerušena"
+  },
   "e5iRgzQaaC": {
     "source": "Resetting an unresponsive Garmin link…",
     "translation": "Resetování nereagujícího spojení Garmin…"
@@ -1033,6 +1041,10 @@
   "iZrhOoD6s9": {
     "source": "{summary} · {problem}",
     "translation": "{summary} · {problem}"
+  },
+  "iaCBlRSI5D": {
+    "source": "Refresh the files view and check the result before trying again.",
+    "translation": "Obnovte seznam souborů a před dalším pokusem zkontrolujte výsledek."
   },
   "iwVTNwbNx0": {
     "source": "Select an activity",
@@ -1234,6 +1246,10 @@
   "rDnKtqqaHr": {
     "source": "Abort requested — waiting for the current operation to stop safely.",
     "translation": "Přerušení vyžádáno — čekání na bezpečné zastavení aktuální operace."
+  },
+  "rELDbByu8U": {
+    "source": "Refresh",
+    "translation": "Obnovit"
   },
   "rM5iNFJyFh": {
     "source": "Accessing device files",

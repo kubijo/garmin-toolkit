@@ -1,4 +1,4 @@
-//! Opt-in browser map composition proof. No map scheduling or browser handles live here.
+//! Browser worker-map composition. No map scheduling or browser handles live here.
 
 use std::sync::Arc;
 
@@ -66,7 +66,7 @@ impl CompositionPlugin {
 
 impl egui::plugin::Plugin for CompositionPlugin {
     fn debug_name(&self) -> &'static str {
-        "map composition experiment"
+        "map composition"
     }
     fn on_begin_pass(&mut self, ui: &mut Ui) {
         self.host.begin_pass();
@@ -140,11 +140,11 @@ fn pipeline(
     fragment: &str,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("map composition proof"),
+        label: Some("map composition"),
         source: wgpu::ShaderSource::Wgsl(include_str!("map_composition.wgsl").into()),
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("map composition proof"),
+        label: Some("map composition"),
         layout: None,
         vertex: wgpu::VertexState {
             module: &shader,

@@ -31,6 +31,8 @@ use crate::{
     worker::{self, ImportOutcome, Worker},
 };
 
+use garmin_ui::window::{Event as WindowEvent, NativeWindow, Spec as WindowSpec, WindowHost as _};
+
 pub struct Desktop {
     context: Context,
     translations: Translations,
@@ -48,6 +50,9 @@ pub struct Desktop {
     create_profile: Option<profile::CreateState>,
     avatar_editor: Option<AvatarEditor>,
     device_browser: Option<device_browser::Browser>,
+    file_window: NativeWindow<device_browser::Action, ()>,
+    file_window_device: Option<String>,
+    file_window_owner: Option<UserId>,
     device_fit_preview: Option<device_fit_preview::Preview>,
     device_browser_loading: Option<String>,
     device_browser_status: DeviceBrowserStatus,
@@ -98,6 +103,9 @@ impl Desktop {
             create_profile: None,
             avatar_editor: None,
             device_browser: None,
+            file_window: NativeWindow::default(),
+            file_window_device: None,
+            file_window_owner: None,
             device_fit_preview: None,
             device_browser_loading: None,
             device_browser_status: DeviceBrowserStatus::Idle,
@@ -114,7 +122,7 @@ impl Desktop {
     }
 
     fn show_chooser(&mut self, ui: &mut Ui, frame: &eframe::Frame) {
-        let window_copy = WindowCopy::new(&self.intl);
+        let window_copy = shell::WindowLabels::new(&self.intl);
         let window_controls = window_copy.props(ui.ctx());
         let output = shell::show(
             ui,
@@ -181,7 +189,6 @@ impl Desktop {
         profile_index: usize,
         drop_active: bool,
     ) {
-        let mut device_browser = self.device_browser.take();
         let profile_props = self
             .profiles
             .iter()
@@ -209,7 +216,7 @@ impl Desktop {
         let intl = &self.intl;
         let device_browser_loading = self.device_browser_loading.as_deref();
         let activity_workspace = &mut self.activity_workspace;
-        let window_copy = WindowCopy::new(&self.intl);
+        let window_copy = shell::WindowLabels::new(&self.intl);
         let window_controls = window_copy.props(ui.ctx());
         let props = workspace::Props {
             product_name: crate::mode::WINDOW_TITLE,
@@ -253,19 +260,8 @@ impl Desktop {
                 }
             }
         });
-        let browser_action = match (&self.page, device_browser.as_mut()) {
-            (Page::Device(key), Some(browser)) if browser.device_key() == key => {
-                browser.show_window(ui, &self.intl)
-            }
-            _ => None,
-        };
-
-        self.device_browser = device_browser;
         self.handle_page_output(profile_index, output.inner);
         self.handle_shell_action(ui.ctx(), frame, output.action, &device_snapshots);
-        if let Some(action) = browser_action {
-            self.handle_device_browser_action(&action);
-        }
     }
 
     fn handle_page_output(&mut self, profile_index: usize, output: PageOutput) {
@@ -289,14 +285,56 @@ impl Desktop {
         }
     }
 
+    fn show_file_window(&mut self) {
+        let selected = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .map(|profile| profile.user.id());
+        if self.file_window_owner.is_none() || self.file_window_owner != selected {
+            self.file_window.close(&self.context);
+            self.file_window_owner = None;
+            self.file_window_device = None;
+            self.device_browser = None;
+            self.device_fit_preview = None;
+            return;
+        }
+        let browser = &mut self.device_browser;
+        let intl = &self.intl;
+        let notice = &self.notice;
+        let busy = self.device_browser_status.is_busy() || self.device_browser_loading.is_some();
+        let loading = self.device_browser_loading.is_some();
+        let events = self.file_window.present(
+            &self.context,
+            &self.intl,
+            || (),
+            |ui| {
+                if let Some(notice) = notice {
+                    notification::show(ui, &notice.props());
+                }
+                if let Some(browser) = browser {
+                    ui.add_enabled_ui(!busy, |ui| browser.show(ui, intl)).inner
+                } else {
+                    ui.label(if loading { "Waiting for the device catalogue…" } else { "Device catalogue unavailable. Close this window and choose Browse files to retry." });
+                    None
+                }
+            },
+        );
+        for event in events {
+            if let WindowEvent::Command { command, .. } = event {
+                self.handle_device_browser_action(&command);
+            }
+        }
+    }
+
     fn handle_device_browser_action(&mut self, action: &device_browser::Action) {
         if matches!(action, device_browser::Action::Close) {
+            self.file_window.close(&self.context);
             if !self.device_browser_status.is_busy() {
                 self.device_browser = None;
             }
             return;
         }
-        if self.device_browser_status.is_busy() {
+        if self.device_browser_status.is_busy() || self.device_browser_loading.is_some() {
             return;
         }
         let Some(key) = self
@@ -314,6 +352,11 @@ impl Desktop {
             return;
         };
         let operation = match action {
+            device_browser::Action::Refresh => {
+                self.device_browser_loading = Some(key);
+                self.worker.browse_device(candidate);
+                return;
+            }
             device_browser::Action::Download(selection) => {
                 let file_name = browser_download_name(selection);
                 let mut dialog = rfd::FileDialog::new().set_file_name(&file_name);
@@ -373,9 +416,49 @@ impl Desktop {
     }
 
     fn browse_device(&mut self, key: String) {
-        if self.device_browser_loading.is_some() {
+        let Some(owner) = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .map(|profile| profile.user.id())
+        else {
+            return;
+        };
+        let busy = self.device_browser_status.is_busy() || self.device_browser_loading.is_some();
+        let same_window = self.file_window_owner == Some(owner)
+            && self.file_window_device.as_deref() == Some(key.as_str());
+        // Raising the current owner's view must not depend on transfer admission.
+        // Switching devices still waits for the active worker operation to finish.
+        if busy && !same_window {
             return;
         }
+        let name = self
+            .devices
+            .presentations()
+            .into_iter()
+            .find(|device| device.key == key)
+            .map_or_else(|| key.clone(), |device| device.name);
+        let _ = self.file_window.open(
+            &self.context,
+            WindowSpec {
+                id: format!("device-files-{key}"),
+                kind: "device-files".into(),
+                title: format_message!(&self.intl, default_message: "Files on {device}", values: { device: name.as_str() }),
+                size: [1000.0, 720.0],
+            },
+        );
+        self.file_window_device = Some(key.clone());
+        self.file_window_owner = Some(owner);
+        if busy {
+            return;
+        }
+        if self
+            .device_browser
+            .as_ref()
+            .is_some_and(|browser| browser.device_key() == key)
+        {
+            return;
+        }
+        self.device_browser = None;
         let Some(candidate) = self.devices.candidate(&key) else {
             self.notice = Some(Notice::error(format_message!(
                 &self.intl,
@@ -644,6 +727,10 @@ impl Desktop {
                     self.device_toasts.insert(id, key);
                 }
                 devices::Event::Detached { key } => {
+                    if self.file_window_device.as_deref() == Some(key.as_str()) {
+                        self.file_window.close(&self.context);
+                        self.file_window_device = None;
+                    }
                     self.dismiss_device_toasts(&key);
                     if self.device_browser_loading.as_deref() == Some(key.as_str()) {
                         self.device_browser_loading = None;
@@ -702,8 +789,13 @@ impl Desktop {
         }
     }
 
-    fn show_toasts(&mut self, context: &Context) {
-        let events = self.toasts.show(context, Id::new("desktop-notifications"));
+    fn show_toasts(&mut self, context: &Context, bounds: eframe::egui::Rect) {
+        let events = self.toasts.show_in(
+            context,
+            Id::new("desktop-notifications"),
+            bounds,
+            notification::StackMode::Automatic,
+        );
         for event in events {
             match event {
                 notification::ToastEvent::Invoked(id) => {
@@ -829,7 +921,7 @@ impl Desktop {
             return;
         }
         self.device_browser_loading = None;
-        if !matches!(&self.page, Page::Device(active) if active == &key) {
+        if self.file_window_device.as_deref() != Some(key.as_str()) {
             return;
         }
         let catalog = match result {
@@ -839,6 +931,14 @@ impl Desktop {
                 return;
             }
         };
+        if let Some(browser) = &mut self.device_browser
+            && browser.device_key() == key
+        {
+            if let Err(reason) = browser.refresh(device_catalog_snapshot(key, catalog)) {
+                self.notice = Some(Notice::error(reason));
+            }
+            return;
+        }
         let Some(device_name) = self
             .devices
             .presentations()
@@ -1146,8 +1246,17 @@ impl Desktop {
 }
 
 impl eframe::App for Desktop {
+    fn clear_color(&self, _visuals: &eframe::egui::Visuals) -> [f32; 4] {
+        // Child viewports clear to transparent; keep the main window opaque.
+        eframe::egui::Color32::from_rgb(12, 12, 12).to_normalized_gamma_f32()
+    }
+
+    fn on_exit(&mut self) {
+        crate::developer::shutdown(&self.context);
+    }
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         let started = Instant::now();
+        let toast_bounds = shell::overlay_bounds(ui.available_rect_before_wrap());
         self.process_events();
         self.process_devices(ui.ctx());
         self.handle_quit_input(ui.ctx());
@@ -1171,10 +1280,12 @@ impl eframe::App for Desktop {
         }
         self.show_create_profile(ui);
         self.show_avatar_editor(ui);
+        self.show_file_window();
         self.show_device_fit_preview(ui);
         self.show_quit_confirmation(ui);
-        self.show_toasts(ui.ctx());
-        crate::window::resize(ui);
+        self.show_toasts(ui.ctx(), toast_bounds);
+        garmin_ui::window::resize(ui);
+        crate::developer::update(ui.ctx(), &self.intl);
         self.profiling
             .record_desktop_frame(started.elapsed().as_secs_f32() * 1_000.0);
     }
@@ -1364,34 +1475,6 @@ fn device_catalog_snapshot(
                     .collect(),
             })
             .collect(),
-    }
-}
-
-struct WindowCopy {
-    minimize: String,
-    maximize: String,
-    restore: String,
-    close: String,
-}
-
-impl WindowCopy {
-    fn new(intl: &Intl) -> Self {
-        Self {
-            minimize: format_message!(intl, default_message: "Minimize window"),
-            maximize: format_message!(intl, default_message: "Maximize window"),
-            restore: format_message!(intl, default_message: "Restore window"),
-            close: format_message!(intl, default_message: "Close window"),
-        }
-    }
-
-    fn props<'a>(&'a self, context: &Context) -> shell::WindowControls<'a> {
-        shell::WindowControls {
-            maximized: context.input(|input| input.viewport().maximized.unwrap_or_default()),
-            minimize_label: &self.minimize,
-            maximize_label: &self.maximize,
-            restore_label: &self.restore,
-            close_label: &self.close,
-        }
     }
 }
 

@@ -15,6 +15,7 @@ demo = ["dep:garmin-fixtures"]
 workspace = true
 
 [dependencies]
+garmin-logging.workspace = true
 anyhow.workspace = true
 axum = { workspace = true, features = ["ws"] }
 blake3.workspace = true

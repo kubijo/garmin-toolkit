@@ -198,6 +198,17 @@ impl PendingBrowserDownloads {
 }
 
 impl ApplicationService for Host {
+    fn logs(
+        &self,
+    ) -> impl Future<Output = Result<garmin_service_api::logging::LogServiceClient, remoc::rtc::CallError>>
+    {
+        std::future::ready(
+            garmin_logging::Store::global()
+                .map(|store| store.client())
+                .ok_or(remoc::rtc::CallError::NotServed),
+        )
+    }
+
     fn deployment_mode(
         &self,
     ) -> impl Future<Output = Result<garmin_service_api::DeploymentMode, rtc::CallError>> {

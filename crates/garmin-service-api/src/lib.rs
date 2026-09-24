@@ -1,5 +1,7 @@
 //! Typed contracts shared by native hosts and isolated clients.
 
+pub mod logging;
+
 use camino::Utf8PathBuf;
 use garmin_model::{
     activity::{
@@ -287,6 +289,7 @@ mod rpc {
 
     #[rtc::remote]
     pub trait ApplicationService {
+        async fn logs(&self) -> Result<crate::logging::LogServiceClient, rtc::CallError>;
         async fn deployment_mode(&self) -> Result<DeploymentMode, rtc::CallError>;
         async fn heartbeat(&self) -> Result<(), rtc::CallError>;
         async fn watch_devices(

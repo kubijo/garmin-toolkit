@@ -9,12 +9,17 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-demo = ["dep:garmin-fixtures"]
+demo = ["dep:garmin-fixtures", "garmin-ui/automation"]
 
 [lints]
 workspace = true
 
 [dependencies]
+axum.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+garmin-logging.workspace = true
 blake3.workspace = true
 camino.workspace = true
 eframe = { workspace = true, features = ["default_fonts", "persistence", "wayland", "wgpu", "x11"] }

@@ -17,6 +17,7 @@ or {
   $item <: contains visibility_modifier(),
   $name <: not or {
     `DeviceSnapshot`,
+    `Batch`,
     `DeviceCatalogSnapshot`,
     `DeviceCatalogStorage`,
     `DeviceCatalogEntry`,

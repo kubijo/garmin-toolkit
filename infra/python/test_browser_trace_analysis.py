@@ -23,6 +23,40 @@ def event(name, pid, tid, *, duration=None, timestamp=0, args=None, phase='X'):
 
 
 class BrowserTraceAnalysisTest(unittest.TestCase):
+    def test_paused_runs_are_functional_evidence_only(self):
+        start = event('garmin.automation.start', 30, 7, args={'detail': {'name': 'stationary-arrival'}})
+        report = {
+            'version': 2,
+            'scenario': 'stationary-arrival',
+            'state': 'passed',
+            'completed': 1,
+            'total': 1,
+            'actions': [{'scheduled_seconds': 1.0, 'actual_seconds': 1.0, 'lateness_seconds': 0.0}],
+            'pauses': [{'started_seconds': 0.5, 'duration_seconds': 200.0}],
+            'performance_eligible': False,
+        }
+        paused = event('garmin.automation.phase', 30, 7, timestamp=5, args={'detail': {**report, 'state': 'paused'}})
+        terminal = event('garmin.automation.phase', 30, 7, timestamp=10, args={'detail': report})
+        self.assertEqual(automation_report([start, paused, terminal]), report)
+        report['performance_eligible'] = True
+        with self.assertRaisesRegex(TraceError, 'uninterrupted'):
+            automation_report([start, terminal])
+        report['pauses'] = []
+        report['viewport_changes'] = [
+            {
+                'elapsed_seconds': 0.5,
+                'previous_viewport': [1000.0, 900.0],
+                'viewport': [600.0, 500.0],
+                'previous_pixels_per_point': 1.0,
+                'pixels_per_point': 2.0,
+            }
+        ]
+        report['performance_eligible'] = False
+        self.assertEqual(automation_report([start, terminal]), report)
+        report['performance_eligible'] = True
+        with self.assertRaisesRegex(TraceError, 'resized run'):
+            automation_report([start, terminal])
+
     def test_automation_evidence_rejects_shortened_or_ambiguous_workloads(self):
         start = event('garmin.automation.start', 30, 7, args={'detail': {'name': 'stationary-arrival'}})
         report = {

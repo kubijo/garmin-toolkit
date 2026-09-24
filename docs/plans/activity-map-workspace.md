@@ -6,6 +6,11 @@ interaction, and rendering contracts live in [activity map architecture](../arch
 HASS uses worker-GL by default; `--no-map-render-worker` restores the original renderer. The semantic interaction runner
 is demo-only and opt-in. This plan owns the remaining lifecycle, resource, and performance questions.
 
+Browser scenarios have recorded verification in worker-GL and main-GL. Linux HASS and desktop have demonstrated
+responsive automation; remaining window checks belong to the [shared interface plan](shared-interface-workflows.md).
+Lifecycle and performance acceptance below remain open. Worker-WebGPU requires separate validation because it also
+changes the graphics backend.
+
 ## Browser verification
 
 Use the [run contract](../architecture/build-system.md#opt-in-browser-interaction-runs) and
@@ -18,7 +23,8 @@ Use the [run contract](../architecture/build-system.md#opt-in-browser-interactio
 - Does a fresh HASS launch without renderer flags select worker-GL and display the activity map?
 - Do real pointer, wheel, and keyboard events remain isolated during a run, with ordinary input restored after Stop?
   Exercise the Automation menu and Stop button through browser input, including cancellation during a held drag.
-- Do focus loss and hidden tabs cancel promptly, release held input, and recover correctly when the page returns?
+- Do focus changes preserve runs, and do hidden tabs pause safely, release held input, and resume without replaying
+  completed actions?
 - Are worker resources released across activity replacement, map removal, page teardown, and renderer failure?
 - Does worker-GL reduce main-thread work without worse visible responsiveness or unacceptable memory growth?
 - What is the CPU cost of upload telemetry and of the scenario runner itself?

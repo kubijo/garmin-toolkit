@@ -6,8 +6,6 @@
 )]
 
 use clap::Parser as _;
-use std::io::{self, IsTerminal as _};
-use tracing_subscriber::EnvFilter;
 
 #[derive(clap::Parser)]
 #[command(version, about)]
@@ -26,17 +24,9 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), garmin_hass::Error> {
     let args = Args::parse();
-    tracing_logfmt::builder()
-        .with_ansi_color(io::stderr().is_terminal())
-        .subscriber_builder()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("garmin_hass=info")),
-        )
-        .init();
     garmin_hass::run(garmin_hass::BrowserOptions {
         map_upload_telemetry: !args.no_map_upload_telemetry,
-        map_render_experiment: !args.no_map_render_worker,
+        map_render_worker: !args.no_map_render_worker,
         ui_automation: args.ui_automation,
     })
     .await

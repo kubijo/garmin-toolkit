@@ -674,7 +674,7 @@ impl BrowserMapWorkerShared {
             }
         }
         if !self.allow_fallback {
-            crate::map_experiment::renderer::report_failure(reason);
+            crate::map_composition::renderer::report_failure(reason);
         }
     }
 }
@@ -775,6 +775,9 @@ impl BrowserMapWorker {
 
         let message_shared = Rc::downgrade(&shared);
         let on_message = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
+            if super::developer::receive_log(&event.data()) {
+                return;
+            }
             if let Some(shared) = message_shared.upgrade() {
                 shared.handle_message(event.data());
             }

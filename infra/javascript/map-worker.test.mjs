@@ -4,17 +4,23 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { installMapWorker } from '../../apps/garmin-hass/web/map-worker.js';
+import { recordLog } from '../../apps/garmin-hass/web/logging.js';
 import * as codec from '../../apps/garmin-hass/web/worker-codec.js';
 import { browserAssetPaths } from './fingerprint-web.mjs';
 
 function worker(install = installMapWorker) {
     const messages = [];
+    const logs = [];
     const self = {
         location: { href: 'https://example.test/api/hass/map-worker.js' },
-        postMessage: (message, transfer = []) => messages.push(structuredClone(message, { transfer })),
+        postMessage(message, transfer = []) {
+            const copy = structuredClone(message, { transfer });
+            if (copy?.type === 'application-log') logs.push(JSON.parse(copy.payload));
+            else messages.push(copy);
+        },
     };
     install(self);
-    return { messages, send: data => self.onmessage({ data }) };
+    return { messages, logs, postMessage: self.postMessage, send: data => self.onmessage({ data }) };
 }
 
 test('passes the exact hashed WASM URL before accepting work', async () => {
@@ -62,6 +68,11 @@ test('initializes emitted WASM and transfers empty and nonempty tiles', {
     );
     let tile = new Uint8Array();
     const originalFetch = globalThis.fetch;
+    const originalPostMessage = globalThis.postMessage;
+    const instance = worker(emittedWorker);
+    // wasm-bindgen calls the real worker global; JS protocol replies use the
+    // injected scope. Both must reach the same transport, including log envelopes.
+    globalThis.postMessage = instance.postMessage;
     const requests = [];
     globalThis.fetch = async url => {
         requests.push(String(url));
@@ -70,10 +81,17 @@ test('initializes emitted WASM and transfers empty and nonempty tiles', {
         return new Response(wasm, { headers: { 'Content-Type': 'application/wasm' } });
     };
     try {
-        const instance = worker(emittedWorker);
         await instance.send([2, 'init', moduleUrl, wasmUrl]);
         assert.deepEqual(Array.from(instance.messages[0]), [2, 'ready']);
         assert.deepEqual(requests, [wasmUrl]);
+        recordLog('Info', 'map-worker-test', 'emitted WASM logging probe', 'preparation-worker');
+        const records = instance.logs.filter(log => log.record?.component === 'map-worker-test');
+        assert.equal(records.length, 1, 'Rust must relay the worker event exactly once');
+        assert.equal(records[0].kind, 'record');
+        assert.equal(records[0].record.message, 'emitted WASM logging probe');
+        assert.equal(records[0].record.source, 'preparation-worker');
+        assert.ok(records[0].record.session);
+        assert.ok(Number.isSafeInteger(records[0].record.source_sequence));
         await instance.send(codec.tileTask(2, 1, 14, 0, 0, true));
         assert.deepEqual(requests, [wasmUrl, tileUrl]);
         assert.deepEqual(instance.messages[1].slice(0, 4), [2, 'result', 1, 'tile']);
@@ -139,6 +157,8 @@ test('initializes emitted WASM and transfers empty and nonempty tiles', {
         }
     } finally {
         globalThis.fetch = originalFetch;
+        if (originalPostMessage === undefined) delete globalThis.postMessage;
+        else globalThis.postMessage = originalPostMessage;
     }
 });
 

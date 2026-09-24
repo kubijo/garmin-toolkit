@@ -2,8 +2,13 @@
 
 mod automation;
 mod browser_timing;
-mod map_experiment;
+mod developer;
+mod files;
+mod map_composition;
 mod map_worker;
+mod window;
+mod window_channel;
+mod window_client;
 
 use bytes::Bytes;
 use camino::Utf8PathBuf;
@@ -73,6 +78,7 @@ impl activity::map_runtime::MapMetricsSink for BrowserMapMetrics {
 /// Returns an error when the application's canvas is missing or has the wrong element type.
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
+    developer::install();
     let Some(window) = web_sys::window() else {
         // The same generated module is loaded by the dedicated map worker.
         return Ok(());
@@ -83,13 +89,16 @@ pub fn start() -> Result<(), JsValue> {
         .and_then(|document| document.get_element_by_id(CANVAS_ID))
         .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
         .ok_or_else(|| js_error("the application canvas is missing"))?;
+    if window::start_if_requested(&canvas)? {
+        return Ok(());
+    }
     let map_upload_telemetry: bool = serde_json::from_str(
         &canvas
             .get_attribute("data-map-upload-telemetry")
             .ok_or_else(|| js_error("the map upload telemetry configuration is missing"))?,
     )
     .map_err(|_| js_error("the map upload telemetry configuration is invalid"))?;
-    let experiment_mode = map_experiment::mode(&canvas)?;
+    let renderer_mode = map_composition::mode(&canvas)?;
     let ui_automation: bool = serde_json::from_str(
         &canvas
             .get_attribute("data-ui-automation")
@@ -102,24 +111,24 @@ pub fn start() -> Result<(), JsValue> {
         let result = eframe::WebRunner::new()
             .start(
                 canvas.clone(),
-                map_experiment::options(&experiment_mode),
+                map_composition::options(&renderer_mode),
                 Box::new(move |creation| {
                     garmin_ui::install(&creation.egui_ctx);
                     let render_state = creation.wgpu_render_state.as_ref().ok_or_else(|| {
                         io::Error::other("eframe did not provide the required WGPU render state")
                     })?;
                     let adapter = render_state.adapter.get_info();
-                    map_experiment::report_startup(
-                        &experiment_mode,
+                    map_composition::report_startup(
+                        &renderer_mode,
                         &format!("{:?}", adapter.backend),
                         &adapter.name,
                         map_upload_telemetry,
                     );
-                    if experiment_mode.starts_with("worker-") && map_experiment::is_fixture() {
-                        return Ok(Box::new(map_experiment::Fixture::new(creation, &fixture_canvas, &experiment_mode)?));
+                    if renderer_mode.starts_with("worker-") && map_composition::is_fixture() {
+                        return Ok(Box::new(map_composition::Fixture::new(creation, &fixture_canvas, &renderer_mode)?));
                     }
-                    if experiment_mode.starts_with("worker-") {
-                        map_experiment::install_map(creation, &fixture_canvas, &experiment_mode)?;
+                    if renderer_mode.starts_with("worker-") {
+                        map_composition::install_map(creation, &fixture_canvas, &renderer_mode)?;
                     }
                     browser_timing::mark_detail(
                         "garmin.map.upload-telemetry",
@@ -157,6 +166,8 @@ fn identify_text_agent(canvas: &web_sys::HtmlCanvasElement) {
 }
 
 struct App {
+    developer: developer::Host,
+    files: files::Host,
     context: eframe::egui::Context,
     translations: Translations,
     intl: Intl,
@@ -206,6 +217,8 @@ impl App {
         });
         let activity_workspace = activity::Workspace::new(&map_runtime);
         Ok(Self {
+            developer: developer::Host::new(context.clone()),
+            files: files::Host::default(),
             context,
             translations,
             intl,
@@ -393,12 +406,10 @@ impl App {
         notice: Option<&Notice>,
     ) {
         let profiles = Rc::clone(&self.profiles);
-        let mut device_browser = self.device_browser.take();
         let Some(profile_index) = self
             .selected_profile
             .filter(|index| *index < profiles.len())
         else {
-            self.device_browser = device_browser;
             self.selected_profile = None;
             return;
         };
@@ -465,18 +476,8 @@ impl App {
                     }
                 },
             );
-        let browser_action = match (&self.page, device_browser.as_mut()) {
-            (Page::Device(key), Some(browser)) if browser.device_key() == key => {
-                browser.show_window(ui, &self.intl)
-            }
-            _ => None,
-        };
-        self.device_browser = device_browser;
         self.handle_page_action(output.inner, &profiles);
         self.handle_shell_action(output.action, &profiles, devices);
-        if let Some(action) = browser_action {
-            self.handle_device_browser_action(action);
-        }
     }
 
     fn show_offline(&self, ui: &Ui, since_milliseconds: f64) {
@@ -525,7 +526,7 @@ impl App {
             PageAction::Device {
                 key,
                 action: Some(device::Action::BrowseFiles),
-            } => spawn_device_catalog(Rc::clone(&self.shared), self.context.clone(), key),
+            } => self.open_file_window(key),
             PageAction::Activities(None)
             | PageAction::Settings(None)
             | PageAction::Device { action: None, .. } => {}
@@ -557,66 +558,19 @@ impl App {
         action: device_browser::Action,
         device_key: String,
     ) {
+        let Some(action) = dispatch_file_action(
+            &self.shared,
+            &self.context,
+            &self.intl,
+            action,
+            device_key.clone(),
+        ) else {
+            return;
+        };
         match action {
-            device_browser::Action::Download(selection) => spawn_device_download(
-                Rc::clone(&self.shared),
-                self.context.clone(),
-                device_key,
-                browser_target(selection),
-                &format_message!(&self.intl, default_message: "Downloading from the device…"),
-                format_message!(&self.intl, default_message: "Download started"),
-                format_message!(&self.intl, default_message: "Download failed"),
-            ),
-            device_browser::Action::Upload {
-                storage_id,
-                directory,
-            } => spawn_device_upload(
-                Rc::clone(&self.shared),
-                self.context.clone(),
-                device_key,
-                storage_id,
-                directory,
-                DeviceUploadCopy {
-                    progress: format_message!(
-                        &self.intl,
-                        default_message: "Uploading to the device…",
-                    ),
-                    complete: format_message!(&self.intl, default_message: "Upload complete"),
-                    failure: format_message!(&self.intl, default_message: "Upload failed"),
-                    too_large: format_message!(
-                        &self.intl,
-                        default_message: "The selected file exceeds the 512 MiB device-browser limit",
-                    ),
-                },
-            ),
-            device_browser::Action::CreateDirectory {
-                storage_id,
-                parent,
-                name,
-            } => spawn_device_browser_request(
-                Rc::clone(&self.shared),
-                self.context.clone(),
-                DeviceBrowserRequest::CreateDirectory {
-                    device_key,
-                    storage_id,
-                    parent,
-                    name,
-                },
-                &format_message!(&self.intl, default_message: "Creating the folder…"),
-                format_message!(&self.intl, default_message: "Folder created"),
-                format_message!(&self.intl, default_message: "Could not create folder"),
-            ),
-            device_browser::Action::Remove(selection) => spawn_device_browser_request(
-                Rc::clone(&self.shared),
-                self.context.clone(),
-                DeviceBrowserRequest::Remove {
-                    device_key,
-                    target: browser_target(selection),
-                },
-                &format_message!(&self.intl, default_message: "Removing the selected item…"),
-                format_message!(&self.intl, default_message: "Item removed"),
-                format_message!(&self.intl, default_message: "Could not remove item"),
-            ),
+            device_browser::Action::Refresh => {
+                spawn_device_catalog(self.shared.clone(), self.context.clone(), device_key);
+            }
             device_browser::Action::Open(selection) => spawn_device_fit_preview(
                 Rc::clone(&self.shared),
                 self.context.clone(),
@@ -641,7 +595,7 @@ impl App {
                     &format_message!(&self.intl, default_message: "Importing the FIT file…"),
                 );
             }
-            device_browser::Action::Close => unreachable!("close was handled above"),
+            _ => unreachable!("filesystem actions and close were handled above"),
         }
     }
 
@@ -948,7 +902,7 @@ impl App {
             )
         };
         if let Some((requested_key, result)) = device_catalog
-            && matches!(&self.page, Page::Device(key) if key == &requested_key)
+            && self.files.device_key.as_deref() == Some(requested_key.as_str())
         {
             let failure_title =
                 format_message!(&self.intl, default_message: "Could not browse device files");
@@ -1085,7 +1039,7 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        map_experiment::update_diagnostics(ui.ctx());
+        map_composition::update_diagnostics(ui.ctx());
         garmin_ui::automation::show_status(ui.ctx());
         if self.first_frame {
             self.first_frame = false;
@@ -1104,7 +1058,8 @@ impl eframe::App for App {
             disconnected_since,
             deployment_mode,
         ) = {
-            let state = self.shared.borrow();
+            let mut state = self.shared.borrow_mut();
+            state.show_device_browser_interruption(&self.intl);
             (
                 Rc::clone(&state.snapshots),
                 Rc::clone(&state.profiles),
@@ -1114,7 +1069,7 @@ impl eframe::App for App {
                 state.notice.clone(),
                 state.activity_detail.as_ref().map(Rc::clone),
                 state.preferences_saving || state.avatar_saving,
-                state.device_catalog_loading.clone(),
+                state.device_catalog_request.loading().map(str::to_owned),
                 state.disconnected_since_milliseconds,
                 state.deployment_mode,
             )
@@ -1124,6 +1079,7 @@ impl eframe::App for App {
             DeploymentMode::Demo => "Garmin Toolkit Demo",
         };
         self.sync_profiles(profiles);
+        self.sync_file_window_owner();
         self.apply_avatar_results();
         self.apply_device_catalogs(&devices);
         self.apply_device_fit_results();
@@ -1164,6 +1120,7 @@ impl eframe::App for App {
                 notice.as_ref(),
             ),
         }
+        self.sync_file_window_owner();
         if !offline {
             self.show_create_profile(ui);
             self.show_avatar_editor(ui);
@@ -1173,6 +1130,9 @@ impl eframe::App for App {
             self.show_offline(ui, since);
         }
         automation::dispatch_menu(ui.ctx());
+        self.developer.update(&self.intl);
+        self.update_file_window();
+        developer::update_logs(ui.ctx(), self.shared.borrow().logs.clone());
     }
 }
 
@@ -1253,6 +1213,7 @@ fn set_profile_preferences(snapshot: &mut ProfileSnapshot, preferences: ProfileP
 )]
 struct State {
     client: Option<ApplicationServiceClient>,
+    logs: Option<garmin_service_api::logging::LogServiceClient>,
     deployment_mode: DeploymentMode,
     snapshots: Rc<Vec<DeviceSnapshot>>,
     profiles: Rc<Vec<ProfileSnapshot>>,
@@ -1264,8 +1225,9 @@ struct State {
     avatar_draft: Option<AvatarDraft>,
     avatar_finished: Option<bool>,
     device_catalog: Option<(String, Result<DeviceCatalogSnapshot, String>)>,
-    device_catalog_loading: Option<String>,
+    device_catalog_request: files::catalog::Request,
     active_device_browser_operation: Option<DeviceBrowserOperationToken>,
+    device_browser_interrupted: bool,
     next_device_browser_operation: u64,
     connection_generation: u64,
     device_browser_refresh: Option<(String, Result<DeviceCatalogSnapshot, String>)>,
@@ -1281,6 +1243,31 @@ struct State {
     notice: Option<Notice>,
     error: Option<String>,
     disconnected_since_milliseconds: Option<f64>,
+}
+
+impl State {
+    fn interrupt_device_browser_operation(&mut self) -> bool {
+        let interrupted = self.active_device_browser_operation.take().is_some();
+        self.device_browser_interrupted |= interrupted;
+        interrupted
+    }
+
+    fn show_device_browser_interruption(&mut self, intl: &Intl) {
+        if std::mem::take(&mut self.device_browser_interrupted) {
+            let explanation = format_message!(
+                intl,
+                default_message: "The connection was lost, so the result is unknown. The operation wasn’t retried.",
+            );
+            let instruction = format_message!(
+                intl,
+                default_message: "Refresh the files view and check the result before trying again.",
+            );
+            self.notice = Some(Notice::error(
+                format_message!(intl, default_message: "Device operation interrupted"),
+                format!("{explanation}\n{instruction}"),
+            ));
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1480,6 +1467,78 @@ fn spawn_import_avatar(
     });
 }
 
+fn dispatch_file_action(
+    shared: &Rc<RefCell<State>>,
+    context: &eframe::egui::Context,
+    intl: &Intl,
+    action: device_browser::Action,
+    device_key: String,
+) -> Option<device_browser::Action> {
+    match action {
+        device_browser::Action::Download(selection) => spawn_device_download(
+            Rc::clone(shared),
+            context.clone(),
+            device_key,
+            browser_target(selection),
+            &format_message!(intl, default_message: "Downloading from the device…"),
+            format_message!(intl, default_message: "Download started"),
+            format_message!(intl, default_message: "Download failed"),
+        ),
+        device_browser::Action::Upload {
+            storage_id,
+            directory,
+        } => spawn_device_upload(
+            Rc::clone(shared),
+            context.clone(),
+            device_key,
+            storage_id,
+            directory,
+            DeviceUploadCopy {
+                progress: format_message!(
+                    intl,
+                    default_message: "Uploading to the device…",
+                ),
+                complete: format_message!(intl, default_message: "Upload complete"),
+                failure: format_message!(intl, default_message: "Upload failed"),
+                too_large: format_message!(
+                    intl,
+                    default_message: "The selected file exceeds the 512 MiB device-browser limit",
+                ),
+            },
+        ),
+        device_browser::Action::CreateDirectory {
+            storage_id,
+            parent,
+            name,
+        } => spawn_device_browser_request(
+            Rc::clone(shared),
+            context.clone(),
+            DeviceBrowserRequest::CreateDirectory {
+                device_key,
+                storage_id,
+                parent,
+                name,
+            },
+            &format_message!(intl, default_message: "Creating the folder…"),
+            format_message!(intl, default_message: "Folder created"),
+            format_message!(intl, default_message: "Could not create folder"),
+        ),
+        device_browser::Action::Remove(selection) => spawn_device_browser_request(
+            Rc::clone(shared),
+            context.clone(),
+            DeviceBrowserRequest::Remove {
+                device_key,
+                target: browser_target(selection),
+            },
+            &format_message!(intl, default_message: "Removing the selected item…"),
+            format_message!(intl, default_message: "Item removed"),
+            format_message!(intl, default_message: "Could not remove item"),
+        ),
+        other => return Some(other),
+    }
+    None
+}
+
 fn browser_target(selection: device_browser::Selection) -> DeviceBrowserTarget {
     DeviceBrowserTarget {
         storage_id: selection.storage_id,
@@ -1546,18 +1605,30 @@ fn spawn_device_upload(
     directory: Utf8PathBuf,
     copy: DeviceUploadCopy,
 ) {
+    let Some((client, token)) = begin_device_browser_request(&shared, &copy.progress) else {
+        return;
+    };
     spawn_local(async move {
         let Some(file) = rfd::AsyncFileDialog::new().pick_file().await else {
+            let mut state = shared.borrow_mut();
+            if finish_device_browser_request(&mut state, token) {
+                state.notice = None;
+            }
+            context.request_repaint();
             return;
         };
+        // A reconnect or changed parent session while the picker was open invalidates it.
+        if shared.borrow().active_device_browser_operation != Some(token) {
+            return;
+        }
         if file.inner().size() > MAX_DEVICE_BROWSER_TRANSFER_BYTES {
-            shared.borrow_mut().notice = Some(Notice::error(copy.failure, copy.too_large));
+            let mut state = shared.borrow_mut();
+            if finish_device_browser_request(&mut state, token) {
+                state.notice = Some(Notice::error(copy.failure, copy.too_large));
+            }
             context.request_repaint();
             return;
         }
-        let Some((client, token)) = begin_device_browser_request(&shared, &copy.progress) else {
-            return;
-        };
         let file_name = file.file_name();
         #[expect(
             clippy::cast_possible_truncation,
@@ -1717,6 +1788,7 @@ fn begin_device_browser_request(
     };
     state.next_device_browser_operation = state.next_device_browser_operation.wrapping_add(1);
     state.active_device_browser_operation = Some(token);
+    state.device_browser_interrupted = false;
     state.notice = Some(Notice::information(progress.to_owned()));
     Some((client, token))
 }
@@ -1800,17 +1872,16 @@ fn spawn_device_catalog(
     context: eframe::egui::Context,
     device_key: String,
 ) {
-    let (client, connection_generation) = {
+    let (client, connection_generation, request) = {
         let mut state = shared.borrow_mut();
-        if state.device_catalog_loading.is_some() {
-            return;
-        }
         let Some(client) = state.client.clone() else {
             return;
         };
-        state.notice = None;
-        state.device_catalog_loading = Some(device_key.clone());
-        (client, state.connection_generation)
+        let Some(request) = state.device_catalog_request.begin(&device_key) else {
+            return;
+        };
+        state.device_catalog = None;
+        (client, state.connection_generation, request)
     };
     spawn_local(async move {
         let requested_key = device_key.clone();
@@ -1821,22 +1892,34 @@ fn spawn_device_catalog(
             .and_then(|result| result.map_err(ConnectError::domain))
             .map_err(|error| error.to_string());
         let mut state = shared.borrow_mut();
-        if state.connection_generation != connection_generation {
+        if state.connection_generation != connection_generation
+            || !state.device_catalog_request.finish(request)
+        {
             return;
         }
-        state.device_catalog_loading = None;
         state.device_catalog = Some((requested_key, result));
         context.request_repaint();
     });
 }
 
 fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) {
+    developer::forward(shared.clone(), context.clone());
     spawn_local(async move {
         let mut retry_milliseconds = 1_000;
         loop {
             match connect().await {
                 Ok((client, mut snapshots, profiles, deployment_mode)) => {
                     retry_milliseconds = 1_000;
+                    shared.borrow_mut().logs = client.logs().await.ok();
+                    garmin_ui::developer::reconnect(&context);
+                    garmin_ui::developer::state(&context)
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .debug = format!(
+                        "Version: {}\nHost: HASS browser\nMode: {:?}",
+                        env!("CARGO_PKG_VERSION"),
+                        deployment_mode
+                    );
                     match snapshots.borrow_and_update() {
                         Ok(initial) => {
                             let mut state = shared.borrow_mut();
@@ -1908,9 +1991,9 @@ async fn next_connection_event(
 fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     let mut state = shared.borrow_mut();
     state.client = None;
-    state.active_device_browser_operation = None;
-    state.device_catalog_loading = None;
-    state.notice = None;
+    state.logs = None;
+    state.interrupt_device_browser_operation();
+    state.device_catalog_request.invalidate();
     state.connection_generation = state.connection_generation.wrapping_add(1);
     if state.profiles_loaded && state.disconnected_since_milliseconds.is_none() {
         state.disconnected_since_milliseconds = Some(js_sys::Date::now());
@@ -2096,6 +2179,18 @@ async fn connect() -> Result<
     ),
     ConnectError,
 > {
+    let client = connect_client().await?;
+    let deployment_mode = client.deployment_mode().await.map_err(ConnectError::call)?;
+    let snapshots = client.watch_devices().await.map_err(ConnectError::call)?;
+    let profiles = client
+        .profiles()
+        .await
+        .map_err(ConnectError::call)?
+        .map_err(ConnectError::domain)?;
+    Ok((client, snapshots, profiles, deployment_mode))
+}
+
+async fn connect_client() -> Result<ApplicationServiceClient, ConnectError> {
     let websocket = WebSocket::connect(&websocket_url()?)
         .await
         .map_err(ConnectError::transport)?;
@@ -2114,14 +2209,7 @@ async fn connect() -> Result<
             .consume()
             .await
             .map_err(ConnectError::remoc)?;
-    let deployment_mode = client.deployment_mode().await.map_err(ConnectError::call)?;
-    let snapshots = client.watch_devices().await.map_err(ConnectError::call)?;
-    let profiles = client
-        .profiles()
-        .await
-        .map_err(ConnectError::call)?
-        .map_err(ConnectError::domain)?;
-    Ok((client, snapshots, profiles, deployment_mode))
+    Ok(client)
 }
 
 fn websocket_url() -> Result<String, ConnectError> {

@@ -38,7 +38,9 @@ function fixture() {
             if (argument !== 'stationary-arrival') return JSON.stringify({ error: 'unknown scenario' });
             report = { state: 'running', phase: 'setup' };
         }
-        if (operation === 'cancel' && report?.state === 'running')
+        if (operation === 'pause' && report?.state === 'running') report.state = 'paused';
+        if (operation === 'resume' && report?.state === 'paused') report.state = 'running';
+        if (operation === 'cancel' && ['running', 'paused'].includes(report?.state))
             report = { ...report, state: 'cancelled', failure: argument };
         return JSON.stringify({ value: operation === 'status' ? report : null });
     };
@@ -72,22 +74,31 @@ test('bridge exposes named commands, metadata and terminal-only results without 
     assert.equal(f.marks.at(-1)[1].state, 'passed');
 });
 
-test('visibility and focus loss cancel immediately even when frame scheduling is suspended', () => {
-    for (const event of ['visibilitychange', 'blur']) {
-        const f = fixture();
-        f.browser.garminAutomation.start('stationary-arrival');
-        f.browser.document.hidden = true;
-        f.listeners[event]();
-        assert.equal(f.browser.garminAutomation.result().state, 'cancelled');
-        assert.throws(() => f.browser.garminAutomation.start('stationary-arrival'), /visible/);
-    }
+test('focus loss is harmless and hidden tabs pause without expiring the watchdog', () => {
+    const f = fixture();
+    f.browser.document.hasFocus = () => false;
+    f.browser.garminAutomation.start('stationary-arrival');
+    assert.equal(f.listeners.blur, undefined);
+    f.browser.document.hidden = true;
+    f.listeners.visibilitychange();
+    assert.equal(f.browser.garminAutomation.status().state, 'paused');
+    assert.equal(f.browser.garminAutomation.result(), null);
+    f.browser.performance.now = () => 200000;
+    f.listeners.tick();
+    assert.equal(f.browser.garminAutomation.status().state, 'paused');
+    f.browser.document.hidden = false;
+    f.listeners.visibilitychange();
+    f.listeners.tick();
+    assert.equal(f.browser.garminAutomation.status().state, 'running');
+    f.browser.garminAutomation.cancel();
+    assert.equal(f.browser.garminAutomation.result().state, 'cancelled');
 });
 
 test('install is explicit and singleton', () => {
     const browser = {};
     assert.equal(browser.garminAutomation, undefined);
     const f = fixture();
-    assert.deepEqual(Object.keys(f.listeners).sort(), ['blur', 'visibilitychange']);
+    assert.deepEqual(Object.keys(f.listeners).sort(), ['visibilitychange']);
     assert.throws(() => installAutomation(() => {}, f.browser), /already installed/);
 });
 
@@ -107,4 +118,16 @@ test('the in-app launcher uses the API and records the same start metadata', () 
     assert.equal(f.marks[0][0], 'garmin.automation.start');
     assert.equal(f.marks[0][1].name, 'stationary-arrival');
     assert.throws(() => launchAutomation('unknown', f.browser), /already/);
+});
+
+test('responsive sequences are forwarded to Rust without scheduling their actions in JavaScript', () => {
+    const f = fixture();
+    const actions = [
+        { kind: 'resize', width: 720, height: 480 },
+        { kind: 'assert_available', target: 'map.fit' },
+        { kind: 'assert_value', target: 'activity.0', value: 'selected' },
+    ];
+    f.browser.garminAutomation.sequence(actions);
+    assert.deepEqual(f.calls[0], ['sequence', JSON.stringify(actions)]);
+    assert.equal(f.marks[0][1].name, 'custom-sequence');
 });

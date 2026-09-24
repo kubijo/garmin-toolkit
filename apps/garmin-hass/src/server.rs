@@ -32,7 +32,7 @@ const WEB_ROOT_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_WEB_ROOT";
 const CSP_REPORT_LIMIT: usize = 32 * 1024;
 const CSP_NONCE_PLACEHOLDER: &str = "GARMIN_TOOLKIT_CSP_NONCE";
 const UPLOAD_TELEMETRY_PLACEHOLDER: &str = "GARMIN_TOOLKIT_MAP_UPLOAD_TELEMETRY";
-const MAP_EXPERIMENT_PLACEHOLDER: &str = "GARMIN_TOOLKIT_MAP_RENDER_EXPERIMENT";
+const MAP_RENDER_WORKER_PLACEHOLDER: &str = "GARMIN_TOOLKIT_MAP_RENDER_WORKER";
 const UI_AUTOMATION_PLACEHOLDER: &str = "GARMIN_TOOLKIT_UI_AUTOMATION";
 
 pub(super) async fn serve(
@@ -123,10 +123,10 @@ impl WebIndex {
                 "browser index lacks the map upload telemetry placeholder",
             ));
         }
-        if !html.contains(MAP_EXPERIMENT_PLACEHOLDER) {
+        if !html.contains(MAP_RENDER_WORKER_PLACEHOLDER) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "browser index lacks the map experiment placeholder",
+                "browser index lacks the map render worker placeholder",
             ));
         }
         let telemetry = serde_json::to_string(&browser.map_upload_telemetry)?;
@@ -137,10 +137,10 @@ impl WebIndex {
             ));
         }
         let automation = serde_json::to_string(&browser.ui_automation)?;
-        let experiment = serde_json::to_string(&browser.map_render_experiment)?;
+        let worker = serde_json::to_string(&browser.map_render_worker)?;
         Ok(Self(
             html.replace(UPLOAD_TELEMETRY_PLACEHOLDER, &telemetry)
-                .replace(MAP_EXPERIMENT_PLACEHOLDER, &experiment)
+                .replace(MAP_RENDER_WORKER_PLACEHOLDER, &worker)
                 .replace(UI_AUTOMATION_PLACEHOLDER, &automation)
                 .into(),
         ))
@@ -550,9 +550,10 @@ async fn serve_client(socket: WebSocket, host: Arc<Host>) -> anyhow::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::{
-        CSP_NONCE_PLACEHOLDER, MAP_EXPERIMENT_PLACEHOLDER, UPLOAD_TELEMETRY_PLACEHOLDER, WebIndex,
-        browser_asset_policy, browser_entry_point, browser_origin_allowed, content_security_policy,
-        csp_report, fingerprinted_asset, request_etag_matches, router, startup_banner, web_link,
+        CSP_NONCE_PLACEHOLDER, MAP_RENDER_WORKER_PLACEHOLDER, UPLOAD_TELEMETRY_PLACEHOLDER,
+        WebIndex, browser_asset_policy, browser_entry_point, browser_origin_allowed,
+        content_security_policy, csp_report, fingerprinted_asset, request_etag_matches, router,
+        startup_banner, web_link,
     };
     use crate::BrowserOptions;
     use crate::devices::{Host, demo::DemoSource};
@@ -726,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn web_index_embeds_experiment_control_and_rejects_stale_bundles() -> anyhow::Result<()> {
+    fn web_index_embeds_worker_control_and_rejects_stale_bundles() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
         let source = format!(
             "{}<script nonce=\"{CSP_NONCE_PLACEHOLDER}\"></script>",
@@ -738,19 +739,19 @@ mod tests {
             let rendered = WebIndex::load(
                 root.path(),
                 BrowserOptions {
-                    map_render_experiment: enabled,
+                    map_render_worker: enabled,
                     ..Default::default()
                 },
             )?
             .render(&nonce);
-            assert!(rendered.contains(&format!("data-map-render-experiment=\"{enabled}\"")));
-            assert!(!rendered.contains(MAP_EXPERIMENT_PLACEHOLDER));
+            assert!(rendered.contains(&format!("data-map-render-worker=\"{enabled}\"")));
+            assert!(!rendered.contains(MAP_RENDER_WORKER_PLACEHOLDER));
         }
         let defaults = WebIndex::load(root.path(), BrowserOptions::default())?.render(&nonce);
-        assert!(defaults.contains("data-map-render-experiment=\"true\""));
+        assert!(defaults.contains("data-map-render-worker=\"true\""));
         std::fs::write(
             root.path().join("index.html"),
-            source.replace(MAP_EXPERIMENT_PLACEHOLDER, "false"),
+            source.replace(MAP_RENDER_WORKER_PLACEHOLDER, "false"),
         )?;
         assert!(WebIndex::load(root.path(), BrowserOptions::default()).is_err());
         Ok(())

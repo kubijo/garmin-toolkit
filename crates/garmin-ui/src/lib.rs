@@ -11,6 +11,7 @@ pub mod automation;
 pub mod brand;
 pub mod button;
 pub mod capacity;
+pub mod developer;
 pub mod device;
 pub mod device_browser;
 pub mod device_fit_preview;
@@ -34,6 +35,7 @@ mod size;
 mod text;
 pub mod theme;
 pub mod typography;
+pub mod window;
 pub mod workspace;
 
 pub use size::Size;

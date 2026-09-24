@@ -110,6 +110,8 @@ one-off colors or geometry in order to resemble a screenshot.
 - Severity is communicated by icon and words as well as color. Animations are short, interruptible, and never required
   to understand state. Reduced-motion behavior must remain possible.
 - Toast surfaces and their full-height severity rails are square so stacked edges remain exact.
+- Desktop toast bounds exclude the shell header. Entry animations, shadows, and expanded stacks stay clipped below the
+  window controls, including after resizing. `infra/gallery/notifications.capture.toml` maintains this evidence.
 
 ## Verification
 

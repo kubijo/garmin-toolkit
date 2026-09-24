@@ -1,0 +1,145 @@
+# Developer tools and application logs
+
+Desktop and HASS expose Developer tools through the icon beside Profiles, including the profile chooser. Desktop uses a
+native secondary viewport; HASS opens a separate browser window with its own Rust/egui canvas. Clicking the icon again
+focuses the same window; closing it and clicking again opens a replacement. If the browser blocks the popup, the app
+offers Retry and Open in a tab. Logs and debug information are available without enabling automation.
+
+The [shared window host](application-windows.md) owns popup routing, session isolation, liveness, and retry/tab
+fallback. Tools has no automation driver or map renderer; highlights and canvas resizing stay in the originating app
+tab. After an app reload, the old tools window retains its last report but disables commands; reopen tools to attach to
+the new session.
+
+The tools page connects directly to the existing backend log RPC, with its own filters, export, and reconnection.
+Closing tools leaves the app and any running scenario alone. The floating app status overlay retains Stop and Escape
+cancellation; Stop and Escape in the tools window send commands to the originating app. Pointer highlights clear when
+runs complete. The status and developer Stop controls have distinct semantic IDs, `automation.stop` and
+`developer.automation.stop`.
+
+Panel sections span the available window width and share one vertical scroll area. Filters use the application's
+labelled inputs and selector, with columns on wide windows and stacked fields on narrow ones. Log details expand inline
+with wrapped messages and fields; copying a record retains the complete JSON. Section headers and the tools icon show
+hover and keyboard-focus feedback. Maintained previews are in `infra/gallery/developer-tools.capture.toml` and
+`infra/gallery/developer-header.capture.toml`. The gallery's `capture-developer-details` recipe exercises expansion and
+scrolling and writes narrow/wide, dark/light captures under `.tmp/gallery/developer-interaction`.
+`capture-developer-controls` captures the expanded browser hooks and resize/sequence instructions in both themes. The
+`developer_panel` tests also guard compact action-row geometry on resize, narrow-window bounds, section toggling, and
+pointer cursors.
+
+## Automation and control
+
+Demo hosts accept `--ui-automation`. Desktop additionally accepts `--control-server`, which enables automation and binds
+an HTTP listener to `127.0.0.1:0`. The operating system selects the port; its actual URL is printed to stdout and shown
+in Developer tools. The panel also provides explicit Start, Stop, and Copy URL controls. Production rejects automation
+and control-server startup flags before opening storage. The listener is stopped on application exit.
+
+Desktop serves `GET /api/capabilities`, `GET /api/debug`, and `POST /api/control`. The command request is JSON with an
+`operation` and `argument`; responses contain either `value` or `error`. HTTP requests enter a bounded queue and the UI
+thread dispatches them to the same driver as browser commands. Browser-origin requests are not accepted by the native
+listener. Ordinary application launches do not bind a control port.
+
+```json
+{
+  "operation": "start",
+  "argument": "activity-smoke"
+}
+```
+
+HASS uses browser automation tools, including browser MCP, and `window.garminAutomation`; it does not expose a second
+host-side control server. The planned extension is tracked in the
+[shared interface plan](../plans/shared-interface-workflows.md#hass-control-protocol-extension-next-task). The panel
+documents and provides copyable examples for the hooks:
+
+- `list()`, `start(name)`, `status()`, `result()`, and `cancel()` manage scenarios.
+- `targets()` lists semantic IDs, labels, roles, enabled states, values, and clipped logical bounds.
+- `action({kind, target, ...})` submits one click, drag, wheel/scroll, key, or text action. Drag `x`/`y` are normalized
+  target coordinates; wheel/scroll uses a logical-point `delta`; key uses an egui key name; text uses `text`.
+- `action({kind: 'resize', width, height})` resizes the root view in logical egui points. Desktop resizes its native
+  window; the browser Rust adapter sizes the application canvas inside the existing tab. Eframe's resize observer
+  updates the backing surface and input coordinates; the worker map follows the actual canvas rectangle.
+- `sequence(actions)` runs 1–64 actions in order, including resize, `wait`, `assert_available`, and `assert_value` (with
+  a string `value`). All syntax is checked before starting; targets are resolved as each action executes.
+
+`responsive-layout` selects the first demo activity, sets playback to 2×, and verifies selection, drawer access,
+playback, and profile/map controls at 720 × 640 and 1100 × 720. Hidden activity rows become available through
+`activity.list.toggle`; it and `activity.details.toggle` expose `open`/`closed` values. Built-in scenarios first log out
+if needed, closing user-bound windows. Use a `sequence` without logout to check secondary-window state across resizing.
+
+Resize completion requires the requested dimensions to appear in rendered input and settle for 50 ms. `status()` exposes
+the pending `resize_request`; host errors and a five-second size mismatch timeout fail explicitly. Dimensions are
+limited to 1–8192 logical points; native window minimum sizes still apply (currently 720 × 480). Resize steps are
+functional evidence, excluded from fixed-geometry performance comparisons. Built-in scenarios restore the starting
+viewport after success, failure, or cancellation; HASS restores the original canvas CSS sizing, including container
+fill. Reports retain the workload geometry. Explicit `action` and `sequence` commands leave the requested size in effect
+for inspection; another resize or browser reload restores the desired layout.
+
+With the first demo activity open, [responsive-layout.json](../../infra/automation/responsive-layout.json) checks that
+its selection survives narrow/wide layouts and that the profile, map-fit, and playback controls remain available. Post
+that JSON to desktop `/api/control`, or pass its `argument` array to `window.garminAutomation.sequence(...)`.
+
+An individual action uses the same input driver and reports completion asynchronously. Key/text actions first click the
+target to establish focus. No command directly changes application or camera state. Missing, ambiguous, disabled, or
+clipped targets fail explicitly, and overlapping workloads are rejected. Native automation targets the application's
+root viewport; the developer viewport remains available for inspecting logs and stopping a workload. The driver pairs
+input/output hooks using the incoming viewport ID because those hooks run outside egui's viewport pass. Secondary
+windows cannot advance the workload, change its recorded geometry, or replace its semantic target tree.
+
+Root-window resize and pixel-scale changes continue functional runs. The driver records each change, waits for fresh
+layout, and resolves targets again. An active click or drag is released outside controls and retried; already applied
+drag movement is not rolled back, and the interrupted attempt is retained in the report. Stationary observations restart
+after map readiness returns. Runs with geometry changes are ineligible for performance comparisons.
+
+Focus loss does not cancel automation. Hidden browser tabs pause it and safely release synthetic input before resuming
+the interrupted action. Applied drag movement is not rolled back. Active-time deadlines exclude the hidden interval.
+Reports distinguish completed actions, interrupted attempts, and pauses; paused runs are functional evidence only and
+cannot establish uninterrupted performance acceptance. Stop, Escape, application shutdown, and actual failures still
+terminate runs.
+
+Runtime acceptance is tracked in the [shared interface plan](../plans/shared-interface-workflows.md#runtime-acceptance).
+
+## Logs
+
+`garmin-logging` owns native collection and persistence. Desktop, CLI, and the HASS backend install it as a tracing
+layer; native event producers use a bounded writer queue. HASS browser and worker diagnostics are forwarded in bounded
+batches through the same typed log service while remaining available in the browser console. Browser ingestion and
+subscription errors are not recursively forwarded as log events.
+
+The browser's Rust/WASM adapter owns record construction, session identities, source sequencing, a 512-record delivery
+buffer, and batches of up to 128 records. Records remain queued until the backend acknowledges ingestion; retries retain
+their original identities. The browser checks the complete serialized record against the shared 16 KiB limit, reserving
+space for the backend source prefix and sequence. Oversized or invalid records are dropped with a counted warning; valid
+following records continue immediately. Ingestion acknowledges valid records and reports permanent rejections
+separately; these records are removed from the queue, while transport/storage-admission errors retain the batch for
+retry. Worker records keep their identities when relayed through the parent. Buffer overflow emits a dropped-record
+warning. JavaScript only captures browser errors, connects Rust callbacks, relays worker messages, and downloads
+exports. Before WASM installs its callback, the adapter retains at most 16 bootstrap events in the page; workers forward
+bootstrap errors to their parent immediately. These events receive their record identities in Rust.
+
+Canonical records and filters live in `garmin-model`; `garmin-service-api::logging::LogService` provides history,
+subscription, ingestion, and export. Desktop obtains a local Remoc client; HASS obtains a remotely transferable client
+through `ApplicationService::logs`. The UI never manages backend storage paths or file formats.
+
+Filters cover severity, component, source, session, time bounds, and text. Sequence cursors advance even over filtered
+records. Resume cursors carry both a sequence and a random store epoch, regenerated whenever a store is opened. An old
+epoch reports a history reset and replays retained history; the UI clears its previous log list before accepting the new
+sequence space. This also handles sequence reuse after memory-only collection and restart. Browser source sequence
+numbers deduplicate retries within retained history. Source identities expire when their last retained record leaves
+history; a retry outside that horizon can be accepted as a new record. Expired cursors and slow-consumer gaps are
+visible. Live UI history is bounded to 2,048 records. Backend files rotate at 8 MiB with four retained segments. The
+query/export history also has independent limits of 16,384 records and 32 MiB of encoded records, including during
+recovery and disk failures. Source bookkeeping is bounded by that history rather than a permanent admission quota.
+
+A write or rotation failure stops persistence until the store is reopened: continuing through a partially written or
+rotated file handle could corrupt retained history. Bounded live collection continues and exposes the storage error
+alongside the stream. Memory eviction still produces retention gaps.
+
+Each active store holds an OS file lock before recovering or modifying its directory. Overlapping processes use the
+first free `writer-N` subdirectory, with separate histories and sequence spaces; the service's directory handle points
+to its actual slot. Slots are reused after their owner exits, recovering that slot's retained history. Histories are not
+merged across simultaneous processes. Dropping the last store handle drains its writer before releasing ownership.
+
+Desktop can open the backend log folder or save a filtered JSONL export; HASS downloads an export without receiving host
+paths. Exports anchor their starting cursor and ending sequence before streaming. A retention gap or storage error fails
+the export rather than offering partial JSONL; its error stays visible independently of live-stream status until another
+export is attempted. Existing CLI capture logs and terminal output remain available. The developer panel shows
+connection status, retention gaps, structured record details, and copy controls.

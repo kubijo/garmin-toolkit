@@ -1,3 +1,4 @@
+import { recordLog } from './logging.js';
 import * as codec from './worker-codec.js';
 
 export function installMapWorker(scope) {
@@ -5,7 +6,10 @@ export function installMapWorker(scope) {
     let initialization;
     let protocolVersion;
     const reason = error => (error instanceof Error ? error.message : String(error));
-    const fatal = error => scope.postMessage(codec.fatal(protocolVersion ?? 0, reason(error)));
+    const fatal = error => {
+        recordLog('Error', 'map-worker', reason(error), 'preparation-worker');
+        scope.postMessage(codec.fatal(protocolVersion ?? 0, reason(error)));
+    };
 
     async function prepare(task) {
         if (applicationModule === undefined) throw Error('map worker received work before initialization');

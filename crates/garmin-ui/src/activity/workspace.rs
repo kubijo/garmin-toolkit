@@ -166,39 +166,10 @@ impl Workspace {
         intl: &Intl,
         props: &WorkspaceProps<'_>,
     ) -> Option<Action> {
-        let activities = format_message!(intl, default_message: "Activities");
-        let details = format_message!(intl, default_message: "Details");
         if ui.input(|input| input.key_pressed(Key::Escape)) {
             self.compact_panel = None;
         }
-        ui.horizontal(|ui| {
-            if (button::Props {
-                label: &activities,
-                icon: Some(icons::ACTIVITY),
-                kind: button::Kind::Tertiary,
-                size: Size::Small,
-                width: button::Width::Fit,
-                enabled: true,
-            })
-            .show(ui)
-            .clicked()
-            {
-                self.compact_panel = toggle_panel(self.compact_panel, CompactPanel::Activities);
-            }
-            if (button::Props {
-                label: &details,
-                icon: Some(icons::INFO),
-                kind: button::Kind::Tertiary,
-                size: Size::Small,
-                width: button::Width::Fit,
-                enabled: props.selected.is_some(),
-            })
-            .show(ui)
-            .clicked()
-            {
-                self.compact_panel = toggle_panel(self.compact_panel, CompactPanel::Details);
-            }
-        });
+        self.compact_controls(ui, intl, props.selected.is_some());
         ui.add_space(8.0);
         let drawer_rect = ui.available_rect_before_wrap();
         self.show_viewer(ui, intl, props);
@@ -253,6 +224,59 @@ impl Workspace {
             self.compact_panel = None;
         }
         action
+    }
+
+    fn compact_controls(&mut self, ui: &mut Ui, intl: &Intl, has_selection: bool) {
+        let activities = format_message!(intl, default_message: "Activities");
+        let details = format_message!(intl, default_message: "Details");
+        ui.horizontal(|ui| {
+            let activities_response = button::Props {
+                label: &activities,
+                icon: Some(icons::ACTIVITY),
+                kind: button::Kind::Tertiary,
+                size: Size::Small,
+                width: button::Width::Fit,
+                enabled: true,
+            }
+            .show(ui);
+            if activities_response.clicked() {
+                self.compact_panel = toggle_panel(self.compact_panel, CompactPanel::Activities);
+            }
+            let details_response = button::Props {
+                label: &details,
+                icon: Some(icons::INFO),
+                kind: button::Kind::Tertiary,
+                size: Size::Small,
+                width: button::Width::Fit,
+                enabled: has_selection,
+            }
+            .show(ui);
+            if details_response.clicked() {
+                self.compact_panel = toggle_panel(self.compact_panel, CompactPanel::Details);
+            }
+            for (response, target, panel) in [
+                (
+                    &activities_response,
+                    "activity.list.toggle",
+                    CompactPanel::Activities,
+                ),
+                (
+                    &details_response,
+                    "activity.details.toggle",
+                    CompactPanel::Details,
+                ),
+            ] {
+                crate::semantics::target(ui, response, target);
+                crate::semantics::value(
+                    response,
+                    if self.compact_panel == Some(panel) {
+                        "open"
+                    } else {
+                        "closed"
+                    },
+                );
+            }
+        });
     }
 
     fn show_viewer(&mut self, ui: &mut Ui, intl: &Intl, props: &WorkspaceProps<'_>) {

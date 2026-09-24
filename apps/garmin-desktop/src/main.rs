@@ -6,5 +6,6 @@
 )]
 
 fn main() -> Result<(), garmin_desktop::Error> {
-    garmin_desktop::run()
+    use clap::Parser as _;
+    garmin_desktop::run_with_options(garmin_desktop::Options::parse())
 }

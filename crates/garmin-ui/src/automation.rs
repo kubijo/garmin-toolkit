@@ -2,7 +2,7 @@
 
 use egui::{Context, Event, Modifiers, PointerButton, Pos2, RawInput, Rect};
 use kittest::{By, Queryable as _};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 mod menu {
     use egui::{Rect, Ui};
@@ -95,9 +95,20 @@ mod menu {
         selected
     }
 }
+mod actions;
+mod control;
+mod resize;
 mod scenarios;
+pub use control::command;
+pub use resize::{ResizeCommand, ResizeHandler, ResizeRequest};
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_developer;
+#[cfg(test)]
+mod tests_resize;
+#[cfg(test)]
+mod tests_workspace;
 
 pub use menu::{header_button, header_rect, launcher, scenario_menu};
 pub use scenarios::SCENARIOS;
@@ -116,7 +127,7 @@ impl<'a> kittest::NodeT<'a> for SemanticNode<'a> {
 }
 
 /// Run report, retained until the next start.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Report {
     pub version: u8,
     pub scenario: String,
@@ -128,15 +139,20 @@ pub struct Report {
     pub elapsed_seconds: f64,
     pub viewport: [f32; 2],
     pub pixels_per_point: f32,
+    pub viewport_changes: Vec<ViewportChange>,
+    pub resize_request: Option<ResizeRequest>,
     pub driver_milliseconds: f64,
     pub tree_milliseconds: f64,
     pub readiness: Option<String>,
     pub actions: Vec<ActionTiming>,
     pub input_events: usize,
+    pub pauses: Vec<Pause>,
+    pub interrupted_attempts: Vec<ActionTiming>,
+    pub performance_eligible: bool,
 }
 
 /// Action timing relative to run start.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ActionTiming {
     pub phase: String,
     pub kind: String,
@@ -190,13 +206,29 @@ pub fn status_view(
     if let Some(failure) = failure {
         ui.label(failure);
     }
-    if state != "running" {
+    if state != "running" && state != "paused" {
         return false;
     }
     ui.label("Input locked · Esc to stop");
     let stop = ui.button("Stop (Esc)");
     crate::semantics::target(ui, &stop, "automation.stop");
     stop.clicked()
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Pause {
+    pub started_seconds: f64,
+    pub duration_seconds: f64,
+}
+
+/// Geometry changes observed during a functional run.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ViewportChange {
+    pub elapsed_seconds: f64,
+    pub previous_viewport: [f32; 2],
+    pub viewport: [f32; 2],
+    pub previous_pixels_per_point: f32,
+    pub pixels_per_point: f32,
 }
 
 struct Run {
@@ -207,22 +239,76 @@ struct Run {
     waiting_since: f64,
     gesture: Option<(Pos2, usize)>,
     ready_since: Option<f64>,
+    recovering_layout: bool,
+    resize_ready_since: Option<f64>,
+    restore_viewport: bool,
 }
 
 impl Run {
+    fn layout_ready(&mut self, action: &Action, value: Option<&str>, elapsed: f64) -> bool {
+        if !self.recovering_layout {
+            return true;
+        }
+        if matches!(action, Action::Observe(_))
+            && value != Some("ready")
+            && !value.is_some_and(|value| value.starts_with("failed:"))
+            && elapsed - self.waiting_since <= 30.0
+        {
+            return false;
+        }
+        self.due = elapsed;
+        self.recovering_layout = false;
+        true
+    }
+
+    fn map_ready(&mut self, value: Option<&str>, elapsed: f64) -> Result<bool, String> {
+        if let Some(failure) = value.filter(|value| value.starts_with("failed:")) {
+            return Err(failure.into());
+        }
+        if value != Some("ready") {
+            self.ready_since = None;
+            if elapsed - self.waiting_since > 30.0 {
+                return Err("visible map preparation/upload readiness timed out".into());
+            }
+            return Ok(false);
+        }
+        Ok(elapsed - *self.ready_since.get_or_insert(elapsed) >= 0.5)
+    }
+
+    fn recover_layout(&mut self, input: &mut RawInput, held: &mut Option<Pos2>, elapsed: f64) {
+        // The target tree still describes the old layout. Release outside controls,
+        // then retry the unfinished action after egui lays out the new size.
+        if self.gesture.take().is_some()
+            && let Some(attempt) = self.report.actions.pop()
+        {
+            self.report.interrupted_attempts.push(attempt);
+        }
+        if held.take().is_some() {
+            let before = input.events.len();
+            release_buttons(input, &[PointerButton::Primary]);
+            self.report.input_events += input.events.len() - before;
+        }
+        self.due = elapsed + 1.0 / 60.0;
+        self.waiting_since = elapsed;
+        self.ready_since = None;
+        self.resize_ready_since = None;
+        self.recovering_layout = true;
+    }
+
     fn observe_environment(
         &mut self,
         ctx: &Context,
         input: &RawInput,
-    ) -> Result<(f64, Rect), String> {
+    ) -> Result<(f64, Rect, bool), String> {
         let now = input
             .time
             .ok_or("automation requires a monotonic input clock")?;
         let epoch = *self.start.get_or_insert(now);
         let elapsed = now - epoch;
-        if !elapsed.is_finite() || elapsed < self.report.elapsed_seconds {
+        if !elapsed.is_finite() || elapsed + 0.000_001 < self.report.elapsed_seconds {
             return Err("automation clock moved backwards or became invalid".into());
         }
+        let elapsed = elapsed.max(self.report.elapsed_seconds);
         if elapsed - self.report.elapsed_seconds > 2.0 {
             return Err("automation frame missed its two second deadline".into());
         }
@@ -230,55 +316,93 @@ impl Run {
         if elapsed > 120.0 {
             return Err("scenario exceeded its 120 second deadline".into());
         }
-        let screen = input.screen_rect.unwrap_or_else(|| ctx.viewport_rect());
+        let screen = input.screen_rect.unwrap_or_else(|| {
+            ctx.viewport_for(input.viewport_id, |viewport| viewport.input.viewport_rect())
+        });
         let viewport = [screen.width(), screen.height()];
-        let scale = ctx.pixels_per_point();
-        if self.report.viewport[0] > 0.0
+        let scale = ctx.zoom_factor() * input.viewport().native_pixels_per_point.unwrap_or(1.0);
+        let changed = self.report.viewport[0] > 0.0
             && (self
                 .report
                 .viewport
                 .iter()
                 .zip(viewport)
                 .any(|(a, b)| (a - b).abs() > 0.5)
-                || (self.report.pixels_per_point - scale).abs() > f32::EPSILON)
-        {
-            return Err("viewport or pixel scale changed during the workload".into());
+                || (self.report.pixels_per_point - scale).abs() > f32::EPSILON);
+        if changed {
+            self.report.performance_eligible = false;
+            self.report.viewport_changes.push(ViewportChange {
+                elapsed_seconds: elapsed,
+                previous_viewport: self.report.viewport,
+                viewport,
+                previous_pixels_per_point: self.report.pixels_per_point,
+                pixels_per_point: scale,
+            });
         }
         self.report.viewport = viewport;
         self.report.pixels_per_point = scale;
-        Ok((elapsed, screen))
+        Ok((elapsed, screen, changed))
     }
 }
 
 /// Install only in explicitly enabled demo/test sessions.
 #[derive(Default)]
 pub struct Driver {
+    resize_handler: Option<ResizeHandler>,
+    viewport_restore: Option<resize::ViewportRestore>,
+    // Hooks run outside the viewport pass. Pair input/output identities explicitly;
+    // a stack also handles immediate viewports nested inside the root pass.
+    viewport_passes: Vec<egui::ViewportId>,
     tree: Option<kittest::State>,
     run: Option<Run>,
     held: Option<Pos2>,
     release: bool,
     launch_request: Option<&'static str>,
     pub launch_error: Option<String>,
+    paused_at: Option<f64>,
+    resumed_at: Option<f64>,
 }
 
 impl Driver {
+    /// Override native viewport resizing, e.g. with a browser canvas adapter.
+    #[must_use]
+    pub fn with_resize_handler(mut self, handler: ResizeHandler) -> Self {
+        self.resize_handler = Some(handler);
+        self
+    }
+
     /// Start a built-in workload.
     ///
     /// # Errors
     /// Unknown names and concurrent runs are rejected.
     pub fn start(&mut self, name: &str) -> Result<(), String> {
-        if self.running() || self.release {
-            return Err("an automation run is active or releasing input".into());
-        }
         let mut steps = scenarios::steps(name).ok_or_else(|| "unknown scenario".to_owned())?;
         if lookup(self.tree.as_ref(), "profile.toggle", Rect::EVERYTHING)?.is_some() {
             let open = lookup(self.tree.as_ref(), "profile.logout", Rect::EVERYTHING)?.is_some();
             steps.splice(0..0, scenarios::return_to_chooser(open));
         }
+        let run = self.start_steps(name, steps)?;
+        run.restore_viewport = run
+            .steps
+            .iter()
+            .any(|step| matches!(step.action, Action::Resize { .. }));
+        Ok(())
+    }
+
+    fn start_steps(&mut self, name: &str, steps: Vec<Step>) -> Result<&mut Run, String> {
+        if self.running()
+            || self.release
+            || self.paused_at.is_some()
+            || self.resumed_at.is_some()
+            || self.viewport_restore.is_some()
+        {
+            return Err("an automation run is active or releasing input".into());
+        }
+        tracing::info!(scenario = name, "Automation started");
         self.launch_error = None;
-        self.run = Some(Run {
+        Ok(self.run.insert(Run {
             report: Report {
-                version: 1,
+                version: 2,
                 scenario: name.into(),
                 state: "running".into(),
                 phase: "setup".into(),
@@ -288,11 +412,16 @@ impl Driver {
                 elapsed_seconds: 0.0,
                 viewport: [0.0; 2],
                 pixels_per_point: 1.0,
+                viewport_changes: Vec::new(),
+                resize_request: None,
                 driver_milliseconds: 0.0,
                 tree_milliseconds: 0.0,
                 readiness: None,
                 actions: Vec::with_capacity(steps.len()),
                 input_events: 0,
+                pauses: Vec::new(),
+                interrupted_attempts: Vec::new(),
+                performance_eligible: true,
             },
             steps,
             start: None,
@@ -300,8 +429,10 @@ impl Driver {
             waiting_since: 0.0,
             gesture: None,
             ready_since: None,
-        });
-        Ok(())
+            recovering_layout: false,
+            resize_ready_since: None,
+            restore_viewport: false,
+        }))
     }
 
     #[must_use]
@@ -316,6 +447,10 @@ impl Driver {
         self.run.as_ref().map(|run| &run.report)
     }
 
+    pub fn request_launch(&mut self, name: &'static str) {
+        self.launch_request = Some(name);
+    }
+
     /// Take the pending menu selection.
     pub fn take_launch_request(&mut self) -> Option<&'static str> {
         self.launch_request.take()
@@ -327,10 +462,19 @@ impl Driver {
     }
 
     fn finish(&mut self, state: &str, failure: Option<String>) {
-        if self.running() {
-            let run = self.run.as_mut().expect("running implies a run");
+        if self.running() || self.paused_at.is_some() || self.resumed_at.is_some() {
+            self.paused_at = None;
+            self.resumed_at = None;
+            let run = self.run.as_mut().expect("active implies a run");
+            tracing::info!(
+                scenario = run.report.scenario,
+                outcome = state,
+                reason = failure,
+                "Automation finished"
+            );
             run.report.state = state.into();
             run.report.failure = failure;
+            run.report.resize_request = None;
             self.release = self.held.is_some();
         }
     }
@@ -363,7 +507,11 @@ impl Driver {
         let reason = if escape {
             Ok(Some("stopped with Escape"))
         } else {
-            lookup(self.tree.as_ref(), "automation.stop", ctx.viewport_rect()).map(|stop| {
+            let stops = ["automation.stop", "developer.automation.stop"]
+                .into_iter()
+                .map(|target| lookup(self.tree.as_ref(), target, ctx.viewport_rect()))
+                .collect::<Result<Vec<_>, _>>();
+            stops.map(|stops| {
                 input.events.iter().find_map(|event| match event {
                     Event::PointerButton {
                         pos,
@@ -375,7 +523,7 @@ impl Driver {
                         pos,
                         phase: egui::TouchPhase::Start,
                         ..
-                    } if stop.as_ref().is_some_and(|(rect, _)| rect.contains(*pos)) => {
+                    } if stops.iter().flatten().any(|(rect, _)| rect.contains(*pos)) => {
                         Some("stopped with Stop button")
                     }
                     _ => None,
@@ -396,19 +544,26 @@ impl Driver {
 
     fn drive(&mut self, ctx: &Context, input: &mut RawInput) -> Result<(), String> {
         let run = self.run.as_mut().expect("only drive an active run");
-        let (elapsed, screen) = run.observe_environment(ctx, input)?;
-        let step = run.steps[run.report.completed];
+        let (elapsed, screen, changed) = run.observe_environment(ctx, input)?;
+        if changed {
+            run.recover_layout(input, &mut self.held, elapsed);
+            return Ok(());
+        }
+        let step = run.steps[run.report.completed].clone();
         run.report.phase = step.phase.into();
         if elapsed < run.due {
             return Ok(());
         }
-        let bounds = lookup(self.tree.as_ref(), step.target, screen)?;
+        if let Action::Resize { width, height } = step.action {
+            return run.resize(ctx, self.resize_handler, [width, height], elapsed, screen);
+        }
+        let bounds = lookup(self.tree.as_ref(), &step.target, screen)?;
         let waiting = matches!(
             step.action,
             Action::Wait | Action::Ready | Action::Observe(_)
         );
         let Some((rect, value)) = bounds else {
-            if matches!(step.action, Action::Wait | Action::Ready)
+            if (run.recovering_layout || matches!(step.action, Action::Wait | Action::Ready))
                 && elapsed - run.waiting_since <= 30.0
             {
                 return Ok(());
@@ -421,23 +576,11 @@ impl Driver {
         if step.target == "map" {
             run.report.readiness.clone_from(&value);
         }
-        if let Action::Ready = step.action {
-            if value
-                .as_deref()
-                .is_some_and(|value| value.starts_with("failed:"))
-            {
-                return Err(value.unwrap_or_default());
-            }
-            if value.as_deref() != Some("ready") {
-                run.ready_since = None;
-                if elapsed - run.waiting_since > 30.0 {
-                    return Err("visible map preparation/upload readiness timed out".into());
-                }
-                return Ok(());
-            }
-            if elapsed - *run.ready_since.get_or_insert(elapsed) < 0.5 {
-                return Ok(());
-            }
+        if !run.layout_ready(&step.action, value.as_deref(), elapsed) {
+            return Ok(());
+        }
+        if matches!(step.action, Action::Ready) && !run.map_ready(value.as_deref(), elapsed)? {
+            return Ok(());
         }
         if !waiting && elapsed - run.due > 2.0 {
             return Err(format!("action missed its deadline: {}", step.target));
@@ -467,7 +610,7 @@ impl Driver {
             run.report.actions.push(ActionTiming {
                 phase: step.phase.into(),
                 kind: step.action.name().into(),
-                target: step.target.into(),
+                target: step.target,
                 scheduled_seconds: scheduled,
                 actual_seconds: elapsed,
                 lateness_seconds: (elapsed - scheduled).max(0.0),
@@ -496,7 +639,7 @@ impl Driver {
 
 impl Step {
     fn input(
-        self,
+        &self,
         input: &mut RawInput,
         held: &mut Option<Pos2>,
         start: Pos2,
@@ -505,8 +648,9 @@ impl Step {
         value: Option<&str>,
     ) -> Result<bool, String> {
         let mut complete = true;
-        match self.action {
-            Action::Wait | Action::Ready | Action::Observe(_) => {}
+        match &self.action {
+            Action::Wait | Action::Ready | Action::Observe(_) | Action::Available => {}
+            Action::Resize { .. } => unreachable!("resize is handled before semantic input"),
             Action::Click => {
                 input.events.push(Event::PointerMoved(start));
                 input.events.push(pointer_button(start, frame == 0));
@@ -519,7 +663,7 @@ impl Step {
                     reason = "gesture has exactly thirty-two bounded samples"
                 )]
                 let fraction = frame.min(32) as f32 / 32.0;
-                let end = rect.min + rect.size() * egui::vec2(x, y);
+                let end = rect.min + rect.size() * egui::vec2(*x, *y);
                 let pos = start.lerp(end, fraction);
                 input.events.push(Event::PointerMoved(pos));
                 if frame == 0 || frame == 33 {
@@ -538,12 +682,24 @@ impl Step {
                 input.events.push(Event::MouseWheel {
                     phase: egui::TouchPhase::Move,
                     unit: egui::MouseWheelUnit::Point,
-                    delta: egui::vec2(0.0, delta),
+                    delta: egui::vec2(0.0, *delta),
                     modifiers: Modifiers::NONE,
                 });
             }
+            Action::Text(text) => input.events.push(Event::Text(text.clone())),
+            Action::Key(key) => {
+                for pressed in [true, false] {
+                    input.events.push(Event::Key {
+                        key: *key,
+                        physical_key: None,
+                        pressed,
+                        repeat: false,
+                        modifiers: Modifiers::NONE,
+                    });
+                }
+            }
             Action::Value(expected) => {
-                if value != Some(expected) {
+                if value != Some(expected.as_str()) {
                     return Err(format!(
                         "{}: expected {expected:?}, got {value:?}",
                         self.target
@@ -659,15 +815,24 @@ impl egui::plugin::Plugin for Driver {
     }
 
     fn input_hook(&mut self, ctx: &Context, input: &mut RawInput) {
+        self.viewport_passes.push(input.viewport_id);
+        if input.viewport_id != egui::ViewportId::ROOT {
+            return;
+        }
+        self.resume_clock(input);
         let started = web_time::Instant::now();
         let was_running = self.running();
         if was_running || self.release {
             match self.capture_user_input(ctx, input) {
                 Ok(Some(reason)) => self.cancel(reason),
-                Ok(None) if !input.focused => self.cancel("window lost focus"),
                 Ok(None) => {}
                 Err(reason) => self.finish("failed", Some(reason)),
             }
+        }
+        if self.running()
+            && let Err(reason) = self.save_viewport(ctx, input)
+        {
+            self.finish("failed", Some(reason));
         }
         if self.running()
             && let Err(reason) = self.drive(ctx, input)
@@ -675,15 +840,19 @@ impl egui::plugin::Plugin for Driver {
             self.finish("failed", Some(reason));
         }
         self.release_input(input);
+        self.restore_viewport(ctx);
         if was_running && let Some(run) = &mut self.run {
             run.report.driver_milliseconds += started.elapsed().as_secs_f64() * 1000.0;
         }
-        if self.running() || self.release {
+        if self.running() || self.release || self.paused_at.is_some() {
             ctx.request_repaint();
         }
     }
 
     fn output_hook(&mut self, _ctx: &Context, output: &mut egui::FullOutput) {
+        if self.viewport_passes.pop() != Some(egui::ViewportId::ROOT) {
+            return;
+        }
         let started = web_time::Instant::now();
         if let Some(update) = output.platform_output.accesskit_update.clone() {
             if let Some(tree) = &mut self.tree {
@@ -723,7 +892,9 @@ pub fn show_status(context: &Context) {
     let Some((state, phase, completed, total, failure, attempt)) = status else {
         return;
     };
-    if let Some(attempt) = attempt {
+    if matches!(state.as_str(), "running" | "paused")
+        && let Some(attempt) = attempt
+    {
         attempt.highlight(context);
     }
     let cancel = egui::Window::new("Automation")

@@ -1,0 +1,71 @@
+{
+  "operation": "sequence",
+  "argument": [
+    {
+      "kind": "resize",
+      "width": 1100,
+      "height": 720
+    },
+    {
+      "kind": "assert_value",
+      "target": "activity.0",
+      "value": "selected"
+    },
+    {
+      "kind": "resize",
+      "width": 720,
+      "height": 640
+    },
+    {
+      "kind": "click",
+      "target": "activity.list.toggle"
+    },
+    {
+      "kind": "wait",
+      "target": "activity.0"
+    },
+    {
+      "kind": "assert_value",
+      "target": "activity.0",
+      "value": "selected"
+    },
+    {
+      "kind": "click",
+      "target": "activity.list.toggle"
+    },
+    {
+      "kind": "assert_available",
+      "target": "profile.toggle"
+    },
+    {
+      "kind": "assert_available",
+      "target": "map.fit"
+    },
+    {
+      "kind": "assert_available",
+      "target": "playback.toggle"
+    },
+    {
+      "kind": "resize",
+      "width": 1100,
+      "height": 720
+    },
+    {
+      "kind": "assert_value",
+      "target": "activity.0",
+      "value": "selected"
+    },
+    {
+      "kind": "assert_available",
+      "target": "profile.toggle"
+    },
+    {
+      "kind": "assert_available",
+      "target": "map.fit"
+    },
+    {
+      "kind": "assert_available",
+      "target": "playback.toggle"
+    }
+  ]
+}
