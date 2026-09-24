@@ -28,7 +28,7 @@ pointer cursors.
 
 ## Automation and control
 
-Demo hosts accept `--ui-automation`. Desktop additionally accepts `--control-server`, which enables automation and binds
+Demo hosts accept `--ui-automation` and `--control-server`. On desktop, `--control-server` enables automation and binds
 an HTTP listener to `127.0.0.1:0`. The operating system selects the port; its actual URL is printed to stdout and shown
 in Developer tools. The panel also provides explicit Start, Stop, and Copy URL controls. Production rejects automation
 and control-server startup flags before opening storage. The listener is stopped on application exit.
@@ -45,10 +45,59 @@ listener. Ordinary application launches do not bind a control port.
 }
 ```
 
-HASS uses browser automation tools, including browser MCP, and `window.garminAutomation`; it does not expose a second
-host-side control server. The planned extension is tracked in the
-[shared interface plan](../plans/shared-interface-workflows.md#hass-control-protocol-extension-next-task). The panel
-documents and provides copyable examples for the hooks:
+HASS `--control-server` enables automation and registers control routes on the existing HTTP listener. Without that
+flag, control, session discovery, and capabilities return HTTP 404. `--ui-automation` alone enables browser hooks
+without HTTP control. Production builds reject either flag. Starting HTTP control requires
+`GARMIN_TOOLKIT_CONTROL_TOKEN`, at least 32 non-space ASCII characters; requests supply it as an
+`Authorization: Bearer ...` header. Browser-origin HTTP requests are rejected. The token is never embedded in the app or
+its URL.
+
+`GET /api/control/sessions` lists connected root browser sessions and their `last_request_id`. Select a session
+explicitly; requests are never redirected to another tab. `GET /api/capabilities` describes the supported operations.
+`POST /api/control` uses the desktop command fields plus `session` and a positive, strictly increasing `request_id`:
+
+```json
+{
+  "session": "connection-id-from-session-discovery",
+  "request_id": 1,
+  "operation": "start",
+  "argument": "responsive-layout"
+}
+```
+
+Start/action/sequence acknowledge admission with `value: null`; poll `status` or `result` using increasing IDs for
+completion. HASS replies include the session and request ID. The backend permits one outstanding command per session, at
+most 16 sessions, a 16 KiB request, and a 1 MiB reply. Busy requests receive 429, reused or older IDs receive 409, and
+unknown/disconnected sessions receive 404. A five-second RPC deadline reports an unknown outcome on timeout or transport
+failure; commands are not retried. Browser dispatch also checks a deadline mapped to its monotonic clock.
+
+The root browser registers a reverse typed Remoc client on its existing application connection. Each reconnect gets a
+new connection ID; its page ID survives reconnect but changes on reload. Dropping the connection unregisters the session
+and revokes its browser handler. Commands enter the existing browser hooks, preserving metadata, watchdog, visibility
+pauses, and reports. Child popups do not register automation sessions. The endpoint is printed at startup; Developer
+tools debug information shows the endpoint, connection ID, and page ID. Relative URLs preserve ingress prefixes.
+
+For a local demo:
+
+```sh
+export GARMIN_TOOLKIT_CONTROL_TOKEN="$(openssl rand -hex 32)"
+just hass::run demo "$PWD/.tmp/hass-ui-automation" --control-server
+```
+
+Open the app in a browser, then use the same token when querying the printed endpoint. Screenshots, child-window
+control, and log access remain in the
+[shared interface plan](../plans/shared-interface-workflows.md#hass-control-protocol-extension). Browser MCP and
+`window.garminAutomation` remain available.
+
+With the token exported, `just hass::control sessions` lists root browser sessions.
+`just hass::control --session SESSION_ID check` runs the four scenarios, individual action and sequence checks,
+cancellation after resizing, and HTTP admission checks. Reports go to `.tmp/hass-control-runtime`; the checker never
+starts a server or chooses a session implicitly. On Linux, `--token-pid PID` can read the token privately from a known
+local HASS control-server process when the invoking shell does not have it. Use
+`just hass::control --session SESSION_ID command status` for a single request, or `--url URL` for another application
+base URL, including an ingress prefix.
+
+The panel documents these browser hooks:
 
 - `list()`, `start(name)`, `status()`, `result()`, and `cancel()` manage scenarios.
 - `targets()` lists semantic IDs, labels, roles, enabled states, values, and clipped logical bounds.

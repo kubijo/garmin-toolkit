@@ -9,6 +9,10 @@ use clap::Parser as _;
 
 #[derive(clap::Parser)]
 #[command(version, about)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent command-line feature switches"
+)]
 struct Args {
     /// Disable browser map upload lifecycle telemetry for controlled profiling comparisons.
     #[arg(long)]
@@ -19,6 +23,9 @@ struct Args {
     /// Enable built-in semantic UI scenarios (demo builds only).
     #[arg(long)]
     ui_automation: bool,
+    /// Enable authenticated HTTP automation control (demo builds only).
+    #[arg(long)]
+    control_server: bool,
 }
 
 #[tokio::main]
@@ -28,6 +35,7 @@ async fn main() -> Result<(), garmin_hass::Error> {
         map_upload_telemetry: !args.no_map_upload_telemetry,
         map_render_worker: !args.no_map_render_worker,
         ui_automation: args.ui_automation,
+        control_server: args.control_server,
     })
     .await
 }
@@ -57,6 +65,10 @@ mod tests {
         let args = Args::try_parse_from(["garmin-hass", "--ui-automation"]).unwrap();
         assert!(args.ui_automation);
         assert!(!args.no_map_render_worker);
+        assert!(!args.control_server);
+        let args = Args::try_parse_from(["garmin-hass", "--control-server"]).expect("control flag");
+        assert!(args.control_server);
+        assert!(!args.ui_automation);
     }
 
     #[test]

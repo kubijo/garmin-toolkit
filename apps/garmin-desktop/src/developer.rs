@@ -6,8 +6,8 @@ use axum::{
     routing::{get, post},
 };
 use eframe::egui;
+use garmin_service_api::control::ControlCommand as Command;
 use garmin_ui::developer::{Request, state};
-use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
@@ -35,12 +35,6 @@ impl Options {
     }
 }
 
-#[derive(Deserialize)]
-struct Command {
-    operation: String,
-    #[serde(default)]
-    argument: Value,
-}
 struct Pending {
     command: Command,
     response: oneshot::Sender<Result<Value, String>>,
@@ -340,9 +334,7 @@ async fn control(
     }
 }
 async fn capabilities() -> Json<Value> {
-    Json(
-        json!({"version":1,"operations":["list","start","status","result","cancel","targets","action","sequence"],"actions":["click","drag","scroll","wheel","key","text","resize","wait","assert_available","assert_value"]}),
-    )
+    Json(garmin_service_api::control::capabilities())
 }
 async fn debug(State(bridge): State<Bridge>) -> Json<Value> {
     Json(

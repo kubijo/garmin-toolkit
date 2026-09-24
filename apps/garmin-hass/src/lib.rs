@@ -15,6 +15,7 @@ use garmin_storage::Storage;
 use thiserror::Error;
 use tracing_subscriber::prelude::*;
 
+mod control;
 mod devices;
 mod mode;
 mod server;
@@ -27,6 +28,10 @@ const DATA_BASE_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_DATA_BASE";
 
 /// Startup-only browser controls, embedded in the uncached entry point.
 #[derive(Clone, Copy, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent startup feature switches"
+)]
 pub struct BrowserOptions {
     /// Record map upload lifecycle telemetry.
     pub map_upload_telemetry: bool,
@@ -34,6 +39,8 @@ pub struct BrowserOptions {
     pub map_render_worker: bool,
     /// Expose named semantic interaction scenarios in demo builds only.
     pub ui_automation: bool,
+    /// Expose authenticated automation routes on the existing HTTP listener (demo only).
+    pub control_server: bool,
 }
 
 impl Default for BrowserOptions {
@@ -42,15 +49,16 @@ impl Default for BrowserOptions {
             map_upload_telemetry: true,
             map_render_worker: true,
             ui_automation: false,
+            control_server: false,
         }
     }
 }
 
 impl BrowserOptions {
     fn validate(self) -> std::io::Result<()> {
-        if self.ui_automation && !cfg!(feature = "demo") {
+        if (self.ui_automation || self.control_server) && !cfg!(feature = "demo") {
             return Err(std::io::Error::other(
-                "--ui-automation requires a demo build",
+                "automation and control server require a demo build",
             ));
         }
         Ok(())
@@ -157,6 +165,12 @@ mod tests {
     fn automation_is_independently_opt_in_and_demo_only() {
         let defaults = super::BrowserOptions::default();
         assert!(!defaults.ui_automation);
+        assert!(!defaults.control_server);
+        let control = super::BrowserOptions {
+            control_server: true,
+            ..defaults
+        };
+        assert_eq!(control.validate().is_ok(), cfg!(feature = "demo"));
         let automation = super::BrowserOptions {
             ui_automation: true,
             ..defaults

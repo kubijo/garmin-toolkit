@@ -70,35 +70,30 @@ simultaneous native windows and Wayland focus on one setup. Remaining work:
 - **Logs:** verify remaining filters, slow-consumer gaps, and desktop export. Render and inspect the Developer tools
   gallery error scene with its persistent export-failure message.
 
-## HASS control protocol extension (next task)
+## HASS control protocol extension
 
-Planned, not implemented. Extend the existing Rust semantic dispatcher to HASS; keep JavaScript as browser API glue.
+Root command forwarding uses the existing HASS HTTP listener and a reverse Remoc client on each browser connection. The
+[endpoint contract](../architecture/developer-tools.md#automation-and-control) is shared with desktop. Use
+`just hass::control --session SESSION_ID check` for direct HTTP runtime acceptance. Complete the ingress and
+fault-injected transport cases below before claiming deployed HASS parity.
 
 ### Contract and routing
 
-- Extract versioned requests, replies, and capabilities from the native adapter while preserving desktop compatibility.
-  Reuse `garmin_ui::automation::command`; advertise unsupported operations per session/window.
-- Identify root app session, connection generation, window, and request separately. Reload creates a new session.
-  Require explicit selection with multiple tabs; never retarget pending commands to another tab.
-- Evaluate a reverse typed Remoc client over the existing service connection before adding WebSockets. The HASS backend
-  brokers requests to the browser event loop through bounded queues with correlated replies.
-- Preserve browser-hook parity: metadata, watchdog, hidden-tab pause/resume, active-time accounting, and reports
-  currently wrapped by `ui-automation.js`. Move shared orchestration into Rust rather than creating a second launch
-  path.
-- Distinguish request acknowledgement from workload completion and expose status/results by ID. Report missing/ambiguous
-  sessions, unsupported windows, queue limits, stale generations, disconnects, capture failures, and deadlines. A
-  timeout after dispatch may have an unknown outcome. Reject expired queued commands; never replay input or mutations
-  after reconnect. Bound pending requests and duplicate/result retention.
+- Verify request/reply parity through desktop HTTP, HASS HTTP, and browser hooks. HASS currently uses the existing
+  JavaScript orchestration to preserve metadata, watchdog, and visibility behavior; moving that orchestration into Rust
+  remains separate work.
+- Reports currently describe the session's latest workload, matching the existing driver. Add bounded historical run-ID
+  retrieval before supporting clients that need to retain several completed reports remotely.
+- Check two-tab targeting, reconnect generations, closed-tab revocation, deadline expiry, increasing request IDs, and
+  rejection of duplicate commands after timeout. No replay or automatic retargeting is allowed.
 
 ### Hosting
 
-- Keep explicit enablement and the demo-build restriction. Disabling control revokes registration and rejects queued
-  requests; cancellation remains separate. Desktop keeps its random loopback port.
-- Choose authenticated HASS ingress or an explicitly enabled loopback endpoint before implementation. Preserve ingress
-  prefixes and origin/access checks; session IDs provide routing, not authorization. Bind registration to the intended
-  backend connection. Do not expose unauthenticated control through the normal HASS listener.
-- Report the endpoint in stdout and Developer tools, alongside session, connection, windows, capabilities, and hooks. A
-  browser must already be connected. Focus loss does not cancel; hidden tabs retain pause/report behavior.
+- Check that all control routes return 404 unless explicitly enabled, and that production rejects enablement.
+- Verify Bearer authorization and ingress prefix/header forwarding on the existing HASS listener. Session IDs provide
+  routing, not authorization. Desktop retains its random loopback port and existing client contract.
+- Verify session discovery and Developer tools debug information after reload/reconnect. A browser must already be
+  connected. Focus loss must not cancel; hidden tabs retain pause/report behavior.
 
 ### Screenshots and later capabilities
 
@@ -117,7 +112,7 @@ operations and images later; browser MCP remains useful for navigation, file cho
 
 ### Implementation order and acceptance
 
-1. Define the contract/session lifecycle and verify existing desktop clients.
+1. Verify the shared contract/session lifecycle and existing desktop clients.
 2. Route root commands through HASS. Test two-tab targeting, independent reports, bounded admission, disabled defaults,
    ingress/access checks, and timeout/reload/reconnect without replay. Closed tabs fail pending requests.
 3. Compare the same scenario/sequence through desktop HTTP, HASS HTTP, and browser hooks: reset/logout, cancellation and

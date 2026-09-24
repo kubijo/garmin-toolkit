@@ -48,6 +48,7 @@
           };
           cargoArtifacts = craneLib.buildDepsOnly (
             nativeArgs
+            // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
             // {
               cargoExtraArgs = "-p garmin-hass --all-features";
               pname = "garmin-hass-deps";
@@ -59,6 +60,7 @@
           };
           webCargoArtifacts = wasmCraneLib.buildDepsOnly (
             webArgs
+            // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
             // {
               pname = "garmin-hass-web-deps";
             }

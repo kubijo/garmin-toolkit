@@ -194,6 +194,7 @@ let
   };
   cargoArtifacts = craneLib.buildDepsOnly (
     commonArgs
+    // import ./cargo-deps.nix { inherit lib workspaceSrc; }
     // {
       cargoExtraArgs = "--workspace --all-features";
       doCheck = false;
@@ -603,6 +604,10 @@ in
         ${workspaceSrc}/crates/garmin-ui/assets \
         ${src}/crates/garmin-ui/assets
       test ! -e ${src}/infra/gallery
+      for crate in fast-mvt winit; do
+        diff --recursive --brief ${workspaceSrc}/vendor/$crate ${src}/vendor/$crate
+        diff --recursive --brief ${workspaceSrc}/vendor/$crate ${cargoArtifacts.src}/vendor/$crate
+      done
       touch "$out"
     '';
 

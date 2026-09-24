@@ -2637,6 +2637,7 @@ dependencies = [
  "garmin-model",
  "remoc",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
