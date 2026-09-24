@@ -39,7 +39,7 @@ pub struct BrowserOptions {
     pub map_render_worker: bool,
     /// Expose named semantic interaction scenarios in demo builds only.
     pub ui_automation: bool,
-    /// Expose authenticated automation routes on the existing HTTP listener (demo only).
+    /// Expose localhost-only automation routes on the HTTP listener (demo only).
     pub control_server: bool,
 }
 

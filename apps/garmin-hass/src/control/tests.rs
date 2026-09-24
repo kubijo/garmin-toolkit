@@ -3,15 +3,147 @@ use garmin_service_api::control::{BrowserControl, BrowserControlServerShared};
 use remoc::{codec, rtc, rtc::ServerShared as _};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-const TOKEN: &str = "test-control-token-with-at-least-32-characters";
+#[tokio::test]
+async fn maximum_screenshot_crosses_the_real_transport_and_leaves_rpc_usable() -> anyhow::Result<()>
+{
+    use remoc::ConnectExt as _;
+    let browser = Arc::new(Browser {
+        capture_bytes: control::MAX_CAPTURE_BYTES,
+        label: "after screenshot",
+        calls: AtomicUsize::new(0),
+        block: AtomicBool::new(false),
+    });
+    let (server, local_client) = BrowserControlServerShared::<_, codec::Default>::new(browser);
+    let serving = tokio::spawn(server.serve());
+    let (left, right) = tokio::io::duplex(64 * 1024);
+    let (read, write) = tokio::io::split(left);
+    let providing = tokio::spawn(
+        remoc::Connect::io(control::transport_config(), read, write).provide(local_client),
+    );
+    let (read, write) = tokio::io::split(right);
+    let client: BrowserControlClient = remoc::Connect::io(control::transport_config(), read, write)
+        .consume()
+        .await?;
+    let capture = tokio::time::timeout(std::time::Duration::from_secs(5), client.capture(u64::MAX))
+        .await??
+        .map_err(anyhow::Error::msg)?;
+    capture.validate().map_err(anyhow::Error::msg)?;
+    assert_eq!(capture.png.len(), control::MAX_CAPTURE_BYTES);
+    assert!(capture.png.len() > remoc::Cfg::default().max_data_size);
+    let reply = client
+        .execute(ControlDispatch {
+            request_id: 2,
+            command_json: r#"{"operation":"status"}"#.into(),
+            expires_at_ms: u64::MAX,
+        })
+        .await?
+        .map_err(anyhow::Error::msg)?;
+    assert_eq!(
+        serde_json::from_str::<Value>(&reply)?["value"],
+        "after screenshot"
+    );
+    serving.abort();
+    providing.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn http_routes_allow_local_commands_without_credentials_and_reject_forwarding()
+-> anyhow::Result<()> {
+    let broker = Broker::new();
+    let (_connection, _, browser, task) = attach(&broker, "local");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    let app = broker.routes();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+    });
+    let client = reqwest::Client::new();
+    let url = format!("http://{address}/api/control");
+    let reply = client
+        .post(&url)
+        .json(&json!({"operation": "status"}))
+        .send()
+        .await?;
+    assert_eq!(reply.status(), StatusCode::OK);
+    assert_eq!(reply.json::<Value>().await?["value"], "local");
+    for header in [
+        "forwarded",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-real-ip",
+    ] {
+        let reply = client
+            .post(&url)
+            .header(header, "127.0.0.1")
+            .json(&json!({"operation": "status"}))
+            .send()
+            .await?;
+        assert_eq!(reply.status(), StatusCode::NOT_FOUND);
+    }
+    assert_eq!(
+        client
+            .post(&url)
+            .header(header::ORIGIN, "http://localhost")
+            .json(&json!({"operation": "status"}))
+            .send()
+            .await?
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        client
+            .post(&url)
+            .header(header::HOST, "example.com")
+            .json(&json!({"operation": "status"}))
+            .send()
+            .await?
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(browser.calls.load(Ordering::SeqCst), 1);
+    server.abort();
+    task.abort();
+    Ok(())
+}
 
 struct Browser {
+    capture_bytes: usize,
     label: &'static str,
     calls: AtomicUsize,
     block: AtomicBool,
 }
 
 impl BrowserControl for Browser {
+    fn capture(
+        &self,
+        _expires_at_ms: u64,
+    ) -> impl Future<Output = Result<Result<control::Capture, String>, rtc::CallError>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        // The broker validates the PNG envelope; renderer tests cover actual decoding.
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend_from_slice(&1_u32.to_be_bytes());
+        png.extend_from_slice(&1_u32.to_be_bytes());
+        png.resize(self.capture_bytes, u8::MAX);
+        std::future::ready(Ok(Ok(control::Capture {
+            info: control::CaptureInfo {
+                width: if self.block.load(Ordering::SeqCst) {
+                    2
+                } else {
+                    1
+                },
+                height: 1,
+                pixels_per_point: 1.0,
+                requested_frame: 10,
+                received_frame: 11,
+            },
+            png,
+        })))
+    }
     async fn execute(
         &self,
         _request: ControlDispatch,
@@ -34,6 +166,7 @@ fn attach(
     tokio::task::JoinHandle<()>,
 ) {
     let browser = Arc::new(Browser {
+        capture_bytes: 24,
         label,
         calls: AtomicUsize::new(0),
         block: AtomicBool::new(false),
@@ -51,77 +184,110 @@ fn attach(
 
 fn headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
-    headers.insert(
-        header::AUTHORIZATION,
-        format!("Bearer {TOKEN}").parse().expect("test header"),
-    );
+    headers.insert(header::HOST, "localhost:8099".parse().expect("test host"));
     headers
 }
 
-fn request(session: &str, request_id: u64) -> Envelope {
+#[tokio::test]
+async fn screenshots_are_binary_correlated_and_share_command_admission() {
+    let broker = Broker::new();
+    let (_connection, _info, browser, task) = attach(&broker, "capture");
+    let capture_request = |id| {
+        let mut envelope = request(id);
+        envelope.operation = "screenshot".into();
+        envelope
+    };
+    let mut origin = headers();
+    origin.insert(
+        header::ORIGIN,
+        "http://localhost:8099".parse().expect("origin"),
+    );
+    let response = control_request(State(broker.clone()), origin, Json(capture_request(1))).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(browser.calls.load(Ordering::SeqCst), 0);
+    let response =
+        control_request(State(broker.clone()), headers(), Json(capture_request(1))).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
+    assert!(!response.headers().contains_key("x-garmin-session"));
+    assert_eq!(response.headers()["x-garmin-request-id"], "1");
+    let body = axum::body::to_bytes(response.into_body(), control::MAX_CAPTURE_BYTES)
+        .await
+        .expect("PNG body");
+    assert_eq!(&body[..8], b"\x89PNG\r\n\x1a\n");
+    assert_eq!(
+        control_request(State(broker.clone()), headers(), Json(capture_request(1)))
+            .await
+            .status(),
+        StatusCode::CONFLICT
+    );
+    browser.block.store(true, Ordering::SeqCst);
+    assert_eq!(
+        control_request(State(broker.clone()), headers(), Json(capture_request(2)))
+            .await
+            .status(),
+        StatusCode::BAD_GATEWAY
+    );
+    let mut invalid = capture_request(3);
+    invalid.argument = json!({"window": "child"});
+    assert_eq!(
+        control_request(State(broker), headers(), Json(invalid))
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(browser.calls.load(Ordering::SeqCst), 2);
+    task.abort();
+}
+
+fn request(request_id: u64) -> Envelope {
     Envelope {
-        session: session.into(),
-        request_id,
-        command: ControlCommand {
-            operation: "status".into(),
-            argument: Value::Null,
-        },
+        request_id: Some(request_id),
+        operation: "status".into(),
+        argument: Value::Null,
     }
 }
 
-#[test]
-fn authentication_requires_the_token_and_rejects_browser_origins() {
-    let broker = Broker::new(TOKEN).expect("broker");
-    assert!(!broker.authorized(&HeaderMap::new()));
-    let mut headers = headers();
-    assert!(broker.authorized(&headers));
-    headers.insert(header::ORIGIN, "http://localhost".parse().expect("origin"));
-    assert!(!broker.authorized(&headers));
-    headers.remove(header::ORIGIN);
-    headers.insert(
-        header::AUTHORIZATION,
-        "Bearer wrong".parse().expect("wrong token"),
-    );
-    assert!(!broker.authorized(&headers));
-    assert!(Broker::new("short").is_err());
-}
-
 #[tokio::test]
-async fn requests_target_one_browser_and_never_replay_or_retarget_after_disconnect() {
-    let broker = Broker::new(TOKEN).expect("broker");
-    let (connection_a, a, first, task_a) = attach(&broker, "first");
-    let (_connection_b, b, second, task_b) = attach(&broker, "second");
+async fn requests_select_the_only_browser_and_reject_ambiguity_and_replay() {
+    let broker = Broker::new();
+    let (connection_a, _a, first, task_a) = attach(&broker, "first");
     let id = 1;
-    let (status, Json(reply)) =
-        dispatch(State(broker.clone()), headers(), Json(request(&a.id, id))).await;
+    let (status, Json(reply)) = dispatch(State(broker.clone()), headers(), Json(request(id))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(reply["value"], "first");
     assert_eq!(reply["request_id"], id);
     assert_eq!(first.calls.load(Ordering::SeqCst), 1);
-    assert_eq!(second.calls.load(Ordering::SeqCst), 0);
     assert_eq!(
-        dispatch(State(broker.clone()), headers(), Json(request(&a.id, id)))
+        dispatch(State(broker.clone()), headers(), Json(request(id)))
             .await
             .0,
         StatusCode::CONFLICT
     );
     assert_eq!(first.calls.load(Ordering::SeqCst), 1);
-    drop(connection_a);
+    let (connection_b, _b, second, task_b) = attach(&broker, "second");
     assert_eq!(
-        dispatch(State(broker.clone()), headers(), Json(request(&a.id, 2)))
+        dispatch(State(broker.clone()), headers(), Json(request(2)))
             .await
             .0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(second.calls.load(Ordering::SeqCst), 0);
+    drop(connection_a);
+    let (_, Json(reply)) = dispatch(State(broker.clone()), headers(), Json(request(2))).await;
+    assert_eq!(reply["value"], "second");
+    drop(connection_b);
+    assert_eq!(
+        dispatch(State(broker), headers(), Json(request(3))).await.0,
         StatusCode::NOT_FOUND
     );
-    let (_, Json(reply)) = dispatch(State(broker), headers(), Json(request(&b.id, id))).await;
-    assert_eq!(reply["value"], "second");
     task_a.abort();
     task_b.abort();
 }
 
 #[tokio::test]
 async fn busy_and_unsupported_requests_do_not_reach_the_browser() {
-    let broker = Broker::new(TOKEN).expect("broker");
+    let broker = Broker::new();
     let (_connection, info, browser, task) = attach(&broker, "first");
     let session = broker
         .active_sessions()
@@ -130,13 +296,13 @@ async fn busy_and_unsupported_requests_do_not_reach_the_browser() {
         .expect("registered session");
     let _permit = session.admission.acquire().await.expect("permit");
     assert_eq!(
-        dispatch(State(broker.clone()), headers(), Json(request(&info.id, 2)))
+        dispatch(State(broker.clone()), headers(), Json(request(2)))
             .await
             .0,
         StatusCode::TOO_MANY_REQUESTS
     );
-    let mut unsupported = request(&info.id, 2);
-    unsupported.command.operation = "eval".into();
+    let mut unsupported = request(2);
+    unsupported.operation = "eval".into();
     assert_eq!(
         dispatch(State(broker), headers(), Json(unsupported))
             .await
@@ -149,9 +315,10 @@ async fn busy_and_unsupported_requests_do_not_reach_the_browser() {
 
 #[tokio::test]
 async fn reconnect_uses_a_new_session_and_registration_is_single_use() {
-    let broker = Broker::new(TOKEN).expect("broker");
+    let broker = Broker::new();
     let browser = Arc::new(Browser {
         label: "reconnecting",
+        capture_bytes: 24,
         calls: AtomicUsize::new(0),
         block: AtomicBool::new(false),
     });
@@ -179,16 +346,11 @@ async fn reconnect_uses_a_new_session_and_registration_is_single_use() {
 
 #[tokio::test]
 async fn timed_out_request_is_not_replayed() {
-    let broker = Broker::new(TOKEN).expect("broker");
-    let (_connection, info, browser, task) = attach(&broker, "blocked");
+    let broker = Broker::new();
+    let (_connection, _info, browser, task) = attach(&broker, "blocked");
     browser.block.store(true, Ordering::SeqCst);
     let id = 1;
-    let (status, Json(reply)) = dispatch(
-        State(broker.clone()),
-        headers(),
-        Json(request(&info.id, id)),
-    )
-    .await;
+    let (status, Json(reply)) = dispatch(State(broker.clone()), headers(), Json(request(id))).await;
     assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
     assert!(
         reply["error"]
@@ -197,11 +359,85 @@ async fn timed_out_request_is_not_replayed() {
             .contains("outcome may be unknown")
     );
     assert_eq!(
-        dispatch(State(broker), headers(), Json(request(&info.id, id)))
+        dispatch(State(broker), headers(), Json(request(id)))
             .await
             .0,
         StatusCode::CONFLICT
     );
     assert_eq!(browser.calls.load(Ordering::SeqCst), 1);
     task.abort();
+}
+
+#[test]
+fn localhost_means_the_socket_peer_and_never_forwarded_headers() {
+    let local_headers = headers();
+    for address in ["127.0.0.1:8123", "[::1]:8123", "[::ffff:127.0.0.1]:8123"] {
+        assert!(local_connection(
+            Some(address.parse().expect("peer")),
+            &local_headers
+        ));
+    }
+    assert!(!local_connection(None, &local_headers));
+    assert!(!local_connection(
+        Some("192.168.1.2:8123".parse().expect("peer")),
+        &local_headers
+    ));
+    for name in [
+        "forwarded",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-real-ip",
+    ] {
+        let mut headers = headers();
+        headers.insert(name, "127.0.0.1".parse().expect("header"));
+        assert!(!local_connection(
+            Some("127.0.0.1:8123".parse().expect("peer")),
+            &headers
+        ));
+    }
+}
+
+#[test]
+fn local_hosts_are_required_even_with_a_loopback_peer() {
+    let peer = Some("127.0.0.1:8123".parse().expect("peer"));
+    assert!(!local_connection(peer, &HeaderMap::new()));
+    for (host, expected) in [
+        ("localhost:8099", true),
+        ("LOCALHOST", true),
+        ("127.0.0.1:8099", true),
+        ("[::1]:8099", true),
+        ("[::ffff:127.0.0.1]:8099", true),
+        ("example.com", false),
+        ("localhost.example.com", false),
+        ("192.168.1.3:8099", false),
+    ] {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, host.parse().expect("host"));
+        assert_eq!(local_connection(peer, &headers), expected, "{host}");
+    }
+}
+
+#[tokio::test]
+async fn commands_need_no_ids_and_explicit_replays_fail_across_reconnects() {
+    let broker = Broker::new();
+    let (connection, _, _, first) = attach(&broker, "first");
+    let envelope: Envelope =
+        serde_json::from_value(json!({"operation": "status"})).expect("plain command");
+    let (status, Json(reply)) = dispatch(State(broker.clone()), headers(), Json(envelope)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(reply["request_id"], 1);
+    assert!(reply.get("session").is_none());
+    assert!(
+        serde_json::from_value::<Envelope>(json!({"operation": "status", "session": "old"}))
+            .is_err()
+    );
+    drop(connection);
+    let (_connection, _, browser, second) = attach(&broker, "second");
+    assert_eq!(
+        dispatch(State(broker), headers(), Json(request(1))).await.0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(browser.calls.load(Ordering::SeqCst), 0);
+    first.abort();
+    second.abort();
 }

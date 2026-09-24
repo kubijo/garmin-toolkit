@@ -1,8 +1,8 @@
 """Exercise an already-running HASS demo through its opt-in HTTP control API."""
 
 import argparse
+import ipaddress
 import json
-import os
 import sys
 import time
 import urllib.error
@@ -11,52 +11,29 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-TOKEN_ENV = 'GARMIN_TOOLKIT_CONTROL_TOKEN'
+MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Do not forward the control credential to a redirect target."""
+    """Keep control requests on the explicitly selected localhost endpoint."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
 
-def read_token(pid: int | None) -> str:
-    if pid is None:
-        token = os.environ.get(TOKEN_ENV, '')
-    else:
-        process = Path('/proc') / str(pid)
-        args = (process / 'cmdline').read_bytes().split(b'\0')
-        if b'--control-server' not in args or 'garmin-hass' not in Path(os.fsdecode(args[0])).name:
-            raise ValueError('Token PID must identify a HASS control server')
-        prefix = TOKEN_ENV.encode() + b'='
-        token = next(
-            (
-                entry[len(prefix) :].decode()
-                for entry in (process / 'environ').read_bytes().split(b'\0')
-                if entry.startswith(prefix)
-            ),
-            '',
-        )
-    if not token:
-        raise ValueError(f'Set {TOKEN_ENV} or supply --token-pid for a local Linux server')
-    return token
-
-
 class Client:
-    def __init__(self, url: str, token: str):
+    def __init__(self, url: str):
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.query or parsed.fragment:
             raise ValueError('URL must be an HTTP(S) application base URL without query or fragment')
+        if parsed.hostname != 'localhost' and not ipaddress.ip_address(parsed.hostname).is_loopback:
+            raise ValueError('Control URL must use localhost or a loopback IP address')
         self.url = url.rstrip('/') + '/'
-        self.token = token
-        self.opener = urllib.request.build_opener(NoRedirect())
-        self.session = ''
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         self.request_id = 0
 
-    def request(self, path: str, body=None, *, auth=True, headers=None) -> tuple[int, Any]:
-        outgoing = {'Authorization': f'Bearer {self.token}'} if auth else {}
-        outgoing.update(headers or {})
+    def request(self, path: str, body=None, *, headers=None) -> tuple[int, Any]:
+        outgoing = dict(headers or {})
         data = None
         if body is not None:
             outgoing['Content-Type'] = 'application/json'
@@ -67,32 +44,53 @@ class Client:
         except urllib.error.HTTPError as error:
             response = error
         with response:
-            raw = response.read().decode()
+            raw_bytes = response.read(MAX_CAPTURE_BYTES + 1)
+            if len(raw_bytes) > MAX_CAPTURE_BYTES:
+                raise ValueError('Control response exceeds size limit')
+            if response.code == 200 and response.headers.get_content_type() == 'image/png':
+                metadata = json.loads(response.headers['x-garmin-capture'])
+                received_id = int(response.headers['x-garmin-request-id'])
+                if isinstance(body, dict) and body.get('request_id') is not None and received_id != body['request_id']:
+                    raise ValueError('Screenshot came from a different request')
+                self.request_id = received_id
+                validate_png(raw_bytes, metadata)
+                return response.code, {'png': raw_bytes, 'metadata': metadata}
+            raw = raw_bytes.decode()
             try:
                 value = json.loads(raw)
+                if isinstance(value, dict) and 'request_id' in value:
+                    self.request_id = value['request_id']
             except ValueError:
                 value = raw
             return response.code, value
 
-    def select(self, session: str):
-        _, result = expect(self.request('api/control/sessions'), 200)
-        match = next((item for item in result['sessions'] if item['id'] == session), None)
-        if match is None:
-            raise ValueError('Selected session is absent; discover sessions again and choose explicitly')
-        self.session = session
-        self.request_id = match['last_request_id']
-
-    def command(self, operation: str, argument=None) -> tuple[int, Any]:
-        self.request_id += 1
+    def command(self, operation: str, argument=None, *, request_id=None) -> tuple[int, Any]:
         return self.request(
             'api/control',
             {
-                'session': self.session,
-                'request_id': self.request_id,
+                'request_id': request_id,
                 'operation': operation,
                 'argument': argument,
             },
         )
+
+
+def validate_png(png: bytes, metadata: dict):
+    if len(png) < 24 or png[:8] != b'\x89PNG\r\n\x1a\n' or png[12:16] != b'IHDR':
+        raise ValueError('Screenshot is not a PNG')
+    width, height = int.from_bytes(png[16:20]), int.from_bytes(png[20:24])
+    if width != metadata['width'] or height != metadata['height'] or not 0 < width * height <= 8 * 1024 * 1024:
+        raise ValueError('Screenshot dimensions do not match its metadata')
+
+
+def screenshot(client: Client, output: Path):
+    if output.suffix.lower() != '.png':
+        raise ValueError('Screenshot output must use the .png extension')
+    _, reply = expect(client.command('screenshot'), 200)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(reply['png'])
+    output.with_suffix('.json').write_text(json.dumps(reply['metadata'], indent=2) + '\n')
+    print(f'Saved screenshot: {output}', flush=True)
 
 
 def expect(reply: tuple[int, Any], status: int) -> tuple[int, Any]:
@@ -120,16 +118,14 @@ def check(client: Client, output: Path):
     output.mkdir(parents=True, exist_ok=True)
     _, reply = expect(client.command('status'), 200)
     if reply['value'] and reply['value']['state'] in ('running', 'paused'):
-        raise ValueError('Selected session already has an active workload')
-    for path in ('api/capabilities', 'api/control/sessions'):
-        expect(client.request(path, auth=False), 401)
-        expect(client.request(path, headers={'Authorization': 'Bearer invalid'}), 401)
-        expect(client.request(path, headers={'Origin': client.url}), 401)
-        expect(client.request(path), 200)
-    expect(client.request('api/control', {'session': 'unknown', 'request_id': 1, 'operation': 'status'}), 404)
+        raise ValueError('The app already has an active workload')
+    expect(client.request('api/capabilities', headers={'Origin': client.url}), 403)
+    expect(client.request('api/capabilities'), 200)
+    expect(client.request('api/control/sessions'), 404)
+    expect(client.request('api/capabilities', headers={'X-Forwarded-For': '127.0.0.1'}), 404)
     expect(client.command('unsupported'), 400)
     expect(client.command('start', 'x' * 17_000), 413)
-    print('Authentication, unknown session, invalid operation, and size limit: passed', flush=True)
+    print('Origin and forwarded request rejection, invalid operation, and size limit: passed', flush=True)
 
     # Only cancel runs started by this check; never interfere with an existing run.
     owned_run = False
@@ -141,7 +137,6 @@ def check(client: Client, output: Path):
                 client.request(
                     'api/control',
                     {
-                        'session': client.session,
                         'request_id': client.request_id,
                         'operation': 'start',
                         'argument': name,
@@ -194,35 +189,28 @@ def check(client: Client, output: Path):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--url', default='http://127.0.0.1:8099/')
-    parser.add_argument('--token-pid', type=int, help='Read the token privately from this local Linux HASS process')
-    parser.add_argument('--session', help='Explicit root browser session ID from sessions')
     commands = parser.add_subparsers(dest='mode', required=True)
-    commands.add_parser('sessions')
     command = commands.add_parser('command')
     command.add_argument('operation')
     command.add_argument('--argument', type=json.loads, help='JSON argument, including quotes for strings')
-    command.add_argument('--request-id', type=int, help='Explicit ID for replay and stale-session checks')
+    command.add_argument('--request-id', type=int, help='Optional explicit ID for replay checks')
     checks = commands.add_parser('check')
     checks.add_argument('--output', type=Path, default=Path('.tmp/hass-control-runtime'))
+    capture = commands.add_parser('screenshot')
+    capture.add_argument('--output', type=Path, default=Path('.tmp/hass-control-runtime/screenshot.png'))
     args = parser.parse_args()
     try:
-        client = Client(args.url, read_token(args.token_pid))
-        if args.mode == 'sessions':
-            _, result = expect(client.request('api/control/sessions'), 200)
-            print(json.dumps(result, indent=2))
+        client = Client(args.url)
+        if args.mode == 'check':
+            check(client, args.output)
+        elif args.mode == 'screenshot':
+            screenshot(client, args.output)
         else:
-            if not args.session:
-                parser.error('--session is required; choose explicitly from sessions')
-            if args.mode == 'command' and args.request_id is not None:
-                client.session, client.request_id = args.session, args.request_id - 1
-            else:
-                client.select(args.session)
-            if args.mode == 'check':
-                check(client, args.output)
-            else:
-                status, result = client.command(args.operation, args.argument)
-                print(json.dumps({'http_status': status, 'response': result}, indent=2))
-                return 0 if status == 200 else 1
+            if args.operation == 'screenshot':
+                parser.error('Use screenshot --output FILE.png to save a capture')
+            status, result = client.command(args.operation, args.argument, request_id=args.request_id)
+            print(json.dumps({'http_status': status, 'response': result}, indent=2))
+            return 0 if status == 200 else 1
     except (OSError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 1

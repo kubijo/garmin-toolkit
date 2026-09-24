@@ -20,7 +20,9 @@ import {
     rendererDiagnostics,
     takeRendererDiagnostics,
     mapReadiness,
+    snapshotComposition,
 } from '../../apps/garmin-hass/web/map-composition.js';
+import { beginScreenshot, finishScreenshot, cancelScreenshot } from '../../apps/garmin-hass/web/screenshot.js';
 
 test.beforeEach(t => {
     t.mock.method(console, 'table', () => {});
@@ -211,6 +213,97 @@ test('direct presentation transfers canvas once and bounds resize work to one in
     await b.draw(630);
     assert.equal(b.worker.messages.length, 3, 'unchanged dimensions do not redraw or transfer frames');
     assert.ok(b.worker.messages.slice(1).every(message => message.transfer === undefined));
+});
+
+test('capture correlation rejects late replies, resize and worker disposal', async t => {
+    const b = browser(t);
+    b.worker.send('composition-ready', 'Gl', 8192);
+    await b.draw();
+    assert.throws(snapshotComposition, /not ready/);
+    b.worker.send('composition-drawn', 1, 600, 400);
+    const first = snapshotComposition();
+    first.cancel();
+    await assert.rejects(first.blob, /cancelled/);
+    const second = snapshotComposition();
+    const blob = new Blob(['test PNG'], { type: 'image/png' });
+    b.worker.send('composition-captured', 1, blob);
+    assert.throws(snapshotComposition, /not ready/, 'late reply must not release the active capture');
+    b.worker.send('composition-captured', 2, blob);
+    assert.equal(await second.blob, blob);
+    second.validate();
+    await b.draw(620);
+    assert.throws(second.validate, /map changed/);
+    b.worker.send('composition-drawn', 2, 620, 400);
+    const third = snapshotComposition();
+    disposeComposition();
+    await assert.rejects(third.blob, /disposed/);
+    assert.throws(third.validate, /map changed/);
+});
+
+test('screenshot composes clipped map below copied UI pixels and rejects changed geometry', async t => {
+    const b = browser(t);
+    b.worker.send('composition-ready', 'Gl', 8192);
+    await b.draw();
+    b.worker.send('composition-drawn', 1, 600, 400);
+    const canvas = {
+        width: 1000,
+        height: 800,
+        isConnected: true,
+        getBoundingClientRect: () => ({ x: 0, y: 0, width: 500, height: 400 }),
+    };
+    b.document.getElementById = () => canvas;
+    const calls = [];
+    const bitmap = { width: 600, height: 400, close: () => calls.push('close') };
+    const png = new Blob(['PNG'], { type: 'image/png' });
+    class Offscreen {
+        getContext() {
+            return {
+                save() {},
+                beginPath() {},
+                clip() {},
+                restore() {},
+                rect: (...args) => calls.push(['clip', ...args]),
+                drawImage: (source, ...args) => calls.push([source === bitmap ? 'map' : 'ui', ...args]),
+                putImageData: image => calls.push(['pixels', image.pixels[0]]),
+            };
+        }
+        async convertToBlob() {
+            return png;
+        }
+    }
+    const globals = {
+        devicePixelRatio: 2,
+        OffscreenCanvas: Offscreen,
+        createImageBitmap: async () => bitmap,
+        ImageData: class {
+            constructor(pixels) {
+                this.pixels = pixels;
+            }
+        },
+    };
+    for (const [key, value] of Object.entries(globals)) {
+        const original = Object.getOwnPropertyDescriptor(globalThis, key);
+        Object.defineProperty(globalThis, key, { value, configurable: true });
+        t.after(() => (original ? Object.defineProperty(globalThis, key, original) : delete globalThis[key]));
+    }
+    const ticket = beginScreenshot();
+    const rgba = new Uint8Array(1000 * 800 * 4);
+    rgba[0] = 42;
+    const result = finishScreenshot(ticket, rgba, 1000, 800);
+    rgba[0] = 0; // A later WASM allocation may reuse the borrowed memory.
+    b.worker.send('composition-captured', 1, png);
+    assert.deepEqual(await result, new Uint8Array(await png.arrayBuffer()));
+    assert.deepEqual(calls, [
+        ['clip', 20, 100, 600, 400],
+        ['map', 20, 100, 600, 400],
+        'close',
+        ['pixels', 42],
+        ['ui', 0, 0],
+    ]);
+    const stale = beginScreenshot();
+    canvas.width = 999;
+    await assert.rejects(finishScreenshot(stale, rgba, 1000, 800), /viewport changed/);
+    cancelScreenshot(stale);
 });
 
 test('logic-only click passes preserve presentation until actual paint', async t => {
@@ -405,6 +498,40 @@ test('render worker rejects early work and remains terminal after failure', asyn
     assert.equal(messages[0][1], 'composition-failed');
     await scope.onmessage({ data: compositionMessage('composition-size', 2, 100, 100) });
     assert.equal(messages.length, 1);
+});
+
+test('render worker redraws before readback and rejects stale capture without losing the renderer', async () => {
+    const moduleUrl = `data:text/javascript,${encodeURIComponent(`
+        export default async function() {}
+        export class CompositionRenderer {
+            static async create(canvas) { const r = new CompositionRenderer(); r.canvas = canvas; return r; }
+            backend() { return 'Gl'; }
+            maximum_size() { return 8192; }
+            draw() { this.canvas.draws++; }
+        }
+    `)}`;
+    const messages = [];
+    const scope = { postMessage: message => messages.push(message) };
+    const canvas = {
+        draws: 0,
+        async convertToBlob() {
+            assert.equal(this.draws, 2, 'capture must redraw an otherwise discarded WebGL buffer');
+            return new Blob(['PNG'], { type: 'image/png' });
+        },
+    };
+    installCompositionWorker(scope);
+    await scope.onmessage({
+        data: compositionMessage('composition-init', 'worker-gl', moduleUrl, 'fixture.wasm', canvas),
+    });
+    await scope.onmessage({ data: compositionMessage('composition-size', 1, 120, 80) });
+    await scope.onmessage({ data: compositionMessage('composition-capture', 1, 2, 120, 80) });
+    assert.equal(messages.at(-1)[1], 'composition-capture-failed');
+    await scope.onmessage({ data: compositionMessage('composition-capture', 2, 1, 120, 80) });
+    assert.equal(messages.at(-1)[1], 'composition-captured');
+    assert.equal(messages.at(-1)[2], 2);
+    assert.equal(messages.at(-1)[3].type, 'image/png');
+    assert.throws(() => compositionMessage('composition-capture', 3, 1, 4096, 4096));
+    assert.throws(() => compositionMessage('composition-captured', 3, new Blob(['text'])));
 });
 
 test('render worker initializes the requested WASM and acknowledges actual submissions', async () => {

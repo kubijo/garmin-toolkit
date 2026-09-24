@@ -46,56 +46,68 @@ listener. Ordinary application launches do not bind a control port.
 ```
 
 HASS `--control-server` enables automation and registers control routes on the existing HTTP listener. Without that
-flag, control, session discovery, and capabilities return HTTP 404. `--ui-automation` alone enables browser hooks
-without HTTP control. Production builds reject either flag. Starting HTTP control requires
-`GARMIN_TOOLKIT_CONTROL_TOKEN`, at least 32 non-space ASCII characters; requests supply it as an
-`Authorization: Bearer ...` header. Browser-origin HTTP requests are rejected. The token is never embedded in the app or
-its URL.
+flag, control and capabilities return HTTP 404. `--ui-automation` alone enables browser hooks without HTTP control.
+Production builds reject either flag. No token is required. Browser-origin HTTP requests are rejected. Control HTTP and
+browser registration accept only actual loopback socket peers and localhost or loopback-IP Host headers. Forwarded
+requests are rejected; control is not available through HASS ingress. Other application routes retain their configured
+bind address.
 
-`GET /api/control/sessions` lists connected root browser sessions and their `last_request_id`. Select a session
-explicitly; requests are never redirected to another tab. `GET /api/capabilities` describes the supported operations.
-`POST /api/control` uses the desktop command fields plus `session` and a positive, strictly increasing `request_id`:
+`GET /api/capabilities` describes the supported operations. `POST /api/control` uses the desktop command fields. The
+server automatically selects the single connected root app tab. No connected tab returns 404; multiple connected tabs
+return 409 and require closing the extra tabs. Child popups do not affect selection. Session discovery and
+caller-supplied session IDs are removed.
 
 ```json
 {
-  "session": "connection-id-from-session-discovery",
-  "request_id": 1,
   "operation": "start",
   "argument": "responsive-layout"
 }
 ```
 
-Start/action/sequence acknowledge admission with `value: null`; poll `status` or `result` using increasing IDs for
-completion. HASS replies include the session and request ID. The backend permits one outstanding command per session, at
-most 16 sessions, a 16 KiB request, and a 1 MiB reply. Busy requests receive 429, reused or older IDs receive 409, and
-unknown/disconnected sessions receive 404. A five-second RPC deadline reports an unknown outcome on timeout or transport
-failure; commands are not retried. Browser dispatch also checks a deadline mapped to its monotonic clock.
+Start/action/sequence acknowledge admission with `value: null`; poll `status` or `result` for completion. HASS allocates
+and returns an increasing `request_id`. Clients may supply a positive explicit ID for replay checks; it must exceed the
+last admitted ID across all connections. The backend permits one outstanding command per connection, at most 16
+connections, a 16 KiB request, and a 1 MiB JSON reply. Busy requests receive 429; reused or older IDs receive 409. A
+five-second RPC deadline reports an unknown outcome on timeout or transport failure; commands are never retried or
+redirected after admission. Browser dispatch also checks a deadline mapped to its monotonic clock.
 
 The root browser registers a reverse typed Remoc client on its existing application connection. Each reconnect gets a
 new connection ID; its page ID survives reconnect but changes on reload. Dropping the connection unregisters the session
 and revokes its browser handler. Commands enter the existing browser hooks, preserving metadata, watchdog, visibility
 pauses, and reports. Child popups do not register automation sessions. The endpoint is printed at startup; Developer
-tools debug information shows the endpoint, connection ID, and page ID. Relative URLs preserve ingress prefixes.
+tools debug information shows the local endpoint. Connection and page IDs remain internal lifecycle bookkeeping.
 
 For a local demo:
 
 ```sh
-export GARMIN_TOOLKIT_CONTROL_TOKEN="$(openssl rand -hex 32)"
 just hass::run demo "$PWD/.tmp/hass-ui-automation" --control-server
 ```
 
-Open the app in a browser, then use the same token when querying the printed endpoint. Screenshots, child-window
-control, and log access remain in the
+Open the app in a browser, then query the printed localhost endpoint. Child-window control and log access remain in the
 [shared interface plan](../plans/shared-interface-workflows.md#hass-control-protocol-extension). Browser MCP and
 `window.garminAutomation` remain available.
 
-With the token exported, `just hass::control sessions` lists root browser sessions.
-`just hass::control --session SESSION_ID check` runs the four scenarios, individual action and sequence checks,
-cancellation after resizing, and HTTP admission checks. Reports go to `.tmp/hass-control-runtime`; the checker never
-starts a server or chooses a session implicitly. On Linux, `--token-pid PID` can read the token privately from a known
-local HASS control-server process when the invoking shell does not have it. Use
-`just hass::control --session SESSION_ID command status` for a single request, or `--url URL` for another application
-base URL, including an ingress prefix.
+`just hass::control check` runs the four scenarios, individual action and sequence checks, cancellation after resizing,
+and HTTP admission checks. Reports go to `.tmp/hass-control-runtime`; the checker never starts a server. Use
+`just hass::control command status` for a single request, or `--url URL` for another localhost application address.
+
+`screenshot` takes no argument and captures the root application on desktop and HASS. Its HTTP success response is
+`image/png`, with `Cache-Control: no-store` and JSON metadata in `x-garmin-capture`: physical width/height,
+`pixels_per_point`, and `requested_frame`/`received_frame`. These identify UI request and receipt, not compositor
+presentation. HASS also returns `x-garmin-request-id`. Errors use the usual JSON response. Capture is limited to 8 Mi
+pixels and 8 MiB of PNG data, with one pending capture and the five-second command deadline. No server-side artifact is
+retained. Both ends of the HASS transport buffer up to the PNG limit plus 64 KiB of RPC/codec overhead; Remoc's default
+512 KiB threshold would switch large replies to streaming that requires OS threads unavailable in browser WASM. On HASS,
+save the image and metadata with:
+
+```sh
+just hass::control screenshot --output .tmp/capture.png
+```
+
+Native capture includes renderer callbacks. HASS composites the worker map underneath the UI using physical placement
+and clipping. A hidden tab, pending map view, resize, or changed map during capture fails explicitly; request a new
+capture after the application settles. Images exclude child windows, browser chrome, OS decorations, and system dialogs.
+Screenshot capture is an HTTP operation; the existing synchronous `window.garminAutomation` hooks remain unchanged.
 
 The panel documents these browser hooks:
 

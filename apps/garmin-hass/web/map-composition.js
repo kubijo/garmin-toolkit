@@ -173,6 +173,8 @@ export function startComposition(canvas, mode, repaint, map = false) {
         pendingRoute: null,
         routeRevision: 0,
         active: false,
+        captureSequence: 0,
+        capture: null,
     };
     host = state;
     state.visibility = () => {
@@ -190,6 +192,7 @@ export function startComposition(canvas, mode, repaint, map = false) {
         state.wrapper.style.display = 'none';
         state.worker?.terminate();
         state.flight = null;
+        rejectCapture(state, state.error);
         clearTimeout(state.timeout);
         state.repaint();
         console.error('Map composition failed:', state.error);
@@ -212,7 +215,14 @@ export function startComposition(canvas, mode, repaint, map = false) {
             if (host !== state || state.status === 'failed') return;
             try {
                 const message = decodeComposition(data);
-                if (message.type === 'composition-ready' && state.status === 'initializing') {
+                if (['composition-captured', 'composition-capture-failed'].includes(message.type)) {
+                    if (state.capture?.id !== message.id) return; // A timed-out capture cannot satisfy a later request.
+                    const pending = state.capture;
+                    state.capture = null;
+                    clearTimeout(pending.timeout);
+                    if (message.type === 'composition-captured') pending.resolve(message.blob);
+                    else pending.reject(Error(message.reason));
+                } else if (message.type === 'composition-ready' && state.status === 'initializing') {
                     const expected = mode === 'worker-gl' ? 'Gl' : 'BrowserWebGpu';
                     if (message.backend !== expected)
                         throw Error('worker backend does not match the requested backend');
@@ -377,6 +387,7 @@ export function compositionStatusText() {
 export function disposeComposition() {
     if (!host) return;
     const state = host;
+    rejectCapture(state, 'map renderer disposed during screenshot');
     host = undefined;
     rendererDisposed = true;
     reportRendererStatus();
@@ -387,4 +398,56 @@ export function disposeComposition() {
     if (state.originalStyle === null) state.canvas.removeAttribute('style');
     else state.canvas.setAttribute('style', state.originalStyle);
     delete window.garminMapComposition;
+}
+
+function rejectCapture(state, reason) {
+    if (!state.capture) return;
+    clearTimeout(state.capture.timeout);
+    state.capture.reject(Error(reason));
+    state.capture = null;
+}
+
+// Capture only a settled map view. A navigation/resize during readback invalidates
+// the complete screenshot, including the separately captured egui layer.
+export function snapshotComposition() {
+    const state = host;
+    const signature = () =>
+        JSON.stringify([host === state, state?.status, state?.placement, state?.view, state?.drawn?.id]);
+    const before = signature();
+    const validate = () => {
+        if (signature() !== before || state?.flight) throw Error('map changed during screenshot capture');
+    };
+    if (!state?.placement) return { validate, blob: Promise.resolve(null), cancel() {} };
+    if (
+        state.status !== 'ready' ||
+        state.flight ||
+        state.capture ||
+        document.hidden ||
+        !state.drawn ||
+        (state.map && mapReadiness() !== 'ready')
+    )
+        throw Error('map is not ready for screenshot capture');
+    if (state.captureSequence === 0xffffffff) throw Error('map capture identity exhausted');
+    const id = ++state.captureSequence;
+    const { width, height, id: viewId } = state.drawn;
+    const message = compositionMessage('composition-capture', id, viewId, width, height);
+    const blob = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => rejectCapture(state, 'map screenshot timed out'), 3000);
+        state.capture = { id, resolve, reject, timeout };
+    });
+    // The UI readback can fail before the consumer awaits this promise.
+    blob.catch(() => {});
+    try {
+        state.worker.postMessage(message);
+    } catch (error) {
+        rejectCapture(state, String(error));
+    }
+    return {
+        placement: structuredClone(state.placement),
+        blob,
+        validate,
+        cancel() {
+            if (state.capture?.id === id) rejectCapture(state, 'screenshot cancelled');
+        },
+    };
 }

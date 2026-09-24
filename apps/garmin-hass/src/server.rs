@@ -4,7 +4,7 @@ use axum::{
     Extension, Router,
     body::{Body, Bytes},
     extract::{
-        DefaultBodyLimit, Path as AxumPath, State,
+        ConnectInfo, DefaultBodyLimit, Path as AxumPath, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, HeaderValue, Request, StatusCode, header, uri::Authority},
@@ -48,14 +48,14 @@ pub(super) async fn serve(
     let listener = tokio::net::TcpListener::bind(address).await?;
     announce_server(address, crate::mode::PRODUCT_NAME)?;
     if browser.control_server {
-        println!(
-            "Control API: http://{address}/api/control (Bearer token from {})",
-            crate::control::TOKEN_ENV
-        );
+        println!("Control API: http://{address}/api/control (localhost only)");
     }
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
 }
 
 async fn shutdown_signal() {
@@ -170,10 +170,7 @@ fn router(
     browser: BrowserOptions,
 ) -> io::Result<Router> {
     browser.validate()?;
-    let control = browser
-        .control_server
-        .then(crate::control::Broker::from_environment)
-        .transpose()?;
+    let control = browser.control_server.then(crate::control::Broker::new);
     let app = Router::new()
         .route("/remoc", any(websocket))
         .route("/device-download/{token}", get(device_download))
@@ -216,10 +213,9 @@ async fn control_visibility(
     next: Next,
 ) -> Response {
     let path = request.uri().path();
-    if !enabled
-        && (matches!(path, "/api/control" | "/api/capabilities")
-            || path.starts_with("/api/control/")
-            || path.starts_with("/api/capabilities/"))
+    if path.starts_with("/api/control/")
+        || path.starts_with("/api/capabilities/")
+        || (!enabled && matches!(path, "/api/control" | "/api/capabilities"))
     {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -472,12 +468,15 @@ fn log_csp_violation(kind: &str, context_url: Option<&str>, report: &CspViolatio
 async fn websocket(
     State(host): State<Arc<Host>>,
     Extension(control): Extension<Option<crate::control::Broker>>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
     if !browser_origin_allowed(&headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    let control = control
+        .filter(|_| crate::control::local_connection(peer.map(|Extension(info)| info.0), &headers));
     upgrade.on_upgrade(move |socket| async move {
         let host = host.with_control(control.map(|broker| broker.connection()));
         if let Err(error) = serve_client(socket, host).await {
@@ -576,10 +575,14 @@ async fn serve_client(socket: WebSocket, host: Arc<Host>) -> anyhow::Result<()> 
         })
     });
     let (server, client) = ApplicationServiceServerShared::<_, codec::Default>::new(host);
-    remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx)
-        .provide(client)
-        .await
-        .map_err(|error| anyhow::anyhow!("could not establish Remoc connection: {error}"))?;
+    remoc::Connect::framed(
+        garmin_service_api::control::transport_config(),
+        transport_tx,
+        transport_rx,
+    )
+    .provide(client)
+    .await
+    .map_err(|error| anyhow::anyhow!("could not establish Remoc connection: {error}"))?;
     server
         .serve()
         .await
@@ -1087,10 +1090,13 @@ mod tests {
                 Err(error) => Some(Err(error)),
             })
         });
-        let client: ApplicationServiceClient =
-            remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx)
-                .consume()
-                .await?;
+        let client: ApplicationServiceClient = remoc::Connect::framed(
+            garmin_service_api::control::transport_config(),
+            transport_tx,
+            transport_rx,
+        )
+        .consume()
+        .await?;
         assert_eq!(
             client.deployment_mode().await?,
             crate::mode::DEPLOYMENT_MODE
