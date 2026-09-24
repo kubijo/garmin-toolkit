@@ -2858,6 +2858,7 @@ dependencies = [
  "garmin-service-api",
  "geo",
  "geo-types",
+ "image",
  "kittest",
  "lyon_path",
  "naga",

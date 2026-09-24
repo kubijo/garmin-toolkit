@@ -3,6 +3,7 @@ use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, State},
     http::{HeaderMap, StatusCode},
+    response::{IntoResponse as _, Response},
     routing::{get, post},
 };
 use eframe::egui;
@@ -37,7 +38,18 @@ impl Options {
 
 struct Pending {
     command: Command,
-    response: oneshot::Sender<Result<Value, String>>,
+    response: oneshot::Sender<Result<Reply, String>>,
+}
+enum Reply {
+    Json(Value),
+    #[cfg(feature = "demo")]
+    Screenshot(garmin_service_api::control::Capture),
+}
+
+#[cfg(feature = "demo")]
+struct PendingCapture {
+    ticket: garmin_ui::capture::Ticket,
+    response: oneshot::Sender<Result<Reply, String>>,
 }
 #[derive(Clone)]
 struct Bridge {
@@ -51,6 +63,8 @@ struct NativeTools {
     receiver: mpsc::Receiver<Pending>,
     sender: mpsc::Sender<Pending>,
     server: Option<tokio::task::JoinHandle<()>>,
+    #[cfg(feature = "demo")]
+    capture: Option<PendingCapture>,
 }
 
 impl Drop for NativeTools {
@@ -61,6 +75,10 @@ impl Drop for NativeTools {
 
 impl NativeTools {
     fn shutdown(&mut self) {
+        #[cfg(feature = "demo")]
+        {
+            self.capture = None;
+        }
         if let Some(server) = self.server.take() {
             server.abort();
         }
@@ -94,10 +112,13 @@ pub fn install(
         receiver,
         sender,
         server: None,
+        #[cfg(feature = "demo")]
+        capture: None,
     };
     #[cfg(feature = "demo")]
     if options.ui_automation || options.control_server {
         context.add_plugin(garmin_ui::automation::Driver::default());
+        context.add_plugin(garmin_ui::capture::CapturePlugin::default());
     }
     if options.control_server {
         tools.start(context);
@@ -131,6 +152,7 @@ impl NativeTools {
             .is_none()
         {
             context.add_plugin(garmin_ui::automation::Driver::default());
+            context.add_plugin(garmin_ui::capture::CapturePlugin::default());
         }
         let result = (|| -> std::io::Result<_> {
             let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
@@ -191,8 +213,15 @@ impl NativeTools {
     }
 
     fn update(&mut self, context: &egui::Context) {
+        #[cfg(feature = "demo")]
+        self.update_capture();
         while let Ok(pending) = self.receiver.try_recv() {
             if pending.response.is_closed() {
+                continue;
+            }
+            #[cfg(feature = "demo")]
+            if pending.command.operation == "screenshot" {
+                self.start_capture(context, pending);
                 continue;
             }
             #[cfg(feature = "demo")]
@@ -206,12 +235,16 @@ impl NativeTools {
                 let _ = pending.command;
                 Err("automation requires a demo build".into())
             };
-            let _ = pending.response.send(result);
+            let _ = pending.response.send(result.map(Reply::Json));
         }
         for request in garmin_ui::developer::take_requests(context) {
             match request {
                 Request::StartServer => self.start(context),
                 Request::StopServer => {
+                    #[cfg(feature = "demo")]
+                    {
+                        self.capture = None;
+                    }
                     if let Some(server) = self.server.take() {
                         server.abort();
                     }
@@ -278,6 +311,52 @@ impl NativeTools {
                 });
         }
     }
+
+    #[cfg(feature = "demo")]
+    fn start_capture(&mut self, context: &egui::Context, pending: Pending) {
+        let ticket = if pending.command.argument.is_null() {
+            garmin_ui::capture::request(context)
+        } else {
+            Err("screenshot takes no argument; only the root window is supported".into())
+        };
+        match ticket {
+            Ok(ticket) => {
+                self.capture = Some(PendingCapture {
+                    ticket,
+                    response: pending.response,
+                });
+            }
+            Err(reason) => {
+                let _ = pending.response.send(Err(reason));
+            }
+        }
+    }
+
+    #[cfg(feature = "demo")]
+    fn update_capture(&mut self) {
+        let Some(pending) = &self.capture else {
+            return;
+        };
+        if pending.response.is_closed() {
+            self.capture = None;
+            return;
+        }
+        let Some(result) = pending.ticket.take() else {
+            return;
+        };
+        let Some(pending) = self.capture.take() else {
+            return;
+        };
+        if let Some(runtime) = &self.runtime {
+            runtime.spawn_blocking(move || {
+                let _ticket = pending.ticket;
+                let reply = result
+                    .and_then(garmin_ui::capture::Pixels::png)
+                    .map(Reply::Screenshot);
+                let _ = pending.response.send(reply);
+            });
+        }
+    }
 }
 
 pub fn update(context: &egui::Context, intl: &garmin_i18n::Intl) {
@@ -301,13 +380,14 @@ async fn control(
     State(bridge): State<Bridge>,
     headers: HeaderMap,
     Json(command): Json<Command>,
-) -> (StatusCode, Json<Value>) {
+) -> Response {
     // Browser automation belongs to the browser bridge, not this native listener.
     if headers.contains_key("origin") {
         return (
             StatusCode::FORBIDDEN,
             Json(json!({"error":"browser origins are not accepted"})),
-        );
+        )
+            .into_response();
     }
     let (sender, receiver) = oneshot::channel();
     if bridge
@@ -321,16 +401,32 @@ async fn control(
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({"error":"control queue is full"})),
-        );
+        )
+            .into_response();
     }
     bridge.context.request_repaint();
     match tokio::time::timeout(std::time::Duration::from_secs(5), receiver).await {
-        Ok(Ok(Ok(value))) => (StatusCode::OK, Json(json!({"value":value}))),
-        Ok(Ok(Err(error))) => (StatusCode::BAD_REQUEST, Json(json!({"error":error}))),
+        Ok(Ok(Ok(Reply::Json(value)))) => {
+            (StatusCode::OK, Json(json!({"value":value}))).into_response()
+        }
+        #[cfg(feature = "demo")]
+        Ok(Ok(Ok(Reply::Screenshot(capture)))) => {
+            let metadata = serde_json::to_string(&capture.info).unwrap_or_default();
+            (
+                [("content-type", "image/png"), ("cache-control", "no-store")],
+                [("x-garmin-capture", metadata)],
+                capture.png,
+            )
+                .into_response()
+        }
+        Ok(Ok(Err(error))) => {
+            (StatusCode::BAD_REQUEST, Json(json!({"error":error}))).into_response()
+        }
         _ => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({"error":"UI command timed out or application closed"})),
-        ),
+        )
+            .into_response(),
     }
 }
 async fn capabilities() -> Json<Value> {

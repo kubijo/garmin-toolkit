@@ -30,6 +30,7 @@ pub(super) fn dispatch_menu(context: &egui::Context) {
 
 pub(super) fn install(context: &egui::Context) {
     context.add_plugin(Driver::default().with_resize_handler(resize_canvas));
+    context.add_plugin(garmin_ui::capture::CapturePlugin::default());
     let context = context.clone();
     let command = Closure::<dyn Fn(String, String) -> String>::new(
         move |operation: String, argument: String| {

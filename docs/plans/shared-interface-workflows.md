@@ -74,7 +74,7 @@ simultaneous native windows and Wayland focus on one setup. Remaining work:
 
 Root command forwarding uses the existing HASS HTTP listener and a reverse Remoc client on each browser connection. The
 [endpoint contract](../architecture/developer-tools.md#automation-and-control) is shared with desktop. Use
-`just hass::control --session SESSION_ID check` for direct HTTP runtime acceptance. Complete the ingress and
+`just hass::control check` for direct localhost HTTP runtime acceptance. Complete the localhost isolation and
 fault-injected transport cases below before claiming deployed HASS parity.
 
 ### Contract and routing
@@ -84,26 +84,27 @@ fault-injected transport cases below before claiming deployed HASS parity.
   remains separate work.
 - Reports currently describe the session's latest workload, matching the existing driver. Add bounded historical run-ID
   retrieval before supporting clients that need to retain several completed reports remotely.
-- Check two-tab targeting, reconnect generations, closed-tab revocation, deadline expiry, increasing request IDs, and
-  rejection of duplicate commands after timeout. No replay or automatic retargeting is allowed.
+- Check ambiguous-tab rejection, reconnect generations, closed-tab revocation, deadline expiry, increasing request IDs,
+  and rejection of duplicate commands after timeout. Admitted requests must never replay or move to another connection.
 
 ### Hosting
 
 - Check that all control routes return 404 unless explicitly enabled, and that production rejects enablement.
-- Verify Bearer authorization and ingress prefix/header forwarding on the existing HASS listener. Session IDs provide
-  routing, not authorization. Desktop retains its random loopback port and existing client contract.
-- Verify session discovery and Developer tools debug information after reload/reconnect. A browser must already be
-  connected. Focus loss must not cancel; hidden tabs retain pause/report behavior.
+- Verify loopback socket peers, localhost Host headers, and origin/forwarded-request rejection on the existing HASS
+  listener. Control is unavailable through ingress. Desktop retains its random loopback port and existing client
+  contract.
+- Verify automatic single-tab selection and Developer tools debug information after reload/reconnect. A browser must
+  already be connected. Focus loss must not cancel; hidden tabs retain pause/report behavior.
 
 ### Screenshots and later capabilities
 
-After root command routing, add correlated next-frame capture returning PNG or a bounded artifact handle with
-session/window, frame, dimensions, and scale. Define pixel/byte limits, deadlines, cancellation, and expiry.
+Root screenshot capture returns bounded PNG bytes with frame, dimensions, and scale through the HTTP adapters. HASS
+capture has demonstrated the activity map, route, overlays, and sidebars at unit scale, with another control request
+succeeding after capture. Use `just hass::control screenshot --output .tmp/capture.png`.
 
-The pinned eframe supports capture on both targets. Native capture must include map rendering callbacks. HASS must
-compose the egui canvas with the separate worker map, preserving clipping, position, transparency, and scale; reject
-stale frames during resize/navigation. Missing map pixels fail acceptance. Captures exclude browser chrome, OS
-decorations, and system dialogs; external automation still covers those boundaries.
+Verify native capture includes map rendering callbacks. Repeat HASS capture at non-unit scale and during
+resize/navigation, checking clipping, transparency, and rejection of stale frames. Missing map pixels fail acceptance.
+Captures exclude browser chrome, OS decorations, and system dialogs; external automation still covers those boundaries.
 
 Child-window control follows separately: the current driver ignores secondary viewports. Add a window registry and
 scoped semantic snapshots/dispatch without mixing target trees or advancing the root workload. Invalidate user-bound
@@ -113,8 +114,8 @@ operations and images later; browser MCP remains useful for navigation, file cho
 ### Implementation order and acceptance
 
 1. Verify the shared contract/session lifecycle and existing desktop clients.
-2. Route root commands through HASS. Test two-tab targeting, independent reports, bounded admission, disabled defaults,
-   ingress/access checks, and timeout/reload/reconnect without replay. Closed tabs fail pending requests.
+2. Route root commands through HASS. Test ambiguous-tab rejection, bounded admission, disabled defaults,
+   localhost/access checks, and timeout/reload/reconnect without replay. Closed tabs fail pending requests.
 3. Compare the same scenario/sequence through desktop HTTP, HASS HTTP, and browser hooks: reset/logout, cancellation and
    input release, resizing, focus loss, hidden-tab pauses, and report parity.
 4. Verify screenshot pixels with maps/overlays, non-unit scale, clipping, resizing, pending map frames, target closure,

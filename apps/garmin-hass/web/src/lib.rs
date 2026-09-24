@@ -2206,11 +2206,14 @@ async fn connect_client() -> Result<ApplicationServiceClient, ConnectError> {
             Err(error) => Some(Err(error)),
         })
     });
-    let client: ApplicationServiceClient =
-        remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx)
-            .consume()
-            .await
-            .map_err(ConnectError::remoc)?;
+    let client: ApplicationServiceClient = remoc::Connect::framed(
+        garmin_service_api::control::transport_config(),
+        transport_tx,
+        transport_rx,
+    )
+    .consume()
+    .await
+    .map_err(ConnectError::remoc)?;
     Ok(client)
 }
 

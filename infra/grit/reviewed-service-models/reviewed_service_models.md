@@ -20,6 +20,8 @@ or {
     `ControlCommand`,
     `ControlSession`,
     `ControlDispatch`,
+    `CaptureInfo`,
+    `Capture`,
     `Batch`,
     `DeviceCatalogSnapshot`,
     `DeviceCatalogStorage`,

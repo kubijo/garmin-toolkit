@@ -1,8 +1,10 @@
 //! Opt-in HTTP control broker. Each reverse RPC client belongs to one Remoc connection.
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, State},
-    http::{HeaderMap, StatusCode, header},
+    extract::{ConnectInfo, DefaultBodyLimit, State},
+    http::{HeaderMap, StatusCode, header, uri::Authority},
+    middleware::{self, Next},
+    response::{IntoResponse as _, Response},
     routing::{get, post},
 };
 use garmin_service_api::control;
@@ -14,32 +16,30 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
+    net::SocketAddr,
     sync::{Arc, Mutex, PoisonError},
     time::{Duration, Instant},
 };
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
 
 const MAX_SESSIONS: usize = 16;
 const TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(test)]
 mod tests;
-pub(super) const TOKEN_ENV: &str = "GARMIN_TOOLKIT_CONTROL_TOKEN";
 
 #[derive(Clone)]
 pub(super) struct Broker(Arc<Inner>);
 
 struct Inner {
-    authorization: String,
     started: Instant,
     sessions: Mutex<HashMap<String, Arc<Session>>>,
+    last_request: Mutex<u64>,
 }
 
 struct Session {
-    info: ControlSession,
     client: BrowserControlClient,
-    admission: Semaphore,
-    last_request: Mutex<u64>,
+    admission: Arc<Semaphore>,
 }
 
 #[derive(Clone)]
@@ -63,23 +63,12 @@ impl Drop for ConnectionState {
 }
 
 impl Broker {
-    pub(super) fn from_environment() -> std::io::Result<Self> {
-        let token = std::env::var(TOKEN_ENV)
-            .map_err(|_| std::io::Error::other(format!("--control-server requires {TOKEN_ENV}")))?;
-        Self::new(&token)
-    }
-
-    fn new(token: &str) -> std::io::Result<Self> {
-        if token.len() < 32 || !token.bytes().all(|byte| byte.is_ascii_graphic()) {
-            return Err(std::io::Error::other(
-                "control token must contain at least 32 non-space ASCII characters",
-            ));
-        }
-        Ok(Self(Arc::new(Inner {
-            authorization: format!("Bearer {token}"),
+    pub(super) fn new() -> Self {
+        Self(Arc::new(Inner {
             started: Instant::now(),
             sessions: Mutex::new(HashMap::new()),
-        })))
+            last_request: Mutex::new(0),
+        }))
     }
 
     pub(super) fn connection(&self) -> Connection {
@@ -96,26 +85,11 @@ impl Broker {
 
     pub(super) fn routes(&self) -> Router {
         Router::new()
-            .route("/api/control", post(dispatch))
-            .route("/api/control/sessions", get(sessions))
+            .route("/api/control", post(control_request))
             .route("/api/capabilities", get(capabilities))
             .layer(DefaultBodyLimit::max(control::MAX_COMMAND_BYTES))
+            .layer(middleware::from_fn(local_only))
             .with_state(self.clone())
-    }
-
-    fn authorized(&self, headers: &HeaderMap) -> bool {
-        // This endpoint serves external automation clients; browser commands use Remoc.
-        !headers.contains_key(header::ORIGIN)
-            && headers.get(header::AUTHORIZATION).is_some_and(|value| {
-                let supplied = value.as_bytes();
-                let expected = self.0.authorization.as_bytes();
-                supplied.len() == expected.len()
-                    && supplied
-                        .iter()
-                        .zip(expected)
-                        .fold(0_u8, |difference, (a, b)| difference | (a ^ b))
-                        == 0
-            })
     }
 
     fn active_sessions(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Session>>> {
@@ -154,15 +128,12 @@ impl Connection {
             id: self.0.id.clone(),
             browser,
             server_time_ms: self.0.broker.now_ms(),
-            last_request_id: 0,
         };
         sessions.insert(
             info.id.clone(),
             Arc::new(Session {
-                info: info.clone(),
                 client,
-                admission: Semaphore::new(1),
-                last_request: Mutex::new(0),
+                admission: Arc::new(Semaphore::new(1)),
             }),
         );
         *registered = true;
@@ -172,47 +143,180 @@ impl Connection {
 
 type HttpReply = (StatusCode, Json<Value>);
 
+pub(super) fn local_connection(peer: Option<SocketAddr>, headers: &HeaderMap) -> bool {
+    peer.is_some_and(|peer| peer.ip().to_canonical().is_loopback())
+        && headers
+            .get(header::HOST)
+            .and_then(|host| host.to_str().ok()?.parse::<Authority>().ok())
+            .is_some_and(|authority| {
+                let host = authority
+                    .host()
+                    .trim_start_matches('[')
+                    .trim_end_matches(']');
+                host.eq_ignore_ascii_case("localhost")
+                    || host
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|ip| ip.to_canonical().is_loopback())
+            })
+        && !headers.keys().any(|name| {
+            let name = name.as_str();
+            name == "forwarded" || name.starts_with("x-forwarded-") || name == "x-real-ip"
+        })
+}
+
+async fn local_only(request: axum::extract::Request, next: Next) -> Response {
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|info| info.0);
+    if !local_connection(peer, request.headers()) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    next.run(request).await
+}
+
 fn error(status: StatusCode, message: &str) -> HttpReply {
     (status, Json(json!({"error": message})))
 }
 
-async fn capabilities(State(broker): State<Broker>, headers: HeaderMap) -> HttpReply {
-    if !broker.authorized(&headers) {
-        return error(StatusCode::UNAUTHORIZED, "control authorization required");
+async fn capabilities(headers: HeaderMap) -> HttpReply {
+    if headers.contains_key(header::ORIGIN) {
+        return error(StatusCode::FORBIDDEN, "browser origins are not accepted");
     }
     let mut value = control::capabilities();
-    value["requires_session"] = json!(true);
-    value["screenshots"] = json!(false);
+    value["requires_session"] = json!(false);
     value["child_windows"] = json!(false);
     (StatusCode::OK, Json(value))
 }
 
-async fn sessions(State(broker): State<Broker>, headers: HeaderMap) -> HttpReply {
-    if !broker.authorized(&headers) {
-        return error(StatusCode::UNAUTHORIZED, "control authorization required");
-    }
-    let mut sessions = broker
-        .active_sessions()
-        .values()
-        .map(|session| {
-            let mut info = session.info.clone();
-            info.last_request_id = *session
-                .last_request
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            info
-        })
-        .collect::<Vec<_>>();
-    sessions.sort_by(|a, b| a.id.cmp(&b.id));
-    (StatusCode::OK, Json(json!({"sessions": sessions})))
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Envelope {
+    #[serde(default)]
+    request_id: Option<u64>,
+    operation: String,
+    #[serde(default)]
+    argument: Value,
 }
 
-#[derive(Deserialize)]
-struct Envelope {
-    session: String,
-    request_id: u64,
-    #[serde(flatten)]
-    command: ControlCommand,
+fn admit(
+    broker: &Broker,
+    headers: &HeaderMap,
+    request: &Envelope,
+) -> Result<(Arc<Session>, OwnedSemaphorePermit, u64), HttpReply> {
+    if headers.contains_key(header::ORIGIN) {
+        return Err(error(
+            StatusCode::FORBIDDEN,
+            "browser origins are not accepted",
+        ));
+    }
+    if request.request_id == Some(0) || !control::OPERATIONS.contains(&request.operation.as_str()) {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "invalid request ID or unsupported operation",
+        ));
+    }
+    let sessions = broker.active_sessions();
+    if sessions.len() > 1 {
+        return Err(error(
+            StatusCode::CONFLICT,
+            "multiple app tabs are connected; close the extra app tabs",
+        ));
+    }
+    let Some(session) = sessions.values().next().cloned() else {
+        return Err(error(StatusCode::NOT_FOUND, "no app browser is connected"));
+    };
+    drop(sessions);
+    let Ok(permit) = session.admission.clone().try_acquire_owned() else {
+        return Err(error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "a command is awaiting this browser; retry with a new request ID",
+        ));
+    };
+    let id = {
+        let mut last = broker
+            .0
+            .last_request
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let id = request
+            .request_id
+            .or_else(|| last.checked_add(1))
+            .ok_or_else(|| error(StatusCode::CONFLICT, "request ID exhausted"))?;
+        if id <= *last {
+            return Err(error(
+                StatusCode::CONFLICT,
+                "request ID must increase; commands are never replayed",
+            ));
+        }
+        *last = id;
+        id
+    };
+    Ok((session, permit, id))
+}
+
+async fn control_request(
+    State(broker): State<Broker>,
+    headers: HeaderMap,
+    Json(request): Json<Envelope>,
+) -> Response {
+    if request.operation == "screenshot" {
+        capture(broker, headers, request).await
+    } else {
+        dispatch(State(broker), headers, Json(request))
+            .await
+            .into_response()
+    }
+}
+
+async fn capture(broker: Broker, headers: HeaderMap, request: Envelope) -> Response {
+    let (session, _permit, request_id) = match admit(&broker, &headers, &request) {
+        Ok(admission) => admission,
+        Err(reply) => return reply.into_response(),
+    };
+    if !request.argument.is_null() {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "screenshot takes no argument; only the root window is supported",
+        )
+        .into_response();
+    }
+    let deadline = broker.now_ms().saturating_add(TIMEOUT.as_secs() * 1_000);
+    let mut response = match tokio::time::timeout(TIMEOUT, session.client.capture(deadline)).await {
+        Ok(Ok(Ok(capture))) => {
+            if let Err(reason) = capture.validate() {
+                return error(StatusCode::BAD_GATEWAY, &reason).into_response();
+            }
+            let metadata = serde_json::to_string(&capture.info).unwrap_or_default();
+            (
+                [
+                    (header::CONTENT_TYPE, "image/png"),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                [("x-garmin-capture", metadata)],
+                capture.png,
+            )
+                .into_response()
+        }
+        Ok(Ok(Err(reason))) => error(StatusCode::BAD_REQUEST, &reason).into_response(),
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "Screenshot RPC failed");
+            (
+                StatusCode::GONE,
+                Json(json!({"error": "browser screenshot reply failed; not retried"})),
+            )
+                .into_response()
+        }
+        Err(_) => error(
+            StatusCode::GATEWAY_TIMEOUT,
+            "screenshot timed out; not retried",
+        )
+        .into_response(),
+    };
+    if let Ok(value) = request_id.to_string().parse() {
+        response.headers_mut().insert("x-garmin-request-id", value);
+    }
+    response
 }
 
 async fn dispatch(
@@ -220,46 +324,18 @@ async fn dispatch(
     headers: HeaderMap,
     Json(request): Json<Envelope>,
 ) -> HttpReply {
-    if !broker.authorized(&headers) {
-        return error(StatusCode::UNAUTHORIZED, "control authorization required");
-    }
-    if request.request_id == 0 || !control::OPERATIONS.contains(&request.command.operation.as_str())
-    {
-        return error(
-            StatusCode::BAD_REQUEST,
-            "invalid request ID or unsupported operation",
-        );
-    }
-    let Some(session) = broker.active_sessions().get(&request.session).cloned() else {
-        return error(
-            StatusCode::NOT_FOUND,
-            "browser session is disconnected or unknown",
-        );
+    let (session, _permit, request_id) = match admit(&broker, &headers, &request) {
+        Ok(admission) => admission,
+        Err(reply) => return reply,
     };
-    let Ok(_permit) = session.admission.try_acquire() else {
-        return error(
-            StatusCode::TOO_MANY_REQUESTS,
-            "a command is awaiting this browser; retry with a new request ID",
-        );
-    };
-    {
-        let mut last = session
-            .last_request
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if request.request_id <= *last {
-            return error(
-                StatusCode::CONFLICT,
-                "request ID must increase; commands are never replayed",
-            );
-        }
-        *last = request.request_id;
-    }
-    let Ok(command_json) = serde_json::to_string(&request.command) else {
+    let Ok(command_json) = serde_json::to_string(&ControlCommand {
+        operation: request.operation,
+        argument: request.argument,
+    }) else {
         return error(StatusCode::BAD_REQUEST, "invalid command");
     };
     let pending = session.client.execute(ControlDispatch {
-        request_id: request.request_id,
+        request_id,
         command_json,
         expires_at_ms: broker.now_ms().saturating_add(TIMEOUT.as_secs() * 1_000),
     });
@@ -293,7 +369,6 @@ async fn dispatch(
             "browser command timed out; outcome may be unknown; not retried",
         ),
     };
-    response.1.0["session"] = json!(request.session);
-    response.1.0["request_id"] = json!(request.request_id);
+    response.1.0["request_id"] = json!(request_id);
     response
 }

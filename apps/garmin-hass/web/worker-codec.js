@@ -58,12 +58,38 @@ export const result = (version, id, kind, buffers) => checked([version, 'result'
 export const taskError = (version, id, kind, reason) => checked([version, 'task-error', id, kind, reason]);
 
 // Composition gate messages deliberately share this codec between browser host and worker.
-// This is not the future route/view protocol: no rendered images or paint lists are accepted.
+// Frame pixels cross this boundary only for an explicit bounded screenshot request.
 const MAX_COMPOSITION_PIXELS = 16 * 1024 * 1024;
 
 export function decodeComposition(value) {
     if (!Array.isArray(value) || value[0] !== 1) throw Error('invalid composition protocol');
     const [, type, ...payload] = value;
+    if (type === 'composition-capture' && payload.length === 4) {
+        const [id, viewId, width, height] = payload;
+        decodeComposition([1, 'composition-size', viewId, width, height]);
+        if (!integer(id, 0xffffffff) || id === 0 || width * height > 8 * 1024 * 1024)
+            throw Error('invalid composition capture');
+        return { type, id, viewId, width, height };
+    }
+    if (type === 'composition-captured' && payload.length === 2) {
+        const [id, blob] = payload;
+        if (
+            integer(id, 0xffffffff) &&
+            id > 0 &&
+            blob instanceof Blob &&
+            blob.type === 'image/png' &&
+            blob.size > 0 &&
+            blob.size <= 8 * 1024 * 1024
+        )
+            return { type, id, blob };
+        throw Error('invalid composition capture reply');
+    }
+    if (type === 'composition-capture-failed' && payload.length === 2) {
+        const [id, reason] = payload;
+        if (integer(id, 0xffffffff) && id > 0 && typeof reason === 'string' && reason.length <= 1024)
+            return { type, id, reason };
+        throw Error('invalid composition capture failure');
+    }
     if (type === 'map-readiness' && payload.length === 2) {
         const [id, state] = payload;
         if (

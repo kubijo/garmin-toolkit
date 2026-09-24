@@ -13,6 +13,8 @@ export function installCompositionWorker(scope) {
     let due = Infinity;
     let viewId = 0;
     let readiness;
+    let canvas;
+    let capturing = false;
 
     function reportReadiness() {
         if (!map || !viewId) return;
@@ -63,6 +65,7 @@ export function installCompositionWorker(scope) {
             if (['composition-init', 'map-init'].includes(message.type)) {
                 if (initialized) throw Error('composition worker initialized twice');
                 initialized = true;
+                canvas = message.canvas;
                 const module = await import(message.moduleUrl);
                 await module.default({ module_or_path: message.wasmUrl });
                 if (failed) return;
@@ -93,7 +96,37 @@ export function installCompositionWorker(scope) {
                 renderer.draw(...dimensions);
                 scope.postMessage(compositionMessage('composition-drawn', message.id, ...dimensions));
                 reportReadiness();
+            } else if (message.type === 'composition-capture') {
+                if (
+                    capturing ||
+                    !renderer ||
+                    !dimensions ||
+                    message.viewId !== viewId ||
+                    message.width !== dimensions[0] ||
+                    message.height !== dimensions[1]
+                ) {
+                    scope.postMessage(
+                        compositionMessage('composition-capture-failed', message.id, 'map changed or capture is busy'),
+                    );
+                    return;
+                }
+                capturing = true;
+                try {
+                    // Snapshot immediately after a fresh draw, before the browser clears a
+                    // non-preserved WebGL drawing buffer at the end of this task.
+                    renderer.draw(...dimensions);
+                    const blob = await canvas.convertToBlob({ type: 'image/png' });
+                    scope.postMessage(compositionMessage('composition-captured', message.id, blob));
+                } catch (error) {
+                    scope.postMessage(
+                        compositionMessage('composition-capture-failed', message.id, String(error).slice(0, 1024)),
+                    );
+                } finally {
+                    capturing = false;
+                }
             } else if (message.type === 'composition-size' && !map && renderer) {
+                dimensions = [message.width, message.height];
+                viewId = message.id;
                 renderer.draw(message.width, message.height);
                 // Acknowledges submission, NOT compositor presentation.
                 scope.postMessage(compositionMessage('composition-drawn', message.id, message.width, message.height));

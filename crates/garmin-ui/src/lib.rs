@@ -11,6 +11,8 @@ pub mod automation;
 pub mod brand;
 pub mod button;
 pub mod capacity;
+#[cfg(any(test, feature = "automation"))]
+pub mod capture;
 pub mod developer;
 pub mod device;
 pub mod device_browser;

@@ -23,7 +23,7 @@ struct Args {
     /// Enable built-in semantic UI scenarios (demo builds only).
     #[arg(long)]
     ui_automation: bool,
-    /// Enable authenticated HTTP automation control (demo builds only).
+    /// Enable localhost-only HTTP automation control (demo builds only).
     #[arg(long)]
     control_server: bool,
 }
