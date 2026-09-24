@@ -1,5 +1,6 @@
 //! Typed contracts shared by native hosts and isolated clients.
 
+pub mod control;
 pub mod logging;
 
 use camino::Utf8PathBuf;
@@ -344,6 +345,11 @@ mod rpc {
             user_id: UserId,
             observation_id: ObservationId,
         ) -> Result<Result<Option<ActivityDetailSnapshot>, String>, rtc::CallError>;
+        async fn register_control(
+            &self,
+            browser: String,
+            client: crate::control::BrowserControlClient,
+        ) -> Result<Result<Option<crate::control::ControlSession>, String>, rtc::CallError>;
     }
 }
 

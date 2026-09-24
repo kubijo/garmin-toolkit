@@ -81,6 +81,7 @@
             };
           cargoArtifacts = craneLib.buildDepsOnly (
             commonArgs
+            // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
             // {
               cargoExtraArgs = manifestArgs;
               doCheck = false;

@@ -47,6 +47,12 @@ pub(super) async fn serve(
     let app = router(host, map_tiles, browser)?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     announce_server(address, crate::mode::PRODUCT_NAME)?;
+    if browser.control_server {
+        println!(
+            "Control API: http://{address}/api/control (Bearer token from {})",
+            crate::control::TOKEN_ENV
+        );
+    }
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
@@ -136,7 +142,7 @@ impl WebIndex {
                 "browser index lacks the UI automation placeholder",
             ));
         }
-        let automation = serde_json::to_string(&browser.ui_automation)?;
+        let automation = serde_json::to_string(&(browser.ui_automation || browser.control_server))?;
         let worker = serde_json::to_string(&browser.map_render_worker)?;
         Ok(Self(
             html.replace(UPLOAD_TELEMETRY_PLACEHOLDER, &telemetry)
@@ -163,6 +169,11 @@ fn router(
     map_tiles: garmin_map_tiles::Service,
     browser: BrowserOptions,
 ) -> io::Result<Router> {
+    browser.validate()?;
+    let control = browser
+        .control_server
+        .then(crate::control::Broker::from_environment)
+        .transpose()?;
     let app = Router::new()
         .route("/remoc", any(websocket))
         .route("/device-download/{token}", get(device_download))
@@ -171,6 +182,12 @@ fn router(
         .route("/csp-report", post(csp_report))
         .with_state(host)
         .layer(Extension(map_tiles));
+    let app = if let Some(broker) = &control {
+        app.merge(broker.routes())
+    } else {
+        app
+    };
+    let app = app.layer(Extension(control));
     let app = match std::env::var_os(WEB_ROOT_ENVIRONMENT).map(PathBuf::from) {
         Some(root) => app
             .route("/", get(web_index))
@@ -186,7 +203,27 @@ fn router(
     };
     Ok(app
         .layer(DefaultBodyLimit::max(CSP_REPORT_LIMIT))
+        .layer(middleware::from_fn_with_state(
+            browser.control_server,
+            control_visibility,
+        ))
         .layer(middleware::from_fn(browser_cache_policy)))
+}
+
+async fn control_visibility(
+    State(enabled): State<bool>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    if !enabled
+        && (matches!(path, "/api/control" | "/api/capabilities")
+            || path.starts_with("/api/control/")
+            || path.starts_with("/api/capabilities/"))
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    next.run(request).await
 }
 
 async fn browser_cache_policy(mut request: Request<Body>, next: Next) -> Response {
@@ -434,6 +471,7 @@ fn log_csp_violation(kind: &str, context_url: Option<&str>, report: &CspViolatio
 
 async fn websocket(
     State(host): State<Arc<Host>>,
+    Extension(control): Extension<Option<crate::control::Broker>>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
@@ -441,6 +479,7 @@ async fn websocket(
         return StatusCode::FORBIDDEN.into_response();
     }
     upgrade.on_upgrade(move |socket| async move {
+        let host = host.with_control(control.map(|broker| broker.connection()));
         if let Err(error) = serve_client(socket, host).await {
             tracing::warn!(%error, "Remoc client connection failed");
         }
@@ -569,6 +608,44 @@ mod tests {
     use remoc::prelude::*;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+    #[tokio::test]
+    async fn disabled_control_is_404_even_with_static_file_fallback() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let app = axum::Router::new()
+            .fallback_service(tower_http::services::ServeDir::new(directory.path()))
+            .layer(axum::middleware::from_fn_with_state(
+                false,
+                super::control_visibility,
+            ));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let client = reqwest::Client::new();
+        for path in [
+            "/api/control",
+            "/api/control/",
+            "/api/control/sessions",
+            "/api/capabilities",
+        ] {
+            for method in [
+                reqwest::Method::GET,
+                reqwest::Method::POST,
+                reqwest::Method::OPTIONS,
+            ] {
+                assert_eq!(
+                    client
+                        .request(method, format!("http://{address}{path}"))
+                        .send()
+                        .await?
+                        .status(),
+                    StatusCode::NOT_FOUND
+                );
+            }
+        }
+        server.abort();
+        Ok(())
+    }
 
     #[test]
     fn browser_websockets_must_come_from_the_served_origin() {

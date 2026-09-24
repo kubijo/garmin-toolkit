@@ -2,6 +2,7 @@
 
 mod automation;
 mod browser_timing;
+mod control;
 mod developer;
 mod files;
 mod map_composition;
@@ -1939,6 +1940,7 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                         }
                     }
                     context.request_repaint();
+                    let _control = control::register(&client, &context).await;
                     let reason = loop {
                         match next_connection_event(&mut snapshots).await {
                             ConnectionEvent::Snapshot(Ok(())) => {

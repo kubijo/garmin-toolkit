@@ -76,11 +76,13 @@ pub(super) trait SourceProvider {
     ) -> Result<Box<dyn Source>, SourceOpenError>;
 }
 
+#[derive(Clone)]
 pub(super) struct Host {
     source: Arc<Mutex<Box<dyn Source>>>,
     snapshots: Arc<rch::watch::Sender<Vec<DeviceSnapshot>>>,
     browser_downloads: PendingBrowserDownloads,
-    application: Application,
+    application: Arc<Application>,
+    control: Option<crate::control::Connection>,
 }
 
 impl Host {
@@ -90,7 +92,8 @@ impl Host {
             source: Arc::new(Mutex::new(source)),
             snapshots: Arc::new(snapshots),
             browser_downloads: PendingBrowserDownloads::default(),
-            application,
+            application: Arc::new(application),
+            control: None,
         })
     }
 
@@ -102,6 +105,13 @@ impl Host {
                 host.refresh().await;
             }
         });
+    }
+
+    pub(super) fn with_control(&self, control: Option<crate::control::Connection>) -> Arc<Self> {
+        Arc::new(Self {
+            control,
+            ..self.clone()
+        })
     }
 
     async fn refresh(&self) {
@@ -198,6 +208,20 @@ impl PendingBrowserDownloads {
 }
 
 impl ApplicationService for Host {
+    fn register_control(
+        &self,
+        browser: String,
+        client: garmin_service_api::control::BrowserControlClient,
+    ) -> impl Future<
+        Output = Result<
+            Result<Option<garmin_service_api::control::ControlSession>, String>,
+            rtc::CallError,
+        >,
+    > {
+        std::future::ready(Ok(self.control.as_ref().map_or(Ok(None), |control| {
+            control.register(browser, client).map(Some)
+        })))
+    }
     fn logs(
         &self,
     ) -> impl Future<Output = Result<garmin_service_api::logging::LogServiceClient, remoc::rtc::CallError>>

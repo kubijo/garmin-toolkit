@@ -24,3 +24,7 @@ run mode data_base *options:
 # Summarize a raw Chrome performance trace for this HASS page.
 profile-analyze trace *options:
     @just in-shell uv run --frozen --project infra/python python infra/python/browser_trace_analysis.py "$@"
+
+# Inspect or exercise the control API of an already-running demo.
+control *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/hass_control.py "$@"

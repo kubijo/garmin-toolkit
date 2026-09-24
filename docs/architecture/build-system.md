@@ -31,7 +31,8 @@ replaces it with per-owner floors while retaining imported 80% floors.
 Cargo patches in `vendor/` apply to both the root workspace and the standalone gallery. `fast-mvt` contains bounded
 decoding fixes; `winit` supplies Wayland activation for existing child windows. Each directory records its changes in
 `PATCHES.md`. Nix build and license sources include these directories in full, including upstream notices and non-Rust
-resources.
+resources. Dependency-cache builds also preserve their real manifests and sources: registry dependencies compile against
+these patches, so Crane's workspace stubs cannot replace them.
 
 Linux Nix test applications, sandboxed Rust tests, and coverage select the pinned Mesa software Vulkan ICD for headless
 renderer tests. Those tests must not silently skip when an adapter is unavailable.

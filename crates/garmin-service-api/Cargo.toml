@@ -17,8 +17,6 @@ garmin-macros.workspace = true
 garmin-model.workspace = true
 remoc.workspace = true
 serde.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
 
 [lints]

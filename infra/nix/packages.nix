@@ -38,7 +38,9 @@ let
   // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
     LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibraries;
   };
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+  cargoArtifacts = craneLib.buildDepsOnly (
+    commonArgs // import ./cargo-deps.nix { inherit lib workspaceSrc; }
+  );
   garminCli = craneLib.buildPackage (
     commonArgs
     // {

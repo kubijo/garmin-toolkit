@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { installAutomation, launchAutomation } from '../../apps/garmin-hass/web/ui-automation.js';
+import { executeAutomation, installAutomation, launchAutomation } from '../../apps/garmin-hass/web/ui-automation.js';
 
 function fixture() {
     let report = null;
@@ -130,4 +130,23 @@ test('responsive sequences are forwarded to Rust without scheduling their action
     f.browser.garminAutomation.sequence(actions);
     assert.deepEqual(f.calls[0], ['sequence', JSON.stringify(actions)]);
     assert.equal(f.marks[0][1].name, 'custom-sequence');
+});
+
+test('forwarded commands retain hook metadata, hidden-tab pauses, cancellation and results', () => {
+    const f = fixture();
+    const call = (operation, argument) =>
+        JSON.parse(executeAutomation(JSON.stringify({ operation, argument }), f.browser));
+    assert.deepEqual(call('list').value, ['stationary-arrival']);
+    f.browser.document.hidden = true;
+    assert.equal(call('start', 'stationary-arrival').value, null);
+    const started = call('status').value;
+    assert.equal(started.state, 'paused');
+    assert.equal(started.environment.dpr, 2);
+    assert.equal(call('result').value, null);
+    call('cancel', 'cancelled by HTTP client');
+    assert.equal(call('result').value.state, 'cancelled');
+    assert.equal(call('result').value.failure, 'cancelled by HTTP client');
+    assert.match(call('eval', 'arbitrary').error, /unsupported/);
+    assert.match(JSON.parse(executeAutomation('{', f.browser)).error, /JSON/);
+    assert.match(JSON.parse(executeAutomation('{"operation":"list"}', {})).error, /disabled/);
 });
