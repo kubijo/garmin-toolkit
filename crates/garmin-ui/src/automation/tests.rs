@@ -524,10 +524,11 @@ fn escape_cancels_without_completing_a_synthetic_click_or_drag() {
     let _ = frame(&context, 0.0, vec![], "ready");
     let _ = frame(&context, 0.1, vec![], "ready");
     let _ = frame(&context, 0.2, vec![], "ready");
+    let _ = frame(&context, 0.3, vec![], "ready");
     assert!(context.plugin::<Driver>().lock().held.is_some());
     let _ = frame(
         &context,
-        0.3,
+        0.4,
         vec![Event::Key {
             key: egui::Key::Escape,
             physical_key: None,
@@ -586,7 +587,7 @@ fn stop_button_captures_mouse_and_touch_without_clicking_through() {
             .lock()
             .start("stationary-arrival")
             .unwrap();
-        for tick in 0..2 {
+        for tick in 0..3 {
             let _ = render(f64::from(tick) / 10.0, vec![]);
         }
         let point = {
@@ -840,12 +841,12 @@ fn explicit_cancel_releases_held_input_even_without_focus() {
             .lock()
             .start("stationary-arrival")
             .unwrap();
-        for time in [0.0, 0.1, 0.2] {
+        for time in [0.0, 0.1, 0.2, 0.3] {
             let _ = frame(&context, time, vec![], "ready");
         }
         context.plugin::<Driver>().lock().cancel("API cancellation");
         let mut input = RawInput {
-            time: Some(0.3),
+            time: Some(0.4),
             focused,
             ..Default::default()
         };
@@ -907,12 +908,16 @@ fn individual_actions_use_semantic_targets_and_reject_overlapping_work() {
     let action = serde_json::json!({"kind":"click", "target":"profile.0"});
     command(&context, "action", &action).unwrap();
     assert!(command(&context, "action", &action).is_err());
-    for time in [0.1, 0.2, 0.3] {
-        let _ = frame(&context, time, vec![], "ready");
+    for tick in 1..=60 {
+        let _ = frame(&context, f64::from(tick) / 60.0, vec![], "ready");
+        if !context.plugin::<Driver>().lock().running() {
+            break;
+        }
     }
     let result = command(&context, "result", &serde_json::Value::Null).unwrap();
-    assert_eq!(result["state"], "passed");
+    assert_eq!(result["state"], "passed", "{result}");
     assert_eq!(result["completed"], 1);
+    assert!(context.plugin::<Driver>().lock().held.is_none());
     assert!(
         command(
             &context,
@@ -932,17 +937,27 @@ fn hidden_pause_releases_a_click_and_excludes_suspended_time() {
         .lock()
         .start("stationary-arrival")
         .unwrap();
-    for time in [0.0, 0.1, 0.2] {
-        let _ = frame(&context, time, vec![], "ready");
-    }
-    command(&context, "pause", &serde_json::json!(0.2)).unwrap();
+    let paused_at = (0..60)
+        .find_map(|tick| {
+            let time = f64::from(tick) / 60.0;
+            let _ = frame(&context, time, vec![], "ready");
+            context
+                .plugin::<Driver>()
+                .lock()
+                .held
+                .is_some()
+                .then_some(time)
+        })
+        .expect("a click must be held before testing pause");
+    command(&context, "pause", &serde_json::json!(paused_at)).unwrap();
     assert_eq!(
         context.plugin::<Driver>().lock().report().unwrap().state,
         "paused"
     );
     assert!(command(&context, "start", &serde_json::json!("stationary-arrival")).is_err());
-    command(&context, "resume", &serde_json::json!(200.2)).unwrap();
-    let _ = frame(&context, 200.2, vec![], "ready");
+    let resumed_at = paused_at + 200.0;
+    command(&context, "resume", &serde_json::json!(resumed_at)).unwrap();
+    let _ = frame(&context, resumed_at, vec![], "ready");
     let plugin = context.plugin::<Driver>();
     let driver = plugin.lock();
     let report = driver.report().unwrap();
@@ -958,7 +973,7 @@ fn hidden_pause_releases_a_click_and_excludes_suspended_time() {
 fn resizing_and_dpi_changes_reanchor_clicks_and_drags() {
     for (action, change_at) in [
         (Action::Click, 1),
-        (Action::Click, 3),
+        (Action::Click, 4),
         (Action::Drag { x: 0.9, y: 0.8 }, 1),
         (Action::Drag { x: 0.9, y: 0.8 }, 8),
     ] {

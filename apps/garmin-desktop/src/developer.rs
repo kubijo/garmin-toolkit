@@ -225,8 +225,9 @@ impl NativeTools {
                 continue;
             }
             #[cfg(feature = "demo")]
-            let result = garmin_ui::automation::command(
+            let result = garmin_ui::window::control::command(
                 context,
+                pending.command.window.as_deref(),
                 &pending.command.operation,
                 &pending.command.argument,
             );
@@ -315,9 +316,9 @@ impl NativeTools {
     #[cfg(feature = "demo")]
     fn start_capture(&mut self, context: &egui::Context, pending: Pending) {
         let ticket = if pending.command.argument.is_null() {
-            garmin_ui::capture::request(context)
+            garmin_ui::window::control::capture(context, pending.command.window.as_deref())
         } else {
-            Err("screenshot takes no argument; only the root window is supported".into())
+            Err("screenshot takes no argument; use the window field to select a child".into())
         };
         match ticket {
             Ok(ticket) => {
@@ -404,7 +405,8 @@ async fn control(
         )
             .into_response();
     }
-    bridge.context.request_repaint();
+    // Only the root update drains the command queue, even for child commands.
+    bridge.context.request_repaint_of(egui::ViewportId::ROOT);
     match tokio::time::timeout(std::time::Duration::from_secs(5), receiver).await {
         Ok(Ok(Ok(Reply::Json(value)))) => {
             (StatusCode::OK, Json(json!({"value":value}))).into_response()

@@ -19,6 +19,23 @@ struct Session<C, S> {
     url: String,
     name: String,
     window: Option<web_sys::Window>,
+    control: bool,
+}
+
+#[wasm_bindgen(module = "/window-control.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = registerWindow)]
+    fn register_control(key: &str, spec: &str, window: &web_sys::Window);
+    #[wasm_bindgen(js_name = unregisterWindow)]
+    fn unregister_control(key: &str);
+}
+
+impl<C, S> Drop for Session<C, S> {
+    fn drop(&mut self) {
+        if self.control {
+            unregister_control(&self.name);
+        }
+    }
 }
 
 impl<C, S> Default for BrowserWindow<C, S> {
@@ -56,6 +73,15 @@ impl<C: Serialize + DeserializeOwned + 'static, S: Serialize + DeserializeOwned 
             return Err(
                 "The browser blocked this window. Allow popups for this site, or open it in a tab."
                     .into(),
+            );
+        }
+        if session.control
+            && let Some(window) = &session.window
+        {
+            register_control(
+                &session.name,
+                &serde_json::to_string(&session.spec).map_err(|error| error.to_string())?,
+                window,
             );
         }
         Ok(())
@@ -117,7 +143,7 @@ impl<C: Serialize + DeserializeOwned + 'static, S: Serialize + DeserializeOwned 
 
     fn close(&mut self, _context: &Context) {
         if let Some(session) = self.session.take()
-            && let Some(window) = session.window
+            && let Some(window) = &session.window
         {
             let _ = window.close();
         }
@@ -210,6 +236,9 @@ fn setup<C: Serialize + DeserializeOwned + 'static, S: Serialize + DeserializeOw
     url.search_params().set(SESSION_PARAMETER, &token);
     url.search_params().set(KIND_PARAMETER, &spec.kind);
     Ok(Session {
+        control: context
+            .plugin_opt::<garmin_ui::automation::Driver>()
+            .is_some(),
         spec,
         channel: Channel::new(&token, context)?,
         url: url.href(),
@@ -240,6 +269,7 @@ pub fn start_if_requested(canvas: &web_sys::HtmlCanvasElement) -> Result<bool, J
         document.set_title(title);
     }
     let canvas = canvas.clone();
+    let automation = canvas.get_attribute("data-ui-automation").as_deref() == Some("true");
     wasm_bindgen_futures::spawn_local(async move {
         let text_canvas = canvas.clone();
         let result = eframe::WebRunner::new()
@@ -248,6 +278,10 @@ pub fn start_if_requested(canvas: &web_sys::HtmlCanvasElement) -> Result<bool, J
                 crate::map_composition::options("main-gl"),
                 Box::new(move |creation| {
                     garmin_ui::install(&creation.egui_ctx);
+                    if automation {
+                        crate::automation::install_window(&creation.egui_ctx);
+                        crate::control::install_window_capture(&creation.egui_ctx);
+                    }
                     let app = match kind.as_str() {
                         "developer-tools" => {
                             crate::developer::popup::create(creation.egui_ctx.clone(), &session)

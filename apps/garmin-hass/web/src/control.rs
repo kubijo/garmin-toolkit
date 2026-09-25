@@ -20,6 +20,39 @@ extern "C" {
     fn execute(command: &str) -> Result<String, JsValue>;
 }
 
+#[wasm_bindgen(module = "/window-control.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = installWindowControl)]
+    fn install_window_control(capture: &JsValue);
+    #[wasm_bindgen(js_name = captureWindow, catch)]
+    fn capture_window(window: &str, milliseconds: f64) -> Result<js_sys::Promise, JsValue>;
+}
+
+pub(super) fn install_window_capture(context: &Context) {
+    let context = context.clone();
+    let callback = Closure::<dyn Fn(f64) -> js_sys::Promise>::new(move |milliseconds: f64| {
+        let context = context.clone();
+        wasm_bindgen_futures::future_to_promise(async move {
+            if !milliseconds.is_finite() || !(0.0..=5_000.0).contains(&milliseconds) {
+                return Err(JsValue::from_str("invalid screenshot deadline"));
+            }
+            let deadline = monotonic_ms().unwrap_or(f64::INFINITY) + milliseconds;
+            let result = capture(context, Arc::new(AtomicBool::new(true)), 0.0, deadline)
+                .await
+                .map_err(|error| JsValue::from_str(&error))?;
+            let info = serde_json::to_string(&result.info)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(js_sys::Array::of2(
+                &JsValue::from_str(&info),
+                &js_sys::Uint8Array::from(result.png.as_slice()),
+            )
+            .into())
+        })
+    });
+    install_window_control(callback.as_ref());
+    callback.forget();
+}
+
 struct Handler {
     active: Arc<AtomicBool>,
     clock_offset_ms: Mutex<f64>,
@@ -57,6 +90,7 @@ impl BrowserControl for Handler {
     fn capture(
         &self,
         expires_at_ms: u64,
+        window: Option<String>,
     ) -> impl Future<Output = Result<Result<garmin_service_api::control::Capture, String>, rtc::CallError>>
     {
         let context = self.context.clone();
@@ -66,7 +100,8 @@ impl BrowserControl for Handler {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         // The RPC future stays Send; DOM/WASM futures run only on the browser executor.
-        let (task, result) = capture(context, active, offset, expires_at_ms).remote_handle();
+        let (task, result) =
+            capture_selected(context, active, offset, expires_at_ms, window).remote_handle();
         wasm_bindgen_futures::spawn_local(task);
         async move { Ok(result.await) }
     }
@@ -197,21 +232,64 @@ pub(super) async fn register(
     clippy::cast_precision_loss,
     reason = "Monotonic milliseconds fit exactly in f64 for practical session lifetimes"
 )]
-async fn capture(
+async fn capture_selected(
     context: Context,
     active: Arc<AtomicBool>,
     offset: f64,
     deadline: u64,
+    window: Option<String>,
 ) -> Result<garmin_service_api::control::Capture, String> {
-    let valid = || {
-        if !active.load(Ordering::Acquire) {
-            return Err("control connection is inactive".to_owned());
-        }
-        if monotonic_ms().unwrap_or(f64::INFINITY) + offset >= deadline as f64 {
-            return Err("screenshot deadline expired".into());
-        }
-        Ok(())
+    let deadline = deadline as f64;
+    let Some(window) = window.filter(|window| window != "root") else {
+        return capture(context, active, offset, deadline).await;
     };
+    validate_capture(&active, offset, deadline)?;
+    let remaining =
+        (deadline - monotonic_ms().unwrap_or(f64::INFINITY) - offset).clamp(0.0, 5_000.0);
+    let promise = capture_window(&window, remaining).map_err(|error| crate::js_reason(&error))?;
+    let value = wasm_bindgen_futures::JsFuture::from(promise)
+        .await
+        .map_err(|error| crate::js_reason(&error))?;
+    validate_capture(&active, offset, deadline)?;
+    let values = value
+        .dyn_into::<js_sys::Array>()
+        .map_err(|_| "invalid window screenshot reply")?;
+    let info = values
+        .get(0)
+        .as_string()
+        .ok_or("missing window screenshot metadata")?;
+    let png = values
+        .get(1)
+        .dyn_into::<js_sys::Uint8Array>()
+        .map_err(|_| "missing window screenshot pixels")?;
+    if png.length() as usize > garmin_service_api::control::MAX_CAPTURE_BYTES {
+        return Err("screenshot exceeds PNG byte limit".into());
+    }
+    let capture = garmin_service_api::control::Capture {
+        info: serde_json::from_str(&info).map_err(|error| error.to_string())?,
+        png: png.to_vec(),
+    };
+    capture.validate()?;
+    Ok(capture)
+}
+
+fn validate_capture(active: &AtomicBool, offset: f64, deadline: f64) -> Result<(), String> {
+    if !active.load(Ordering::Acquire) {
+        return Err("control connection is inactive".into());
+    }
+    if monotonic_ms().unwrap_or(f64::INFINITY) + offset >= deadline {
+        return Err("screenshot deadline expired".into());
+    }
+    Ok(())
+}
+
+async fn capture(
+    context: Context,
+    active: Arc<AtomicBool>,
+    offset: f64,
+    deadline: f64,
+) -> Result<garmin_service_api::control::Capture, String> {
+    let valid = || validate_capture(&active, offset, deadline);
     valid()?;
     let composition =
         CompositionCapture(begin_screenshot().map_err(|error| crate::js_reason(&error))?);

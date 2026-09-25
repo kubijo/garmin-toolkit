@@ -54,6 +54,20 @@ class CaptureTests(unittest.TestCase):
             with self.subTest(fields=fields), self.assertRaises(ValueError):
                 self.client(self.response(**fields)).command('screenshot', request_id=1)
 
+    def test_child_capture_keeps_the_explicit_window_handle(self):
+        client = self.client(self.response())
+        with tempfile.TemporaryDirectory() as directory:
+            screenshot(client, Path(directory) / 'child.png', 'files:12')
+        request = client.opener.open.call_args.args[0]
+        self.assertEqual(json.loads(request.data)['window'], 'files:12')
+
+    def test_native_capture_without_broker_request_id(self):
+        response = self.response()
+        del response.headers['x-garmin-request-id']
+        status, result = self.client(response).command('screenshot')
+        self.assertEqual(status, 200)
+        self.assertEqual(result['metadata']['width'], 2)
+
     def test_screenshot_cli_needs_no_token_environment_or_session(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'capture.png'

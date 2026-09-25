@@ -8,6 +8,7 @@ async fn maximum_screenshot_crosses_the_real_transport_and_leaves_rpc_usable() -
 {
     use remoc::ConnectExt as _;
     let browser = Arc::new(Browser {
+        windows: Mutex::new(Vec::new()),
         capture_bytes: control::MAX_CAPTURE_BYTES,
         label: "after screenshot",
         calls: AtomicUsize::new(0),
@@ -24,9 +25,12 @@ async fn maximum_screenshot_crosses_the_real_transport_and_leaves_rpc_usable() -
     let client: BrowserControlClient = remoc::Connect::io(control::transport_config(), read, write)
         .consume()
         .await?;
-    let capture = tokio::time::timeout(std::time::Duration::from_secs(5), client.capture(u64::MAX))
-        .await??
-        .map_err(anyhow::Error::msg)?;
+    let capture = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client.capture(u64::MAX, None),
+    )
+    .await??
+    .map_err(anyhow::Error::msg)?;
     capture.validate().map_err(anyhow::Error::msg)?;
     assert_eq!(capture.png.len(), control::MAX_CAPTURE_BYTES);
     assert!(capture.png.len() > remoc::Cfg::default().max_data_size);
@@ -71,6 +75,18 @@ async fn http_routes_allow_local_commands_without_credentials_and_reject_forward
         .await?;
     assert_eq!(reply.status(), StatusCode::OK);
     assert_eq!(reply.json::<Value>().await?["value"], "local");
+    for operation in ["targets", "screenshot"] {
+        let reply = client
+            .post(&url)
+            .json(&json!({"operation": operation, "window": "files:12"}))
+            .send()
+            .await?;
+        assert_eq!(reply.status(), StatusCode::OK);
+    }
+    assert_eq!(
+        *browser.windows.lock().expect("recorded window selectors"),
+        [None, Some("files:12".into()), Some("files:12".into())]
+    );
     for header in [
         "forwarded",
         "x-forwarded-for",
@@ -105,13 +121,14 @@ async fn http_routes_allow_local_commands_without_credentials_and_reject_forward
             .status(),
         StatusCode::NOT_FOUND
     );
-    assert_eq!(browser.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(browser.calls.load(Ordering::SeqCst), 3);
     server.abort();
     task.abort();
     Ok(())
 }
 
 struct Browser {
+    windows: Mutex<Vec<Option<String>>>,
     capture_bytes: usize,
     label: &'static str,
     calls: AtomicUsize,
@@ -122,8 +139,10 @@ impl BrowserControl for Browser {
     fn capture(
         &self,
         _expires_at_ms: u64,
+        window: Option<String>,
     ) -> impl Future<Output = Result<Result<control::Capture, String>, rtc::CallError>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.windows.lock().expect("window selectors").push(window);
         // The broker validates the PNG envelope; renderer tests cover actual decoding.
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         png.extend_from_slice(&1_u32.to_be_bytes());
@@ -146,9 +165,15 @@ impl BrowserControl for Browser {
     }
     async fn execute(
         &self,
-        _request: ControlDispatch,
+        request: ControlDispatch,
     ) -> Result<Result<String, String>, rtc::CallError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        let command: control::ControlCommand =
+            serde_json::from_str(&request.command_json).expect("forwarded command");
+        self.windows
+            .lock()
+            .expect("window selectors")
+            .push(command.window);
         if self.block.load(Ordering::SeqCst) {
             std::future::pending::<()>().await;
         }
@@ -166,6 +191,7 @@ fn attach(
     tokio::task::JoinHandle<()>,
 ) {
     let browser = Arc::new(Browser {
+        windows: Mutex::new(Vec::new()),
         capture_bytes: 24,
         label,
         calls: AtomicUsize::new(0),
@@ -242,6 +268,7 @@ async fn screenshots_are_binary_correlated_and_share_command_admission() {
 
 fn request(request_id: u64) -> Envelope {
     Envelope {
+        window: None,
         request_id: Some(request_id),
         operation: "status".into(),
         argument: Value::Null,
@@ -317,6 +344,7 @@ async fn busy_and_unsupported_requests_do_not_reach_the_browser() {
 async fn reconnect_uses_a_new_session_and_registration_is_single_use() {
     let broker = Broker::new();
     let browser = Arc::new(Browser {
+        windows: Mutex::new(Vec::new()),
         label: "reconnecting",
         capture_bytes: 24,
         calls: AtomicUsize::new(0),

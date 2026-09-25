@@ -6,9 +6,9 @@ focuses the same window; closing it and clicking again opens a replacement. If t
 offers Retry and Open in a tab. Logs and debug information are available without enabling automation.
 
 The [shared window host](application-windows.md) owns popup routing, session isolation, liveness, and retry/tab
-fallback. Tools has no automation driver or map renderer; highlights and canvas resizing stay in the originating app
-tab. After an app reload, the old tools window retains its last report but disables commands; reopen tools to attach to
-the new session.
+fallback. Scenario buttons control the originating app. When automation is enabled, tools also has an independent driver
+for commands targeting its own controls. It has no map renderer. After an app reload, the old tools window retains its
+last report but disables commands; reopen tools to attach to the new session.
 
 The tools page connects directly to the existing backend log RPC, with its own filters, export, and reconnection.
 Closing tools leaves the app and any running scenario alone. The floating app status overlay retains Stop and Escape
@@ -83,9 +83,9 @@ For a local demo:
 just hass::run demo "$PWD/.tmp/hass-ui-automation" --control-server
 ```
 
-Open the app in a browser, then query the printed localhost endpoint. Child-window control and log access remain in the
-[shared interface plan](../plans/shared-interface-workflows.md#hass-control-protocol-extension). Browser MCP and
-`window.garminAutomation` remain available.
+Open the app in a browser, then query the printed localhost endpoint. Browser MCP and `window.garminAutomation` remain
+available. Log access through HTTP remains in the
+[shared interface plan](../plans/shared-interface-workflows.md#hass-control-protocol-extension).
 
 `just hass::control check` runs the four scenarios, individual action and sequence checks, cancellation after resizing,
 and HTTP admission checks. Reports go to `.tmp/hass-control-runtime`; the checker never starts a server. Use
@@ -106,8 +106,40 @@ just hass::control screenshot --output .tmp/capture.png
 
 Native capture includes renderer callbacks. HASS composites the worker map underneath the UI using physical placement
 and clipping. A hidden tab, pending map view, resize, or changed map during capture fails explicitly; request a new
-capture after the application settles. Images exclude child windows, browser chrome, OS decorations, and system dialogs.
-Screenshot capture is an HTTP operation; the existing synchronous `window.garminAutomation` hooks remain unchanged.
+capture after the application settles. Each image covers one canvas, excluding browser chrome, OS decorations, and
+system dialogs. Screenshot capture is an HTTP operation; the existing synchronous `window.garminAutomation` hooks remain
+unchanged.
+
+### Child windows
+
+`windows` lists the root and owned child windows with `id`, `kind`, `title`, `ready`, `focused`, and `screenshots`. Pass
+an entry's `id` in the optional `window` command field to address that window. Omitting it, or using `root`, selects the
+main app. Handles expire on close, owner logout, or browser popup reload; discover them again after reopening. Unknown
+handles fail instead of falling back to the main app.
+
+`window.focus` and `window.close` require an explicit child handle and no argument. Focus requests remain subject to
+browser and compositor policy. `targets`, `action`, `sequence`, `status`, `result`, and `cancel` use the selected
+window's own semantic tree and driver. Child actions cannot advance the root workload. Built-in scenarios run only in
+the root; use custom sequences for children. Resizing a browser child sizes its canvas, while desktop resizes the native
+window. Developer section headers expose `developer.section.automation`, `.control`, `.logs`, and `.debug`, with
+`open`/`closed` values. Clicking these targets expands or collapses the section even when its body controls are absent.
+The nested time filter uses `developer.section.log-time`; log record expanders use
+`developer.section.record.<sequence>`.
+
+```sh
+just hass::control command windows
+just hass::control command targets --window HANDLE
+just hass::control command action --window HANDLE --argument '{"kind":"click","target":"files.refresh"}'
+just hass::control screenshot --window HANDLE --output .tmp/files.png
+just hass::control command window.close --window HANDLE
+```
+
+HASS captures child canvases through their owning page, with deadline, closure, and reload checks. Native immediate
+child viewports advertise `screenshots: false` and reject capture explicitly: eframe's immediate rendering path does not
+process screenshot requests. Native root capture remains available. Opening browser popups and OS file pickers still
+obeys browser interaction restrictions; these commands do not bypass them.
+
+### Semantic actions
 
 The panel documents these browser hooks:
 
@@ -139,11 +171,12 @@ its selection survives narrow/wide layouts and that the profile, map-fit, and pl
 that JSON to desktop `/api/control`, or pass its `argument` array to `window.garminAutomation.sequence(...)`.
 
 An individual action uses the same input driver and reports completion asynchronously. Key/text actions first click the
-target to establish focus. No command directly changes application or camera state. Missing, ambiguous, disabled, or
-clipped targets fail explicitly, and overlapping workloads are rejected. Native automation targets the application's
-root viewport; the developer viewport remains available for inspecting logs and stopping a workload. The driver pairs
-input/output hooks using the incoming viewport ID because those hooks run outside egui's viewport pass. Secondary
-windows cannot advance the workload, change its recorded geometry, or replace its semantic target tree.
+target to establish focus. Before a click, drag, or scroll starts, target bounds must match across two rendered frames.
+Layout must settle within the action's two-second deadline; this readiness wait shifts later actions' schedules. Active
+gestures retain their existing input sequence. No command directly changes application or camera state. Missing,
+ambiguous, disabled, or clipped targets fail explicitly, and overlapping workloads in the same window are rejected. The
+driver pairs input/output hooks using the incoming viewport ID because those hooks run outside egui's viewport pass.
+Secondary windows cannot advance the root workload, change its recorded geometry, or replace its semantic target tree.
 
 Root-window resize and pixel-scale changes continue functional runs. The driver records each change, waits for fresh
 layout, and resolves targets again. An active click or drag is released outside controls and retried; already applied

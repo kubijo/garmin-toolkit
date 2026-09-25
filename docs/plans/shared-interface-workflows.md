@@ -8,24 +8,27 @@ plan owns user-visible workflow parity between its browser client and the native
 
 ## Shared work
 
-1. Populate each device page through automatic bounded inspection, then give it explicit FIT import, route upload, map
-   management, and asset-management entry points. File transfer and mutation require separate confirmation.
-2. Stage FIT ingress before persistence. Pre-parse selected or dropped files and present their activities, metadata,
-   duplicates, warnings, and failures for review. Import nothing until the user explicitly confirms the staged set.
-3. Confine drag and drop to visible, enabled targets. Show clear accept or reject feedback while hovering. A drop target
-   cannot remain active elsewhere in the window or application.
-4. Complete the [activity map workspace](activity-map-workspace.md) acceptance and rendering-isolation work without
-   duplicating its implementation checklist here.
-5. Report mutations through the notification host. Success follows persistence; failures remain visible and actionable
-   across reconnects.
-6. Prove offline sync, visualization, export, snapshot and restore, and one confirmed upload through both clients.
-7. Use only original or individually licensed artwork with generated attribution.
-8. Complete a keyboard-only audit of both shells, including the explorer window, focus visibility, traversal order,
-   modal trapping, and reconnect overlay/recovery.
-9. Complete the window, automation, and logging acceptance below. Current contracts live in
-   [application windows](../architecture/application-windows.md), [Developer tools](../architecture/developer-tools.md),
-   and [device explorer](../architecture/device-explorer.md). [Device inspection](device-state.md) owns hardware
-   acceptance.
+01. Populate each device page through automatic bounded inspection, then give it explicit FIT import, route upload, map
+    management, and asset-management entry points. File transfer and mutation require separate confirmation.
+02. Stage FIT ingress before persistence. Pre-parse selected or dropped files and present their activities, metadata,
+    duplicates, warnings, and failures for review. Import nothing until the user explicitly confirms the staged set.
+03. Confine drag and drop to visible, enabled targets. Show clear accept or reject feedback while hovering. A drop
+    target cannot remain active elsewhere in the window or application.
+04. Complete the [activity map workspace](activity-map-workspace.md) acceptance and rendering-isolation work without
+    duplicating its implementation checklist here.
+05. Report mutations through the notification host. Success follows persistence; failures remain visible and actionable
+    across reconnects.
+06. Prove offline sync, visualization, export, snapshot and restore, and one confirmed upload through both clients.
+07. Use only original or individually licensed artwork with generated attribution.
+08. Complete a keyboard-only audit of both shells, including the explorer window, focus visibility, traversal order,
+    modal trapping, and reconnect overlay/recovery.
+09. Complete the window, automation, and logging acceptance below. Current contracts live in
+    [application windows](../architecture/application-windows.md),
+    [Developer tools](../architecture/developer-tools.md), and [device explorer](../architecture/device-explorer.md).
+    [Device inspection](device-state.md) owns hardware acceptance.
+10. **Missing profile accent-color chooser:** profile settings display the stored accent but provide no way to change
+    it. Add a shared chooser for desktop and HASS, persist the selection in the existing profile accent field, and
+    verify it survives profile switching and restart, with accessible controls in both themes.
 
 ## Runtime acceptance
 
@@ -102,14 +105,28 @@ Root screenshot capture returns bounded PNG bytes with frame, dimensions, and sc
 capture has demonstrated the activity map, route, overlays, and sidebars at unit scale, with another control request
 succeeding after capture. Use `just hass::control screenshot --output .tmp/capture.png`.
 
-Verify native capture includes map rendering callbacks. Repeat HASS capture at non-unit scale and during
-resize/navigation, checking clipping, transparency, and rejection of stale frames. Missing map pixels fail acceptance.
-Captures exclude browser chrome, OS decorations, and system dialogs; external automation still covers those boundaries.
+Native root capture has demonstrated the activity map, route, and overlays after stationary arrival. Repeat capture at
+non-unit scale and during resize/navigation, checking clipping, transparency, and rejection of stale frames. Missing map
+pixels fail acceptance. Captures exclude browser chrome, OS decorations, and system dialogs; external automation still
+covers those boundaries.
 
-Child-window control follows separately: the current driver ignores secondary viewports. Add a window registry and
-scoped semantic snapshots/dispatch without mixing target trees or advancing the root workload. Invalidate user-bound
-windows on profile changes. Expose existing log RPC through the adapter. An optional MCP facade can reuse these
-operations and images later; browser MCP remains useful for navigation, file choosers, and console/network inspection.
+Child-window control has demonstrated discovery and separate tools/files PNG captures in HASS/Vivaldi through HTTP,
+without browser MCP. File refresh and resizing to 720 × 640 preserve the root report; cancelling a child action leaves
+an active root workload running. Closing/reopening files expires the old handle, and logout revokes files while
+retaining tools. Root-only scenarios reject child selectors. Vivaldi required popup permission before synthetic clicks
+could open windows.
+
+Desktop has also demonstrated file-window discovery, refresh, resizing to 720 × 640, root/child cancellation isolation,
+fresh handles after reopen, and logout revocation while retaining tools. Native tools section targets can toggle
+Automation, Control, Logs, and Debug without changing the root report. Repeated rapid Control collapse → Debug click
+sequences pass with target-geometry stabilization; subsequent HTTP commands respond while the root report stays
+unchanged. Verify browser closure/reload during capture, non-unit scale, and actual foreground focus; acceptance of a
+focus request alone does not prove the browser/compositor granted it. Native child capture remains deferred because
+eframe's immediate viewport renderer does not process screenshot requests; its explicit unsupported response is
+verified. No additional upstream patch is carried for this feature.
+
+Next, expose existing log RPC through the adapter. An optional MCP facade can reuse these operations and images later;
+browser MCP remains useful for navigation, file choosers, and console/network inspection.
 
 ### Implementation order and acceptance
 
@@ -120,7 +137,7 @@ operations and images later; browser MCP remains useful for navigation, file cho
    input release, resizing, focus loss, hidden-tab pauses, and report parity.
 4. Verify screenshot pixels with maps/overlays, non-unit scale, clipping, resizing, pending map frames, target closure,
    byte limits, and artifact cleanup.
-5. Add child-window and log access with profile/session isolation and stale-window tests; consider MCP afterward.
+5. Complete child-window runtime acceptance, then add log access with profile/session isolation; consider MCP afterward.
 
 ## Deferred Wayland activation work
 

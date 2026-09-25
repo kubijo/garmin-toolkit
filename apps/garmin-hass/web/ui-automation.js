@@ -1,4 +1,5 @@
 import { rendererSnapshot } from './map-composition.js';
+import { routeWindowCommand } from './window-control.js';
 
 export function launchAutomation(name, browser = window) {
     browser.garminAutomation.start(name);
@@ -7,15 +8,23 @@ export function launchAutomation(name, browser = window) {
 // Native HTTP and the browser hooks share the same orchestration and driver.
 export function executeAutomation(commandJson, browser = window) {
     try {
-        const { operation, argument } = JSON.parse(commandJson);
-        const api = browser.garminAutomation;
-        if (!api) throw Error('automation is disabled');
-        if (!['list', 'start', 'status', 'result', 'cancel', 'targets', 'action', 'sequence'].includes(operation)) {
-            throw Error('unsupported automation operation');
-        }
-        const value = api[operation](argument);
-        const acknowledgement = ['start', 'action', 'sequence', 'cancel'].includes(operation);
-        return JSON.stringify({ value: acknowledgement ? null : (value ?? null) });
+        const request = JSON.parse(commandJson);
+        const { operation, argument } = request;
+        if (!browser.garminAutomation) throw Error('automation is disabled');
+        return JSON.stringify({
+            value: routeWindowCommand(request, browser, api => {
+                if (
+                    !['list', 'start', 'status', 'result', 'cancel', 'targets', 'action', 'sequence'].includes(
+                        operation,
+                    )
+                ) {
+                    throw Error('unsupported automation operation');
+                }
+                const value = api[operation](argument);
+                const acknowledgement = ['start', 'action', 'sequence', 'cancel'].includes(operation);
+                return acknowledgement ? null : (value ?? null);
+            }),
+        });
     } catch (error) {
         return JSON.stringify({ error: String(error?.message ?? error) });
     }
