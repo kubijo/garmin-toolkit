@@ -95,9 +95,6 @@ per-frame image transfers, whole-UI paint-list transfers, or shared-memory deplo
   Source inspection found feathered tile-background rectangles and no per-tile clipping of buffered geometry; these are
   candidates, not a confirmed diagnosis of the screenshot. Do not mask the defect with overlapping tiles or globally
   disable antialiasing.
-- [ ] Keep chart endpoint tick labels inside the chart card's content bounds. Reported on 2026-09-18: the elevation
-  chart's `0.0 km` label extends left beyond the plot/content edge. Check both endpoints, narrow layouts, and time and
-  distance axes; add a visual regression check when fixing the layout.
 
 ### Performance acceptance
 

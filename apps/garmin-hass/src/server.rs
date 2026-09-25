@@ -44,17 +44,31 @@ pub(super) async fn serve(
         .unwrap_or_else(|_| "127.0.0.1:8099".to_owned())
         .parse::<SocketAddr>()
         .map_err(std::io::Error::other)?;
-    let app = router(host, map_tiles, browser)?;
+    let (app, control) = router(host, map_tiles, browser)?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     announce_server(address, crate::mode::PRODUCT_NAME)?;
     if browser.control_server {
         println!("Control API: http://{address}/api/control (localhost only)");
     }
+    serve_http(listener, app, control, shutdown_signal()).await
+}
+
+async fn serve_http(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    control: Option<crate::control::Broker>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> io::Result<()> {
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(async move {
+        shutdown.await;
+        if let Some(control) = control {
+            control.stop();
+        }
+    })
     .await
 }
 
@@ -168,7 +182,7 @@ fn router(
     host: Arc<Host>,
     map_tiles: garmin_map_tiles::Service,
     browser: BrowserOptions,
-) -> io::Result<Router> {
+) -> io::Result<(Router, Option<crate::control::Broker>)> {
     browser.validate()?;
     let control = browser.control_server.then(crate::control::Broker::new);
     let app = Router::new()
@@ -184,7 +198,7 @@ fn router(
     } else {
         app
     };
-    let app = app.layer(Extension(control));
+    let app = app.layer(Extension(control.clone()));
     let app = match std::env::var_os(WEB_ROOT_ENVIRONMENT).map(PathBuf::from) {
         Some(root) => app
             .route("/", get(web_index))
@@ -198,13 +212,14 @@ fn router(
             }),
         ),
     };
-    Ok(app
+    let app = app
         .layer(DefaultBodyLimit::max(CSP_REPORT_LIMIT))
         .layer(middleware::from_fn_with_state(
             browser.control_server,
             control_visibility,
         ))
-        .layer(middleware::from_fn(browser_cache_policy)))
+        .layer(middleware::from_fn(browser_cache_policy));
+    Ok((app, control))
 }
 
 async fn control_visibility(
@@ -216,6 +231,7 @@ async fn control_visibility(
     if path.starts_with("/api/control/")
         || path.starts_with("/api/capabilities/")
         || (!enabled && matches!(path, "/api/control" | "/api/capabilities"))
+        || (!enabled && garmin_diagnostics::is_route(path))
     {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -612,6 +628,60 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
 
+    #[cfg(feature = "demo")]
+    #[tokio::test]
+    async fn shutdown_finishes_with_diagnostic_followers_and_browser_connected()
+    -> anyhow::Result<()> {
+        use std::time::Duration;
+        let directory = tempfile::tempdir()?;
+        let storage = crate::prepare_storage(directory.path()).await?;
+        let (app, control) = router(
+            Host::new(
+                Box::new(DemoSource::new(
+                    directory.path().join("device"),
+                    tokio::runtime::Handle::current(),
+                )?),
+                Application::new(storage),
+            ),
+            garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+            BrowserOptions {
+                control_server: true,
+                ..Default::default()
+            },
+        )?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(super::serve_http(listener, app, control, async move {
+            let _ = stopped.await;
+        }));
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(3))
+            .build()?;
+        let (browser, _) = connect_async(format!("ws://{address}/remoc")).await?;
+        let mut followers = Vec::new();
+        for format in ["text", "ansi", "sse", "html"] {
+            let mut response = client
+                .get(format!(
+                    "http://{address}/api/events-stream?format={format}"
+                ))
+                .header("accept", "text/event-stream")
+                .send()
+                .await?
+                .error_for_status()?;
+            assert!(response.chunk().await?.is_some());
+            followers.push(response);
+        }
+        stop.send(()).expect("server is waiting for shutdown");
+        tokio::time::timeout(Duration::from_secs(2), server).await???;
+        for mut follower in followers {
+            assert!(follower.chunk().await?.is_none());
+        }
+        drop(browser);
+        Ok(())
+    }
+
     #[tokio::test]
     async fn disabled_control_is_404_even_with_static_file_fallback() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
@@ -630,6 +700,10 @@ mod tests {
             "/api/control/",
             "/api/control/sessions",
             "/api/capabilities",
+            "/api/logs-get",
+            "/api/logs-stream",
+            "/api/events-get",
+            "/api/events-stream",
         ] {
             for method in [
                 reqwest::Method::GET,
@@ -932,7 +1006,7 @@ mod tests {
         let storage = crate::prepare_storage(directory.path()).await?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
-        let app = router(
+        let (app, _control) = router(
             Host::new(
                 Box::new(DemoSource::new(
                     directory.path().join("device"),
@@ -1020,7 +1094,7 @@ mod tests {
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
-        let app = router(
+        let (app, _control) = router(
             host,
             garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
             BrowserOptions::default(),
@@ -1056,7 +1130,7 @@ mod tests {
         let storage = crate::prepare_storage(directory.path()).await?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
-        let app = router(
+        let (app, _control) = router(
             Host::new(
                 Box::new(DemoSource::new(
                     directory.path().join("device"),

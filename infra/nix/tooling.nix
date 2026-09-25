@@ -17,6 +17,9 @@ let
       "crates/garmin-ui/src/activity/map_composition.wgsl"
       "infra/javascript/fixtures/*.pbf.hex"
       "infra/javascript/fixtures/*.pbf"
+      # Biome's HTML parser rewrites Askama block delimiters;
+      # Askama compiles these templates.
+      "crates/garmin-diagnostics/templates/*.html"
     ];
     html = true;
     javascript = true;
@@ -80,6 +83,7 @@ let
           ${lib.getExe pkgs.nodejs} infra/javascript/map-worker.test.mjs || exit $?
           ${lib.getExe pkgs.nodejs} infra/javascript/map-composition.test.mjs || exit $?
           ${lib.getExe pkgs.nodejs} infra/javascript/ui-automation.test.mjs || exit $?
+          ${lib.getExe pkgs.nodejs} infra/javascript/diagnostics-view.test.mjs || exit $?
           ${lib.getExe pkgs.nodejs} infra/javascript/logging.test.mjs || exit $?
           exec ${lib.getExe pkgs.nodejs} infra/javascript/initializer.test.mjs
         '';

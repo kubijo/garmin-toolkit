@@ -14,6 +14,8 @@ use std::{
 };
 use wasm_bindgen::prelude::*;
 
+mod diagnostics;
+
 #[wasm_bindgen(module = "/ui-automation.js")]
 extern "C" {
     #[wasm_bindgen(js_name = executeAutomation, catch)]
@@ -24,11 +26,14 @@ extern "C" {
 extern "C" {
     #[wasm_bindgen(js_name = installWindowControl)]
     fn install_window_control(capture: &JsValue);
+    #[wasm_bindgen(js_name = installWindowDiagnostics)]
+    fn install_window_diagnostics(observe: &JsValue);
     #[wasm_bindgen(js_name = captureWindow, catch)]
     fn capture_window(window: &str, milliseconds: f64) -> Result<js_sys::Promise, JsValue>;
 }
 
 pub(super) fn install_window_capture(context: &Context) {
+    let observer = diagnostics::install(context);
     let context = context.clone();
     let callback = Closure::<dyn Fn(f64) -> js_sys::Promise>::new(move |milliseconds: f64| {
         let context = context.clone();
@@ -49,7 +54,9 @@ pub(super) fn install_window_capture(context: &Context) {
             .into())
         })
     });
+    install_window_diagnostics(observer.as_ref());
     install_window_control(callback.as_ref());
+    observer.forget();
     callback.forget();
 }
 
@@ -87,6 +94,19 @@ fn monotonic_ms() -> Option<f64> {
 }
 
 impl BrowserControl for Handler {
+    fn diagnostics(
+        &self,
+    ) -> impl Future<
+        Output = Result<
+            remoc::rch::mpsc::Receiver<garmin_model::diagnostics::Update>,
+            rtc::CallError,
+        >,
+    > {
+        std::future::ready(Ok(diagnostics::subscribe(
+            &self.context,
+            self.active.clone(),
+        )))
+    }
     fn capture(
         &self,
         expires_at_ms: u64,

@@ -63,6 +63,8 @@ struct NativeTools {
     receiver: mpsc::Receiver<Pending>,
     sender: mpsc::Sender<Pending>,
     server: Option<tokio::task::JoinHandle<()>>,
+    diagnostics: Option<garmin_diagnostics::Diagnostics>,
+    observer: Option<garmin_ui::diagnostics::Observer>,
     #[cfg(feature = "demo")]
     capture: Option<PendingCapture>,
 }
@@ -75,15 +77,25 @@ impl Drop for NativeTools {
 
 impl NativeTools {
     fn shutdown(&mut self) {
+        self.stop_server();
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
+
+    fn stop_server(&mut self) {
+        if let Some(observer) = self.observer.take() {
+            observer.stop();
+        }
+        if let Some(diagnostics) = self.diagnostics.take() {
+            diagnostics.stop();
+        }
         #[cfg(feature = "demo")]
         {
             self.capture = None;
         }
         if let Some(server) = self.server.take() {
             server.abort();
-        }
-        if let Some(runtime) = self.runtime.take() {
-            runtime.shutdown_background();
         }
     }
 }
@@ -112,6 +124,8 @@ pub fn install(
         receiver,
         sender,
         server: None,
+        diagnostics: None,
+        observer: None,
         #[cfg(feature = "demo")]
         capture: None,
     };
@@ -135,6 +149,42 @@ impl egui::plugin::Plugin for NativeTools {
 }
 
 impl NativeTools {
+    fn publish_diagnostics(&self, context: &egui::Context) {
+        let Some(diagnostics) = &self.diagnostics else {
+            return;
+        };
+        let focused = context.input_for(egui::ViewportId::ROOT, |input| input.focused);
+        diagnostics.events.publish(
+            "desktop",
+            garmin_model::diagnostics::Observation {
+                kind: "window".into(),
+                window: "root".into(),
+                removed: false,
+                fields: std::collections::BTreeMap::from([
+                    ("kind".into(), "application".into()),
+                    ("focused".into(), focused.to_string()),
+                ]),
+            },
+        );
+        let debug = state(context)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .debug
+            .clone();
+        diagnostics.events.publish(
+            "desktop",
+            garmin_model::diagnostics::Observation {
+                kind: "renderer".into(),
+                window: "root".into(),
+                removed: false,
+                fields: std::collections::BTreeMap::from([(
+                    "detail".into(),
+                    debug.chars().take(512).collect(),
+                )]),
+            },
+        );
+    }
+
     fn start(&mut self, context: &egui::Context) {
         if self.server.is_some() {
             return;
@@ -168,6 +218,15 @@ impl NativeTools {
         })();
         match result {
             Ok((listener, url)) => {
+                let diagnostics =
+                    garmin_diagnostics::Diagnostics::new(Some(self.store.clone()), "desktop");
+                let events = diagnostics.events.clone();
+                self.observer = Some(garmin_ui::diagnostics::install(
+                    context,
+                    move |observation| {
+                        events.publish("desktop", observation);
+                    },
+                ));
                 println!("Control server: {url}");
                 let handle = state(context);
                 {
@@ -185,14 +244,22 @@ impl NativeTools {
                     .with_state(Bridge {
                         sender: self.sender.clone(),
                         context: context.clone(),
-                    });
+                    })
+                    .merge(diagnostics.routes());
+                self.diagnostics = Some(diagnostics);
                 let context = context.clone();
                 self.server = Some(
                     self.runtime
                         .as_ref()
                         .expect("native runtime is active")
                         .spawn(async move {
-                            if let Err(error) = axum::serve(listener, router).await {
+                            if let Err(error) = axum::serve(
+                                listener,
+                                router
+                                    .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+                            )
+                            .await
+                            {
                                 let mut state = handle
                                     .lock()
                                     .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -213,6 +280,7 @@ impl NativeTools {
     }
 
     fn update(&mut self, context: &egui::Context) {
+        self.publish_diagnostics(context);
         #[cfg(feature = "demo")]
         self.update_capture();
         while let Ok(pending) = self.receiver.try_recv() {
@@ -242,13 +310,7 @@ impl NativeTools {
             match request {
                 Request::StartServer => self.start(context),
                 Request::StopServer => {
-                    #[cfg(feature = "demo")]
-                    {
-                        self.capture = None;
-                    }
-                    if let Some(server) = self.server.take() {
-                        server.abort();
-                    }
+                    self.stop_server();
                     state(context)
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)

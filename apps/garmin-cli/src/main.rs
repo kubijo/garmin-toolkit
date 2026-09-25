@@ -1,4 +1,5 @@
 mod diagnostic;
+mod diagnostics;
 mod pending_recovery;
 mod pipeline;
 
@@ -105,6 +106,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Read logs and events from a running local desktop or HASS demo.
+    Diagnostics(diagnostics::Args),
     /// Discover and inspect devices.
     Device {
         #[command(subcommand)]
@@ -609,6 +612,7 @@ async fn run_cli(cli: Cli, capture: Option<SessionCapture>) -> Result<()> {
         );
     }
     match cli.command {
+        Some(Command::Diagnostics(args)) => args.run(cli.json).await,
         None => match (cli.mock_device, cli.mock_server.as_ref()) {
             (Some(path), Some(mock_server)) => {
                 interactive_mock_demo(path, mock_server, None, capture).await

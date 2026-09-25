@@ -30,6 +30,7 @@ pub(super) fn dispatch_menu(context: &egui::Context) {
 
 pub(super) fn install(context: &egui::Context) {
     install_driver(context, Driver::default());
+    crate::control::install_window_capture(context);
 }
 
 pub(super) fn install_window(context: &egui::Context) {

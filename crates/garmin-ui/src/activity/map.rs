@@ -727,6 +727,7 @@ fn attribution(ui: &mut Ui, source: &Attribution, performance: Option<&str>) {
     super::map_diagnostics::RendererDiagnostics::show_installed(ui);
     let palette = crate::theme::palette(ui);
     let color = crate::theme::color32(palette.content().text_helper());
+    ui.add_space(-ui.spacing().item_spacing.y);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 12.0), Sense::hover());
     ui.painter().rect_filled(
         rect,

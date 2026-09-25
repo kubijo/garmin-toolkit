@@ -13,6 +13,18 @@ pub struct RendererDiagnostics {
 impl RendererDiagnostics {
     /// Publish the latest host state. Hosts without diagnostics do not add a map footer.
     pub fn install(self, context: &Context) {
+        crate::diagnostics::publish(
+            context,
+            garmin_model::diagnostics::Observation {
+                kind: "renderer".into(),
+                window: "root".into(),
+                removed: false,
+                fields: std::collections::BTreeMap::from([
+                    ("label".into(), self.label.clone()),
+                    ("detail".into(), self.detail.clone()),
+                ]),
+            },
+        );
         context.data_mut(|data| data.insert_temp(Id::new("map-renderer-diagnostics"), self));
     }
 

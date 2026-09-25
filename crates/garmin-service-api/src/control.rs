@@ -126,6 +126,9 @@ pub struct ControlDispatch {
 
 #[rtc::remote]
 pub trait BrowserControl {
+    async fn diagnostics(
+        &self,
+    ) -> Result<remoc::rch::mpsc::Receiver<garmin_model::diagnostics::Update>, rtc::CallError>;
     async fn execute(
         &self,
         request: ControlDispatch,

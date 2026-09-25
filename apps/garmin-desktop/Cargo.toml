@@ -15,6 +15,7 @@ demo = ["dep:garmin-fixtures", "garmin-ui/automation"]
 workspace = true
 
 [dependencies]
+garmin-diagnostics.workspace = true
 axum.workspace = true
 clap.workspace = true
 tracing.workspace = true

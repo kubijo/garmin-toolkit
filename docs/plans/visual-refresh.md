@@ -22,13 +22,33 @@ copy their assets, palette, dimensions, layout, or distinctive treatment.
 
 ## Pages and workspaces
 
-- [ ] Activities: align search/filter/list/detail hierarchy, empty/loading/error states, and map-ready detail content.
+- [ ] Activities: implement the [calendar header](#activity-calendar-header), including empty/loading/error states.
 - [ ] Profile entry and settings: replace oversized slabs with bounded groups and modern form/action hierarchy while
   keeping picture selection native to the client.
 - [ ] Devices: establish object header, inspection/status summary, capabilities, storage, and contextual actions without
   stretching low-information cards across the viewport.
 - [ ] Offline, imports, dialogs, notifications, and all failure states: make feedback visually related but semantically
   distinct.
+
+### Activity calendar header
+
+Agreed layout; implementation pending for desktop and HASS.
+
+- Replace the permanent activity-list and right-hand details columns with one header above a full-width map. Keep the
+  application sidebar. Remove redundant outer page padding while retaining padding around text and controls.
+- Show an **expanded, always-visible month calendar** in the header, beside the selected activity's title, date/time,
+  distance, duration, and ascent. Mark days containing activities and highlight the selected day.
+- Calendar arrows change month. Separate previous/next activity controls step chronologically through activities,
+  including those on the same day, skipping empty days and updating the displayed month when needed.
+- Selecting a new day opens its first activity; selecting the current day preserves the selected activity. Show a
+  selectable list beside the calendar **only when that day contains multiple activities**, with time, sport/name, and
+  distance. Otherwise show just the selected activity's heading and summary.
+- Allow space for six calendar week rows; avoid another title or toolbar above this header. Keep charts and laps below
+  the map, with contextual inspection when needed instead of a permanent details column.
+- Retain an **All activities** action for searching and filtering the archive.
+
+Before implementation, settle empty-day selection, date/time-zone grouping, and narrow-screen arrangement. Verify
+month/year boundaries, multiple activities per day, navigation endpoints, keyboard access, and both themes.
 
 ## Evidence
 

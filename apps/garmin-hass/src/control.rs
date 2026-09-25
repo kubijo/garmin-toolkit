@@ -32,14 +32,22 @@ mod tests;
 pub(super) struct Broker(Arc<Inner>);
 
 struct Inner {
+    diagnostics: garmin_diagnostics::Diagnostics,
     started: Instant,
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     last_request: Mutex<u64>,
 }
 
 struct Session {
+    telemetry: tokio::task::JoinHandle<()>,
     client: BrowserControlClient,
     admission: Arc<Semaphore>,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.telemetry.abort();
+    }
 }
 
 #[derive(Clone)]
@@ -55,6 +63,11 @@ impl Drop for ConnectionState {
     fn drop(&mut self) {
         self.broker
             .0
+            .diagnostics
+            .events
+            .disconnect(&format!("browser/{}", self.id));
+        self.broker
+            .0
             .sessions
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -65,6 +78,10 @@ impl Drop for ConnectionState {
 impl Broker {
     pub(super) fn new() -> Self {
         Self(Arc::new(Inner {
+            diagnostics: garmin_diagnostics::Diagnostics::new(
+                garmin_logging::Store::global(),
+                "hass",
+            ),
             started: Instant::now(),
             sessions: Mutex::new(HashMap::new()),
             last_request: Mutex::new(0),
@@ -79,6 +96,10 @@ impl Broker {
         }))
     }
 
+    pub(super) fn stop(&self) {
+        self.0.diagnostics.stop();
+    }
+
     fn now_ms(&self) -> u64 {
         u64::try_from(self.0.started.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
@@ -90,6 +111,7 @@ impl Broker {
             .layer(DefaultBodyLimit::max(control::MAX_COMMAND_BYTES))
             .layer(middleware::from_fn(local_only))
             .with_state(self.clone())
+            .merge(self.0.diagnostics.routes())
     }
 
     fn active_sessions(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Session>>> {
@@ -129,15 +151,73 @@ impl Connection {
             browser,
             server_time_ms: self.0.broker.now_ms(),
         };
+        let telemetry = self.observe(&client, &info.id);
         sessions.insert(
             info.id.clone(),
             Arc::new(Session {
+                telemetry,
                 client,
                 admission: Arc::new(Semaphore::new(1)),
             }),
         );
         *registered = true;
         Ok(info)
+    }
+
+    fn observe(&self, client: &BrowserControlClient, id: &str) -> tokio::task::JoinHandle<()> {
+        let events = self.0.broker.0.diagnostics.events.clone();
+        let source = format!("browser/{id}");
+        let client = client.clone();
+        let owner = Arc::downgrade(&self.0);
+        events.publish(
+            &source,
+            garmin_model::diagnostics::Observation {
+                kind: "connection".into(),
+                window: String::new(),
+                removed: false,
+                fields: std::collections::BTreeMap::from([("status".into(), "connected".into())]),
+            },
+        );
+        tokio::spawn(async move {
+            let reason = observe_updates(&client, &events, &source, &owner).await;
+            if let Some(_owner) = owner.upgrade() {
+                events.unavailable(&source, reason);
+            }
+        })
+    }
+}
+
+async fn observe_updates(
+    client: &BrowserControlClient,
+    events: &garmin_diagnostics::Events,
+    source: &str,
+    owner: &std::sync::Weak<ConnectionState>,
+) -> &'static str {
+    let mut receiver = match tokio::time::timeout(TIMEOUT, client.diagnostics()).await {
+        Ok(Ok(receiver)) => receiver,
+        Ok(Err(_)) => return "Diagnostic subscription failed",
+        Err(_) => return "Diagnostic subscription timed out",
+    };
+    loop {
+        let update = match receiver.recv().await {
+            Ok(Some(update)) => update,
+            Ok(None) => return "Diagnostic subscription closed",
+            Err(_) => return "Diagnostic subscription failed",
+        };
+        let Some(_owner) = owner.upgrade() else {
+            return "Application disconnected";
+        };
+        if update.state.len() > 128
+            || update.changes.len() > 128
+            || !update
+                .state
+                .iter()
+                .chain(&update.changes)
+                .all(garmin_model::diagnostics::Observation::valid)
+        {
+            return "Invalid diagnostic update";
+        }
+        events.update(source, update);
     }
 }
 

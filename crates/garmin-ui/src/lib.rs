@@ -17,6 +17,7 @@ pub mod developer;
 pub mod device;
 pub mod device_browser;
 pub mod device_fit_preview;
+pub mod diagnostics;
 pub mod file_import;
 mod header_selector;
 pub mod icons;
