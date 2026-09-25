@@ -61,6 +61,7 @@ let
   };
   portableCargoArtifacts = craneLibPortable.buildDepsOnly (
     portableCommonArgs
+    // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
     // {
       cargoExtraArgs = "--locked -p garmin-desktop --all-features";
       pname = "garmin-toolkit-portable-deps";

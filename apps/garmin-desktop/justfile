@@ -1,7 +1,7 @@
 import '../../infra/just/common.just'
 
 # Run production data or an isolated, deterministic demo corpus.
-run mode:
+run mode *options:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -11,12 +11,38 @@ run mode:
         *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
     esac
 
-    exec just in-shell cargo run --locked -p garmin-desktop "${features[@]}"
+    shift
+    exec just in-shell cargo run --locked -p garmin-desktop "${features[@]}" -- "$@"
+
+# Pre-warm the exact optimized binary used by a profiling capture.
+profile-build mode:
+    @just in-shell python infra/python/desktop_profile.py build {{ quote(mode) }}
+
+# Record immutable Samply/runtime evidence and derive one enriched profile; close the app to finish.
+profile mode REPORT='00-latest' *samply_args:
+    @shift 2; exec just in-shell python infra/python/desktop_profile.py record {{ quote(mode) }} {{ quote(REPORT) }} -- "$@"
+
+# Open a named enriched report in the local profiler UI.
+profile-load REPORT='00-latest':
+    just in-shell samply load {{ quote(repository_root) }}/.tmp/profiles/{{ quote(REPORT) }}/combined.json.gz
+
+# Summarize a named report without opening the profiler UI.
+profile-analyze REPORT='00-latest':
+    @just in-shell python infra/python/desktop_profile_analysis.py analyze {{ quote(REPORT) }}
+
+# Compare two or more named reports without opening the profiler UI.
+profile-compare *reports:
+    @exec just in-shell python infra/python/desktop_profile_analysis.py compare "$@"
 
 # Write the selected AppImage to dist.
 appimage mode:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    if [[ $(uname -s) != Linux ]]; then
+        printf 'AppImage packaging requires Linux.\n' >&2
+        exit 64
+    fi
 
     case {{ quote(mode) }} in
         production) app=desktop-appimage ;;
@@ -30,6 +56,11 @@ appimage mode:
 flatpak mode:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    if [[ $(uname -s) != Linux ]]; then
+        printf 'Flatpak packaging requires Linux.\n' >&2
+        exit 64
+    fi
 
     case {{ quote(mode) }} in
         production) app=desktop-flatpak ;;

@@ -33,16 +33,20 @@ let
       pkgs.wrapGAppsNoGuiHook
     ];
     buildInputs = runtimeLibraries;
-    LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibraries;
     SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+  }
+  // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+    LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibraries;
   };
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+  cargoArtifacts = craneLib.buildDepsOnly (
+    commonArgs // import ./cargo-deps.nix { inherit lib workspaceSrc; }
+  );
   garminCli = craneLib.buildPackage (
     commonArgs
     // {
       inherit cargoArtifacts;
       cargoExtraArgs = "--package garmin-cli";
-      preFixup = ''
+      preFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
         gappsWrapperArgs+=(
           --set-default SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         )

@@ -1,5 +1,11 @@
-use std::{collections::HashMap, fs, path::PathBuf, time::Duration};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
+use camino::Utf8Path;
 use eframe::egui::{
     ColorImage, Context, Id, Key, Modifiers, TextureHandle, TextureOptions, Ui, ViewportCommand,
     load::SizedTexture,
@@ -9,19 +15,23 @@ use garmin_device::attachments as devices;
 use garmin_i18n::{Intl, Language, Translations, format_message};
 use garmin_model::identity::{LanguagePreference, ThemePreference, UnitSystem, User, UserId};
 use garmin_service_api::{
-    DeviceCapability, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
+    ActivityDetailSnapshot, DeviceCapability, DeviceCatalogEntry, DeviceCatalogEntryKind,
+    DeviceCatalogSnapshot, DeviceCatalogStorage, DeviceDataType, DeviceSnapshot, InspectionState,
+    TransferDirection,
 };
 use garmin_services::{ActivityPreview, Application, UserContext};
 use garmin_ui::{
-    activity, device, file_import, icons, image_crop, modal, notification, path, profile,
-    profile_settings, progress, shell,
+    activity, device, device_browser, device_fit_preview, file_import, icons, image_crop, modal,
+    notification, profile, profile_settings, progress, shell,
     workspace::{self, Page},
 };
 
 use crate::{
-    Error, device_backend,
+    Error, device_backend, profiling,
     worker::{self, ImportOutcome, Worker},
 };
+
+use garmin_ui::window::{Event as WindowEvent, NativeWindow, Spec as WindowSpec, WindowHost as _};
 
 pub struct Desktop {
     context: Context,
@@ -33,11 +43,19 @@ pub struct Desktop {
     page: Page,
     preferences_saving: bool,
     selected_activity: usize,
-    activity_path: Option<ActivityPath>,
+    activity_detail: Option<ActivityDetailSnapshot>,
+    activity_workspace: activity::Workspace,
     navigation: shell::Navigation,
     loaded: bool,
     create_profile: Option<profile::CreateState>,
     avatar_editor: Option<AvatarEditor>,
+    device_browser: Option<device_browser::Browser>,
+    file_window: NativeWindow<device_browser::Action, ()>,
+    file_window_device: Option<String>,
+    file_window_owner: Option<UserId>,
+    device_fit_preview: Option<device_fit_preview::Preview>,
+    device_browser_loading: Option<String>,
+    device_browser_status: DeviceBrowserStatus,
     quit: QuitState,
     import: ImportStatus,
     notice: Option<Notice>,
@@ -45,6 +63,8 @@ pub struct Desktop {
     devices: devices::Manager<device_backend::Platform>,
     device_toasts: HashMap<notification::ToastId, String>,
     worker: Worker,
+    map_runtime: activity::map_runtime::MapRuntimeHandle,
+    profiling: profiling::RuntimeMetricsRecorder,
 }
 
 impl Desktop {
@@ -52,9 +72,20 @@ impl Desktop {
         application: Application,
         translations: Translations,
         context: eframe::egui::Context,
+        device_platform: device_backend::Platform,
+        data_root: &Path,
+        map_renderer: activity::WgpuMapHandle,
+        profiling: profiling::RuntimeMetricsRecorder,
     ) -> Result<Self, Error> {
         let intl = translations.formatter(Language::English)?;
         let worker = Worker::spawn(application, context.clone())?;
+        let map_worker = crate::map_worker::Worker::spawn(&data_root.join("cache/activity-map"))?;
+        let map_runtime = activity::map_runtime::MapRuntimeHandle::new(
+            map_worker,
+            activity::map_runtime::Renderer::wgpu(map_renderer),
+        )
+        .with_metrics(profiling.clone());
+        let activity_workspace = activity::Workspace::new(&map_runtime);
         Ok(Self {
             context,
             translations,
@@ -65,23 +96,33 @@ impl Desktop {
             page: Page::Activities,
             preferences_saving: false,
             selected_activity: 0,
-            activity_path: None,
+            activity_detail: None,
+            activity_workspace,
             navigation: shell::Navigation::Expanded,
             loaded: false,
             create_profile: None,
             avatar_editor: None,
+            device_browser: None,
+            file_window: NativeWindow::default(),
+            file_window_device: None,
+            file_window_owner: None,
+            device_fit_preview: None,
+            device_browser_loading: None,
+            device_browser_status: DeviceBrowserStatus::Idle,
             quit: QuitState::Idle,
             import: ImportStatus::default(),
             notice: None,
             toasts: notification::Toasts::default(),
-            devices: devices::Manager::new(device_backend::Platform::new()),
+            devices: devices::Manager::new(device_platform),
             device_toasts: HashMap::new(),
             worker,
+            map_runtime,
+            profiling,
         })
     }
 
     fn show_chooser(&mut self, ui: &mut Ui, frame: &eframe::Frame) {
-        let window_copy = WindowCopy::new(&self.intl);
+        let window_copy = shell::WindowLabels::new(&self.intl);
         let window_controls = window_copy.props(ui.ctx());
         let output = shell::show(
             ui,
@@ -148,9 +189,34 @@ impl Desktop {
         profile_index: usize,
         drop_active: bool,
     ) {
-        let profile_props = self.profile_props();
+        let profile_props = self
+            .profiles
+            .iter()
+            .map(ProfileView::profile_props)
+            .collect::<Vec<_>>();
         let device_snapshots = self.device_snapshots();
-        let window_copy = WindowCopy::new(&self.intl);
+        let activities_page = ActivitiesPage::new(
+            &self.intl,
+            &self.profiles[profile_index],
+            self.selected_activity,
+            self.activity_detail.as_ref(),
+            &self.import,
+            drop_active,
+        );
+        let profile = self.profiles[profile_index].user.profile();
+        let settings_props = profile_settings::Props {
+            intl: &self.intl,
+            preferences: profile.preferences(),
+            profile: self.profiles[profile_index].profile_props(),
+            picture_enabled: true,
+            disabled: self.preferences_saving,
+        };
+        let notice = self.notice.as_ref();
+        let page = &self.page;
+        let intl = &self.intl;
+        let device_browser_loading = self.device_browser_loading.as_deref();
+        let activity_workspace = &mut self.activity_workspace;
+        let window_copy = shell::WindowLabels::new(&self.intl);
         let window_controls = window_copy.props(ui.ctx());
         let props = workspace::Props {
             product_name: crate::mode::WINDOW_TITLE,
@@ -164,32 +230,36 @@ impl Desktop {
             window_controls: Some(&window_controls),
         };
         let output = workspace::show(ui, &props, |ui| {
-            if let Some(notice) = &self.notice {
+            if let Some(notice) = notice {
                 notification::show(ui, &notice.props());
                 ui.add_space(12.0);
             }
-            match &self.page {
-                Page::Activities => PageOutput::Activities(self.show_activities_page(
-                    ui,
-                    profile_index,
-                    drop_active,
-                )),
-                Page::ProfileSettings => PageOutput::Settings(profile_settings::show(
-                    ui,
-                    &self.profile_settings_props(profile_index),
-                )),
+            match page {
+                Page::Activities => {
+                    PageOutput::Activities(activities_page.show(ui, activity_workspace))
+                }
+                Page::ProfileSettings => {
+                    PageOutput::Settings(profile_settings::show(ui, &settings_props))
+                }
                 Page::Device(key) => {
-                    if let Some(snapshot) = device_snapshots
+                    let action = device_snapshots
                         .iter()
                         .find(|snapshot| &snapshot.key == key)
-                    {
-                        device::show_snapshot(ui, &self.intl, snapshot);
+                        .and_then(|snapshot| {
+                            device::show_snapshot(
+                                ui,
+                                intl,
+                                snapshot,
+                                device_browser_loading == Some(key.as_str()),
+                            )
+                        });
+                    PageOutput::Device {
+                        key: key.clone(),
+                        action,
                     }
-                    PageOutput::Device
                 }
             }
         });
-
         self.handle_page_output(profile_index, output.inner);
         self.handle_shell_action(ui.ctx(), frame, output.action, &device_snapshots);
     }
@@ -207,81 +277,197 @@ impl Desktop {
             PageOutput::Settings(Some(action)) => {
                 self.handle_profile_settings_action(profile_index, action);
             }
-            PageOutput::Settings(None) | PageOutput::Device => {}
+            PageOutput::Device {
+                key,
+                action: Some(device::Action::BrowseFiles),
+            } => self.browse_device(key),
+            PageOutput::Settings(None) | PageOutput::Device { action: None, .. } => {}
         }
     }
 
-    fn show_activities_page(
-        &self,
-        ui: &mut Ui,
-        profile_index: usize,
-        drop_active: bool,
-    ) -> (Option<file_import::Action>, Option<activity::Action>) {
-        let current_profile = &self.profiles[profile_index];
-        let items = current_profile.activity_props();
-        let metric_props = current_profile.metric_props(self.selected_activity);
-        let segments = self
-            .activity_path
+    fn show_file_window(&mut self) {
+        let selected = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .map(|profile| profile.user.id());
+        if self.file_window_owner.is_none() || self.file_window_owner != selected {
+            self.file_window.close(&self.context);
+            self.file_window_owner = None;
+            self.file_window_device = None;
+            self.device_browser = None;
+            self.device_fit_preview = None;
+            return;
+        }
+        let browser = &mut self.device_browser;
+        let intl = &self.intl;
+        let notice = &self.notice;
+        let busy = self.device_browser_status.is_busy() || self.device_browser_loading.is_some();
+        let loading = self.device_browser_loading.is_some();
+        let events = self.file_window.present(
+            &self.context,
+            &self.intl,
+            || (),
+            |ui| {
+                if let Some(notice) = notice {
+                    notification::show(ui, &notice.props());
+                }
+                if let Some(browser) = browser {
+                    ui.add_enabled_ui(!busy, |ui| browser.show(ui, intl)).inner
+                } else {
+                    ui.label(if loading { "Waiting for the device catalogue…" } else { "Device catalogue unavailable. Close this window and choose Browse files to retry." });
+                    None
+                }
+            },
+        );
+        for event in events {
+            if let WindowEvent::Command { command, .. } = event {
+                self.handle_device_browser_action(&command);
+            }
+        }
+    }
+
+    fn handle_device_browser_action(&mut self, action: &device_browser::Action) {
+        if matches!(action, device_browser::Action::Close) {
+            self.file_window.close(&self.context);
+            if !self.device_browser_status.is_busy() {
+                self.device_browser = None;
+            }
+            return;
+        }
+        if self.device_browser_status.is_busy() || self.device_browser_loading.is_some() {
+            return;
+        }
+        let Some(key) = self
+            .device_browser
             .as_ref()
-            .filter(|path| {
-                current_profile
-                    .previews
-                    .get(self.selected_activity)
-                    .is_some_and(|preview| preview.observation_id() == path.observation_id)
-            })
-            .map(ActivityPath::segment_props)
-            .unwrap_or_default();
-        let no_path = format_message!(&self.intl, default_message: "No recorded path");
-        let path = path::Props {
-            segments: &segments,
-            empty: &no_path,
-            height: None,
+            .map(|browser| browser.device_key().to_owned())
+        else {
+            return;
         };
-        let detail = current_profile.detail_props(self.selected_activity, &metric_props, path);
-        let no_activities = format_message!(&self.intl, default_message: "No activities yet");
-        let select_activity = format_message!(&self.intl, default_message: "Select an activity");
-        let import_copy = ImportCopy::new(&self.intl, drop_active);
-        let import = file_import::show(
-            ui,
-            &file_import::Props {
-                title: &import_copy.title,
-                description: &import_copy.description,
-                files_label: &import_copy.files,
-                folder_label: &import_copy.folder,
-                drop_active,
-                enabled: !self.import.busy(),
+        let Some(candidate) = self.devices.candidate(&key) else {
+            self.notice = Some(Notice::error(format_message!(
+                &self.intl,
+                default_message: "The selected device is no longer connected",
+            )));
+            return;
+        };
+        let operation = match action {
+            device_browser::Action::Refresh => {
+                self.device_browser_loading = Some(key);
+                self.worker.browse_device(candidate);
+                return;
+            }
+            device_browser::Action::Download(selection) => {
+                let file_name = browser_download_name(selection);
+                let mut dialog = rfd::FileDialog::new().set_file_name(&file_name);
+                if selection.kind == DeviceCatalogEntryKind::Directory {
+                    dialog = dialog.add_filter("ZIP archive", &["zip"]);
+                }
+                let Some(destination) = dialog.save_file() else {
+                    return;
+                };
+                device_browser_download_operation(selection, destination)
+            }
+            device_browser::Action::Upload {
+                storage_id,
+                directory,
+            } => {
+                let Some(source) = rfd::FileDialog::new().pick_file() else {
+                    return;
+                };
+                device_browser_upload_operation(storage_id, directory, source)
+            }
+            device_browser::Action::CreateDirectory {
+                storage_id,
+                parent,
+                name,
+            } => worker::DeviceBrowserOperation::CreateDirectory {
+                storage_id: storage_id.clone(),
+                parent: parent.clone(),
+                name: name.clone(),
             },
-        );
-        ui.add_space(12.0);
-        show_import_status(ui, &self.intl, &self.import);
-        if self.import.visible() {
-            ui.add_space(12.0);
-        }
-        let selected = activity::browser(
-            ui,
-            &activity::BrowserProps {
-                list: activity::ListProps {
-                    items: &items,
-                    selected: (!items.is_empty()).then_some(self.selected_activity),
-                    empty: &no_activities,
-                },
-                detail: detail.as_ref(),
-                empty_detail: &select_activity,
-            },
-        );
-        (import, selected)
+            device_browser::Action::Remove(selection) => {
+                worker::DeviceBrowserOperation::Remove(device_browser_target(selection))
+            }
+            device_browser::Action::Open(selection) => {
+                worker::DeviceBrowserOperation::OpenFit(device_browser_target(selection))
+            }
+            device_browser::Action::ImportFit(selection) => {
+                let Some(user) = self
+                    .selected_profile
+                    .and_then(|index| self.profiles.get(index))
+                    .map(|profile| UserContext::new(profile.user.id()))
+                else {
+                    return;
+                };
+                worker::DeviceBrowserOperation::ImportFit {
+                    target: device_browser_target(selection),
+                    user,
+                }
+            }
+            device_browser::Action::Close => unreachable!("close was handled above"),
+        };
+        self.device_browser_status = DeviceBrowserStatus::Busy;
+        self.notice = Some(Notice::information(device_browser_progress(
+            &self.intl,
+            operation.kind(),
+        )));
+        self.worker.operate_device(candidate, operation);
     }
 
-    fn profile_settings_props(&self, profile_index: usize) -> profile_settings::Props<'_> {
-        let profile = self.profiles[profile_index].user.profile();
-        let preferences = profile.preferences();
-        profile_settings::Props {
-            intl: &self.intl,
-            preferences,
-            profile: self.profiles[profile_index].profile_props(),
-            picture_enabled: true,
-            disabled: self.preferences_saving,
+    fn browse_device(&mut self, key: String) {
+        let Some(owner) = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .map(|profile| profile.user.id())
+        else {
+            return;
+        };
+        let busy = self.device_browser_status.is_busy() || self.device_browser_loading.is_some();
+        let same_window = self.file_window_owner == Some(owner)
+            && self.file_window_device.as_deref() == Some(key.as_str());
+        // Raising the current owner's view must not depend on transfer admission.
+        // Switching devices still waits for the active worker operation to finish.
+        if busy && !same_window {
+            return;
         }
+        let name = self
+            .devices
+            .presentations()
+            .into_iter()
+            .find(|device| device.key == key)
+            .map_or_else(|| key.clone(), |device| device.name);
+        let _ = self.file_window.open(
+            &self.context,
+            WindowSpec {
+                id: format!("device-files-{key}"),
+                kind: "device-files".into(),
+                title: format_message!(&self.intl, default_message: "Files on {device}", values: { device: name.as_str() }),
+                size: [1000.0, 720.0],
+            },
+        );
+        self.file_window_device = Some(key.clone());
+        self.file_window_owner = Some(owner);
+        if busy {
+            return;
+        }
+        if self
+            .device_browser
+            .as_ref()
+            .is_some_and(|browser| browser.device_key() == key)
+        {
+            return;
+        }
+        self.device_browser = None;
+        let Some(candidate) = self.devices.candidate(&key) else {
+            self.notice = Some(Notice::error(format_message!(
+                &self.intl,
+                default_message: "The selected device is no longer connected",
+            )));
+            return;
+        };
+        self.device_browser_loading = Some(key);
+        self.worker.browse_device(candidate);
     }
 
     fn device_snapshots(&self) -> Vec<DeviceSnapshot> {
@@ -385,6 +571,7 @@ impl Desktop {
             || self.preferences_saving
             || self.create_profile.is_some()
             || self.avatar_editor.is_some()
+            || self.device_browser_status.is_busy()
             || self.devices.inspecting_name().is_some()
     }
 
@@ -415,6 +602,9 @@ impl Desktop {
         }
         if let Some(name) = self.devices.inspecting_name() {
             operations.push(ActiveOperation::InspectingDevice(name.to_owned()));
+        }
+        if self.device_browser_status.is_busy() {
+            operations.push(ActiveOperation::AccessingDeviceFiles);
         }
         operations
     }
@@ -450,14 +640,14 @@ impl Desktop {
         self.profile_menu_expanded = false;
         self.page = Page::Activities;
         self.selected_activity = 0;
-        self.activity_path = None;
+        self.activity_detail = None;
         self.import = ImportStatus::default();
         self.apply_selected_preferences();
         self.load_selected_activity();
     }
 
     fn select_activity(&mut self, index: usize) {
-        if self.selected_activity == index && self.activity_path.is_some() {
+        if self.selected_activity == index && self.activity_detail.is_some() {
             return;
         }
         self.selected_activity = index;
@@ -465,7 +655,7 @@ impl Desktop {
     }
 
     fn load_selected_activity(&mut self) {
-        self.activity_path = None;
+        self.activity_detail = None;
         let Some((user, observation_id)) = self.selected_profile.and_then(|profile_index| {
             let profile = self.profiles.get(profile_index)?;
             let preview = profile.previews.get(self.selected_activity)?;
@@ -537,7 +727,23 @@ impl Desktop {
                     self.device_toasts.insert(id, key);
                 }
                 devices::Event::Detached { key } => {
+                    if self.file_window_device.as_deref() == Some(key.as_str()) {
+                        self.file_window.close(&self.context);
+                        self.file_window_device = None;
+                    }
                     self.dismiss_device_toasts(&key);
+                    if self.device_browser_loading.as_deref() == Some(key.as_str()) {
+                        self.device_browser_loading = None;
+                    }
+                    if self
+                        .device_browser
+                        .as_ref()
+                        .is_some_and(|browser| browser.device_key() == key)
+                    {
+                        self.device_browser = None;
+                        self.device_fit_preview = None;
+                        self.device_browser_status = DeviceBrowserStatus::Idle;
+                    }
                     if matches!(&self.page, Page::Device(active) if active == &key) {
                         self.page = Page::Activities;
                     }
@@ -583,8 +789,13 @@ impl Desktop {
         }
     }
 
-    fn show_toasts(&mut self, context: &Context) {
-        let events = self.toasts.show(context, Id::new("desktop-notifications"));
+    fn show_toasts(&mut self, context: &Context, bounds: eframe::egui::Rect) {
+        let events = self.toasts.show_in(
+            context,
+            Id::new("desktop-notifications"),
+            bounds,
+            notification::StackMode::Automatic,
+        );
         for event in events {
             match event {
                 notification::ToastEvent::Invoked(id) => {
@@ -648,6 +859,12 @@ impl Desktop {
                         self.notice = Some(Notice::error(reason));
                     }
                 },
+                worker::Event::DeviceCatalog { key, result } => {
+                    self.handle_device_catalog(key, result);
+                }
+                worker::Event::DeviceBrowser { key, kind, result } => {
+                    self.handle_device_browser_result(key, kind, result);
+                }
                 worker::Event::ImportStarted { total } => self.import.begin(total),
                 worker::Event::ImportItem(item) => self.import.record(item),
                 worker::Event::ImportFinished(result) => {
@@ -675,7 +892,12 @@ impl Desktop {
                     }
                     match result {
                         Ok(Some(details)) => {
-                            self.activity_path = Some(ActivityPath::from_details(&details));
+                            self.activity_detail = Some(ActivityDetailSnapshot {
+                                id: details.observation_id(),
+                                recording: garmin_service_api::ActivityRecordingSnapshot::from(
+                                    details.normalized().activity(),
+                                ),
+                            });
                         }
                         Ok(None) => {
                             self.notice = Some(Notice::error(format_message!(
@@ -687,6 +909,109 @@ impl Desktop {
                     }
                 }
             }
+        }
+    }
+
+    fn handle_device_catalog(
+        &mut self,
+        key: String,
+        result: Result<garmin_device::DeviceCatalog, String>,
+    ) {
+        if self.device_browser_loading.as_deref() != Some(key.as_str()) {
+            return;
+        }
+        self.device_browser_loading = None;
+        if self.file_window_device.as_deref() != Some(key.as_str()) {
+            return;
+        }
+        let catalog = match result {
+            Ok(catalog) => catalog,
+            Err(reason) => {
+                self.notice = Some(Notice::error(reason));
+                return;
+            }
+        };
+        if let Some(browser) = &mut self.device_browser
+            && browser.device_key() == key
+        {
+            if let Err(reason) = browser.refresh(device_catalog_snapshot(key, catalog)) {
+                self.notice = Some(Notice::error(reason));
+            }
+            return;
+        }
+        let Some(device_name) = self
+            .devices
+            .presentations()
+            .into_iter()
+            .find(|device| device.key == key)
+            .map(|device| device.name)
+        else {
+            return;
+        };
+        match device_browser::Browser::open(
+            device_catalog_snapshot(key, catalog),
+            &self.intl,
+            &device_name,
+        ) {
+            Ok(browser) => self.device_browser = Some(browser),
+            Err(reason) => self.notice = Some(Notice::error(reason)),
+        }
+    }
+
+    fn handle_device_browser_result(
+        &mut self,
+        key: String,
+        kind: worker::DeviceBrowserOperationKind,
+        result: Result<worker::DeviceBrowserOutcome, String>,
+    ) {
+        self.device_browser_status = DeviceBrowserStatus::Idle;
+        if self
+            .device_browser
+            .as_ref()
+            .is_none_or(|browser| browser.device_key() != key)
+        {
+            return;
+        }
+        match result {
+            Ok(worker::DeviceBrowserOutcome::Downloaded(path)) => {
+                self.notice = Some(Notice::success(format_message!(
+                    &self.intl,
+                    default_message: "Saved {file}",
+                    values: { file: path.display().to_string() },
+                )));
+            }
+            Ok(worker::DeviceBrowserOutcome::FitPreview { target, preview }) => {
+                self.notice = None;
+                let fit_preview =
+                    device_fit_preview::Preview::new(target, preview, &self.map_runtime);
+                self.device_fit_preview = Some(fit_preview);
+            }
+            Ok(worker::DeviceBrowserOutcome::FitImported { item, profiles }) => {
+                self.import = ImportStatus::default();
+                self.import.begin(1);
+                self.import.record(item);
+                self.import.finish();
+                self.replace_profiles(profiles, None);
+                self.device_fit_preview = None;
+                self.page = Page::Activities;
+                self.notice = None;
+            }
+            Ok(worker::DeviceBrowserOutcome::Refreshed(catalog)) => {
+                let snapshot = device_catalog_snapshot(key, catalog);
+                match self
+                    .device_browser
+                    .as_mut()
+                    .expect("the active browser was checked above")
+                    .refresh(snapshot)
+                {
+                    Ok(()) => {
+                        self.notice =
+                            Some(Notice::success(device_browser_complete(&self.intl, kind)));
+                    }
+                    Err(reason) => self.notice = Some(Notice::error(reason)),
+                }
+            }
+            Err(reason) => self.notice = Some(Notice::error(reason)),
         }
     }
 
@@ -893,10 +1218,45 @@ impl Desktop {
             None => {}
         }
     }
+
+    fn show_device_fit_preview(&mut self, ui: &mut Ui) {
+        let units = self.selected_unit_system();
+        let Some(preview) = self.device_fit_preview.as_mut() else {
+            return;
+        };
+        match preview.show(ui, &self.intl, self.device_browser_status.is_busy(), units) {
+            Some(device_fit_preview::Action::Close) => self.device_fit_preview = None,
+            Some(device_fit_preview::Action::Import(target)) => {
+                self.device_fit_preview = None;
+                self.handle_device_browser_action(&device_browser::Action::ImportFit(
+                    device_browser_selection(target),
+                ));
+            }
+            None => {}
+        }
+    }
+
+    fn selected_unit_system(&self) -> UnitSystem {
+        self.selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .map_or(UnitSystem::Metric, |profile| {
+                profile.user.profile().preferences().unit_system()
+            })
+    }
 }
 
 impl eframe::App for Desktop {
+    fn clear_color(&self, _visuals: &eframe::egui::Visuals) -> [f32; 4] {
+        // Child viewports clear to transparent; keep the main window opaque.
+        eframe::egui::Color32::from_rgb(12, 12, 12).to_normalized_gamma_f32()
+    }
+
+    fn on_exit(&mut self) {
+        crate::developer::shutdown(&self.context);
+    }
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
+        let started = Instant::now();
+        let toast_bounds = shell::overlay_bounds(ui.available_rect_before_wrap());
         self.process_events();
         self.process_devices(ui.ctx());
         self.handle_quit_input(ui.ctx());
@@ -920,9 +1280,14 @@ impl eframe::App for Desktop {
         }
         self.show_create_profile(ui);
         self.show_avatar_editor(ui);
+        self.show_file_window();
+        self.show_device_fit_preview(ui);
         self.show_quit_confirmation(ui);
-        self.show_toasts(ui.ctx());
-        crate::window::resize(ui);
+        self.show_toasts(ui.ctx(), toast_bounds);
+        garmin_ui::window::resize(ui);
+        crate::developer::update(ui.ctx(), &self.intl);
+        self.profiling
+            .record_desktop_frame(started.elapsed().as_secs_f32() * 1_000.0);
     }
 }
 
@@ -932,6 +1297,19 @@ enum QuitState {
     Idle,
     Confirming,
     Closing,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum DeviceBrowserStatus {
+    #[default]
+    Idle,
+    Busy,
+}
+
+impl DeviceBrowserStatus {
+    const fn is_busy(self) -> bool {
+        matches!(self, Self::Busy)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -945,6 +1323,7 @@ enum ActiveOperation {
     SavingProfilePicture,
     ProfilePictureDraft,
     InspectingDevice(String),
+    AccessingDeviceFiles,
 }
 
 impl ActiveOperation {
@@ -978,6 +1357,9 @@ impl ActiveOperation {
                 description: "Active operation shown while reading a connected device manifest",
                 values: { device: device.as_str() },
             ),
+            Self::AccessingDeviceFiles => {
+                format_message!(intl, default_message: "Accessing device files")
+            }
         }
     }
 }
@@ -1023,35 +1405,32 @@ fn device_snapshot(presentation: devices::Presentation) -> DeviceSnapshot {
         name: presentation.name,
         identifier: presentation
             .identifier
-            .map(garmin_device::capabilities::DeviceId::into_u32),
+            .map(garmin_device::DeviceId::into_u32),
         software_version: presentation
             .software_version
-            .map(garmin_device::capabilities::SoftwareVersion::into_hundredths),
+            .map(garmin_device::SoftwareVersion::into_hundredths),
         inspection: match presentation.state {
             devices::InspectionState::Running => InspectionState::Running,
             devices::InspectionState::Ready => InspectionState::Ready,
             devices::InspectionState::Failed => InspectionState::Failed,
         },
+        inspection_error: presentation.inspection_error,
         capabilities: presentation
             .capabilities
             .into_iter()
             .filter_map(|capability| {
                 let data_type = match capability.data_type() {
-                    garmin_device::capabilities::DataType::Activity => DeviceDataType::Activity,
-                    garmin_device::capabilities::DataType::Workout => DeviceDataType::Workout,
-                    garmin_device::capabilities::DataType::Course => DeviceDataType::Course,
+                    garmin_device::DataType::Activity => DeviceDataType::Activity,
+                    garmin_device::DataType::Workout => DeviceDataType::Workout,
+                    garmin_device::DataType::Course => DeviceDataType::Course,
                     _ => return None,
                 };
                 let direction = match capability.direction() {
-                    garmin_device::capabilities::TransferDirection::OutputFromUnit => {
+                    garmin_device::TransferDirection::OutputFromUnit => {
                         TransferDirection::OutputFromUnit
                     }
-                    garmin_device::capabilities::TransferDirection::InputToUnit => {
-                        TransferDirection::InputToUnit
-                    }
-                    garmin_device::capabilities::TransferDirection::InputOutput => {
-                        TransferDirection::InputOutput
-                    }
+                    garmin_device::TransferDirection::InputToUnit => TransferDirection::InputToUnit,
+                    garmin_device::TransferDirection::InputOutput => TransferDirection::InputOutput,
                 };
                 Some(DeviceCapability {
                     data_type,
@@ -1066,39 +1445,46 @@ fn device_snapshot(presentation: devices::Presentation) -> DeviceSnapshot {
     }
 }
 
-struct WindowCopy {
-    minimize: String,
-    maximize: String,
-    restore: String,
-    close: String,
+fn device_catalog_snapshot(
+    device_key: String,
+    catalog: garmin_device::DeviceCatalog,
+) -> DeviceCatalogSnapshot {
+    DeviceCatalogSnapshot {
+        device_key,
+        storages: catalog
+            .storages
+            .into_iter()
+            .map(|storage| DeviceCatalogStorage {
+                id: storage.id,
+                label: storage.label,
+                entries: storage
+                    .entries
+                    .into_iter()
+                    .map(|entry| DeviceCatalogEntry {
+                        path: entry.path,
+                        kind: match entry.kind {
+                            garmin_device::DeviceCatalogEntryKind::Directory => {
+                                DeviceCatalogEntryKind::Directory
+                            }
+                            garmin_device::DeviceCatalogEntryKind::File => {
+                                DeviceCatalogEntryKind::File
+                            }
+                        },
+                        size: entry.size,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
 }
 
-impl WindowCopy {
-    fn new(intl: &Intl) -> Self {
-        Self {
-            minimize: format_message!(intl, default_message: "Minimize window"),
-            maximize: format_message!(intl, default_message: "Maximize window"),
-            restore: format_message!(intl, default_message: "Restore window"),
-            close: format_message!(intl, default_message: "Close window"),
-        }
-    }
-
-    fn props<'a>(&'a self, context: &Context) -> shell::WindowControls<'a> {
-        shell::WindowControls {
-            maximized: context.input(|input| input.viewport().maximized.unwrap_or_default()),
-            minimize_label: &self.minimize,
-            maximize_label: &self.maximize,
-            restore_label: &self.restore,
-            close_label: &self.close,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
 enum PageOutput {
     Activities((Option<file_import::Action>, Option<activity::Action>)),
     Settings(Option<profile_settings::Action>),
-    Device,
+    Device {
+        key: String,
+        action: Option<device::Action>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1182,6 +1568,90 @@ impl ImportStatus {
     }
 }
 
+struct ActivitiesPage<'a> {
+    intl: &'a Intl,
+    profile: &'a ProfileView,
+    selected_activity: usize,
+    detail: Option<&'a ActivityDetailSnapshot>,
+    import: &'a ImportStatus,
+    drop_active: bool,
+}
+
+impl<'a> ActivitiesPage<'a> {
+    fn new(
+        intl: &'a Intl,
+        profile: &'a ProfileView,
+        selected_activity: usize,
+        detail: Option<&'a ActivityDetailSnapshot>,
+        import: &'a ImportStatus,
+        drop_active: bool,
+    ) -> Self {
+        let detail = detail.filter(|detail| {
+            profile
+                .previews
+                .get(selected_activity)
+                .is_some_and(|preview| preview.observation_id() == detail.id)
+        });
+        Self {
+            intl,
+            profile,
+            selected_activity,
+            detail,
+            import,
+            drop_active,
+        }
+    }
+
+    fn show(
+        &self,
+        ui: &mut Ui,
+        workspace: &mut activity::Workspace,
+    ) -> (Option<file_import::Action>, Option<activity::Action>) {
+        let drop_rect = ui.available_rect_before_wrap();
+        let items = self.profile.activity_props();
+        let recording_key = self.detail.map(|detail| detail.id.to_string());
+        let no_route = format_message!(self.intl, default_message: "No recorded route");
+        let no_activities = format_message!(self.intl, default_message: "No activities yet");
+        let select_activity = format_message!(self.intl, default_message: "Select an activity");
+        let import_copy = ImportCopy::new(self.intl, self.drop_active);
+        let import = file_import::show(
+            ui,
+            &file_import::Props {
+                title: &import_copy.title,
+                description: &import_copy.description,
+                files_label: &import_copy.files,
+                folder_label: &import_copy.folder,
+                drop_active: self.drop_active,
+                enabled: !self.import.busy(),
+            },
+        );
+        ui.add_space(12.0);
+        show_import_status(ui, self.intl, self.import);
+        if self.import.visible() {
+            ui.add_space(12.0);
+        }
+        let selected = workspace.show(
+            ui,
+            self.intl,
+            &activity::WorkspaceProps {
+                items: &items,
+                presentations: &self.profile.activities,
+                selected: (!items.is_empty()).then_some(self.selected_activity),
+                recording: self.detail.map(|detail| &detail.recording),
+                recording_key: recording_key.as_deref(),
+                units: self.profile.user.profile().preferences().unit_system(),
+                empty_list: &no_activities,
+                empty_detail: &select_activity,
+                no_route: &no_route,
+            },
+        );
+        if self.drop_active {
+            file_import::drop_overlay(ui, drop_rect, &import_copy.description);
+        }
+        (import, selected)
+    }
+}
+
 struct ImportCopy {
     title: String,
     description: String,
@@ -1225,11 +1695,123 @@ impl Notice {
         }
     }
 
+    const fn success(title: String) -> Self {
+        Self {
+            kind: notification::Kind::Success,
+            title,
+        }
+    }
+
     fn props(&self) -> notification::Props<'_> {
         notification::Props {
             kind: self.kind,
             title: &self.title,
             detail: None,
+        }
+    }
+}
+
+fn device_browser_target(
+    selection: &device_browser::Selection,
+) -> garmin_device::DeviceBrowserTarget {
+    garmin_device::DeviceBrowserTarget {
+        storage_id: selection.storage_id.clone(),
+        path: selection.path.clone(),
+        kind: match selection.kind {
+            DeviceCatalogEntryKind::Directory => garmin_device::DeviceCatalogEntryKind::Directory,
+            DeviceCatalogEntryKind::File => garmin_device::DeviceCatalogEntryKind::File,
+        },
+    }
+}
+
+fn device_browser_download_operation(
+    selection: &device_browser::Selection,
+    destination: PathBuf,
+) -> worker::DeviceBrowserOperation {
+    worker::DeviceBrowserOperation::Download {
+        target: device_browser_target(selection),
+        destination,
+    }
+}
+
+fn device_browser_upload_operation(
+    storage_id: &str,
+    directory: &Utf8Path,
+    source: PathBuf,
+) -> worker::DeviceBrowserOperation {
+    worker::DeviceBrowserOperation::Upload {
+        storage_id: storage_id.to_owned(),
+        directory: directory.to_owned(),
+        source,
+    }
+}
+
+fn device_browser_selection(
+    target: garmin_service_api::DeviceBrowserTarget,
+) -> device_browser::Selection {
+    device_browser::Selection {
+        storage_label: target.storage_id.clone(),
+        storage_id: target.storage_id,
+        path: target.path,
+        kind: target.kind,
+        size: None,
+    }
+}
+
+fn browser_download_name(selection: &device_browser::Selection) -> String {
+    let name = selection
+        .path
+        .file_name()
+        .unwrap_or(&selection.storage_label);
+    if selection.kind == DeviceCatalogEntryKind::Directory {
+        format!("{name}.zip")
+    } else {
+        name.to_owned()
+    }
+}
+
+fn device_browser_progress(intl: &Intl, kind: worker::DeviceBrowserOperationKind) -> String {
+    match kind {
+        worker::DeviceBrowserOperationKind::OpenFit => {
+            format_message!(intl, default_message: "Opening the FIT file…")
+        }
+        worker::DeviceBrowserOperationKind::ImportFit => {
+            format_message!(intl, default_message: "Importing the FIT file…")
+        }
+        worker::DeviceBrowserOperationKind::Download => {
+            format_message!(intl, default_message: "Downloading from the device…")
+        }
+        worker::DeviceBrowserOperationKind::Upload => {
+            format_message!(intl, default_message: "Uploading to the device…")
+        }
+        worker::DeviceBrowserOperationKind::CreateDirectory => {
+            format_message!(intl, default_message: "Creating the folder…")
+        }
+        worker::DeviceBrowserOperationKind::Remove => {
+            format_message!(intl, default_message: "Removing the selected item…")
+        }
+    }
+}
+
+fn device_browser_complete(intl: &Intl, kind: worker::DeviceBrowserOperationKind) -> String {
+    match kind {
+        worker::DeviceBrowserOperationKind::OpenFit => {
+            format_message!(intl, default_message: "FIT file opened")
+        }
+        worker::DeviceBrowserOperationKind::ImportFit => {
+            format_message!(intl, default_message: "FIT import complete")
+        }
+        worker::DeviceBrowserOperationKind::Download => {
+            format_message!(intl, default_message: "Download complete")
+        }
+        worker::DeviceBrowserOperationKind::Upload => {
+            format_message!(intl, default_message: "Upload complete")
+        }
+        worker::DeviceBrowserOperationKind::CreateDirectory => {
+            format_message!(intl, default_message: "Folder created")
+        }
+        worker::DeviceBrowserOperationKind::Remove => {
+            format_message!(intl, default_message: "Item removed")
         }
     }
 }
@@ -1384,23 +1966,6 @@ impl ProfileView {
             .map(activity::Presentation::item_props)
             .collect()
     }
-
-    fn metric_props(&self, selected: usize) -> Vec<activity::MetricProps<'_>> {
-        self.activities
-            .get(selected)
-            .map_or_else(Vec::new, activity::Presentation::metric_props)
-    }
-
-    fn detail_props<'a>(
-        &'a self,
-        selected: usize,
-        metrics: &'a [activity::MetricProps<'a>],
-        path: path::Props<'a>,
-    ) -> Option<activity::DetailProps<'a>> {
-        self.activities
-            .get(selected)
-            .map(|activity| activity.detail_props(metrics, path))
-    }
 }
 
 fn activity_presentation(
@@ -1415,40 +1980,60 @@ fn activity_presentation(
     activity::Presentation::from_summary(preview.summary(), source, intl, units)
 }
 
-struct ActivityPath {
-    observation_id: garmin_model::observation::ObservationId,
-    segments: Vec<Vec<path::Point>>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl ActivityPath {
-    fn from_details(details: &garmin_services::ActivityDetails) -> Self {
-        let mut segments = Vec::new();
-        let mut current = Vec::new();
-        for sample in details.normalized().activity().track() {
-            if let Some(coordinate) = sample.coordinate() {
-                current.push(path::Point {
-                    latitude: coordinate.latitude().as_degrees(),
-                    longitude: coordinate.longitude().as_degrees(),
-                });
-            } else if current.len() >= 2 {
-                segments.push(std::mem::take(&mut current));
-            } else {
-                current.clear();
-            }
-        }
-        if current.len() >= 2 {
-            segments.push(current);
-        }
-        Self {
-            observation_id: details.observation_id(),
-            segments,
+    fn selection(path: &str, kind: DeviceCatalogEntryKind) -> device_browser::Selection {
+        device_browser::Selection {
+            storage_id: "internal".to_owned(),
+            storage_label: "Internal storage".to_owned(),
+            path: path.into(),
+            kind,
+            size: None,
         }
     }
 
-    fn segment_props(&self) -> Vec<path::Segment<'_>> {
-        self.segments
-            .iter()
-            .map(|points| path::Segment { points })
-            .collect()
+    #[test]
+    fn native_upload_selection_preserves_the_chosen_source_and_target_directory() {
+        let source = PathBuf::from("/tmp/selected/ride.fit");
+
+        let operation = device_browser_upload_operation(
+            "internal",
+            Utf8Path::new("Garmin/Activity"),
+            source.clone(),
+        );
+
+        let worker::DeviceBrowserOperation::Upload {
+            storage_id,
+            directory,
+            source: selected_source,
+        } = operation
+        else {
+            panic!("the selected native file must route to upload");
+        };
+        assert_eq!(storage_id, "internal");
+        assert_eq!(directory, "Garmin/Activity");
+        assert_eq!(selected_source, source);
+    }
+
+    #[test]
+    fn native_download_selection_preserves_destination_and_suggested_name() {
+        let directory = selection("Garmin/Activity", DeviceCatalogEntryKind::Directory);
+        let destination = PathBuf::from("/tmp/selected/Activity.zip");
+
+        assert_eq!(browser_download_name(&directory), "Activity.zip");
+        let operation = device_browser_download_operation(&directory, destination.clone());
+
+        let worker::DeviceBrowserOperation::Download {
+            target,
+            destination: selected_destination,
+        } = operation
+        else {
+            panic!("the selected native destination must route to download");
+        };
+        assert_eq!(target.storage_id, "internal");
+        assert_eq!(target.path, "Garmin/Activity");
+        assert_eq!(selected_destination, destination);
     }
 }

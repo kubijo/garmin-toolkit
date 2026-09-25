@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+garmin-logging.workspace = true
 anyhow.workspace = true
 byte-unit.workspace = true
 clap = { workspace = true, features = ["env"] }
@@ -27,6 +28,7 @@ garmin-update.workspace = true
 indoc.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 ratatui.workspace = true
+reqwest = { workspace = true, features = ["query"] }
 serde.workspace = true
 serde_json.workspace = true
 sys-locale.workspace = true

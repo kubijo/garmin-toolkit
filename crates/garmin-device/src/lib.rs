@@ -1,9 +1,9 @@
 //! Garmin device discovery and transport adapters.
 
 pub mod attachments;
-pub mod capabilities;
+mod browser;
 mod domain;
-mod manifest;
+pub mod manifest;
 mod mass_storage;
 mod mtp;
 pub mod read_mounted;
@@ -16,11 +16,21 @@ mod system;
 #[path = "../tests/support/mod.rs"]
 pub(crate) mod test_support;
 
+pub use browser::{
+    BrowserFileUpload, DeviceBrowserOperationError, DeviceBrowserTarget, DeviceCatalog,
+    DeviceCatalogEntry, DeviceCatalogEntryKind, DeviceCatalogStorage, MAX_BROWSER_TRANSFER_BYTES,
+    PreparedDeviceBrowserDownload, create_browser_directory,
+    create_browser_directory_with_progress, prepare_browser_download, remove_browser_target,
+    remove_browser_target_with_progress, upload_browser_file_from_path,
+};
 pub use domain::{
     DeviceInventory, DeviceManifest, DevicePathInspection, DevicePathState, DevicePathStatus,
     DeviceSummary, PathSafetyError, SafeRelativePath, TransportKind,
 };
-pub use manifest::{ManifestError, parse_manifest};
+pub use manifest::{
+    DataType, DeviceId, DeviceModel, FileCapability, ManifestError, ManifestFormat, ManifestQuirk,
+    OperationHandle, ParsedManifest, SoftwareVersion, TransferDirection, parse_manifest,
+};
 pub use mass_storage::{
     MassStorageError, discover_mass_storage, inventory_mass_storage, open_mass_storage,
     probe_mass_storage_file,

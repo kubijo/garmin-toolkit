@@ -33,10 +33,15 @@ Real device files stay ignored. They extend support only through a synthetic reg
 
 ## Development corpus
 
-`garmin-fixtures` seeds three fake profiles and six generated run/ride files through the production importer and storage
-APIs. Stable IDs make the seed idempotent.
-[`fixture.toml`](../../infra/fixtures/fit/development-activities/fixture.toml) records its provenance; no generated
-binary or database is committed.
+`garmin-fixtures` seeds three fake profiles and six generated run, ride, and swim files through the production importer
+and storage APIs. Four outdoor activities contain real route geometry and varied chart data; a sensor-rich indoor ride
+contains speed, cadence, and power. Stable IDs make the seed idempotent.
+
+The compact normalized recordings are derived from the GPL-3-licensed real-data examples in `trackeR` 1.6.1. Source
+timestamps, athlete identity, and device identity are discarded; the generated FIT files use deterministic 2026 dates
+and fake device metadata. [`fixture.toml`](../../infra/fixtures/fit/development-activities/fixture.toml) pins the CRAN
+archive, every selected member, generator, transformation, committed-input hash, and expected output case. Generated FIT
+files and databases remain build products rather than committed binaries.
 
 Community files help select missing cases. A case becomes durable only after it is recreated synthetically or cleared
 for redistribution with its provenance intact.

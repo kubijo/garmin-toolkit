@@ -4,21 +4,28 @@ use cint::ColorInterop;
 use egui::{Align, Align2, Layout, Order, Rect, Response, Sense, Ui, UiBuilder};
 use garmin_color::theme;
 
-use crate::{icons, profile, theme::color32};
+use crate::{
+    icons, profile,
+    theme::{CONTROL_RADIUS, color32},
+    typography,
+};
 
-const HEADER_HEIGHT: f32 = 36.0;
-const NAV_ITEM_HEIGHT: f32 = 48.0;
-const EXPANDED_NAV_WIDTH: f32 = 224.0;
-const RAIL_WIDTH: f32 = 56.0;
+const HEADER_HEIGHT: f32 = 32.0;
+const NAV_ITEM_HEIGHT: f32 = 40.0;
+const EXPANDED_NAV_WIDTH: f32 = 232.0;
+const RAIL_WIDTH: f32 = HEADER_HEIGHT;
+const NAV_ITEM_HORIZONTAL_INSET: f32 = 0.0;
+const NAV_ITEM_VERTICAL_INSET: f32 = 0.0;
 const ACTIVE_MARKER_WIDTH: f32 = 3.0;
 const ICON_SIZE: f32 = 20.0;
+const NAV_ICON_CENTER_INSET: f32 = RAIL_WIDTH / 2.0;
 const CONTENT_PADDING: f32 = 24.0;
 const PROFILE_MENU_WIDTH: f32 = 280.0;
 const PROFILE_CONTROL_GAP: f32 = 8.0;
 const COMPACT_HEADER_WIDTH: f32 = 600.0;
 const NAV_GROUP_HEIGHT: f32 = 32.0;
-const WINDOW_ACTION_WIDTH: f32 = 32.0;
-const WINDOW_CONTROLS_WIDTH: f32 = WINDOW_ACTION_WIDTH * 3.0;
+const WINDOW_ACTION_SIZE: f32 = HEADER_HEIGHT;
+const WINDOW_CONTROLS_WIDTH: f32 = WINDOW_ACTION_SIZE * 3.0;
 
 /// Primary-navigation presentation.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -61,6 +68,38 @@ pub struct WindowControls<'a> {
     pub close_label: &'a str,
 }
 
+/// Translated labels shared by root and secondary native windows.
+pub struct WindowLabels {
+    minimize: String,
+    maximize: String,
+    restore: String,
+    close: String,
+}
+
+impl WindowLabels {
+    #[must_use]
+    pub fn new(intl: &garmin_i18n::Intl) -> Self {
+        use garmin_i18n::format_message;
+        Self {
+            minimize: format_message!(intl, default_message: "Minimize window"),
+            maximize: format_message!(intl, default_message: "Maximize window"),
+            restore: format_message!(intl, default_message: "Restore window"),
+            close: format_message!(intl, default_message: "Close window"),
+        }
+    }
+
+    #[must_use]
+    pub fn props<'a>(&'a self, context: &egui::Context) -> WindowControls<'a> {
+        WindowControls {
+            maximized: context.input(|input| input.viewport().maximized.unwrap_or_default()),
+            minimize_label: &self.minimize,
+            maximize_label: &self.maximize,
+            restore_label: &self.restore,
+            close_label: &self.close,
+        }
+    }
+}
+
 /// Shell inputs.
 pub struct Props<'a> {
     pub product_name: &'a str,
@@ -101,12 +140,68 @@ pub struct Output<R> {
 #[derive(Clone, Copy)]
 struct HeaderSelectors {
     profile: Rect,
+    automation: Option<Rect>,
+}
+
+/// Bounds for transient overlays, excluding the header and its window controls.
+#[must_use]
+pub fn overlay_bounds(root: Rect) -> Rect {
+    Rect::from_min_max(
+        egui::pos2(root.left(), (root.top() + HEADER_HEIGHT).min(root.bottom())),
+        root.right_bottom(),
+    )
+}
+
+/// The application's title bar, without navigation or profile controls.
+pub fn window_header(
+    ui: &mut Ui,
+    title: &str,
+    controls: &WindowControls<'_>,
+) -> Option<WindowAction> {
+    egui::Panel::top("native-window-header")
+        .exact_size(HEADER_HEIGHT)
+        .show_separator_line(false)
+        .frame(egui::Frame::NONE)
+        .show(ui, |ui| {
+            let header = ui.max_rect();
+            let palette = crate::theme::palette(ui);
+            ui.painter()
+                .rect_filled(header, 0.0, color32(palette.surfaces().chrome()));
+            let title_rect = Rect::from_min_max(
+                header.min,
+                egui::pos2(
+                    (header.right() - WINDOW_CONTROLS_WIDTH).max(header.left()),
+                    header.bottom(),
+                ),
+            );
+            ui.painter().with_clip_rect(title_rect).text(
+                egui::pos2(title_rect.left() + 12.0, title_rect.center().y),
+                Align2::LEFT_CENTER,
+                title,
+                typography::font(14.0, typography::Weight::SemiBold),
+                color32(palette.content().text_primary()),
+            );
+            match header_window_action(ui, header, title_rect, Some(controls)) {
+                Some(Action::Window(action)) => Some(action),
+                _ => None,
+            }
+        })
+        .inner
 }
 
 #[must_use]
 pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) -> Output<R> {
     let size = ui.available_size_before_wrap();
     let (root, _) = ui.allocate_exact_size(size, Sense::hover());
+    let shell_clip = bounded_clip(root, ui.clip_rect());
+    let mut shell_ui = ui.new_child(
+        UiBuilder::new()
+            .id_salt("application-shell")
+            .max_rect(root)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    shell_ui.set_clip_rect(shell_clip);
+    let ui = &mut shell_ui;
     let nav_width = if props.navigation_groups.is_empty() {
         0.0
     } else {
@@ -126,7 +221,7 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
     paint_chrome(ui, root, header, navigation, nav_width > 0.0);
 
     let selectors = header_selectors(ui, header, props);
-    let mut action = header_contents(ui, header, nav_width, selectors, props);
+    let mut action = header_contents(ui, header, selectors, props);
     let nav_action = navigation_contents(ui, navigation, props);
     if action.is_none() {
         action = nav_action;
@@ -144,11 +239,15 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
     );
     let inner = page(&mut page_ui);
 
-    if let Some(profile_action) = profile_menu(ui, selectors.profile, props) {
+    if let Some(profile_action) = profile_menu(ui, selectors.profile, shell_clip, props) {
         action = Some(Action::Profile(profile_action));
     }
     paint_window_border(ui, root);
     Output { action, inner }
+}
+
+fn bounded_clip(root: Rect, caller_clip: Rect) -> Rect {
+    root.intersect(caller_clip)
 }
 
 fn paint_chrome(ui: &Ui, root: Rect, header: Rect, navigation: Rect, show_navigation: bool) {
@@ -157,14 +256,17 @@ fn paint_chrome(ui: &Ui, root: Rect, header: Rect, navigation: Rect, show_naviga
         .rect_filled(root, 0.0, theme.surfaces().background().into_cint());
     ui.painter()
         .rect_filled(header, 0.0, theme.surfaces().chrome().into_cint());
-    let border = egui::Stroke::new(1.0, theme.borders().strong().into_cint());
-    ui.painter()
-        .hline(header.x_range(), header.bottom(), border);
     if show_navigation {
-        ui.painter()
-            .rect_filled(navigation, 0.0, theme.surfaces().chrome().into_cint());
-        ui.painter()
-            .vline(navigation.right(), navigation.y_range(), border);
+        ui.painter().rect_filled(
+            navigation,
+            0.0,
+            theme.surfaces().layer(theme::Level::One).into_cint(),
+        );
+        ui.painter().vline(
+            navigation.right(),
+            navigation.y_range(),
+            egui::Stroke::new(1.0, theme.borders().subtle().into_cint()),
+        );
     }
 }
 
@@ -183,13 +285,11 @@ fn paint_window_border(ui: &Ui, root: Rect) {
 fn header_contents(
     ui: &mut Ui,
     header: Rect,
-    nav_width: f32,
     selectors: HeaderSelectors,
     props: &Props<'_>,
 ) -> Option<Action> {
     let show_navigation = !props.navigation_groups.is_empty();
-    let toggle_rect = show_navigation
-        .then(|| Rect::from_min_size(header.min, egui::vec2(RAIL_WIDTH, HEADER_HEIGHT)));
+    let toggle_rect = show_navigation.then(|| navigation_toggle_rect(header));
     let toggle_clicked = toggle_rect.is_some_and(|rect| {
         let response = shell_response(
             ui,
@@ -199,37 +299,42 @@ fn header_contents(
         );
         paint_header_action_background(ui, &response);
         icons::Props {
-            icon: icons::LIST,
+            icon: navigation_toggle_icon(props.navigation),
             size: ICON_SIZE,
             color: crate::theme::palette(ui).content().icon_primary(),
         }
-        .paint_at(ui, rect.center());
+        .paint_at(ui, navigation_icon_center(rect));
         paint_focus_ring(ui, &response);
         let clicked = response.clicked();
         response.on_hover_text(props.toggle_label);
         clicked
     });
 
-    let product_left = if !show_navigation {
-        header.left() + CONTENT_PADDING
-    } else if props.navigation == Navigation::Expanded {
-        toggle_rect.map_or_else(|| header.left(), |rect| rect.right())
-    } else {
-        nav_width + 16.0
-    };
+    let product_left = header_product_left(header, toggle_rect);
     let product_rect = Rect::from_min_max(
         egui::pos2(product_left, header.top()),
-        egui::pos2(selectors.profile.left().max(product_left), header.bottom()),
+        egui::pos2(
+            selectors
+                .automation
+                .unwrap_or(selectors.profile)
+                .left()
+                .max(product_left),
+            header.bottom(),
+        ),
     );
     ui.painter().with_clip_rect(product_rect).text(
         egui::pos2(product_rect.left(), product_rect.center().y),
         Align2::LEFT_CENTER,
         props.product_name,
-        egui::TextStyle::Button.resolve(ui.style()),
+        typography::font(14.0, typography::Weight::SemiBold),
         color32(crate::theme::palette(ui).content().text_primary()),
     );
 
     let window_action = header_window_action(ui, header, product_rect, props.window_controls);
+
+    if let Some(rect) = selectors.automation {
+        crate::developer::header_button(ui, rect);
+    }
 
     let profile_clicked = props.profile_selector.is_some_and(|selector| {
         profile::header(ui, selectors.profile, selector, props.profile_label).clicked()
@@ -258,7 +363,14 @@ fn header_selectors(ui: &Ui, header: Rect, props: &Props<'_>) -> HeaderSelectors
         egui::pos2(profile_right - profile_width, header.top()),
         egui::pos2(profile_right, header.bottom()),
     );
-    HeaderSelectors { profile }
+    let automation = Some(Rect::from_min_max(
+        egui::pos2((profile.left() - 34.0).max(header.left()), header.top()),
+        egui::pos2(profile.left().max(header.left()), header.bottom()),
+    ));
+    HeaderSelectors {
+        profile,
+        automation,
+    }
 }
 
 fn header_window_action(
@@ -274,10 +386,10 @@ fn header_window_action(
             ui.make_persistent_id("shell-window-drag"),
             Sense::click_and_drag(),
         );
-        if drag.is_pointer_button_down_on() {
+        if drag.dragged_by(egui::PointerButton::Primary) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         } else if drag.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
         }
         let menu_position = if drag.contains_pointer() {
             ui.input(|input| secondary_press(&input.events, drag.rect))
@@ -319,12 +431,7 @@ fn preferred_profile_width(ui: &Ui, header_width: f32, props: &Props<'_>) -> f32
 }
 
 fn window_controls(ui: &Ui, header: Rect, props: &WindowControls<'_>) -> Option<WindowAction> {
-    let minimize_rect = Rect::from_min_size(
-        egui::pos2(header.right() - WINDOW_CONTROLS_WIDTH, header.top()),
-        egui::vec2(WINDOW_ACTION_WIDTH, HEADER_HEIGHT),
-    );
-    let maximize_rect = minimize_rect.translate(egui::vec2(WINDOW_ACTION_WIDTH, 0.0));
-    let close_rect = maximize_rect.translate(egui::vec2(WINDOW_ACTION_WIDTH, 0.0));
+    let [minimize_rect, maximize_rect, close_rect] = window_control_rects(header);
     let minimize = window_control(
         ui,
         minimize_rect,
@@ -368,6 +475,38 @@ fn window_controls(ui: &Ui, header: Rect, props: &WindowControls<'_>) -> Option<
     }
 }
 
+fn window_control_rects(header: Rect) -> [Rect; 3] {
+    let minimize = Rect::from_min_size(
+        egui::pos2(header.right() - WINDOW_CONTROLS_WIDTH, header.top()),
+        egui::Vec2::splat(WINDOW_ACTION_SIZE),
+    );
+    let maximize = minimize.translate(egui::vec2(WINDOW_ACTION_SIZE, 0.0));
+    let close = maximize.translate(egui::vec2(WINDOW_ACTION_SIZE, 0.0));
+    [minimize, maximize, close]
+}
+
+fn navigation_toggle_rect(header: Rect) -> Rect {
+    Rect::from_min_size(header.min, egui::vec2(RAIL_WIDTH, HEADER_HEIGHT))
+}
+
+fn navigation_icon_center(rect: Rect) -> egui::Pos2 {
+    egui::pos2(rect.left() + NAV_ICON_CENTER_INSET, rect.center().y)
+}
+
+const fn navigation_toggle_icon(navigation: Navigation) -> icons::Icon {
+    match navigation {
+        Navigation::Expanded => icons::TEXT_OUTDENT,
+        Navigation::Rail => icons::TEXT_INDENT,
+    }
+}
+
+fn header_product_left(header: Rect, toggle_rect: Option<Rect>) -> f32 {
+    match toggle_rect {
+        None => header.left() + CONTENT_PADDING,
+        Some(toggle) => toggle.right(),
+    }
+}
+
 fn window_control(
     ui: &Ui,
     rect: Rect,
@@ -407,20 +546,23 @@ fn window_control(
     response
 }
 
-fn profile_menu(ui: &Ui, selector_rect: Rect, props: &Props<'_>) -> Option<profile::Action> {
+fn profile_menu(
+    ui: &Ui,
+    selector_rect: Rect,
+    shell_clip: Rect,
+    props: &Props<'_>,
+) -> Option<profile::Action> {
     let selector = props.profile_selector?;
     if !selector.expanded {
         return None;
     }
-    let geometry = crate::header_selector::menu_geometry(
-        selector_rect,
-        PROFILE_MENU_WIDTH,
-        ui.min_rect().left(),
-    );
+    let geometry =
+        crate::header_selector::menu_geometry(selector_rect, PROFILE_MENU_WIDTH, shell_clip.left());
     egui::Area::new(ui.make_persistent_id("shell-profile-menu"))
         .order(Order::Foreground)
         .fixed_pos(geometry.position)
         .show(ui.ctx(), |ui| {
+            ui.set_clip_rect(shell_clip);
             ui.set_width(geometry.width);
             profile::menu(
                 ui,
@@ -434,7 +576,7 @@ fn profile_menu(ui: &Ui, selector_rect: Rect, props: &Props<'_>) -> Option<profi
 
 fn navigation_contents(ui: &Ui, rect: Rect, props: &Props<'_>) -> Option<Action> {
     let mut action = None;
-    let mut top = rect.top();
+    let mut top = rect.top() + 8.0;
     let mut destination_index = 0;
     for group in props.navigation_groups {
         if let Some(label) = group.label
@@ -457,14 +599,18 @@ fn navigation_contents(ui: &Ui, rect: Rect, props: &Props<'_>) -> Option<Action>
             top += NAV_GROUP_HEIGHT;
         }
         for destination in group.destinations {
-            let item_rect = Rect::from_min_size(
+            let row_rect = Rect::from_min_size(
                 egui::pos2(rect.left(), top),
                 egui::vec2(rect.width(), NAV_ITEM_HEIGHT),
             );
             top += NAV_ITEM_HEIGHT;
-            if item_rect.bottom() > rect.bottom() {
+            if row_rect.bottom() > rect.bottom() {
                 break;
             }
+            let item_rect = row_rect.shrink2(egui::vec2(
+                NAV_ITEM_HORIZONTAL_INSET,
+                NAV_ITEM_VERTICAL_INSET,
+            ));
             let active = props.active == Some(destination_index);
             let response = shell_response(
                 ui,
@@ -481,6 +627,8 @@ fn navigation_contents(ui: &Ui, rect: Rect, props: &Props<'_>) -> Option<Action>
                 &response,
             );
             let clicked = response.clicked();
+            crate::semantics::target(ui, &response, format!("navigation.{destination_index}"));
+            crate::semantics::value(&response, if active { "on" } else { "off" });
             if props.navigation == Navigation::Rail {
                 response.on_hover_text(destination.label);
             }
@@ -508,18 +656,21 @@ fn paint_destination(
         } else {
             theme::Level::One
         };
-        ui.painter()
-            .rect_filled(rect, 0.0, theme.surfaces().layer_hover(level).into_cint());
+        ui.painter().rect_filled(
+            rect,
+            CONTROL_RADIUS,
+            theme.surfaces().layer_hover(level).into_cint(),
+        );
     }
     if active {
         ui.painter().rect_filled(
             Rect::from_min_size(rect.min, egui::vec2(ACTIVE_MARKER_WIDTH, rect.height())),
-            0.0,
-            theme.interaction().interactive().into_cint(),
+            egui::CornerRadius::ZERO,
+            crate::theme::selection_accent(ui).into_cint(),
         );
     }
 
-    let icon_center = egui::pos2(rect.left() + RAIL_WIDTH / 2.0, rect.center().y);
+    let icon_center = navigation_icon_center(rect);
     icons::Props {
         icon: destination.icon,
         size: ICON_SIZE,
@@ -532,7 +683,7 @@ fn paint_destination(
     .paint_at(ui, icon_center);
     if navigation == Navigation::Expanded {
         ui.painter().text(
-            egui::pos2(rect.left() + RAIL_WIDTH, rect.center().y),
+            egui::pos2(icon_center.x + ICON_SIZE / 2.0 + 12.0, rect.center().y),
             Align2::LEFT_CENTER,
             destination.label,
             egui::TextStyle::Button.resolve(ui.style()),
@@ -559,7 +710,7 @@ fn paint_header_action_background(ui: &Ui, response: &Response) {
     if response.highlighted() {
         ui.painter().rect_filled(
             response.rect,
-            0.0,
+            CONTROL_RADIUS,
             crate::theme::palette(ui)
                 .surfaces()
                 .layer_hover(theme::Level::One)
@@ -572,7 +723,7 @@ fn paint_focus_ring(ui: &Ui, response: &Response) {
     if response.has_focus() {
         ui.painter().rect_stroke(
             response.rect,
-            0.0,
+            CONTROL_RADIUS,
             egui::Stroke::new(
                 2.0,
                 crate::theme::palette(ui).interaction().focus().into_cint(),
@@ -622,6 +773,68 @@ mod tests {
         assert_eq!(
             secondary_press(&[event(inside, egui::PointerButton::Primary, true)], title,),
             None
+        );
+    }
+
+    #[test]
+    fn shell_clip_never_exceeds_the_root_or_its_caller() {
+        let root = Rect::from_min_max(egui::pos2(40.0, 20.0), egui::pos2(440.0, 320.0));
+        let caller = Rect::from_min_max(egui::pos2(100.0, 0.0), egui::pos2(500.0, 260.0));
+
+        assert_eq!(
+            bounded_clip(root, caller),
+            Rect::from_min_max(egui::pos2(100.0, 20.0), egui::pos2(440.0, 260.0))
+        );
+    }
+
+    #[test]
+    fn native_window_controls_fill_square_header_cells() {
+        let header = Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(500.0, HEADER_HEIGHT));
+        let controls = window_control_rects(header);
+
+        assert!(
+            (controls[0].left() - (header.right() - WINDOW_CONTROLS_WIDTH)).abs() < f32::EPSILON
+        );
+        assert!((controls[2].right() - header.right()).abs() < f32::EPSILON);
+        for control in controls {
+            assert!((control.top() - header.top()).abs() < f32::EPSILON);
+            assert!((control.bottom() - header.bottom()).abs() < f32::EPSILON);
+            assert!((control.width() - WINDOW_ACTION_SIZE).abs() < f32::EPSILON);
+            assert!((control.height() - WINDOW_ACTION_SIZE).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn navigation_toggle_matches_rail_and_its_icon_alignment() {
+        let header = Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(500.0, HEADER_HEIGHT));
+        let toggle = navigation_toggle_rect(header);
+
+        assert_eq!(toggle.min, header.min);
+        assert!((toggle.width() - RAIL_WIDTH).abs() < f32::EPSILON);
+        assert!((toggle.height() - HEADER_HEIGHT).abs() < f32::EPSILON);
+        assert!(
+            (navigation_icon_center(toggle).x - (header.left() + NAV_ICON_CENTER_INSET)).abs()
+                < f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn navigation_toggle_icon_describes_the_next_state() {
+        assert_eq!(
+            navigation_toggle_icon(Navigation::Expanded),
+            icons::TEXT_OUTDENT
+        );
+        assert_eq!(navigation_toggle_icon(Navigation::Rail), icons::TEXT_INDENT);
+    }
+
+    #[test]
+    fn rail_product_title_is_relative_to_an_inset_shell() {
+        let header = Rect::from_min_size(egui::pos2(45.0, 20.0), egui::vec2(500.0, HEADER_HEIGHT));
+        let toggle = navigation_toggle_rect(header);
+
+        assert!(
+            (header_product_left(header, Some(toggle)) - (header.left() + RAIL_WIDTH)).abs()
+                < f32::EPSILON
         );
     }
 }

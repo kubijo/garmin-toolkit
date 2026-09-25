@@ -1,5 +1,6 @@
 [workspace]
 resolver = "3"
+exclude = ["vendor/fast-mvt", "vendor/winit"]
 members = [
   "apps/garmin-cli",
   "apps/garmin-cli/tui",
@@ -10,14 +11,17 @@ members = [
   "crates/garmin-capture",
   "crates/garmin-color",
   "crates/garmin-device",
+  "crates/garmin-diagnostics",
   "crates/garmin-fit",
   "crates/garmin-fixtures",
   "crates/garmin-gpx",
   "crates/garmin-i18n",
   "crates/garmin-importer",
   "crates/garmin-map-service",
+  "crates/garmin-map-tiles",
   "crates/garmin-macros",
   "crates/garmin-model",
+  "crates/garmin-logging",
   "crates/garmin-progress",
   "crates/garmin-route",
   "crates/garmin-service-api",
@@ -38,12 +42,16 @@ publish = false
 
 [workspace.dependencies]
 anyhow = "=1.0.104"
+askama = { version = "=0.16.1", default-features = false, features = ["derive", "std"] }
+arc-swap = "=1.9.2"
 async-trait = "=0.1.92"
 axum = "=0.8.9"
 base64 = "=0.23.1"
 blake3 = "=1.8.7"
+bytemuck = { version = "=1.25.2", features = ["derive"] }
 byte-unit = "=5.2.5"
 bytes = "=1.12.1"
+camino = { version = "=1.2.5", features = ["serde1"] }
 cint = "=0.3.1"
 clap = { version = "=4.6.6", features = ["derive"] }
 comrak = { version = "=0.54.0", default-features = false }
@@ -51,10 +59,14 @@ crossterm = { version = "=0.29.0", features = ["event-stream"] }
 dirs = "=6.0.0"
 eframe = { version = "=0.36.2", default-features = false }
 egui = { version = "=0.36.2", default-features = false, features = ["cint"] }
+egui-wgpu = "=0.36.2"
 egui_extras = { version = "=0.36.2", default-features = false, features = ["image", "svg"] }
+egui_plot = "=0.37.0"
+kittest = "=0.4.0"
 embedded-io-adapters = { version = "=0.7.0", features = ["std"] }
 formatjs_intl = "=0.5.0"
 fs2 = "=0.4.3"
+flate2 = "=1.1.10"
 futures-lite = "=2.6.1"
 futures-util = "=0.3.34"
 geo-types = "=0.7.20"
@@ -64,13 +76,16 @@ garmin-capture = { version = "0.1.0", path = "crates/garmin-capture" }
 garmin-cli-tui = { version = "0.1.0", path = "apps/garmin-cli/tui" }
 garmin-color = { version = "0.1.0", path = "crates/garmin-color" }
 garmin-device = { version = "0.1.0", path = "crates/garmin-device" }
+garmin-diagnostics = { version = "0.1.0", path = "crates/garmin-diagnostics" }
 garmin-fit = { version = "0.1.0", path = "crates/garmin-fit" }
 garmin-fixtures = { version = "0.1.0", path = "crates/garmin-fixtures" }
 garmin-gpx = { version = "0.1.0", path = "crates/garmin-gpx" }
 garmin-i18n = { version = "0.1.0", path = "crates/garmin-i18n" }
 garmin-importer = { version = "0.1.0", path = "crates/garmin-importer" }
 garmin-map-service = { version = "0.1.0", path = "crates/garmin-map-service" }
+garmin-map-tiles = { version = "0.1.0", path = "crates/garmin-map-tiles" }
 garmin-macros = { version = "0.1.0", path = "crates/garmin-macros" }
+garmin-logging = { version = "0.1.0", path = "crates/garmin-logging" }
 garmin-model = { version = "0.1.0", path = "crates/garmin-model" }
 garmin-progress = { version = "0.1.0", path = "crates/garmin-progress" }
 garmin-route = { version = "0.1.0", path = "crates/garmin-route" }
@@ -86,13 +101,19 @@ har = "=0.9.0"
 hex = "=0.4.3"
 http-security-headers = "=0.5.0"
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+egui_ltreeview = "=0.9.0"
 indoc = "=2.0.7"
 js-sys = "=0.3.103"
 jiff = { version = "=0.2.35", default-features = false, features = ["std", "tz-system"] }
 md-5 = "=0.11.0"
 mediatype = "=0.23.0"
+naga = { version = "=30.0.1", features = ["wgsl-in"] }
 miette = { git = "https://github.com/zkat/miette", rev = "e853bbf9bc78bbe0b225995de54a3108d77dcaf8", default-features = false }
 mtp-rs = "=0.32.0"
+fast-mvt = { version = "=0.6.2", default-features = false, features = ["reader"] }
+buffa = "=0.9.2"
+geo = { version = "=0.33.1", default-features = false }
+lyon_path = "=1.0.19"
 newtype-uuid = { version = "=1.4.0", features = ["serde", "v4"] }
 nusb = { version = "=0.2.7", features = ["tokio"] }
 nu-ansi-term = "=0.50.3"
@@ -122,9 +143,11 @@ termcolor-json = "=1.0.0"
 thiserror = "=2.0.20"
 time = { version = "=0.3.55", features = ["formatting"] }
 tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-wasm-io = { package = "tokio", version = "=1.53.1", default-features = false, features = ["io-util"] }
 tokio-tungstenite = "=0.29.0"
 toml_edit = "=0.25.13"
 tower-http = "=0.6.11"
+tower = { version = "=0.5.3", features = ["util"] }
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-logfmt = { version = "=0.3.7", features = ["ansi_logs"] }
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt"] }
@@ -132,14 +155,22 @@ url = { version = "=2.5.8", features = ["serde"] }
 usvg = { version = "=0.45.1", default-features = false }
 uuid = { version = "=1.26.0", features = ["serde", "v4", "v5"] }
 walkdir = "=2.5.0"
+walkers = { version = "=0.59.0", default-features = false, features = ["mvt"] }
 wasm-bindgen = "=0.2.126"
 wasm-bindgen-futures = "=0.4.76"
 web-sys = "=0.3.103"
+web-time = "=1.1.0"
 websocket-web = "=0.1.9"
 winit = { version = "=0.30.13", default-features = false }
+wgpu = "=30.0.0"
+zip = { version = "=4.6.1", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+[patch.crates-io]
+fast-mvt = { path = "vendor/fast-mvt" }
+winit = { path = "vendor/winit" }
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
@@ -154,3 +185,55 @@ unimplemented = "deny"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Production-shaped native profiling with source lines and unwindable stacks.
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = false
+
+# Interactive vector maps are prohibitively slow when
+# their parser and tessellator run fully unoptimized.
+# Keep application code quick to compile while making
+# debug map interaction usable.
+[profile.dev.package.garmin-ui]
+opt-level = 2
+
+[profile.dev.package.walkers]
+opt-level = 3
+
+[profile.dev.package.mvt-reader]
+opt-level = 3
+
+[profile.dev.package.lyon_tessellation]
+opt-level = 3
+
+[profile.dev.package.lyon_path]
+opt-level = 3
+
+[profile.dev.package.prost]
+opt-level = 3
+
+[profile.dev.package.epaint]
+opt-level = 3
+
+[profile.dev.package.emath]
+opt-level = 3
+
+[profile.dev.package.egui_plot]
+opt-level = 3
+
+[profile.dev.package.egui-wgpu]
+opt-level = 3
+
+[profile.dev.package.wgpu]
+opt-level = 3
+
+[profile.dev.package.wgpu-core]
+opt-level = 3
+
+[profile.dev.package.wgpu-hal]
+opt-level = 3
+
+[profile.dev.package.naga]
+opt-level = 3

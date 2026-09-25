@@ -127,6 +127,7 @@ mod tests {
             identifier: None,
             software_version: None,
             inspection: InspectionState::Ready,
+            inspection_error: None,
             capabilities: Vec::new(),
             storages: Vec::new(),
         }
@@ -134,14 +135,17 @@ mod tests {
 
     #[test]
     fn page_indices_keep_primary_destinations_before_devices() {
-        let devices = [device("edge"), device("fenix")];
+        let devices = [device("mock-cycle"), device("mock-watch")];
 
         assert_eq!(Page::Activities.index(&devices), Some(0));
         assert_eq!(Page::ProfileSettings.index(&devices), Some(1));
-        assert_eq!(Page::Device("fenix".to_owned()).index(&devices), Some(3));
+        assert_eq!(
+            Page::Device("mock-watch".to_owned()).index(&devices),
+            Some(3)
+        );
         assert_eq!(
             Page::from_index(2, &devices),
-            Some(Page::Device("edge".to_owned()))
+            Some(Page::Device("mock-cycle".to_owned()))
         );
     }
 }

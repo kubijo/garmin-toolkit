@@ -31,6 +31,14 @@
     "source": "Create a profile",
     "translation": "Vytvořit profil"
   },
+  "/UnJ3SDiCO": {
+    "source": "Zoom out",
+    "translation": "Oddálit"
+  },
+  "/quHYgXvvj": {
+    "source": "The connection was lost, so the result is unknown. The operation wasn’t retried.",
+    "translation": "Spojení bylo přerušeno, proto není výsledek znám. Operace nebyla zopakována."
+  },
   "/r6LEP1upO": {
     "source": "Offline for {duration}",
     "translation": "Bez připojení {duration}"
@@ -43,9 +51,17 @@
     "source": "No Garmin device is currently visible",
     "translation": "Momentálně není viditelné žádné zařízení Garmin"
   },
+  "0PEF0xXRv2": {
+    "source": "Downloading from the device…",
+    "translation": "Stahování ze zařízení…"
+  },
   "0QfDUFTYoL": {
     "source": "toggle",
     "translation": "přepnout"
+  },
+  "0Z0+d+jtCn": {
+    "source": "Activity map",
+    "translation": "Mapa aktivity"
   },
   "0ah2udCSKF": {
     "source": "Space",
@@ -67,6 +83,14 @@
     "source": "garmin-cli — Removing map components",
     "translation": "garmin-cli — Odebírání mapových komponent"
   },
+  "1uAlK7aGnI": {
+    "source": "Remove this folder?",
+    "translation": "Odebrat tuto složku?"
+  },
+  "2ADnoTeW0a": {
+    "source": "Lap {number}",
+    "translation": "Okruh {number}"
+  },
   "2nRbMDmfKx": {
     "source": "Interrupted preparation",
     "translation": "Přerušená příprava"
@@ -83,13 +107,29 @@
     "source": "Select an update device",
     "translation": "Vyberte zařízení k aktualizaci"
   },
+  "3H0J5pf+Y7": {
+    "source": "Full activity",
+    "translation": "Celá aktivita"
+  },
+  "3Q13J6QetV": {
+    "source": "No activities in this FIT file",
+    "translation": "Tento soubor FIT neobsahuje žádné aktivity"
+  },
   "3cc4CtJM5h": {
     "source": "Light",
     "translation": "Světlý"
   },
+  "45uwHjhMvq": {
+    "source": "The selected file exceeds the 512 MiB device-browser limit",
+    "translation": "Vybraný soubor překračuje limit prohlížeče zařízení 512 MiB"
+  },
   "47FYwba+bI": {
     "source": "Cancel",
     "translation": "Zrušit"
+  },
+  "4MQ9zggf0W": {
+    "source": "Saved {file}",
+    "translation": "Uloženo: {file}"
   },
   "4pFMl6Ug+w": {
     "source": "panel",
@@ -119,13 +159,25 @@
     "source": "{files} accepted · {duplicates} already imported · {rejected} rejected · {failed} failed",
     "translation": "Přijato: {files} · již importováno: {duplicates} · odmítnuto: {rejected} · selhalo: {failed}"
   },
+  "63JjPpVm7h": {
+    "source": "Map background unavailable",
+    "translation": "Mapový podklad není k dispozici"
+  },
   "66Ne22SKYu": {
     "source": "History — newest first",
     "translation": "Historie — nejnovější první"
   },
+  "6SLhrE8RhT": {
+    "source": "Could not open FIT file",
+    "translation": "Soubor FIT se nepodařilo otevřít"
+  },
   "6YJCPwQgG6": {
     "source": "Active time",
     "translation": "Aktivní čas"
+  },
+  "6oOCCLxV+t": {
+    "source": "Upload file",
+    "translation": "Nahrát soubor"
   },
   "6qGk6O3huN": {
     "source": "Map authorization — protected maps require device-bound authorization.",
@@ -135,9 +187,17 @@
     "source": "Toggle navigation",
     "translation": "Přepnout navigaci"
   },
+  "734gAe/gd6": {
+    "source": "Could not remove item",
+    "translation": "Položku se nepodařilo odebrat"
+  },
   "77LpDyUvjF": {
     "source": "ETA {duration}",
     "translation": "zbývá {duration}"
+  },
+  "79lLl+CKxN": {
+    "source": "Music",
+    "translation": "Hudba"
   },
   "7SCSGnhmrs": {
     "source": "{count, plural, one {# file was already imported} other {# files were already imported}}",
@@ -146,6 +206,10 @@
   "7c6qjta7pc": {
     "source": "discard attempt",
     "translation": "zahodit pokus"
+  },
+  "8IM6iWwT81": {
+    "source": "Cadence",
+    "translation": "Kadence"
   },
   "8PBYrouiJt": {
     "source": "Could not inspect {device}",
@@ -156,6 +220,10 @@
     "source": "No activities yet",
     "translation": "Zatím nejsou žádné aktivity"
   },
+  "8qQk3ZHeVR": {
+    "source": "The file will be permanently removed from the device.",
+    "translation": "Soubor bude ze zařízení trvale odebrán."
+  },
   "8vx1cCQefE": {
     "source": "Operation complete — review the history, then close when ready.",
     "translation": "Operace dokončena — zkontrolujte historii a poté zavřete."
@@ -163,6 +231,14 @@
   "95PRHWmLRH": {
     "source": "Device finalize",
     "translation": "Dokončení na zařízení"
+  },
+  "9JBneyFS5c": {
+    "source": "Download as ZIP",
+    "translation": "Stáhnout jako ZIP"
+  },
+  "9XUYQtJvwF": {
+    "source": "Import",
+    "translation": "Importovat"
   },
   "9e+QqEgrF1": {
     "source": "Preparing update…",
@@ -180,6 +256,10 @@
     "source": "Recovery finishes journal-authorized writes and cleanup.",
     "translation": "Obnova dokončí zápisy povolené žurnálem a úklid."
   },
+  "ABtn01UJlF": {
+    "source": "Could not import FIT file",
+    "translation": "Soubor FIT se nepodařilo importovat"
+  },
   "AQkpi3vGmC": {
     "source": "Reinstall",
     "translation": "Přeinstalovat"
@@ -188,9 +268,17 @@
     "source": "Recovery complete. Target paths and sizes match.",
     "translation": "Obnova dokončena. Cílové cesty a velikosti odpovídají."
   },
+  "Amt/8bnG1H": {
+    "source": "Minimum",
+    "translation": "Minimum"
+  },
   "B2+PtLuDLG": {
     "source": "Commit",
     "translation": "Zápis"
+  },
+  "BCzmdv6hs1": {
+    "source": "Maximum",
+    "translation": "Maximum"
   },
   "BQVAnsVPgA": {
     "source": "{device} inspected",
@@ -221,6 +309,10 @@
     "source": "Active operation:",
     "translation": "Aktivní operace:"
   },
+  "ByQwVA1h99": {
+    "source": "Select a file or folder to see its details",
+    "translation": "Výběrem souboru nebo složky zobrazíte podrobnosti"
+  },
   "C5q3ggNG3s": {
     "source": "Map components",
     "translation": "Mapové komponenty"
@@ -237,6 +329,14 @@
     "source": "Profile settings",
     "translation": "Nastavení profilu"
   },
+  "CuaE08GEbj": {
+    "source": "The folder and everything inside it will be permanently removed from the device.",
+    "translation": "Složka a veškerý její obsah budou ze zařízení trvale odebrány."
+  },
+  "D4nm2xqYJO": {
+    "source": "Remove this file?",
+    "translation": "Odebrat tento soubor?"
+  },
   "D8jUm2X056": {
     "source": "Save picture",
     "translation": "Uložit obrázek"
@@ -249,9 +349,17 @@
     "source": "Minimize window",
     "translation": "Minimalizovat okno"
   },
+  "DUIDEquXSb": {
+    "source": "Storage",
+    "translation": "Úložiště"
+  },
   "DXXrFODt/A": {
     "source": "Preparing guarded removal…",
     "translation": "Příprava zabezpečeného odebrání…"
+  },
+  "DkTXT8/72n": {
+    "source": "Could not load activity",
+    "translation": "Aktivitu se nepodařilo načíst"
   },
   "Dy1J1y8uY5": {
     "source": "{completed}/{total} {total, plural, one {file verified} other {files verified}}",
@@ -278,6 +386,14 @@
     "source": "Device recovery",
     "translation": "Obnova zařízení"
   },
+  "F1fcf5qGMA": {
+    "source": "Pace",
+    "translation": "Tempo"
+  },
+  "F5Fq484uH5": {
+    "source": "Audiobooks",
+    "translation": "Audioknihy"
+  },
   "F7j1HOLQQZ": {
     "source": "Reading and validating {file}.",
     "translation": "Načítání a ověřování {file}."
@@ -286,6 +402,10 @@
     "source": "The file may contain the device ID, hardware, software, and installed maps.",
     "translation": "Soubor může obsahovat ID zařízení, hardware, software a nainstalované mapy."
   },
+  "FRUmKpjuk5": {
+    "source": "The selected device is no longer connected",
+    "translation": "Vybrané zařízení již není připojeno"
+  },
   "FYD1a0/glf": {
     "source": "garmin-cli — Recovering map update",
     "translation": "garmin-cli — Obnova aktualizace map"
@@ -293,6 +413,14 @@
   "FbELO094kF": {
     "source": "No diagnostic capture was requested.",
     "translation": "Diagnostický záznam nebyl vyžádán."
+  },
+  "Fk4clKNGhw": {
+    "source": "Reading files…",
+    "translation": "Načítání souborů…"
+  },
+  "FnRTEV9wum": {
+    "source": "Average",
+    "translation": "Průměr"
   },
   "G/yZLul6P1": {
     "source": "Remove",
@@ -310,6 +438,10 @@
     "source": "Skipped by user; automatic rollback is unavailable",
     "translation": "Přeskočeno uživatelem; automatický návrat není k dispozici"
   },
+  "HAlOn1ZsuY": {
+    "source": "Name",
+    "translation": "Název"
+  },
   "HvwZaPKxdv": {
     "source": "Continue with update?",
     "translation": "Pokračovat v aktualizaci?"
@@ -321,6 +453,10 @@
   "I9Vq88kNSi": {
     "source": "Choose files",
     "translation": "Vybrat soubory"
+  },
+  "IS/aVg5AZp": {
+    "source": "Laps",
+    "translation": "Okruhy"
   },
   "IU+ie9OEb0": {
     "source": "last data {seconds}s ago",
@@ -342,6 +478,10 @@
     "source": "cached",
     "translation": "v mezipaměti"
   },
+  "J3ca41Hqe7": {
+    "source": "Play",
+    "translation": "Přehrát"
+  },
   "J4SQjQZlH8": {
     "source": "select",
     "translation": "vybrat"
@@ -349,6 +489,10 @@
   "JLwGDxma/f": {
     "source": "current file progress shown below",
     "translation": "průběh aktuálního souboru je níže"
+  },
+  "JfG49wNHKP": {
+    "source": "Open",
+    "translation": "Otevřít"
   },
   "JkGWnbsbOM": {
     "source": "Checking host-visible attachment candidates.",
@@ -386,6 +530,10 @@
     "source": "Scanning selected files",
     "translation": "Prohledávání vybraných souborů"
   },
+  "KiuFRboc5o": {
+    "source": "FIT import complete",
+    "translation": "Import souboru FIT dokončen"
+  },
   "Knc/iJqLjl": {
     "source": "Device transfer",
     "translation": "Přenos do zařízení"
@@ -406,6 +554,14 @@
     "source": "{count, plural, one {# file} other {# files}}",
     "translation": "{count, plural, one {# soubor} few {# soubory} other {# souborů}}"
   },
+  "LmMjtRuyez": {
+    "source": "System data · browse only",
+    "translation": "Systémová data · pouze pro prohlížení"
+  },
+  "Lv0zJuL1jH": {
+    "source": "Details",
+    "translation": "Podrobnosti"
+  },
   "MWn/JlMcmy": {
     "source": "{count, plural, one {# more storage} other {# more storages}}",
     "translation": "{count, plural, one {# další úložiště} few {# další úložiště} other {# dalších úložišť}}"
@@ -414,13 +570,29 @@
     "source": "Release to import these files",
     "translation": "Uvolněním soubory importujete"
   },
+  "N0weLRGX26": {
+    "source": "Fit route",
+    "translation": "Přizpůsobit trasu"
+  },
   "N0zUi9Hrsd": {
     "source": "Loading map components…",
     "translation": "Načítání mapových komponent…"
   },
+  "NJYeoBmle6": {
+    "source": "Creating the folder…",
+    "translation": "Vytváření složky…"
+  },
+  "NP/kQh6KDd": {
+    "source": "Use a single folder name without slashes or control characters",
+    "translation": "Použijte jeden název složky bez lomítek a řídicích znaků"
+  },
   "NXI/XLSYwc": {
     "source": "Auto",
     "translation": "Automaticky"
+  },
+  "Nc+TQCQuqm": {
+    "source": "No recorded route",
+    "translation": "Žádná zaznamenaná trasa"
   },
   "Nyz15F0iCV": {
     "source": "Profiles keep each person's activities and devices separate.",
@@ -441,10 +613,6 @@
   "OnM1xpU1Dm": {
     "source": "{used} used · {free} free · {total} total",
     "translation": "Využito {used} · volno {free} · celkem {total}"
-  },
-  "Oxh6x98DVg": {
-    "source": "No recorded path",
-    "translation": "Žádná zaznamenaná trasa"
   },
   "P8JC58mIGs": {
     "source": "Distance",
@@ -474,6 +642,10 @@
     "source": "Log out",
     "translation": "Odhlásit se"
   },
+  "PtyktMpGIx": {
+    "source": "FIT file opened",
+    "translation": "Soubor FIT otevřen"
+  },
   "Q825BzTWHX": {
     "source": "Device discovery",
     "translation": "Hledání zařízení"
@@ -486,6 +658,10 @@
     "source": "garmin-cli — Updating maps",
     "translation": "garmin-cli — Aktualizace map"
   },
+  "QWTP0t8UTt": {
+    "source": "Speed",
+    "translation": "Rychlost"
+  },
   "QwnGVYPlwS": {
     "source": "Authorize",
     "translation": "Autorizace"
@@ -493,6 +669,10 @@
   "R85gsW8HY9": {
     "source": "Courses",
     "translation": "Trasy"
+  },
+  "R9peZJU46F": {
+    "source": "Swimming",
+    "translation": "Plavání"
   },
   "RDgr4YI8HK": {
     "source": "This device contains an interrupted transaction. Resolve it before making more changes.",
@@ -502,9 +682,25 @@
     "source": "Map component",
     "translation": "Mapová komponenta"
   },
+  "RVhqZ4lBSZ": {
+    "source": "Download failed",
+    "translation": "Stahování se nezdařilo"
+  },
+  "RXpxPUwfNq": {
+    "source": "Forward",
+    "translation": "Vpřed"
+  },
+  "Rl5++Udrl5": {
+    "source": "Elevation",
+    "translation": "Nadmořská výška"
+  },
   "RmDsSpSa9/": {
     "source": "scroll",
     "translation": "posouvat"
+  },
+  "S40xOi/j1/": {
+    "source": "Create it inside {directory}.",
+    "translation": "Vytvořit ve složce {directory}."
   },
   "SD3EJvfioI": {
     "source": "Current operation",
@@ -521,6 +717,10 @@
   "SQgAi+/0Q9": {
     "source": "Device verify",
     "translation": "Kontrola zařízení"
+  },
+  "SWhA3pwBfe": {
+    "source": "Could not open profile picture",
+    "translation": "Profilový obrázek se nepodařilo otevřít"
   },
   "SduMNm+0em": {
     "source": "Downgrade",
@@ -541,6 +741,10 @@
   "TULKs8rI3w": {
     "source": "Could not refresh storage usage: {reason}",
     "translation": "Využití úložiště se nepodařilo obnovit: {reason}"
+  },
+  "TVwK9cdC9z": {
+    "source": "Could not create folder",
+    "translation": "Složku se nepodařilo vytvořit"
   },
   "TWWiZQuQPS": {
     "source": "↑/↓ or Mouse",
@@ -586,6 +790,10 @@
     "source": "Verified {bytes} across {files, plural, one {# selected file} other {# selected files}}; captured Garmin's authorization response. Device unchanged. Evidence: {capture}",
     "translation": "Ověřeno {bytes} v {files, plural, one {# vybraném souboru} few {# vybraných souborech} other {# vybraných souborech}}; autorizační odpověď Garminu byla zaznamenána. Zařízení nezměněno. Důkazy: {capture}"
   },
+  "VCHJaddq7Y": {
+    "source": "New folder",
+    "translation": "Nová složka"
+  },
   "VDvZ/Nk5y5": {
     "source": "Review the device and selected changes.",
     "translation": "Zkontrolujte zařízení a vybrané změny."
@@ -614,6 +822,10 @@
     "source": "Recover finishes it. Clear requires proof that the device is updated or untouched.",
     "translation": "Obnova transakci dokončí. Vymazání vyžaduje důkaz, že je zařízení aktualizované nebo nezměněné."
   },
+  "WhJwg8orxI": {
+    "source": "Could not save profile settings",
+    "translation": "Nastavení profilu se nepodařilo uložit"
+  },
   "XAEXJz69Uc": {
     "source": "Choose a picture",
     "translation": "Vybrat obrázek"
@@ -625,6 +837,10 @@
   "XDtT/2V3nq": {
     "source": "confirm",
     "translation": "potvrdit"
+  },
+  "XF2FVGDwkK": {
+    "source": "Heart rate",
+    "translation": "Tepová frekvence"
   },
   "XslFtApJNA": {
     "source": "Cleanup",
@@ -646,6 +862,10 @@
     "source": "continue",
     "translation": "pokračovat"
   },
+  "YXoHk0YjYL": {
+    "source": "Power",
+    "translation": "Výkon"
+  },
   "YjjTU9NztP": {
     "source": "Choose a folder",
     "translation": "Vybrat složku"
@@ -666,13 +886,25 @@
     "source": "Continue",
     "translation": "Pokračovat"
   },
+  "agOXPD4vII": {
+    "source": "Size",
+    "translation": "Velikost"
+  },
   "b0bewtUePz": {
     "source": "New profile draft",
     "translation": "Rozepsaný nový profil"
   },
+  "bp5vKkR4s4": {
+    "source": "Folder created",
+    "translation": "Složka vytvořena"
+  },
   "c3VJQoWwCE": {
     "source": "Device",
     "translation": "Zařízení"
+  },
+  "cG0Q8MnYSg": {
+    "source": "Temperature",
+    "translation": "Teplota"
   },
   "cJtOboitAO": {
     "source": "↑↓/wheel",
@@ -690,6 +922,18 @@
     "source": "cancel",
     "translation": "zrušit"
   },
+  "cyR7KhiuaU": {
+    "source": "Back",
+    "translation": "Zpět"
+  },
+  "czI42JRuTk": {
+    "source": "Loading map…",
+    "translation": "Načítání mapy…"
+  },
+  "d18HtpGPo6": {
+    "source": "Item removed",
+    "translation": "Položka odebrána"
+  },
   "dDHiosRzUJ": {
     "source": "Reading selected device metadata…",
     "translation": "Načítání údajů vybraného zařízení…"
@@ -697,6 +941,10 @@
   "dLVFc+8uRc": {
     "source": "Loading profiles",
     "translation": "Načítání profilů"
+  },
+  "dgqFvY9MdV": {
+    "source": "Device operation interrupted",
+    "translation": "Operace se zařízením přerušena"
   },
   "e5iRgzQaaC": {
     "source": "Resetting an unresponsive Garmin link…",
@@ -706,9 +954,17 @@
     "source": "Reading device storage…",
     "translation": "Načítání úložiště zařízení…"
   },
+  "eHp6THD6eM": {
+    "source": "Uploading to the device…",
+    "translation": "Nahrávání do zařízení…"
+  },
   "eLrXv7EkrC": {
     "source": "Inspecting…",
     "translation": "Kontrola…"
+  },
+  "f00p/7iV78": {
+    "source": "Upload failed",
+    "translation": "Nahrávání se nezdařilo"
   },
   "f0MYRvYSEE": {
     "source": "Shared application content",
@@ -746,13 +1002,29 @@
     "source": "MD5 verified",
     "translation": "MD5 ověřeno"
   },
+  "gCqhGgdHjd": {
+    "source": "Opening the FIT file…",
+    "translation": "Otevírání souboru FIT…"
+  },
   "gG+/7BblKQ": {
     "source": "refresh space",
     "translation": "aktualizovat volné místo"
   },
+  "gitwcFybfV": {
+    "source": "Removing the selected item…",
+    "translation": "Odebírání vybrané položky…"
+  },
+  "hRcDjG7HM7": {
+    "source": "Back to device",
+    "translation": "Zpět na zařízení"
+  },
   "hX5jJfBpJZ": {
     "source": "Backup",
     "translation": "Záloha"
+  },
+  "hkAEhwzS/C": {
+    "source": "Could not browse device files",
+    "translation": "Soubory v zařízení se nepodařilo procházet"
   },
   "hmr5dvqYY0": {
     "source": "keep running",
@@ -770,6 +1042,10 @@
     "source": "{summary} · {problem}",
     "translation": "{summary} · {problem}"
   },
+  "iaCBlRSI5D": {
+    "source": "Refresh the files view and check the result before trying again.",
+    "translation": "Obnovte seznam souborů a před dalším pokusem zkontrolujte výsledek."
+  },
   "iwVTNwbNx0": {
     "source": "Select an activity",
     "translation": "Vyberte aktivitu"
@@ -782,9 +1058,25 @@
     "source": "Enter, Esc, q, or mouse",
     "translation": "Enter, Esc, q nebo myš"
   },
+  "j0VPFonMiW": {
+    "source": "This FIT file was already imported",
+    "translation": "Tento soubor FIT již byl importován"
+  },
+  "jHKpC4Qxas": {
+    "source": "Imported {count} activities",
+    "translation": "Importováno aktivit: {count}"
+  },
+  "jNnMq4p1Qd": {
+    "source": "Podcasts",
+    "translation": "Podcasty"
+  },
   "jO3kA9S8ao": {
     "source": "Enter or R",
     "translation": "Enter nebo R"
+  },
+  "ja+73nEtzy": {
+    "source": "Importing the FIT file…",
+    "translation": "Importování souboru FIT…"
   },
   "k2veDAJW1p": {
     "source": "Write",
@@ -806,13 +1098,41 @@
     "source": "Request cancellation at the next safe checkpoint?",
     "translation": "Požádat o přerušení v nejbližším bezpečném bodě?"
   },
+  "l0ACpR6HTS": {
+    "source": "Loading activity data…",
+    "translation": "Načítání dat aktivity…"
+  },
   "l9Co77Oehu": {
     "source": "Clearing stalled MTP state, then waiting quietly.",
     "translation": "Vyčištění zaseknutého stavu MTP a následné čekání."
   },
+  "lR/7o8npaT": {
+    "source": "Folder name",
+    "translation": "Název složky"
+  },
   "lkMoYJ9N2j": {
     "source": "Cancellation may require rollback or later recovery. Do not disconnect until this screen closes.",
     "translation": "Přerušení může vyžadovat návrat nebo pozdější obnovu. Neodpojujte zařízení, dokud se tato obrazovka nezavře."
+  },
+  "lsIMJhY3Jv": {
+    "source": "FIT activity preview",
+    "translation": "Náhled aktivity FIT"
+  },
+  "m4vqJl0/FT": {
+    "source": "Files",
+    "translation": "Soubory"
+  },
+  "m9Q7Rf6j4B": {
+    "source": "Download complete",
+    "translation": "Stahování dokončeno"
+  },
+  "mCE4/IYVzg": {
+    "source": "An item with that name already exists",
+    "translation": "Položka s tímto názvem již existuje"
+  },
+  "mCjAld2nwy": {
+    "source": "Files on {device}",
+    "translation": "Soubory v zařízení {device}"
   },
   "mvCaSAxfUj": {
     "source": "Device storage",
@@ -825,6 +1145,10 @@
   "nLM15TLExb": {
     "source": "Cycling",
     "translation": "Cyklistika"
+  },
+  "nSuQlM3yTx": {
+    "source": "{reason} Retrying…",
+    "translation": "{reason} Probíhá další pokus…"
   },
   "nZ9QXAjOmF": {
     "source": "Map update installed.",
@@ -847,6 +1171,10 @@
     "source": "The selected activity no longer exists",
     "translation": "Vybraná aktivita již neexistuje"
   },
+  "oemX8+WbsL": {
+    "source": "Current directory contents",
+    "translation": "Obsah aktuální složky"
+  },
   "oxpz0TpIVD": {
     "source": "Enter a profile name",
     "translation": "Zadejte název profilu"
@@ -867,6 +1195,10 @@
     "source": "Contacting the map-update service.",
     "translation": "Kontaktování služby pro aktualizaci map."
   },
+  "q/uwLTb3Zf": {
+    "source": "Stop",
+    "translation": "Zastavit"
+  },
   "q5Xl0MIdUj": {
     "source": "Verify",
     "translation": "Ověření"
@@ -874,6 +1206,14 @@
   "qKOCNSmJcw": {
     "source": "Contact Garmin?",
     "translation": "Kontaktovat Garmin?"
+  },
+  "qSYDHD3Pb0": {
+    "source": "Inspection error",
+    "translation": "Chyba kontroly"
+  },
+  "qh4LLO2afn": {
+    "source": "Playback speed",
+    "translation": "Rychlost přehrávání"
   },
   "qj71j1QRTA": {
     "source": "Query",
@@ -883,6 +1223,14 @@
     "source": "The previous operation stopped before changing the device.",
     "translation": "Předchozí operace se zastavila před změnou zařízení."
   },
+  "qoyVoB2RTa": {
+    "source": "Download started",
+    "translation": "Stahování zahájeno"
+  },
+  "quO2KGQ183": {
+    "source": "Could not connect to the device host",
+    "translation": "K hostiteli zařízení se nepodařilo připojit"
+  },
   "r1ey/2zpHa": {
     "source": "Update complete",
     "translation": "Aktualizace dokončena"
@@ -891,13 +1239,33 @@
     "source": "Software",
     "translation": "Software"
   },
+  "r54z1q6Q3W": {
+    "source": "Browse files",
+    "translation": "Procházet soubory"
+  },
   "rDnKtqqaHr": {
     "source": "Abort requested — waiting for the current operation to stop safely.",
     "translation": "Přerušení vyžádáno — čekání na bezpečné zastavení aktuální operace."
   },
+  "rELDbByu8U": {
+    "source": "Refresh",
+    "translation": "Obnovit"
+  },
+  "rM5iNFJyFh": {
+    "source": "Accessing device files",
+    "translation": "Práce se soubory zařízení"
+  },
   "rQUSqe6JcA": {
     "source": "Creating…",
     "translation": "Vytváření…"
+  },
+  "rWG5IWErKN": {
+    "source": "Create a folder",
+    "translation": "Vytvořit složku"
+  },
+  "rbrahOGMC3": {
+    "source": "Close",
+    "translation": "Zavřít"
   },
   "rd4Wgppb3S": {
     "source": "abort operation",
@@ -927,6 +1295,10 @@
     "source": "Garmin map components",
     "translation": "Mapové komponenty Garmin"
   },
+  "t9FrgUkP3A": {
+    "source": "Import FIT",
+    "translation": "Importovat FIT"
+  },
   "tOdNiYuuag": {
     "source": "Dark",
     "translation": "Tmavý"
@@ -939,6 +1311,10 @@
     "source": "Status",
     "translation": "Stav"
   },
+  "u9wPpcCpZw": {
+    "source": "Importing…",
+    "translation": "Importování…"
+  },
   "uUkib+hyP2": {
     "source": "Drag to reposition. Scroll or use the slider to zoom.",
     "translation": "Přetažením změňte výřez. Posouváním nebo jezdcem upravte přiblížení."
@@ -947,6 +1323,10 @@
     "source": "avg {rate}/s",
     "translation": "prům. {rate}/s"
   },
+  "uXO/JkmE2x": {
+    "source": "This folder is empty",
+    "translation": "Tato složka je prázdná"
+  },
   "uYAYibV2jR": {
     "source": "Stage",
     "translation": "Příprava"
@@ -954,6 +1334,10 @@
   "ubmFc8rrea": {
     "source": "Install",
     "translation": "Nainstalovat"
+  },
+  "ug01MkZy2v": {
+    "source": "Time",
+    "translation": "Čas"
   },
   "uqBy7yud/k": {
     "source": "Enter a name",
@@ -984,6 +1368,14 @@
     "source": "Maximize window",
     "translation": "Maximalizovat okno"
   },
+  "x/yXKSn1p9": {
+    "source": "At cursor",
+    "translation": "Na pozici kurzoru"
+  },
+  "xbi38cl5pP": {
+    "source": "Zoom in",
+    "translation": "Přiblížit"
+  },
   "xlL9emwsYC": {
     "source": "{completed} of {total} files",
     "translation": "{completed} z {total} souborů"
@@ -999,6 +1391,10 @@
   "yBaILMpvgy": {
     "source": "Saving profile settings",
     "translation": "Ukládání nastavení profilu"
+  },
+  "yC6aLcbMRT": {
+    "source": "Could not save profile picture",
+    "translation": "Profilový obrázek se nepodařilo uložit"
   },
   "yC9TWJNgiY": {
     "source": "Inspecting update journal…",
@@ -1019,5 +1415,9 @@
   "yypztrtvnt": {
     "source": "Metric",
     "translation": "Metrický"
+  },
+  "zPxvqJZI9C": {
+    "source": "Upload complete",
+    "translation": "Nahrávání dokončeno"
   }
 }

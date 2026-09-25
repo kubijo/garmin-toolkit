@@ -1,7 +1,7 @@
 //! FIT file-ingress controls.
 
 use cint::ColorInterop;
-use egui::{Align, Layout, RichText, Stroke, Ui};
+use egui::{Align, Align2, Layout, Rect, RichText, Stroke, Ui};
 use garmin_color::theme;
 
 use crate::{Size, button, icons, theme as widget_theme};
@@ -35,23 +35,23 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     let mut action = None;
     egui::Frame::new()
         .fill(widget_theme::color32(fill))
+        .corner_radius(widget_theme::PANEL_RADIUS)
         .stroke(if props.drop_active {
             Stroke::new(2.0, palette.interaction().interactive().into_cint())
         } else {
             Stroke::NONE
         })
-        .inner_margin(16)
+        .inner_margin(8)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             if ui.available_width() < 560.0 {
                 heading(ui, props, palette);
-                ui.add_space(12.0);
-                ui.scope(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    if file_button(ui, props, button::Width::Fill).clicked() {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if file_button(ui, props, button::Width::Fit).clicked() {
                         action = Some(Action::Files);
                     }
-                    if folder_button(ui, props, button::Width::Fill).clicked() {
+                    if folder_button(ui, props, button::Width::Fit).clicked() {
                         action = Some(Action::Folder);
                     }
                 });
@@ -70,6 +70,31 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
             }
         });
     action
+}
+
+/// Paint a non-shifting drop affordance over the complete import workspace.
+pub fn drop_overlay(ui: &Ui, rect: Rect, label: &str) {
+    let palette = crate::theme::palette(ui);
+    let veil = if ui.visuals().dark_mode {
+        egui::Color32::from_black_alpha(112)
+    } else {
+        egui::Color32::from_white_alpha(152)
+    };
+    ui.painter()
+        .rect_filled(rect, widget_theme::PANEL_RADIUS, veil);
+    ui.painter().rect_stroke(
+        rect,
+        widget_theme::PANEL_RADIUS,
+        Stroke::new(2.0, palette.interaction().interactive().into_cint()),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        egui::TextStyle::Heading.resolve(ui.style()),
+        widget_theme::color32(palette.content().text_primary()),
+    );
 }
 
 fn heading(ui: &mut Ui, props: &Props<'_>, palette: &theme::Theme) {
@@ -103,8 +128,8 @@ fn file_button(ui: &mut Ui, props: &Props<'_>, width: button::Width) -> egui::Re
     button::Props {
         label: props.files_label,
         icon: Some(icons::FILE),
-        kind: button::Kind::Secondary,
-        size: Size::Medium,
+        kind: button::Kind::Tertiary,
+        size: Size::Small,
         width,
         enabled: props.enabled,
     }
@@ -116,7 +141,7 @@ fn folder_button(ui: &mut Ui, props: &Props<'_>, width: button::Width) -> egui::
         label: props.folder_label,
         icon: Some(icons::FOLDER_OPEN),
         kind: button::Kind::Tertiary,
-        size: Size::Medium,
+        size: Size::Small,
         width,
         enabled: props.enabled,
     }

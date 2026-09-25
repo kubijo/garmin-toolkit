@@ -206,6 +206,17 @@ pub trait DeviceWrite: DeviceRead {
         )))
     }
 
+    async fn ensure_directory_with_progress(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        progress: &garmin_progress::ProgressReporter,
+    ) -> Result<(), DeviceIoError> {
+        require_running(progress)?;
+        self.ensure_directory(storage, path).await?;
+        require_running(progress)
+    }
+
     /// Create and verify a small file.
     async fn create_verified_file(
         &self,
@@ -228,6 +239,17 @@ pub trait DeviceWrite: DeviceRead {
         Err(DeviceIoError::Transport(format!(
             "directory removal is unsupported for {storage}:{path}"
         )))
+    }
+
+    async fn remove_empty_directory_with_progress(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        progress: &garmin_progress::ProgressReporter,
+    ) -> Result<(), DeviceIoError> {
+        require_running(progress)?;
+        self.remove_empty_directory(storage, path).await?;
+        require_running(progress)
     }
 
     async fn delete(
@@ -426,6 +448,17 @@ impl DeviceWrite for MountedMtpDevice {
         Ok(self.backend_ensure_directory(storage, path).await?)
     }
 
+    async fn ensure_directory_with_progress(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        progress: &garmin_progress::ProgressReporter,
+    ) -> Result<(), DeviceIoError> {
+        Ok(self
+            .backend_ensure_directory_with_progress(storage, path, progress)
+            .await?)
+    }
+
     async fn create_verified_file(
         &self,
         storage: &str,
@@ -443,6 +476,17 @@ impl DeviceWrite for MountedMtpDevice {
         path: &SafeRelativePath,
     ) -> Result<(), DeviceIoError> {
         Ok(self.backend_remove_empty_directory(storage, path).await?)
+    }
+
+    async fn remove_empty_directory_with_progress(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+        progress: &garmin_progress::ProgressReporter,
+    ) -> Result<(), DeviceIoError> {
+        Ok(self
+            .backend_remove_empty_directory_with_progress(storage, path, progress)
+            .await?)
     }
 
     async fn delete(
@@ -574,12 +618,12 @@ impl DeviceIoError {
 
 impl From<MountedMtpError> for DeviceIoError {
     fn from(error: MountedMtpError) -> Self {
-        match error {
-            MountedMtpError::Cancelled => Self::Cancelled,
-            error @ (MountedMtpError::RemovalObjectSize { .. }
-            | MountedMtpError::RemovalObjectChecksum(_)
-            | MountedMtpError::UploadMetadata(_)) => Self::Verification(error.to_string()),
-            error => Self::Transport(error.to_string()),
+        if error.is_cancelled() {
+            Self::Cancelled
+        } else if error.is_verification_failure() {
+            Self::Verification(error.to_string())
+        } else {
+            Self::Transport(error.to_string())
         }
     }
 }
@@ -587,5 +631,49 @@ impl From<MountedMtpError> for DeviceIoError {
 impl From<mtp_rs::Error> for DeviceIoError {
     fn from(error: mtp_rs::Error) -> Self {
         Self::Transport(error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DeviceIoError, MountedMtpError};
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn unsupported_mounted_mtp_is_a_transport_error() {
+        let error = MountedMtpError::Unsupported;
+        let reason = error.to_string();
+        assert!(
+            matches!(DeviceIoError::from(error), DeviceIoError::Transport(message) if message == reason)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mounted_mtp_preserves_cancellation_and_verification_errors() {
+        assert!(matches!(
+            DeviceIoError::from(MountedMtpError::Cancelled),
+            DeviceIoError::Cancelled
+        ));
+        let path = super::SafeRelativePath::parse("Garmin/map.img").unwrap();
+        for error in [
+            MountedMtpError::RemovalObjectSize {
+                path: path.clone(),
+                expected: 4,
+                actual: 3,
+            },
+            MountedMtpError::RemovalObjectChecksum(path.clone()),
+            MountedMtpError::UploadMetadata(path),
+        ] {
+            let reason = error.to_string();
+            assert!(
+                matches!(DeviceIoError::from(error), DeviceIoError::Verification(message) if message == reason)
+            );
+        }
+        let error = MountedMtpError::NotFound("disposable-fixture".into());
+        let reason = error.to_string();
+        assert!(
+            matches!(DeviceIoError::from(error), DeviceIoError::Transport(message) if message == reason)
+        );
     }
 }

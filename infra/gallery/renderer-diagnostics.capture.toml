@@ -1,0 +1,16 @@
+out = "../../.tmp/gallery/renderer-diagnostics"
+size = "640x360"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "dark"
+scene = "activity::Renderer Diagnostics"
+
+[[shot]]
+name = "light"
+scene = "activity::Renderer Diagnostics"
+
+[shot.globals]
+Theme = "Light"

@@ -20,6 +20,7 @@ Applications compose policy; crates own reusable capabilities.
 | `garmin-i18n`        | ICU MessageFormat catalogs                                      |
 | `garmin-importer`    | Provenance-aware FIT, GPX, and avatar import                    |
 | `garmin-map-service` | Garmin map catalog and authorization service adapter            |
+| `garmin-map-tiles`   | OpenFreeMap tile validation, transport, and HTTP-aware cache    |
 | `garmin-model`       | Source-neutral user, activity, route, and map models            |
 | `garmin-progress`    | Operation observation and cancellation contracts                |
 | `garmin-route`       | Route-plan transformations                                      |

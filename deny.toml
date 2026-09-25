@@ -16,6 +16,7 @@ allow = [
     "BSD-3-Clause",
     "BSL-1.0",
     "CC0-1.0",
+    "CDLA-Permissive-2.0",
     "ISC",
     "MIT",
     "MIT-0",
@@ -31,7 +32,7 @@ private = { ignore = false }
 
 # The pinned crate bundles Unicode v3 text but declares the older SPDX identifier.
 [[licenses.clarify]]
-crate = "finl_unicode@1.4.0"
+crate = "finl_unicode@1.5.0"
 expression = "(MIT OR Apache-2.0) AND Unicode-3.0"
 license-files = [
     { path = "LICENSE-MIT", hash = 0x386ca1bc },
@@ -44,6 +45,7 @@ multiple-versions = "deny"
 wildcards = "deny"
 allow-wildcard-paths = true
 skip = [
+    { crate = "base64@0.21.7", reason = "Walkers' native HTTP cache uses SSRI's base64 0.21; the toolkit uses newer base64 releases" },
     { crate = "base64@0.23.1", reason = "Map unlocks and FormatJS use base64 0.23; other dependencies use 0.22" },
     { crate = "bitflags@1.3.2", reason = "egui's SVG renderer uses png 0.17; the rest of the graph uses bitflags 2" },
     { crate = "block-buffer@0.12.1", reason = "FormatJS uses SHA-2 0.11 while SQLx uses SHA-2 0.10" },
@@ -55,22 +57,35 @@ skip = [
     { crate = "darling_core@0.20.11", reason = "Remoc uses custom_debug 0.6; har and Ratatui use newer Darling releases" },
     { crate = "darling_macro@0.20.11", reason = "Remoc uses custom_debug 0.6; har and Ratatui use newer Darling releases" },
     { crate = "digest@0.11.3", reason = "FormatJS uses SHA-2 0.11 while SQLx uses SHA-2 0.10" },
+    { crate = "float_next_after@1.0.0", reason = "Walkers uses Lyon's float_next_after 1 and Geo's float_next_after 2" },
+    { crate = "foldhash@0.1.5", reason = "fast-mvt's Buffa runtime requires foldhash 0.1 and hashbrown 0.15; other dependencies use foldhash 0.2" },
     { crate = "getrandom@0.3.4", reason = "egui and UUID generation use adjacent getrandom releases" },
+    { crate = "getrandom@0.4.3", reason = "Current tempfile, UUID, and Walkers dependencies use getrandom 0.4 alongside ring's older release" },
+    { crate = "hashbrown@0.15.5", reason = "fast-mvt's Buffa runtime requires hashbrown 0.15; other dependencies use newer hashbrown releases" },
     { crate = "hashbrown@0.16.1", reason = "SQLx and Ratatui use adjacent hashbrown releases" },
     { crate = "itertools@0.14.0", reason = "Ratatui and egui require adjacent itertools releases" },
     { crate = "kurbo@0.11.3", reason = "egui's SVG renderer and painter use adjacent kurbo releases" },
     { crate = "linux-raw-sys@0.4.15", reason = "the Wayland stack and nusb use adjacent rustix generations" },
+    { crate = "memmap2@0.5.10", reason = "Walkers' native HTTP cache still uses memmap2 0.5; the toolkit uses memmap2 0.9" },
+    { crate = "miette@5.10.0", reason = "Walkers' native HTTP cache uses miette 5; the CLI reporter uses miette 7" },
     { crate = "miniz_oxide@0.8.9", reason = "png and flate2 use adjacent miniz_oxide releases" },
     { crate = "png@0.17.16", reason = "egui SVG and avatar imports use adjacent png releases" },
     { crate = "pollster@0.4.0", reason = "rfd and eframe use adjacent pollster releases" },
+    { crate = "phf@0.11.3", reason = "egui's MIME lookup uses phf 0.11; the simulator's Markdown renderer uses phf 0.13" },
+    { crate = "phf_shared@0.11.3", reason = "egui's MIME lookup and the simulator's Markdown renderer use adjacent PHF releases" },
     { crate = "quick-xml@0.41.0", reason = "Wayland generation uses quick-xml 0.41; Garmin XML uses 0.42" },
     { crate = "rustc-hash@1.1.0", reason = "wgpu and type-map use adjacent rustc-hash releases" },
     { crate = "rustix@0.38.44", reason = "the Wayland stack and nusb use adjacent rustix generations" },
+    { crate = "rand@0.10.3", reason = "Walkers' Geo dependency uses rand 0.10; the WebSocket stack uses rand 0.9" },
+    { crate = "rand_core@0.10.1", reason = "Walkers' Geo dependency and the WebSocket stack use adjacent rand_core releases" },
+    { crate = "reqwest@0.12.28", reason = "Walkers is pinned to reqwest 0.12; toolkit services use reqwest 0.13" },
     { crate = "sha2@0.11.0", reason = "FormatJS and toolkit verification use adjacent SHA-2 releases" },
     { crate = "smithay-client-toolkit@0.19.2", reason = "winit and clipboard use adjacent Wayland client stacks" },
     { crate = "syn@2.0.119", reason = "platform and SQLx macros use syn 2 while current derives use syn 3" },
+    { crate = "synstructure@0.13.2", reason = "Remoc's custom_debug derives use synstructure 0.13; ICU's derives use 0.14" },
     { crate = "thiserror@1.0.69", reason = "the older Wayland client stack still uses thiserror 1" },
     { crate = "thiserror-impl@1.0.69", reason = "the older Wayland client stack still uses thiserror 1" },
+    { crate = "unicode-width@0.1.14", reason = "Walkers' native HTTP cache uses miette 5 and unicode-width 0.1; the toolkit uses unicode-width 0.2" },
 ]
 
 [sources]

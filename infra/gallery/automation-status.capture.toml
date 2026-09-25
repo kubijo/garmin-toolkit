@@ -1,0 +1,38 @@
+out = "../../.tmp/gallery/automation-status"
+size = "640x640"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "dark"
+scene = "activity::Automation Status"
+
+[[shot]]
+name = "light"
+scene = "activity::Automation Status"
+
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "menu-dark"
+scene = "activity::Automation Menu"
+
+[[shot]]
+name = "menu-light"
+scene = "activity::Automation Menu"
+
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "target-dark"
+scene = "activity::Automation Target"
+
+[[shot]]
+name = "target-light"
+scene = "activity::Automation Target"
+
+[shot.globals]
+Theme = "Light"

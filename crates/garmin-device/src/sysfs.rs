@@ -71,7 +71,7 @@ mod tests {
         fs::create_dir_all(&unrelated).expect("create unrelated fixture");
         write(&garmin.join("idVendor"), "091e\n");
         write(&garmin.join("idProduct"), "5158\n");
-        write(&garmin.join("product"), "Garmin Example Device\n");
+        write(&garmin.join("product"), "Mock USB-o-Matic 9000\n");
         write(&unrelated.join("idVendor"), "1234\n");
         write(&unrelated.join("idProduct"), "5678\n");
 
@@ -80,7 +80,7 @@ mod tests {
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].vendor_id, 0x091e);
         assert_eq!(devices[0].product_id, 0x5158);
-        assert_eq!(devices[0].product.as_deref(), Some("Garmin Example Device"));
+        assert_eq!(devices[0].product.as_deref(), Some("Mock USB-o-Matic 9000"));
     }
 
     fn write(path: &Path, contents: &str) {

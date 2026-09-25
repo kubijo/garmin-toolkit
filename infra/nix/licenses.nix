@@ -10,6 +10,7 @@ let
   carbonRevision = "7518c84ffd00f22434fe19d83119692c12fccb2f";
   flagIconsRevision = "7aa5b2bdddd570ece62c812c0cb588ccdc099e2e";
   notoSansRevision = "c4a321e123e4d4ff315f57f4e0adf294fe3a95be";
+  notoFallbackRevision = "ffebf8c1ee449e544955a7e813c54f9b73848eac";
   phosphorRevision = "7790ae563ef83ac36094b15b5e109d89fef09337";
   carbonLicense = pkgs.fetchurl {
     url = "https://raw.githubusercontent.com/carbon-design-system/carbon/${carbonRevision}/LICENSE";
@@ -26,6 +27,10 @@ let
   notoSansLicense = pkgs.fetchurl {
     url = "https://raw.githubusercontent.com/notofonts/latin-greek-cyrillic/${notoSansRevision}/OFL.txt";
     hash = "sha256-zumJL58MyP6ILJ6VN+5qiWIdhu586vcLAuKyscJcBho=";
+  };
+  notoFallbackLicense = pkgs.fetchurl {
+    url = "https://raw.githubusercontent.com/notofonts/noto-fonts/${notoFallbackRevision}/LICENSE";
+    hash = "sha256-DauS0FRPeyM0A/FLhKZjvb+nRpgu2mKef0+f/hsDb+s=";
   };
   config = (pkgs.formats.json { }).generate "garmin-toolkit-license-config.json" {
     assets = [
@@ -68,6 +73,28 @@ let
         license = "OFL-1.1";
         license_file = notoSansLicense;
         source = "https://github.com/notofonts/latin-greek-cyrillic/releases/tag/NotoSans-v2.015";
+        targets = [
+          "desktop"
+          "hass"
+        ];
+      }
+      {
+        name = "noto-sans-arabic";
+        version = "2.009";
+        license = "OFL-1.1";
+        license_file = notoFallbackLicense;
+        source = "https://github.com/notofonts/noto-fonts/tree/${notoFallbackRevision}/hinted/ttf/NotoSansArabic";
+        targets = [
+          "desktop"
+          "hass"
+        ];
+      }
+      {
+        name = "noto-sans-tifinagh";
+        version = "2.002";
+        license = "OFL-1.1";
+        license_file = notoFallbackLicense;
+        source = "https://github.com/notofonts/noto-fonts/tree/${notoFallbackRevision}/hinted/ttf/NotoSansTifinagh";
         targets = [
           "desktop"
           "hass"
@@ -129,6 +156,10 @@ let
     root = workspaceSrc;
     fileset = lib.fileset.unions [
       (craneLib.fileset.commonCargoSources workspaceSrc)
+      # Path dependencies are not Cargo registry downloads: keep their notices in
+      # the sandbox source, just as in the build source closure.
+      (workspaceSrc + "/vendor/fast-mvt")
+      (workspaceSrc + "/vendor/winit")
       (workspaceSrc + "/infra/licenses")
       (lib.fileset.maybeMissing (workspaceSrc + "/assets/licenses"))
     ];

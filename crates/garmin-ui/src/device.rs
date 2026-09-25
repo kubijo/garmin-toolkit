@@ -7,9 +7,10 @@ use garmin_service_api::{
     DeviceCapability, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
 };
 
-use crate::icons;
+use crate::{Size, button, icons};
 
 const DEVICE_ICON_SIZE: f32 = 32.0;
+const CONTENT_MAX_WIDTH: f32 = 880.0;
 
 /// Display data for one attached device.
 pub struct Props<'a> {
@@ -19,6 +20,8 @@ pub struct Props<'a> {
     pub software: Option<&'a str>,
     pub status: &'a str,
     pub status_label: &'a str,
+    pub inspection_error: Option<&'a str>,
+    pub inspection_error_label: &'a str,
     pub identifier_label: &'a str,
     pub software_label: &'a str,
     pub transfers_label: &'a str,
@@ -39,6 +42,11 @@ pub enum CollectionState<'a> {
     Connecting(&'a str),
     Empty(&'a str),
     Error(&'a str),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Action {
+    BrowseFiles,
 }
 
 /// Renders collection-level feedback.
@@ -62,6 +70,7 @@ pub fn show_collection_state(ui: &mut Ui, state: CollectionState<'_>) {
 }
 
 pub fn show(ui: &mut Ui, props: &Props<'_>) {
+    ui.set_max_width(CONTENT_MAX_WIDTH.min(ui.available_width()));
     let palette = crate::theme::palette(ui);
     ui.horizontal(|ui| {
         icons::Props {
@@ -84,11 +93,19 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
         .fill(crate::theme::color32(
             palette.surfaces().layer(garmin_color::theme::Level::One),
         ))
+        .corner_radius(crate::theme::PANEL_RADIUS)
+        .stroke(egui::Stroke::new(
+            1.0,
+            crate::theme::color32(palette.borders().subtle()),
+        ))
         .inner_margin(16.0)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.vertical(|ui| {
                 metadata(ui, props.status_label, props.status);
+                if let Some(error) = props.inspection_error {
+                    inspection_error(ui, props.inspection_error_label, error);
+                }
                 if let Some(identifier) = props.identifier {
                     metadata(ui, props.identifier_label, identifier);
                 }
@@ -122,7 +139,12 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
     }
 }
 
-pub fn show_snapshot(ui: &mut Ui, intl: &Intl, snapshot: &DeviceSnapshot) {
+pub fn show_snapshot(
+    ui: &mut Ui,
+    intl: &Intl,
+    snapshot: &DeviceSnapshot,
+    browser_loading: bool,
+) -> Option<Action> {
     let view = SnapshotView::new(snapshot, intl);
     let transfers = view
         .transfers
@@ -150,6 +172,8 @@ pub fn show_snapshot(ui: &mut Ui, intl: &Intl, snapshot: &DeviceSnapshot) {
             software: view.software.as_deref(),
             status: &view.status,
             status_label: &view.status_label,
+            inspection_error: snapshot.inspection_error.as_deref(),
+            inspection_error_label: &view.inspection_error_label,
             identifier_label: &view.identifier_label,
             software_label: &view.software_label,
             transfers_label: &view.transfers_label,
@@ -158,14 +182,38 @@ pub fn show_snapshot(ui: &mut Ui, intl: &Intl, snapshot: &DeviceSnapshot) {
             icon: snapshot_icon(snapshot),
         },
     );
+    if snapshot.inspection != InspectionState::Ready || snapshot.storages.is_empty() {
+        return None;
+    }
+    ui.add_space(20.0);
+    let browse = if browser_loading {
+        format_message!(intl, default_message: "Reading files…")
+    } else {
+        format_message!(intl, default_message: "Browse files")
+    };
+    let response = button::Props {
+        label: &browse,
+        icon: Some(icons::FOLDER_OPEN),
+        kind: button::Kind::Secondary,
+        size: Size::Medium,
+        width: button::Width::Fit,
+        enabled: !browser_loading,
+    }
+    .show(ui);
+    crate::semantics::target(ui, &response, "device.files");
+    response.clicked().then_some(Action::BrowseFiles)
 }
 
 #[must_use]
 pub fn snapshot_icon(snapshot: &DeviceSnapshot) -> icons::Icon {
     let name = snapshot.name.to_lowercase();
-    if name.contains("edge") {
+    if name.contains("edge") || name.contains("bike") || name.contains("cycle") {
         icons::BICYCLE
-    } else if name.contains("fenix") || name.contains("fēnix") || name.contains("venu") {
+    } else if name.contains("fenix")
+        || name.contains("fēnix")
+        || name.contains("venu")
+        || name.contains("watch")
+    {
         icons::WATCH
     } else {
         icons::HARD_DRIVE
@@ -177,6 +225,7 @@ struct SnapshotView {
     software: Option<String>,
     status: String,
     status_label: String,
+    inspection_error_label: String,
     identifier_label: String,
     software_label: String,
     transfers_label: String,
@@ -201,6 +250,7 @@ impl SnapshotView {
                 }
             },
             status_label: format_message!(intl, default_message: "Status"),
+            inspection_error_label: format_message!(intl, default_message: "Inspection error"),
             identifier_label: format_message!(intl, default_message: "Device ID"),
             software_label: format_message!(intl, default_message: "Software"),
             transfers_label: format_message!(intl, default_message: "Supported transfers"),
@@ -331,6 +381,19 @@ fn metadata(ui: &mut Ui, label: &str, value: &str) {
             .color(palette.content().text_secondary().into_cint()),
     );
     ui.label(value);
+    ui.add_space(8.0);
+}
+
+fn inspection_error(ui: &mut Ui, label: &str, value: &str) {
+    let palette = crate::theme::palette(ui);
+    let color = palette.support().error().into_cint();
+    ui.label(
+        RichText::new(label)
+            .small()
+            .color(palette.content().text_secondary().into_cint()),
+    );
+    let value = crate::text::balanced(ui, value, &TextStyle::Body, false);
+    ui.label(RichText::new(value).color(color));
     ui.add_space(8.0);
 }
 

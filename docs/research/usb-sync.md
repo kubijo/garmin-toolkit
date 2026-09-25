@@ -47,6 +47,21 @@ Garmin documents [`NewFiles`](https://support.garmin.com/en-MY/?faq=rzvP53Si4O3b
 Under [ADR 0012](../decisions/0012-manifest-driven-usb-capabilities.md), output permits copy, input only identifies a
 potential operation, and unlisted paths grant nothing.
 
+### Device-browser bookmark policy
+
+The file browser derives shortcuts from the catalog it already received; it never invents a directory or scans beyond
+that bounded snapshot. The conservative known-place set is `Garmin/Activity`, `Garmin/Courses`, `Garmin/Workouts`, and
+existing root or `Garmin`-nested Music, Podcasts, and Audiobooks directories. Activity, course, and workout locations
+come from the device manifest contract above. Garmin separately documents music, podcast, audiobook, and playlist
+content support, but not one universal watch directory layout, so media shortcuts are strictly existence-based:
+[Garmin audio file support](https://support.garmin.com/en-US/?faq=JyNEOTsZaR3KMXqej3oQp5).
+
+`GARMIN-TOOLKIT` remains visible because it is the toolkit's bounded, versioned recovery and transaction namespace. It
+is not a user-directory bookmark. The browser keeps it in the full storage tree and storage-root listing with a distinct
+toolbox icon. Its subtree is browse/download-only in this generic explorer: upload, new-folder, and remove affordances
+are suppressed. This protection is an application policy; it does not misrepresent a writable device volume as
+transport-level read-only.
+
 ## Device identity
 
 [ADR 0018](../decisions/0018-on-device-profile-marker.md) makes a root TOML marker the sole persisted association. It

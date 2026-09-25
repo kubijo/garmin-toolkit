@@ -12,10 +12,12 @@ publish.workspace = true
 ignored = ["serde"]
 
 [dependencies]
+camino.workspace = true
 garmin-macros.workspace = true
 garmin-model.workspace = true
 remoc.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

@@ -68,8 +68,11 @@ fn indeterminate(ui: &mut Ui, palette: &garmin_color::theme::Theme) {
     let width = ui.available_width().max(0.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 4.0), Sense::hover());
     response.widget_info(|| egui::WidgetInfo::new(egui::WidgetType::ProgressIndicator));
-    ui.painter()
-        .rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
+    ui.painter().rect_filled(
+        rect,
+        egui::CornerRadius::ZERO,
+        ui.visuals().extreme_bg_color,
+    );
 
     let segment_width = rect.width() * 0.32;
     let time = ui.input(|input| input.time);
@@ -81,7 +84,7 @@ fn indeterminate(ui: &mut Ui, palette: &garmin_color::theme::Theme) {
     );
     ui.painter().with_clip_rect(rect).rect_filled(
         segment,
-        0.0,
+        egui::CornerRadius::ZERO,
         widget_theme::color32(palette.interaction().interactive()),
     );
     ui.request_repaint();

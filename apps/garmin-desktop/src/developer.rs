@@ -1,0 +1,562 @@
+//! Native developer tools: local RPC logs and an explicitly started loopback server.
+use axum::{
+    Json, Router,
+    extract::{DefaultBodyLimit, State},
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse as _, Response},
+    routing::{get, post},
+};
+use eframe::egui;
+use garmin_service_api::control::ControlCommand as Command;
+use garmin_ui::developer::{Request, state};
+use serde_json::{Value, json};
+use tokio::sync::{mpsc, oneshot};
+
+#[derive(Clone, Copy, Debug, Default, clap::Parser)]
+pub struct Options {
+    /// Enable semantic automation (demo builds only).
+    #[arg(long)]
+    pub ui_automation: bool,
+    /// Start the loopback control server on an OS-assigned port (demo builds only).
+    #[arg(long)]
+    pub control_server: bool,
+}
+
+impl Options {
+    /// Validate startup controls before opening application storage.
+    /// # Errors
+    /// Production builds reject automation and the control server.
+    pub fn validate(self) -> std::io::Result<()> {
+        if (self.ui_automation || self.control_server) && !cfg!(feature = "demo") {
+            return Err(std::io::Error::other(
+                "automation and control server require a demo build",
+            ));
+        }
+        Ok(())
+    }
+}
+
+struct Pending {
+    command: Command,
+    response: oneshot::Sender<Result<Reply, String>>,
+}
+enum Reply {
+    Json(Value),
+    #[cfg(feature = "demo")]
+    Screenshot(garmin_service_api::control::Capture),
+}
+
+#[cfg(feature = "demo")]
+struct PendingCapture {
+    ticket: garmin_ui::capture::Ticket,
+    response: oneshot::Sender<Result<Reply, String>>,
+}
+#[derive(Clone)]
+struct Bridge {
+    sender: mpsc::Sender<Pending>,
+    context: egui::Context,
+}
+
+struct NativeTools {
+    runtime: Option<tokio::runtime::Runtime>,
+    store: garmin_logging::Store,
+    receiver: mpsc::Receiver<Pending>,
+    sender: mpsc::Sender<Pending>,
+    server: Option<tokio::task::JoinHandle<()>>,
+    diagnostics: Option<garmin_diagnostics::Diagnostics>,
+    observer: Option<garmin_ui::diagnostics::Observer>,
+    #[cfg(feature = "demo")]
+    capture: Option<PendingCapture>,
+}
+
+impl Drop for NativeTools {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+impl NativeTools {
+    fn shutdown(&mut self) {
+        self.stop_server();
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
+
+    fn stop_server(&mut self) {
+        if let Some(observer) = self.observer.take() {
+            observer.stop();
+        }
+        if let Some(diagnostics) = self.diagnostics.take() {
+            diagnostics.stop();
+        }
+        #[cfg(feature = "demo")]
+        {
+            self.capture = None;
+        }
+        if let Some(server) = self.server.take() {
+            server.abort();
+        }
+    }
+}
+
+pub fn shutdown(context: &egui::Context) {
+    if let Some(plugin) = context.plugin_opt::<NativeTools>() {
+        plugin.lock().shutdown();
+    }
+}
+
+pub fn install(
+    context: &egui::Context,
+    options: Options,
+    store: garmin_logging::Store,
+) -> std::io::Result<()> {
+    let runtime = Some(
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()?,
+    );
+    let (sender, receiver) = mpsc::channel(16);
+    let mut tools = NativeTools {
+        runtime,
+        store,
+        receiver,
+        sender,
+        server: None,
+        diagnostics: None,
+        observer: None,
+        #[cfg(feature = "demo")]
+        capture: None,
+    };
+    #[cfg(feature = "demo")]
+    if options.ui_automation || options.control_server {
+        context.add_plugin(garmin_ui::automation::Driver::default());
+        context.add_plugin(garmin_ui::capture::CapturePlugin::default());
+    }
+    if options.control_server {
+        tools.start(context);
+    }
+    context.add_plugin(tools);
+    garmin_ui::developer::reconnect(context);
+    Ok(())
+}
+
+impl egui::plugin::Plugin for NativeTools {
+    fn debug_name(&self) -> &'static str {
+        "native developer tools"
+    }
+}
+
+impl NativeTools {
+    fn publish_diagnostics(&self, context: &egui::Context) {
+        let Some(diagnostics) = &self.diagnostics else {
+            return;
+        };
+        let focused = context.input_for(egui::ViewportId::ROOT, |input| input.focused);
+        diagnostics.events.publish(
+            "desktop",
+            garmin_model::diagnostics::Observation {
+                kind: "window".into(),
+                window: "root".into(),
+                removed: false,
+                fields: std::collections::BTreeMap::from([
+                    ("kind".into(), "application".into()),
+                    ("focused".into(), focused.to_string()),
+                ]),
+            },
+        );
+        let debug = state(context)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .debug
+            .clone();
+        diagnostics.events.publish(
+            "desktop",
+            garmin_model::diagnostics::Observation {
+                kind: "renderer".into(),
+                window: "root".into(),
+                removed: false,
+                fields: std::collections::BTreeMap::from([(
+                    "detail".into(),
+                    debug.chars().take(512).collect(),
+                )]),
+            },
+        );
+    }
+
+    fn start(&mut self, context: &egui::Context) {
+        if self.server.is_some() {
+            return;
+        }
+        if !cfg!(feature = "demo") {
+            state(context)
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .server_error = Some("Control server requires a demo build".into());
+            return;
+        }
+        #[cfg(feature = "demo")]
+        if context
+            .plugin_opt::<garmin_ui::automation::Driver>()
+            .is_none()
+        {
+            context.add_plugin(garmin_ui::automation::Driver::default());
+            context.add_plugin(garmin_ui::capture::CapturePlugin::default());
+        }
+        let result = (|| -> std::io::Result<_> {
+            let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
+            listener.set_nonblocking(true)?;
+            let url = format!("http://{}", listener.local_addr()?);
+            let _entered = self
+                .runtime
+                .as_ref()
+                .expect("native runtime is active")
+                .enter();
+            let listener = tokio::net::TcpListener::from_std(listener)?;
+            Ok((listener, url))
+        })();
+        match result {
+            Ok((listener, url)) => {
+                let diagnostics =
+                    garmin_diagnostics::Diagnostics::new(Some(self.store.clone()), "desktop");
+                let events = diagnostics.events.clone();
+                self.observer = Some(garmin_ui::diagnostics::install(
+                    context,
+                    move |observation| {
+                        events.publish("desktop", observation);
+                    },
+                ));
+                println!("Control server: {url}");
+                let handle = state(context);
+                {
+                    let mut state = handle
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    state.server = Some(url);
+                    state.server_error = None;
+                }
+                let router = Router::new()
+                    .route("/api/control", post(control))
+                    .route("/api/capabilities", get(capabilities))
+                    .route("/api/debug", get(debug))
+                    .layer(DefaultBodyLimit::max(16 * 1024))
+                    .with_state(Bridge {
+                        sender: self.sender.clone(),
+                        context: context.clone(),
+                    })
+                    .merge(diagnostics.routes());
+                self.diagnostics = Some(diagnostics);
+                let context = context.clone();
+                self.server = Some(
+                    self.runtime
+                        .as_ref()
+                        .expect("native runtime is active")
+                        .spawn(async move {
+                            if let Err(error) = axum::serve(
+                                listener,
+                                router
+                                    .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+                            )
+                            .await
+                            {
+                                let mut state = handle
+                                    .lock()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                                state.server = None;
+                                state.server_error = Some(error.to_string());
+                                context.request_repaint();
+                            }
+                        }),
+                );
+            }
+            Err(error) => {
+                state(context)
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .server_error = Some(error.to_string());
+            }
+        }
+    }
+
+    fn update(&mut self, context: &egui::Context) {
+        self.publish_diagnostics(context);
+        #[cfg(feature = "demo")]
+        self.update_capture();
+        while let Ok(pending) = self.receiver.try_recv() {
+            if pending.response.is_closed() {
+                continue;
+            }
+            #[cfg(feature = "demo")]
+            if pending.command.operation == "screenshot" {
+                self.start_capture(context, pending);
+                continue;
+            }
+            #[cfg(feature = "demo")]
+            let result = garmin_ui::window::control::command(
+                context,
+                pending.command.window.as_deref(),
+                &pending.command.operation,
+                &pending.command.argument,
+            );
+            #[cfg(not(feature = "demo"))]
+            let result = {
+                let _ = pending.command;
+                Err("automation requires a demo build".into())
+            };
+            let _ = pending.response.send(result.map(Reply::Json));
+        }
+        for request in garmin_ui::developer::take_requests(context) {
+            match request {
+                Request::StartServer => self.start(context),
+                Request::StopServer => {
+                    self.stop_server();
+                    state(context)
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .server = None;
+                }
+                Request::OpenFolder => {
+                    let path = self.store.directory().to_path_buf();
+                    self.runtime
+                        .as_ref()
+                        .expect("native runtime is active")
+                        .spawn_blocking(move || {
+                            let launcher = if cfg!(target_os = "macos") {
+                                "open"
+                            } else {
+                                "xdg-open"
+                            };
+                            if let Err(error) =
+                                std::process::Command::new(launcher).arg(path).spawn()
+                            {
+                                tracing::warn!(%error, "Could not open log folder");
+                            }
+                        });
+                }
+                request => {
+                    let _entered = self
+                        .runtime
+                        .as_ref()
+                        .expect("native runtime is active")
+                        .enter();
+                    let client = self.store.client();
+                    self.runtime
+                        .as_ref()
+                        .expect("native runtime is active")
+                        .spawn(garmin_ui::developer::logs(context.clone(), client, request));
+                }
+            }
+        }
+        let handle = state(context);
+        let export = handle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .export
+            .take();
+        if let Some(export) = export {
+            let context = context.clone();
+            self.runtime
+                .as_ref()
+                .expect("native runtime is active")
+                .spawn_blocking(move || {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("garmin-logs.jsonl")
+                        .save_file()
+                        && let Err(error) = std::fs::write(path, export)
+                    {
+                        state(&context)
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .log_error = Some(error.to_string());
+                        context.request_repaint();
+                    }
+                });
+        }
+    }
+
+    #[cfg(feature = "demo")]
+    fn start_capture(&mut self, context: &egui::Context, pending: Pending) {
+        let ticket = if pending.command.argument.is_null() {
+            garmin_ui::window::control::capture(context, pending.command.window.as_deref())
+        } else {
+            Err("screenshot takes no argument; use the window field to select a child".into())
+        };
+        match ticket {
+            Ok(ticket) => {
+                self.capture = Some(PendingCapture {
+                    ticket,
+                    response: pending.response,
+                });
+            }
+            Err(reason) => {
+                let _ = pending.response.send(Err(reason));
+            }
+        }
+    }
+
+    #[cfg(feature = "demo")]
+    fn update_capture(&mut self) {
+        let Some(pending) = &self.capture else {
+            return;
+        };
+        if pending.response.is_closed() {
+            self.capture = None;
+            return;
+        }
+        let Some(result) = pending.ticket.take() else {
+            return;
+        };
+        let Some(pending) = self.capture.take() else {
+            return;
+        };
+        if let Some(runtime) = &self.runtime {
+            runtime.spawn_blocking(move || {
+                let _ticket = pending.ticket;
+                let reply = result
+                    .and_then(garmin_ui::capture::Pixels::png)
+                    .map(Reply::Screenshot);
+                let _ = pending.response.send(reply);
+            });
+        }
+    }
+}
+
+pub fn update(context: &egui::Context, intl: &garmin_i18n::Intl) {
+    if let Some(plugin) = context.plugin_opt::<NativeTools>() {
+        plugin.lock().update(context);
+    }
+    #[cfg(feature = "demo")]
+    if let Some(plugin) = context.plugin_opt::<garmin_ui::automation::Driver>() {
+        let requested = plugin.lock().take_launch_request();
+        if let Some(name) = requested
+            && let Err(error) = garmin_ui::automation::command(context, "start", &json!(name))
+        {
+            plugin.lock().launch_error = Some(error);
+        }
+        garmin_ui::automation::show_status(context);
+    }
+    garmin_ui::developer::show(context, true, intl);
+}
+
+async fn control(
+    State(bridge): State<Bridge>,
+    headers: HeaderMap,
+    Json(command): Json<Command>,
+) -> Response {
+    // Browser automation belongs to the browser bridge, not this native listener.
+    if headers.contains_key("origin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error":"browser origins are not accepted"})),
+        )
+            .into_response();
+    }
+    let (sender, receiver) = oneshot::channel();
+    if bridge
+        .sender
+        .try_send(Pending {
+            command,
+            response: sender,
+        })
+        .is_err()
+    {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error":"control queue is full"})),
+        )
+            .into_response();
+    }
+    // Only the root update drains the command queue, even for child commands.
+    bridge.context.request_repaint_of(egui::ViewportId::ROOT);
+    match tokio::time::timeout(std::time::Duration::from_secs(5), receiver).await {
+        Ok(Ok(Ok(Reply::Json(value)))) => {
+            (StatusCode::OK, Json(json!({"value":value}))).into_response()
+        }
+        #[cfg(feature = "demo")]
+        Ok(Ok(Ok(Reply::Screenshot(capture)))) => {
+            let metadata = serde_json::to_string(&capture.info).unwrap_or_default();
+            (
+                [("content-type", "image/png"), ("cache-control", "no-store")],
+                [("x-garmin-capture", metadata)],
+                capture.png,
+            )
+                .into_response()
+        }
+        Ok(Ok(Err(error))) => {
+            (StatusCode::BAD_REQUEST, Json(json!({"error":error}))).into_response()
+        }
+        _ => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error":"UI command timed out or application closed"})),
+        )
+            .into_response(),
+    }
+}
+async fn capabilities() -> Json<Value> {
+    Json(garmin_service_api::control::capabilities())
+}
+async fn debug(State(bridge): State<Bridge>) -> Json<Value> {
+    Json(
+        json!({"debug":state(&bridge.context).lock().unwrap_or_else(std::sync::PoisonError::into_inner).debug}),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read as _, Write as _};
+
+    #[test]
+    fn production_rejects_explicit_automation_before_startup() {
+        let options = Options {
+            ui_automation: true,
+            control_server: false,
+        };
+        assert_eq!(options.validate().is_ok(), cfg!(feature = "demo"));
+        assert!(Options::default().validate().is_ok());
+    }
+
+    #[test]
+    #[cfg(feature = "demo")]
+    fn server_is_explicit_dynamic_and_stops_without_closing_the_application() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = garmin_logging::Store::open(directory.path(), "test").unwrap();
+        let context = egui::Context::default();
+        install(&context, Options::default(), store).unwrap();
+        assert!(state(&context).lock().unwrap().server.is_none());
+        state(&context)
+            .lock()
+            .unwrap()
+            .requests
+            .push(Request::StartServer);
+        context.plugin::<NativeTools>().lock().update(&context);
+        let url = state(&context).lock().unwrap().server.clone().unwrap();
+        let address = url.strip_prefix("http://").unwrap();
+        let mut stream = std::net::TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .write_all(
+                b"GET /api/capabilities HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.contains("200 OK"));
+        assert!(response.contains("targets"));
+        state(&context)
+            .lock()
+            .unwrap()
+            .requests
+            .push(Request::StopServer);
+        context.plugin::<NativeTools>().lock().update(&context);
+        assert!(state(&context).lock().unwrap().server.is_none());
+        assert!(
+            context
+                .plugin_opt::<garmin_ui::automation::Driver>()
+                .is_some()
+        );
+    }
+}

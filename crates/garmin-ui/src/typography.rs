@@ -6,6 +6,8 @@ use egui::{FontDefinitions, FontFamily, FontId, RichText, Style, TextStyle};
 
 const REGULAR_DATA: &str = "NotoSans-Regular";
 const SEMIBOLD_DATA: &str = "NotoSans-SemiBold";
+const ARABIC_DATA: &str = "NotoSansArabic-Regular";
+const TIFINAGH_DATA: &str = "NotoSansTifinagh-Regular";
 const UBUNTU_LIGHT_DATA: &str = "Ubuntu-Light";
 static REGULAR_FAMILY: LazyLock<FontFamily> =
     LazyLock::new(|| FontFamily::Name(REGULAR_DATA.into()));
@@ -69,9 +71,25 @@ fn definitions() -> FontDefinitions {
             "../assets/fonts/NotoSans-SemiBold.ttf"
         ))),
     );
+    for (name, bytes) in [
+        (
+            ARABIC_DATA,
+            include_bytes!("../assets/fonts/NotoSansArabic-Regular.ttf").as_slice(),
+        ),
+        (
+            TIFINAGH_DATA,
+            include_bytes!("../assets/fonts/NotoSansTifinagh-Regular.ttf").as_slice(),
+        ),
+    ] {
+        fonts.font_data.insert(
+            name.to_owned(),
+            Arc::new(egui::FontData::from_static(bytes)),
+        );
+    }
 
     for chain in fonts.families.values_mut() {
         chain.retain(|name| name != UBUNTU_LIGHT_DATA);
+        chain.extend([ARABIC_DATA.to_owned(), TIFINAGH_DATA.to_owned()]);
     }
     if let Some(chain) = fonts.families.get_mut(&FontFamily::Monospace) {
         chain.insert(1.min(chain.len()), REGULAR_DATA.to_owned());
@@ -101,6 +119,43 @@ fn definitions() -> FontDefinitions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn map_labels_have_arabic_and_tifinagh_glyphs() {
+        let ctx = egui::Context::default();
+        install(&ctx);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.fonts_mut(|fonts| {
+                for family in [
+                    FontFamily::Proportional,
+                    Weight::Regular.family(),
+                    Weight::SemiBold.family(),
+                ] {
+                    let font = FontId::new(12.0, family);
+                    for label in [
+                        "Dakhla-Oued Ed-Dahab الداخلة وادي الذهب",
+                        "Tanger-Tétouan-Al Hoceïma ⵟⴰⵏⵊⴰ ⵜⵉⵟⵟⴰⵡⵉⵏ ⵍⵃⵓⵙⵉⵎⴰ طنجة تطوان الحسيمة",
+                    ] {
+                        for character in label.chars() {
+                            assert!(
+                                fonts.has_glyph(&font, character),
+                                "{font:?}: {character} U+{:04X}",
+                                u32::from(character)
+                            );
+                        }
+                        let galley = fonts.layout_no_wrap(
+                            label.to_owned(),
+                            font.clone(),
+                            egui::Color32::WHITE,
+                        );
+                        assert!(!galley.is_empty());
+                        assert!(galley.size().is_finite());
+                    }
+                }
+            });
+        });
+        output.textures_delta.clear();
+    }
 
     #[test]
     fn weights_select_distinct_static_faces() {

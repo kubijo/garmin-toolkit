@@ -1,0 +1,31 @@
+out = "../../.tmp/gallery/notifications"
+size = "560x440"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "desktop-dark"
+scene = "notification::Desktop Toasts"
+
+[[shot]]
+name = "desktop-light"
+scene = "notification::Desktop Toasts"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "expanded-short-dark"
+scene = "notification::Desktop Toasts"
+[shot.knobs]
+expanded = true
+height = 180.0
+
+[[shot]]
+name = "expanded-short-light"
+scene = "notification::Desktop Toasts"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+expanded = true
+height = 180.0

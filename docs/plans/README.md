@@ -1,6 +1,7 @@
 # Active plans
 
-Plans contain unfinished work only. Completion requires evidence, durable documentation, and removal of the plan.
+Plans contain unfinished work only. Completion requires evidence, durable documentation, and removal of the plan. Follow
+the [development safeguards](../development.md) for builds, Git changes, servers, and physical devices.
 
 All plans obey [single-path execution](../decisions/0037-single-execution-path.md) and
 [validated interface previews](../decisions/0038-validated-interface-previews.md).
@@ -30,8 +31,15 @@ Read-only device inspection owns capacity discovery and display. Completed trans
 evidence lives in [USB synchronization](../research/usb-sync.md#map-maintenance-evidence). Device expansion owns support
 claims and HASS/desktop publication; distribution owns CLI packaging.
 
-The consented fēnix and Edge hardware update, restart, and interrupted-recovery matrix is complete. HASS and desktop map
-mutation remain owned by their active interface and publication plans; their existing device inspection and capacity
-views are read-only.
-
 [Open questions](open-questions.md) records unresolved choices under their earliest owning plan.
+
+## Cross-cutting follow-ups
+
+- [Activity map workspace](activity-map-workspace.md) owns the shared map, charts, sample inspection, laps, and playback
+  acceptance, remaining renderer isolation, and browser validation of the semantic interaction runner. Resume from its
+  [browser verification questions](activity-map-workspace.md#browser-verification).
+- [Application-wide visual refresh](visual-refresh.md) owns adoption of the original Carbon-derived visual language
+  across every shared primitive and primary page.
+
+Explorer hardware acceptance belongs to device inspection; keyboard and diagnostics work belongs to shared interface
+workflows. Completed explorer and parser implementation no longer have separate plans.

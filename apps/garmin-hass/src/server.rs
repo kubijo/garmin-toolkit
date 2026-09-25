@@ -1,9 +1,10 @@
+use crate::BrowserOptions;
 use crate::devices::Host;
 use axum::{
     Extension, Router,
     body::{Body, Bytes},
     extract::{
-        DefaultBodyLimit, State,
+        ConnectInfo, DefaultBodyLimit, Path as AxumPath, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, HeaderValue, Request, StatusCode, header, uri::Authority},
@@ -23,24 +24,52 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use tokio::io::AsyncReadExt as _;
 use tower_http::services::ServeDir;
 
 const ADDRESS_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_ADDRESS";
 const WEB_ROOT_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_WEB_ROOT";
 const CSP_REPORT_LIMIT: usize = 32 * 1024;
 const CSP_NONCE_PLACEHOLDER: &str = "GARMIN_TOOLKIT_CSP_NONCE";
+const UPLOAD_TELEMETRY_PLACEHOLDER: &str = "GARMIN_TOOLKIT_MAP_UPLOAD_TELEMETRY";
+const MAP_RENDER_WORKER_PLACEHOLDER: &str = "GARMIN_TOOLKIT_MAP_RENDER_WORKER";
+const UI_AUTOMATION_PLACEHOLDER: &str = "GARMIN_TOOLKIT_UI_AUTOMATION";
 
-pub(super) async fn serve(host: Arc<Host>) -> Result<(), std::io::Error> {
+pub(super) async fn serve(
+    host: Arc<Host>,
+    map_tiles: garmin_map_tiles::Service,
+    browser: BrowserOptions,
+) -> Result<(), std::io::Error> {
     let address = std::env::var(ADDRESS_ENVIRONMENT)
         .unwrap_or_else(|_| "127.0.0.1:8099".to_owned())
         .parse::<SocketAddr>()
         .map_err(std::io::Error::other)?;
-    let app = router(host)?;
+    let (app, control) = router(host, map_tiles, browser)?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     announce_server(address, crate::mode::PRODUCT_NAME)?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
+    if browser.control_server {
+        println!("Control API: http://{address}/api/control (localhost only)");
+    }
+    serve_http(listener, app, control, shutdown_signal()).await
+}
+
+async fn serve_http(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    control: Option<crate::control::Broker>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> io::Result<()> {
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        shutdown.await;
+        if let Some(control) = control {
+            control.stop();
+        }
+    })
+    .await
 }
 
 async fn shutdown_signal() {
@@ -100,7 +129,7 @@ fn web_link(web_url: &str) -> AnsiString<'_> {
 struct WebIndex(Arc<str>);
 
 impl WebIndex {
-    fn load(root: &Path) -> io::Result<Self> {
+    fn load(root: &Path, browser: BrowserOptions) -> io::Result<Self> {
         let html = std::fs::read_to_string(root.join("index.html"))?;
         if !html.contains(CSP_NONCE_PLACEHOLDER) {
             return Err(io::Error::new(
@@ -108,7 +137,33 @@ impl WebIndex {
                 "browser index lacks the CSP nonce placeholder",
             ));
         }
-        Ok(Self(html.into()))
+        if !html.contains(UPLOAD_TELEMETRY_PLACEHOLDER) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "browser index lacks the map upload telemetry placeholder",
+            ));
+        }
+        if !html.contains(MAP_RENDER_WORKER_PLACEHOLDER) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "browser index lacks the map render worker placeholder",
+            ));
+        }
+        let telemetry = serde_json::to_string(&browser.map_upload_telemetry)?;
+        if !html.contains(UI_AUTOMATION_PLACEHOLDER) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "browser index lacks the UI automation placeholder",
+            ));
+        }
+        let automation = serde_json::to_string(&(browser.ui_automation || browser.control_server))?;
+        let worker = serde_json::to_string(&browser.map_render_worker)?;
+        Ok(Self(
+            html.replace(UPLOAD_TELEMETRY_PLACEHOLDER, &telemetry)
+                .replace(MAP_RENDER_WORKER_PLACEHOLDER, &worker)
+                .replace(UI_AUTOMATION_PLACEHOLDER, &automation)
+                .into(),
+        ))
     }
 
     fn render(&self, nonce: &Nonce) -> String {
@@ -123,18 +178,33 @@ async fn web_index(
     Html(index.render(&nonce))
 }
 
-fn router(host: Arc<Host>) -> io::Result<Router> {
+fn router(
+    host: Arc<Host>,
+    map_tiles: garmin_map_tiles::Service,
+    browser: BrowserOptions,
+) -> io::Result<(Router, Option<crate::control::Broker>)> {
+    browser.validate()?;
+    let control = browser.control_server.then(crate::control::Broker::new);
     let app = Router::new()
         .route("/remoc", any(websocket))
+        .route("/device-download/{token}", get(device_download))
+        .route("/map/tiles/{zoom}/{x}/{file}", get(map_tile))
         .route("/health", get(|| async { "ok" }))
         .route("/csp-report", post(csp_report))
-        .with_state(host);
+        .with_state(host)
+        .layer(Extension(map_tiles));
+    let app = if let Some(broker) = &control {
+        app.merge(broker.routes())
+    } else {
+        app
+    };
+    let app = app.layer(Extension(control.clone()));
     let app = match std::env::var_os(WEB_ROOT_ENVIRONMENT).map(PathBuf::from) {
         Some(root) => app
             .route("/", get(web_index))
             .route("/index.html", get(web_index))
             .fallback_service(ServeDir::new(&root).append_index_html_on_directories(true))
-            .layer(Extension(WebIndex::load(&root)?)),
+            .layer(Extension(WebIndex::load(&root, browser)?)),
         None => app.route(
             "/",
             get(|| async {
@@ -142,37 +212,164 @@ fn router(host: Arc<Host>) -> io::Result<Router> {
             }),
         ),
     };
-    Ok(app
+    let app = app
         .layer(DefaultBodyLimit::max(CSP_REPORT_LIMIT))
-        .layer(middleware::from_fn(browser_cache_policy)))
+        .layer(middleware::from_fn_with_state(
+            browser.control_server,
+            control_visibility,
+        ))
+        .layer(middleware::from_fn(browser_cache_policy));
+    Ok((app, control))
+}
+
+async fn control_visibility(
+    State(enabled): State<bool>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    if path.starts_with("/api/control/")
+        || path.starts_with("/api/capabilities/")
+        || (!enabled && matches!(path, "/api/control" | "/api/capabilities"))
+        || (!enabled && garmin_diagnostics::is_route(path))
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    next.run(request).await
 }
 
 async fn browser_cache_policy(mut request: Request<Body>, next: Next) -> Response {
     let path = request.uri().path();
-    let entry_point = matches!(path, "/" | "/index.html");
-    let initializer = path.ends_with("-initializer.js");
-    let static_asset =
-        !entry_point && !initializer && !matches!(path, "/health" | "/remoc" | "/csp-report");
+    let entry_point = browser_entry_point(path);
+    let map_tile = path.starts_with("/map/tiles/");
+    let static_asset = fingerprinted_asset(path)
+        && !entry_point
+        && !path.starts_with("/device-download/")
+        && !map_tile
+        && !matches!(path, "/health" | "/remoc" | "/csp-report");
     let nonce = Nonce::random();
     let content_security_policy = content_security_policy(request.headers(), &nonce);
     request.extensions_mut().insert(nonce);
-    if entry_point || initializer {
+    if entry_point {
         request.headers_mut().remove(header::IF_MODIFIED_SINCE);
         request.headers_mut().remove(header::IF_NONE_MATCH);
     }
     let mut response = next.run(request).await;
-    let policy = if static_asset && response.status().is_success() {
-        "public, max-age=31536000, immutable"
-    } else {
-        "no-store"
-    };
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
+    if !map_tile {
+        let policy = browser_asset_policy(static_asset, response.status());
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
+    }
     response
         .headers_mut()
         .insert(header::CONTENT_SECURITY_POLICY, content_security_policy);
     response
+}
+
+fn browser_entry_point(path: &str) -> bool {
+    matches!(
+        path,
+        "/" | "/index.html" | "/map-worker.js" | "/map-render-worker.js" | "/worker-codec.js"
+    ) || path.ends_with("-initializer.js")
+}
+
+fn fingerprinted_asset(path: &str) -> bool {
+    let Some((stem, extension)) = path
+        .rsplit('/')
+        .next()
+        .and_then(|name| name.rsplit_once('.'))
+    else {
+        return false;
+    };
+    if !matches!(
+        extension,
+        "js" | "wasm" | "svg" | "css" | "png" | "jpg" | "webp" | "woff" | "woff2"
+    ) {
+        return false;
+    }
+    let Some((_, hash)) = stem.rsplit_once('-') else {
+        return false;
+    };
+    // All published assets use esbuild's dependency-aware base32 hash.
+    hash.len() == 8
+        && hash
+            .bytes()
+            .all(|c| c.is_ascii_uppercase() || matches!(c, b'2'..=b'7'))
+}
+
+fn browser_asset_policy(static_asset: bool, status: StatusCode) -> &'static str {
+    if static_asset && status.is_success() {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-store"
+    }
+}
+
+async fn map_tile(
+    Extension(service): Extension<garmin_map_tiles::Service>,
+    AxumPath((zoom, x, file)): AxumPath<(u8, u32, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(y) = file
+        .strip_suffix(".pbf")
+        .and_then(|value| value.parse::<u32>().ok())
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let tile_id = garmin_map_tiles::TileId { zoom, x, y };
+    if tile_id.validate().is_err() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let tile = match service.tile(tile_id).await {
+        Ok(tile) => tile,
+        Err(error) => {
+            tracing::warn!(%error, zoom, x, y, "Could not serve activity map tile");
+            return StatusCode::BAD_GATEWAY.into_response();
+        }
+    };
+    let etag = HeaderValue::from_str(&tile.etag).ok();
+    let cache_control = HeaderValue::from_str(&format!("public, max-age={}", tile.max_age_seconds))
+        .unwrap_or_else(|_| HeaderValue::from_static("no-cache"));
+    if request_etag_matches(&headers, &tile.etag) {
+        let mut response = StatusCode::NOT_MODIFIED.into_response();
+        if let Some(etag) = etag {
+            response.headers_mut().insert(header::ETAG, etag);
+        }
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, cache_control);
+        return response;
+    }
+    let mut response = Response::new(Body::from(tile.bytes));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/vnd.mapbox-vector-tile"),
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, cache_control);
+    response.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    if let Some(etag) = etag {
+        response.headers_mut().insert(header::ETAG, etag);
+    }
+    response
+}
+
+fn request_etag_matches(headers: &HeaderMap, etag: &str) -> bool {
+    let etag = etag.strip_prefix("W/").unwrap_or(etag);
+    headers
+        .get_all(header::IF_NONE_MATCH)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .any(|candidate| {
+            candidate == "*" || candidate.strip_prefix("W/").unwrap_or(candidate) == etag
+        })
 }
 
 fn content_security_policy(headers: &HeaderMap, nonce: &Nonce) -> HeaderValue {
@@ -195,6 +392,7 @@ fn content_security_policy(headers: &HeaderMap, nonce: &Nonce) -> HeaderValue {
         .object_src(["'none'"])
         .script_src(["'self'", "'wasm-unsafe-eval'"])
         .nonce_for(["script-src"])
+        .directive("worker-src", ["'self'"])
         .style_src(["'self'", "'unsafe-inline'"])
         .report_uri(["csp-report"])
         .to_header_value_with_nonce(nonce)
@@ -285,17 +483,70 @@ fn log_csp_violation(kind: &str, context_url: Option<&str>, report: &CspViolatio
 
 async fn websocket(
     State(host): State<Arc<Host>>,
+    Extension(control): Extension<Option<crate::control::Broker>>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
     if !browser_origin_allowed(&headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    let control = control
+        .filter(|_| crate::control::local_connection(peer.map(|Extension(info)| info.0), &headers));
     upgrade.on_upgrade(move |socket| async move {
+        let host = host.with_control(control.map(|broker| broker.connection()));
         if let Err(error) = serve_client(socket, host).await {
             tracing::warn!(%error, "Remoc client connection failed");
         }
     })
+}
+
+async fn device_download(
+    State(host): State<Arc<Host>>,
+    AxumPath(token): AxumPath<String>,
+) -> Response {
+    let Some(download) = host.take_browser_download(&token) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let content_length = download.size;
+    let file = match tokio::fs::File::open(download.path()).await {
+        Ok(file) => file,
+        Err(error) => {
+            tracing::warn!(%error, "prepared browser download disappeared");
+            return StatusCode::NOT_FOUND.into_response();
+        }
+    };
+    let body = Body::from_stream(futures_util::stream::try_unfold(
+        (file, download),
+        |(mut file, download)| async move {
+            let mut bytes = vec![0_u8; 64 * 1024];
+            let count = file.read(&mut bytes).await?;
+            if count == 0 {
+                Ok::<_, std::io::Error>(None)
+            } else {
+                bytes.truncate(count);
+                Ok(Some((Bytes::from(bytes), (file, download))))
+            }
+        },
+    ));
+    let mut response = Response::new(body);
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_static("attachment"),
+    );
+    if let Ok(content_length) = HeaderValue::from_str(&content_length.to_string()) {
+        headers.insert(header::CONTENT_LENGTH, content_length);
+    }
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    response
 }
 
 fn browser_origin_allowed(headers: &HeaderMap) -> bool {
@@ -340,10 +591,14 @@ async fn serve_client(socket: WebSocket, host: Arc<Host>) -> anyhow::Result<()> 
         })
     });
     let (server, client) = ApplicationServiceServerShared::<_, codec::Default>::new(host);
-    remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx)
-        .provide(client)
-        .await
-        .map_err(|error| anyhow::anyhow!("could not establish Remoc connection: {error}"))?;
+    remoc::Connect::framed(
+        garmin_service_api::control::transport_config(),
+        transport_tx,
+        transport_rx,
+    )
+    .provide(client)
+    .await
+    .map_err(|error| anyhow::anyhow!("could not establish Remoc connection: {error}"))?;
     server
         .serve()
         .await
@@ -353,18 +608,121 @@ async fn serve_client(socket: WebSocket, host: Arc<Host>) -> anyhow::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::{
-        CSP_NONCE_PLACEHOLDER, WebIndex, browser_origin_allowed, content_security_policy,
-        csp_report, router, startup_banner, web_link,
+        CSP_NONCE_PLACEHOLDER, MAP_RENDER_WORKER_PLACEHOLDER, UPLOAD_TELEMETRY_PLACEHOLDER,
+        WebIndex, browser_asset_policy, browser_entry_point, browser_origin_allowed,
+        content_security_policy, csp_report, fingerprinted_asset, request_etag_matches, router,
+        startup_banner, web_link,
     };
-    use crate::devices::{DemoSource, Host};
+    use crate::BrowserOptions;
+    use crate::devices::{Host, demo::DemoSource};
     use axum::body::Bytes;
     use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
     use futures_util::{SinkExt as _, StreamExt as _, future};
-    use garmin_service_api::{ApplicationService as _, ApplicationServiceClient, InspectionState};
+    use garmin_service_api::{
+        ApplicationService as _, ApplicationServiceClient, DeviceBrowserTarget,
+        DeviceCatalogEntryKind, InspectionState,
+    };
     use garmin_services::Application;
     use http_security_headers::{ContentSecurityPolicy, Nonce};
     use remoc::prelude::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+    #[cfg(feature = "demo")]
+    #[tokio::test]
+    async fn shutdown_finishes_with_diagnostic_followers_and_browser_connected()
+    -> anyhow::Result<()> {
+        use std::time::Duration;
+        let directory = tempfile::tempdir()?;
+        let storage = crate::prepare_storage(directory.path()).await?;
+        let (app, control) = router(
+            Host::new(
+                Box::new(DemoSource::new(
+                    directory.path().join("device"),
+                    tokio::runtime::Handle::current(),
+                )?),
+                Application::new(storage),
+            ),
+            garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+            BrowserOptions {
+                control_server: true,
+                ..Default::default()
+            },
+        )?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(super::serve_http(listener, app, control, async move {
+            let _ = stopped.await;
+        }));
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(3))
+            .build()?;
+        let (browser, _) = connect_async(format!("ws://{address}/remoc")).await?;
+        let mut followers = Vec::new();
+        for format in ["text", "ansi", "sse", "html"] {
+            let mut response = client
+                .get(format!(
+                    "http://{address}/api/events-stream?format={format}"
+                ))
+                .header("accept", "text/event-stream")
+                .send()
+                .await?
+                .error_for_status()?;
+            assert!(response.chunk().await?.is_some());
+            followers.push(response);
+        }
+        stop.send(()).expect("server is waiting for shutdown");
+        tokio::time::timeout(Duration::from_secs(2), server).await???;
+        for mut follower in followers {
+            assert!(follower.chunk().await?.is_none());
+        }
+        drop(browser);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn disabled_control_is_404_even_with_static_file_fallback() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let app = axum::Router::new()
+            .fallback_service(tower_http::services::ServeDir::new(directory.path()))
+            .layer(axum::middleware::from_fn_with_state(
+                false,
+                super::control_visibility,
+            ));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let client = reqwest::Client::new();
+        for path in [
+            "/api/control",
+            "/api/control/",
+            "/api/control/sessions",
+            "/api/capabilities",
+            "/api/logs-get",
+            "/api/logs-stream",
+            "/api/events-get",
+            "/api/events-stream",
+        ] {
+            for method in [
+                reqwest::Method::GET,
+                reqwest::Method::POST,
+                reqwest::Method::OPTIONS,
+            ] {
+                assert_eq!(
+                    client
+                        .request(method, format!("http://{address}{path}"))
+                        .send()
+                        .await?
+                        .status(),
+                    StatusCode::NOT_FOUND
+                );
+            }
+        }
+        server.abort();
+        Ok(())
+    }
 
     #[test]
     fn browser_websockets_must_come_from_the_served_origin() {
@@ -402,6 +760,7 @@ mod tests {
         assert!(policy.contains("connect-src 'self' ws://127.0.0.1:8099 wss://127.0.0.1:8099"));
         assert!(policy.contains("frame-ancestors 'self'"));
         assert!(policy.contains("script-src 'self' 'wasm-unsafe-eval'"));
+        assert!(policy.contains("worker-src 'self'"));
         assert!(policy.contains("'nonce-dGVzdA=='"));
         assert!(policy.contains("report-uri csp-report"));
         assert!(!policy.contains("report-to"));
@@ -424,6 +783,18 @@ mod tests {
     }
 
     #[test]
+    fn map_revalidation_accepts_lists_and_weak_etags() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_static(r#""other", W/"current""#),
+        );
+
+        assert!(request_etag_matches(&headers, r#""current""#));
+        assert!(!request_etag_matches(&headers, r#""missing""#));
+    }
+
+    #[test]
     fn web_index_replaces_the_trunk_nonce_placeholder() {
         let index =
             WebIndex(format!(r#"<script nonce="{CSP_NONCE_PLACEHOLDER}"></script>"#).into());
@@ -433,6 +804,140 @@ mod tests {
             index.render(&nonce),
             r#"<script nonce="dGVzdA=="></script>"#
         );
+    }
+
+    #[test]
+    fn web_index_embeds_the_startup_telemetry_choice_without_changing_assets() -> anyhow::Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        let source = include_str!("../web/index.html");
+        let html = format!(
+            "{source}<script nonce=\"{CSP_NONCE_PLACEHOLDER}\" src=\"app-hash.js\"></script>"
+        );
+        std::fs::write(root.path().join("index.html"), html)?;
+        let nonce = Nonce::from_encoded("dGVzdA==")?;
+        for enabled in [true, false] {
+            let rendered = WebIndex::load(
+                root.path(),
+                BrowserOptions {
+                    map_upload_telemetry: enabled,
+                    ..Default::default()
+                },
+            )?
+            .render(&nonce);
+            let value = rendered
+                .split("data-map-upload-telemetry=\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap();
+            assert_eq!(serde_json::from_str::<bool>(value)?, enabled);
+            assert!(rendered.contains("src=\"app-hash.js\""));
+            assert!(rendered.contains("nonce=\"dGVzdA==\""));
+            assert!(!rendered.contains(UPLOAD_TELEMETRY_PLACEHOLDER));
+        }
+        std::fs::write(
+            root.path().join("index.html"),
+            format!("<script nonce=\"{CSP_NONCE_PLACEHOLDER}\"></script>"),
+        )?;
+        assert!(
+            WebIndex::load(root.path(), BrowserOptions::default()).is_err(),
+            "a stale bundle cannot silently ignore the control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stable_browser_worker_is_never_cached_as_an_immutable_asset() {
+        for path in [
+            "/worker-codec.js",
+            "/snippets/crate-123456789/codec.js",
+            "/app.js",
+            "/icon.svg",
+        ] {
+            assert!(!fingerprinted_asset(path));
+        }
+        for path in [
+            "/map-worker-ABCDEFG2.js",
+            "/chunks/chunk-ABCD2345.js",
+            "/app_bg-ABCD2345.wasm",
+            "/icon-ABCD2345.svg",
+        ] {
+            assert!(fingerprinted_asset(path));
+        }
+        assert!(browser_entry_point("/map-worker.js"));
+        assert!(browser_entry_point("/map-render-worker.js"));
+        assert!(browser_entry_point("/worker-codec.js"));
+        assert_eq!(browser_asset_policy(false, StatusCode::OK), "no-store");
+        assert_eq!(
+            browser_asset_policy(true, StatusCode::OK),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(
+            browser_asset_policy(true, StatusCode::NOT_FOUND),
+            "no-store"
+        );
+    }
+
+    #[test]
+    fn web_index_embeds_worker_control_and_rejects_stale_bundles() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let source = format!(
+            "{}<script nonce=\"{CSP_NONCE_PLACEHOLDER}\"></script>",
+            include_str!("../web/index.html")
+        );
+        std::fs::write(root.path().join("index.html"), &source)?;
+        let nonce = Nonce::from_encoded("dGVzdA==")?;
+        for enabled in [false, true] {
+            let rendered = WebIndex::load(
+                root.path(),
+                BrowserOptions {
+                    map_render_worker: enabled,
+                    ..Default::default()
+                },
+            )?
+            .render(&nonce);
+            assert!(rendered.contains(&format!("data-map-render-worker=\"{enabled}\"")));
+            assert!(!rendered.contains(MAP_RENDER_WORKER_PLACEHOLDER));
+        }
+        let defaults = WebIndex::load(root.path(), BrowserOptions::default())?.render(&nonce);
+        assert!(defaults.contains("data-map-render-worker=\"true\""));
+        std::fs::write(
+            root.path().join("index.html"),
+            source.replace(MAP_RENDER_WORKER_PLACEHOLDER, "false"),
+        )?;
+        assert!(WebIndex::load(root.path(), BrowserOptions::default()).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn web_index_embeds_automation_only_when_requested() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let source = format!(
+            "{}<script nonce=\"{CSP_NONCE_PLACEHOLDER}\"></script>",
+            include_str!("../web/index.html")
+        );
+        std::fs::write(root.path().join("index.html"), &source)?;
+        let nonce = Nonce::from_encoded("dGVzdA==")?;
+        for enabled in [false, true] {
+            let rendered = WebIndex::load(
+                root.path(),
+                BrowserOptions {
+                    ui_automation: enabled,
+                    ..Default::default()
+                },
+            )?
+            .render(&nonce);
+            assert!(rendered.contains(&format!("data-ui-automation=\"{enabled}\"")));
+            assert!(!rendered.contains(super::UI_AUTOMATION_PLACEHOLDER));
+        }
+        std::fs::write(
+            root.path().join("index.html"),
+            source.replace(super::UI_AUTOMATION_PLACEHOLDER, "false"),
+        )?;
+        assert!(WebIndex::load(root.path(), BrowserOptions::default()).is_err());
+        Ok(())
     }
 
     #[tokio::test]
@@ -467,10 +972,155 @@ mod tests {
     async fn host_routes_are_constructible() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
         let storage = crate::prepare_storage(directory.path()).await?;
-        let _router = router(Host::new(
-            Box::new(DemoSource::new()),
+        let _router = router(
+            Host::new(
+                Box::new(DemoSource::new(
+                    directory.path().join("device"),
+                    tokio::runtime::Handle::current(),
+                )?),
+                Application::new(storage),
+            ),
+            garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+            BrowserOptions::default(),
+        )?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn map_tiles_are_relative_cacheable_and_revalidated() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let cache = directory.path().join("map-cache/0/0");
+        tokio::fs::create_dir_all(&cache).await?;
+        let bytes = [0x1a, 0x05, 0x0a, 0x01, b'x', 0x78, 0x02];
+        tokio::fs::write(cache.join("0.pbf"), bytes).await?;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        tokio::fs::write(
+            cache.join("0.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "fetched_at": now,
+                "accessed_at": now,
+                "etag": null,
+            }))?,
+        )
+        .await?;
+        let storage = crate::prepare_storage(directory.path()).await?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (app, _control) = router(
+            Host::new(
+                Box::new(DemoSource::new(
+                    directory.path().join("device"),
+                    tokio::runtime::Handle::current(),
+                )?),
+                Application::new(storage),
+            ),
+            garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+            BrowserOptions::default(),
+        )?;
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let client = reqwest::Client::new();
+        let url = format!("http://{address}/map/tiles/0/0/0.pbf");
+
+        let response = client.get(&url).send().await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static(
+                "application/vnd.mapbox-vector-tile"
+            ))
+        );
+        assert!(
+            response
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.starts_with("public, max-age=604"))
+        );
+        assert!(
+            response
+                .headers()
+                .get(header::CONTENT_SECURITY_POLICY)
+                .is_some()
+        );
+        let etag = response
+            .headers()
+            .get(header::ETAG)
+            .expect("a cached tile has a response validator")
+            .clone();
+        assert_eq!(response.bytes().await?.as_ref(), bytes.as_slice());
+
+        let response = client
+            .get(&url)
+            .header(header::IF_NONE_MATCH, etag)
+            .send()
+            .await?;
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(
+            client
+                .get(format!("http://{address}/map/tiles/23/0/0.pbf"))
+                .send()
+                .await?
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        server.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn prepared_browser_download_is_same_origin_and_single_use() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let storage = crate::prepare_storage(directory.path()).await?;
+        let host = Host::new(
+            Box::new(DemoSource::new(
+                directory.path().join("device"),
+                tokio::runtime::Handle::current(),
+            )?),
             Application::new(storage),
-        ))?;
+        );
+        let ticket = host
+            .prepare_device_browser_download(
+                "demo:watch-o-matic-9000".to_owned(),
+                DeviceBrowserTarget {
+                    storage_id: "internal".to_owned(),
+                    path: "Garmin/Activity/History/2026/city-ride.fit".into(),
+                    kind: DeviceCatalogEntryKind::File,
+                },
+            )
+            .await?
+            .map_err(anyhow::Error::msg)?;
+        assert_eq!(ticket.file_name, "city-ride.fit");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (app, _control) = router(
+            host,
+            garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+            BrowserOptions::default(),
+        )?;
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let url = format!("http://{address}/device-download/{}", ticket.token);
+        let response = reqwest::get(&url).await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_DISPOSITION),
+            Some(&HeaderValue::from_static("attachment"))
+        );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
+        assert_eq!(
+            response.bytes().await?.as_ref(),
+            garmin_fit::fixture::ActivityCase::CityRide
+                .encode()?
+                .as_slice()
+        );
+        assert_eq!(reqwest::get(url).await?.status(), StatusCode::NOT_FOUND);
+
+        server.abort();
         Ok(())
     }
 
@@ -480,10 +1130,17 @@ mod tests {
         let storage = crate::prepare_storage(directory.path()).await?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
-        let app = router(Host::new(
-            Box::new(DemoSource::new()),
-            Application::new(storage),
-        ))?;
+        let (app, _control) = router(
+            Host::new(
+                Box::new(DemoSource::new(
+                    directory.path().join("device"),
+                    tokio::runtime::Handle::current(),
+                )?),
+                Application::new(storage),
+            ),
+            garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
+            BrowserOptions::default(),
+        )?;
         let server = tokio::spawn(async move { axum::serve(listener, app).await });
         let (socket, response) = connect_async(format!("ws://{address}/remoc")).await?;
         assert!(
@@ -507,10 +1164,13 @@ mod tests {
                 Err(error) => Some(Err(error)),
             })
         });
-        let client: ApplicationServiceClient =
-            remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx)
-                .consume()
-                .await?;
+        let client: ApplicationServiceClient = remoc::Connect::framed(
+            garmin_service_api::control::transport_config(),
+            transport_tx,
+            transport_rx,
+        )
+        .consume()
+        .await?;
         assert_eq!(
             client.deployment_mode().await?,
             crate::mode::DEPLOYMENT_MODE

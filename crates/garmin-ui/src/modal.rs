@@ -4,10 +4,20 @@ use cint::ColorInterop;
 use egui::{Align, Align2, Id, Layout, Order, Response, RichText, Ui};
 use garmin_color::theme;
 
-use crate::{Size as ComponentSize, button, icons::Icon, theme::color32};
+use crate::{
+    Size as ComponentSize, button,
+    icons::Icon,
+    theme::{FLOATING_RADIUS, color32},
+};
 
-const BODY_PADDING: i8 = 24;
-const FOOTER_HEIGHT: f32 = 56.0;
+const BODY_MARGIN: egui::Margin = egui::Margin {
+    left: 24,
+    right: 24,
+    top: 24,
+    bottom: 24,
+};
+const FOOTER_MARGIN: egui::Margin = egui::Margin::ZERO;
+const ACTION_GAP: f32 = 2.0;
 const VIEWPORT_MARGIN: f32 = 32.0;
 
 /// Dialog placement and input scope.
@@ -45,6 +55,7 @@ pub enum PrimaryKind {
     /// Normal confirmation.
     #[default]
     Confirm,
+    /// Destructive confirmation.
     Danger,
 }
 
@@ -159,10 +170,18 @@ fn render_surface<R>(
     let palette = crate::theme::palette(ui);
     egui::Frame::new()
         .fill(color32(palette.surfaces().layer(theme::Level::One)))
+        .corner_radius(FLOATING_RADIUS)
+        .stroke(egui::Stroke::new(1.0, color32(palette.borders().subtle())))
+        .shadow(egui::Shadow {
+            offset: [0, 12],
+            blur: 32,
+            spread: 0,
+            color: egui::Color32::from_black_alpha(128),
+        })
         .show(ui, |ui| {
             ui.set_width(width);
             let inner = egui::Frame::new()
-                .inner_margin(BODY_PADDING)
+                .inner_margin(BODY_MARGIN)
                 .show(ui, |ui| {
                     crate::theme::layer(ui, theme::Level::Two, |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
@@ -212,60 +231,91 @@ fn header(ui: &mut Ui, props: &Props<'_>) {
 
 fn footer(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     let actions = crate::theme::palette(ui).modal_actions();
-    let cell_width = ui.available_width() / 2.0;
     let mut action = None;
-    ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.horizontal(|ui| {
-            let cancel = footer_button(
-                ui,
-                cell_width,
-                button::Props {
-                    label: props.cancel_label,
-                    icon: None,
-                    kind: button::Kind::Secondary,
-                    size: ComponentSize::Medium,
-                    width: button::Width::Fill,
-                    enabled: true,
-                },
-                actions.cancel(),
-            );
-            let primary = footer_button(
-                ui,
-                cell_width,
-                button::Props {
+    egui::Frame::new()
+        .inner_margin(FOOTER_MARGIN)
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = ACTION_GAP;
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let primary = button::Props {
                     label: props.primary.label,
                     icon: props.primary.icon,
                     kind: props.primary.kind.button_kind(),
                     size: ComponentSize::Medium,
-                    width: button::Width::Fill,
+                    width: button::Width::Fit,
                     enabled: props.primary.enabled,
-                },
-                match props.primary.kind {
-                    PrimaryKind::Confirm => actions.confirm(),
-                    PrimaryKind::Danger => actions.danger(),
-                },
-            );
-            if cancel.clicked() {
-                action = Some(Action::Cancel);
-            } else if primary.clicked() {
-                action = Some(Action::Primary);
-            }
+                }
+                .show_with_states(
+                    ui,
+                    match props.primary.kind {
+                        PrimaryKind::Confirm => actions.confirm(),
+                        PrimaryKind::Danger => actions.danger(),
+                    },
+                );
+                let cancel = button::Props {
+                    label: props.cancel_label,
+                    icon: None,
+                    kind: button::Kind::Secondary,
+                    size: ComponentSize::Medium,
+                    width: button::Width::Fit,
+                    enabled: true,
+                }
+                .show_with_states(ui, actions.cancel());
+                if primary_activated(props.primary.kind, &primary) {
+                    action = Some(Action::Primary);
+                } else if cancel.clicked() {
+                    action = Some(Action::Cancel);
+                }
+            });
         });
-    });
     action
 }
 
-fn footer_button(
-    ui: &mut Ui,
-    width: f32,
-    props: button::Props<'_>,
-    states: &theme::ButtonStates,
-) -> Response {
-    ui.allocate_ui_with_layout(
-        egui::vec2(width, FOOTER_HEIGHT),
-        Layout::top_down(Align::Min),
-        |ui| props.show_with_states_at_height(ui, states, FOOTER_HEIGHT),
-    )
-    .inner
+fn primary_activated(_kind: PrimaryKind, response: &Response) -> bool {
+    response.clicked()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn danger_primary_accepts_keyboard_activation() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        context
+            .run_ui(egui::RawInput::default(), |ui| {
+                ui.button("Remove").request_focus();
+            })
+            .drop_without_applying_deltas();
+
+        let mut danger_response = None;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(320.0, 200.0),
+            )),
+            events: vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..egui::RawInput::default()
+        };
+        context
+            .run_ui(input, |ui| {
+                let response = ui.button("Remove");
+                danger_response = Some(response);
+            })
+            .drop_without_applying_deltas();
+
+        let response = danger_response.expect("the button was shown");
+        assert!(
+            response.clicked(),
+            "Enter produces a synthetic button click"
+        );
+        assert!(primary_activated(PrimaryKind::Danger, &response));
+    }
 }

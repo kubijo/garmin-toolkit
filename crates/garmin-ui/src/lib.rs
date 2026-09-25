@@ -6,10 +6,18 @@
 )]
 
 pub mod activity;
+#[cfg(any(test, feature = "automation"))]
+pub mod automation;
 pub mod brand;
 pub mod button;
 pub mod capacity;
+#[cfg(any(test, feature = "automation"))]
+pub mod capture;
+pub mod developer;
 pub mod device;
+pub mod device_browser;
+pub mod device_fit_preview;
+pub mod diagnostics;
 pub mod file_import;
 mod header_selector;
 pub mod icons;
@@ -24,11 +32,13 @@ pub mod profile;
 pub mod profile_settings;
 pub mod progress;
 pub mod select;
+pub mod semantics;
 pub mod shell;
 mod size;
 mod text;
 pub mod theme;
 pub mod typography;
+pub mod window;
 pub mod workspace;
 
 pub use size::Size;

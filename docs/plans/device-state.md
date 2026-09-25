@@ -1,12 +1,8 @@
 # Read-only device inspection
 
-[Capacity behavior and validation](../research/device-capacity-and-recovery.md) are complete. This plan owns the
-remaining device-state work.
-
-## Implemented
-
-- Mounted devices automatically expose manifest and storage state in desktop and HASS. Inspection does not run the file
-  catalog. Transfer, networking, and mutation remain explicit.
+Continue from the [validated capacity boundary](../research/device-capacity-and-recovery.md) and
+[device explorer](../architecture/device-explorer.md). Mounted devices already expose manifest and storage state without
+running the file catalog; transfer, networking, and mutation remain explicit.
 
 ## Remaining work
 
@@ -18,9 +14,12 @@ remaining device-state work.
    refresh. Capacity queries must not crawl device files.
 4. Validate the packaged HASS host and browser under USB assignment, nested ingress, reconnect, disconnect, and slow
    startup. Capture the real DOM loader separately from the shared `garmin-ui` gallery evidence.
-5. Extend the HASS browser from its device-state page into the full shared application UI, then prove that CLI, desktop,
-   and HASS render the same canonical snapshot and refresh it after reconnect or mutation. A planned-space segment is
-   optional; separate volumes remain mandatory.
+5. Prove that CLI, desktop, and HASS render the same canonical device snapshot and refresh it after reconnect or
+   mutation. A planned-space segment is optional; separate volumes remain mandatory.
+6. Complete consented production explorer acceptance on the Venu 3S and distinguish real OS-visible attachments from
+   synthetic fixtures. The confirmed simultaneous Edge/Venu attachment is not full explorer proof. If an absent device
+   remains visible, diagnose the host/GVFS lifecycle rather than hiding it in application code. Follow the
+   [hardware and anonymization safeguards](../development.md#execution-safeguards).
 
 [USB synchronization](../research/usb-sync.md#map-maintenance-evidence) records completed transaction checks and
 hardware write evidence. [Device expansion](device-expansion-and-publication.md) owns optional battery and

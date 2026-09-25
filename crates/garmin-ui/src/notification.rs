@@ -15,6 +15,11 @@ const STACK_MARGIN: f32 = 16.0;
 const STACK_PEEK: f32 = 8.0;
 const TOAST_WIDTH: f32 = 320.0;
 const TOAST_SHADOW_CLIP_MARGIN: f32 = 20.0;
+const SEVERITY_RAIL_WIDTH: f32 = 3.0;
+const CLOSE_ICON_SIZE: f32 = 14.0;
+const CLOSE_TARGET_SIZE: f32 = 24.0;
+const TOAST_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
+const SEVERITY_RAIL_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
 
 /// Notification severity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -87,6 +92,19 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
 #[must_use]
 pub fn actionable(ui: &mut Ui, props: &ActionableProps<'_>) -> Option<Action> {
     surface(ui, props)
+}
+
+/// Removes repeated transport-layer prefixes while preserving the underlying diagnostic.
+#[must_use]
+pub fn normalize_error_detail(detail: &str) -> String {
+    let mut detail = detail.trim().to_owned();
+    for prefix in ["receive error:", "send error:", "connection error:"] {
+        let repeated = format!("{prefix} {prefix}");
+        while detail.contains(&repeated) {
+            detail = detail.replace(&repeated, prefix);
+        }
+    }
+    detail
 }
 
 /// Stable identity assigned by [`Toasts`].
@@ -308,6 +326,7 @@ impl Toasts {
         let display: Vec<_> = (0..self.entries.len()).rev().collect();
         let output = egui::Area::new(id)
             .order(Order::Tooltip)
+            .constrain_to(bounds)
             .fixed_pos(bounds.right_top() + egui::vec2(-STACK_MARGIN, STACK_MARGIN))
             .pivot(Align2::RIGHT_TOP)
             .movable(false)
@@ -351,7 +370,7 @@ impl Toasts {
                         egui::vec2(TOAST_WIDTH - inset * 2.0, height),
                     );
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-                    child.set_clip_rect(rect.expand(TOAST_SHADOW_CLIP_MARGIN));
+                    child.set_clip_rect(rect.expand(TOAST_SHADOW_CLIP_MARGIN).intersect(bounds));
                     child.set_opacity(visibility);
                     if let Some(action) = render_surface(
                         &mut child,
@@ -410,7 +429,6 @@ fn measure_surface(ui: &mut Ui, entry: &Entry) -> f32 {
         egui::UiBuilder::new()
             .id_salt(("toast-measure", entry.id.0))
             .max_rect(rect)
-            .sizing_pass()
             .invisible(),
     );
     render_surface(
@@ -435,6 +453,18 @@ fn surface(ui: &mut Ui, props: &ActionableProps<'_>) -> Option<Action> {
 struct SurfaceOutput {
     action: Option<Action>,
     rect: Rect,
+    #[cfg(test)]
+    action_target: Option<(Id, Rect)>,
+    #[cfg(test)]
+    close_target: Option<(Id, Rect)>,
+}
+
+struct SurfaceContentOutput {
+    action: Option<Action>,
+    #[cfg(test)]
+    action_target: Option<(Id, Rect)>,
+    #[cfg(test)]
+    close_target: Option<(Id, Rect)>,
 }
 
 fn render_surface(ui: &mut Ui, props: &ActionableProps<'_>, content_opacity: f32) -> SurfaceOutput {
@@ -444,6 +474,7 @@ fn render_surface(ui: &mut Ui, props: &ActionableProps<'_>, content_opacity: f32
         .fill(widget_theme::color32(
             palette.surfaces().layer(theme::Level::Two),
         ))
+        .corner_radius(TOAST_RADIUS)
         .stroke(egui::Stroke::new(
             1.0,
             widget_theme::color32(palette.borders().subtle()),
@@ -454,92 +485,133 @@ fn render_surface(ui: &mut Ui, props: &ActionableProps<'_>, content_opacity: f32
             spread: 0,
             color: egui::Color32::from_black_alpha(96),
         })
-        .inner_margin(egui::Margin::symmetric(16, 12))
-        .show(ui, |ui| {
-            ui.multiply_opacity(content_opacity);
-            ui.set_min_width(ui.available_width());
-            ui.spacing_mut().item_spacing.y = 8.0;
-            let mut action = None;
-            ui.horizontal_top(|ui| {
-                icons::Props {
-                    icon: props.kind.icon(),
-                    size: 18.0,
-                    color: accent,
-                }
-                .show(ui);
-                ui.add_space(4.0);
-                ui.with_layout(Layout::top_down(Align::Min), |ui| {
-                    ui.add(
-                        egui::Label::new(
-                            crate::typography::semibold(props.title)
-                                .color(palette.content().text_primary().into_cint()),
-                        )
-                        .selectable(false),
-                    );
-                    if let Some(detail) = props.detail {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(detail)
-                                    .size(12.0)
-                                    .color(palette.content().text_secondary().into_cint()),
-                            )
-                            .selectable(false)
-                            .wrap(),
-                        );
-                    }
-                });
-                if props.closable {
-                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                        if close_button(ui, palette.content().icon_primary()).clicked() {
-                            action = Some(Action::Dismiss);
-                        }
-                    });
-                }
-            });
-            if let Some(label) = props.action {
-                ui.add_space(4.0);
-                let response = ui
-                    .horizontal(|ui| {
-                        ui.add_space(30.0);
-                        button::Props {
-                            label,
-                            icon: None,
-                            kind: button::Kind::Tertiary,
-                            size: Size::Small,
-                            width: button::Width::Fit,
-                            enabled: true,
-                        }
-                        .show(ui)
-                    })
-                    .inner;
-                if response.clicked() {
-                    action = Some(Action::Invoke);
-                }
-            }
-            action
-        });
-    let marker = egui::Rect::from_min_max(
-        output.response.rect.min,
-        egui::pos2(output.response.rect.min.x + 3.0, output.response.rect.max.y),
+        .inner_margin(egui::Margin {
+            left: 16,
+            right: 8,
+            top: 8,
+            bottom: 12,
+        })
+        .show(ui, |ui| render_surface_content(ui, props, content_opacity));
+    ui.painter().rect_filled(
+        severity_rail_rect(output.response.rect),
+        SEVERITY_RAIL_RADIUS,
+        accent.into_cint(),
     );
-    ui.painter().rect_filled(marker, 0.0, accent.into_cint());
     SurfaceOutput {
-        action: output.inner,
+        action: output.inner.action,
         rect: output.response.rect,
+        #[cfg(test)]
+        action_target: output.inner.action_target,
+        #[cfg(test)]
+        close_target: output.inner.close_target,
     }
 }
 
+fn render_surface_content(
+    ui: &mut Ui,
+    props: &ActionableProps<'_>,
+    content_opacity: f32,
+) -> SurfaceContentOutput {
+    let palette = crate::theme::palette(ui);
+    let accent = props.kind.color(ui);
+    #[cfg(test)]
+    let mut action_target = None;
+    #[cfg(test)]
+    let mut close_target = None;
+    ui.multiply_opacity(content_opacity);
+    ui.set_min_width(ui.available_width());
+    ui.spacing_mut().item_spacing.y = 8.0;
+    let mut action = None;
+    ui.horizontal_top(|ui| {
+        icons::Props {
+            icon: props.kind.icon(),
+            size: 18.0,
+            color: accent,
+        }
+        .show(ui);
+        ui.add_space(4.0);
+        ui.with_layout(Layout::top_down(Align::Min), |ui| {
+            ui.add(
+                egui::Label::new(
+                    crate::typography::semibold(props.title)
+                        .color(palette.content().text_primary().into_cint()),
+                )
+                .selectable(false),
+            );
+            if let Some(detail) = props.detail {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(detail)
+                            .size(12.0)
+                            .color(palette.content().text_secondary().into_cint()),
+                    )
+                    .selectable(false)
+                    .wrap(),
+                );
+            }
+        });
+        if props.closable {
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                let response = close_button(ui, palette.content().icon_primary());
+                #[cfg(test)]
+                {
+                    close_target = Some((response.id, response.rect));
+                }
+                if response.clicked() {
+                    action = Some(Action::Dismiss);
+                }
+            });
+        }
+    });
+    if let Some(label) = props.action {
+        ui.add_space(4.0);
+        let response = ui
+            .horizontal(|ui| {
+                ui.add_space(30.0);
+                button::Props {
+                    label,
+                    icon: None,
+                    kind: button::Kind::Tertiary,
+                    size: Size::Small,
+                    width: button::Width::Fit,
+                    enabled: true,
+                }
+                .show(ui)
+            })
+            .inner;
+        #[cfg(test)]
+        {
+            action_target = Some((response.id, response.rect));
+        }
+        if response.clicked() {
+            action = Some(Action::Invoke);
+        }
+    }
+    SurfaceContentOutput {
+        action,
+        #[cfg(test)]
+        action_target,
+        #[cfg(test)]
+        close_target,
+    }
+}
+
+fn severity_rail_rect(surface: Rect) -> Rect {
+    Rect::from_min_max(
+        surface.min,
+        egui::pos2(surface.min.x + SEVERITY_RAIL_WIDTH, surface.max.y),
+    )
+}
+
 fn close_button(ui: &mut Ui, color: Color) -> Response {
-    let response = ui.add_sized(
-        [24.0, 24.0],
-        egui::Button::new(
-            icons::X
-                .mask()
-                .tint(color.into_cint())
-                .fit_to_exact_size(egui::Vec2::splat(14.0)),
-        )
-        .frame(false),
-    );
+    let (id, icon_rect) = ui.allocate_space(egui::Vec2::splat(CLOSE_ICON_SIZE));
+    let target_expansion = (CLOSE_TARGET_SIZE - CLOSE_ICON_SIZE) / 2.0;
+    let response = ui.interact(icon_rect.expand(target_expansion), id, egui::Sense::click());
+    icons::X
+        .mask()
+        .tint(color.into_cint())
+        .fit_to_exact_size(egui::Vec2::splat(CLOSE_ICON_SIZE))
+        .paint_at(ui, icon_rect);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Dismiss"));
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -549,11 +621,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn toast_paint_stays_below_header_during_animation_expansion_and_resize() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        let id = Id::new("header-dead-zone");
+        let mut toasts = Toasts::default();
+        for _ in 0..4 {
+            toasts.push(Toast::new(Kind::Success, "Device inspected").persistent());
+        }
+        for height in [600.0, 100.0, 400.0] {
+            let root = Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(400.0, height));
+            let bounds = crate::shell::overlay_bounds(root);
+            for mode in [
+                StackMode::Automatic,
+                StackMode::Collapsed,
+                StackMode::Expanded,
+            ] {
+                let mut painted = false;
+                for _ in 0..3 {
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(root),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let _ = toasts.show_in(ui.ctx(), id, bounds, mode);
+                        },
+                    );
+                    let mut inside_bounds = true;
+                    for shape in &output.shapes {
+                        if !matches!(shape.shape, egui::epaint::Shape::Noop) {
+                            painted = true;
+                            inside_bounds &= shape.clip_rect.top() >= bounds.top();
+                        }
+                    }
+                    output.drop_without_applying_deltas();
+                    assert!(inside_bounds);
+                }
+                assert!(painted);
+            }
+        }
+    }
+
+    #[test]
     fn actions_make_toasts_persistent() {
         let toast = Toast::new(Kind::Information, "Device connected").action("Review");
 
         assert_eq!(toast.action.as_deref(), Some("Review"));
         assert_eq!(toast.duration, None);
+    }
+
+    #[test]
+    fn repeated_transport_prefixes_are_collapsed() {
+        assert_eq!(
+            normalize_error_detail(
+                "Application service call failed: receive error: receive error: connection closed"
+            ),
+            "Application service call failed: receive error: connection closed"
+        );
+        assert_eq!(
+            normalize_error_detail(" send error: send error: unavailable "),
+            "send error: unavailable"
+        );
     }
 
     #[test]
@@ -579,5 +708,144 @@ mod tests {
 
         assert!(toasts.entries[0].dismissing);
         assert!(!toasts.entries[1].dismissing);
+    }
+
+    #[test]
+    fn expanded_mixed_height_toasts_keep_the_configured_gap() {
+        let heights = [84.0, 50.0, 112.0];
+
+        let first_gap = expanded_y_for(&heights, 1) - heights[0];
+        let first_two_gaps = expanded_y_for(&heights, 2) - heights[0] - heights[1];
+        assert!((first_gap - STACK_GAP).abs() < f32::EPSILON);
+        assert!((first_two_gaps - STACK_GAP * 2.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn hover_focus_and_press_preserve_toast_geometry_and_stack_gap() {
+        fn render(context: &egui::Context, events: Vec<egui::Event>) -> SurfaceOutput {
+            let mut output = None;
+            context
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(TOAST_WIDTH, 200.0),
+                        )),
+                        events,
+                        ..egui::RawInput::default()
+                    },
+                    |ui| {
+                        ui.set_width(TOAST_WIDTH);
+                        output = Some(render_surface(
+                            ui,
+                            &ActionableProps {
+                                kind: Kind::Warning,
+                                title: "One FIT file needs attention",
+                                detail: Some("The source file could not be imported."),
+                                action: Some("Review"),
+                                closable: true,
+                            },
+                            1.0,
+                        ));
+                    },
+                )
+                .drop_without_applying_deltas();
+            output.expect("egui rendered one pass")
+        }
+
+        fn geometry(output: &SurfaceOutput) -> (Rect, Rect, Rect) {
+            (
+                output.rect,
+                output.action_target.expect("action target").1,
+                output.close_target.expect("close target").1,
+            )
+        }
+
+        let context = egui::Context::default();
+        crate::install(&context);
+        let rest = render(&context, Vec::new());
+        let rest_geometry = geometry(&rest);
+        let (action_id, action_rect) = rest.action_target.expect("action target");
+
+        let hovered = render(
+            &context,
+            vec![egui::Event::PointerMoved(action_rect.center())],
+        );
+        assert_eq!(geometry(&hovered), rest_geometry);
+
+        context.memory_mut(|memory| memory.request_focus(action_id));
+        let focused = render(&context, Vec::new());
+        assert_eq!(geometry(&focused), rest_geometry);
+
+        let pressed = render(
+            &context,
+            vec![
+                egui::Event::PointerMoved(action_rect.center()),
+                egui::Event::PointerButton {
+                    pos: action_rect.center(),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        assert_eq!(geometry(&pressed), rest_geometry);
+
+        let gap =
+            expanded_y_for(&[rest.rect.height(), hovered.rect.height()], 1) - rest.rect.height();
+        assert!((gap - STACK_GAP).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn severity_rail_spans_the_complete_toast_height() {
+        let surface = Rect::from_min_max(egui::pos2(12.0, 24.0), egui::pos2(332.0, 120.0));
+
+        let rail = severity_rail_rect(surface);
+
+        assert!((rail.top() - surface.top()).abs() < f32::EPSILON);
+        assert!((rail.bottom() - surface.bottom()).abs() < f32::EPSILON);
+        assert!((rail.left() - surface.left()).abs() < f32::EPSILON);
+        assert!((rail.width() - SEVERITY_RAIL_WIDTH).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn title_only_toast_measurement_matches_normal_rendering() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        let entry = Entry::new(
+            ToastId(0),
+            Toast::new(Kind::Success, "Profile settings saved").persistent(),
+        );
+        let mut heights = None;
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(TOAST_WIDTH, 200.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        context
+            .run_ui(input, |ui| {
+                ui.set_width(TOAST_WIDTH);
+                let measured = measure_surface(ui, &entry);
+                let rendered = render_surface(
+                    ui,
+                    &ActionableProps {
+                        kind: entry.toast.kind,
+                        title: &entry.toast.title,
+                        detail: entry.toast.detail.as_deref(),
+                        action: entry.toast.action.as_deref(),
+                        closable: true,
+                    },
+                    1.0,
+                )
+                .rect
+                .height();
+                heights = Some((measured, rendered));
+            })
+            .drop_without_applying_deltas();
+
+        let (measured, rendered) = heights.expect("egui rendered one pass");
+        assert!((measured - rendered).abs() < f32::EPSILON);
     }
 }

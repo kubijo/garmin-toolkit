@@ -101,11 +101,11 @@ fn owner_and_source() -> TestResult<(User, Device, Source)> {
         Role::Owner,
         Profile::from_display_name("Rider".parse()?),
     );
-    let device = Device::from_parts(DeviceId::new_v4(), "Watch".parse()?);
+    let device = Device::from_parts(DeviceId::new_v4(), "Mock Watch-o-Matic 9000".parse()?);
     let source = Source::from_parts(
         SourceId::new_v4(),
         user.id(),
-        "USB watch".parse()?,
+        "Mock watch source".parse()?,
         Some(device.id()),
     );
     Ok((user, device, source))

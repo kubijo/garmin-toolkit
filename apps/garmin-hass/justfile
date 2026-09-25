@@ -2,15 +2,33 @@ import '../../infra/just/common.just'
 
 # Run the selected deployment mode against a caller-owned base directory.
 [no-exit-message]
-run mode data_base:
+run mode data_base *options:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    case {{ quote(mode) }} in
+    case "$1" in
         production) package=garmin-hass ;;
         demo) package=garmin-hass-demo ;;
         *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
     esac
 
-    package_path="$(nix build --quiet --no-warn-dirty --no-link --print-out-paths "{{ flake }}#${package}")"
-    exec env GARMIN_TOOLKIT_HASS_DATA_BASE={{ quote(data_base) }} "$package_path/bin/garmin-hass"
+    package_path="$(
+        {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 \
+            nix build --quiet --no-warn-dirty --no-link --print-out-paths \
+            "{{ flake }}#${package}"
+    )"
+    data_base="$2"
+    shift 2
+    exec env GARMIN_TOOLKIT_HASS_DATA_BASE="$data_base" "$package_path/bin/garmin-hass" "$@"
+
+# Summarize a raw Chrome performance trace for this HASS page.
+profile-analyze trace *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/browser_trace_analysis.py "$@"
+
+# Inspect or exercise the control API of an already-running demo.
+control *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/hass_control.py "$@"
+
+# Read application logs or events with the shared Rust CLI.
+diagnostics *options:
+    @just in-shell nix run {{ flake }}#garmin-cli -- diagnostics "$@"

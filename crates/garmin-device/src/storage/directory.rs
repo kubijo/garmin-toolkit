@@ -16,12 +16,28 @@ use garmin_progress::OperationStage;
 /// Filesystem transport using the same object transaction as MTP.
 pub struct DirectoryDevice {
     root: PathBuf,
+    storage_id: String,
+    storage_label: String,
 }
 
 impl DirectoryDevice {
     #[must_use]
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self::with_storage(root, "primary", "Device storage")
+    }
+
+    /// Opens a directory-backed device with an explicit storage identity.
+    #[must_use]
+    pub fn with_storage(
+        root: PathBuf,
+        storage_id: impl Into<String>,
+        storage_label: impl Into<String>,
+    ) -> Self {
+        Self {
+            root,
+            storage_id: storage_id.into(),
+            storage_label: storage_label.into(),
+        }
     }
 
     async fn resolve(
@@ -30,7 +46,7 @@ impl DirectoryDevice {
         path: &SafeRelativePath,
         create_parents: bool,
     ) -> Result<PathBuf, DeviceIoError> {
-        if storage != "primary" {
+        if storage != self.storage_id {
             return Err(DeviceIoError::Storage(storage.to_owned()));
         }
         let mut current = self.root.clone();
@@ -134,6 +150,8 @@ impl DeviceRead for DirectoryDevice {
     }
     async fn state(&self) -> Result<crate::DeviceStateSnapshot, DeviceIoError> {
         let root = self.root.clone();
+        let storage_id = self.storage_id.clone();
+        let storage_label = self.storage_label.clone();
         tokio::task::spawn_blocking(move || {
             let metadata = std::fs::symlink_metadata(&root)?;
             if !metadata.is_dir() {
@@ -141,8 +159,8 @@ impl DeviceRead for DirectoryDevice {
             }
             Ok(crate::DeviceStateSnapshot {
                 storages: vec![crate::DeviceStorageState {
-                    id: "primary".to_owned(),
-                    label: "Device storage".to_owned(),
+                    id: storage_id,
+                    label: storage_label,
                     capacity: crate::filesystem_capacity(&root),
                     writable: metadata.permissions().readonly().then_some(false),
                 }],
@@ -157,10 +175,10 @@ impl DeviceRead for DirectoryDevice {
     ) -> Result<DeviceInventory, DeviceIoError> {
         let mut items = Vec::new();
         for path in paths {
-            let status = self.inspect("primary", path).await?;
+            let status = self.inspect(&self.storage_id, path).await?;
             items.push(DevicePathInspection {
-                storage_id: "primary".to_owned(),
-                storage_label: "Device storage".to_owned(),
+                storage_id: self.storage_id.clone(),
+                storage_label: self.storage_label.clone(),
                 path: path.clone(),
                 state: status.state(),
                 size: status.size(),
@@ -172,7 +190,7 @@ impl DeviceRead for DirectoryDevice {
         })
     }
     async fn primary_storage_id(&self) -> Result<String, DeviceIoError> {
-        Ok("primary".to_owned())
+        Ok(self.storage_id.clone())
     }
     async fn inspect(
         &self,
@@ -303,7 +321,7 @@ impl DeviceWrite for DirectoryDevice {
         storage: &str,
         path: &SafeRelativePath,
     ) -> Result<(), DeviceIoError> {
-        if storage != "primary" {
+        if storage != self.storage_id {
             return Err(DeviceIoError::Storage(storage.to_owned()));
         }
         let mut current = self.root.clone();

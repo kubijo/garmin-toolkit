@@ -1,4 +1,5 @@
 mod diagnostic;
+mod diagnostics;
 mod pending_recovery;
 mod pipeline;
 
@@ -105,6 +106,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Read logs and events from a running local desktop or HASS demo.
+    Diagnostics(diagnostics::Args),
     /// Discover and inspect devices.
     Device {
         #[command(subcommand)]
@@ -384,6 +387,15 @@ struct OptionalTargetArgs {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    struct FlushLogs;
+    impl Drop for FlushLogs {
+        fn drop(&mut self) {
+            if let Some(logs) = garmin_logging::Store::global() {
+                logs.flush();
+            }
+        }
+    }
+    let _flush_logs = FlushLogs;
     let cli = Cli::parse();
     OUTPUT_COLOR.get_or_init(|| cli.color);
     if let Err(error) = diagnostic::install(error_color_enabled()) {
@@ -600,6 +612,7 @@ async fn run_cli(cli: Cli, capture: Option<SessionCapture>) -> Result<()> {
         );
     }
     match cli.command {
+        Some(Command::Diagnostics(args)) => args.run(cli.json).await,
         None => match (cli.mock_device, cli.mock_server.as_ref()) {
             (Some(path), Some(mock_server)) => {
                 interactive_mock_demo(path, mock_server, None, capture).await
@@ -642,29 +655,35 @@ async fn run_cli(cli: Cli, capture: Option<SessionCapture>) -> Result<()> {
 }
 
 fn initialize_tracing(capture: Option<&SessionCapture>, terminal_ui: bool) -> Result<()> {
-    if let Some(capture) = capture {
-        let log = capture.create_log()?;
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::new("trace"))
-            .with_ansi(false)
-            .with_writer(log)
-            .try_init()
-            .map_err(|error| anyhow::anyhow!("cannot initialize logging: {error}"))?;
-    } else if terminal_ui {
-        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into());
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_writer(std::io::sink)
-            .try_init()
-            .map_err(|error| anyhow::anyhow!("cannot initialize logging: {error}"))?;
+    use tracing_subscriber::prelude::*;
+    let directory = dirs::state_dir()
+        .or_else(dirs::data_local_dir)
+        .context("application log directory unavailable")?
+        .join("garmin-toolkit/cli/logs");
+    let logs = garmin_logging::Store::open(directory, "cli")?;
+    logs.install_global();
+    let filter = if capture.is_some() {
+        EnvFilter::new("trace")
     } else {
-        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into());
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_writer(std::io::stderr)
-            .try_init()
-            .map_err(|error| anyhow::anyhow!("cannot initialize logging: {error}"))?;
-    }
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into())
+    };
+    let writer: Box<dyn std::io::Write + Send + Sync> = if let Some(capture) = capture {
+        Box::new(capture.create_log()?)
+    } else if terminal_ui {
+        Box::new(std::io::sink())
+    } else {
+        Box::new(std::io::stderr())
+    };
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(logs)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(std::sync::Mutex::new(writer)),
+        )
+        .try_init()
+        .map_err(|error| anyhow::anyhow!("cannot initialize logging: {error}"))?;
     Ok(())
 }
 
@@ -4396,7 +4415,8 @@ mod tests {
         };
         let error = anyhow::Error::msg("outer error");
 
-        let presentation = mounted_install_failure_presentation(&mounted, &error, ".tmp/fenix-t03");
+        let presentation =
+            mounted_install_failure_presentation(&mounted, &error, ".tmp/mock-watch-t03");
         let body = format!("{:?}", presentation.body);
 
         assert_eq!(presentation.title, "Update incomplete — device changed");
@@ -4455,7 +4475,8 @@ mod tests {
         let mounted = garmin_update::MountedInstallError::JournalVersion(3);
         let error = anyhow::Error::msg("mounted update journal version 3 is unsupported");
 
-        let presentation = mounted_install_failure_presentation(&mounted, &error, ".tmp/fenix-t03");
+        let presentation =
+            mounted_install_failure_presentation(&mounted, &error, ".tmp/mock-watch-t03");
         let body = format!("{:?}", presentation.body);
 
         assert_eq!(presentation.title, "Recovery evidence rejected");
@@ -4594,9 +4615,9 @@ mod tests {
             indoc::indoc! {r#"
                 <Device xmlns="http://www.garmin.com/xmlschemas/GarminDevice/v2">
                   <Model>
-                    <PartNumber>006-TEST-02</PartNumber>
+                    <PartNumber>006-FAKE-02</PartNumber>
                     <SoftwareVersion>9902</SoftwareVersion>
-                    <Description>Example Cycling Computer</Description>
+                    <Description>Mock Cycle-o-Matic 9000</Description>
                   </Model>
                   <Id>42</Id>
                   <MassStorageMode />
@@ -4609,7 +4630,7 @@ mod tests {
 
         assert_eq!(
             device_identification(&manifest),
-            "Example Cycling Computer (006-TEST-02) — desktop-mounted MTP at synthetic-mount"
+            "Mock Cycle-o-Matic 9000 (006-FAKE-02) — desktop-mounted MTP at synthetic-mount"
         );
     }
 
