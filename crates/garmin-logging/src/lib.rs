@@ -20,6 +20,7 @@ use tracing_subscriber::{Layer, layer::Context};
 
 mod directory;
 mod history;
+mod query;
 
 #[cfg(test)]
 mod tests;

@@ -1,42 +1,31 @@
 # Developer tools and application logs
 
-Desktop and HASS expose Developer tools through the icon beside Profiles, including the profile chooser. Desktop uses a
-native secondary viewport; HASS opens a separate browser window with its own Rust/egui canvas. Clicking the icon again
-focuses the same window; closing it and clicking again opens a replacement. If the browser blocks the popup, the app
-offers Retry and Open in a tab. Logs and debug information are available without enabling automation.
-
-The [shared window host](application-windows.md) owns popup routing, session isolation, liveness, and retry/tab
-fallback. Scenario buttons control the originating app. When automation is enabled, tools also has an independent driver
-for commands targeting its own controls. It has no map renderer. After an app reload, the old tools window retains its
-last report but disables commands; reopen tools to attach to the new session.
-
-The tools page connects directly to the existing backend log RPC, with its own filters, export, and reconnection.
-Closing tools leaves the app and any running scenario alone. The floating app status overlay retains Stop and Escape
-cancellation; Stop and Escape in the tools window send commands to the originating app. Pointer highlights clear when
-runs complete. The status and developer Stop controls have distinct semantic IDs, `automation.stop` and
-`developer.automation.stop`.
-
-Panel sections span the available window width and share one vertical scroll area. Filters use the application's
-labelled inputs and selector, with columns on wide windows and stacked fields on narrow ones. Log details expand inline
-with wrapped messages and fields; copying a record retains the complete JSON. Section headers and the tools icon show
-hover and keyboard-focus feedback. Maintained previews are in `infra/gallery/developer-tools.capture.toml` and
-`infra/gallery/developer-header.capture.toml`. The gallery's `capture-developer-details` recipe exercises expansion and
-scrolling and writes narrow/wide, dark/light captures under `.tmp/gallery/developer-interaction`.
-`capture-developer-controls` captures the expanded browser hooks and resize/sequence instructions in both themes. The
-`developer_panel` tests also guard compact action-row geometry on resize, narrow-window bounds, section toggling, and
-pointer cursors.
+Developer tools opens beside the app through the [shared window host](application-windows.md). Reopening focuses the
+existing window. Logs and debug information work without automation. Closing tools leaves scenarios running; Stop or
+Escape cancels them. After a parent reload, reopen tools to attach to the new session.
 
 ## Automation and control
 
-Demo hosts accept `--ui-automation` and `--control-server`. On desktop, `--control-server` enables automation and binds
-an HTTP listener to `127.0.0.1:0`. The operating system selects the port; its actual URL is printed to stdout and shown
-in Developer tools. The panel also provides explicit Start, Stop, and Copy URL controls. Production rejects automation
-and control-server startup flags before opening storage. The listener is stopped on application exit.
+Demo builds accept `--control-server`, which also enables automation. Desktop binds a random loopback port and prints
+its URL; HASS uses its existing listener. Without the flag, desktop does not listen and HASS returns 404 for control and
+diagnostic routes. `--ui-automation` alone enables automation without HTTP access. Production rejects both flags.
 
-Desktop serves `GET /api/capabilities`, `GET /api/debug`, and `POST /api/control`. The command request is JSON with an
-`operation` and `argument`; responses contain either `value` or `error`. HTTP requests enter a bounded queue and the UI
-thread dispatches them to the same driver as browser commands. Browser-origin requests are not accepted by the native
-listener. Ordinary application launches do not bind a control port.
+Access requires a loopback socket peer and localhost/loopback Host. Forwarded requests and browser-origin commands are
+rejected; diagnostic reads allow same-origin browsers. No token is required. HASS ingress cannot access control.
+
+```sh
+just hass::run demo "$PWD/.tmp/hass-ui-automation" --control-server
+just hass::control command status
+just hass::control check
+```
+
+The checker writes to `.tmp/hass-control-runtime`. Pass `--url URL` to target another running localhost listener.
+
+| Endpoint                | Contract                                                             |
+| ----------------------- | -------------------------------------------------------------------- |
+| `GET /api/capabilities` | Supported operations                                                 |
+| `GET /api/debug`        | Desktop debug information                                            |
+| `POST /api/control`     | JSON command; JSON `value` or `error`, except PNG screenshot success |
 
 ```json
 {
@@ -45,195 +34,144 @@ listener. Ordinary application launches do not bind a control port.
 }
 ```
 
-HASS `--control-server` enables automation and registers control routes on the existing HTTP listener. Without that
-flag, control and capabilities return HTTP 404. `--ui-automation` alone enables browser hooks without HTTP control.
-Production builds reject either flag. No token is required. Browser-origin HTTP requests are rejected. Control HTTP and
-browser registration accept only actual loopback socket peers and localhost or loopback-IP Host headers. Forwarded
-requests are rejected; control is not available through HASS ingress. Other application routes retain their configured
-bind address.
+Start/action/sequence acknowledge admission with `value: null`; poll `status` or `result` for completion. HASS selects
+the sole connected root tab: none returns 404, multiple tabs return 409. Child windows do not affect selection.
+Disconnect revokes the root's reverse Remoc client; admitted commands never replay or move to another connection.
 
-`GET /api/capabilities` describes the supported operations. `POST /api/control` uses the desktop command fields. The
-server automatically selects the single connected root app tab. No connected tab returns 404; multiple connected tabs
-return 409 and require closing the extra tabs. Child popups do not affect selection. Session discovery and
-caller-supplied session IDs are removed.
-
-```json
-{
-  "operation": "start",
-  "argument": "responsive-layout"
-}
-```
-
-Start/action/sequence acknowledge admission with `value: null`; poll `status` or `result` for completion. HASS allocates
-and returns an increasing `request_id`. Clients may supply a positive explicit ID for replay checks; it must exceed the
-last admitted ID across all connections. The backend permits one outstanding command per connection, at most 16
-connections, a 16 KiB request, and a 1 MiB JSON reply. Busy requests receive 429; reused or older IDs receive 409. A
-five-second RPC deadline reports an unknown outcome on timeout or transport failure; commands are never retried or
-redirected after admission. Browser dispatch also checks a deadline mapped to its monotonic clock.
-
-The root browser registers a reverse typed Remoc client on its existing application connection. Each reconnect gets a
-new connection ID; its page ID survives reconnect but changes on reload. Dropping the connection unregisters the session
-and revokes its browser handler. Commands enter the existing browser hooks, preserving metadata, watchdog, visibility
-pauses, and reports. Child popups do not register automation sessions. The endpoint is printed at startup; Developer
-tools debug information shows the local endpoint. Connection and page IDs remain internal lifecycle bookkeeping.
-
-For a local demo:
-
-```sh
-just hass::run demo "$PWD/.tmp/hass-ui-automation" --control-server
-```
-
-Open the app in a browser, then query the printed localhost endpoint. Browser MCP and `window.garminAutomation` remain
-available. Log access through HTTP remains in the
-[shared interface plan](../plans/shared-interface-workflows.md#hass-control-protocol-extension).
-
-`just hass::control check` runs the four scenarios, individual action and sequence checks, cancellation after resizing,
-and HTTP admission checks. Reports go to `.tmp/hass-control-runtime`; the checker never starts a server. Use
-`just hass::control command status` for a single request, or `--url URL` for another localhost application address.
-
-`screenshot` takes no argument and captures the root application on desktop and HASS. Its HTTP success response is
-`image/png`, with `Cache-Control: no-store` and JSON metadata in `x-garmin-capture`: physical width/height,
-`pixels_per_point`, and `requested_frame`/`received_frame`. These identify UI request and receipt, not compositor
-presentation. HASS also returns `x-garmin-request-id`. Errors use the usual JSON response. Capture is limited to 8 Mi
-pixels and 8 MiB of PNG data, with one pending capture and the five-second command deadline. No server-side artifact is
-retained. Both ends of the HASS transport buffer up to the PNG limit plus 64 KiB of RPC/codec overhead; Remoc's default
-512 KiB threshold would switch large replies to streaming that requires OS threads unavailable in browser WASM. On HASS,
-save the image and metadata with:
-
-```sh
-just hass::control screenshot --output .tmp/capture.png
-```
-
-Native capture includes renderer callbacks. HASS composites the worker map underneath the UI using physical placement
-and clipping. A hidden tab, pending map view, resize, or changed map during capture fails explicitly; request a new
-capture after the application settles. Each image covers one canvas, excluding browser chrome, OS decorations, and
-system dialogs. Screenshot capture is an HTTP operation; the existing synchronous `window.garminAutomation` hooks remain
-unchanged.
+HASS allows 16 connections, one pending command per connection, 16 KiB requests, and 1 MiB JSON replies. It returns an
+increasing `request_id`; caller-supplied IDs must exceed the last admitted ID. Busy requests return 429; reused IDs
+return 409. The five-second deadline reports an unknown outcome when completion cannot be confirmed.
 
 ### Child windows
 
-`windows` lists the root and owned child windows with `id`, `kind`, `title`, `ready`, `focused`, and `screenshots`. Pass
-an entry's `id` in the optional `window` command field to address that window. Omitting it, or using `root`, selects the
-main app. Handles expire on close, owner logout, or browser popup reload; discover them again after reopening. Unknown
-handles fail instead of falling back to the main app.
+`windows` returns `id`, `kind`, `title`, `ready`, `focused`, and `screenshots`. Put an ID in the command's `window`
+field; omission or `root` selects the app. Handles expire on close, owner logout, or popup reload. Stale handles fail
+instead of selecting another window.
 
-`window.focus` and `window.close` require an explicit child handle and no argument. Focus requests remain subject to
-browser and compositor policy. `targets`, `action`, `sequence`, `status`, `result`, and `cancel` use the selected
-window's own semantic tree and driver. Child actions cannot advance the root workload. Built-in scenarios run only in
-the root; use custom sequences for children. Resizing a browser child sizes its canvas, while desktop resizes the native
-window. Developer section headers expose `developer.section.automation`, `.control`, `.logs`, and `.debug`, with
-`open`/`closed` values. Clicking these targets expands or collapses the section even when its body controls are absent.
-The nested time filter uses `developer.section.log-time`; log record expanders use
-`developer.section.record.<sequence>`.
+`window.focus` and `window.close` require a child handle and no argument. Focus remains subject to browser/compositor
+policy. Each window has its own targets, actions, sequences, status, results, and cancellation. Named scenarios run only
+in the root.
 
 ```sh
 just hass::control command windows
 just hass::control command targets --window HANDLE
 just hass::control command action --window HANDLE --argument '{"kind":"click","target":"files.refresh"}'
 just hass::control screenshot --window HANDLE --output .tmp/files.png
-just hass::control command window.close --window HANDLE
 ```
 
-HASS captures child canvases through their owning page, with deadline, closure, and reload checks. Native immediate
-child viewports advertise `screenshots: false` and reject capture explicitly: eframe's immediate rendering path does not
-process screenshot requests. Native root capture remains available. Opening browser popups and OS file pickers still
-obeys browser interaction restrictions; these commands do not bypass them.
+Developer section targets are `developer.section.{automation,control,logs,debug,log-time}`; record expanders use
+`developer.section.record.<sequence>`. Sections report `open`/`closed`. Root and tools Stop buttons use
+`automation.stop` and `developer.automation.stop`.
+
+### Screenshots
+
+`screenshot` takes no argument. Success returns `image/png` and `x-garmin-capture` metadata: dimensions,
+`pixels_per_point`, and requested/received UI frames. HASS also returns `x-garmin-request-id`. Limits are 8 Mi pixels, 8
+MiB PNG, one pending capture, and the command deadline.
+
+Captures include maps and overlays within one canvas, excluding browser chrome and system dialogs. Hidden tabs, pending
+map views, resize, navigation, and child closure can invalidate a capture. Retry after the view settles. HASS captures
+child canvases; native immediate viewports advertise `screenshots: false` because eframe does not process their capture
+requests. Native root capture works.
 
 ### Semantic actions
 
-The panel documents these browser hooks:
+The browser exposes `window.garminAutomation`; HTTP commands use the same driver.
 
-- `list()`, `start(name)`, `status()`, `result()`, and `cancel()` manage scenarios.
-- `targets()` lists semantic IDs, labels, roles, enabled states, values, and clipped logical bounds.
-- `action({kind, target, ...})` submits one click, drag, wheel/scroll, key, or text action. Drag `x`/`y` are normalized
-  target coordinates; wheel/scroll uses a logical-point `delta`; key uses an egui key name; text uses `text`.
-- `action({kind: 'resize', width, height})` resizes the root view in logical egui points. Desktop resizes its native
-  window; the browser Rust adapter sizes the application canvas inside the existing tab. Eframe's resize observer
-  updates the backing surface and input coordinates; the worker map follows the actual canvas rectangle.
-- `sequence(actions)` runs 1–64 actions in order, including resize, `wait`, `assert_available`, and `assert_value` (with
-  a string `value`). All syntax is checked before starting; targets are resolved as each action executes.
+| Operation                                     | Input or result                                                         |
+| --------------------------------------------- | ----------------------------------------------------------------------- |
+| `list`, `start`, `status`, `result`, `cancel` | Discover, run, inspect, and stop scenarios                              |
+| `targets`                                     | Semantic IDs, labels, roles, enabled states, values, and clipped bounds |
+| `action`                                      | `kind` and `target`; click, drag, scroll, key, text, or resize          |
+| `sequence`                                    | 1–64 actions; also supports wait, assert_available, and assert_value    |
 
-`responsive-layout` selects the first demo activity, sets playback to 2×, and verifies selection, drawer access,
-playback, and profile/map controls at 720 × 640 and 1100 × 720. Hidden activity rows become available through
-`activity.list.toggle`; it and `activity.details.toggle` expose `open`/`closed` values. Built-in scenarios first log out
-if needed, closing user-bound windows. Use a `sequence` without logout to check secondary-window state across resizing.
+Drag coordinates are normalized to the target; scroll deltas use logical points; keys use egui names. Text uses `text`;
+assertions use a string `value`. Resize uses `width`/`height` in logical points (1–8192), subject to native minimum
+sizes. Browser resize changes the canvas, not browser chrome.
 
-Resize completion requires the requested dimensions to appear in rendered input and settle for 50 ms. `status()` exposes
-the pending `resize_request`; host errors and a five-second size mismatch timeout fail explicitly. Dimensions are
-limited to 1–8192 logical points; native window minimum sizes still apply (currently 720 × 480). Resize steps are
-functional evidence, excluded from fixed-geometry performance comparisons. Built-in scenarios restore the starting
-viewport after success, failure, or cancellation; HASS restores the original canvas CSS sizing, including container
-fill. Reports retain the workload geometry. Explicit `action` and `sequence` commands leave the requested size in effect
-for inspection; another resize or browser reload restores the desired layout.
+Targets resolve at execution time. Pointer actions require stable bounds across two frames within two seconds. Key/text
+actions establish focus first. Missing, ambiguous, disabled, or clipped targets fail; each window permits one workload
+at a time.
 
-With the first demo activity open, [responsive-layout.json](../../infra/automation/responsive-layout.json) checks that
-its selection survives narrow/wide layouts and that the profile, map-fit, and playback controls remain available. Post
-that JSON to desktop `/api/control`, or pass its `argument` array to `window.garminAutomation.sequence(...)`.
+Named scenarios log out when needed and restore their initial viewport on success, failure, or cancellation. Explicit
+actions/sequences leave their final size in place. Resize waits for the rendered size to settle for 50 ms, with a
+five-second timeout. `status` exposes `resize_request`.
 
-An individual action uses the same input driver and reports completion asynchronously. Key/text actions first click the
-target to establish focus. Before a click, drag, or scroll starts, target bounds must match across two rendered frames.
-Layout must settle within the action's two-second deadline; this readiness wait shifts later actions' schedules. Active
-gestures retain their existing input sequence. No command directly changes application or camera state. Missing,
-ambiguous, disabled, or clipped targets fail explicitly, and overlapping workloads in the same window are rejected. The
-driver pairs input/output hooks using the incoming viewport ID because those hooks run outside egui's viewport pass.
-Secondary windows cannot advance the root workload, change its recorded geometry, or replace its semantic target tree.
+`responsive-layout` tests selection, drawers, playback, and controls at narrow/wide sizes. Use
+[responsive-layout.json](../../infra/automation/responsive-layout.json) after selecting the first activity to test
+resizing without logout or closing user-bound windows.
 
-Root-window resize and pixel-scale changes continue functional runs. The driver records each change, waits for fresh
-layout, and resolves targets again. An active click or drag is released outside controls and retried; already applied
-drag movement is not rolled back, and the interrupted attempt is retained in the report. Stationary observations restart
-after map readiness returns. Runs with geometry changes are ineligible for performance comparisons.
+Focus loss does not cancel. Hidden tabs pause active-time deadlines and release synthetic input. Geometry changes
+release and retry interrupted gestures after layout settles; prior drag movement is not rolled back. Reports retain
+pauses, interrupted attempts, and geometry changes. These runs are functional evidence, not uninterrupted performance
+measurements.
 
-Focus loss does not cancel automation. Hidden browser tabs pause it and safely release synthetic input before resuming
-the interrupted action. Applied drag movement is not rolled back. Active-time deadlines exclude the hidden interval.
-Reports distinguish completed actions, interrupted attempts, and pauses; paused runs are functional evidence only and
-cannot establish uninterrupted performance acceptance. Stop, Escape, application shutdown, and actual failures still
-terminate runs.
+## Read-only diagnostics
 
-Runtime acceptance is tracked in the [shared interface plan](../plans/shared-interface-workflows.md#runtime-acceptance).
+These routes share the control server's enablement and access rules, with a separate allowance of 32 streams.
+
+| Route                                   | Response                                                       |
+| --------------------------------------- | -------------------------------------------------------------- |
+| `/api/logs-get`, `/api/logs-stream`     | Recent application logs; stream continues with new records     |
+| `/api/events-get`, `/api/events-stream` | Current state and recent events; stream continues with changes |
+
+Events cover connections, windows, automation, and renderers across all connected browsers. Reads work without an app
+tab. History retains at most 2,048 records/8 MiB; intermediate progress may be coalesced. Closing a window removes its
+current state. Subscription failure clears stale telemetry and marks collection unavailable; the app stays connected.
+Source overflow reports incomplete state.
+
+| Filters                                            | Applies to     |
+| -------------------------------------------------- | -------------- |
+| `source`, `since_ms`, `until_ms`, `after`, `limit` | Both resources |
+| `minimum`, `component`, `text`                     | Logs           |
+| `kind`, `window`                                   | Events         |
+
+Limits default to 100 records, maximum 256. Event kind/window matches are exact; log matching uses the existing filter.
+Time bounds are inclusive Unix milliseconds and affect history only. Invalid, unknown, or duplicate filters return 400.
+
+Without `after`, reads return the newest matches in chronological order. Replies contain `cursor`, `more`, and `gap`;
+events add `state` and `snapshot_revision`. State stays current while history pages forward. Cursors advance over
+nonmatches. Restart, retention loss, and source-history loss signal gaps even in filtered views. SSE reconnect prefers
+`Last-Event-ID` over the URL cursor.
+
+Open these routes directly in a browser for HTML, or use curl for readable text. Override with `format=text`, `ansi`,
+`html`, `json` (get), or `sse` (stream). Rust/Askama formats the content; Axum constructs SSE. Streams suppress
+unchanged content and advance past nonmatching records; SSE sends keepalives. HASS stops diagnostic streams before
+waiting for HTTP connections to drain on shutdown.
+
+```sh
+just hass::diagnostics logs --minimum warn --follow
+just cli::run diagnostics --url http://127.0.0.1:35435 events --json
+```
+
+CLI `--json` selects JSON snapshots or SSE with `--follow`. `--after` resumes a cursor, `--output PATH` saves the
+response, and Ctrl-C stops following. Terminal output requests ANSI colors according to `--color`, `NO_COLOR`, and
+`FORCE_COLOR`; files and pipes default to plain text.
 
 ## Logs
 
-`garmin-logging` owns native collection and persistence. Desktop, CLI, and the HASS backend install it as a tracing
-layer; native event producers use a bounded writer queue. HASS browser and worker diagnostics are forwarded in bounded
-batches through the same typed log service while remaining available in the browser console. Browser ingestion and
-subscription errors are not recursively forwarded as log events.
+`garmin-logging` owns collection and persistence. `LogService` exposes history, subscription, ingestion, and export to
+desktop and HASS, including browser/worker records. Backend paths stay private; transport failures are not logged
+through the failing transport.
 
-The browser's Rust/WASM adapter owns record construction, session identities, source sequencing, a 512-record delivery
-buffer, and batches of up to 128 records. Records remain queued until the backend acknowledges ingestion; retries retain
-their original identities. The browser checks the complete serialized record against the shared 16 KiB limit, reserving
-space for the backend source prefix and sequence. Oversized or invalid records are dropped with a counted warning; valid
-following records continue immediately. Ingestion acknowledges valid records and reports permanent rejections
-separately; these records are removed from the queue, while transport/storage-admission errors retain the batch for
-retry. Worker records keep their identities when relayed through the parent. Buffer overflow emits a dropped-record
-warning. JavaScript only captures browser errors, connects Rust callbacks, relays worker messages, and downloads
-exports. Before WASM installs its callback, the adapter retains at most 16 bootstrap events in the page; workers forward
-bootstrap errors to their parent immediately. These events receive their record identities in Rust.
+Browser ingestion retains record identities across retries. Permanent rejections are counted and discarded;
+unacknowledged records remain queued. Deduplication lasts only while the original record remains in retained history.
+Overflow and resume gaps are reported.
 
-Canonical records and filters live in `garmin-model`; `garmin-service-api::logging::LogService` provides history,
-subscription, ingestion, and export. Desktop obtains a local Remoc client; HASS obtains a remotely transferable client
-through `ApplicationService::logs`. The UI never manages backend storage paths or file formats.
+| Bound                   | Limit                              |
+| ----------------------- | ---------------------------------- |
+| Record                  | 16 KiB, including backend metadata |
+| Browser queue / batch   | 512 / 128 records                  |
+| Backend query history   | 16,384 records and 32 MiB          |
+| Developer panel history | 2,048 records                      |
+| Persistent segments     | Four at 8 MiB each                 |
 
-Filters cover severity, component, source, session, time bounds, and text. Sequence cursors advance even over filtered
-records. Resume cursors carry both a sequence and a random store epoch, regenerated whenever a store is opened. An old
-epoch reports a history reset and replays retained history; the UI clears its previous log list before accepting the new
-sequence space. This also handles sequence reuse after memory-only collection and restart. Browser source sequence
-numbers deduplicate retries within retained history. Source identities expire when their last retained record leaves
-history; a retry outside that horizon can be accepted as a new record. Expired cursors and slow-consumer gaps are
-visible. Live UI history is bounded to 2,048 records. Backend files rotate at 8 MiB with four retained segments. The
-query/export history also has independent limits of 16,384 records and 32 MiB of encoded records, including during
-recovery and disk failures. Source bookkeeping is bounded by that history rather than a permanent admission quota.
+Store epochs distinguish restarts from sequence continuation. Write/rotation failure stops persistence until reopening,
+while bounded live collection continues with an error. Concurrent writers use locked `writer-N` directories with
+independent histories; dropping a store drains its writer before releasing ownership.
 
-A write or rotation failure stops persistence until the store is reopened: continuing through a partially written or
-rotated file handle could corrupt retained history. Bounded live collection continues and exposes the storage error
-alongside the stream. Memory eviction still produces retention gaps.
+Desktop saves filtered JSONL exports; HASS downloads them. Exports fix their start/end cursor and fail on gaps or
+storage errors rather than returning partial data. Export errors remain visible until another attempt.
 
-Each active store holds an OS file lock before recovering or modifying its directory. Overlapping processes use the
-first free `writer-N` subdirectory, with separate histories and sequence spaces; the service's directory handle points
-to its actual slot. Slots are reused after their owner exits, recovering that slot's retained history. Histories are not
-merged across simultaneous processes. Dropping the last store handle drains its writer before releasing ownership.
-
-Desktop can open the backend log folder or save a filtered JSONL export; HASS downloads an export without receiving host
-paths. Exports anchor their starting cursor and ending sequence before streaming. A retention gap or storage error fails
-the export rather than offering partial JSONL; its error stays visible independently of live-stream status until another
-export is attempted. Existing CLI capture logs and terminal output remain available. The developer panel shows
-connection status, retention gaps, structured record details, and copy controls.
+Outstanding runtime checks live in the
+[shared interface plan](../plans/shared-interface-workflows.md#runtime-acceptance).

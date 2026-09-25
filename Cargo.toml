@@ -11,6 +11,7 @@ members = [
   "crates/garmin-capture",
   "crates/garmin-color",
   "crates/garmin-device",
+  "crates/garmin-diagnostics",
   "crates/garmin-fit",
   "crates/garmin-fixtures",
   "crates/garmin-gpx",
@@ -41,6 +42,7 @@ publish = false
 
 [workspace.dependencies]
 anyhow = "=1.0.104"
+askama = { version = "=0.16.1", default-features = false, features = ["derive", "std"] }
 arc-swap = "=1.9.2"
 async-trait = "=0.1.92"
 axum = "=0.8.9"
@@ -74,6 +76,7 @@ garmin-capture = { version = "0.1.0", path = "crates/garmin-capture" }
 garmin-cli-tui = { version = "0.1.0", path = "apps/garmin-cli/tui" }
 garmin-color = { version = "0.1.0", path = "crates/garmin-color" }
 garmin-device = { version = "0.1.0", path = "crates/garmin-device" }
+garmin-diagnostics = { version = "0.1.0", path = "crates/garmin-diagnostics" }
 garmin-fit = { version = "0.1.0", path = "crates/garmin-fit" }
 garmin-fixtures = { version = "0.1.0", path = "crates/garmin-fixtures" }
 garmin-gpx = { version = "0.1.0", path = "crates/garmin-gpx" }
@@ -144,6 +147,7 @@ tokio-wasm-io = { package = "tokio", version = "=1.53.1", default-features = fal
 tokio-tungstenite = "=0.29.0"
 toml_edit = "=0.25.13"
 tower-http = "=0.6.11"
+tower = { version = "=0.5.3", features = ["util"] }
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-logfmt = { version = "=0.3.7", features = ["ansi_logs"] }
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt"] }

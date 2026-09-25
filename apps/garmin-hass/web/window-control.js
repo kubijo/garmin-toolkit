@@ -19,9 +19,12 @@ export function registerWindow(key, specJson, child, browser = window) {
         api: undefined,
         id: key + ':' + ++state.next,
     });
+    windowObservation(state.entries.get(key), browser);
 }
 
 export function unregisterWindow(key, browser = window) {
+    const entry = registry(browser).entries.get(key);
+    if (entry) windowObservation(entry, browser, true);
     registry(browser).entries.delete(key);
 }
 
@@ -30,15 +33,18 @@ function refresh(browser) {
     for (const [key, entry] of state.entries) {
         try {
             if (entry.child.closed) {
-                state.entries.delete(key);
+                unregisterWindow(key, browser);
                 continue;
             }
             const api = entry.child.garminWindowControl;
-            if (entry.api && entry.api !== api) entry.id = key + ':' + ++state.next;
+            if (entry.api && entry.api !== api) {
+                windowObservation(entry, browser, true);
+                entry.id = key + ':' + ++state.next;
+            }
             entry.api = api;
         } catch {
             // Navigation away from this origin revokes access permanently.
-            state.entries.delete(key);
+            unregisterWindow(key, browser);
         }
     }
     return state;
@@ -92,8 +98,64 @@ export function routeWindowCommand(request, browser, invoke) {
     return invoke(entry.api.automation);
 }
 
+export function installWindowDiagnostics(observe, browser = window) {
+    registry(browser).observe = observe;
+}
+
 export function installWindowControl(capture, browser = window) {
-    browser.garminWindowControl = Object.freeze({ automation: browser.garminAutomation, capture });
+    const observe = json => registry(browser).observe?.(json);
+    browser.garminWindowControl = Object.freeze({
+        automation: browser.garminAutomation,
+        capture,
+        observe,
+        observeChild(child, json) {
+            const entry = [...refresh(browser).entries.values()].find(entry => entry.child === child);
+            if (!entry) return;
+            const observation = JSON.parse(json);
+            observation.window = entry.id;
+            observe(JSON.stringify(observation));
+        },
+    });
+}
+
+export function publishObservation(json, browser = window) {
+    if (browser.opener?.garminWindowControl?.observeChild)
+        browser.opener.garminWindowControl.observeChild(browser, json);
+    else browser.garminWindowControl?.observe?.(json);
+}
+
+function windowObservation(entry, browser, removed = false) {
+    browser.garminWindowControl?.observe?.(
+        JSON.stringify({
+            kind: 'window',
+            window: entry.id,
+            removed,
+            fields: {
+                kind: entry.spec.kind,
+                title: entry.spec.title,
+                ready: String(!!entry.api),
+                focused: String(!removed && entry.child.document.hasFocus()),
+            },
+        }),
+    );
+}
+
+export function refreshDiagnostics(browser = window) {
+    const entries = refresh(browser).entries.values();
+    for (const entry of entries) windowObservation(entry, browser);
+    publishObservation(
+        JSON.stringify({
+            kind: 'window',
+            window: 'root',
+            removed: false,
+            fields: {
+                kind: 'application',
+                title: browser.document.title,
+                focused: String(browser.document.hasFocus()),
+            },
+        }),
+        browser,
+    );
 }
 
 export async function captureWindow(id, milliseconds, browser = window) {

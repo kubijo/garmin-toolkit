@@ -914,6 +914,9 @@ impl egui::plugin::Plugin for Driver {
         }
         self.release_input(input);
         self.restore_viewport(ctx);
+        if self.viewport == egui::ViewportId::ROOT {
+            crate::diagnostics::automation(ctx, "root", self.report());
+        }
         if was_running && let Some(run) = &mut self.run {
             run.report.driver_milliseconds += started.elapsed().as_secs_f64() * 1000.0;
         }

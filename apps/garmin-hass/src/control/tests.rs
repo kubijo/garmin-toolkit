@@ -4,6 +4,84 @@ use remoc::{codec, rtc, rtc::ServerShared as _};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[tokio::test]
+async fn diagnostic_reads_work_without_a_browser_and_include_all_connections() -> anyhow::Result<()>
+{
+    let broker = Broker::new();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    let router = broker.routes();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+    });
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{address}/api/events-get?format=json");
+    let before: Value = client
+        .get(&endpoint)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(before["state"].as_array().unwrap().len(), 1);
+    assert_eq!(before["state"][0]["source"], "hass");
+    let (first, _, _, first_task) = attach(&broker, "first");
+    let (second, _, _, second_task) = attach(&broker, "second");
+    let both: Value = client
+        .get(&endpoint)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(both["state"].as_array().unwrap().len(), 3);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let snapshot: Value = client.get(&endpoint).send().await?.json().await?;
+            if snapshot["state"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|event| event["fields"]["diagnostics"] == "unavailable")
+                .count()
+                == 2
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        anyhow::Ok(())
+    })
+    .await??;
+    drop(first);
+    let command = control_request(State(broker.clone()), headers(), Json(request(1))).await;
+    assert_eq!(command.status(), StatusCode::OK);
+    let remaining: Value = client
+        .get(&endpoint)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    assert_eq!(remaining["state"].as_array().unwrap().len(), 2);
+    assert!(
+        remaining["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|record| record["removed"] == true)
+    );
+    drop(second);
+    first_task.abort();
+    second_task.abort();
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
 async fn maximum_screenshot_crosses_the_real_transport_and_leaves_rpc_usable() -> anyhow::Result<()>
 {
     use remoc::ConnectExt as _;
@@ -136,6 +214,16 @@ struct Browser {
 }
 
 impl BrowserControl for Browser {
+    fn diagnostics(
+        &self,
+    ) -> impl Future<
+        Output = Result<
+            remoc::rch::mpsc::Receiver<garmin_model::diagnostics::Update>,
+            rtc::CallError,
+        >,
+    > {
+        std::future::ready(Ok(remoc::rch::mpsc::with_local_buffer(1).1))
+    }
     fn capture(
         &self,
         _expires_at_ms: u64,

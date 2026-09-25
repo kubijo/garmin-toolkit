@@ -12,7 +12,9 @@ pub fn command(context: &Context, operation: &str, argument: &Value) -> Result<V
         .plugin_opt::<Driver>()
         .ok_or("Enable --ui-automation in a demo build")?;
     let mut driver = plugin.lock();
-    driver.command(context, operation, argument)
+    let result = driver.command(context, operation, argument);
+    crate::diagnostics::automation(context, "root", driver.report());
+    result
 }
 
 impl Driver {

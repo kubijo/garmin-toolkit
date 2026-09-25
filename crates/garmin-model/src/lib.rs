@@ -1,5 +1,6 @@
 //! Source-neutral application domain.
 
+pub mod diagnostics;
 pub mod logging;
 
 macro_rules! define_id {

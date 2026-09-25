@@ -26,6 +26,7 @@ struct Registry {
 }
 
 pub(super) struct Registration {
+    context: Context,
     registry: egui::plugin::TypedPluginHandle<Registry>,
     id: String,
     live: Arc<AtomicBool>,
@@ -39,6 +40,7 @@ impl Registration {
 
 impl Drop for Registration {
     fn drop(&mut self) {
+        crate::diagnostics::publish(&self.context, window_observation(&self.id, None));
         self.live.store(false, Ordering::Release);
         self.registry.lock().entries.remove(&self.id);
     }
@@ -62,7 +64,13 @@ pub(super) fn register(context: &Context, spec: &Spec) -> Option<Registration> {
         },
     );
     drop(state);
-    Some(Registration { registry, id, live })
+    crate::diagnostics::publish(context, window_observation(&id, Some(spec)));
+    Some(Registration {
+        registry,
+        id,
+        live,
+        context: context.clone(),
+    })
 }
 
 impl egui::plugin::Plugin for Registry {
@@ -72,12 +80,19 @@ impl egui::plugin::Plugin for Registry {
 
     fn input_hook(&mut self, context: &Context, input: &mut egui::RawInput) {
         self.passes.push(input.viewport_id);
-        if let Some(entry) = self
-            .entries
-            .values_mut()
-            .find(|entry| entry.viewport == input.viewport_id && entry.live.load(Ordering::Acquire))
-        {
-            entry.driver.input_hook(context, input);
+        if let Some(entry) = self.entries.iter_mut().find(|(_, entry)| {
+            entry.viewport == input.viewport_id && entry.live.load(Ordering::Acquire)
+        }) {
+            entry.1.driver.input_hook(context, input);
+            crate::diagnostics::automation(context, entry.0, entry.1.driver.report());
+            let mut observation = window_observation(entry.0, Some(&entry.1.spec));
+            observation
+                .fields
+                .insert("focused".into(), input.focused.to_string());
+            observation
+                .fields
+                .insert("ready".into(), entry.1.driver.ready().to_string());
+            crate::diagnostics::publish(context, observation);
         }
     }
 
@@ -167,7 +182,29 @@ pub fn command(
             context.request_repaint_of(ViewportId::ROOT);
             Ok(Value::Null)
         }
-        _ => entry.driver.command(context, operation, argument),
+        _ => {
+            let result = entry.driver.command(context, operation, argument);
+            crate::diagnostics::automation(
+                context,
+                window.unwrap_or_default(),
+                entry.driver.report(),
+            );
+            result
+        }
+    }
+}
+
+fn window_observation(id: &str, spec: Option<&Spec>) -> garmin_model::diagnostics::Observation {
+    garmin_model::diagnostics::Observation {
+        kind: "window".into(),
+        window: id.into(),
+        removed: spec.is_none(),
+        fields: spec.map_or_else(BTreeMap::new, |spec| {
+            BTreeMap::from([
+                ("kind".into(), spec.kind.clone()),
+                ("title".into(), spec.title.clone()),
+            ])
+        }),
     }
 }
 

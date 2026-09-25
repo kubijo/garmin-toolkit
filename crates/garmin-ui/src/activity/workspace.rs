@@ -1954,8 +1954,8 @@ impl<'frame, 'recording> ChartFrame<'frame, 'recording> {
                 accent: color32(crate::theme::selection_accent(ui)),
                 guide: color32(palette.content().icon_secondary()),
                 surface: color32(palette.surfaces().layer(theme::Level::One)),
-                field: color32(palette.surfaces().background_hover()),
-                grid: color32(palette.borders().subtle()).gamma_multiply(0.42),
+                field: color32(palette.surfaces().background_hover()).gamma_multiply(0.5),
+                grid: color32(palette.borders().subtle()),
             },
         }
     }
@@ -2026,13 +2026,7 @@ fn show_chart(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) ->
             );
             ui.add_space(8.0);
             let plot = egui::Frame::new()
-                .fill(frame.visuals.field)
-                .inner_margin(egui::Margin {
-                    left: 0,
-                    right: 0,
-                    top: 4,
-                    bottom: 4,
-                })
+                .inner_margin(egui::Margin::symmetric(0, 4))
                 .show(ui, |ui| show_chart_plot(ui, chart, frame));
             (
                 plot.inner,
@@ -2048,6 +2042,12 @@ fn show_chart(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) ->
 
 fn show_chart_plot(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) -> Option<f64> {
     let inverted = chart.kind == ChartKind::PaceSpeed && frame.sport == ActivitySport::Running;
+    let peak = if inverted {
+        chart.stats.minimum
+    } else {
+        chart.stats.maximum
+    };
+    let background = ui.painter().add(egui::Shape::Noop);
     let plot = Plot::new(ui.id().with(("activity-chart", chart.chart_index)))
         .height(CHART_HEIGHT)
         .allow_drag(false)
@@ -2063,10 +2063,19 @@ fn show_chart_plot(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_
         .show_y(false)
         .show_axes(egui::Vec2b::new(true, false))
         .grid_color(frame.visuals.grid)
-        .grid_fade(0.75)
+        .grid_spacing(16.0..=80.0)
+        .grid_fade(0.5)
+        // Keep headroom above the data, but anchor the fill baseline to the bottom.
+        .set_margin_fraction(Vec2::ZERO)
         .include_y(chart.baseline)
+        .include_y(peak + (peak - chart.baseline) * 0.05)
         .invert_y(inverted)
-        .x_axis_formatter(|mark, _bounds| format_domain_tick(mark.value, frame.axis, frame.units))
+        // Reserve the axis row, then paint bounded labels without insetting the data.
+        .custom_x_axes(vec![
+            egui_plot::AxisHints::new_x()
+                .min_thickness(ui.text_style_height(&egui::TextStyle::Body))
+                .formatter(|_, _| String::new()),
+        ])
         .link_axis(frame.linked, egui::Vec2b::new(true, false))
         .show(ui, |plot_ui| {
             plot_ui.set_plot_bounds_x(frame.x_bounds.clone());
@@ -2077,11 +2086,46 @@ fn show_chart_plot(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_
                 .then(|| plot_ui.pointer_coordinate().map(|point| point.x))
                 .flatten()
         });
+    ui.painter().set(
+        background,
+        egui::Shape::rect_filled(*plot.transform.frame(), 0, frame.visuals.field),
+    );
+    paint_chart_axis(ui, &plot.transform, frame);
     plot.response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Other, ui.is_enabled(), &chart.label)
     });
     crate::semantics::target(ui, &plot.response, format!("chart.{}", chart.chart_index));
     plot.inner
+}
+
+fn paint_chart_axis(ui: &Ui, transform: &egui_plot::PlotTransform, frame: &ChartFrame<'_, '_>) {
+    let bounds = transform.bounds();
+    let marks = egui_plot::log_grid_spacer(10)(egui_plot::GridInput {
+        bounds: (bounds.min()[0], bounds.max()[0]),
+        base_step_size: transform.dvalue_dpos()[0].abs() * 60.0,
+    });
+    let rect = transform.frame();
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let color = ui.visuals().text_color();
+    let mut next_left = rect.left();
+    for mark in marks {
+        let galley = ui.painter().layout_no_wrap(
+            format_domain_tick(mark.value, frame.axis, frame.units),
+            font.clone(),
+            color,
+        );
+        if galley.size().x > rect.width() {
+            continue;
+        }
+        let left = (transform.position_from_point_x(mark.value) - galley.size().x * 0.5)
+            .clamp(rect.left(), rect.right() - galley.size().x);
+        if left < next_left {
+            continue;
+        }
+        next_left = left + galley.size().x + 8.0;
+        ui.painter()
+            .galley(egui::pos2(left, rect.bottom()), galley, color);
+    }
 }
 
 fn paint_chart_data<'a>(

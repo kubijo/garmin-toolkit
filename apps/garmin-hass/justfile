@@ -28,3 +28,7 @@ profile-analyze trace *options:
 # Inspect or exercise the control API of an already-running demo.
 control *options:
     @just in-shell uv run --frozen --project infra/python python infra/python/hass_control.py "$@"
+
+# Read application logs or events with the shared Rust CLI.
+diagnostics *options:
+    @just in-shell nix run {{ flake }}#garmin-cli -- diagnostics "$@"

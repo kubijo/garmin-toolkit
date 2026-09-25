@@ -7,7 +7,31 @@ import {
     unregisterWindow,
     installWindowControl,
     captureWindow,
+    installWindowDiagnostics,
+    publishObservation,
+    refreshDiagnostics,
 } from '../../apps/garmin-hass/web/window-control.js';
+
+test('window observations forward through the owner and closed handles cannot publish', () => {
+    const parent = fixture();
+    const child = fixture();
+    const observations = [];
+    installWindowDiagnostics(json => observations.push(JSON.parse(json)), parent.browser);
+    installWindowControl(async () => {}, parent.browser);
+    installWindowControl(async () => {}, child.browser);
+    child.browser.opener = parent.browser;
+    registerWindow('files', JSON.stringify({ kind: 'device-files', title: 'Files' }), child.browser, parent.browser);
+    refreshDiagnostics(parent.browser);
+    const id = observations.find(item => item.fields.kind === 'device-files').window;
+    const observation = { kind: 'automation', window: 'root', fields: { state: 'passed' }, removed: false };
+    publishObservation(JSON.stringify(observation), child.browser);
+    assert.equal(observations.at(-1).window, id);
+    unregisterWindow('files', parent.browser);
+    assert.equal(observations.at(-1).removed, true);
+    const count = observations.length;
+    publishObservation(JSON.stringify(observation), child.browser);
+    assert.equal(observations.length, count);
+});
 
 test('window discovery, scoped dispatch and reload invalidate handles without touching root automation', async () => {
     const parent = fixture();

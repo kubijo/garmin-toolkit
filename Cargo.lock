@@ -232,6 +232,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "askama"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6024d73179f43f15ccd2b881bfea6fee7f3a46ec53f33b52210dea749ebebaa4"
+dependencies = [
+ "askama_macros",
+ "itoa",
+ "percent-encoding",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "askama_derive"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "071ee5ebf2138e3ad180e0aacf6940c2cab5e6d8333741d9925c7bee2b153f39"
+dependencies = [
+ "askama_parser",
+ "memchr",
+ "proc-macro2",
+ "quote",
+ "rustc-hash 2.1.3",
+ "syn 3.0.5",
+]
+
+[[package]]
+name = "askama_macros"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "643e1c7cbb6aec1d920332fe51a7c0d8219e273dcb8602db03f5263e4d16487b"
+dependencies = [
+ "askama_derive",
+]
+
+[[package]]
+name = "askama_parser"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c5ae75772275d268b03ab8bdccdd12117b6169ee23256942b34e46c9f476583"
+dependencies = [
+ "rustc-hash 2.1.3",
+ "unicode-ident",
+ "winnow",
+]
+
+[[package]]
 name = "async-channel"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2412,6 +2459,7 @@ dependencies = [
  "indoc",
  "miette 7.6.0",
  "ratatui",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "sys-locale",
@@ -2467,6 +2515,7 @@ dependencies = [
  "futures-lite",
  "garmin-color",
  "garmin-device",
+ "garmin-diagnostics",
  "garmin-fit",
  "garmin-fixtures",
  "garmin-i18n",
@@ -2524,6 +2573,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "garmin-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "askama",
+ "axum",
+ "futures-util",
+ "garmin-logging",
+ "garmin-model",
+ "garmin-service-api",
+ "nu-ansi-term",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "garmin-fit"
 version = "0.1.0"
 dependencies = [
@@ -2570,6 +2639,7 @@ dependencies = [
  "futures-lite",
  "futures-util",
  "garmin-device",
+ "garmin-diagnostics",
  "garmin-fit",
  "garmin-fixtures",
  "garmin-importer",
@@ -6470,6 +6540,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",

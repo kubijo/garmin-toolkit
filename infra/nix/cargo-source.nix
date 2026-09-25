@@ -18,6 +18,8 @@ lib.fileset.toSource {
       (workspaceSrc + "/vendor/fast-mvt")
       (workspaceSrc + "/vendor/winit")
       (workspaceSrc + "/crates/garmin-brand/assets")
+      (workspaceSrc + "/crates/garmin-diagnostics/templates")
+      (workspaceSrc + "/crates/garmin-diagnostics/view.js")
       (workspaceSrc + "/crates/garmin-gpx/tests/fixtures")
       (workspaceSrc + "/crates/garmin-i18n/catalogs")
       (workspaceSrc + "/crates/garmin-i18n/translations")
