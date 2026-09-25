@@ -49,7 +49,8 @@ class Client:
                 raise ValueError('Control response exceeds size limit')
             if response.code == 200 and response.headers.get_content_type() == 'image/png':
                 metadata = json.loads(response.headers['x-garmin-capture'])
-                received_id = int(response.headers['x-garmin-request-id'])
+                capture_id = response.headers.get('x-garmin-request-id')
+                received_id = int(capture_id) if capture_id is not None else None
                 if isinstance(body, dict) and body.get('request_id') is not None and received_id != body['request_id']:
                     raise ValueError('Screenshot came from a different request')
                 self.request_id = received_id
@@ -64,13 +65,14 @@ class Client:
                 value = raw
             return response.code, value
 
-    def command(self, operation: str, argument=None, *, request_id=None) -> tuple[int, Any]:
+    def command(self, operation: str, argument=None, *, request_id=None, window=None) -> tuple[int, Any]:
         return self.request(
             'api/control',
             {
                 'request_id': request_id,
                 'operation': operation,
                 'argument': argument,
+                **({'window': window} if window is not None else {}),
             },
         )
 
@@ -83,10 +85,10 @@ def validate_png(png: bytes, metadata: dict):
         raise ValueError('Screenshot dimensions do not match its metadata')
 
 
-def screenshot(client: Client, output: Path):
+def screenshot(client: Client, output: Path, window=None):
     if output.suffix.lower() != '.png':
         raise ValueError('Screenshot output must use the .png extension')
-    _, reply = expect(client.command('screenshot'), 200)
+    _, reply = expect(client.command('screenshot', window=window), 200)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(reply['png'])
     output.with_suffix('.json').write_text(json.dumps(reply['metadata'], indent=2) + '\n')
@@ -194,21 +196,25 @@ def main() -> int:
     command.add_argument('operation')
     command.add_argument('--argument', type=json.loads, help='JSON argument, including quotes for strings')
     command.add_argument('--request-id', type=int, help='Optional explicit ID for replay checks')
+    command.add_argument('--window', help='Child handle returned by the windows command; defaults to root')
     checks = commands.add_parser('check')
     checks.add_argument('--output', type=Path, default=Path('.tmp/hass-control-runtime'))
     capture = commands.add_parser('screenshot')
     capture.add_argument('--output', type=Path, default=Path('.tmp/hass-control-runtime/screenshot.png'))
+    capture.add_argument('--window', help='Child handle returned by the windows command; defaults to root')
     args = parser.parse_args()
     try:
         client = Client(args.url)
         if args.mode == 'check':
             check(client, args.output)
         elif args.mode == 'screenshot':
-            screenshot(client, args.output)
+            screenshot(client, args.output, args.window)
         else:
             if args.operation == 'screenshot':
                 parser.error('Use screenshot --output FILE.png to save a capture')
-            status, result = client.command(args.operation, args.argument, request_id=args.request_id)
+            status, result = client.command(
+                args.operation, args.argument, request_id=args.request_id, window=args.window
+            )
             print(json.dumps({'http_status': status, 'response': result}, indent=2))
             return 0 if status == 200 else 1
     except (OSError, ValueError) as error:

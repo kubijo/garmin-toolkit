@@ -4,6 +4,8 @@ use std::marker::PhantomData;
 
 pub struct NativeWindow<C, S> {
     spec: Option<Spec>,
+    #[cfg(any(feature = "automation", test))]
+    control: Option<super::control::Registration>,
     types: PhantomData<fn() -> (C, S)>,
 }
 
@@ -11,6 +13,8 @@ impl<C, S> Default for NativeWindow<C, S> {
     fn default() -> Self {
         Self {
             spec: None,
+            #[cfg(any(feature = "automation", test))]
+            control: None,
             types: PhantomData,
         }
     }
@@ -30,6 +34,10 @@ impl<C, S> WindowHost for NativeWindow<C, S> {
                 .send_viewport_cmd_to(ViewportId::from_hash_of(&spec.id), ViewportCommand::Focus);
         } else {
             self.close(context);
+            #[cfg(any(feature = "automation", test))]
+            {
+                self.control = super::control::register(context, &spec);
+            }
             self.spec = Some(spec);
         }
         context.request_repaint();
@@ -37,6 +45,10 @@ impl<C, S> WindowHost for NativeWindow<C, S> {
     }
 
     fn close(&mut self, context: &Context) {
+        #[cfg(any(feature = "automation", test))]
+        {
+            self.control = None;
+        }
         if let Some(spec) = self.spec.take() {
             context.send_viewport_cmd_to(ViewportId::from_hash_of(spec.id), ViewportCommand::Close);
         }
@@ -53,9 +65,18 @@ impl<C, S> WindowHost for NativeWindow<C, S> {
         _snapshot: impl FnOnce() -> S,
         mut render: impl FnMut(&mut Ui) -> Option<C>,
     ) -> Vec<Event<C>> {
+        #[cfg(any(feature = "automation", test))]
+        if self.control.as_ref().is_some_and(|control| !control.live()) {
+            self.close(context);
+            return vec![Event::Closed];
+        }
         let Some(spec) = &self.spec else {
             return Vec::new();
         };
+        #[cfg(any(feature = "automation", test))]
+        if self.control.is_none() {
+            self.control = super::control::register(context, spec);
+        }
         let mut events = Vec::new();
         let mut closed = false;
         context.show_viewport_immediate(
@@ -87,7 +108,7 @@ impl<C, S> WindowHost for NativeWindow<C, S> {
             },
         );
         if closed {
-            self.spec = None;
+            self.close(context);
             events.push(Event::Closed);
         }
         events

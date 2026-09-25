@@ -1,6 +1,96 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { executeAutomation, installAutomation, launchAutomation } from '../../apps/garmin-hass/web/ui-automation.js';
+import {
+    registerWindow,
+    unregisterWindow,
+    installWindowControl,
+    captureWindow,
+} from '../../apps/garmin-hass/web/window-control.js';
+
+test('window discovery, scoped dispatch and reload invalidate handles without touching root automation', async () => {
+    const parent = fixture();
+    const child = fixture();
+    let focused = 0;
+    child.browser.focus = () => {
+        focused++;
+    };
+    child.browser.close = () => {
+        child.browser.closed = true;
+    };
+    installWindowControl(async () => ['{}', runInNewContext('new Uint8Array([1, 2, 3])')], child.browser);
+    registerWindow('files', JSON.stringify({ kind: 'device-files', title: 'Files' }), child.browser, parent.browser);
+    const dispatch = request => JSON.parse(executeAutomation(JSON.stringify(request), parent.browser));
+    const list = () => dispatch({ operation: 'windows' }).value;
+    const id = list()[1].id;
+    assert.equal(list()[1].ready, true);
+    dispatch({ operation: 'window.focus', window: id });
+    assert.equal(focused, 1);
+    dispatch({ operation: 'targets', window: id });
+    assert.equal(child.calls.at(-1)[0], 'targets');
+    assert.equal(parent.calls.length, 0);
+    const pixels = await captureWindow(id, 1000, parent.browser);
+    assert.deepEqual(pixels, ['{}', new Uint8Array([1, 2, 3])]);
+    assert.ok(pixels[1] instanceof Uint8Array);
+    installWindowControl(async () => 'new pixels', child.browser);
+    assert.match(dispatch({ operation: 'targets', window: id }).error, /stale/);
+    const replacement = list()[1].id;
+    assert.notEqual(replacement, id);
+    dispatch({ operation: 'window.close', window: replacement });
+    assert.equal(child.browser.closed, true);
+    assert.equal(list().length, 1);
+    assert.match(dispatch({ operation: 'targets', window: replacement }).error, /stale/);
+});
+
+test('a destroyed or unresponsive popup cannot leave a capture pending forever', async () => {
+    for (const revoke of ['close', 'owner', 'reload', 'timeout']) {
+        const parent = fixture();
+        const child = fixture();
+        installWindowControl(() => new Promise(() => {}), child.browser);
+        registerWindow(
+            'files',
+            JSON.stringify({ kind: 'device-files', title: 'Files' }),
+            child.browser,
+            parent.browser,
+        );
+        const listed = JSON.parse(executeAutomation('{"operation":"windows"}', parent.browser)).value;
+        const capture = captureWindow(listed[1].id, revoke === 'timeout' ? 1 : 1000, parent.browser);
+        if (revoke === 'close') child.browser.closed = true;
+        if (revoke === 'owner') unregisterWindow('files', parent.browser);
+        if (revoke === 'reload') installWindowControl(async () => 'new', child.browser);
+        await assert.rejects(capture, /stale|changed|deadline/);
+    }
+});
+
+test('window screenshot rejects closure, owner revocation and reload while awaiting pixels', async () => {
+    for (const revoke of ['close', 'owner', 'reload']) {
+        const parent = fixture();
+        const child = fixture();
+        let complete;
+        installWindowControl(
+            () =>
+                new Promise(resolve => {
+                    complete = resolve;
+                }),
+            child.browser,
+        );
+        registerWindow(
+            'files',
+            JSON.stringify({ kind: 'device-files', title: 'Files' }),
+            child.browser,
+            parent.browser,
+        );
+        const listed = JSON.parse(executeAutomation('{"operation":"windows"}', parent.browser)).value;
+        const capture = captureWindow(listed[1].id, 1000, parent.browser);
+        if (revoke === 'close') child.browser.closed = true;
+        if (revoke === 'owner') unregisterWindow('files', parent.browser);
+        if (revoke === 'reload') installWindowControl(async () => 'new', child.browser);
+        complete('old pixels');
+        await assert.rejects(capture, /stale|changed/);
+        assert.equal(parent.calls.length, 0);
+    }
+});
 
 function fixture() {
     let report = null;

@@ -29,7 +29,15 @@ pub(super) fn dispatch_menu(context: &egui::Context) {
 }
 
 pub(super) fn install(context: &egui::Context) {
-    context.add_plugin(Driver::default().with_resize_handler(resize_canvas));
+    install_driver(context, Driver::default());
+}
+
+pub(super) fn install_window(context: &egui::Context) {
+    install_driver(context, Driver::for_window(egui::ViewportId::ROOT));
+}
+
+fn install_driver(context: &egui::Context, driver: Driver) {
+    context.add_plugin(driver.with_resize_handler(resize_canvas));
     context.add_plugin(garmin_ui::capture::CapturePlugin::default());
     let context = context.clone();
     let command = Closure::<dyn Fn(String, String) -> String>::new(

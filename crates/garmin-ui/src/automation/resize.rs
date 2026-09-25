@@ -30,7 +30,9 @@ impl Driver {
         {
             return Ok(());
         }
-        let screen = input.screen_rect.unwrap_or_else(|| context.viewport_rect());
+        let screen = input
+            .screen_rect
+            .unwrap_or_else(|| context.input_for(self.viewport, egui::InputState::viewport_rect));
         if let Some(handler) = self.resize_handler {
             handler(context, ResizeCommand::Save)?;
         }
@@ -51,10 +53,10 @@ impl Driver {
         let result = if let Some(handler) = self.resize_handler {
             handler(context, ResizeCommand::Restore(saved.size))
         } else {
-            let result = resize_root(context, None, saved.size);
+            let result = resize_viewport(context, self.viewport, None, saved.size);
             if let Some(maximized) = saved.maximized {
                 context.send_viewport_cmd_to(
-                    egui::ViewportId::ROOT,
+                    self.viewport,
                     egui::ViewportCommand::Maximized(maximized),
                 );
             }
@@ -75,7 +77,7 @@ impl Driver {
                 );
             }
         }
-        context.request_repaint();
+        context.request_repaint_of(self.viewport);
     }
 }
 
@@ -90,13 +92,14 @@ impl Run {
     pub(super) fn resize(
         &mut self,
         context: &Context,
+        viewport: egui::ViewportId,
         handler: Option<ResizeHandler>,
         size: [f32; 2],
         elapsed: f64,
         screen: Rect,
     ) -> Result<(), String> {
         if self.report.resize_request.is_none() {
-            resize_root(context, handler, size)?;
+            resize_viewport(context, viewport, handler, size)?;
             self.report.resize_request = Some(ResizeRequest {
                 viewport: size,
                 started_seconds: elapsed,
@@ -150,8 +153,9 @@ impl Run {
     }
 }
 
-fn resize_root(
+fn resize_viewport(
     context: &Context,
+    viewport: egui::ViewportId,
     handler: Option<ResizeHandler>,
     size: [f32; 2],
 ) -> Result<(), String> {
@@ -161,9 +165,6 @@ fn resize_root(
     if cfg!(target_arch = "wasm32") {
         return Err("browser canvas resize adapter is unavailable".into());
     }
-    context.send_viewport_cmd_to(
-        egui::ViewportId::ROOT,
-        egui::ViewportCommand::InnerSize(size.into()),
-    );
+    context.send_viewport_cmd_to(viewport, egui::ViewportCommand::InnerSize(size.into()));
     Ok(())
 }

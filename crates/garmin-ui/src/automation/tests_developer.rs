@@ -43,11 +43,81 @@ fn render(context: &Context, tick: u32, events: Vec<Event>, window: bool) {
                 crate::developer::show(ui.ctx(), false, &intl);
             } else {
                 ui.set_max_width(620.0);
-                crate::developer::contents(ui, &mut crate::developer::State::default());
+                let state = crate::developer::state(ui.ctx());
+                crate::developer::contents(ui, &mut state.lock().expect("panel state"));
             }
         },
     );
     output.textures_delta.clear();
+}
+
+#[test]
+fn section_targets_can_collapse_and_reopen_automation() {
+    let context = context();
+    for tick in 0..4 {
+        render(&context, tick, vec![], false);
+    }
+    for (start, value) in [(4, "closed"), (34, "open")] {
+        command(
+            &context,
+            "sequence",
+            &serde_json::json!([
+                {"kind": "click", "target": "developer.section.automation"},
+                {"kind": "assert_value", "target": "developer.section.automation", "value": value}
+            ]),
+        )
+        .expect("section sequence");
+        for tick in start..start + 30 {
+            render(&context, tick, vec![], false);
+        }
+        let plugin = context.plugin::<Driver>();
+        let driver = plugin.lock();
+        let report = driver.report().expect("section report");
+        assert_eq!(report.state, "passed", "{:?}", report.failure);
+        let scenario = lookup(
+            driver.tree.as_ref(),
+            "automation.scenario.stationary-arrival",
+            Rect::EVERYTHING,
+        )
+        .expect("unique scenario target");
+        assert_eq!(scenario.is_some(), value == "open");
+    }
+}
+
+#[test]
+fn section_sequence_waits_for_headers_to_stop_moving() {
+    let context = context();
+    // Match the native control section from the reported transition.
+    crate::developer::state(&context)
+        .lock()
+        .expect("panel state")
+        .native = true;
+    for tick in 0..4 {
+        render(&context, tick, vec![], false);
+    }
+    command(
+        &context,
+        "sequence",
+        &serde_json::json!([
+            {"kind": "click", "target": "developer.section.control"},
+            {"kind": "assert_value", "target": "developer.section.control", "value": "open"},
+            {"kind": "click", "target": "developer.section.control"},
+            {"kind": "assert_value", "target": "developer.section.control", "value": "closed"},
+            {"kind": "click", "target": "developer.section.debug"},
+            {"kind": "assert_value", "target": "developer.section.debug", "value": "open"},
+            {"kind": "click", "target": "developer.section.debug"},
+            {"kind": "assert_value", "target": "developer.section.debug", "value": "closed"}
+        ]),
+    )
+    .expect("section sequence");
+    for tick in 4..124 {
+        render(&context, tick, vec![], false);
+    }
+    let plugin = context.plugin::<Driver>();
+    let driver = plugin.lock();
+    let report = driver.report().expect("section report");
+    assert_eq!(report.state, "passed", "{:?}", report.failure);
+    assert_eq!(report.completed, 8);
 }
 
 #[test]

@@ -24,6 +24,13 @@ pub(super) enum Action {
 }
 
 impl Action {
+    pub(super) const fn uses_pointer(&self) -> bool {
+        matches!(
+            self,
+            Self::Click | Self::Drag { .. } | Self::Wheel(_) | Self::Scroll(_)
+        )
+    }
+
     pub(super) const fn name(&self) -> &'static str {
         match self {
             Self::Resize { .. } => "resize",

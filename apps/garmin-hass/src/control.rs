@@ -185,13 +185,14 @@ async fn capabilities(headers: HeaderMap) -> HttpReply {
     }
     let mut value = control::capabilities();
     value["requires_session"] = json!(false);
-    value["child_windows"] = json!(false);
     (StatusCode::OK, Json(value))
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Envelope {
+    #[serde(default)]
+    window: Option<String>,
     #[serde(default)]
     request_id: Option<u64>,
     operation: String,
@@ -277,42 +278,44 @@ async fn capture(broker: Broker, headers: HeaderMap, request: Envelope) -> Respo
     if !request.argument.is_null() {
         return error(
             StatusCode::BAD_REQUEST,
-            "screenshot takes no argument; only the root window is supported",
+            "screenshot takes no argument; use the window field to select a child",
         )
         .into_response();
     }
     let deadline = broker.now_ms().saturating_add(TIMEOUT.as_secs() * 1_000);
-    let mut response = match tokio::time::timeout(TIMEOUT, session.client.capture(deadline)).await {
-        Ok(Ok(Ok(capture))) => {
-            if let Err(reason) = capture.validate() {
-                return error(StatusCode::BAD_GATEWAY, &reason).into_response();
+    let mut response =
+        match tokio::time::timeout(TIMEOUT, session.client.capture(deadline, request.window)).await
+        {
+            Ok(Ok(Ok(capture))) => {
+                if let Err(reason) = capture.validate() {
+                    return error(StatusCode::BAD_GATEWAY, &reason).into_response();
+                }
+                let metadata = serde_json::to_string(&capture.info).unwrap_or_default();
+                (
+                    [
+                        (header::CONTENT_TYPE, "image/png"),
+                        (header::CACHE_CONTROL, "no-store"),
+                    ],
+                    [("x-garmin-capture", metadata)],
+                    capture.png,
+                )
+                    .into_response()
             }
-            let metadata = serde_json::to_string(&capture.info).unwrap_or_default();
-            (
-                [
-                    (header::CONTENT_TYPE, "image/png"),
-                    (header::CACHE_CONTROL, "no-store"),
-                ],
-                [("x-garmin-capture", metadata)],
-                capture.png,
+            Ok(Ok(Err(reason))) => error(StatusCode::BAD_REQUEST, &reason).into_response(),
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "Screenshot RPC failed");
+                (
+                    StatusCode::GONE,
+                    Json(json!({"error": "browser screenshot reply failed; not retried"})),
+                )
+                    .into_response()
+            }
+            Err(_) => error(
+                StatusCode::GATEWAY_TIMEOUT,
+                "screenshot timed out; not retried",
             )
-                .into_response()
-        }
-        Ok(Ok(Err(reason))) => error(StatusCode::BAD_REQUEST, &reason).into_response(),
-        Ok(Err(error)) => {
-            tracing::warn!(%error, "Screenshot RPC failed");
-            (
-                StatusCode::GONE,
-                Json(json!({"error": "browser screenshot reply failed; not retried"})),
-            )
-                .into_response()
-        }
-        Err(_) => error(
-            StatusCode::GATEWAY_TIMEOUT,
-            "screenshot timed out; not retried",
-        )
-        .into_response(),
-    };
+            .into_response(),
+        };
     if let Ok(value) = request_id.to_string().parse() {
         response.headers_mut().insert("x-garmin-request-id", value);
     }
@@ -331,6 +334,7 @@ async fn dispatch(
     let Ok(command_json) = serde_json::to_string(&ControlCommand {
         operation: request.operation,
         argument: request.argument,
+        window: request.window,
     }) else {
         return error(StatusCode::BAD_REQUEST, "invalid command");
     };

@@ -33,11 +33,12 @@ pub(super) fn show(ui: &mut Ui, state: &mut State) {
 
 pub(super) fn section(
     ui: &mut Ui,
-    id: impl egui::AsIdSalt,
+    id: &str,
     title: &str,
     default_open: bool,
     body: impl FnOnce(&mut Ui),
 ) {
+    let target = format!("developer.section.{id}");
     let id = ui.make_persistent_id(id);
     let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
@@ -53,6 +54,8 @@ pub(super) fn section(
     if response.clicked() {
         state.toggle(ui);
     }
+    crate::semantics::target(ui, &response, target);
+    crate::semantics::value(&response, if state.is_open() { "open" } else { "closed" });
     let palette = crate::theme::palette(ui);
     let fill = if response.hovered() || response.is_pointer_button_down_on() {
         palette.surfaces().layer_hover(Level::One)

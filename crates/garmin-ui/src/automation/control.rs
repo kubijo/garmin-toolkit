@@ -12,68 +12,85 @@ pub fn command(context: &Context, operation: &str, argument: &Value) -> Result<V
         .plugin_opt::<Driver>()
         .ok_or("Enable --ui-automation in a demo build")?;
     let mut driver = plugin.lock();
-    let result = match operation {
-        "list" => Ok(json!(SCENARIOS)),
-        "start" => driver
-            .start(argument.as_str().ok_or("scenario must be a string")?)
-            .map(|()| Value::Null),
-        "status" => Ok(json!(driver.report())),
-        "result" => Ok(if driver.running() || driver.paused_at.is_some() {
-            Value::Null
-        } else {
-            json!(driver.report())
-        }),
-        "cancel" => {
-            driver.cancel(argument.as_str().unwrap_or("cancelled through control API"));
-            Ok(Value::Null)
-        }
-        "pause" => {
-            driver.pause(
-                argument
-                    .as_f64()
-                    .ok_or("pause requires monotonic seconds")?,
-            );
-            Ok(Value::Null)
-        }
-        "resume" => {
-            driver.resume(
-                argument
-                    .as_f64()
-                    .ok_or("resume requires monotonic seconds")?,
-            );
-            Ok(Value::Null)
-        }
-        "targets" => {
-            let targets = driver.tree.as_ref().map_or_else(Vec::new, |tree| {
+    driver.command(context, operation, argument)
+}
+
+impl Driver {
+    pub(crate) fn command(
+        &mut self,
+        context: &Context,
+        operation: &str,
+        argument: &Value,
+    ) -> Result<Value, String> {
+        let screen = context.input_for(self.viewport, egui::InputState::viewport_rect);
+        let driver = self;
+        let result = match operation {
+            "list" => Ok(if driver.window_scope {
+                json!([])
+            } else {
+                json!(SCENARIOS)
+            }),
+            "start" => driver
+                .start(argument.as_str().ok_or("scenario must be a string")?)
+                .map(|()| Value::Null),
+            "status" => Ok(json!(driver.report())),
+            "result" => Ok(if driver.running() || driver.paused_at.is_some() {
+                Value::Null
+            } else {
+                json!(driver.report())
+            }),
+            "cancel" => {
+                driver.cancel(argument.as_str().unwrap_or("cancelled through control API"));
+                Ok(Value::Null)
+            }
+            "pause" => {
+                driver.pause(
+                    argument
+                        .as_f64()
+                        .ok_or("pause requires monotonic seconds")?,
+                );
+                Ok(Value::Null)
+            }
+            "resume" => {
+                driver.resume(
+                    argument
+                        .as_f64()
+                        .ok_or("resume requires monotonic seconds")?,
+                );
+                Ok(Value::Null)
+            }
+            "targets" => {
+                let targets = driver.tree.as_ref().map_or_else(Vec::new, |tree| {
                 SemanticNode(tree.root()).query_all(By::new().predicate(|node| node.author_id().is_some())).map(|node| {
                     let node = node.0;
                     let id = node.author_id().unwrap_or_default();
-                    let bounds = super::lookup(Some(tree), id, context.viewport_rect()).ok().flatten().map(|(rect, _)| [rect.left(), rect.top(), rect.right(), rect.bottom()]);
+                    let bounds = super::lookup(Some(tree), id, screen).ok().flatten().map(|(rect, _)| [rect.left(), rect.top(), rect.right(), rect.bottom()]);
                     json!({"id": id, "label": node.label(), "role": format!("{:?}", node.role()), "value": node.value(), "enabled": !node.is_disabled(), "bounds": bounds})
                 }).collect()
             });
-            Ok(json!(targets))
-        }
-        "action" => {
-            let steps = actions::parse(argument)?;
-            for step in &steps {
-                if !matches!(step.action, Action::Resize { .. }) {
-                    super::lookup(driver.tree.as_ref(), &step.target, context.viewport_rect())?
-                        .ok_or("target missing, disabled or clipped")?;
-                }
+                Ok(json!(targets))
             }
-            driver.start_steps("individual-action", steps)?;
-            Ok(Value::Null)
-        }
-        "sequence" => {
-            let steps = actions::sequence(argument)?;
-            driver.start_steps("custom-sequence", steps)?;
-            Ok(Value::Null)
-        }
-        _ => Err("unknown automation command".into()),
-    };
-    context.request_repaint();
-    result
+            "action" => {
+                let steps = actions::parse(argument)?;
+                for step in &steps {
+                    if !matches!(step.action, Action::Resize { .. }) {
+                        super::lookup(driver.tree.as_ref(), &step.target, screen)?
+                            .ok_or("target missing, disabled or clipped")?;
+                    }
+                }
+                driver.start_steps("individual-action", steps)?;
+                Ok(Value::Null)
+            }
+            "sequence" => {
+                let steps = actions::sequence(argument)?;
+                driver.start_steps("custom-sequence", steps)?;
+                Ok(Value::Null)
+            }
+            _ => Err("unknown automation command".into()),
+        };
+        context.request_repaint_of(driver.viewport);
+        result
+    }
 }
 
 impl Driver {
@@ -92,6 +109,8 @@ impl Driver {
             run.report.interrupted_attempts.push(attempt);
         }
         run.ready_since = None;
+        run.target_geometry = None;
+        run.stabilizing_since = None;
     }
 
     fn resume(&mut self, now: f64) {

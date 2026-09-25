@@ -191,7 +191,7 @@ pub fn show_snapshot(
     } else {
         format_message!(intl, default_message: "Browse files")
     };
-    button::Props {
+    let response = button::Props {
         label: &browse,
         icon: Some(icons::FOLDER_OPEN),
         kind: button::Kind::Secondary,
@@ -199,9 +199,9 @@ pub fn show_snapshot(
         width: button::Width::Fit,
         enabled: !browser_loading,
     }
-    .show(ui)
-    .clicked()
-    .then_some(Action::BrowseFiles)
+    .show(ui);
+    crate::semantics::target(ui, &response, "device.files");
+    response.clicked().then_some(Action::BrowseFiles)
 }
 
 #[must_use]

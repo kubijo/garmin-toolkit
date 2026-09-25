@@ -177,21 +177,27 @@ fn record_row(ui: &mut Ui, record: &Record) {
         "{:?} · {} · {}",
         record.level, record.component, record.message
     );
-    panel::section(ui, ("record", record.sequence), &title, false, |ui| {
-        panel::code(ui, &record.message);
-        panel::note(
-            ui,
-            &format!(
-                "{} · {} · {} ms",
-                record.source, record.session, record.timestamp_ms
-            ),
-        );
-        for (key, value) in &record.fields {
-            panel::code(ui, &format!("{key}: {value}"));
-        }
-        if panel::action(ui, "Copy record as JSON", button::Kind::Secondary).clicked() {
-            ui.ctx()
-                .copy_text(serde_json::to_string_pretty(record).unwrap_or_default());
-        }
-    });
+    panel::section(
+        ui,
+        &format!("record.{}", record.sequence),
+        &title,
+        false,
+        |ui| {
+            panel::code(ui, &record.message);
+            panel::note(
+                ui,
+                &format!(
+                    "{} · {} · {} ms",
+                    record.source, record.session, record.timestamp_ms
+                ),
+            );
+            for (key, value) in &record.fields {
+                panel::code(ui, &format!("{key}: {value}"));
+            }
+            if panel::action(ui, "Copy record as JSON", button::Kind::Secondary).clicked() {
+                ui.ctx()
+                    .copy_text(serde_json::to_string_pretty(record).unwrap_or_default());
+            }
+        },
+    );
 }

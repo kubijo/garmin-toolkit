@@ -627,6 +627,8 @@ fn navigation_contents(ui: &Ui, rect: Rect, props: &Props<'_>) -> Option<Action>
                 &response,
             );
             let clicked = response.clicked();
+            crate::semantics::target(ui, &response, format!("navigation.{destination_index}"));
+            crate::semantics::value(&response, if active { "on" } else { "off" });
             if props.navigation == Navigation::Rail {
                 response.on_hover_text(destination.label);
             }

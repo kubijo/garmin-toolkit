@@ -561,8 +561,10 @@ impl Browser {
                 ui.style_mut().interaction.selectable_labels = false;
 
                 let mut action = if header {
+                    let spacing = ui.spacing().item_spacing.y;
+                    ui.spacing_mut().item_spacing.y = 0.0;
                     let action = self.show_header(ui, intl);
-                    ui.add_space(12.0);
+                    ui.spacing_mut().item_spacing.y = spacing;
                     action
                 } else {
                     None
@@ -1247,7 +1249,7 @@ impl Browser {
                     .layout(Layout::right_to_left(Align::Center)),
             );
             let upload = format_message!(intl, default_message: "Upload file");
-            clicked = button::Props {
+            let response = button::Props {
                 label: &upload,
                 icon: Some(icons::UPLOAD_SIMPLE),
                 kind: button::Kind::Tertiary,
@@ -1255,8 +1257,9 @@ impl Browser {
                 width: button::Width::Fit,
                 enabled: true,
             }
-            .show(&mut action_ui)
-            .clicked();
+            .show(&mut action_ui);
+            crate::semantics::target(&action_ui, &response, "files.upload");
+            clicked = response.clicked();
         });
         clicked.then_some(Action::Upload {
             storage_id,
@@ -1853,6 +1856,8 @@ fn path_icon_button(
     }
     .paint_at(ui, rect.center());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    crate::semantics::target(ui, &response, format!("files.{id_salt}"));
+    crate::semantics::value(&response, if selected { "on" } else { "off" });
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(label)
@@ -1899,6 +1904,14 @@ fn history_button(
     }
     .paint_at(ui, rect.center());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    crate::semantics::target(
+        ui,
+        &response,
+        match direction {
+            HistoryMove::Back => "files.back",
+            HistoryMove::Forward => "files.forward",
+        },
+    );
     let response = response.on_hover_text(label);
     let response = if enabled {
         response.on_hover_cursor(egui::CursorIcon::PointingHand)

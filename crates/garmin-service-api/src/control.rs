@@ -17,6 +17,9 @@ pub const OPERATIONS: &[&str] = &[
     "action",
     "sequence",
     "screenshot",
+    "windows",
+    "window.focus",
+    "window.close",
 ];
 pub const ACTIONS: &[&str] = &[
     "click",
@@ -92,12 +95,15 @@ pub struct ControlCommand {
     pub operation: String,
     #[serde(default)]
     pub argument: serde_json::Value,
+    /// Omitted or "root" selects the app; child handles come from "windows".
+    #[serde(default)]
+    pub window: Option<String>,
 }
 
 #[must_use]
 pub fn capabilities() -> serde_json::Value {
     serde_json::json!({"version": 1, "operations": OPERATIONS, "actions": ACTIONS,
-        "screenshots": true, "screenshot_max_pixels": MAX_CAPTURE_PIXELS,
+        "child_windows": true, "screenshots": true, "screenshot_max_pixels": MAX_CAPTURE_PIXELS,
         "screenshot_max_bytes": MAX_CAPTURE_BYTES})
 }
 
@@ -124,5 +130,9 @@ pub trait BrowserControl {
         &self,
         request: ControlDispatch,
     ) -> Result<Result<String, String>, rtc::CallError>;
-    async fn capture(&self, expires_at_ms: u64) -> Result<Result<Capture, String>, rtc::CallError>;
+    async fn capture(
+        &self,
+        expires_at_ms: u64,
+        window: Option<String>,
+    ) -> Result<Result<Capture, String>, rtc::CallError>;
 }

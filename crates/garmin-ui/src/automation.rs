@@ -108,6 +108,8 @@ mod tests_developer;
 #[cfg(test)]
 mod tests_resize;
 #[cfg(test)]
+mod tests_stability;
+#[cfg(test)]
 mod tests_workspace;
 
 pub use menu::{header_button, header_rect, launcher, scenario_menu};
@@ -238,6 +240,8 @@ struct Run {
     due: f64,
     waiting_since: f64,
     gesture: Option<(Pos2, usize)>,
+    target_geometry: Option<(Rect, bool)>,
+    stabilizing_since: Option<f64>,
     ready_since: Option<f64>,
     recovering_layout: bool,
     resize_ready_since: Option<f64>,
@@ -245,6 +249,39 @@ struct Run {
 }
 
 impl Run {
+    fn complete_step(&mut self, elapsed: f64, after: f64, waiting: bool) {
+        self.report.completed += 1;
+        self.gesture = None;
+        self.target_geometry = None;
+        self.stabilizing_since = None;
+        self.ready_since = None;
+        self.due = if waiting { elapsed } else { self.due } + after;
+        self.waiting_since = elapsed;
+        if self.report.completed == self.steps.len() {
+            self.report.state = "passed".into();
+        }
+    }
+
+    fn pointer_ready(&mut self, action: &Action, rect: Rect, elapsed: f64) -> bool {
+        if !action.uses_pointer() || self.gesture.is_some() {
+            return true;
+        }
+        // Bounds come from completed layout. Require two matching rendered
+        // positions before pressing on an animated control.
+        if !self
+            .target_geometry
+            .is_some_and(|(previous, stable)| stable && previous == rect)
+        {
+            self.stabilizing_since.get_or_insert(elapsed);
+            return false;
+        }
+        if let Some(started) = self.stabilizing_since.take() {
+            // Readiness waits shift scheduling without consuming later actions' deadlines.
+            self.due += elapsed - started;
+        }
+        true
+    }
+
     fn layout_ready(&mut self, action: &Action, value: Option<&str>, elapsed: f64) -> bool {
         if !self.recovering_layout {
             return true;
@@ -276,8 +313,8 @@ impl Run {
     }
 
     fn recover_layout(&mut self, input: &mut RawInput, held: &mut Option<Pos2>, elapsed: f64) {
-        // The target tree still describes the old layout. Release outside controls,
-        // then retry the unfinished action after egui lays out the new size.
+        // The target tree still describes the old layout.
+        // Release outside controls, then retry the unfinished action after egui lays out the new size.
         if self.gesture.take().is_some()
             && let Some(attempt) = self.report.actions.pop()
         {
@@ -291,6 +328,8 @@ impl Run {
         self.due = elapsed + 1.0 / 60.0;
         self.waiting_since = elapsed;
         self.ready_since = None;
+        self.target_geometry = None;
+        self.stabilizing_since = None;
         self.resize_ready_since = None;
         self.recovering_layout = true;
     }
@@ -348,9 +387,12 @@ impl Run {
 /// Install only in explicitly enabled demo/test sessions.
 #[derive(Default)]
 pub struct Driver {
+    viewport: egui::ViewportId,
+    window_scope: bool,
     resize_handler: Option<ResizeHandler>,
     viewport_restore: Option<resize::ViewportRestore>,
-    // Hooks run outside the viewport pass. Pair input/output identities explicitly;
+    // Hooks run outside the viewport pass.
+    // Pair input/output identities explicitly;
     // a stack also handles immediate viewports nested inside the root pass.
     viewport_passes: Vec<egui::ViewportId>,
     tree: Option<kittest::State>,
@@ -364,6 +406,21 @@ pub struct Driver {
 }
 
 impl Driver {
+    /// Create an independent driver for a child window.
+    /// Built-in app scenarios stay on the root.
+    #[must_use]
+    pub fn for_window(viewport: egui::ViewportId) -> Self {
+        Self {
+            viewport,
+            window_scope: true,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn ready(&self) -> bool {
+        self.tree.is_some()
+    }
+
     /// Override native viewport resizing, e.g. with a browser canvas adapter.
     #[must_use]
     pub fn with_resize_handler(mut self, handler: ResizeHandler) -> Self {
@@ -376,6 +433,9 @@ impl Driver {
     /// # Errors
     /// Unknown names and concurrent runs are rejected.
     pub fn start(&mut self, name: &str) -> Result<(), String> {
+        if self.window_scope {
+            return Err("built-in scenarios require the root window".into());
+        }
         let mut steps = scenarios::steps(name).ok_or_else(|| "unknown scenario".to_owned())?;
         if lookup(self.tree.as_ref(), "profile.toggle", Rect::EVERYTHING)?.is_some() {
             let open = lookup(self.tree.as_ref(), "profile.logout", Rect::EVERYTHING)?.is_some();
@@ -428,6 +488,8 @@ impl Driver {
             due: 0.0,
             waiting_since: 0.0,
             gesture: None,
+            target_geometry: None,
+            stabilizing_since: None,
             ready_since: None,
             recovering_layout: false,
             resize_ready_since: None,
@@ -509,7 +571,13 @@ impl Driver {
         } else {
             let stops = ["automation.stop", "developer.automation.stop"]
                 .into_iter()
-                .map(|target| lookup(self.tree.as_ref(), target, ctx.viewport_rect()))
+                .map(|target| {
+                    lookup(
+                        self.tree.as_ref(),
+                        target,
+                        ctx.input_for(input.viewport_id, egui::InputState::viewport_rect),
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>();
             stops.map(|stops| {
                 input.events.iter().find_map(|event| match event {
@@ -555,7 +623,14 @@ impl Driver {
             return Ok(());
         }
         if let Action::Resize { width, height } = step.action {
-            return run.resize(ctx, self.resize_handler, [width, height], elapsed, screen);
+            return run.resize(
+                ctx,
+                input.viewport_id,
+                self.resize_handler,
+                [width, height],
+                elapsed,
+                screen,
+            );
         }
         let bounds = lookup(self.tree.as_ref(), &step.target, screen)?;
         let waiting = matches!(
@@ -584,6 +659,9 @@ impl Driver {
         }
         if !waiting && elapsed - run.due > 2.0 {
             return Err(format!("action missed its deadline: {}", step.target));
+        }
+        if !run.pointer_ready(&step.action, rect, elapsed) {
+            return Ok(());
         }
         let (start, frame) = run.gesture.unwrap_or((rect.center(), 0));
         if let Action::Observe(seconds) = step.action {
@@ -621,14 +699,7 @@ impl Driver {
             action.pointer_position = pointer_position.or(action.pointer_position);
         }
         if complete {
-            run.report.completed += 1;
-            run.gesture = None;
-            run.ready_since = None;
-            run.due = if waiting { elapsed } else { run.due } + step.after;
-            run.waiting_since = elapsed;
-            if run.report.completed == run.steps.len() {
-                run.report.state = "passed".into();
-            }
+            run.complete_step(elapsed, step.after, waiting);
         } else {
             run.gesture = Some((start, frame + 1));
             run.due += 1.0 / 60.0;
@@ -742,7 +813,9 @@ fn release_buttons(input: &mut RawInput, buttons: &[PointerButton]) {
 }
 
 fn clear_inherited_input(ctx: &Context, input: &mut RawInput) {
-    for key in ctx.input(|state| state.keys_down.iter().copied().collect::<Vec<_>>()) {
+    for key in ctx.input_for(input.viewport_id, |state| {
+        state.keys_down.iter().copied().collect::<Vec<_>>()
+    }) {
         input.events.push(Event::Key {
             key,
             physical_key: None,
@@ -758,7 +831,7 @@ fn clear_inherited_input(ctx: &Context, input: &mut RawInput) {
         PointerButton::Extra1,
         PointerButton::Extra2,
     ];
-    let held = ctx.input(|state| {
+    let held = ctx.input_for(input.viewport_id, |state| {
         buttons
             .into_iter()
             .filter(|button| state.pointer.button_down(*button))
@@ -816,7 +889,7 @@ impl egui::plugin::Plugin for Driver {
 
     fn input_hook(&mut self, ctx: &Context, input: &mut RawInput) {
         self.viewport_passes.push(input.viewport_id);
-        if input.viewport_id != egui::ViewportId::ROOT {
+        if input.viewport_id != self.viewport {
             return;
         }
         self.resume_clock(input);
@@ -845,12 +918,12 @@ impl egui::plugin::Plugin for Driver {
             run.report.driver_milliseconds += started.elapsed().as_secs_f64() * 1000.0;
         }
         if self.running() || self.release || self.paused_at.is_some() {
-            ctx.request_repaint();
+            ctx.request_repaint_of(self.viewport);
         }
     }
 
-    fn output_hook(&mut self, _ctx: &Context, output: &mut egui::FullOutput) {
-        if self.viewport_passes.pop() != Some(egui::ViewportId::ROOT) {
+    fn output_hook(&mut self, ctx: &Context, output: &mut egui::FullOutput) {
+        if self.viewport_passes.pop() != Some(self.viewport) {
             return;
         }
         let started = web_time::Instant::now();
@@ -864,6 +937,19 @@ impl egui::plugin::Plugin for Driver {
         if self.running()
             && let Some(run) = &mut self.run
         {
+            let step = &run.steps[run.report.completed];
+            if step.action.uses_pointer() && run.gesture.is_none() {
+                let screen = ctx.input_for(self.viewport, egui::InputState::viewport_rect);
+                run.target_geometry = lookup(self.tree.as_ref(), &step.target, screen)
+                    .ok()
+                    .flatten()
+                    .map(|(rect, _)| {
+                        let stable = run
+                            .target_geometry
+                            .is_some_and(|(previous, _)| previous == rect);
+                        (rect, stable)
+                    });
+            }
             run.report.tree_milliseconds += started.elapsed().as_secs_f64() * 1000.0;
         }
     }

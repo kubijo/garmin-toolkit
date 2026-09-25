@@ -50,6 +50,12 @@ Developer tools renders the same panel on both platforms. Native commands go to 
 commands go to the originating app tab. Logs use the existing log service directly from the tools runner. Automation
 continues when tools is closed, and only the root viewport contributes semantic targets to its driver.
 
+When automation is enabled, the window host registers each child with an expiring control handle. Native children have
+independent drivers keyed by viewport; browser children expose their local driver to the owning page without registering
+another backend control connection. Scoped actions and reports stay in that child. Closing the host or ending its owner
+scope revokes its handle. Browser reload also expires the handle. See the
+[control contract](developer-tools.md#child-windows) for discovery, commands, and capture support.
+
 Device files keeps one active device window per app, bound to the profile that opened it. Logout, profile removal, or
 switching to another profile closes the file window and its FIT preview on both platforms and clears their cached views.
 Late browser catalogue and operation results are discarded after that scope ends. Developer tools is app-wide and stays

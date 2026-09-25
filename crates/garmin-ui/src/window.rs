@@ -6,6 +6,8 @@ mod native;
 pub use native::{NativeWindow, surface};
 mod resize;
 pub use resize::resize;
+#[cfg(any(feature = "automation", test))]
+pub mod control;
 pub mod protocol;
 
 #[cfg(test)]
