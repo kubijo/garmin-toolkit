@@ -236,12 +236,12 @@ impl MapSurface {
         &self.readiness
     }
 
-    /// Paint only map content using the production scene and marker paths.
-    pub fn paint(&mut self, ui: &mut Ui) {
+    /// Paint map content at its logical offset inside the pixel-aligned worker surface.
+    pub fn paint(&mut self, ui: &mut Ui, origin: egui::Pos2) {
         let Some(view) = &self.view else {
             return;
         };
-        let rect = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(view.size[0], view.size[1]));
+        let rect = Rect::from_min_size(origin, egui::vec2(view.size[0], view.size[1]));
         ui.set_clip_rect(rect);
         let mut camera = MapCamera::default();
         camera.center_at(walkers::lon_lat(view.center[0], view.center[1]));
@@ -282,12 +282,12 @@ impl MapSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::activity::map_runtime::{Backend, Renderer, TileTask};
+    use crate::activity::map_runtime::{Backend, Renderer, TileCoordinates, TileReply};
 
     struct NoTiles;
     impl Backend for NoTiles {
-        fn submit(&self, task: TileTask) {
-            task.complete_encoded(Err("no test tiles".to_owned()));
+        fn fetch(&self, _request: TileCoordinates, reply: TileReply) {
+            reply(Err("no test tiles".to_owned()));
         }
     }
 

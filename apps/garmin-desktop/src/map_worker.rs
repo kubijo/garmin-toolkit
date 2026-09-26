@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use garmin_ui::activity::map_runtime::{Backend, TileDecoder, TileTask};
+use garmin_ui::activity::map_runtime::{Backend, TileCoordinates, TileData, TileReply};
 
 const MAX_IN_FLIGHT: usize = 6;
 const MAX_CPU_WORKERS: usize = 4;
@@ -31,15 +31,12 @@ impl Worker {
                     .build()
                     .expect("activity map runtime must start");
                 let semaphore = Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT));
-                let decoder = Arc::new(TileDecoder::default());
                 while let Ok(command) = command_receiver.recv() {
-                    let Command::Tile(task) = command else {
+                    let Command::Tile { request, reply } = command else {
                         break;
                     };
-                    let request = task.coordinates();
                     let service = service.clone();
                     let semaphore = Arc::clone(&semaphore);
-                    let decoder = Arc::clone(&decoder);
                     std::mem::drop(runtime.spawn(async move {
                         let Ok(_permit) = semaphore.acquire_owned().await else {
                             return;
@@ -54,7 +51,7 @@ impl Worker {
                             .map(|tile| tile.bytes)
                             .map_err(|error| error.to_string());
                         let _ignored = tokio::task::spawn_blocking(move || {
-                            task.complete_decoded(&decoder, result);
+                            reply(result.map(TileData::Encoded));
                         })
                         .await;
                     }));
@@ -69,12 +66,12 @@ impl Worker {
 }
 
 impl Backend for Worker {
-    fn submit(&self, task: TileTask) {
-        if let Err(error) = self.commands.send(Command::Tile(task)) {
-            let Command::Tile(task) = error.0 else {
+    fn fetch(&self, request: TileCoordinates, reply: TileReply) {
+        if let Err(error) = self.commands.send(Command::Tile { request, reply }) {
+            let Command::Tile { reply, .. } = error.0 else {
                 return;
             };
-            task.complete_encoded(Err("native map runtime is unavailable".to_owned()));
+            reply(Err("native map runtime is unavailable".to_owned()));
         }
     }
 }
@@ -89,6 +86,9 @@ impl Drop for Worker {
 }
 
 enum Command {
-    Tile(TileTask),
+    Tile {
+        request: TileCoordinates,
+        reply: TileReply,
+    },
     Shutdown,
 }

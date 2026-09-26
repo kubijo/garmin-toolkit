@@ -53,7 +53,11 @@ pub fn run_with_options(options: Options) -> Result<(), Error> {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "warn,garmin=info".into()),
         )
-        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(garmin_logging::console::layer(
+            "desktop",
+            std::io::stderr,
+            garmin_logging::console::stderr_ansi(),
+        ))
         .try_init();
     tracing::info!("Desktop starting");
     let storage = block_on(mode::open_storage(mode::database_path(&data_root)))?;

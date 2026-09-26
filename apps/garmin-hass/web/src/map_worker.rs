@@ -86,7 +86,26 @@ fn check_data_result(
     Ok(())
 }
 
-fn fetch_map_tile(task: activity::map_runtime::TileTask) {
+struct TileFetch {
+    coordinates: activity::map_runtime::TileCoordinates,
+    reply: activity::map_runtime::TileReply,
+}
+
+impl TileFetch {
+    const fn coordinates(&self) -> activity::map_runtime::TileCoordinates {
+        self.coordinates
+    }
+
+    fn complete_encoded(self, result: Result<Vec<u8>, String>) {
+        (self.reply)(result.map(activity::map_runtime::TileData::Encoded));
+    }
+
+    fn complete_prepared(self, result: Result<activity::map_runtime::BrowserTilePacket, String>) {
+        (self.reply)(result.map(activity::map_runtime::TileData::Prepared));
+    }
+}
+
+fn fetch_map_tile(task: TileFetch) {
     let request = task.coordinates();
     spawn_local(async move {
         let result = fetch_map_tile_bytes(request).await;
@@ -129,7 +148,7 @@ fn map_fetch_error(value: JsValue) -> String {
 }
 
 enum BrowserMapTask {
-    Tile(activity::map_runtime::TileTask),
+    Tile(TileFetch),
     Labels {
         task: activity::map_runtime::BrowserLabelTask,
         request: Vec<u8>,
@@ -243,7 +262,7 @@ impl BrowserTileBuffers {
 }
 
 struct PendingBrowserTile {
-    task: activity::map_runtime::TileTask,
+    task: TileFetch,
     builder: activity::map_runtime::BrowserTilePacketBuilder,
     sources: BrowserTileBuffers,
     offsets: BrowserTileOffsets,
@@ -271,10 +290,7 @@ impl BrowserTileOffsets {
 }
 
 impl PendingBrowserTile {
-    fn new(
-        task: activity::map_runtime::TileTask,
-        sources: BrowserTileBuffers,
-    ) -> Result<Self, (activity::map_runtime::TileTask, String)> {
+    fn new(task: TileFetch, sources: BrowserTileBuffers) -> Result<Self, (TileFetch, String)> {
         let [vertices, indices, text_records, strings] = sources.lengths();
         let builder = match activity::map_runtime::BrowserTilePacketBuilder::new(
             vertices,
@@ -357,7 +373,7 @@ impl PendingBrowserTile {
     fn finish(
         self,
     ) -> (
-        activity::map_runtime::TileTask,
+        TileFetch,
         Result<activity::map_runtime::BrowserTilePacket, String>,
     ) {
         let result = self.builder.finish();
@@ -819,7 +835,7 @@ impl BrowserMapWorker {
         })
     }
 
-    fn request(&self, task: activity::map_runtime::TileTask) {
+    fn request(&self, task: TileFetch) {
         self.shared.submit(BrowserMapTask::Tile(task));
     }
 
@@ -873,7 +889,12 @@ impl BrowserMapBackend {
 }
 
 impl activity::map_runtime::Backend for BrowserMapBackend {
-    fn submit(&self, task: activity::map_runtime::TileTask) {
+    fn fetch(
+        &self,
+        coordinates: activity::map_runtime::TileCoordinates,
+        reply: activity::map_runtime::TileReply,
+    ) {
+        let task = TileFetch { coordinates, reply };
         match self {
             Self::Worker(worker) => worker.request(task),
             Self::Fallback => BrowserMapTask::Tile(task).fallback(),

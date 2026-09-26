@@ -23,6 +23,87 @@ def event(name, pid, tid, *, duration=None, timestamp=0, args=None, phase='X'):
 
 
 class BrowserTraceAnalysisTest(unittest.TestCase):
+    def test_render_worker_timings_are_included_without_cross_thread_pairing(self):
+        self.events = [item for item in self.events if item['name'] != 'garmin.map.tile-admission']
+        for tid, stop in [(7, 1_000), (8, 3_000)]:
+            self.events.extend(
+                [
+                    {**event('garmin.map.tile-admission', 30, tid, phase='b'), 'id': 1},
+                    {**event('garmin.map.tile-admission', 30, tid, phase='e', timestamp=stop), 'id': 1},
+                ]
+            )
+        self.events.append(event('garmin.map.tile-allocation', 30, 8, duration=500))
+        self.events.append(event('garmin.map.tile-admission', 20, 8, duration=100_000))
+        summary = analyze_trace(self.events)
+        self.assertEqual(summary.user_timings['garmin.map.tile-admission'].count, 2)
+        self.assertEqual(summary.user_timings['garmin.map.tile-admission'].maximum, 3)
+        self.assertEqual(summary.user_timings['garmin.map.tile-allocation'].maximum, 0.5)
+        self.assertFalse(any('No tile-admission' in message for message in summary.diagnostics))
+
+    def test_workload_excludes_reload_idle_nested_tasks_and_unrelated_workers(self):
+        report = {
+            'version': 1,
+            'scenario': 'stationary-arrival',
+            'state': 'passed',
+            'completed': 1,
+            'total': 1,
+            'actions': [{'scheduled_seconds': 0, 'actual_seconds': 0, 'lateness_seconds': 0}],
+        }
+        self.events.extend(
+            [
+                event(
+                    'garmin.automation.start',
+                    30,
+                    7,
+                    timestamp=1_000_000,
+                    args={'detail': {'name': 'stationary-arrival'}},
+                ),
+                event('garmin.automation.phase', 30, 7, timestamp=2_000_000, args={'detail': report}),
+                event('RunTask', 30, 7, timestamp=0, duration=280_000),
+                {**event('RunTask', 30, 7, timestamp=1_100_000, duration=10_000), 'tdur': 8_000},
+                {**event('RunTask', 30, 7, timestamp=1_101_000, duration=1_000), 'tdur': 900},
+                event('RunTask', 30, 7, timestamp=1_200_000, duration=5_000),
+                {**event('RunTask', 30, 7, timestamp=1_995_000, duration=10_000), 'tdur': 8_000},
+                event('RunTask', 30, 7, timestamp=3_000_000, duration=500_000),
+                event(
+                    'TracingSessionIdForWorker',
+                    30,
+                    8,
+                    args={
+                        'data': {
+                            'workerThreadId': 8,
+                            'url': 'http://localhost/map-render-worker-hash.js',
+                        }
+                    },
+                ),
+                {**event('RunTask', 30, 8, timestamp=1_100_000, duration=2_000), 'tdur': 1_000},
+                event('RunTask', 30, 9, timestamp=1_100_000, duration=900_000),
+                event('BeginMainThreadFrame', 30, 7, timestamp=1_100_000),
+                event('BeginMainThreadFrame', 30, 7, timestamp=1_116_000),
+            ]
+        )
+        summary = analyze_trace(self.events)
+        work = summary.workload
+        assert work is not None and work.frame_intervals is not None
+        self.assertEqual(work.duration_ms, 1_000)
+        self.assertEqual(work.frame_intervals.count, 1)
+        self.assertEqual(work.frame_intervals.maximum, 16)
+        self.assertEqual(work.frame_stalls, 0)
+        self.assertEqual(set(work.threads), {7, 8})
+        main = work.threads[7]
+        assert main.tasks is not None and main.cpu is not None
+        self.assertEqual(main.busy_wall_ms, 20)
+        self.assertEqual(main.tasks.count, 2)
+        self.assertEqual(main.cpu_total_ms, 8)
+        self.assertEqual(main.cpu.maximum, 8)
+        self.assertEqual(main.cpu_missing, 1)
+        self.assertEqual(main.boundary_tasks, 1)
+        self.assertEqual(work.threads[8].cpu_total_ms, 1)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_summary(summary)
+        self.assertIn('reload and operator wait excluded', output.getvalue())
+
     def test_paused_runs_are_functional_evidence_only(self):
         start = event('garmin.automation.start', 30, 7, args={'detail': {'name': 'stationary-arrival'}})
         report = {

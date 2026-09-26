@@ -1,8 +1,7 @@
 # Browser map evidence
 
-Recorded 2026-09-19. Scope: the bounded map committed as `10234ef`, subsequent upload telemetry, and renderer
-extraction. This is an evidence record, not a completion checklist. Open work lives in the
-[activity map plan](../plans/activity-map-workspace.md). Current renderer ownership and limits live in
+Evidence for the bounded map introduced in `10234ef`, subsequent upload telemetry, and renderer extraction. Open work
+lives in the [activity map plan](../plans/activity-map-workspace.md). Current renderer ownership and limits live in
 [activity map architecture](../architecture/activity-map.md).
 
 Raw traces remain private local inputs, not committed fixtures. Measurements concern the bundled synthetic demo route.
@@ -20,14 +19,165 @@ activity smoke complete in both worker-GL and main-GL. Activity smoke exercises 
 indoor-activity replacement, and map restoration. Main-GL also cancels a drag with Escape and completes a subsequent run
 from an active profile.
 
+On 2026-09-25, Vivaldi/ANGLE worker-GL remained at zero actions and input events when started hidden. After a
+41.73-second pause it completed warm interaction; screenshots rejected the hidden canvas and recovered on visibility. A
+separate 40-drag sequence recorded one interrupted drag during a 4.81-second hide, then completed all drags and the
+final map fit. Main-GL completed the same sequence after a 5.77-second hide interrupted a drag; capture also recovered.
+The reports excluded paused time and were marked ineligible for performance comparisons. This verifies gesture recovery
+in both renderers. A main-GL hidden-start check on 2026-09-26 also held at zero actions/input events, then completed
+warm interaction after a 100.85-second pause, using 13.33 seconds of active time. Capture recovered and the report
+excluded the run from performance comparisons.
+
+Opening either WebGL2 mode directly in a background tab reported a ready renderer while capture rejected the hidden
+canvas. The first workload stayed at zero actions/input events, then completed after visibility returned. Worker-GL
+excluded a 31.65-second pause from 12.28 seconds of active time; main-GL excluded 23.74 seconds from 12.27 seconds. Map
+capture recovered in both. Both emitted one unsupported `SetTheme(SystemDefault)` warning; the rebuilt worker-GL check
+below emitted none after disabling native window-theme synchronization on web. Evidence is in
+`.tmp/renderer-automation-acceptance/browser-lifecycle-20260926/{background-startup,main-gl-background-startup}/`.
+
+On 2026-09-25, the Linux desktop demo on Vulkan/RTX 4090 restored its 1234×812 viewport after success, failure, and
+cancellation. A subsequent rebuilt run recovered from a fully scrolled workspace. Twelve cycles switching between
+route/indoor recordings and leaving/reopening Activities, followed by six logout/login cycles, left the map ready
+without new warnings. Post-warmup process RSS samples stayed between 415,708 and 415,964 KiB, with 24 threads. This
+short native check does not measure GPU allocations or establish browser worker/callback retention bounds. Local reports
+and the restored-window captures are in `.tmp/renderer-automation-acceptance/desktop-rebuilt/` and `desktop-35833/`.
+
+On 2026-09-26, Vivaldi/ANGLE worker-GL at 1645×1291, DPR 1, completed twelve route/indoor and Activities/settings
+cycles, then six logout/login cycles. The final map was ready, capture included the map and charts, and diagnostics
+contained no warnings or errors. Vivaldi Task Manager showed tab memory falling from 213,980 K to 212,940 K, with the
+same process and two dedicated workers before and after. This short sample shows no tab-memory or worker-count growth;
+it does not establish callback, cache, or GPU allocation bounds. Reports and captures are in
+`.tmp/renderer-automation-acceptance/browser-lifecycle-20260926/worker-gl/`.
+
+A longer worker-GL check at a fixed 1440×900, DPR 1, completed four batches of six activity/map-removal cycles and six
+logout/login cycles. Post-batch RSS varied between 390,976 and 400,192 KiB; private memory between 241,212 and 250,500
+KiB, with two dedicated worker threads throughout. Memory fluctuated rather than growing across successive batches. With
+the map removed, settled RSS/private memory was 393,532/243,764 KiB; the renderer used 0.56 CPU seconds over 39.10
+seconds. Map restoration and capture then passed. An initial narrow-layout fixture timeout was excluded; all measured
+batches used the fixed wide viewport. This passes the worker retention smoke gate, not exact GPU/cache allocation
+accounting. Raw samples and reports are in the adjacent `retention-worker/` directory.
+
+Main-GL completed the same replacement and logout/login cycles without warnings or errors, with the map ready and
+capture working afterward. Replacement used 1645×1291; logout/login used 1219×838 after a window resize. Reports and
+captures are in the adjacent `main-gl/` directory. No main-GL memory baseline was collected; these runs establish
+functional recovery, not a matched performance or memory comparison.
+
+The subsequent main-GL retention check matched the 1440×900 canvas and four measured batches above. All 24
+activity/map-removal cycles and 24 logout/login cycles passed. RSS fluctuated between 326,032 and 331,752 KiB; private
+memory between 168,208 and 173,928 KiB, with one dedicated worker throughout. Settled map-removed RSS/private memory was
+325,660/167,924 KiB, with 0.75 CPU seconds over 52.74 seconds. Restoration and capture passed without warnings or
+errors. Both modes pass the retention smoke gate; the samples do not measure shared GPU-process allocations. Evidence is
+in `retention-main/` beside the worker samples.
+
+Closing the main-GL tab removed its diagnostic state; status and workload-start requests returned HTTP 404 with no app
+connected. Reopening registered a new browser source with idle automation, then completed a fresh arrival workload. The
+rejected start did not replay. With two tabs connected, workload start returned HTTP 409 and neither tab emitted new
+automation events. Closing the extra tab restored control without replay; a fresh warm-interaction workload completed.
+Worker termination after page closure was not independently observed.
+
+Reloading during a main-GL drag sequence removed a still-running workload last observed at 9/64; the new connection
+started idle and accepted a fresh arrival workload. API cancellation also stopped a sequence during its seventh drag,
+with six completed, and a subsequent map-fit action passed. Manual map dragging and page scrolling then responded
+normally. These checks do not cover keyboard recovery or an HTTP request awaiting a reply at disconnect.
+
+In both WebGL2 modes, manual scrolling and navigation clicks were ignored during a drag sequence. Escape cancelled
+during the 34th drag in main-GL and the 37th in worker-GL, after which the user confirmed scrolling and navigation
+worked again. Both reports record `stopped with Escape`. Later sequences in both modes completed all 64 drags across
+repeated focus loss/return with no visibility pauses. The user confirmed Tab/arrow input was blocked during each run and
+worked after normal completion; cancellation was not attempted in these checks. Reports and correlated window events are
+in `.tmp/renderer-automation-acceptance/browser-lifecycle-20260926/keyboard-focus/`.
+
+At Vivaldi menu zoom 130%, activity smoke completed in both WebGL2 modes with semantic targets scaled at 1.3 pixels per
+point. Both captures returned 1490×1077 pixels for a 1146.15×828.46 logical viewport. Worker-GL's map looked softer than
+main-GL's. Composition scaled a rounded bitmap into a fractional rectangle in both CSS and screenshot `drawImage`. The
+correction aligns the surface to physical pixels, preserves the fractional origin inside the renderer, and redraws when
+that origin changes. Regression tests cover placement, scrolling, and capture without resampling. Native monitor scaling
+remains unverified. Original evidence is in
+`.tmp/renderer-automation-acceptance/browser-lifecycle-20260926/{worker-gl-zoom,main-gl-zoom}/`.
+
+Both rebuilt WebGL2 modes passed activity smoke at 130% with the same 1146.15×619.23 logical viewport and 1490×805
+captures. Inspected stationary and scrolled captures no longer show general worker-map softness. Captures after 0.5- and
+73.25-point downward scrolls preserve map alignment and clipping; returning to the top passed. Small label and marker
+raster differences remain, so this establishes comparable visual sharpness, not pixel identity. Neither mode logged
+warnings or errors during the checks. Evidence is in the adjacent `pixel-alignment-rebuilt/` directory.
+
+Calling the existing composition host's failure handler in worker-GL with `Acceptance probe: renderer failure` preserved
+that reason in diagnostics and the map's semantic state. Both dedicated workers terminated. Profile settings remained
+usable and its screenshot succeeded; map capture rejected the failed renderer. This tests failure containment, not an
+actual GPU crash. After rebuild/reload, worker-GL reported ready with no error; map fit and an inspected 1440×900
+capture passed, with no new warnings. Evidence is in
+`.tmp/renderer-automation-acceptance/browser-lifecycle-20260926/failure-recovery/`.
+
+That check exposed a stale automation assertion: navigation succeeded, but the immediately following assertion read the
+previous layout's value. The driver now allows a fresh layout after input delivery before reading the next action's
+targets. Regression coverage checks both rejection of the old value and acceptance of the new one. The rebuilt browser
+passed immediate selection assertions and navigation assertions in both directions, without inserted wait actions.
+
+The rebuilt demo's emitted WASM also passed `map-worker.test.mjs` with no skipped checks: hashed-module initialization,
+empty/nonempty tile transfer, worker log relay, malformed-input recovery, and bundled tile fixtures in both themes.
+
+The acceptance evidence directory also contains worker-GL/main-GL scenario reports, cancellation/restoration captures,
+and child window action/capture reports. Browser duplicate-command rejection and stale child handles were exercised.
+Native root capture worked; immediate child viewports correctly rejected capture as unsupported. These checks do not
+establish non-unit scale, teardown during a command, or reconnect/deadline behavior for in-flight requests.
+
 Remaining input/lifecycle and performance questions live in the
 [browser verification plan](../plans/activity-map-workspace.md#browser-verification).
+
+## Matched renderer performance
+
+The first stationary-arrival pair on 2026-09-26 passed all 11 actions in both WebGL2 modes at 1450×905, DPR 1, on the
+same ANGLE/RTX 4090 adapter. Both requested the same 20 tile identities through the worker, all HTTP 200 and reported
+uncached by the browser; this does not describe backend proxy caching. Neither run paused or resized.
+
+| Workload measurement           | Worker-GL |    Main-GL |
+| ------------------------------ | --------: | ---------: |
+| Main-thread frame interval p95 |  17.29 ms |   17.34 ms |
+| Maximum frame interval         |  30.39 ms |   32.54 ms |
+| Frame intervals above 33 ms    |         0 |          0 |
+| Main-thread busy wall time     | 941.53 ms | 1169.83 ms |
+| Recorded main-thread task CPU  | 897.84 ms | 1118.63 ms |
+| Maximum tile-admission work    |   1.90 ms |    2.00 ms |
+
+Each 10.40-second trace window contains 622 frame intervals and excludes reload/operator waiting. CPU sums omit missing
+samples and boundary tasks; frame intervals are not presentation FPS. This first pair shows no observed regression, but
+does not establish a completed comparative benchmark. Both enabled telemetry, but only main-GL recorded correlated
+upload lifecycles, so upload latency cannot be compared. Reports, analyzer output, and trace hashes are under
+`.tmp/renderer-automation-acceptance/performance-20260926/`; source traces are `*-gl-stationary-1.json.gz` in Downloads.
+
+Across three recorded worker stationary runs, frame-interval p95 ranged from 17.29 to 17.39 ms, with no interval above
+33 ms. The second main-GL run had p95 17.37 ms and one 34.41 ms interval. No further A/B repetitions are required.
+
+The final `worker-gl-warm-1.json.gz` capture passed all 27 actions at the same viewport/DPR without pauses, resizing, or
+new warnings. Its 12.60-second trace window contains 754 frame intervals: p95 17.27 ms, maximum 30.93 ms, none above 33
+ms. All 40 worker tile requests returned HTTP 200; none originated on the main thread. Admission work peaked at 1.70 ms.
+Main/render-worker/preparation-worker busy wall times were 1288.61/440.41/695.24 ms; the longest preparation task was
+63.99 ms. Correlated upload lifecycles remain absent in worker-GL. This closes the agreed performance smoke check,
+without establishing presentation FPS, per-frame UI CPU, or end-to-end upload latency.
+
+## Deferred acceptance coverage
+
+The closing gate prioritizes retention, failure recovery, default-renderer performance, and final QA. Further renderer
+A/B profiling is outside the gate; existing recordings remain evidence. It does not require deterministic hiding during
+tile fetch/CPU preparation, the original rural-view comparison, native monitor scaling, every chart/theme/unit
+permutation, or every child-window/reconnect/deadline/diagnostic-stream timing combination. Existing automated boundary
+coverage and recorded runtime checks remain the evidence for those paths; untested permutations are not claimed as
+passed. No tile-proxy fault-control API is required for closure.
+
+Separate telemetry on/off benchmarking is deferred. Future measurements can use `--no-map-upload-telemetry` with matched
+tile sets, cache state, and publication counts. Current renderer comparisons keep instrumentation settings identical;
+they do not establish absolute telemetry overhead or exact GPU/cache allocation bounds from tab-memory samples.
 
 ## Browser rendering constraints
 
 WebGL2 requires raster-only device limits; requesting compute limits prevents worker initialization. On the tested
 Chrome/ANGLE setup, WebGPU exposed its API but returned no adapter. Renderer selection must report that failure rather
 than substitute a backend.
+
+On 2026-09-25, Vivaldi/ANGLE captures showed darker road edges in worker-GL than main-GL. The worker used the default
+sRGB surface while eframe preferred an unorm surface. Using egui's framebuffer selection for both removed the visible
+brightness difference at 1091×1291, DPR 1, on the bundled London activity. This was a visual comparison, not pixel-exact
+parity or validation of other adapters.
 
 Chrome DPR emulation returned inconsistent physical sizes: a 100-CSS-pixel element reported 100 physical pixels through
 `ResizeObserver.devicePixelContentBoxSize` while `devicePixelRatio` was 2. Use native-DPR testing for canvas alignment
@@ -38,6 +188,16 @@ controls above both canvases. A WASM panic may leave an object borrowed, so call
 mask the original cause. Applied egui texture deltas must be drained before their collections are dropped.
 
 ## Renderer projection
+
+### Tile background seams
+
+On 2026-09-25, the headless WGPU regression `adjacent_tile_backgrounds_have_no_seams_at_fractional_zoom_and_scale`
+reproduced dark boundaries between uniformly filled tiles: expected RGB `(36, 104, 36)`, observed `(29, 83, 29)` at a
+shared edge. Feathered background rectangles caused the discontinuity. Exact background quads pass at zoom 2/2.35, scale
+1/1.25/2, and sample counts 1/4. Other geometry retains antialiasing. This establishes the rendering defect;
+confirmation against the reported rural browser view still requires a rebuilt runtime.
+
+### Projection and clipping
 
 Clipping must preserve the full map projection. Remap it into the target-bounded viewport with a scale/offset uniform
 shared by tiles, routes, and highlights. Build the scene before constructing callbacks, and retain the same frame for

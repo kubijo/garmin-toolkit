@@ -7,5 +7,5 @@ mod implementation;
 #[path = "platform/web.rs"]
 mod implementation;
 
-pub use implementation::Backend;
-pub(super) use implementation::{ResponseQueue, SceneSlot, Shared, SurfaceRuntime};
+pub use implementation::{Backend, TileReply};
+pub(super) use implementation::{ResponseQueue, ResponseTarget, SceneSlot, Shared, SurfaceRuntime};

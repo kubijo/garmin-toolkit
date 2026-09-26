@@ -35,11 +35,11 @@ claims and HASS/desktop publication; distribution owns CLI packaging.
 
 ## Cross-cutting follow-ups
 
-- [Activity map workspace](activity-map-workspace.md) owns the shared map, charts, sample inspection, laps, and playback
-  acceptance, remaining renderer isolation, and browser validation of the semantic interaction runner. Resume from its
-  [browser verification questions](activity-map-workspace.md#browser-verification).
+- [Activity map workspace](activity-map-workspace.md) owns the combined renderer/automation lifecycle and performance
+  acceptance. Resume from its [browser verification](activity-map-workspace.md#browser-verification).
 - [Application-wide visual refresh](visual-refresh.md) owns adoption of the original Carbon-derived visual language
   across every shared primitive and primary page.
 
-Explorer hardware acceptance belongs to device inspection; keyboard and diagnostics work belongs to shared interface
-workflows. Completed explorer and parser implementation no longer have separate plans.
+Explorer hardware acceptance belongs to device inspection; device-window and recovery checks belong to shared interface
+workflows. The activity map plan owns control and diagnostics acceptance. Completed explorer and parser implementation
+no longer have separate plans.

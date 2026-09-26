@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
+import { copyFile, mkdtemp, mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { fingerprintWeb, browserAssetPaths } from './fingerprint-web.mjs';
 
-async function build(version, wasm = 'wasm fixture') {
+async function build(version, wasm = 'wasm fixture', stageWorkers) {
     await mkdir('.tmp', { recursive: true });
     const root = await mkdtemp('.tmp/web-assets-test-');
     await mkdir(join(root, 'snippets', 'unchanged-directory-id'), { recursive: true });
@@ -14,6 +14,7 @@ async function build(version, wasm = 'wasm fixture') {
     for (const worker of ['map-worker', 'map-render-worker']) {
         await writeFile(join(root, `${worker}.js`), 'export { version } from "./worker-codec.js";');
     }
+    if (stageWorkers) await stageWorkers(root);
     await writeFile(
         join(root, 'garmin-hass-web-abcdef.js'),
         `
@@ -85,6 +86,23 @@ test('binary changes invalidate the dependent application module, while unchange
     assert.notEqual(first.assets.wasm, changed.assets.wasm);
     assert.notEqual(first.assets.module, changed.assets.module);
     assert.equal(first.assets['map-worker'], changed.assets['map-worker']);
+});
+
+test('Trunk copy declarations supply all production worker dependencies', async () => {
+    const web = new URL('../../apps/garmin-hass/web/', import.meta.url);
+    const html = await readFile(new URL('index.html', web), 'utf8');
+    const { root, assets } = await build(1, undefined, async staging => {
+        for (const [, path] of html.matchAll(/<link data-trunk rel="copy-file" href="([^"]+)">/g)) {
+            await copyFile(new URL(path, web), join(staging, path));
+        }
+    });
+    for (const [asset, entry] of [
+        ['map-worker', 'installMapWorker'],
+        ['map-render-worker', 'installCompositionWorker'],
+    ]) {
+        const module = await import(pathToFileURL(join(root, assets[asset])).href);
+        assert.equal(typeof module[entry], 'function');
+    }
 });
 
 test('every emitted production asset is fingerprinted and every declared path exists', {

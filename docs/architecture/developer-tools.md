@@ -154,6 +154,11 @@ response, and Ctrl-C stops following. Terminal output requests ANSI colors accor
 desktop and HASS, including browser/worker records. Backend paths stay private; transport failures are not logged
 through the failing transport.
 
+`garmin_logging::console` renders application stderr and readable diagnostic logs with one format and ANSI palette:
+green strings, orange booleans, purple numbers, and cyan field names. Plain text uses the same layout and escaping.
+Gallery scene `logging::All variants` compares both outputs; `just gallery::capture logging.capture.toml` captures the
+comparison in both terminal fonts.
+
 Browser ingestion retains record identities across retries. Permanent rejections are counted and discarded;
 unacknowledged records remain queued. Deduplication lasts only while the original record remains in retained history.
 Overflow and resume gaps are reported.

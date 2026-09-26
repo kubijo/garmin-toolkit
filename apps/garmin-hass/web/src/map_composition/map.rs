@@ -9,6 +9,7 @@ pub(super) struct WorkerMap {
     context: egui::Context,
     surface: MapSurface,
     painter: egui_wgpu::Renderer,
+    pixel_origin: egui::Vec2,
 }
 
 impl WorkerMap {
@@ -38,6 +39,7 @@ impl WorkerMap {
         Ok(Self {
             context,
             surface: MapSurface::new(&runtime),
+            pixel_origin: egui::Vec2::ZERO,
             painter: egui_wgpu::Renderer::new(
                 device,
                 format,
@@ -46,10 +48,27 @@ impl WorkerMap {
         })
     }
 
-    pub(super) fn update(&mut self, view: &str, route: Option<&[u8]>) -> Result<(), String> {
-        self.surface.update(view, route)
+    pub(super) fn update(
+        &mut self,
+        view: &str,
+        route: Option<&[u8]>,
+        pixel_origin: [f32; 2],
+    ) -> Result<(), String> {
+        if pixel_origin
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..1.0).contains(value))
+        {
+            return Err("invalid map pixel origin".into());
+        }
+        self.surface.update(view, route)?;
+        self.pixel_origin = pixel_origin.into();
+        Ok(())
     }
 
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "surface dimensions are bounded by GPU texture limits"
+    )]
     pub(super) fn draw(
         &mut self,
         device: &wgpu::Device,
@@ -57,7 +76,7 @@ impl WorkerMap {
         target: &wgpu::TextureView,
         dimensions: [u32; 2],
     ) {
-        let Some((size, scale, dark)) = self.surface.viewport() else {
+        let Some((_, scale, dark)) = self.surface.viewport() else {
             return;
         };
         self.context.set_theme(if dark {
@@ -69,12 +88,15 @@ impl WorkerMap {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
-                egui::vec2(size[0], size[1]),
+                egui::vec2(dimensions[0] as f32, dimensions[1] as f32) / scale,
             )),
             time: Some(crate::browser_timing::now() / 1000.0),
             ..Default::default()
         };
-        let mut output = self.context.run_ui(input, |ui| self.surface.paint(ui));
+        let origin = (self.pixel_origin / scale).to_pos2();
+        let mut output = self
+            .context
+            .run_ui(input, |ui| self.surface.paint(ui, origin));
         let primitives = self
             .context
             .tessellate(output.shapes, output.pixels_per_point);

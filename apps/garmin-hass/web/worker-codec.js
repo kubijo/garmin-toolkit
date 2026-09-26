@@ -119,17 +119,19 @@ export function decodeComposition(value) {
     if (type === 'map-active' && payload.length === 1 && typeof payload[0] === 'boolean') {
         return { type, active: payload[0] };
     }
-    if (type === 'map-frame' && payload.length === 5) {
-        const [id, width, height, view, route] = payload;
+    if (type === 'map-frame' && payload.length === 7) {
+        const [id, width, height, view, route, originX, originY] = payload;
         decodeComposition([1, 'composition-size', id, width, height]);
         if (
             typeof view !== 'string' ||
             new TextEncoder().encode(view).length > 1536 ||
-            new TextEncoder().encode(JSON.stringify([1, type, id, width, height, view, null])).length > 2048 ||
+            new TextEncoder().encode(JSON.stringify([1, type, id, width, height, view, null, originX, originY]))
+                .length > 2048 ||
+            ![originX, originY].every(value => Number.isFinite(value) && value >= 0 && value < 1) ||
             (route !== null && (!(route instanceof ArrayBuffer) || route.byteLength > 32 * 1024 * 1024))
         )
             throw Error('invalid remote map payload');
-        return { type, id, width, height, view, route };
+        return { type, id, width, height, view, route, originX, originY };
     }
     if (type === 'composition-ready' && payload.length === 2) {
         const [backend, maximumSize] = payload;

@@ -109,7 +109,18 @@ fn assert_render_parity(bytes: &[u8], style: &Style, zoom: u8) {
         panic!("vector")
     };
     assert!(!shapes.is_empty());
-    assert_eq!(shapes, expected);
+    let (Shape::Mesh(background), Shape::Rect(expected_background)) = (&shapes[0], &expected[0])
+    else {
+        panic!("background must use an exact quad instead of a feathered rectangle")
+    };
+    assert_eq!(background.calc_bounds(), expected_background.rect);
+    assert!(
+        background
+            .vertices
+            .iter()
+            .all(|vertex| vertex.color == expected_background.fill)
+    );
+    assert_eq!(shapes[1..], expected[1..]);
     assert_eq!(texts.len(), labels.len());
     for (text, label) in texts.iter().zip(labels) {
         assert_eq!(text.text, label.text);

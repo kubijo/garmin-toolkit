@@ -7,6 +7,104 @@ const WIDTH: u32 = 768;
 const HEIGHT: u32 = 256;
 
 #[test]
+fn adjacent_tile_backgrounds_have_no_seams_at_fractional_zoom_and_scale() {
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let adapter = futures_lite::future::block_on(
+        instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
+    )
+    .expect("tile seam regression requires a WGPU adapter");
+    let (device, queue) =
+        futures_lite::future::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+            .unwrap();
+    let style: walkers::Style = serde_json::from_value(serde_json::json!({"layers": [
+        {"type": "background", "paint": {"background-color": "#246824"}}
+    ]}))
+    .unwrap();
+    let decoded = super::super::tile_decode::decode(
+        include_bytes!(concat!(env!("GARMIN_MAP_FIXTURES_DIR"), "/world-z0.pbf")),
+        &style,
+        2,
+        512,
+    )
+    .unwrap();
+    for samples in [1, 4] {
+        let handle = WgpuMapHandle::new(&device, wgpu::TextureFormat::Rgba8Unorm, samples);
+        let tiles = [
+            TileId {
+                zoom: 2,
+                x: 1,
+                y: 1,
+            },
+            TileId {
+                zoom: 2,
+                x: 2,
+                y: 1,
+            },
+            TileId {
+                zoom: 2,
+                x: 1,
+                y: 2,
+            },
+            TileId {
+                zoom: 2,
+                x: 2,
+                y: 2,
+            },
+        ]
+        .map(|id| {
+            let (_, prepared) = prepare_tile(&handle, id, decoded.clone());
+            (id, prepared.unwrap())
+        });
+        let renderer = renderer::Renderer::new(
+            &handle,
+            platform::UploadController,
+            crate::activity::map_runtime::MapMetrics::default(),
+        );
+        for zoom in [2.0, 2.35] {
+            for scale in [1.0, 1.25, 2.0] {
+                let mut camera = MapCamera::default();
+                camera.set_zoom(zoom);
+                camera.center_at(walkers::lon_lat(0.137, 0.321));
+                let viewport = Rect::from_min_size(
+                    pos2(0.0, 0.0),
+                    egui::vec2(WIDTH as f32 / scale, HEIGHT as f32 / scale),
+                );
+                let assembly = assemble_tile_frame(
+                    tiles.iter().map(|(id, tile)| (id, tile)),
+                    &camera,
+                    viewport,
+                );
+                let frame = Frame {
+                    camera: assembly.camera,
+                    visible: assembly.visible,
+                    ..Default::default()
+                };
+                let region = renderer::DrawRegion {
+                    projection: [0.0, 0.0, WIDTH as f32, HEIGHT as f32],
+                    viewport: [0, 0, WIDTH, HEIGHT],
+                    scissor: [0, 0, WIDTH, HEIGHT],
+                };
+                renderer.prepare(&frame, region, &queue);
+                let pixels = draw_image(&device, &queue, samples, |pass| {
+                    renderer.draw(&frame, region, pass);
+                });
+                for y in 110..146 {
+                    for x in 365..404 {
+                        let offset = (y * WIDTH as usize + x) * 4;
+                        assert_eq!(
+                            &pixels[offset..offset + 4],
+                            &[36, 104, 36, 255],
+                            "tile seam at {x},{y}; samples={samples}, zoom={zoom}, scale={scale}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn standalone_renderer_preserves_route_highlight_clipping_and_msaa() {
     let instance =
         wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());

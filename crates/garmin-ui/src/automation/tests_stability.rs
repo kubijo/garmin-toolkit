@@ -2,6 +2,59 @@
 use super::*;
 
 #[test]
+fn assertions_after_clicks_observe_the_updated_widget_state() {
+    for expected in ["on", "off"] {
+        let context = Context::default();
+        context.add_plugin(Driver::default());
+        let mut selected = false;
+        for tick in 0..30_u32 {
+            context
+                .run_ui(
+                    RawInput {
+                        time: Some(f64::from(tick) / 60.0),
+                        focused: true,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let response = ui.button("Select page");
+                        crate::semantics::target(ui, &response, "page");
+                        crate::semantics::value(&response, if selected { "on" } else { "off" });
+                        // Navigation publishes the old value while building the widget,
+                        // then applies its click for the following layout.
+                        if response.clicked() {
+                            selected = true;
+                        }
+                    },
+                )
+                .drop_without_applying_deltas();
+            if tick == 0 {
+                command(
+                    &context,
+                    "sequence",
+                    &serde_json::json!([
+                        {"kind":"click", "target":"page"},
+                        {"kind":"assert_value", "target":"page", "value":expected},
+                    ]),
+                )
+                .expect("click and assert sequence");
+            } else if !context.plugin::<Driver>().lock().running() {
+                break;
+            }
+        }
+        assert!(selected, "the click must reach the application");
+        let plugin = context.plugin::<Driver>();
+        let driver = plugin.lock();
+        let report = driver.report().expect("sequence report");
+        assert_eq!(
+            report.state,
+            if expected == "on" { "passed" } else { "failed" },
+            "{:?}",
+            report.failure
+        );
+    }
+}
+
+#[test]
 fn pointer_actions_wait_for_moving_targets() {
     for action in [
         serde_json::json!({"kind":"click", "target":"moving"}),

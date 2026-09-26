@@ -80,6 +80,26 @@ class BrowserTraceSummary:
     uploads: UploadAnalysis
     upload_telemetry: bool | None
     automation: dict[str, Any] | None
+    workload: WorkloadSummary | None
+
+
+@dataclass(frozen=True)
+class ThreadWork:
+    label: str
+    tasks: Distribution | None
+    cpu: Distribution | None
+    cpu_total_ms: float
+    cpu_missing: int
+    boundary_tasks: int
+    busy_wall_ms: float
+
+
+@dataclass(frozen=True)
+class WorkloadSummary:
+    duration_ms: float
+    frame_intervals: Distribution | None
+    frame_stalls: int
+    threads: dict[int, ThreadWork]
 
 
 @dataclass(frozen=True)
@@ -179,7 +199,7 @@ def tile_loading(events: list[dict[str, Any]], main_tid: int) -> TileLoading:
                 intervals[tid].append((start, start + duration))
             if name == 'SchedulePostMessage' and phase == 'I':
                 window(start).worker_replies += 1
-        elif tid == main_tid and phase in {'b', 'n', 'X'}:
+        if phase in {'b', 'n', 'X'}:
             if name == 'garmin.map.tile-allocation':
                 window(start).allocation_calls += 1
             elif name == 'garmin.map.tile-admission':
@@ -427,6 +447,86 @@ def automation_report(events: list[dict[str, Any]]) -> dict[str, Any] | None:
         raise TraceError(f'Malformed automation evidence: {error}') from error
 
 
+def thread_work(events: list[dict[str, Any]], label: str, start: float, end: float) -> ThreadWork:
+    """RunTask wall duration and recorded thread CPU, without nested-task double counting."""
+    spans = sorted(
+        (
+            (event['ts'], event['ts'] + event['dur'], event.get('tdur'))
+            for event in events
+            if event.get('name') == 'RunTask'
+            and event.get('ph') == 'X'
+            and finite_number(event.get('ts'))
+            and finite_number(event.get('dur'))
+            and event['dur'] >= 0
+            and event['ts'] < end
+            and event['ts'] + event['dur'] > start
+        ),
+        key=lambda span: (span[0], -span[1]),
+    )
+    durations, cpu = [], []
+    busy = 0.0
+    previous_end = -math.inf
+    missing = boundary = 0
+    for left, right, cpu_duration in spans:
+        if right <= previous_end:
+            continue
+        busy += max(0, min(right, end) - max(left, start, previous_end)) / 1_000
+        overlaps = left < previous_end
+        previous_end = right
+        if left < start or right > end or overlaps:
+            # CPU time cannot be apportioned from a partial wall-time interval.
+            boundary += 1
+            continue
+        durations.append((right - left) / 1_000)
+        if finite_number(cpu_duration) and 0 <= cpu_duration <= right - left:
+            cpu.append(cpu_duration / 1_000)
+        else:
+            missing += 1
+    return ThreadWork(
+        label, Distribution.from_values(durations), Distribution.from_values(cpu), sum(cpu), missing, boundary, busy
+    )
+
+
+def workload_summary(events: list[dict[str, Any]], main_tid: int) -> WorkloadSummary | None:
+    """Scope comparisons to one validated automation run, excluding reload and operator wait time."""
+    main = [event for event in events if event.get('tid') == main_tid]
+    starts = [event['ts'] for event in main if event.get('name') == 'garmin.automation.start']
+    ends = [
+        event['ts']
+        for event in main
+        if event.get('name') == 'garmin.automation.phase'
+        and decode_mark_detail(event).get('state') in {'passed', 'failed', 'cancelled'}
+    ]
+    if not starts or not ends:
+        return None
+    start, end = starts[0], ends[0]
+    if not finite_number(start) or not finite_number(end) or end <= start:
+        raise TraceError('Invalid automation trace interval.')
+    frames = sorted(
+        event['ts'] for event in main if event.get('name') == 'BeginMainThreadFrame' and start <= event['ts'] <= end
+    )
+    intervals = [(right - left) / 1_000 for left, right in zip(frames, frames[1:], strict=False)]
+    labels = {main_tid: 'main'}
+    for event in events:
+        if event.get('name') == 'TracingSessionIdForWorker':
+            data = event.get('args', {}).get('data', {})
+            path = urlsplit(data.get('url', '')).path
+            tid = data.get('workerThreadId')
+            if path.startswith(('/map-render-worker-', '/map-worker-')) and type(tid) is int:
+                labels[tid] = path.rsplit('/', 1)[-1]
+    threads = {}
+    for tid, label in labels.items():
+        work = thread_work([event for event in events if event.get('tid') == tid], label, start, end)
+        if tid == main_tid or work.busy_wall_ms:
+            threads[tid] = work
+    return WorkloadSummary(
+        (end - start) / 1_000,
+        Distribution.from_values(intervals),
+        sum(interval > STALL_LIMIT_MILLISECONDS for interval in intervals),
+        threads,
+    )
+
+
 def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PREFIX) -> BrowserTraceSummary:
     renderer_pid, page_url = renderer_for_url(events, url_prefix)
     renderer_tid = renderer_main_thread(events, renderer_pid)
@@ -463,7 +563,7 @@ def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PR
     ]
 
     dispatch: dict[str, list[float]] = {}
-    timings = user_timing_durations(main)
+    timings = user_timing_durations(timed)
     tile_requests = 0
     worker_tile_requests = 0
     for event in main:
@@ -550,6 +650,7 @@ def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PR
         uploads=uploads,
         upload_telemetry=upload_telemetry,
         automation=automation,
+        workload=workload_summary(timed, renderer_tid) if automation is not None else None,
     )
 
 
@@ -571,6 +672,19 @@ def print_summary(summary: BrowserTraceSummary, *, timeline: bool = False) -> No
     if summary.automation is not None:
         run = summary.automation
         print(f'  automation {run["scenario"]}: {run["state"]} ({run.get("completed", 0)}/{run.get("total", "?")})')
+    if summary.workload is not None:
+        workload = summary.workload
+        print(f'  workload   {workload.duration_ms:.2f} ms; reload and operator wait excluded')
+        print(
+            f'  workload frame intervals {format_distribution(workload.frame_intervals)}; '
+            f'{workload.frame_stalls} above 33 ms (not presentation FPS)'
+        )
+        for tid, work in workload.threads.items():
+            print(
+                f'  {work.label} [tid {tid}]: task CPU {format_distribution(work.cpu)}; '
+                f'total {work.cpu_total_ms:.2f} ms; busy wall {work.busy_wall_ms:.2f} ms; '
+                f'{work.cpu_missing} missing CPU samples, {work.boundary_tasks} partial/overlapping tasks excluded'
+            )
     print(f'  interaction {format_distribution(summary.interaction_frame_intervals)}')
     print('              pointer contact / wheel bursts + 200 ms; overlapping frame intervals, not presentation FPS')
     print(f'  interact >33 ms {summary.interaction_frame_stalls}')

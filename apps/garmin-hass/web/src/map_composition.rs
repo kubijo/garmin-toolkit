@@ -86,7 +86,7 @@ pub(super) fn install_map(
     creation: &eframe::CreationContext<'_>,
     canvas: &web_sys::HtmlCanvasElement,
     mode: &str,
-) -> Result<(), std::io::Error> {
+) -> Result<Session, std::io::Error> {
     let render = creation
         .wgpu_render_state
         .as_ref()
@@ -97,8 +97,9 @@ pub(super) fn install_map(
         ));
     }
     let context = creation.egui_ctx.clone();
-    let repaint = Closure::<dyn FnMut()>::new(move || context.request_repaint()).into_js_value();
-    start_map(canvas, mode, &repaint).map_err(|e| std::io::Error::other(super::js_reason(&e)))?;
+    let repaint = Closure::<dyn FnMut()>::new(move || context.request_repaint());
+    start_map(canvas, mode, repaint.as_ref())
+        .map_err(|e| std::io::Error::other(super::js_reason(&e)))?;
     creation.egui_ctx.add_plugin(CompositionPlugin::new(
         &render.device,
         render.target_format,
@@ -110,7 +111,17 @@ pub(super) fn install_map(
         .add_plugin(garmin_ui::activity::map_remote::RemoteMapPlugin::new(
             BrowserHost,
         ));
-    Ok(())
+    Ok(Session { _repaint: repaint })
+}
+
+pub(super) struct Session {
+    _repaint: Closure<dyn FnMut()>,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        dispose();
+    }
 }
 
 pub(super) fn mode(canvas: &web_sys::HtmlCanvasElement) -> Result<String, JsValue> {
@@ -153,6 +164,7 @@ impl Host for BrowserHost {
 }
 
 pub(super) struct Fixture {
+    _session: Session,
     width: f32,
     height: f32,
     show_map: bool,
@@ -176,9 +188,8 @@ impl Fixture {
             ));
         }
         let context = creation.egui_ctx.clone();
-        let repaint =
-            Closure::<dyn FnMut()>::new(move || context.request_repaint()).into_js_value();
-        start_composition(canvas, mode, &repaint)
+        let repaint = Closure::<dyn FnMut()>::new(move || context.request_repaint());
+        start_composition(canvas, mode, repaint.as_ref())
             .map_err(|error| std::io::Error::other(super::js_reason(&error)))?;
         creation.egui_ctx.add_plugin(CompositionPlugin::new(
             &render.device,
@@ -187,6 +198,7 @@ impl Fixture {
             BrowserHost,
         ));
         Ok(Self {
+            _session: Session { _repaint: repaint },
             width: 760.0,
             height: 400.0,
             show_map: true,
@@ -268,11 +280,5 @@ impl eframe::App for Fixture {
                 self.show_modal = false;
             }
         }
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        dispose();
     }
 }

@@ -3,9 +3,10 @@ import test from 'node:test';
 
 import { compositionMessage, decodeComposition, requestMapDraw } from '../../apps/garmin-hass/web/worker-codec.js';
 import { installCompositionWorker } from '../../apps/garmin-hass/web/map-render-worker.js';
-import { waitMilliseconds, nextMapFrame } from '../../apps/garmin-hass/web/map-clock.js';
+import { MapClock, waitMilliseconds, nextMapFrame } from '../../apps/garmin-hass/web/map-clock.js';
 import {
     rendererMode,
+    compositionSurface,
     placementStyle,
     startComposition,
     beginCompositionPass,
@@ -93,6 +94,7 @@ test('physical placement preserves clipped projection and accounts for canvas CS
         canvasHeight: 300,
         backingWidth: 800,
         backingHeight: 600,
+        pixelOrigin: [0, 0],
     });
     assert.throws(() =>
         placementStyle([0, 0, Infinity, 5], [0, 0, 5, 5], [10, 10], { left: 0, top: 0, width: 10, height: 10 }),
@@ -100,6 +102,26 @@ test('physical placement preserves clipped projection and accounts for canvas CS
     assert.throws(() =>
         placementStyle([0, 0, 5, 5], [0, 0, 5, 5], [0, 10], { left: 0, top: 0, width: 10, height: 10 }),
     );
+});
+
+test('fractional placement keeps backing pixels one-to-one without shifting the map projection', () => {
+    const projection = [-80.25, 100.75, 800.5, 600.5];
+    const clip = [0, 120, 720, 400];
+    const bounds = { left: 10, top: 20, width: 800, height: 600 };
+    const placement = placementStyle(projection, clip, [1600, 1200], bounds);
+    const surface = compositionSurface(projection);
+    assert.deepEqual(surface, [-81, 100, 802, 602]);
+    assert.equal(placement.canvasWidth * 2, placement.backingWidth);
+    assert.equal(placement.canvasHeight * 2, placement.backingHeight);
+    assert.equal((placement.left + placement.canvasLeft - bounds.left) * 2, surface[0]);
+    assert.equal((placement.top + placement.canvasTop - bounds.top) * 2, surface[1]);
+    for (let axis = 0; axis < 2; axis++) {
+        for (const fraction of [0, 0.25, 0.5, 1]) {
+            const original = projection[axis] + projection[axis + 2] * fraction;
+            const composed = surface[axis] + placement.pixelOrigin[axis] + projection[axis + 2] * fraction;
+            assert.equal(composed, original, 'geographic projection survives the integer surface translation');
+        }
+    }
 });
 
 test('shared composition codec rejects malformed and oversized payloads', () => {
@@ -243,8 +265,10 @@ test('capture correlation rejects late replies, resize and worker disposal', asy
 test('screenshot composes clipped map below copied UI pixels and rejects changed geometry', async t => {
     const b = browser(t);
     b.worker.send('composition-ready', 'Gl', 8192);
-    await b.draw();
-    b.worker.send('composition-drawn', 1, 600, 400);
+    beginCompositionPaint();
+    paintedComposition([20.25, 100.75, 599.5, 399.5], [20, 101, 600, 399], [1000, 800]);
+    await Promise.resolve();
+    b.worker.send('composition-drawn', 1, 600, 401);
     const canvas = {
         width: 1000,
         height: 800,
@@ -253,7 +277,7 @@ test('screenshot composes clipped map below copied UI pixels and rejects changed
     };
     b.document.getElementById = () => canvas;
     const calls = [];
-    const bitmap = { width: 600, height: 400, close: () => calls.push('close') };
+    const bitmap = { width: 600, height: 401, close: () => calls.push('close') };
     const png = new Blob(['PNG'], { type: 'image/png' });
     class Offscreen {
         getContext() {
@@ -293,13 +317,7 @@ test('screenshot composes clipped map below copied UI pixels and rejects changed
     rgba[0] = 0; // A later WASM allocation may reuse the borrowed memory.
     b.worker.send('composition-captured', 1, png);
     assert.deepEqual(await result, new Uint8Array(await png.arrayBuffer()));
-    assert.deepEqual(calls, [
-        ['clip', 20, 100, 600, 400],
-        ['map', 20, 100, 600, 400],
-        'close',
-        ['pixels', 42],
-        ['ui', 0, 0],
-    ]);
+    assert.deepEqual(calls, [['clip', 20, 101, 600, 399], ['map', 20, 100], 'close', ['pixels', 42], ['ui', 0, 0]]);
     const stale = beginScreenshot();
     canvas.width = 999;
     await assert.rejects(finishScreenshot(stale, rgba, 1000, 800), /viewport changed/);
@@ -351,6 +369,37 @@ test('map transport coalesces view demand and transfers each route revision once
     assert.deepEqual(new Uint8Array(frames()[2].transfer[0]), new Uint8Array([9]));
 });
 
+test('scrolling by a fractional pixel redraws the worker origin without resending the route', async t => {
+    const b = browser(t, true);
+    b.worker.send('composition-ready', 'Gl', 8192);
+    setMapRoute(1, new Uint8Array([7, 8]));
+    const paint = async y => {
+        beginCompositionPass();
+        setMapView(JSON.stringify({ revision: 1, zoom: 10 }));
+        beginCompositionPaint();
+        paintedComposition([20.25, y, 600, 400], [20, 101, 600, 399], [1000, 800]);
+        await Promise.resolve();
+    };
+    await paint(100.25);
+    const frame = () => decodeComposition(b.worker.messages.filter(m => m.message[1] === 'map-frame').at(-1).message);
+    assert.equal(frame().width, 601);
+    assert.equal(frame().height, 401);
+    assert.equal(frame().originX, 0.25);
+    assert.equal(frame().originY, 0.25);
+    b.worker.send('composition-drawn', 1, 601, 401);
+    await paint(100.75);
+    assert.equal(frame().id, 2, 'unchanged camera and dimensions still need new pixel alignment');
+    assert.equal(frame().originY, 0.75);
+    assert.equal(frame().route, null);
+    b.worker.send('composition-drawn', 2, 601, 401);
+    b.worker.send('map-readiness', 2, 'ready');
+    await paint(101.75);
+    assert.equal(frame().id, 2, 'whole-pixel translation reuses the same bitmap');
+    for (const value of [-0.1, 1, NaN, Infinity]) {
+        assert.throws(() => compositionMessage('map-frame', 3, 601, 401, '{}', null, value, 0));
+    }
+});
+
 test('readiness belongs to the current fully submitted view, not a draw acknowledgement', async t => {
     const b = browser(t, true);
     b.worker.send('composition-ready', 'Gl', 8192);
@@ -392,6 +441,59 @@ test('worker admission clocks yield without a Window or animation-frame API', as
     t.mock.timers.tick(984);
     await first;
     assert.equal(timeout, true);
+});
+
+test('preparation deadlines retain their remaining active time across repeated suspension', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let now = 0;
+    t.mock.method(performance, 'now', () => now);
+    const advance = milliseconds => {
+        now += milliseconds;
+        t.mock.timers.tick(milliseconds);
+    };
+    const clock = new MapClock();
+    let expired = 0;
+    const first = clock.wait(10000).then(() => expired++);
+    advance(3000);
+    clock.setActive(false);
+    const second = clock.wait(2000).then(() => expired++);
+    advance(60000);
+    await Promise.resolve();
+    assert.equal(expired, 0);
+    clock.setActive(true);
+    clock.setActive(true);
+    advance(2000);
+    await second;
+    assert.equal(expired, 1);
+    clock.setActive(false);
+    clock.setActive(false);
+    advance(60000);
+    clock.setActive(true);
+    advance(4999);
+    await Promise.resolve();
+    assert.equal(expired, 1);
+    advance(1);
+    await first;
+    assert.equal(expired, 2);
+    assert.equal(clock.pending.size, 0);
+});
+
+test('worker entry point and wasm-bindgen module copies share the preparation clock', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const entry = await import('../../apps/garmin-hass/web/map-clock.js?entry');
+    const binding = await import('../../apps/garmin-hass/web/map-clock.js?binding');
+    entry.setMapClockActive(false);
+    let expired = false;
+    const deadline = binding.waitMilliseconds(100).then(() => {
+        expired = true;
+    });
+    t.mock.timers.tick(60000);
+    await Promise.resolve();
+    assert.equal(expired, false);
+    entry.setMapClockActive(true);
+    t.mock.timers.tick(100);
+    await deadline;
+    assert.equal(expired, true);
 });
 
 test('a painted frame without a map and page visibility hide the underlay', async t => {
@@ -468,6 +570,81 @@ test('submission timeout releases the worker and rejects late publication', asyn
     b.worker.send('composition-drawn', 1, 600, 400);
     assert.equal(b.wrapper.style.display, 'none');
     assert.equal(compositionStatus().submitted, 0);
+});
+
+test('hidden time does not consume initialization or submission deadlines', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let now = 0;
+    t.mock.method(performance, 'now', () => now);
+    const advance = milliseconds => {
+        now += milliseconds;
+        t.mock.timers.tick(milliseconds);
+    };
+    const b = browser(t, true);
+    const hide = () => {
+        b.document.hidden = true;
+        b.events.dispatchEvent(new Event('visibilitychange'));
+    };
+    const show = () => {
+        b.document.hidden = false;
+        b.events.dispatchEvent(new Event('visibilitychange'));
+    };
+    advance(4000);
+    hide();
+    advance(60000);
+    assert.equal(compositionStatus().state, 'initializing');
+    show();
+    advance(5000);
+    b.worker.send('composition-ready', 'Gl', 8192);
+    setMapRoute(1, new Uint8Array([1]));
+    await b.draw(600, 400, { revision: 1, zoom: 10 });
+    advance(3000);
+    hide();
+    assert.deepEqual(b.worker.messages.at(-1).message, compositionMessage('map-active', false));
+    advance(60000);
+    assert.equal(compositionStatus().state, 'ready');
+    assert.equal(compositionStatus().inFlight, 1);
+    show();
+    await b.draw(600, 400, { revision: 1, zoom: 10 });
+    advance(6000);
+    assert.equal(compositionStatus().state, 'ready');
+    advance(1000);
+    assert.equal(compositionStatus().state, 'failed', 'visible time still has a bounded deadline');
+    assert.equal(b.worker.terminated, true);
+});
+
+test('completion while hidden clears the suspended deadline without replaying the frame', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const b = browser(t, true);
+    b.worker.send('composition-ready', 'Gl', 8192);
+    setMapRoute(1, new Uint8Array([1]));
+    const view = { revision: 1, zoom: 10 };
+    await b.draw(600, 400, view);
+    b.document.hidden = true;
+    b.events.dispatchEvent(new Event('visibilitychange'));
+    b.worker.send('composition-drawn', 1, 600, 400);
+    b.worker.send('map-readiness', 1, 'ready');
+    t.mock.timers.tick(60000);
+    b.document.hidden = false;
+    b.events.dispatchEvent(new Event('visibilitychange'));
+    await b.draw(600, 400, view);
+    t.mock.timers.tick(60000);
+    assert.equal(mapReadiness(), 'ready');
+    assert.equal(b.worker.messages.filter(m => m.message[1] === 'map-frame').length, 1);
+    assert.equal(b.wrapper.style.display, 'block');
+    const completedCapture = snapshotComposition();
+    b.worker.send('composition-captured', 1, new Blob(['PNG'], { type: 'image/png' }));
+    await completedCapture.blob;
+    const capture = snapshotComposition();
+    b.document.hidden = true;
+    b.events.dispatchEvent(new Event('visibilitychange'));
+    await assert.rejects(capture.blob, /hidden/);
+    b.document.hidden = false;
+    b.events.dispatchEvent(new Event('visibilitychange'));
+    assert.throws(completedCapture.validate, /map changed/, 'visibility changes invalidate the whole readback');
+    disposeComposition();
+    t.mock.timers.tick(60000);
+    assert.deepEqual(compositionStatus(), { state: 'disposed' });
 });
 
 test('stale submission identities cannot publish a resized surface', async t => {
@@ -574,7 +751,10 @@ test('worker reports bounded readiness transitions for asynchronous map draws', 
             backend() { return 'Gl'; }
             maximum_size() { return 8192; }
             enable_map() {}
-            update_map() { this.draws = 0; }
+            update_map(view, route, x, y) {
+                if (x !== 0.25 || y !== 0.75) throw Error('lost fractional pixel origin');
+                this.draws = 0;
+            }
             draw() { this.draws++; }
             readiness() { return this.draws > 1 ? 'ready' : 'pending'; }
         }
@@ -585,7 +765,9 @@ test('worker reports bounded readiness transitions for asynchronous map draws', 
     await scope.onmessage({
         data: compositionMessage('map-init', 'worker-gl', moduleUrl, 'fixture.wasm', {}, 'prepare.js'),
     });
-    await scope.onmessage({ data: compositionMessage('map-frame', 1, 120, 80, '{}', new ArrayBuffer(0)) });
+    await scope.onmessage({
+        data: compositionMessage('map-frame', 1, 120, 80, '{}', new ArrayBuffer(0), 0.25, 0.75),
+    });
     assert.deepEqual(messages.at(-1), [1, 'map-readiness', 1, 'pending']);
     requestMapDraw(0);
     t.mock.timers.tick(16);

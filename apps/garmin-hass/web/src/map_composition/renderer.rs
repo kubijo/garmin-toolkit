@@ -79,9 +79,15 @@ impl CompositionRenderer {
         device.on_uncaptured_error(std::sync::Arc::new(|error| {
             report_failure(&format!("worker GPU error: {error}"));
         }));
-        let configuration = surface
+        let mut configuration = surface
             .get_default_config(&adapter, 1, 1)
             .ok_or_else(|| error("worker surface has no supported configuration"))?;
+        // Match eframe's framebuffer selection so antialiased edges blend in the same color space.
+        configuration.format = eframe::egui_wgpu::preferred_framebuffer_format(
+            &surface.get_capabilities(&adapter).formats,
+        )
+        .map_err(error)?;
+        configuration.view_formats = vec![configuration.format];
         let pipeline =
             garmin_ui::activity::map_composition::pattern_pipeline(&device, configuration.format);
         Ok(Self {
@@ -130,11 +136,21 @@ impl CompositionRenderer {
     /// Apply one bounded view and optional immutable route replacement.
     /// # Errors
     /// Returns shared-codec validation errors.
-    pub fn update_map(&mut self, view: &str, route: &[u8]) -> Result<(), JsValue> {
+    pub fn update_map(
+        &mut self,
+        view: &str,
+        route: &[u8],
+        origin_x: f32,
+        origin_y: f32,
+    ) -> Result<(), JsValue> {
         self.map
             .as_mut()
             .ok_or_else(|| error("map is not initialized"))?
-            .update(view, (!route.is_empty()).then_some(route))
+            .update(
+                view,
+                (!route.is_empty()).then_some(route),
+                [origin_x, origin_y],
+            )
             .map_err(error)
     }
 

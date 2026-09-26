@@ -25,7 +25,7 @@ const RESIZE_SETTLE_TIME: Duration = Duration::from_millis(120);
 static TERMINAL_RENDERER: OnceLock<Mutex<TerminalPreviewRenderer>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-enum PreviewFont {
+pub enum PreviewFont {
     DepartureMono,
     JetBrainsMonoNerd,
 }
@@ -275,6 +275,50 @@ fn show_font_preview(ui: &mut Ui, spec: TerminalPreviewSpec, scene_revision: Sce
         data.insert_temp(texture_id, preview);
         data.insert_temp(input_id, (scene_revision, input));
     });
+}
+
+/// Display formatted terminal output using the same fonts, palette, and renderer as TUI scenes.
+pub fn show_text(
+    ui: &mut Ui,
+    text: ratatui::text::Text<'_>,
+    font: PreviewFont,
+    columns: u16,
+    revision: SceneRevision,
+) {
+    use ratatui::widgets::{Paragraph, Widget as _, Wrap};
+
+    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+    let rows = u16::try_from(paragraph.line_count(columns)).expect("preview fits in a terminal");
+    let pixels_per_point = ui.ctx().pixels_per_point().max(1.0);
+    let available = ui.available_size();
+    let font_size = shared_renderer().fit_font_size(FontFit {
+        font,
+        columns,
+        rows,
+        max_width: even_floor(available.x * pixels_per_point)
+            .saturating_sub(2)
+            .max(2),
+        max_height: even_floor(available.y * pixels_per_point)
+            .saturating_sub(2)
+            .max(2),
+    });
+    let id = ui.id().with(("terminal-text", font, font_size, columns));
+    let cached = ui.data(|data| data.get_temp::<(SceneRevision, egui::TextureHandle)>(id));
+    let texture = cached.filter(|(saved, _)| *saved == revision).map_or_else(
+        || {
+            let area = ratatui::layout::Rect::new(0, 0, columns, rows);
+            let mut buffer = ratatui::buffer::Buffer::empty(area);
+            paragraph.render(area, &mut buffer);
+            let image = shared_renderer().render(&buffer, font, font_size);
+            let texture =
+                ui.ctx()
+                    .load_texture("terminal-text", image, egui::TextureOptions::LINEAR);
+            ui.data_mut(|data| data.insert_temp(id, (revision, texture.clone())));
+            texture
+        },
+        |(_, texture)| texture,
+    );
+    paint_terminal_texture(ui, &texture, available, pixels_per_point, id, false);
 }
 
 fn terminal_preview(
