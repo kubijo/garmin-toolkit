@@ -43,7 +43,6 @@ tempfile.workspace = true
 tokio.workspace = true
 tower-http = { workspace = true, features = ["fs"] }
 tracing.workspace = true
-tracing-logfmt.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 

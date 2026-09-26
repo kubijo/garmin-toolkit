@@ -14,8 +14,8 @@ use garmin_model::{
 
 struct NoTiles;
 impl map_runtime::Backend for NoTiles {
-    fn submit(&self, task: map_runtime::TileTask) {
-        task.complete_encoded(Ok(Vec::new()));
+    fn fetch(&self, _request: map_runtime::TileCoordinates, reply: map_runtime::TileReply) {
+        reply(Ok(map_runtime::TileData::Encoded(Vec::new())));
     }
 }
 

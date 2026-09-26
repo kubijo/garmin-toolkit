@@ -1,4 +1,4 @@
-import { snapshotComposition } from './map-composition.js';
+import { compositionSurface, snapshotComposition } from './map-composition.js';
 
 const MAX_PIXELS = 8 * 1024 * 1024;
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -62,18 +62,19 @@ export async function finishScreenshot(ticket, rgba, width, height) {
         try {
             validate();
             const { projection, clip, screen } = ticket.map.placement;
+            const surface = compositionSurface(projection);
             if (
                 screen[0] !== width ||
                 screen[1] !== height ||
-                bitmap.width !== Math.ceil(projection[2]) ||
-                bitmap.height !== Math.ceil(projection[3])
+                bitmap.width !== surface[2] ||
+                bitmap.height !== surface[3]
             )
                 throw Error('map screenshot dimensions do not match the UI frame');
             context.save();
             context.beginPath();
             context.rect(...clip);
             context.clip();
-            context.drawImage(bitmap, ...projection);
+            context.drawImage(bitmap, surface[0], surface[1]);
             context.restore();
         } finally {
             bitmap.close();

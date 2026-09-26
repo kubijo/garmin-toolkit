@@ -18,6 +18,7 @@ use std::{
 };
 use tracing_subscriber::{Layer, layer::Context};
 
+pub mod console;
 mod directory;
 mod history;
 mod query;

@@ -105,6 +105,8 @@ pub(super) fn steps(name: &str) -> Option<Vec<Step>> {
     add("setup", "activity.0", Action::Wait, 0.1);
     add("setup", "activity.0", Action::Click, 0.2);
     add("setup", "activity.0", Action::Value("selected".into()), 0.1);
+    add("setup", "activity.viewer", Action::Wait, 0.1);
+    add("setup", "activity.viewer", Action::Scroll(100_000.0), 0.3);
     add("setup", "map.fit", Action::Wait, 0.1);
     add("setup", "map.fit", Action::Click, 0.2);
     add("arrival", "map", Action::Ready, 0.2);
@@ -125,59 +127,73 @@ pub(super) fn steps(name: &str) -> Option<Vec<Step>> {
         add("return", "map", Action::Ready, 0.2);
     }
     if name == "activity-smoke" {
-        add("playback", "playback.toggle", Action::Click, 0.3);
-        add(
+        steps.extend(activity_smoke_steps());
+    }
+    Some(steps)
+}
+
+fn activity_smoke_steps() -> Vec<Step> {
+    [
+        ("playback", "playback.toggle", Action::Click, 0.3),
+        (
             "playback",
             "playback.toggle",
             Action::Value("playing".into()),
             0.1,
-        );
-        add("playback", "playback.speed.2", Action::Click, 0.3);
-        add(
+        ),
+        ("playback", "playback.speed.2", Action::Click, 0.3),
+        (
             "playback",
             "playback.speed",
             Action::Value("2×".into()),
             0.2,
-        );
-        add("playback", "playback.toggle", Action::Click, 0.3);
-        add(
+        ),
+        ("playback", "playback.toggle", Action::Click, 0.3),
+        (
             "playback",
             "playback.toggle",
             Action::Value("stopped".into()),
             0.1,
-        );
-        add("lap", "lap.0", Action::Click, 0.3);
-        add("lap", "map.full-activity", Action::Wait, 0.1);
-        add("lap", "map.full-activity", Action::Click, 0.3);
-        add("chart", "activity.viewer", Action::Scroll(-320.0), 0.5);
-        add("chart", "chart.0", Action::Wait, 0.1);
-        add("chart", "chart.0", Action::Drag { x: 0.75, y: 0.5 }, 0.3);
-        add("chart", "activity.viewer", Action::Scroll(320.0), 0.5);
-        add("replacement", "activity.1", Action::Click, 0.3);
-        add(
+        ),
+        ("lap", "lap.0", Action::Click, 0.3),
+        ("lap", "map.full-activity", Action::Wait, 0.1),
+        ("lap", "map.full-activity", Action::Click, 0.3),
+        ("chart", "activity.viewer", Action::Scroll(-320.0), 0.5),
+        ("chart", "chart.0", Action::Wait, 0.1),
+        ("chart", "chart.0", Action::Drag { x: 0.75, y: 0.5 }, 0.3),
+        ("chart", "activity.viewer", Action::Scroll(320.0), 0.5),
+        ("replacement", "activity.1", Action::Click, 0.3),
+        (
             "replacement",
             "activity.1",
             Action::Value("selected".into()),
             0.1,
-        );
+        ),
         // The second fixture has no GPS data.
-        add("replacement", "map.empty", Action::Wait, 0.1);
-        add(
+        ("replacement", "map.empty", Action::Wait, 0.1),
+        (
             "replacement",
             "map.empty",
             Action::Value("empty".into()),
             0.1,
-        );
-        add("restore", "activity.0", Action::Click, 0.3);
-        add(
+        ),
+        ("restore", "activity.0", Action::Click, 0.3),
+        (
             "restore",
             "activity.0",
             Action::Value("selected".into()),
             0.1,
-        );
-        add("restore", "map", Action::Ready, 0.2);
-    }
-    Some(steps)
+        ),
+        ("restore", "map", Action::Ready, 0.2),
+    ]
+    .into_iter()
+    .map(|(phase, target, action, after)| Step {
+        phase,
+        target: target.into(),
+        action,
+        after,
+    })
+    .collect()
 }
 
 fn responsive_steps() -> Vec<Step> {

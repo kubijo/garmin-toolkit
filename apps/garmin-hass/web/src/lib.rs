@@ -128,9 +128,11 @@ pub fn start() -> Result<(), JsValue> {
                     if renderer_mode.starts_with("worker-") && map_composition::is_fixture() {
                         return Ok(Box::new(map_composition::Fixture::new(creation, &fixture_canvas, &renderer_mode)?));
                     }
-                    if renderer_mode.starts_with("worker-") {
-                        map_composition::install_map(creation, &fixture_canvas, &renderer_mode)?;
-                    }
+                    let map_session = if renderer_mode.starts_with("worker-") {
+                        Some(map_composition::install_map(creation, &fixture_canvas, &renderer_mode)?)
+                    } else {
+                        None
+                    };
                     browser_timing::mark_detail(
                         "garmin.map.upload-telemetry",
                         &serde_json::json!({
@@ -142,7 +144,7 @@ pub fn start() -> Result<(), JsValue> {
                         }).to_string(),
                     );
                     let map_renderer = activity::install_wgpu_map(render_state, 1);
-                    let app = App::new(creation.egui_ctx.clone(), map_renderer, map_upload_telemetry)?;
+                    let app = App::new(creation.egui_ctx.clone(), map_renderer, map_upload_telemetry, map_session)?;
                     if ui_automation { automation::install(&creation.egui_ctx); }
                     Ok(Box::new(app))
                 }),
@@ -167,6 +169,7 @@ fn identify_text_agent(canvas: &web_sys::HtmlCanvasElement) {
 }
 
 struct App {
+    _map_session: Option<map_composition::Session>,
     developer: developer::Host,
     files: files::Host,
     context: eframe::egui::Context,
@@ -197,6 +200,7 @@ impl App {
         context: eframe::egui::Context,
         map_renderer: activity::WgpuMapHandle,
         map_upload_telemetry: bool,
+        map_session: Option<map_composition::Session>,
     ) -> Result<Self, garmin_i18n::Error> {
         let translations = Translations::bundled()?;
         let intl = translations.formatter(Language::English)?;
@@ -218,6 +222,7 @@ impl App {
         });
         let activity_workspace = activity::Workspace::new(&map_runtime);
         Ok(Self {
+            _map_session: map_session,
             developer: developer::Host::new(context.clone()),
             files: files::Host::default(),
             context,

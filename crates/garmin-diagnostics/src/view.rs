@@ -10,10 +10,23 @@ use axum::{
     http::StatusCode,
     response::{Html, IntoResponse as _, Response},
 };
-use garmin_model::logging::{Level, Record};
+use garmin_logging::console::Text;
+use garmin_model::logging::Record;
 use nu_ansi_term::Color;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::fmt::{Display, Write as _};
+
+struct Fields<'a> {
+    values: &'a BTreeMap<String, String>,
+    ansi: bool,
+}
+
+impl Display for Fields<'_> {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        output.write_str(&garmin_logging::console::fields(self.values, self.ansi))
+    }
+}
 
 #[derive(Clone, Copy)]
 enum Style {
@@ -73,22 +86,7 @@ trait Line {
 
 impl Line for Record {
     fn line(&self, ansi: bool) -> String {
-        let severity = match self.level {
-            Level::Trace => Style::Dim,
-            Level::Debug => Style::Blue,
-            Level::Info => Style::Green,
-            Level::Warn => Style::Yellow,
-            Level::Error => Style::Red,
-        };
-        format!(
-            "{} {} {} [{}] {} {:?}",
-            Style::Dim.paint(self.timestamp_ms, ansi),
-            severity.paint(format_args!("{:?}", self.level), ansi),
-            Style::Dim.paint(self.source.escape_debug(), ansi),
-            Style::Cyan.paint(self.component.escape_debug(), ansi),
-            self.message.escape_debug(),
-            self.fields
-        )
+        garmin_logging::console::line(self, ansi)
     }
 }
 
@@ -102,17 +100,20 @@ impl Line for Event {
             _ => Style::Heading,
         };
         format!(
-            "{} {} {} [{}] {}{:?}",
+            "{} {} {} [{}] {}{}",
             Style::Dim.paint(self.timestamp_ms, ansi),
-            Style::Dim.paint(self.source.escape_debug(), ansi),
-            kind.paint(self.observation.kind.escape_debug(), ansi),
-            Style::Cyan.paint(self.observation.window.escape_debug(), ansi),
+            Style::Dim.paint(Text(&self.source), ansi),
+            kind.paint(Text(&self.observation.kind), ansi),
+            Style::Cyan.paint(Text(&self.observation.window), ansi),
             if self.observation.removed {
                 Style::Yellow.paint("removed ", ansi)
             } else {
                 String::new()
             },
-            self.observation.fields
+            Fields {
+                values: &self.observation.fields,
+                ansi,
+            }
         )
     }
 }
@@ -127,7 +128,7 @@ impl Content {
             let _ = write!(
                 status,
                 " · {}",
-                Style::Red.paint(format_args!("Error: {}", error.escape_debug()), ansi)
+                Style::Red.paint(format_args!("Error: {}", Text(error)), ansi)
             );
         }
         let mut records = Vec::new();

@@ -1,20 +1,19 @@
 //! Platform backend and per-surface completion boundary for activity maps.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 #[path = "map_runtime/browser_worker.rs"]
 mod browser_worker;
 #[path = "map_runtime/platform.rs"]
 mod platform;
 
-use platform::{ResponseQueue, SceneSlot, Shared, SurfaceRuntime};
+use platform::{ResponseQueue, ResponseTarget, SceneSlot, Shared, SurfaceRuntime};
 
 use super::map::{
     MapTileDecoder, MapTileResponse, PreparedTile, TileStore,
     camera::{MapCamera, MapViewDemand},
 };
 
-pub use super::map::MapTileDecoder as TileDecoder;
 pub use super::map::gpu_map::{
     BrowserLabelTask, BrowserRouteTask, BrowserTileLimits, BrowserTilePacket,
     BrowserTilePacketBuilder, BrowserTileSection, BrowserTileTransfer,
@@ -27,7 +26,7 @@ pub use browser_worker::{
     BROWSER_WORKER_PROTOCOL_VERSION, BrowserWorkerCompletion, BrowserWorkerReceipt,
     BrowserWorkerRegistration, BrowserWorkerState, BrowserWorkerTaskKind, BrowserWorkerTransition,
 };
-pub use platform::Backend;
+pub use platform::{Backend, TileReply};
 
 type SharedBackend = Shared<dyn Backend>;
 
@@ -222,6 +221,7 @@ pub struct MapRuntimeHandle {
     backend: SharedBackend,
     metrics: MapMetrics,
     renderer: Renderer,
+    decoder: Arc<OnceLock<MapTileDecoder>>,
 }
 
 /// Rendering strategy paired with a map runtime.
@@ -229,7 +229,7 @@ pub struct MapRuntimeHandle {
 pub struct Renderer(Arc<dyn RendererFactory>);
 
 trait RendererFactory: Send + Sync {
-    fn painter(&self, metrics: MapMetrics) -> Box<dyn ScenePainter>;
+    fn runtime(&self, metrics: MapMetrics) -> Box<dyn SceneRuntime>;
     fn prepare_tile(
         &self,
         id: walkers::TileId,
@@ -274,8 +274,8 @@ impl Renderer {
 struct WgpuRenderer(super::map::WgpuMapHandle);
 
 impl RendererFactory for WgpuRenderer {
-    fn painter(&self, metrics: MapMetrics) -> Box<dyn ScenePainter> {
-        Box::new(super::map::gpu_map::GpuMap::new(&self.0, metrics))
+    fn runtime(&self, metrics: MapMetrics) -> Box<dyn SceneRuntime> {
+        Box::new(super::map::gpu_map::GpuMapRuntime::new(&self.0, metrics))
     }
 
     fn prepare_tile(
@@ -313,7 +313,7 @@ impl RendererFactory for WgpuRenderer {
 struct SoftwareRenderer;
 
 impl RendererFactory for SoftwareRenderer {
-    fn painter(&self, _metrics: MapMetrics) -> Box<dyn ScenePainter> {
+    fn runtime(&self, _metrics: MapMetrics) -> Box<dyn SceneRuntime> {
         Box::new(SoftwarePainter)
     }
 
@@ -334,10 +334,18 @@ impl RendererFactory for SoftwareRenderer {
 }
 
 trait ScenePainter {
-    fn is_gpu(&self) -> bool;
     fn paint_callback(&self, rect: egui::Rect) -> Option<egui::Shape>;
-    fn paint_labels(&mut self, frame: LabelFrame<'_>);
-    fn update(&mut self, frame: SceneFrame<'_, '_>) -> super::map::gpu_map::ScenePerf;
+    fn paint_labels(&self, frame: LabelFrame<'_>);
+}
+
+trait SceneRuntime {
+    fn is_gpu(&self) -> bool;
+    fn prepare(&mut self, frame: SceneFrame<'_, '_>) -> PreparedScene;
+}
+
+struct PreparedScene {
+    painter: Box<dyn ScenePainter>,
+    performance: super::map::gpu_map::ScenePerf,
 }
 
 #[derive(Clone, Copy)]
@@ -346,7 +354,6 @@ pub(super) struct LabelFrame<'a> {
     pub scene: &'a MapScene,
     pub camera: &'a MapCamera,
     pub viewport: egui::Rect,
-    pub backend: &'a dyn Backend,
 }
 
 #[derive(Clone, Copy)]
@@ -360,30 +367,32 @@ pub(super) struct SceneFrame<'frame, 'recording> {
 }
 
 impl ScenePainter for super::map::gpu_map::GpuMap {
-    fn is_gpu(&self) -> bool {
-        true
-    }
-
     fn paint_callback(&self, rect: egui::Rect) -> Option<egui::Shape> {
         Some(self.paint_callback(rect))
     }
 
-    fn paint_labels(&mut self, frame: LabelFrame<'_>) {
+    fn paint_labels(&self, frame: LabelFrame<'_>) {
         self.paint_labels(frame);
     }
+}
 
-    fn update(&mut self, frame: SceneFrame<'_, '_>) -> super::map::gpu_map::ScenePerf {
-        self.update(frame)
+impl SceneRuntime for super::map::gpu_map::GpuMapRuntime {
+    fn is_gpu(&self) -> bool {
+        true
+    }
+
+    fn prepare(&mut self, frame: SceneFrame<'_, '_>) -> PreparedScene {
+        let (painter, performance) = self.update(frame);
+        PreparedScene {
+            painter: Box::new(painter),
+            performance,
+        }
     }
 }
 
 struct SoftwarePainter;
 
 impl ScenePainter for SoftwarePainter {
-    fn is_gpu(&self) -> bool {
-        false
-    }
-
     fn paint_callback(&self, _rect: egui::Rect) -> Option<egui::Shape> {
         None
     }
@@ -392,7 +401,7 @@ impl ScenePainter for SoftwarePainter {
         clippy::cast_possible_truncation,
         reason = "software fallback transforms bounded f64 world coordinates into egui f32 points"
     )]
-    fn paint_labels(&mut self, frame: LabelFrame<'_>) {
+    fn paint_labels(&self, frame: LabelFrame<'_>) {
         let LabelFrame {
             ui,
             scene,
@@ -434,9 +443,18 @@ impl ScenePainter for SoftwarePainter {
             }
         }
     }
+}
 
-    fn update(&mut self, _frame: SceneFrame<'_, '_>) -> super::map::gpu_map::ScenePerf {
-        super::map::gpu_map::ScenePerf::default()
+impl SceneRuntime for SoftwarePainter {
+    fn is_gpu(&self) -> bool {
+        false
+    }
+
+    fn prepare(&mut self, _frame: SceneFrame<'_, '_>) -> PreparedScene {
+        PreparedScene {
+            painter: Box::new(Self),
+            performance: super::map::gpu_map::ScenePerf::default(),
+        }
     }
 }
 
@@ -448,6 +466,7 @@ impl MapRuntimeHandle {
             backend: Shared::new(backend),
             metrics: MapMetrics::discard(),
             renderer,
+            decoder: Arc::new(OnceLock::new()),
         }
     }
 
@@ -462,11 +481,17 @@ impl MapRuntimeHandle {
         let renderer = self.renderer.clone();
         let backend = Shared::clone(&self.backend);
         let scene = SceneSlot::default();
-        let driver = SurfaceDriver::new(Shared::clone(&backend), renderer.clone(), scene.clone());
+        let driver = SurfaceDriver::new(
+            Shared::clone(&backend),
+            renderer.clone(),
+            scene.clone(),
+            Arc::clone(&self.decoder),
+        );
         MapSurfaceHandle {
             backend,
             metrics: self.metrics.clone(),
-            painter: renderer.0.painter(self.metrics.clone()),
+            preparation: renderer.0.runtime(self.metrics.clone()),
+            painter: None,
             runtime: SurfaceRuntime::new(driver),
             scene,
         }
@@ -476,7 +501,8 @@ impl MapRuntimeHandle {
 pub(super) struct MapSurfaceHandle {
     backend: SharedBackend,
     metrics: MapMetrics,
-    painter: Box<dyn ScenePainter>,
+    preparation: Box<dyn SceneRuntime>,
+    painter: Option<Box<dyn ScenePainter>>,
     runtime: SurfaceRuntime,
     scene: SceneSlot,
 }
@@ -510,27 +536,30 @@ impl MapSurfaceHandle {
     }
 
     pub(super) fn gpu_enabled(&self) -> bool {
-        self.painter.is_gpu()
+        self.preparation.is_gpu()
     }
 
     pub(super) fn paint_callback(&self, rect: egui::Rect) -> Option<egui::Shape> {
-        self.painter.paint_callback(rect)
+        self.painter
+            .as_ref()
+            .and_then(|painter| painter.paint_callback(rect))
     }
 
     pub(super) fn paint_labels(
-        &mut self,
+        &self,
         scene: &MapScene,
         ui: &egui::Ui,
         camera: &MapCamera,
         viewport: egui::Rect,
     ) {
-        self.painter.paint_labels(LabelFrame {
-            ui,
-            scene,
-            camera,
-            viewport,
-            backend: self.backend.as_ref(),
-        });
+        if let Some(painter) = &self.painter {
+            painter.paint_labels(LabelFrame {
+                ui,
+                scene,
+                camera,
+                viewport,
+            });
+        }
     }
 
     pub(super) fn update_scene(
@@ -541,14 +570,16 @@ impl MapSurfaceHandle {
         context: &egui::Context,
         route: &super::map::gpu_map::RouteScene<'_>,
     ) -> super::map::gpu_map::ScenePerf {
-        self.painter.update(SceneFrame {
+        let prepared = self.preparation.prepare(SceneFrame {
             scene,
             camera,
             viewport,
             context,
             route,
             backend: self.backend.as_ref(),
-        })
+        });
+        self.painter = Some(prepared.painter);
+        prepared.performance
     }
 
     pub(super) fn scene(&self) -> MapScene {
@@ -656,16 +687,23 @@ pub(in crate::activity::map_runtime) struct SurfaceDriver {
     responses: ResponseQueue,
     scene: PublishedScene,
     tiles: TileStore,
+    decoder: Arc<OnceLock<MapTileDecoder>>,
 }
 
 impl SurfaceDriver {
-    fn new(backend: SharedBackend, renderer: Renderer, scene: SceneSlot) -> Self {
+    fn new(
+        backend: SharedBackend,
+        renderer: Renderer,
+        scene: SceneSlot,
+        decoder: Arc<OnceLock<MapTileDecoder>>,
+    ) -> Self {
         Self {
             backend,
             renderer,
             responses: ResponseQueue::default(),
             scene: PublishedScene::new(scene),
             tiles: TileStore::default(),
+            decoder,
         }
     }
 
@@ -678,12 +716,15 @@ impl SurfaceDriver {
             self.tiles.apply_demand(&demand);
             self.tiles.schedule_requests();
             for request in self.tiles.take_requests() {
-                self.backend.submit(TileTask {
+                let task = TileTask {
                     request,
                     renderer: self.renderer.clone(),
-                    responses: self.responses.clone(),
+                    responses: self.responses.target(),
                     context: view.context.clone(),
-                });
+                    decoder: Arc::clone(&self.decoder),
+                };
+                self.backend
+                    .fetch(request, Box::new(move |result| task.complete(result)));
             }
         }
 
@@ -743,40 +784,36 @@ impl MapScene {
     }
 }
 
-/// One runtime-owned tile operation. Completing it publishes only to its originating surface.
-pub struct TileTask {
+/// Transport payload; decoding and surface publication belong to the runtime.
+pub enum TileData {
+    Encoded(Vec<u8>),
+    Prepared(BrowserTilePacket),
+}
+
+struct TileTask {
     request: TileCoordinates,
     renderer: Renderer,
-    responses: ResponseQueue,
+    responses: ResponseTarget,
     context: egui::Context,
+    decoder: Arc<OnceLock<MapTileDecoder>>,
 }
 
 impl TileTask {
-    /// Return the requested XYZ coordinates and map theme.
-    #[must_use]
-    pub const fn coordinates(&self) -> TileCoordinates {
-        self.request
-    }
-
-    /// Decode and publish encoded MVT bytes on the caller's worker thread.
-    pub fn complete_decoded(self, decoder: &MapTileDecoder, result: Result<Vec<u8>, String>) {
-        let response = decoder.decode(self.request, result, &self.renderer);
-        self.complete(response);
-    }
-
-    /// Publish encoded bytes for lightweight or deterministic backends.
-    pub fn complete_encoded(self, result: Result<Vec<u8>, String>) {
-        self.complete_decoded(&MapTileDecoder::default(), result);
-    }
-
-    /// Publish a tile prepared by the browser worker.
-    pub fn complete_prepared(self, result: Result<BrowserTilePacket, String>) {
-        let response = MapTileResponse::prepared(self.request, result, &self.renderer);
-        self.complete(response);
-    }
-
-    fn complete(self, response: MapTileResponse) {
-        self.responses.push(response);
+    fn complete(self, result: Result<TileData, String>) {
+        let Some(responses) = self.responses.upgrade() else {
+            return;
+        };
+        let response = match result {
+            Ok(TileData::Encoded(bytes)) => self
+                .decoder
+                .get_or_init(MapTileDecoder::default)
+                .decode(self.request, Ok(bytes), &self.renderer),
+            Ok(TileData::Prepared(packet)) => {
+                MapTileResponse::prepared(self.request, Ok(packet), &self.renderer)
+            }
+            Err(reason) => MapTileResponse::prepared(self.request, Err(reason), &self.renderer),
+        };
+        responses.push(response);
         self.context.request_repaint();
     }
 }
@@ -797,24 +834,24 @@ mod tests {
     }
 
     impl Backend for RecordingBackend {
-        fn submit(&self, task: TileTask) {
-            self.submitted.lock().unwrap().push(task.coordinates());
+        fn fetch(&self, request: TileCoordinates, _reply: TileReply) {
+            self.submitted.lock().unwrap().push(request);
         }
     }
 
     struct CompletingBackend;
 
     impl Backend for CompletingBackend {
-        fn submit(&self, task: TileTask) {
-            task.complete_encoded(Ok(Vec::new()));
+        fn fetch(&self, _request: TileCoordinates, reply: TileReply) {
+            reply(Ok(TileData::Encoded(Vec::new())));
         }
     }
 
     struct FailingBackend;
 
     impl Backend for FailingBackend {
-        fn submit(&self, task: TileTask) {
-            task.complete_encoded(Err("fixture failure".to_owned()));
+        fn fetch(&self, _request: TileCoordinates, reply: TileReply) {
+            reply(Err("fixture failure".to_owned()));
         }
     }
 
@@ -826,7 +863,7 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     impl Backend for ThreadRecordingBackend {
-        fn submit(&self, _task: TileTask) {
+        fn fetch(&self, _request: TileCoordinates, _reply: TileReply) {
             *self.submitted_on.lock().unwrap() = Some(std::thread::current().id());
         }
     }
@@ -834,6 +871,50 @@ mod tests {
     fn demand(ids: impl IntoIterator<Item = walkers::TileId>) -> MapViewDemand {
         let visible = ids.into_iter().collect::<Vec<_>>();
         MapViewDemand::from_tiles(&visible)
+    }
+
+    #[test]
+    fn retired_surface_replies_do_not_prepare_or_publish_tiles() {
+        struct CountingRenderer(Arc<std::sync::atomic::AtomicUsize>);
+        impl RendererFactory for CountingRenderer {
+            fn runtime(&self, _metrics: MapMetrics) -> Box<dyn SceneRuntime> {
+                Box::new(SoftwarePainter)
+            }
+
+            fn prepare_tile(
+                &self,
+                _id: walkers::TileId,
+                tile: walkers::Tile,
+            ) -> Result<PreparedTile, String> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Ok(PreparedTile { tile, gpu: None })
+            }
+
+            fn prepare_browser_tile(
+                &self,
+                _packet: BrowserTilePacket,
+            ) -> Result<Option<Arc<super::super::map::PreparedGpuTile>>, String> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Ok(None)
+            }
+        }
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let responses = ResponseQueue::default();
+        let task = TileTask {
+            request: TileCoordinates::new(0, 0, 0, true, 0),
+            renderer: Renderer(Arc::new(CountingRenderer(Arc::clone(&count)))),
+            responses: responses.target(),
+            decoder: Arc::new(OnceLock::new()),
+            context: egui::Context::default(),
+        };
+        drop(responses);
+        task.complete(Ok(TileData::Prepared(
+            BrowserTilePacketBuilder::new(0, 0, 0, 0)
+                .unwrap()
+                .finish()
+                .unwrap(),
+        )));
+        assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
 
     #[test]

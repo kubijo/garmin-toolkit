@@ -46,6 +46,9 @@ pub use size::Size;
 /// Installs shared loaders and styling.
 pub fn install(ctx: &egui::Context) {
     install_assets(ctx);
+    // Browser windows do not support native decoration theme commands.
+    #[cfg(target_arch = "wasm32")]
+    ctx.options_mut(|options| options.sync_window_theme = false);
     ctx.style_mut_of(egui::Theme::Dark, |style| {
         theme::apply_palette(style, &garmin_color::theme::GRAY_100);
     });

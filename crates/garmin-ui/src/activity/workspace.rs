@@ -3017,8 +3017,14 @@ mod tests {
     struct TestMapBackend;
 
     impl crate::activity::map_runtime::Backend for TestMapBackend {
-        fn submit(&self, task: crate::activity::map_runtime::TileTask) {
-            task.complete_encoded(Ok(Vec::new()));
+        fn fetch(
+            &self,
+            _request: crate::activity::map_runtime::TileCoordinates,
+            reply: crate::activity::map_runtime::TileReply,
+        ) {
+            reply(Ok(crate::activity::map_runtime::TileData::Encoded(
+                Vec::new(),
+            )));
         }
     }
 

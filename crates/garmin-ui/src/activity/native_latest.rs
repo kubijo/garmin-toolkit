@@ -160,4 +160,36 @@ mod tests {
         worker.synchronize();
         assert_eq!(results.try_iter().collect::<Vec<_>>(), vec![1, 3]);
     }
+
+    #[test]
+    fn dropping_a_busy_worker_discards_pending_work_and_releases_its_resources() {
+        struct Resource(mpsc::Sender<()>);
+        impl Drop for Resource {
+            fn drop(&mut self) {
+                self.0.send(()).unwrap();
+            }
+        }
+        let (released, wait_for_release) = mpsc::channel();
+        let resource = Resource(released);
+        let (started, wait_for_start) = mpsc::channel();
+        let (finish, wait_for_finish) = mpsc::channel();
+        let (executed, results) = mpsc::channel();
+        let worker = LatestWorker::spawn("latest-worker-drop-test", move |task| {
+            let _resource = &resource;
+            started.send(()).unwrap();
+            wait_for_finish.recv().unwrap();
+            executed.send(task).unwrap();
+        });
+        worker.submit(1);
+        wait_for_start
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        worker.submit(2);
+        drop(worker);
+        finish.send(()).unwrap();
+        wait_for_release
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(results.try_iter().collect::<Vec<_>>(), vec![1]);
+    }
 }

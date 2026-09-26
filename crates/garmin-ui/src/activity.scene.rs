@@ -584,14 +584,17 @@ struct GalleryMapBackend {
 }
 
 impl activity::map_runtime::Backend for GalleryMapBackend {
-    fn submit(&self, task: activity::map_runtime::TileTask) {
-        let request = task.coordinates();
+    fn fetch(
+        &self,
+        request: activity::map_runtime::TileCoordinates,
+        reply: activity::map_runtime::TileReply,
+    ) {
         let result = if self.fail_tiles {
             Err("gallery provider unavailable".to_owned())
         } else {
             Ok(gallery_vector_tile(request))
         };
-        task.complete_encoded(result);
+        reply(result.map(activity::map_runtime::TileData::Encoded));
     }
 }
 

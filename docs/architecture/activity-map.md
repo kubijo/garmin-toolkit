@@ -17,11 +17,15 @@ Narrow views retain the viewer and expose subordinate panes as drawers. Missing 
 inspection, laps, or playback. The shared visual language applies; external activity viewers are behavioral references,
 not sources of copied implementation or design.
 
-`egui_plot` owns chart axes, grids, lines, fills, transforms, clipping, and pointer coordinates. Chart hover maps X to
-the nearest original sample. Missing measurements split rendered series and omit only the affected point marker, not the
-shared vertical guide. Width-sensitive first/minimum/maximum/last buckets reduce rendered series without discarding
-inspection data. Distance is the default domain only with monotonic anchors and nonzero span; otherwise elapsed time is
-used. Profile units apply.
+`egui_plot` owns grids, lines, fills, transforms, clipping, and pointer coordinates; the viewer paints axis labels
+outside the plot background. Chart hover maps X to the nearest original sample. Missing measurements split rendered
+series and omit only the affected point marker, not the shared vertical guide. Width-sensitive
+first/minimum/maximum/last buckets reduce rendered series without discarding inspection data. Distance is the default
+domain only with monotonic anchors and nonzero span; otherwise elapsed time is used. Profile units apply.
+
+The viewer caches recording analysis and width-dependent chart series. Offscreen cards reserve their measured height
+without rebuilding plots; language, font metrics, and display scale invalidate those measurements. Cursor and playback
+updates reuse the series.
 
 Route hover performs the inverse sample lookup. Clicking pins; Escape or empty analysis space clears. Lap hover
 highlights without moving the camera; selection fits the lap range and restricts playback until reset. Playback uses a
@@ -38,7 +42,9 @@ templates, provider hosts, and response shape are validated. HASS exposes relati
 leaves the activity and neutral route canvas usable; attribution remains visible.
 
 `walkers` supplies map style/types behind the owned runtime, not the interactive map widget. Prepared tile caching,
-deduplicated requests, scheduling, and retry state belong to that runtime.
+deduplicated requests, scheduling, and retry state belong to that runtime. Hosts receive coordinates and a reply
+callback, returning encoded bytes or a browser-prepared packet. The runtime owns the shared decoder and surface
+publication; replies for a retired surface are discarded before decoding.
 
 ## Rendering boundary
 
@@ -88,18 +94,28 @@ full physical-pixel projection and target-bounded viewport/scissor, plus a WGPU 
 remaps clip coordinates into the bounded viewport, preserving geometry scale and alignment when the map extends beyond
 the render target. Device handles own pipelines; map surfaces own uniforms and upload controllers. The egui adapter
 converts logical placement and invokes this boundary on the event/render thread, retaining the same frame through
-preparation and drawing. It no longer stores pipelines in egui callback resources. Route and label ready state remains
-painter-owned in this native/main-thread path. HASS instead defaults to a worker-owned map-only OffscreenCanvas using
-WebGL2. The main thread retains egui, camera/input, and chart state; the render worker owns map scheduling, uploads,
-labels, markers, and presentation. A separate preparation worker transfers bulk results directly to the render worker.
-The egui composition callback supplies final placement and a transparent replacement-blend hole over the worker canvas.
-`?map-render-mode=main-gl` retains the matched WebGL2 baseline; `--no-map-render-worker` restores the original host
-path. Worker initialization failures are explicit, with no silent backend substitution. Native rendering is unchanged.
-The browser integration lives in the `map_composition` Rust module and `map-composition.js`; the host's
-`map_render_worker` setting selects the default worker path. The composition host exposes `window.garminMapComposition`
-for status and disposal. Worker-WebGPU is an experimental alternative, selected explicitly with
-`?map-render-mode=worker-webgpu`. Functional native-DPR scenario evidence and remaining lifecycle/performance limits are
-recorded in [browser evidence](../research/browser-map.md#semantic-interaction-findings).
+preparation and drawing. Route and label preparation belongs to the surface runtime. Each prepared scene captures its
+route, label shapes and texture, and readiness together; painting cannot poll results or enqueue work. Label placement
+uses a spatial grid, reuses same-zoom translations, and hides stale labels after zoom changes.
+
+HASS defaults to a worker-owned map-only OffscreenCanvas using WebGL2. The main thread retains egui, camera/input, and
+chart state; the render worker owns map scheduling, uploads, labels, markers, and presentation. A separate preparation
+worker transfers bulk results directly to the render worker. Both renderers use egui's preferred framebuffer format to
+keep edge blending in the same color space. The egui composition callback supplies final placement and a transparent
+replacement-blend hole over the worker canvas. `?map-render-mode=main-gl` retains the matched WebGL2 baseline;
+`--no-map-render-worker` restores the original host path. Worker initialization failures are explicit, with no silent
+backend substitution. The browser integration lives in the `map_composition` Rust module and `map-composition.js`; the
+host's `map_render_worker` setting selects the default worker path. The composition host exposes
+`window.garminMapComposition` for status and disposal. Worker-WebGPU is an experimental alternative, selected explicitly
+with `?map-render-mode=worker-webgpu`. Functional native-DPR scenario evidence and remaining lifecycle/performance
+limits are recorded in [browser evidence](../research/browser-map.md#semantic-interaction-findings).
+
+Route data transfers once per revision; view updates allow one in flight and one replaceable pending update. Rendering
+does not transfer per-frame images or whole-UI paint lists. Native retains 4x MSAA and the upload budgets above.
+
+Render and preparation deadlines count active time. Hidden tabs suspend those deadlines and map drawing, and invalidate
+pending screenshots. Application teardown disposes the worker and its repaint callback. A temporarily hidden map pauses
+drawing while retaining its bounded caches for reuse.
 
 If egui transforms a callback rectangle after construction, painting uses the final placement with an immutable
 corrected camera binding. It does not rewrite the prepared surface buffer, which earlier draws may still reference.

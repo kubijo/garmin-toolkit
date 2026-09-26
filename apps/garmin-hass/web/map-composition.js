@@ -1,6 +1,7 @@
 import { receiveLog } from './logging.js';
 import { compositionMessage, decodeComposition } from './worker-codec.js';
 import { applicationAssets } from './browser-assets.js';
+import { MapClock } from './map-clock.js';
 
 export function rendererMode(enabled, search) {
     if (!enabled) return '';
@@ -9,6 +10,13 @@ export function rendererMode(enabled, search) {
     const mode = values[0] ?? 'worker-gl';
     if (!['main-gl', 'worker-gl', 'worker-webgpu'].includes(mode)) throw Error('unknown map-render-mode');
     return mode;
+}
+
+// Cover the original projection with whole physical pixels; never scale the rendered bitmap.
+export function compositionSurface([left, top, width, height]) {
+    const x = Math.floor(left);
+    const y = Math.floor(top);
+    return [x, y, Math.ceil(left + width) - x, Math.ceil(top + height) - y];
 }
 
 // Pure coordinate conversion shared by the host and tests. Projection is NEVER clipped/rebased.
@@ -27,17 +35,19 @@ export function placementStyle(projection, clip, screen, bounds) {
         throw Error('invalid composition placement');
     const sx = bounds.width / screen[0];
     const sy = bounds.height / screen[1];
+    const surface = compositionSurface(projection);
     return {
         left: bounds.left + clip[0] * sx,
         top: bounds.top + clip[1] * sy,
         width: clip[2] * sx,
         height: clip[3] * sy,
-        canvasLeft: (projection[0] - clip[0]) * sx,
-        canvasTop: (projection[1] - clip[1]) * sy,
-        canvasWidth: projection[2] * sx,
-        canvasHeight: projection[3] * sy,
-        backingWidth: Math.ceil(projection[2]),
-        backingHeight: Math.ceil(projection[3]),
+        canvasLeft: (surface[0] - clip[0]) * sx,
+        canvasTop: (surface[1] - clip[1]) * sy,
+        canvasWidth: surface[2] * sx,
+        canvasHeight: surface[3] * sy,
+        backingWidth: surface[2],
+        backingHeight: surface[3],
+        pixelOrigin: [projection[0] - surface[0], projection[1] - surface[1]],
     };
 }
 
@@ -172,16 +182,24 @@ export function startComposition(canvas, mode, repaint, map = false) {
         pendingView: null,
         pendingRoute: null,
         routeRevision: 0,
-        active: false,
+        active: null,
         captureSequence: 0,
         capture: null,
+        visibilityRevision: 0,
+        watchdog: null,
+        clock: new MapClock(!document.hidden),
     };
     host = state;
     state.visibility = () => {
+        state.clock.setActive(!document.hidden);
         if (document.hidden) {
+            state.visibilityRevision++;
             state.wrapper.style.display = 'none';
             setActive(state, false);
-        } else state.repaint();
+            rejectCapture(state, 'map hidden during screenshot');
+        } else {
+            state.repaint();
+        }
     };
     document.addEventListener('visibilitychange', state.visibility);
     const fail = error => {
@@ -193,7 +211,7 @@ export function startComposition(canvas, mode, repaint, map = false) {
         state.worker?.terminate();
         state.flight = null;
         rejectCapture(state, state.error);
-        clearTimeout(state.timeout);
+        clearWatchdog(state);
         state.repaint();
         console.error('Map composition failed:', state.error);
     };
@@ -226,7 +244,7 @@ export function startComposition(canvas, mode, repaint, map = false) {
                     const expected = mode === 'worker-gl' ? 'Gl' : 'BrowserWebGpu';
                     if (message.backend !== expected)
                         throw Error('worker backend does not match the requested backend');
-                    clearTimeout(state.timeout);
+                    clearWatchdog(state);
                     state.status = 'ready';
                     state.backend = backendLabel(message.backend);
                     reportRendererStatus();
@@ -239,7 +257,7 @@ export function startComposition(canvas, mode, repaint, map = false) {
                     state.flight.width === message.width &&
                     state.flight.height === message.height
                 ) {
-                    clearTimeout(state.timeout);
+                    clearWatchdog(state);
                     state.drawn = state.flight;
                     if (state.map) state.routeRevision = state.flight.revision;
                     state.flight = null;
@@ -260,7 +278,7 @@ export function startComposition(canvas, mode, repaint, map = false) {
                 fail(error);
             }
         };
-        state.timeout = setTimeout(() => fail('render worker initialization timed out'), 10000);
+        startWatchdog(state, 'render worker initialization timed out');
         const initialization = map
             ? compositionMessage('map-init', mode, moduleUrl, wasmUrl, offscreen, preparationUrl)
             : compositionMessage('composition-init', mode, moduleUrl, wasmUrl, offscreen);
@@ -326,7 +344,11 @@ function flush(state) {
         const matches = state.drawn?.width === width && state.drawn?.height === height;
         state.wrapper.style.display = matches && (state.map || !state.flight) ? 'block' : 'none';
         setActive(state, true);
-        const viewChanged = state.map && state.view !== null && state.view !== state.drawn?.view;
+        const viewChanged =
+            state.map &&
+            state.view !== null &&
+            (state.view !== state.drawn?.view ||
+                style.pixelOrigin.some((value, index) => value !== state.drawn?.pixelOrigin[index]));
         if ((!matches || viewChanged) && !state.flight) {
             if (state.map && state.view === null) return;
             if (state.sequence === 0xffffffff) throw Error('composition sequence exhausted');
@@ -338,12 +360,19 @@ function flush(state) {
                 route = state.route.buffer;
             }
             const message = state.map
-                ? compositionMessage('map-frame', id, width, height, state.view, route)
+                ? compositionMessage('map-frame', id, width, height, state.view, route, ...style.pixelOrigin)
                 : compositionMessage('composition-size', id, width, height);
-            state.flight = { id, width, height, view: state.view, revision };
+            state.flight = {
+                id,
+                width,
+                height,
+                view: state.view,
+                revision,
+                pixelOrigin: style.pixelOrigin,
+            };
             state.sent += 1;
             state.bytes += JSON.stringify(message).length;
-            state.timeout = setTimeout(() => state.fail('render worker submission timed out'), 10000);
+            startWatchdog(state, 'render worker submission timed out');
             if (route === null) state.worker.postMessage(message);
             else state.worker.postMessage(message, [route]);
             if (route !== null) state.route = null;
@@ -357,6 +386,16 @@ function setActive(state, active) {
     if (!state.map || state.status !== 'ready' || state.active === active) return;
     state.active = active;
     state.worker.postMessage(compositionMessage('map-active', active));
+}
+
+function startWatchdog(state, reason) {
+    clearWatchdog(state);
+    state.watchdog = state.clock.schedule(() => state.fail(reason), 10000);
+}
+
+function clearWatchdog(state) {
+    state.watchdog?.();
+    state.watchdog = null;
 }
 
 export function mapReadiness() {
@@ -391,7 +430,7 @@ export function disposeComposition() {
     host = undefined;
     rendererDisposed = true;
     reportRendererStatus();
-    clearTimeout(state.timeout);
+    clearWatchdog(state);
     document.removeEventListener('visibilitychange', state.visibility);
     state.worker?.terminate();
     state.wrapper.remove();
@@ -412,7 +451,14 @@ function rejectCapture(state, reason) {
 export function snapshotComposition() {
     const state = host;
     const signature = () =>
-        JSON.stringify([host === state, state?.status, state?.placement, state?.view, state?.drawn?.id]);
+        JSON.stringify([
+            host === state,
+            state?.status,
+            state?.placement,
+            state?.view,
+            state?.drawn?.id,
+            state?.visibilityRevision,
+        ]);
     const before = signature();
     const validate = () => {
         if (signature() !== before || state?.flight) throw Error('map changed during screenshot capture');

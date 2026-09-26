@@ -126,7 +126,9 @@ cover the input and tree-consumption hooks, not total AccessKit generation or st
 instrumentation overhead separately before drawing performance conclusions. `just hass::profile-analyze TRACE --json`
 retains that terminal report and rejects inconsistent passing action counts. Scripted egui input does not produce DOM
 dispatch events, so the tool's legacy DOM interaction-frame statistics do not describe these runs; its diagnostic output
-explicitly calls out that limitation.
+explicitly calls out that limitation. The workload summary spans the start and terminal marks, excluding page load and
+operator wait time. It reports main-thread frame intervals and main/map-worker task CPU and busy wall time separately;
+partial tasks and missing CPU samples remain explicit. These are not presentation FPS or per-frame UI CPU measurements.
 
 Action reports retain `target_bounds` (`left, top, right, bottom`) and the latest injected `pointer_position`, in egui
 logical points. The opt-in status view highlights the last pointer action with a target outline, semantic ID, and

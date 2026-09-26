@@ -44,6 +44,7 @@ capture FILE='components.capture.toml' OUT='':
 
 # Render every maintained evidence sheet.
 capture-all:
+    just capture logging.capture.toml
     just capture components.capture.toml
     just capture activity-map.capture.toml
     just capture renderer-diagnostics.capture.toml

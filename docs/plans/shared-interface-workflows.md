@@ -16,6 +16,7 @@ Contracts live in [application windows](../architecture/application-windows.md),
 6. Audit keyboard navigation, focus, modal trapping, and reconnect recovery. Require licensed artwork and attribution.
 7. **Add the missing profile accent-color chooser.** Persist the existing accent field; test switching/restart,
    accessibility, and both themes.
+8. Restore browser Ctrl+wheel zoom over the HASS canvas. Vivaldi menu zoom works; Ctrl+wheel currently has no effect.
 
 ## Runtime acceptance
 
@@ -30,17 +31,9 @@ Use `just hass::control check` against a running demo. Remaining checks:
   across keyboard/touch and other Wayland compositors. Pending activation must not recreate closed windows.
 - **Decorations:** native title-bar actions, window menu, resizing, borders/shadows, maximized appearance, and both
   themes.
-- **Automation:** desktop input release and viewport restoration on pass/failure/cancel; report retrieval after
-  reopening tools; parity across HTTP and browser hooks. Use
-  [responsive-layout.json](../../infra/automation/responsive-layout.json) to resize with files open without scenario
-  logout.
-- **Control transport:** ambiguous tabs and reconnect generations, including deadline expiry and duplicate rejection.
-  Verify that admitted commands never replay or transfer to another tab.
-- **Capture:** non-unit scale, clipping/transparency, pending frames, resize/navigation, child closure/reload, and
-  limits.
-- **Logs and diagnostics:** browser Back/Forward restoration; no app tab, multiple tabs, and app reconnect; desktop
-  streaming alongside commands, server stop/restart, and export errors. Retention overflow, slow-consumer gaps, and
-  disabled routes have automated coverage; live overflow and disabled-server checks remain unverified.
+- **Automation, control, capture, and diagnostics:** close the combined
+  [renderer and automation acceptance](activity-map-workspace.md#browser-verification) before the Activities redesign.
+  File export errors remain part of this workflow's recovery checks.
 
 Gallery evidence must cover narrow layouts, translations, failures, progress, and recovery. HASS loader/ingress also
 needs browser evidence. [Device inspection](device-state.md) owns hardware checks; test macOS/Windows before claiming

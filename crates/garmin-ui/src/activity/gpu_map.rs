@@ -43,7 +43,7 @@ pub use tile_budget::BrowserTileLimits;
 pub(in crate::activity) use tile_budget::{TileBudget, TileDecodeBudget};
 
 pub use labels::{BrowserLabelTask, prepare_labels_for_browser_worker};
-use labels::{LabelCache, LabelResult, LabelTask, LabelView};
+use labels::{LabelCache, LabelResult, LabelSnapshot, LabelTask, LabelView};
 pub use route::{BrowserRouteTask, prepare_route_for_browser_worker};
 use route::{RouteOutcome, RouteResult, RouteSample, RouteTask};
 
@@ -740,7 +740,7 @@ struct Frame {
     camera: CameraUniform,
     visible: Vec<VisibleTile>,
     route: Option<VisibleRoute>,
-    visible_tiles_settling: bool,
+    labels: LabelSnapshot,
 }
 
 #[derive(Clone)]
@@ -876,6 +876,11 @@ impl RouteCache {
 
 pub(in crate::activity) struct GpuMap {
     frame: Arc<Frame>,
+    renderer: Arc<renderer::Renderer>,
+    label_view: LabelView,
+}
+
+pub(in crate::activity) struct GpuMapRuntime {
     runtime: WgpuRuntime,
     labels: LabelCache,
     route: RouteCache,
@@ -1020,7 +1025,7 @@ fn assemble_tile_frame<'a>(
     }
 }
 
-impl GpuMap {
+impl GpuMapRuntime {
     pub(in crate::activity) fn new(
         handle: &WgpuMapHandle,
         metrics: crate::activity::map_runtime::MapMetrics,
@@ -1033,25 +1038,16 @@ impl GpuMap {
             metrics,
         ));
         Self {
-            frame: Arc::new(Frame::default()),
             runtime: WgpuRuntime { renderer, executor },
             labels: LabelCache::default(),
             route: RouteCache::default(),
         }
     }
 
-    pub(in crate::activity) fn paint_callback(&self, rect: Rect) -> Shape {
-        egui_adapter::paint_callback(
-            rect,
-            Arc::clone(&self.frame),
-            Arc::clone(&self.runtime.renderer),
-        )
-    }
-
     pub(in crate::activity) fn update(
         &mut self,
         frame: crate::activity::map_runtime::SceneFrame<'_, '_>,
-    ) -> ScenePerf {
+    ) -> (GpuMap, ScenePerf) {
         let crate::activity::map_runtime::SceneFrame {
             scene,
             camera,
@@ -1064,7 +1060,7 @@ impl GpuMap {
         let _span = tracing::trace_span!("activity_map_frame_assembly").entered();
         self.prepare_route(route, context, backend);
         let TileFrameAssembly {
-            camera,
+            camera: uniform,
             mut visible,
             upload_candidates,
         } = assemble_tile_frame(scene.renderable_gpu_tiles(), camera, viewport);
@@ -1077,19 +1073,24 @@ impl GpuMap {
         let route_ready = matches!(self.route.state, RoutePreparation::Ready { .. });
         let route = self.route.visible(route);
         let visible_tiles = visible.len();
-        self.frame = Arc::new(Frame {
-            camera,
-            visible,
-            route,
-            visible_tiles_settling,
-        });
+        let labels_pending = self.prepare_labels(frame, &visible, visible_tiles_settling);
+        let prepared = GpuMap {
+            frame: Arc::new(Frame {
+                camera: uniform,
+                visible,
+                route,
+                labels: self.labels.snapshot(),
+            }),
+            renderer: Arc::clone(&self.runtime.renderer),
+            label_view: LabelView::new(camera, viewport),
+        };
         let label_metrics = self.labels.metrics();
-        ScenePerf {
+        let perf = ScenePerf {
             route_ready,
             milliseconds: started.elapsed().as_secs_f32() * 1_000.0,
             visible_tiles,
             label_milliseconds: label_metrics.milliseconds,
-            label_backlog: label_metrics.backlog,
+            label_backlog: label_metrics.backlog.max(usize::from(labels_pending)),
             stale_work: label_metrics.stale_work,
             queued_upload_bytes: upload.queued_bytes,
             uploaded_bytes: upload.uploaded_bytes,
@@ -1098,39 +1099,40 @@ impl GpuMap {
             completed_upload_tiles: upload.completed_tiles,
             upload_milliseconds: upload.milliseconds,
             upload_budget_overruns: upload.budget_overruns,
-        }
+        };
+        (prepared, perf)
     }
 
-    pub(in crate::activity) fn paint_labels(
+    fn prepare_labels(
         &mut self,
-        frame: crate::activity::map_runtime::LabelFrame<'_>,
-    ) {
-        let crate::activity::map_runtime::LabelFrame {
-            ui,
+        frame: crate::activity::map_runtime::SceneFrame<'_, '_>,
+        visible: &[VisibleTile],
+        visible_tiles_settling: bool,
+    ) -> bool {
+        let crate::activity::map_runtime::SceneFrame {
+            context,
             scene,
             camera,
             viewport,
             backend,
+            ..
         } = frame;
         while let Some(result) = self.runtime.poll_label() {
             self.labels.apply(result);
         }
-        let frame = &self.frame;
-        let visible = frame.visible.clone();
         if visible.is_empty() {
-            return;
+            return false;
         }
 
         let view = LabelView::new(camera, viewport);
-        if scene.pending_visible_tiles() > 0 || frame.visible_tiles_settling {
-            self.labels.paint(ui, view, viewport);
-            return;
+        if scene.pending_visible_tiles() > 0 || visible_tiles_settling {
+            return true;
         }
-        if !self.labels.request_matches(&visible, view) {
+        if !self.labels.request_matches(visible, view) {
             if let Some(delay) = self.labels.defer_request_for_motion(view, Instant::now()) {
-                ui.ctx().request_repaint_after(delay);
+                context.request_repaint_after(delay);
             } else {
-                let task = self.labels.request(&visible, view, ui.ctx().clone());
+                let task = self.labels.request(visible, view, context.clone());
                 let (ready, discarded) = self.runtime.schedule_label(task, backend);
                 if discarded {
                     self.labels.record_discarded_work();
@@ -1140,7 +1142,7 @@ impl GpuMap {
                 }
             }
         }
-        self.labels.paint(ui, view, viewport);
+        !self.labels.request_matches(visible, view)
     }
 
     fn prepare_route(
@@ -1182,6 +1184,23 @@ impl GpuMap {
             context: context.clone(),
         };
         self.runtime.schedule_route(task, backend);
+    }
+}
+
+impl GpuMap {
+    pub(in crate::activity) fn paint_callback(&self, rect: Rect) -> Shape {
+        egui_adapter::paint_callback(rect, Arc::clone(&self.frame), Arc::clone(&self.renderer))
+    }
+
+    pub(in crate::activity) fn paint_labels(
+        &self,
+        frame: crate::activity::map_runtime::LabelFrame<'_>,
+    ) {
+        if !self.frame.visible.is_empty() {
+            self.frame
+                .labels
+                .paint(frame.ui, self.label_view, self.label_view.viewport);
+        }
     }
 }
 
@@ -2446,6 +2465,68 @@ mod tests {
         assert_eq!(metrics.stale_work, 1);
         assert!(metrics.milliseconds.abs() < f32::EPSILON);
         assert_eq!(metrics.backlog, 1);
+    }
+
+    #[test]
+    fn captured_labels_survive_publication_and_rebase_without_reusing_a_different_zoom() {
+        let context = egui::Context::default();
+        let anchor = LabelView {
+            center: [0.5, 0.5],
+            zoom: 0.0,
+            viewport: Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(200.0, 100.0)),
+        };
+        let mut cache = LabelCache::default();
+        let publish = |cache: &mut LabelCache, x| {
+            let task = cache.request(&[], anchor, context.clone());
+            cache.apply(LabelResult {
+                generation: task.generation,
+                view: anchor,
+                outcome: LabelOutcome::Ready {
+                    milliseconds: 0.0,
+                    shapes: vec![Shape::circle_filled(pos2(x, 20.0), 2.0, Color32::GREEN)],
+                    texture: None,
+                },
+            });
+            cache.snapshot()
+        };
+        let first = publish(&mut cache, 20.0);
+        let second = publish(&mut cache, 80.0);
+        drop(cache);
+        let paint = |snapshot: &LabelSnapshot, view| {
+            let output = context.run_ui(egui::RawInput::default(), |ui| {
+                snapshot.paint(ui, view, anchor.viewport);
+            });
+            let positions = output
+                .shapes
+                .iter()
+                .filter_map(|shape| {
+                    if let Shape::Circle(circle) = &shape.shape {
+                        Some(circle.center)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            output.drop_without_applying_deltas();
+            positions
+        };
+        assert_eq!(paint(&first, anchor), vec![pos2(20.0, 20.0)]);
+        assert_eq!(paint(&second, anchor), vec![pos2(80.0, 20.0)]);
+        let translated = LabelView {
+            center: [0.5 - 10.0 / f64::from(WALKERS_TILE_SIZE), 0.5],
+            ..anchor
+        };
+        assert_eq!(paint(&first, translated), vec![pos2(30.0, 20.0)]);
+        assert!(
+            paint(
+                &first,
+                LabelView {
+                    zoom: 1.0,
+                    ..anchor
+                }
+            )
+            .is_empty()
+        );
     }
 
     #[test]

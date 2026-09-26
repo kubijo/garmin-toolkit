@@ -1,5 +1,6 @@
 import { recordLog } from './logging.js';
 import { compositionMessage, decodeComposition, installMapDrawRequest } from './worker-codec.js';
+import { setMapClockActive } from './map-clock.js';
 
 // Worker-owned wgpu surface for the composition fixture and activity map renderer.
 export function installCompositionWorker(scope) {
@@ -80,6 +81,7 @@ export function installCompositionWorker(scope) {
                 scope.postMessage(compositionMessage('composition-ready', renderer.backend(), renderer.maximum_size()));
             } else if (message.type === 'map-active' && map && renderer) {
                 active = message.active;
+                setMapClockActive(active);
                 if (active) schedule(0);
                 else {
                     clearTimeout(timer);
@@ -89,6 +91,8 @@ export function installCompositionWorker(scope) {
                 renderer.update_map(
                     message.view,
                     message.route === null ? new Uint8Array(0) : new Uint8Array(message.route),
+                    message.originX,
+                    message.originY,
                 );
                 dimensions = [message.width, message.height];
                 active = true;

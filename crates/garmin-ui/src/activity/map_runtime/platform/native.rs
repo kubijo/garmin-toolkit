@@ -1,19 +1,19 @@
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
 };
 
 use arc_swap::ArcSwap;
 
 use super::super::{
     BrowserLabelTask, BrowserRouteTask, MapSceneData, MapTileResponse, SurfaceDriver, SurfaceView,
-    TileTask,
+    TileCoordinates, TileData,
 };
 use crate::activity::native_latest::LatestWorker;
 
 /// Native map backend contract.
 pub trait Backend: Send + Sync {
-    fn submit(&self, task: TileTask);
+    fn fetch(&self, coordinates: TileCoordinates, reply: TileReply);
 
     fn submit_labels(&self, task: BrowserLabelTask) {
         task.complete(Err("this map backend does not prepare labels".to_owned()));
@@ -23,6 +23,9 @@ pub trait Backend: Send + Sync {
         task.complete(Err("this map backend does not prepare routes".to_owned()));
     }
 }
+
+/// Return transport data on a worker thread; the runtime owns decoding and publication.
+pub type TileReply = Box<dyn FnOnce(Result<TileData, String>) + Send>;
 
 pub(in crate::activity::map_runtime) type Shared<T> = Arc<T>;
 
@@ -75,7 +78,19 @@ impl SurfaceRuntime {
 #[derive(Clone, Default)]
 pub(in crate::activity::map_runtime) struct ResponseQueue(Arc<Mutex<VecDeque<MapTileResponse>>>);
 
+pub(in crate::activity::map_runtime) struct ResponseTarget(Weak<Mutex<VecDeque<MapTileResponse>>>);
+
+impl ResponseTarget {
+    pub(in crate::activity::map_runtime) fn upgrade(&self) -> Option<ResponseQueue> {
+        self.0.upgrade().map(ResponseQueue)
+    }
+}
+
 impl ResponseQueue {
+    pub(in crate::activity::map_runtime) fn target(&self) -> ResponseTarget {
+        ResponseTarget(Arc::downgrade(&self.0))
+    }
+
     pub(in crate::activity::map_runtime) fn drain(&self) -> Vec<MapTileResponse> {
         self.0
             .lock()

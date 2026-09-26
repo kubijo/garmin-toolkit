@@ -505,6 +505,7 @@ async fn debug(State(bridge): State<Bridge>) -> Json<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "demo")]
     use std::io::{Read as _, Write as _};
 
     #[test]

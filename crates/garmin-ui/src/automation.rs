@@ -240,6 +240,7 @@ struct Run {
     due: f64,
     waiting_since: f64,
     gesture: Option<(Pos2, usize)>,
+    input_layout_since: Option<f64>,
     target_geometry: Option<(Rect, bool)>,
     stabilizing_since: Option<f64>,
     ready_since: Option<f64>,
@@ -249,6 +250,16 @@ struct Run {
 }
 
 impl Run {
+    fn input_layout_ready(&mut self, elapsed: f64) -> bool {
+        let Some(started) = self.input_layout_since.take() else {
+            return true;
+        };
+        // The input-delivery frame can still publish pre-click widget state.
+        // Allow a fresh layout before reading targets for the next action.
+        self.due += elapsed - started;
+        false
+    }
+
     fn complete_step(&mut self, elapsed: f64, after: f64, waiting: bool) {
         self.report.completed += 1;
         self.gesture = None;
@@ -488,6 +499,7 @@ impl Driver {
             due: 0.0,
             waiting_since: 0.0,
             gesture: None,
+            input_layout_since: None,
             target_geometry: None,
             stabilizing_since: None,
             ready_since: None,
@@ -531,7 +543,7 @@ impl Driver {
             tracing::info!(
                 scenario = run.report.scenario,
                 outcome = state,
-                reason = failure,
+                reason = failure.as_deref(),
                 "Automation finished"
             );
             run.report.state = state.into();
@@ -619,7 +631,7 @@ impl Driver {
         }
         let step = run.steps[run.report.completed].clone();
         run.report.phase = step.phase.into();
-        if elapsed < run.due {
+        if !run.input_layout_ready(elapsed) || elapsed < run.due {
             return Ok(());
         }
         if let Action::Resize { width, height } = step.action {
@@ -699,6 +711,7 @@ impl Driver {
             action.pointer_position = pointer_position.or(action.pointer_position);
         }
         if complete {
+            run.input_layout_since = (input.events.len() > before).then_some(elapsed);
             run.complete_step(elapsed, step.after, waiting);
         } else {
             run.gesture = Some((start, frame + 1));
@@ -771,8 +784,10 @@ impl Step {
             }
             Action::Value(expected) => {
                 if value != Some(expected.as_str()) {
+                    let actual =
+                        value.map_or_else(|| "no value".into(), |value| format!("'{value}'"));
                     return Err(format!(
-                        "{}: expected {expected:?}, got {value:?}",
+                        "{}: expected '{expected}', got {actual}",
                         self.target
                     ));
                 }

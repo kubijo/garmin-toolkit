@@ -1,13 +1,18 @@
-use std::{cell::RefCell, collections::VecDeque, rc::Rc, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    rc::{Rc, Weak},
+    sync::Arc,
+};
 
 use super::super::{
     BrowserLabelTask, BrowserRouteTask, MapSceneData, MapTileResponse, SurfaceDriver, SurfaceView,
-    TileTask,
+    TileCoordinates, TileData,
 };
 
 /// Browser map backend contract.
 pub trait Backend {
-    fn submit(&self, task: TileTask);
+    fn fetch(&self, coordinates: TileCoordinates, reply: TileReply);
 
     fn submit_labels(&self, task: BrowserLabelTask) {
         task.complete(Err("this map backend does not prepare labels".to_owned()));
@@ -17,6 +22,9 @@ pub trait Backend {
         task.complete(Err("this map backend does not prepare routes".to_owned()));
     }
 }
+
+/// Return encoded bytes or worker-prepared data to the owning runtime.
+pub type TileReply = Box<dyn FnOnce(Result<TileData, String>)>;
 
 pub(in crate::activity::map_runtime) type Shared<T> = Rc<T>;
 
@@ -69,7 +77,21 @@ impl SurfaceRuntime {
 #[derive(Clone, Default)]
 pub(in crate::activity::map_runtime) struct ResponseQueue(Rc<RefCell<VecDeque<MapTileResponse>>>);
 
+pub(in crate::activity::map_runtime) struct ResponseTarget(
+    Weak<RefCell<VecDeque<MapTileResponse>>>,
+);
+
+impl ResponseTarget {
+    pub(in crate::activity::map_runtime) fn upgrade(&self) -> Option<ResponseQueue> {
+        self.0.upgrade().map(ResponseQueue)
+    }
+}
+
 impl ResponseQueue {
+    pub(in crate::activity::map_runtime) fn target(&self) -> ResponseTarget {
+        ResponseTarget(Rc::downgrade(&self.0))
+    }
+
     pub(in crate::activity::map_runtime) fn drain(&self) -> Vec<MapTileResponse> {
         self.0.borrow_mut().drain(..).collect()
     }

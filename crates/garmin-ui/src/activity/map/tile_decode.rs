@@ -126,11 +126,14 @@ fn render(sources: &[Source], style: &Style, zoom: u8, size: u32) -> Result<Tile
                 .background_color
                 .as_ref()
                 .map_or(Color32::WHITE, |c| c.evaluate(&context));
-            shapes.push(Shape::rect_filled(
+            // Tile boundaries share an edge, not an antialiased silhouette. Feathering each
+            // rectangle independently blends a dark seam into an otherwise continuous fill.
+            let mut background = egui::Mesh::default();
+            background.add_colored_rect(
                 Rect::from_min_size(pos2(0.0, 0.0), vec2(size as f32, size as f32)),
-                0.0,
                 color,
-            ));
+            );
+            shapes.push(Shape::mesh(background));
             budget.shapes(&shapes[shapes.len() - 1..])?;
             continue;
         }

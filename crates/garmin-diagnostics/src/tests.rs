@@ -567,7 +567,7 @@ async fn ansi_get_and_stream_preserve_plain_text_and_escape_record_controls() {
     use garmin_model::logging::{Level, Record};
     let directory = tempfile::tempdir().unwrap();
     let store = garmin_logging::Store::open(directory.path(), "test").unwrap();
-    let hostile = "injected\x1b[2J\r\n\x07text";
+    let hostile = "injected\x1b[2J\r\n\x07text \"quoted\" 'apostrophe' C:\\maps";
     let levels = [
         Level::Trace,
         Level::Debug,
@@ -631,6 +631,7 @@ async fn ansi_get_and_stream_preserve_plain_text_and_escape_record_controls() {
                 assert!(!body.contains("\x1b[2J"));
                 assert!(!body.contains(['\r', '\x07']));
                 assert!(body.contains("injected\\u{1b}[2J\\r\\n\\u{7}text"));
+                assert!(body.contains("text \"quoted\" 'apostrophe' C:\\maps"));
             }
         }
     }

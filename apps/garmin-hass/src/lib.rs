@@ -91,11 +91,11 @@ pub async fn run(browser: BrowserOptions) -> Result<(), Error> {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "warn,garmin=info".into()),
         )
-        .with(
-            tracing_logfmt::builder()
-                .layer()
-                .with_writer(std::io::stderr),
-        )
+        .with(garmin_logging::console::layer(
+            "hass",
+            std::io::stderr,
+            garmin_logging::console::stderr_ansi(),
+        ))
         .try_init();
     tracing::info!("HASS starting");
     let storage = prepare_storage(&data_root).await?;

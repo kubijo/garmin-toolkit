@@ -67,7 +67,7 @@ impl LabelView {
 #[derive(Default)]
 pub(super) struct LabelCache {
     requested: Option<RequestedLabels>,
-    published: Option<PublishedLabels>,
+    published: Option<Arc<PublishedLabels>>,
     next_generation: u64,
     last_milliseconds: f32,
     stale_work: u64,
@@ -110,6 +110,26 @@ struct PublishedLabels {
     anchor: LabelView,
     shapes: Vec<Shape>,
     _texture: Option<egui::TextureHandle>,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct LabelSnapshot(Option<Arc<PublishedLabels>>);
+
+impl LabelSnapshot {
+    pub(super) fn paint(&self, ui: &egui::Ui, view: LabelView, viewport: Rect) {
+        let Some(published) = &self.0 else {
+            return;
+        };
+        if (published.anchor.zoom - view.zoom).abs() > f64::EPSILON {
+            return;
+        }
+        let delta = published.anchor.translation_to(view);
+        let shapes = published.shapes.iter().cloned().map(|mut shape| {
+            shape.translate(delta);
+            shape
+        });
+        ui.painter().with_clip_rect(viewport).extend(shapes);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -181,12 +201,12 @@ impl LabelCache {
                 texture,
             } => {
                 self.last_milliseconds = milliseconds;
-                self.published = Some(PublishedLabels {
+                self.published = Some(Arc::new(PublishedLabels {
                     generation: result.generation,
                     anchor: result.view,
                     shapes,
                     _texture: texture,
-                });
+                }));
             }
             LabelOutcome::Failed => {
                 self.requested = None;
@@ -198,19 +218,8 @@ impl LabelCache {
         self.stale_work = self.stale_work.saturating_add(1);
     }
 
-    pub(super) fn paint(&self, ui: &egui::Ui, view: LabelView, viewport: Rect) {
-        let Some(published) = &self.published else {
-            return;
-        };
-        if (published.anchor.zoom - view.zoom).abs() > f64::EPSILON {
-            return;
-        }
-        let delta = published.anchor.translation_to(view);
-        let shapes = published.shapes.iter().cloned().map(|mut shape| {
-            shape.translate(delta);
-            shape
-        });
-        ui.painter().with_clip_rect(viewport).extend(shapes);
+    pub(super) fn snapshot(&self) -> LabelSnapshot {
+        LabelSnapshot(self.published.clone())
     }
 
     pub(super) fn metrics(&self) -> LabelCacheMetrics {

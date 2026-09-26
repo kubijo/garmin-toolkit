@@ -72,7 +72,7 @@ impl MapTileResponse {
 }
 
 /// Reusable vector-tile decoder for runtime backends with a preparation worker.
-pub struct MapTileDecoder {
+pub(in crate::activity) struct MapTileDecoder {
     dark: walkers::Style,
     light: walkers::Style,
 }
@@ -529,6 +529,25 @@ pub(super) fn map_style(dark_mode: bool) -> walkers::Style {
     };
 
     for layer in &mut style.layers {
+        if let walkers::Layer::Line { paint, .. } = layer
+            && let Some(dashes) = &mut paint.line_dasharray
+            && dashes.0
+                == walkers::json!([
+                    "step",
+                    ["zoom"],
+                    ["literal", [2, 0]],
+                    4,
+                    ["literal", [2, 1]]
+                ])
+        {
+            // Walkers 0.59 emits this country-border rule but cannot evaluate `step`.
+            dashes.0 = walkers::json!([
+                "case",
+                ["<", ["zoom"], 4],
+                ["literal", [2, 0]],
+                ["literal", [2, 1]]
+            ]);
+        }
         let Some((source_layer, filter)) = source_layer_and_filter(layer) else {
             continue;
         };
@@ -738,6 +757,38 @@ fn json_contains(value: &walkers::Value, expected: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn country_border_dashes_change_at_zoom_four_in_both_themes() {
+        for dark in [false, true] {
+            let style = map_style(dark);
+            let borders: Vec<_> = style
+                .layers
+                .iter()
+                .filter_map(|layer| match layer {
+                    walkers::Layer::Line {
+                        source_layer,
+                        paint,
+                        ..
+                    } if source_layer.matches("boundary") => paint.line_dasharray.as_ref(),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(borders.len(), 1);
+            for zoom in 0..=22 {
+                let context = walkers::Context::new(
+                    "LineString".to_owned(),
+                    std::collections::HashMap::new(),
+                    zoom,
+                );
+                assert_eq!(
+                    borders[0].evaluate(&context),
+                    Some(vec![2.0, if zoom < 4 { 0.0 } else { 1.0 }]),
+                    "country-border dash pattern at zoom {zoom}, dark={dark}"
+                );
+            }
+        }
+    }
 
     fn visibility(source_layer: &str, filter: walkers::Value) -> Option<BasemapVisibility> {
         BasemapVisibility::classify(

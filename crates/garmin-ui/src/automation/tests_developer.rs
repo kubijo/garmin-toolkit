@@ -52,6 +52,27 @@ fn render(context: &Context, tick: u32, events: Vec<Event>, window: bool) {
 }
 
 #[test]
+fn assertion_failures_describe_values_without_debug_wrappers() {
+    let context = context();
+    render(&context, 0, vec![], false);
+    command(
+        &context,
+        "action",
+        &serde_json::json!({
+            "kind": "assert_value", "target": "developer.section.automation", "value": "closed"
+        }),
+    )
+    .unwrap();
+    render(&context, 1, vec![], false);
+    let plugin = context.plugin::<Driver>();
+    let driver = plugin.lock();
+    assert_eq!(
+        driver.report().unwrap().failure.as_deref(),
+        Some("developer.section.automation: expected 'closed', got 'open'")
+    );
+}
+
+#[test]
 fn section_targets_can_collapse_and_reopen_automation() {
     let context = context();
     for tick in 0..4 {

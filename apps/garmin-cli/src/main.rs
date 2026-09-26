@@ -677,11 +677,11 @@ fn initialize_tracing(capture: Option<&SessionCapture>, terminal_ui: bool) -> Re
     tracing_subscriber::registry()
         .with(filter)
         .with(logs)
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_ansi(false)
-                .with_writer(std::sync::Mutex::new(writer)),
-        )
+        .with(garmin_logging::console::layer(
+            "cli",
+            std::sync::Mutex::new(writer),
+            capture.is_none() && !terminal_ui && error_color_enabled(),
+        ))
         .try_init()
         .map_err(|error| anyhow::anyhow!("cannot initialize logging: {error}"))?;
     Ok(())
