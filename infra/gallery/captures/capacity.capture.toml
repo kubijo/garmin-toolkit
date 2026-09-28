@@ -1,4 +1,4 @@
-out = "../../.tmp/capacity-gallery"
+out = "../../../.tmp/capacity-gallery"
 size = "1920x1080"
 sheet = "sheet.png"
 report = "capture.json"

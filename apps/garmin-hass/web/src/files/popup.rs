@@ -11,7 +11,7 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 pub fn create(context: Context, session: &str) -> Result<Box<dyn eframe::App>, String> {
     let translations = Translations::bundled().map_err(|error| error.to_string())?;
     let intl = translations
-        .formatter(Language::English)
+        .formatter_for_client(Language::English)
         .map_err(|error| error.to_string())?;
     let shared = Rc::new(RefCell::new(crate::State::default()));
     let connection = Client::new(context.clone(), session)?;
@@ -114,7 +114,7 @@ impl Files {
                 LanguagePreference::English => Language::English,
                 LanguagePreference::Czech => Language::Czech,
             };
-            if let Ok(intl) = self.translations.formatter(language) {
+            if let Ok(intl) = self.translations.formatter_for_client(language) {
                 self.intl = intl;
             }
         }

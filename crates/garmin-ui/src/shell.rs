@@ -191,6 +191,25 @@ pub fn window_header(
 
 #[must_use]
 pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) -> Output<R> {
+    show_with_padding(ui, props, CONTENT_PADDING, page)
+}
+
+/// Render a workspace that owns its content insets, such as the activity map.
+#[must_use]
+pub fn show_edge_to_edge<R>(
+    ui: &mut Ui,
+    props: &Props<'_>,
+    page: impl FnOnce(&mut Ui) -> R,
+) -> Output<R> {
+    show_with_padding(ui, props, 0.0, page)
+}
+
+fn show_with_padding<R>(
+    ui: &mut Ui,
+    props: &Props<'_>,
+    padding: f32,
+    page: impl FnOnce(&mut Ui) -> R,
+) -> Output<R> {
     let size = ui.available_size_before_wrap();
     let (root, _) = ui.allocate_exact_size(size, Sense::hover());
     let shell_clip = bounded_clip(root, ui.clip_rect());
@@ -228,8 +247,8 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
     }
 
     let page_padding = egui::vec2(
-        CONTENT_PADDING.min(content.width() / 2.0),
-        CONTENT_PADDING.min(content.height() / 2.0),
+        padding.min(content.width() / 2.0),
+        padding.min(content.height() / 2.0),
     );
     let page_rect = content.shrink2(page_padding);
     let mut page_ui = ui.new_child(
@@ -516,6 +535,7 @@ fn window_control(
     danger: bool,
 ) -> Response {
     let response = shell_response(ui, rect, ui.make_persistent_id(id), label);
+    crate::semantics::target(ui, &response, id);
     let palette = crate::theme::palette(ui);
     let (background, foreground) = if response.highlighted() {
         let states = if danger {

@@ -176,6 +176,7 @@ fn show_preferences(ui: &mut Ui, props: &Props<'_>) -> Option<ProfilePreferences
         &themes,
         button::GroupProps {
             size: Size::Medium,
+            width: button::Width::Fit,
             enabled: !props.disabled,
         },
     ) {

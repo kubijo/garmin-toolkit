@@ -11,6 +11,6 @@ fn main() -> gallery::eframe::Result {
         gallery::Settings::new(gallery::Renderer::Wgpu)
             .window_icon(garmin_ui::brand::icon())
             .controls_default_width(260.0)
-            .collapsed(false)
+            .collapsed(true)
     )
 }

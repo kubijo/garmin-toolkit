@@ -20,6 +20,8 @@ let
       # Biome's HTML parser rewrites Askama block delimiters;
       # Askama compiles these templates.
       "crates/garmin-diagnostics/templates/*.html"
+      # Jinja owns the build report's template syntax.
+      "infra/python/templates/*.html"
     ];
     html = true;
     javascript = true;
@@ -79,6 +81,7 @@ let
       python.configFile = pythonConfig;
       extraProjectCheckers = {
         map-worker-tests.command = pkgs.writeShellScript "map-worker-tests" ''
+          ${lib.getExe pkgs.nodejs} infra/javascript/test-directory.test.mjs || exit $?
           ESBUILD=${lib.getExe pkgs.esbuild} ${lib.getExe pkgs.nodejs} infra/javascript/fingerprint-web.test.mjs || exit $?
           ${lib.getExe pkgs.nodejs} infra/javascript/map-worker.test.mjs || exit $?
           ${lib.getExe pkgs.nodejs} infra/javascript/map-composition.test.mjs || exit $?
@@ -93,7 +96,12 @@ let
             --project infra/python
         '';
         python-tests.command = pkgs.writeShellScript "python-tests" ''
-          export PATH=${lib.makeBinPath [ pkgs.bash ]}:$PATH
+          export PATH=${
+            lib.makeBinPath [
+              pkgs.bash
+              pkgs.just
+            ]
+          }:$PATH
           exec ${pythonToolsEnv}/bin/python -m unittest discover -q \
             --start-directory infra/python \
             --pattern 'test_*.py'

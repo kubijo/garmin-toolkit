@@ -6,17 +6,29 @@ The tiles reproduce rejected overview backgrounds. They are unmodified OpenFreeM
 `20260913_164504_pt`, using the OpenMapTiles schema and © OpenStreetMap contributors' data
 ([ODbL attribution](https://www.openstreetmap.org/copyright)).
 
-| Fixture                | Source                                                                    | SHA-256                                                            |
-| ---------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `world-z0.pbf`         | <https://tiles.openfreemap.org/planet/20260913_164504_pt/0/0/0.pbf>       | `055ff033cd389b87d7767ca74e9a7f334d279a0d8e7951107b4e2752c86f6ae9` |
-| `europe-africa-z2.pbf` | <https://tiles.openfreemap.org/planet/20260913_164504_pt/2/1/1.pbf>       | `c3912641de47845541b142d193f834627098bb2da5908c40f4117f61c4bdb38f` |
-| `europe-africa-z3.pbf` | <https://tiles.openfreemap.org/planet/20260913_164504_pt/3/3/2.pbf>       | `6b49b0b077807c1137d606061659a93eb6df429ebff947235e121c136e1dbe6c` |
-| `asia-z3.pbf`          | <https://tiles.openfreemap.org/planet/20260913_164504_pt/3/5/2.pbf>       | `3fe854de34c2acf1376ef552701859cf68ea667010bae4d507a3cc73a28b4684` |
-| `london-z7.pbf`        | <https://tiles.openfreemap.org/planet/20260913_164504_pt/7/62/44.pbf>     | `9ab6529cd384d770111193556beae05f48f4400fc316e92ace7087271daf373b` |
-| `london-z8.pbf`        | <https://tiles.openfreemap.org/planet/20260913_164504_pt/8/127/85.pbf>    | `9179c9aad4a0e9c577926e2acc925226a33a9f4b79596f88980e92269950d87a` |
-| `london-z9.pbf`        | <https://tiles.openfreemap.org/planet/20260913_164504_pt/9/257/169.pbf>   | `f318a1ce15e329ba4e61be07c6d2b4aa6e4cbb5b1841c580c144e50b886faf08` |
-| `london-z11.pbf`       | <https://tiles.openfreemap.org/planet/20260913_164504_pt/11/1023/680.pbf> | `eb2b2baf8df0a920f5cab5c30563a88550fb8563fec880fbaade7eb7321de6bb` |
-| `london-z10.pbf`       | <https://tiles.openfreemap.org/planet/20260913_164504_pt/10/511/340.pbf>  | `950b78e146298e600406a48a2d4b2a43129049f5de4bd6fae0119d1dd2037ce1` |
+| Fixture                | Source                                                                    |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `world-z0.pbf`         | <https://tiles.openfreemap.org/planet/20260913_164504_pt/0/0/0.pbf>       |
+| `europe-africa-z2.pbf` | <https://tiles.openfreemap.org/planet/20260913_164504_pt/2/1/1.pbf>       |
+| `europe-africa-z3.pbf` | <https://tiles.openfreemap.org/planet/20260913_164504_pt/3/3/2.pbf>       |
+| `asia-z3.pbf`          | <https://tiles.openfreemap.org/planet/20260913_164504_pt/3/5/2.pbf>       |
+| `london-z7.pbf`        | <https://tiles.openfreemap.org/planet/20260913_164504_pt/7/62/44.pbf>     |
+| `london-z8.pbf`        | <https://tiles.openfreemap.org/planet/20260913_164504_pt/8/127/85.pbf>    |
+| `london-z9.pbf`        | <https://tiles.openfreemap.org/planet/20260913_164504_pt/9/257/169.pbf>   |
+| `london-z11.pbf`       | <https://tiles.openfreemap.org/planet/20260913_164504_pt/11/1023/680.pbf> |
+| `london-z10.pbf`       | <https://tiles.openfreemap.org/planet/20260913_164504_pt/10/511/340.pbf>  |
+
+| Fixture                | SHA-256                                                            |
+| ---------------------- | ------------------------------------------------------------------ |
+| `world-z0.pbf`         | `055ff033cd389b87d7767ca74e9a7f334d279a0d8e7951107b4e2752c86f6ae9` |
+| `europe-africa-z2.pbf` | `c3912641de47845541b142d193f834627098bb2da5908c40f4117f61c4bdb38f` |
+| `europe-africa-z3.pbf` | `6b49b0b077807c1137d606061659a93eb6df429ebff947235e121c136e1dbe6c` |
+| `asia-z3.pbf`          | `3fe854de34c2acf1376ef552701859cf68ea667010bae4d507a3cc73a28b4684` |
+| `london-z7.pbf`        | `9ab6529cd384d770111193556beae05f48f4400fc316e92ace7087271daf373b` |
+| `london-z8.pbf`        | `9179c9aad4a0e9c577926e2acc925226a33a9f4b79596f88980e92269950d87a` |
+| `london-z9.pbf`        | `f318a1ce15e329ba4e61be07c6d2b4aa6e4cbb5b1841c580c144e50b886faf08` |
+| `london-z11.pbf`       | `eb2b2baf8df0a920f5cab5c30563a88550fb8563fec880fbaade7eb7321de6bb` |
+| `london-z10.pbf`       | `950b78e146298e600406a48a2d4b2a43129049f5de4bd6fae0119d1dd2037ce1` |
 
 With the dark basemap, z11 produces 16,393 shapes from 44,418 input points. Z10 produces 28,911 shapes from 80,960 input
 points and 10,174,104 GPU mesh bytes before labels. These exceed the former count and 8 MiB upload limits. Decode

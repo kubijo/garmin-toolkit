@@ -102,9 +102,16 @@ pub(super) fn steps(name: &str) -> Option<Vec<Step>> {
     }
     add("setup", "profile.0", Action::Wait, 0.1);
     add("setup", "profile.0", Action::Click, 0.2);
+    add("setup", "activity.list.toggle", Action::Wait, 0.1);
+    add("setup", "activity.list.toggle", Action::Click, 0.1);
     add("setup", "activity.0", Action::Wait, 0.1);
     add("setup", "activity.0", Action::Click, 0.2);
-    add("setup", "activity.0", Action::Value("selected".into()), 0.1);
+    add(
+        "setup",
+        "activity.selection",
+        Action::Value("0".into()),
+        0.1,
+    );
     add("setup", "activity.viewer", Action::Wait, 0.1);
     add("setup", "activity.viewer", Action::Scroll(100_000.0), 0.3);
     add("setup", "map.fit", Action::Wait, 0.1);
@@ -155,18 +162,27 @@ fn activity_smoke_steps() -> Vec<Step> {
             Action::Value("stopped".into()),
             0.1,
         ),
+        ("lap", "activity.viewer", Action::Scroll(-100_000.0), 0.5),
         ("lap", "lap.0", Action::Click, 0.3),
+        ("lap", "activity.viewer", Action::Scroll(100_000.0), 0.3),
         ("lap", "map.full-activity", Action::Wait, 0.1),
         ("lap", "map.full-activity", Action::Click, 0.3),
         ("chart", "activity.viewer", Action::Scroll(-320.0), 0.5),
         ("chart", "chart.0", Action::Wait, 0.1),
         ("chart", "chart.0", Action::Drag { x: 0.75, y: 0.5 }, 0.3),
         ("chart", "activity.viewer", Action::Scroll(320.0), 0.5),
+        (
+            "replacement",
+            "activity.viewer",
+            Action::Scroll(100_000.0),
+            0.3,
+        ),
+        ("replacement", "activity.list.toggle", Action::Click, 0.2),
         ("replacement", "activity.1", Action::Click, 0.3),
         (
             "replacement",
-            "activity.1",
-            Action::Value("selected".into()),
+            "activity.selection",
+            Action::Value("1".into()),
             0.1,
         ),
         // The second fixture has no GPS data.
@@ -177,11 +193,13 @@ fn activity_smoke_steps() -> Vec<Step> {
             Action::Value("empty".into()),
             0.1,
         ),
+        ("restore", "activity.viewer", Action::Scroll(100_000.0), 0.3),
+        ("restore", "activity.list.toggle", Action::Click, 0.2),
         ("restore", "activity.0", Action::Click, 0.3),
         (
             "restore",
-            "activity.0",
-            Action::Value("selected".into()),
+            "activity.selection",
+            Action::Value("0".into()),
             0.1,
         ),
         ("restore", "map", Action::Ready, 0.2),
@@ -210,14 +228,17 @@ fn responsive_steps() -> Vec<Step> {
             action: Action::Resize { width, height },
             after: 0.1,
         });
-        steps.push(Step {
-            phase,
-            target: "map".into(),
-            action: Action::Ready,
-            after: 0.1,
-        });
         steps.extend(responsive_selection_steps(phase));
         for (target, action) in [
+            (
+                if phase == "narrow" {
+                    "activity.selection"
+                } else {
+                    "activity.viewer"
+                },
+                Action::Scroll(if phase == "narrow" { -460.0 } else { 100_000.0 }),
+            ),
+            ("map", Action::Ready),
             ("playback.speed", Action::Value("2×".into())),
             ("profile.toggle", Action::Available),
             ("map.fit", Action::Available),
@@ -240,25 +261,15 @@ fn responsive_steps() -> Vec<Step> {
 }
 
 pub(super) fn responsive_selection_steps(phase: &'static str) -> Vec<Step> {
-    let mut actions = Vec::new();
-    if phase == "narrow" {
-        actions.extend([
-            ("activity.list.toggle", Action::Click),
-            ("activity.list.toggle", Action::Value("open".into())),
-            ("activity.0", Action::Wait),
-        ]);
-    }
-    actions.push(("activity.0", Action::Value("selected".into())));
-    if phase == "narrow" {
-        actions.extend([
-            ("activity.list.toggle", Action::Click),
-            ("activity.list.toggle", Action::Value("closed".into())),
-            ("activity.details.toggle", Action::Click),
-            ("activity.details.toggle", Action::Value("open".into())),
-            ("activity.details.toggle", Action::Click),
-            ("activity.details.toggle", Action::Value("closed".into())),
-        ]);
-    }
+    let actions = [
+        ("activity.viewer", Action::Scroll(100_000.0)),
+        ("activity.list.toggle", Action::Click),
+        ("activity.0", Action::Wait),
+        ("activity.0", Action::Value("selected".into())),
+        ("activity.list.close", Action::Click),
+        ("activity.list.toggle", Action::Value("closed".into())),
+        ("activity.selection", Action::Value("0".into())),
+    ];
     actions
         .into_iter()
         .map(|(target, action)| Step {

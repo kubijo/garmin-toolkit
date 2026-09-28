@@ -24,6 +24,21 @@ pub(super) fn resize_at(ui: &Ui, bounds: Rect) {
     let Some((direction, cursor)) = resize_target(bounds, pointer) else {
         return;
     };
+    // Scrollbars and controls can reach the client edge.
+    // Respect egui's hit test instead of starting an OS resize over a widget that owns the pointer.
+    if context.egui_is_using_pointer() {
+        return;
+    }
+    let hovered = context.interaction_snapshot(|interaction| {
+        interaction.hovered.iter().copied().collect::<Vec<_>>()
+    });
+    if hovered.into_iter().any(|id| {
+        context
+            .read_response(id)
+            .is_some_and(|response| response.sense.senses_click() || response.sense.senses_drag())
+    }) {
+        return;
+    }
     context.set_cursor_icon(cursor);
     if context.input(|input| input.pointer.primary_pressed()) {
         context.send_viewport_cmd(ViewportCommand::BeginResize(direction));
@@ -31,10 +46,16 @@ pub(super) fn resize_at(ui: &Ui, bounds: Rect) {
 }
 
 fn resize_target(bounds: Rect, pointer: Pos2) -> Option<(ResizeDirection, CursorIcon)> {
+    if !bounds.contains(pointer) {
+        return None;
+    }
     let left = pointer.x <= bounds.left() + EDGE_WIDTH;
     let right = pointer.x >= bounds.right() - EDGE_WIDTH;
     let top = pointer.y <= bounds.top() + EDGE_WIDTH;
     let bottom = pointer.y >= bounds.bottom() - EDGE_WIDTH;
+    if !(left || right || top || bottom) {
+        return None;
+    }
     let near_left = pointer.x <= bounds.left() + CORNER_WIDTH;
     let near_right = pointer.x >= bounds.right() - CORNER_WIDTH;
     let near_top = pointer.y <= bounds.top() + CORNER_WIDTH;
@@ -74,5 +95,100 @@ mod tests {
     #[test]
     fn center_is_not_a_resize_target() {
         assert_eq!(resize_target(BOUNDS, BOUNDS.center()), None);
+        assert_eq!(resize_target(BOUNDS, Pos2::new(8.0, 8.0)), None);
+        assert_eq!(resize_target(BOUNDS, Pos2::new(-1.0, 40.0)), None);
+    }
+
+    #[test]
+    fn unclaimed_edge_still_starts_native_resize() {
+        let context = egui::Context::default();
+        let pointer = Pos2::new(99.0, 40.0);
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(BOUNDS),
+                events: vec![
+                    egui::Event::PointerMoved(pointer),
+                    egui::Event::PointerButton {
+                        pos: pointer,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..egui::RawInput::default()
+            },
+            |ui| resize_at(ui, BOUNDS),
+        );
+        assert!(output.viewport_output.values().any(|viewport| {
+            viewport.commands.iter().any(|command| {
+                matches!(command, ViewportCommand::BeginResize(ResizeDirection::East))
+            })
+        }));
+        output.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn scrollbar_at_window_edge_keeps_its_drag() {
+        assert_scrollbar_drag(egui::style::ScrollStyle::solid());
+        assert_scrollbar_drag(egui::style::ScrollStyle::floating());
+    }
+
+    fn assert_scrollbar_drag(scroll: egui::style::ScrollStyle) {
+        use egui::{Event, Modifiers, PointerButton, RawInput, ScrollArea};
+
+        let context = egui::Context::default();
+        context.all_styles_mut(|style| {
+            style.spacing.scroll = scroll;
+            style.spacing.scroll.bar_outer_margin = 0.0;
+        });
+        let start = Pos2::new(99.0, 16.0);
+        let end = Pos2::new(99.0, 55.0);
+        let press = |pos, pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut offset = 0.0;
+        for events in [
+            vec![Event::PointerMoved(start)],
+            vec![Event::PointerMoved(start)],
+            vec![press(start, true)],
+            vec![Event::PointerMoved(end)],
+            vec![press(end, false)],
+        ] {
+            let output = context.run_ui(
+                RawInput {
+                    screen_rect: Some(BOUNDS),
+                    events,
+                    ..RawInput::default()
+                },
+                |ui| {
+                    offset = ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.allocate_space(egui::vec2(40.0, 500.0));
+                        })
+                        .state
+                        .offset
+                        .y;
+                    resize_at(ui, BOUNDS);
+                },
+            );
+            assert!(
+                !output.viewport_output.values().any(|viewport| {
+                    viewport
+                        .commands
+                        .iter()
+                        .any(|command| matches!(command, ViewportCommand::BeginResize(_)))
+                }),
+                "scrollbar input must not begin a window resize"
+            );
+            output.drop_without_applying_deltas();
+        }
+        assert!(
+            offset > 0.0,
+            "dragging the scrollbar must scroll its content"
+        );
     }
 }

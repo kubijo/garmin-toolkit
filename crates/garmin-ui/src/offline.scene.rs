@@ -4,7 +4,7 @@ use garmin_i18n::format_message;
 use garmin_service_api::{DeviceSnapshot, InspectionState};
 use garmin_ui::{offline, profile, shell, workspace};
 
-scene_meta! { title: "Application / States / Offline" }
+scene_meta! { title: "Application / Offline" }
 
 #[scene(default)]
 fn disconnected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {

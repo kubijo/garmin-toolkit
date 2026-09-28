@@ -1,4 +1,4 @@
-out = "../../.tmp/gallery/visual-language"
+out = "../../../.tmp/gallery/visual-language"
 size = "1920x1080"
 sheet = "sheet.png"
 report = "capture.json"

@@ -37,7 +37,7 @@ impl LabelView {
             && self.viewport.size().x.to_bits() == other.viewport.size().x.to_bits()
             && self.viewport.size().y.to_bits() == other.viewport.size().y.to_bits()
             && {
-                let translation = self.translation_to(other);
+                let translation = self.camera_translation_to(other);
                 translation.x.abs() <= MAX_TRANSLATION && translation.y.abs() <= MAX_TRANSLATION
             }
     }
@@ -45,22 +45,24 @@ impl LabelView {
     fn same_camera(self, other: Self) -> bool {
         self.center.map(f64::to_bits) == other.center.map(f64::to_bits)
             && self.zoom.to_bits() == other.zoom.to_bits()
-            && self.viewport == other.viewport
+            && self.viewport.size() == other.viewport.size()
     }
 
     #[expect(
         clippy::cast_possible_truncation,
         reason = "label positions are screen-space f32 values after bounded Mercator projection"
     )]
-    pub(super) fn translation_to(self, other: Self) -> egui::Vec2 {
+    fn camera_translation_to(self, other: Self) -> egui::Vec2 {
         let world_size = f64::from(WALKERS_TILE_SIZE) * 2.0_f64.powf(self.zoom);
         let center_x = other.center[0] + (self.center[0] - other.center[0]).round();
         egui::vec2(
-            ((self.center[0] - center_x) * world_size) as f32 + other.viewport.center().x
-                - self.viewport.center().x,
-            ((self.center[1] - other.center[1]) * world_size) as f32 + other.viewport.center().y
-                - self.viewport.center().y,
+            ((self.center[0] - center_x) * world_size) as f32,
+            ((self.center[1] - other.center[1]) * world_size) as f32,
         )
+    }
+
+    pub(super) fn translation_to(self, other: Self) -> egui::Vec2 {
+        self.camera_translation_to(other) + (other.viewport.center() - self.viewport.center())
     }
 }
 

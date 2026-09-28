@@ -11,7 +11,7 @@ pub struct RendererDiagnostics {
 }
 
 impl RendererDiagnostics {
-    /// Publish the latest host state. Hosts without diagnostics do not add a map footer.
+    /// Publish the latest host state for the map footer and developer panel.
     pub fn install(self, context: &Context) {
         crate::diagnostics::publish(
             context,
@@ -30,7 +30,7 @@ impl RendererDiagnostics {
 
     /// Render a compact technical identity with full details on hover.
     pub fn show(&self, ui: &mut Ui) {
-        ui.label(egui::RichText::new(&self.label).small().weak())
+        ui.add(egui::Label::new(egui::RichText::new(&self.label).small().weak()).truncate())
             .on_hover_text(&self.detail);
     }
 

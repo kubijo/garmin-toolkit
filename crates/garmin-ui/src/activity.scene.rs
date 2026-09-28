@@ -1,5 +1,6 @@
 use crate::SceneStateKey as _;
 use gallery::prelude::*;
+use garmin_i18n::format_message;
 use garmin_model::{
     activity::{
         ActivityDuration, ActivityMetrics, ActivitySport, ActivitySummary, ActivityTotals, Cadence,
@@ -14,14 +15,14 @@ use garmin_service_api::{
     ActivityTimerEventSnapshot, ActivityTimerStateSnapshot, DeviceBrowserTarget,
     DeviceCatalogEntryKind, DeviceFitPreview, DeviceFitPreviewActivity,
 };
-use garmin_ui::{activity, device_fit_preview, icons};
+use garmin_ui::{activity, device_fit_preview, file_import, icons};
 
 scene_meta! { title: "Application / Activities" }
 
 const RECORDING_START_MILLISECONDS: i64 = 1_789_453_800_000;
 
 thread_local! {
-    static WORKSPACES: crate::SceneState<(activity::Workspace, usize), 10> = const { crate::SceneState::empty() };
+    static WORKSPACES: crate::SceneState<(activity::Workspace, usize), 18> = const { crate::SceneState::empty() };
     static FIT_PREVIEW: crate::SceneState<device_fit_preview::Preview> = const { crate::SceneState::empty() };
 }
 
@@ -38,6 +39,14 @@ enum WorkspaceSlot {
     MissingMetrics,
     Loading,
     Failure,
+    CalendarBoundaries,
+    Empty,
+    Application,
+    NarrowApplication,
+    Archive,
+    RegionalCalendar,
+    HebrewCalendar,
+    Desktop,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -53,6 +62,16 @@ struct WorkspaceScene {
     cursor: Option<activity::ActivityCursor>,
     selected_lap: Option<usize>,
     fail_tiles: bool,
+    activities: ActivitiesKind,
+    locale: Option<&'static str>,
+    import_actions: bool,
+}
+
+#[derive(Clone, Copy)]
+enum ActivitiesKind {
+    Standard,
+    Boundaries,
+    Empty,
 }
 
 impl WorkspaceScene {
@@ -61,6 +80,9 @@ impl WorkspaceScene {
         cursor: None,
         selected_lap: None,
         fail_tiles: false,
+        activities: ActivitiesKind::Standard,
+        locale: None,
+        import_actions: false,
     };
 }
 
@@ -185,6 +207,59 @@ fn renderer_diagnostics(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Gl
             }
         }
     );
+}
+
+#[scene]
+fn application(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    application_scene(ctx, ui, globals, false);
+}
+
+#[scene]
+fn narrow_application(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    application_scene(ctx, ui, globals, true);
+}
+
+fn application_scene(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals, narrow: bool) {
+    use garmin_ui::{profile, shell, workspace};
+    let intl = globals.intl();
+    let profiles = [profile::ProfileProps {
+        display_name: "Alex Rider",
+        accent: garmin_color::swatch::cyan::G40,
+        avatar: None,
+    }];
+    let size = if narrow {
+        egui::vec2(720.0, 760.0)
+    } else {
+        egui::vec2(1360.0, 920.0)
+    };
+    stage!(ctx, ui, Stage::Fixed(size), |ui| {
+        let _ = workspace::show(
+            ui,
+            &workspace::Props {
+                product_name: "Garmin Toolkit Demo",
+                intl: &intl,
+                profiles: &profiles,
+                selected_profile: 0,
+                profile_menu_expanded: false,
+                page: &workspace::Page::Activities,
+                navigation: shell::Navigation::Expanded,
+                devices: &[],
+                window_controls: None,
+            },
+            |ui| {
+                workspace_contents(
+                    ui,
+                    globals,
+                    if narrow {
+                        WorkspaceSlot::NarrowApplication
+                    } else {
+                        WorkspaceSlot::Application
+                    },
+                    WorkspaceScene::COMPLETE,
+                );
+            },
+        );
+    });
 }
 
 #[scene]
@@ -326,8 +401,81 @@ fn compact_workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globa
         ctx,
         ui,
         globals,
-        egui::vec2(620.0, 760.0),
+        egui::vec2(390.0, 760.0),
         WorkspaceSlot::Compact,
+        WorkspaceScene::COMPLETE,
+    );
+}
+
+#[scene]
+fn calendar_boundaries(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        WorkspaceSlot::CalendarBoundaries,
+        WorkspaceScene {
+            activities: ActivitiesKind::Boundaries,
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn regional_calendar(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        WorkspaceSlot::RegionalCalendar,
+        WorkspaceScene {
+            locale: Some("en-US-u-fw-wed-hc-h23"),
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn hebrew_calendar(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        WorkspaceSlot::HebrewCalendar,
+        WorkspaceScene {
+            locale: Some("en-GB-u-ca-hebrew"),
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn empty_workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(620.0, 760.0),
+        WorkspaceSlot::Empty,
+        WorkspaceScene {
+            activities: ActivitiesKind::Empty,
+            recording: None,
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn archive(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(1_180.0, 760.0),
+        WorkspaceSlot::Archive,
         WorkspaceScene::COMPLETE,
     );
 }
@@ -367,17 +515,34 @@ fn synchronized_hover(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
 
 #[scene]
 fn pinned_cursor(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let height = ctx.slider("height", 760.0, 600.0, 1_600.0, 1.0);
     show_workspace(
         ctx,
         ui,
         globals,
-        egui::vec2(1_180.0, 760.0),
+        egui::vec2(1_180.0, height),
         WorkspaceSlot::Pinned,
         WorkspaceScene {
             cursor: Some(activity::ActivityCursor {
                 sample_index: Some(64),
                 mode: activity::CursorMode::Pinned,
             }),
+            ..WorkspaceScene::COMPLETE
+        },
+    );
+}
+
+#[scene]
+fn desktop_workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let width = ctx.slider("width", 1_180.0, 390.0, 1_180.0, 1.0);
+    show_workspace(
+        ctx,
+        ui,
+        globals,
+        egui::vec2(width, 760.0),
+        WorkspaceSlot::Desktop,
+        WorkspaceScene {
+            import_actions: true,
             ..WorkspaceScene::COMPLETE
         },
     );
@@ -524,49 +689,80 @@ fn show_workspace(
         ui,
         Stage::Fixed(size).checkerboard(globals.checkerboard()),
         |ui| {
-            let intl = globals.intl();
-            let recording = scene.recording.map(sample_recording);
-            let presentations = sample_presentations(&intl);
-            let items = presentations
-                .iter()
-                .map(activity::Presentation::item_props)
-                .collect::<Vec<_>>();
-            WORKSPACES.with_scene(
-                slot as usize,
-                || {
-                    let runtime = gallery_map_runtime(scene.fail_tiles);
-                    (activity::Workspace::new(&runtime), 0)
+            workspace_contents(ui, globals, slot, scene);
+        }
+    );
+}
+
+fn workspace_contents(
+    ui: &mut Ui,
+    globals: &crate::Globals,
+    slot: WorkspaceSlot,
+    scene: WorkspaceScene,
+) {
+    let intl = scene
+        .locale
+        .map_or_else(|| globals.intl(), |locale| globals.intl_for_locale(locale));
+    let recording = scene.recording.map(sample_recording);
+    let presentations = sample_presentations(&intl, scene.activities);
+    let items = presentations
+        .iter()
+        .map(activity::Presentation::item_props)
+        .collect::<Vec<_>>();
+    WORKSPACES.with_scene(
+        slot as usize,
+        || {
+            let runtime = gallery_map_runtime(scene.fail_tiles);
+            let mut workspace = activity::Workspace::new(&runtime);
+            if matches!(slot, WorkspaceSlot::Archive) {
+                workspace.open_archive();
+            }
+            (workspace, 0)
+        },
+        |(workspace, selected)| {
+            if let Some(cursor) = scene.cursor {
+                workspace.set_cursor(cursor);
+            }
+            if let Some(selected_lap) = scene.selected_lap {
+                workspace.set_selected_lap(Some(selected_lap));
+            }
+            if let Some(activity::Action::Select(index)) = workspace.show_with_actions(
+                ui,
+                &intl,
+                &activity::WorkspaceProps {
+                    items: &items,
+                    presentations: &presentations,
+                    selected: (!items.is_empty()).then_some(*selected),
+                    recording: recording.as_ref(),
+                    recording_key: scene.recording.map(|kind| match kind {
+                        RecordingKind::Complete => "complete",
+                        RecordingKind::MissingMetrics => "missing-metrics",
+                        RecordingKind::NoGps => "no-gps",
+                    }),
+                    units: UnitSystem::Metric,
+                    empty_list: "No activities yet",
+                    empty_detail: "Select an activity",
+                    no_route: "No recorded route",
                 },
-                |(workspace, selected)| {
-                    if let Some(cursor) = scene.cursor {
-                        workspace.set_cursor(cursor);
-                    }
-                    if let Some(selected_lap) = scene.selected_lap {
-                        workspace.set_selected_lap(Some(selected_lap));
-                    }
-                    if let Some(activity::Action::Select(index)) = workspace.show(
-                        ui,
-                        &intl,
-                        &activity::WorkspaceProps {
-                            items: &items,
-                            presentations: &presentations,
-                            selected: Some(*selected),
-                            recording: recording.as_ref(),
-                            recording_key: scene.recording.map(|kind| match kind {
-                                RecordingKind::Complete => "complete",
-                                RecordingKind::MissingMetrics => "missing-metrics",
-                                RecordingKind::NoGps => "no-gps",
-                            }),
-                            units: UnitSystem::Metric,
-                            empty_list: "No activities yet",
-                            empty_detail: "Select an activity",
-                            no_route: "No recorded route",
-                        },
-                    ) {
-                        *selected = index;
+                |ui| {
+                    if scene.import_actions {
+                        ui.add_space(12.0);
+                        let _ = file_import::actions(
+                            ui,
+                            &file_import::Props {
+                                title: "",
+                                description: "",
+                                files_label: &format_message!(&intl, default_message: "Choose files"),
+                                folder_label: &format_message!(&intl, default_message: "Choose a folder"),
+                                enabled: true,
+                                drop_active: false,
+                            },
+                        );
                     }
                 },
-            );
+            ) {
+                *selected = index;
+            }
         },
     );
 }
@@ -779,25 +975,42 @@ fn push_varint(output: &mut Vec<u8>, mut value: u64) {
     output.push(u8::try_from(value).unwrap_or_default());
 }
 
-fn sample_presentations(intl: &garmin_i18n::Intl) -> Vec<activity::Presentation> {
+fn sample_presentations(
+    intl: &garmin_i18n::Intl,
+    kind: ActivitiesKind,
+) -> Vec<activity::Presentation> {
+    if matches!(kind, ActivitiesKind::Empty) {
+        return Vec::new();
+    }
+    // March 2026 needs six rows with a Monday-first calendar. Include a prior
+    // year and a next-month activity so the pager exercises both boundaries.
+    let starts = if matches!(kind, ActivitiesKind::Boundaries) {
+        [1_772_366_400_000, 1_767_096_000_000, 1_775_044_800_000]
+    } else {
+        [
+            RECORDING_START_MILLISECONDS,
+            RECORDING_START_MILLISECONDS + 7_200_000,
+            RECORDING_START_MILLISECONDS + 172_800_000,
+        ]
+    };
     [
         (
             ActivitySport::Cycling,
-            RECORDING_START_MILLISECONDS,
+            starts[0],
             43 * 60 * 1_000,
             16_800_000,
             "Edge 850",
         ),
         (
             ActivitySport::Running,
-            RECORDING_START_MILLISECONDS + 86_400_000,
+            starts[1],
             51 * 60 * 1_000,
             10_870_000,
             "Forerunner",
         ),
         (
             ActivitySport::Cycling,
-            RECORDING_START_MILLISECONDS + 172_800_000,
+            starts[2],
             34 * 60 * 1_000,
             18_420_000,
             "Edge 850",

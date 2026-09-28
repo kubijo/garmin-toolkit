@@ -1,6 +1,6 @@
 # Resolved fēnix `t03` mounted-MTP incident
 
-The ignored `.tmp/fenix-t03` capture records a backup-free update with 18 writes and 9 removals.
+The interrupted backup-free update involved 18 writes and 9 removals.
 
 The original interruption left:
 

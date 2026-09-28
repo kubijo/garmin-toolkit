@@ -11,7 +11,7 @@ Contracts live in [application windows](../architecture/application-windows.md),
    and mutations behind separate confirmation.
 2. Stage FIT files for review of activities, duplicates, warnings, and failures before confirmed import.
 3. Limit drag/drop to visible, enabled targets with accept/reject feedback.
-4. Finish [activity map acceptance](activity-map-workspace.md); report mutations through persistent notifications.
+4. Report mutations through persistent notifications.
 5. Prove offline sync, visualization, export, cross-target snapshot/restore, and one confirmed upload on both clients.
 6. Audit keyboard navigation, focus, modal trapping, and reconnect recovery. Require licensed artwork and attribution.
 7. **Add the missing profile accent-color chooser.** Persist the existing accent field; test switching/restart,
@@ -31,33 +31,21 @@ Use `just hass::control check` against a running demo. Remaining checks:
   across keyboard/touch and other Wayland compositors. Pending activation must not recreate closed windows.
 - **Decorations:** native title-bar actions, window menu, resizing, borders/shadows, maximized appearance, and both
   themes.
-- **Automation, control, capture, and diagnostics:** close the combined
-  [renderer and automation acceptance](activity-map-workspace.md#browser-verification) before the Activities redesign.
-  File export errors remain part of this workflow's recovery checks.
+- **Diagnostics:** verify file-export error recovery.
 
 Gallery evidence must cover narrow layouts, translations, failures, progress, and recovery. HASS loader/ingress also
 needs browser evidence. [Device inspection](device-state.md) owns hardware checks; test macOS/Windows before claiming
 support beyond the Linux GIO path.
 
-## Deferred work
-
-Device/profile lifecycle events, historical run-ID retrieval, moving browser orchestration into Rust, and an optional
-MCP facade remain separate work. Browser automation still handles browser chrome, file choosers, and console/network
-inspection.
-
 ### Deferred Wayland activation work
 
-Keep the working [winit patch](../../vendor/winit/PATCHES.md) pending a compatible upstream fix. As of 2026-09-23,
-stable winit was 0.30.13 and 0.31 prereleases were incompatible with the current eframe integration.
-
+Retain the [winit patch](../../vendor/winit/PATCHES.md) until a compatible upstream fix exists. Recorded 2026-09-23:
+winit 0.30.13 is compatible; 0.31 prereleases are not. Track
 [winit #3633](https://github.com/rust-windowing/winit/issues/3633) and
-[egui #8142](https://github.com/emilk/egui/issues/8142) track activation.
-[PR #2955](https://github.com/rust-windowing/winit/pull/2955) added startup tokens;
-[PR #4612](https://github.com/rust-windowing/winit/pull/4612) was withdrawn and does not establish sibling-window focus.
+[egui #8142](https://github.com/emilk/egui/issues/8142). Startup tokens from
+[PR #2955](https://github.com/rust-windowing/winit/pull/2955) do not establish sibling-window focus. Before upstreaming:
+two-window reproduction, source-window token API discussion, keyboard/touch/multi-seat/compositor checks,
+development-branch port, then separate 0.30 backport request.
 
-Before upstreaming: recheck existing work, prepare a two-window reproduction, discuss an API using source-window tokens,
-and test keyboard/touch, multi-seat, and multiple compositors. Port to the development branch and request a 0.30
-backport separately. No patch has been submitted.
-
-Retire this plan once both clients complete the watch workflow, snapshots round-trip, and advertised platforms have
-explicit test coverage.
+Other deferred work: device/profile lifecycle events, historical run retrieval, Rust browser orchestration, optional
+MCP. Browser tooling retains chrome/file-picker/console/network inspection.

@@ -35,5 +35,6 @@ expectations, and review; prefer synthetic data.
 
 ## Interface and performance
 
+- [Build performance](build-performance.md)
 - [Browser map evidence](browser-map.md)
 - [Shared interface validation](interface-validation.md)

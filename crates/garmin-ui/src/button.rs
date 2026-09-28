@@ -86,6 +86,7 @@ impl<'a, T> GroupChoice<'a, T> {
 #[derive(Clone, Copy, Debug)]
 pub struct GroupProps {
     pub size: Size,
+    pub width: Width,
     pub enabled: bool,
 }
 
@@ -99,63 +100,49 @@ pub fn group<T>(
 where
     T: Copy + Eq,
 {
-    group_with_density(ui, selected, choices, props, GroupDensity::Standard)
+    row(ui, choices.len(), props.width, |ui, index| {
+        let choice = &choices[index];
+        let is_selected = choice.value == selected;
+        let clicked = Props {
+            label: choice.label,
+            icon: Some(choice.icon),
+            kind: if is_selected {
+                Kind::Primary
+            } else {
+                Kind::Secondary
+            },
+            size: props.size,
+            width: props.width,
+            enabled: props.enabled && choice.enabled,
+        }
+        .show(ui)
+        .clicked();
+        (clicked && !is_selected).then_some(choice.value)
+    })
 }
 
-pub(crate) fn compact_group<T>(
+pub(crate) fn row<T>(
     ui: &mut Ui,
-    selected: T,
-    choices: &[GroupChoice<'_, T>],
-    props: GroupProps,
-) -> Option<T>
-where
-    T: Copy + Eq,
-{
-    group_with_density(ui, selected, choices, props, GroupDensity::Compact)
-}
-
-#[derive(Clone, Copy)]
-enum GroupDensity {
-    Standard,
-    Compact,
-}
-
-fn group_with_density<T>(
-    ui: &mut Ui,
-    selected: T,
-    choices: &[GroupChoice<'_, T>],
-    props: GroupProps,
-    density: GroupDensity,
-) -> Option<T>
-where
-    T: Copy + Eq,
-{
+    count: usize,
+    width: Width,
+    mut show: impl FnMut(&mut Ui, usize) -> Option<T>,
+) -> Option<T> {
+    if count == 0 {
+        return None;
+    }
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        ui.horizontal(|ui| {
-            choices.iter().find_map(|choice| {
-                let is_selected = choice.value == selected;
-                let button = Props {
-                    label: choice.label,
-                    icon: Some(choice.icon),
-                    kind: if is_selected {
-                        Kind::Primary
-                    } else {
-                        Kind::Secondary
-                    },
-                    size: props.size,
-                    width: Width::Fit,
-                    enabled: props.enabled && choice.enabled,
-                };
-                let clicked = match density {
-                    GroupDensity::Standard => button.show(ui),
-                    GroupDensity::Compact => button.show_compact(ui),
-                }
-                .clicked();
-                (clicked && !is_selected).then_some(choice.value)
+        if width == Width::Fill {
+            ui.columns(count, |columns| {
+                columns
+                    .iter_mut()
+                    .enumerate()
+                    .fold(None, |action, (index, ui)| show(ui, index).or(action))
             })
-        })
-        .inner
+        } else {
+            ui.horizontal(|ui| (0..count).fold(None, |action, index| show(ui, index).or(action)))
+                .inner
+        }
     })
     .inner
 }
@@ -182,11 +169,6 @@ impl Props<'_> {
             ..metrics(self.size)
         };
         self.show_with_states_and_metrics(ui, states, metrics)
-    }
-
-    pub(crate) fn show_compact(self, ui: &mut Ui) -> Response {
-        let states = self.kind.states(ui);
-        self.show_with_states_and_metrics(ui, states, compact_metrics())
     }
 
     fn show_with_states_and_metrics(
@@ -304,16 +286,6 @@ struct Metrics {
     font_size: f32,
     icon_size: f32,
     gap: f32,
-}
-
-const fn compact_metrics() -> Metrics {
-    Metrics {
-        height: 28.0,
-        horizontal_padding: 8.0,
-        font_size: 12.0,
-        icon_size: 14.0,
-        gap: 4.0,
-    }
 }
 
 const fn metrics(size: Size) -> Metrics {

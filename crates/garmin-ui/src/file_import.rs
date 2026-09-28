@@ -72,6 +72,19 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     action
 }
 
+/// Compact ingress actions for a contextual page header.
+#[must_use]
+pub fn actions(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
+    button::row(ui, 2, button::Width::Fill, |ui, index| match index {
+        0 => file_button(ui, props, button::Width::Fill)
+            .clicked()
+            .then_some(Action::Files),
+        _ => folder_button(ui, props, button::Width::Fill)
+            .clicked()
+            .then_some(Action::Folder),
+    })
+}
+
 /// Paint a non-shifting drop affordance over the complete import workspace.
 pub fn drop_overlay(ui: &Ui, rect: Rect, label: &str) {
     let palette = crate::theme::palette(ui);

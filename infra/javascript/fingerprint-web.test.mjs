@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
-import { copyFile, mkdtemp, mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { fingerprintWeb, browserAssetPaths } from './fingerprint-web.mjs';
+import { testDirectory } from './test-directory.mjs';
 
-async function build(version, wasm = 'wasm fixture', stageWorkers) {
-    await mkdir('.tmp', { recursive: true });
-    const root = await mkdtemp('.tmp/web-assets-test-');
+async function build(t, version, wasm = 'wasm fixture', stageWorkers) {
+    const root = testDirectory(t, 'web-assets-test-');
     await mkdir(join(root, 'snippets', 'unchanged-directory-id'), { recursive: true });
     await writeFile(join(root, 'snippets', 'unchanged-directory-id', 'codec.js'), `export const version = ${version};`);
     await writeFile(join(root, 'worker-codec.js'), `export const version = ${version};`);
@@ -47,9 +47,9 @@ async function inventory(root, prefix = '') {
     return result;
 }
 
-test('cached build A cannot supply stale dependencies to build B', async () => {
-    const first = await build(1);
-    const second = await build(2);
+test('cached build A cannot supply stale dependencies to build B', async t => {
+    const first = await build(t, 1);
+    const second = await build(t, 2);
     for (const asset of ['module', 'map-worker', 'map-render-worker']) {
         assert.notEqual(
             first.assets[asset],
@@ -78,20 +78,20 @@ test('cached build A cannot supply stale dependencies to build B', async () => {
     );
 });
 
-test('binary changes invalidate the dependent application module, while unchanged builds are reproducible', async () => {
-    const first = await build(3, 'one');
-    const repeated = await build(3, 'one');
-    const changed = await build(3, 'two');
+test('binary changes invalidate the dependent application module, while unchanged builds are reproducible', async t => {
+    const first = await build(t, 3, 'one');
+    const repeated = await build(t, 3, 'one');
+    const changed = await build(t, 3, 'two');
     assert.deepEqual(first.names, repeated.names);
     assert.notEqual(first.assets.wasm, changed.assets.wasm);
     assert.notEqual(first.assets.module, changed.assets.module);
     assert.equal(first.assets['map-worker'], changed.assets['map-worker']);
 });
 
-test('Trunk copy declarations supply all production worker dependencies', async () => {
+test('Trunk copy declarations supply all production worker dependencies', async t => {
     const web = new URL('../../apps/garmin-hass/web/', import.meta.url);
     const html = await readFile(new URL('index.html', web), 'utf8');
-    const { root, assets } = await build(1, undefined, async staging => {
+    const { root, assets } = await build(t, 1, undefined, async staging => {
         for (const [, path] of html.matchAll(/<link data-trunk rel="copy-file" href="([^"]+)">/g)) {
             await copyFile(new URL(path, web), join(staging, path));
         }

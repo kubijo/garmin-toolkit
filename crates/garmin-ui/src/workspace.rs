@@ -95,7 +95,12 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
         selected: Some(props.selected_profile),
         expanded: props.profile_menu_expanded,
     };
-    let output = shell::show(
+    let show = if matches!(props.page, Page::Activities) {
+        shell::show_edge_to_edge
+    } else {
+        shell::show
+    };
+    let output = show(
         ui,
         &shell::Props {
             product_name: props.product_name,

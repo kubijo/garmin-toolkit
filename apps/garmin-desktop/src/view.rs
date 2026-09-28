@@ -77,7 +77,7 @@ impl Desktop {
         map_renderer: activity::WgpuMapHandle,
         profiling: profiling::RuntimeMetricsRecorder,
     ) -> Result<Self, Error> {
-        let intl = translations.formatter(Language::English)?;
+        let intl = translations.formatter_for_client(Language::English)?;
         let worker = Worker::spawn(application, context.clone())?;
         let map_worker = crate::map_worker::Worker::spawn(&data_root.join("cache/activity-map"))?;
         let map_runtime = activity::map_runtime::MapRuntimeHandle::new(
@@ -1051,7 +1051,7 @@ impl Desktop {
             LanguagePreference::English => Language::English,
             LanguagePreference::Czech => Language::Czech,
         };
-        match self.translations.formatter(language) {
+        match self.translations.formatter_for_client(language) {
             Ok(intl) => {
                 for profile in &mut self.profiles {
                     profile.reformat(&intl, preferences.unit_system());
@@ -1522,10 +1522,6 @@ impl ImportStatus {
         }
     }
 
-    const fn visible(&self) -> bool {
-        !matches!(self.phase, ImportPhase::Idle)
-    }
-
     fn start(&mut self) {
         *self = Self {
             phase: ImportPhase::Scanning,
@@ -1614,23 +1610,8 @@ impl<'a> ActivitiesPage<'a> {
         let no_activities = format_message!(self.intl, default_message: "No activities yet");
         let select_activity = format_message!(self.intl, default_message: "Select an activity");
         let import_copy = ImportCopy::new(self.intl, self.drop_active);
-        let import = file_import::show(
-            ui,
-            &file_import::Props {
-                title: &import_copy.title,
-                description: &import_copy.description,
-                files_label: &import_copy.files,
-                folder_label: &import_copy.folder,
-                drop_active: self.drop_active,
-                enabled: !self.import.busy(),
-            },
-        );
-        ui.add_space(12.0);
-        show_import_status(ui, self.intl, self.import);
-        if self.import.visible() {
-            ui.add_space(12.0);
-        }
-        let selected = workspace.show(
+        let mut import = None;
+        let selected = workspace.show_with_actions(
             ui,
             self.intl,
             &activity::WorkspaceProps {
@@ -1643,6 +1624,21 @@ impl<'a> ActivitiesPage<'a> {
                 empty_list: &no_activities,
                 empty_detail: &select_activity,
                 no_route: &no_route,
+            },
+            |ui| {
+                ui.add_space(12.0);
+                import = file_import::actions(
+                    ui,
+                    &file_import::Props {
+                        title: &import_copy.title,
+                        description: &import_copy.description,
+                        files_label: &import_copy.files,
+                        folder_label: &import_copy.folder,
+                        drop_active: self.drop_active,
+                        enabled: !self.import.busy(),
+                    },
+                );
+                show_import_status(ui, self.intl, self.import);
             },
         );
         if self.drop_active {

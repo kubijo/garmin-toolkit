@@ -1,4 +1,4 @@
-out = "../../.tmp/gallery/activity-map"
+out = "../../../.tmp/gallery/activity-map"
 size = "1920x1080"
 sheet = "sheet.png"
 report = "capture.json"
@@ -31,7 +31,23 @@ frames = 4
 [[shot]]
 name = "pinned-cursor"
 scene = "activity::Pinned Cursor"
+size = "1220x1660"
 frames = 16
+
+[shot.knobs]
+height = 1600
+
+[[shot]]
+name = "pinned-cursor-light"
+scene = "activity::Pinned Cursor"
+size = "1220x1660"
+frames = 16
+
+[shot.knobs]
+height = 1600
+
+[shot.globals]
+Theme = "Light"
 
 [[shot]]
 name = "playback"

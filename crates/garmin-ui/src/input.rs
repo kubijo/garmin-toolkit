@@ -251,14 +251,16 @@ fn field(
         } else {
             app_theme.content().text_disabled()
         };
-        ui.add(
-            egui::Label::new(
-                RichText::new(props.label)
-                    .size(12.0)
-                    .color(label_color.into_cint()),
-            )
-            .selectable(false),
-        );
+        if !props.label.is_empty() {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(props.label)
+                        .size(12.0)
+                        .color(label_color.into_cint()),
+                )
+                .selectable(false),
+            );
+        }
 
         let fill = if !props.enabled {
             ui.visuals().widgets.noninteractive.bg_fill

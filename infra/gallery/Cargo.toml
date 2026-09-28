@@ -55,6 +55,10 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
+# This path dependency contains the scenes under active development.
+[profile.dev.package.garmin-ui]
+opt-level = 0
+
 [lints.rust]
 unsafe_code = "forbid"
 

@@ -1,15 +1,54 @@
 """License generator tests."""
 
+import io
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
+from unittest.mock import patch
 
-from generate import bundle_document, expanded_entries, resolve_linked
+from generate import bundle_document, expanded_entries, main, resolve_linked
 
 
 class LicenseGenerationTests(unittest.TestCase):
     """Exercise graph selection and bundle encoding."""
+
+    def test_subprocess_diagnostics_reach_stderr(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                '-c',
+                """
+from generate import run_json
+import sys
+run_json([sys.executable, '-c', 'import sys; print("Cargo diagnostic", file=sys.stderr); sys.exit(101)'])
+""",
+            ],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Cargo diagnostic', result.stderr.splitlines())
+
+    def test_cli_reports_failed_command_without_traceback(self) -> None:
+        for arguments in ([], ['--check']):
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as directory:
+                config = Path(directory) / 'config.json'
+                config.write_text('{}')
+                error = subprocess.CalledProcessError(101, ['cargo', 'metadata', '--locked'])
+                stderr = io.StringIO()
+                with (
+                    patch.object(sys, 'argv', ['generate.py', '--config', str(config), *arguments]),
+                    patch('generate.generate', side_effect=error),
+                    redirect_stderr(stderr),
+                ):
+                    self.assertEqual(main(), 1)
+                self.assertEqual(stderr.getvalue(), 'license generation failed: cargo metadata --locked (exit 101)\n')
 
     def test_resolves_only_normal_non_macro_dependencies(self) -> None:
         packages = [

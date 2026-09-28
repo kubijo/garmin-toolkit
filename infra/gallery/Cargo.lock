@@ -2605,7 +2605,13 @@ name = "garmin-i18n"
 version = "0.1.0"
 dependencies = [
  "formatjs_intl",
+ "icu_calendar",
+ "icu_datetime",
+ "icu_decimal",
+ "icu_locale",
+ "jiff",
  "serde_json",
+ "sys-locale",
  "thiserror 2.0.20",
 ]
 
@@ -2695,6 +2701,7 @@ dependencies = [
  "geo",
  "geo-types",
  "image",
+ "jiff",
  "kittest",
  "lyon_path",
  "phosphor-svgs",
@@ -4059,10 +4066,12 @@ dependencies = [
  "jiff-core",
  "jiff-static",
  "jiff-tzdb-platform",
+ "js-sys",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -7318,6 +7327,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "js-sys",
+ "libc",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-out = "../../.tmp/gallery/automation-status"
+out = "../../../.tmp/gallery/automation-status"
 size = "640x640"
 sheet = "sheet.png"
 report = "capture.json"

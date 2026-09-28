@@ -1,4 +1,4 @@
-out = "../../.tmp/gallery/notifications"
+out = "../../../.tmp/gallery/notifications"
 size = "560x440"
 sheet = "sheet.png"
 report = "capture.json"

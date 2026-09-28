@@ -1,4 +1,4 @@
-//! Exercise responsive selection against the production workspace and drawers.
+//! Exercise responsive selection against the production calendar and archive.
 use super::*;
 use crate::activity;
 use crate::activity::map_runtime;
@@ -20,7 +20,7 @@ impl map_runtime::Backend for NoTiles {
 }
 
 #[test]
-fn responsive_selection_opens_real_drawers_and_preserves_the_selected_activity() {
+fn responsive_archive_preserves_the_selected_activity() {
     let context = Context::default();
     crate::install(&context);
     context.add_plugin(Driver::default());
@@ -110,7 +110,7 @@ fn responsive_selection_opens_real_drawers_and_preserves_the_selected_activity()
     assert!(open_drawer_seen);
     assert_eq!(selected, 0);
     assert!(
-        lookup(driver.tree.as_ref(), "activity.0", Rect::EVERYTHING)
+        lookup(driver.tree.as_ref(), "activity.selection", Rect::EVERYTHING)
             .unwrap()
             .is_some()
     );

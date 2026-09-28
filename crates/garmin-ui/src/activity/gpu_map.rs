@@ -2409,6 +2409,16 @@ mod tests {
         assert!(anchor.can_reuse_layout(translated));
         assert!(!anchor.can_reuse_layout(too_far));
         assert!(!anchor.can_reuse_layout(zoomed));
+
+        let scrolled = LabelView {
+            viewport: anchor.viewport.translate(egui::vec2(0.0, -300.0)),
+            ..anchor
+        };
+        assert!(
+            anchor.can_reuse_layout(scrolled),
+            "page scrolling must reuse map labels"
+        );
+        assert_eq!(anchor.translation_to(scrolled), egui::vec2(0.0, -300.0));
     }
 
     #[test]
@@ -2426,6 +2436,17 @@ mod tests {
         let mut cache = LabelCache::default();
 
         assert_eq!(cache.defer_request_for_motion(initial, started), None);
+        assert_eq!(
+            cache.defer_request_for_motion(
+                LabelView {
+                    viewport: initial.viewport.translate(egui::vec2(0.0, -300.0)),
+                    ..initial
+                },
+                started
+            ),
+            None,
+            "moving the map within the page must not defer label preparation"
+        );
         assert_eq!(
             cache.defer_request_for_motion(moved, started),
             Some(std::time::Duration::from_millis(120))

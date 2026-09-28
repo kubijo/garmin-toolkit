@@ -117,6 +117,7 @@ fn group(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
             &choices,
             GroupProps {
                 size: Size::Medium,
+                width: Width::Fit,
                 enabled: true,
             },
         );
