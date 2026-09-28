@@ -1,4 +1,4 @@
-out = "../../.tmp/gallery/renderer-diagnostics"
+out = "../../../.tmp/gallery/renderer-diagnostics"
 size = "640x360"
 sheet = "sheet.png"
 report = "capture.json"

@@ -323,6 +323,8 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
     } else {
         24.0
     };
+    let gap_user = 2.0;
+    let gap_add = 4.0;
     let width = available.x.min(CHOOSER_MAX_WIDTH);
     let mut action = None;
 
@@ -337,21 +339,32 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
                 });
                 ui.add_space(32.0);
 
+                // The explicit gaps below include all spacing between chooser rows.
+                ui.spacing_mut().item_spacing.y = 0.0;
+
                 if props.profiles.is_empty() {
                     ui.label(RichText::new(empty).weak());
-                    ui.add_space(16.0);
-                } else {
+                    ui.add_space(gap_user);
+                }
+                // Contentful
+                else {
+                    let count = props.profiles.len();
                     for (index, profile) in props.profiles.iter().enumerate() {
                         let response = chooser_profile_row(ui, profile);
                         crate::semantics::target(ui, &response, format!("profile.{index}"));
+
                         if response.clicked() {
                             action = Some(Action::Select(index));
                         }
-                        ui.add_space(8.0);
+
+                        if index < count - 1 {
+                            ui.add_space(gap_user);
+                        }
                     }
-                    ui.add_space(8.0);
                 }
 
+                // Gap is doubled before the create button
+                ui.add_space(gap_add);
                 if chooser_create_row(ui, &create).clicked() {
                     action = Some(Action::Create);
                 }

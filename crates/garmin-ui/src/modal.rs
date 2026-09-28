@@ -167,17 +167,7 @@ fn render_surface<R>(
         .min((bounds.x - VIEWPORT_MARGIN).max(0.0));
     let max_body_height = bounds.y.mul_add(0.8, -180.0).max(96.0);
 
-    let palette = crate::theme::palette(ui);
-    egui::Frame::new()
-        .fill(color32(palette.surfaces().layer(theme::Level::One)))
-        .corner_radius(FLOATING_RADIUS)
-        .stroke(egui::Stroke::new(1.0, color32(palette.borders().subtle())))
-        .shadow(egui::Shadow {
-            offset: [0, 12],
-            blur: 32,
-            spread: 0,
-            color: egui::Color32::from_black_alpha(128),
-        })
+    surface_frame(ui)
         .show(ui, |ui| {
             ui.set_width(width);
             let inner = egui::Frame::new()
@@ -197,6 +187,20 @@ fn render_surface<R>(
             Output { action, inner }
         })
         .inner
+}
+
+pub(crate) fn surface_frame(ui: &Ui) -> egui::Frame {
+    let palette = crate::theme::palette(ui);
+    egui::Frame::new()
+        .fill(color32(palette.surfaces().layer(theme::Level::One)))
+        .corner_radius(FLOATING_RADIUS)
+        .stroke(egui::Stroke::new(1.0, color32(palette.borders().subtle())))
+        .shadow(egui::Shadow {
+            offset: [0, 12],
+            blur: 32,
+            spread: 0,
+            color: egui::Color32::from_black_alpha(128),
+        })
 }
 
 fn contained_backdrop(ui: &Ui, id: Id, bounds: egui::Rect) -> Response {

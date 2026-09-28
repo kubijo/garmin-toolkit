@@ -15,6 +15,7 @@ use crate::{
     theme::{CONTROL_RADIUS, PANEL_RADIUS, color32},
 };
 
+mod calendar;
 mod map;
 pub mod map_composition;
 pub mod map_diagnostics;
@@ -23,6 +24,7 @@ pub use map::remote as map_remote;
 mod map_style;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_latest;
+mod navigation;
 mod route_index;
 mod workspace;
 
@@ -41,6 +43,8 @@ const METRIC_GAP: f32 = 1.0;
 const METRIC_MAX_HEIGHT: f32 = 96.0;
 
 pub struct Presentation {
+    started_at: jiff::Timestamp,
+    local_start: jiff::civil::DateTime,
     sport: ActivitySport,
     icon: icons::Icon,
     title: String,
@@ -68,7 +72,9 @@ impl Presentation {
 
     fn new(summary: ActivitySummary, source: &str, intl: &Intl, units: UnitSystem) -> Self {
         let sport = summary.sport();
-        let started_at = summary.time().start().to_string();
+        let started_at = *summary.time().start().as_jiff();
+        let local_start = started_at.to_zoned(jiff::tz::TimeZone::system()).datetime();
+        let start_label = calendar::date_time_label(intl, local_start);
         let timer_milliseconds = summary.totals().timer().into_milliseconds();
         let distance_millimeters = summary.totals().distance().map(Distance::into_millimeters);
         let average_heart_rate = summary
@@ -81,7 +87,7 @@ impl Presentation {
             intl,
             default_message: "{start} · {source}",
             values: {
-                start: started_at,
+                start: start_label,
                 source: source,
             },
         );
@@ -111,6 +117,8 @@ impl Presentation {
             });
         }
         Self {
+            started_at,
+            local_start,
             sport,
             icon: sport_icon(sport),
             title,

@@ -1,15 +1,15 @@
 """Headless checks for raw Chrome traces captured from the HASS client."""
 
-import argparse
 import gzip
 import json
 import math
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import urlsplit
 
+import tyro
 from browser_upload_analysis import UploadAnalysis, analyze_uploads, decode_mark_detail, finite_number
 
 DEFAULT_URL_PREFIX = 'http://127.0.0.1:8099/'
@@ -750,21 +750,26 @@ def print_summary(summary: BrowserTraceSummary, *, timeline: bool = False) -> No
         )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('trace', type=Path)
-    parser.add_argument('--url-prefix', default=DEFAULT_URL_PREFIX)
-    parser.add_argument('--json', action='store_true', dest='as_json')
-    parser.add_argument('--timeline', action='store_true', help='show loading activity in one-second windows')
-    arguments = parser.parse_args()
+def summarize(
+    trace: tyro.conf.Positional[Path],
+    *,
+    url_prefix: str = DEFAULT_URL_PREFIX,
+    as_json: Annotated[bool, tyro.conf.arg(name='json')] = False,
+    timeline: bool = False,
+) -> None:
+    """Summarize a Chrome trace; optionally include the loading timeline or emit JSON."""
     try:
-        summary = analyze_trace(load_trace(arguments.trace), arguments.url_prefix)
+        summary = analyze_trace(load_trace(trace), url_prefix)
     except (OSError, json.JSONDecodeError, TraceError) as error:
         raise SystemExit(f'error: {error}') from error
-    if arguments.as_json:
+    if as_json:
         print(json.dumps(asdict(summary), indent=2, sort_keys=True))
     else:
-        print_summary(summary, timeline=arguments.timeline)
+        print_summary(summary, timeline=timeline)
+
+
+def main() -> None:
+    tyro.cli(summarize)
 
 
 if __name__ == '__main__':

@@ -101,15 +101,25 @@ impl Globals {
     }
 
     pub(crate) fn intl(&self) -> Intl {
+        self.intl_for_locale(match self.language {
+            GalleryLanguage::English => "en",
+            GalleryLanguage::Czech => "cs",
+        })
+    }
+
+    pub(crate) fn intl_for_locale(&self, locale: &str) -> Intl {
         static TRANSLATIONS: OnceLock<Translations> = OnceLock::new();
         TRANSLATIONS
             .get_or_init(|| {
                 Translations::bundled().expect("embedded catalogs are validated during the build")
             })
-            .formatter(match self.language {
-                GalleryLanguage::English => IntlLanguage::English,
-                GalleryLanguage::Czech => IntlLanguage::Czech,
-            })
+            .formatter_with_locale(
+                match self.language {
+                    GalleryLanguage::English => IntlLanguage::English,
+                    GalleryLanguage::Czech => IntlLanguage::Czech,
+                },
+                locale,
+            )
             .expect("gallery globals select only bundled languages")
     }
 }

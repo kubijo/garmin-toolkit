@@ -1,0 +1,118 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -60,6 +60,7 @@
+ serde_json = "1"
+ serde_yaml = "=0.9.33" # serde-yaml is deprecated, but "just works", let's see who becomes the next serde_yaml
+ sha2 = "0.10"
++tempfile = "3"
+ strum = { version = "0.27.1", features = ["derive"] }
+ tar = "0.4"
+ thiserror = "2"
+--- a/src/pipelines/rust/mod.rs
++++ b/src/pipelines/rust/mod.rs
+@@ -1,6 +1,7 @@
+ //! Rust application pipeline.
+ 
+ mod output;
++mod bindgen_cache;
+ mod sri;
+ mod wasm_bindgen;
+ mod wasm_opt;
+@@ -585,16 +586,49 @@
+         let target_path =
+             target_path(&self.cfg.staging_dist, self.target_path.as_deref(), None).await?;
+ 
+-        // Invoke wasm-bindgen.
+-        tracing::debug!("calling wasm-bindgen for {}", self.name);
+-        common::run_command(
+-            wasm_bindgen_name,
+-            &wasm_bindgen,
+-            &args,
+-            &self.cfg.working_directory,
+-        )
+-        .await
+-        .map_err(|err| check_target_not_found_err(err, wasm_bindgen_name))?;
++        // Local JS is embedded in the WASM by this bindgen version. package.json
++        // is read at bindgen time, so hash every Cargo package's sibling manifest.
++        // Re-audit these inputs before enabling another bindgen version.
++        let cache = if !self.cfg.release
++            && version == "0.2.126"
++            && std::env::var_os("TRUNK_BINDGEN_CACHE_DISABLE").is_none()
++        {
++            Some(bindgen_cache::Cache::prepare(
++                self.manifest.metadata.target_directory.as_std_path(),
++                wasm_path,
++                &wasm_bindgen,
++                &version,
++                &args,
++                &self.cfg.working_directory,
++                self.manifest.metadata.packages.iter().map(|package| {
++                    package.manifest_path.parent().unwrap().join("package.json").into_std_path_buf()
++                }),
++            )?)
++        } else {
++            None
++        };
++        let mut bindgen_out = cache.as_ref().map_or_else(
++            || bindgen_out.into_std_path_buf(),
++            |cache| cache.output(),
++        );
++        let cached_out_arg = format!("--out-dir={}", bindgen_out.display());
++        args[1] = &cached_out_arg;
++        if cache.as_ref().is_some_and(|cache| cache.hit()) {
++            tracing::info!("wasm-bindgen cache hit for {}", self.name);
++        } else {
++            tracing::debug!("calling wasm-bindgen for {}", self.name);
++            common::run_command(
++                wasm_bindgen_name,
++                &wasm_bindgen,
++                &args,
++                &self.cfg.working_directory,
++            )
++            .await
++            .map_err(|err| check_target_not_found_err(err, wasm_bindgen_name))?;
++            if let Some(cache) = &cache {
++                bindgen_out = cache.publish()?;
++            }
++        }
+ 
+         // Copy the generated WASM & JS loader to the dist dir.
+         tracing::debug!("copying generated wasm-bindgen artifacts");
+@@ -623,7 +657,8 @@
+             .map(|m| self.cfg.staging_dist.join(m));
+ 
+         tracing::debug!(
+-            "copying {js_loader_path} to {}",
++            "copying {} to {}",
++            js_loader_path.display(),
+             js_loader_path_dist.display()
+         );
+         self.copy_or_minify_js(
+@@ -637,7 +672,7 @@
+         .await
+         .context("error minifying or copying JS loader file to stage dir")?;
+ 
+-        tracing::debug!("copying {wasm_path} to {}", wasm_path_dist.display());
++        tracing::debug!("copying {} to {}", wasm_path.display(), wasm_path_dist.display());
+ 
+         fs::copy(wasm_path, &wasm_path_dist)
+             .await
+@@ -647,7 +682,7 @@
+             let ts_path = bindgen_out.join(&ts_name);
+             let ts_path_dist = self.cfg.staging_dist.join(&hashed_ts_name);
+ 
+-            tracing::debug!("copying {ts_path} to {}", ts_path_dist.display());
++            tracing::debug!("copying {} to {}", ts_path.display(), ts_path_dist.display());
+             fs::copy(ts_path, ts_path_dist)
+                 .await
+                 .context("error copying TS files to stage dir")?;
+@@ -686,7 +721,8 @@
+         let snippets = if path_exists(&snippets_dir_src).await? {
+             let snippets_dir_dest = target_path.join(SNIPPETS_DIR);
+             tracing::debug!(
+-                "recursively copying from '{snippets_dir_src}' to '{}'",
++                "recursively copying from '{}' to '{}'",
++                snippets_dir_src.display(),
+                 snippets_dir_dest.display()
+             );
+             copy_dir_recursive(snippets_dir_src, snippets_dir_dest)

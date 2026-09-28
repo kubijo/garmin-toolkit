@@ -203,7 +203,7 @@ impl App {
         map_session: Option<map_composition::Session>,
     ) -> Result<Self, garmin_i18n::Error> {
         let translations = Translations::bundled()?;
-        let intl = translations.formatter(Language::English)?;
+        let intl = translations.formatter_for_client(Language::English)?;
         let shared = Rc::new(RefCell::new(State::default()));
         spawn_connection(Rc::clone(&shared), context.clone());
         let map_runtime = activity::map_runtime::MapRuntimeHandle::new(
@@ -663,7 +663,7 @@ impl App {
             LanguagePreference::English => Language::English,
             LanguagePreference::Czech => Language::Czech,
         };
-        if let Ok(intl) = self.translations.formatter(language) {
+        if let Ok(intl) = self.translations.formatter_for_client(language) {
             self.intl = intl;
         }
         let theme = match preferences.theme() {

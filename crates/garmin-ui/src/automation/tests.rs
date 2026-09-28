@@ -202,9 +202,8 @@ fn frame_at_scale(
             .lock()
             .report()
             .is_some_and(|report| report.scenario == "responsive-layout");
-        if responsive {
-            responsive_controls(ui, size);
-        }
+        responsive_controls(ui, size, responsive);
+        ui.add_space(32.0);
         for target in [
             "profile.0",
             "activity.0",
@@ -217,6 +216,7 @@ fn frame_at_scale(
             "map.full-activity",
             "chart.0",
             "activity.1",
+            "activity.selection",
             "activity.viewer",
             "map.empty",
         ] {
@@ -238,6 +238,10 @@ fn frame_at_scale(
                 playing = !playing;
                 ui.data_mut(|data| data.insert_temp(playing_id, playing));
             }
+            update_mock_selection(ui, target, response.clicked());
+            let selected = ui
+                .data(|data| data.get_temp::<usize>(egui::Id::new("test-selected")))
+                .unwrap_or(0);
             crate::semantics::target(ui, &response, target);
             ui.ctx().accesskit_node_builder(response.id, |node| {
                 node.set_value(match target {
@@ -250,6 +254,13 @@ fn frame_at_scale(
                         }
                     }
                     "activity.0" | "activity.1" => "selected",
+                    "activity.selection" => {
+                        if selected == 0 {
+                            "0"
+                        } else {
+                            "1"
+                        }
+                    }
                     "map.empty" => "empty",
                     _ => value,
                 });
@@ -265,20 +276,31 @@ fn frame_at_scale(
     output
 }
 
-fn responsive_controls(ui: &mut egui::Ui, size: egui::Vec2) {
-    let response = ui.put(
-        Rect::from_min_size(egui::pos2(size.x - 100.0, 0.0), egui::vec2(90.0, 24.0)),
-        egui::Button::new("Profile"),
-    );
-    crate::semantics::target(ui, &response, "profile.toggle");
-    if size.x >= 1000.0 {
-        return;
+fn update_mock_selection(ui: &mut egui::Ui, target: &str, clicked: bool) {
+    if clicked && matches!(target, "activity.0" | "activity.1") {
+        ui.data_mut(|data| {
+            data.insert_temp(
+                egui::Id::new("test-selected"),
+                usize::from(target == "activity.1"),
+            );
+            data.insert_temp(egui::Id::new("activity.list.toggle"), false);
+        });
+    }
+}
+
+fn responsive_controls(ui: &mut egui::Ui, size: egui::Vec2, responsive: bool) {
+    if responsive {
+        let response = ui.put(
+            Rect::from_min_size(egui::pos2(size.x - 100.0, 0.0), egui::vec2(90.0, 24.0)),
+            egui::Button::new("Profile"),
+        );
+        crate::semantics::target(ui, &response, "profile.toggle");
     }
     for (target, x) in [
         ("activity.list.toggle", 230.0),
-        ("activity.details.toggle", 380.0),
+        ("activity.list.close", 380.0),
     ] {
-        let id = egui::Id::new(target);
+        let id = egui::Id::new("activity.list.toggle");
         let mut open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
         let response = ui.put(
             Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(130.0, 24.0)),
@@ -373,6 +395,56 @@ fn secondary_window_frames_do_not_drive_or_replace_the_root_workload() {
 }
 
 #[test]
+fn scenario_setup_waits_for_activities_after_login() {
+    let context = Context::default();
+    context.add_plugin(Driver::default());
+    let steps = scenarios::steps("activity-smoke")
+        .unwrap()
+        .into_iter()
+        .take(4)
+        .collect();
+    context
+        .plugin::<Driver>()
+        .lock()
+        .start_steps("delayed-login", steps)
+        .unwrap();
+    let mut signed_in = false;
+    let mut opened = false;
+    for tick in 0..180 {
+        let mut output = context.run_ui(
+            RawInput {
+                time: Some(f64::from(tick) / 60.0),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                if !signed_in {
+                    let response = ui.button("Profile");
+                    crate::semantics::target(ui, &response, "profile.0");
+                    signed_in = response.clicked();
+                } else if tick >= 60 {
+                    let response = ui.button("All activities");
+                    crate::semantics::target(ui, &response, "activity.list.toggle");
+                    opened |= response.clicked();
+                }
+            },
+        );
+        output.textures_delta.clear();
+        if !context.plugin::<Driver>().lock().running() {
+            break;
+        }
+    }
+    let plugin = context.plugin::<Driver>();
+    let driver = plugin.lock();
+    let report = driver.report().unwrap();
+    assert_eq!(report.state, "passed", "{:?}", report.failure);
+    assert!(
+        opened,
+        "the scenario must wait for the activity list to load"
+    );
+}
+
+#[test]
 fn built_in_workloads_use_the_same_plugin_and_complete_every_action() {
     for name in SCENARIOS {
         let context = Context::default();
@@ -429,10 +501,24 @@ fn hidpi_clicks_use_logical_bounds_and_reach_the_target() {
             if tick == 0 {
                 let plugin = context.plugin::<Driver>();
                 let mut driver = plugin.lock();
-                driver.start("stationary-arrival").unwrap();
-                let run = driver.run.as_mut().unwrap();
-                run.steps.truncate(3);
-                run.report.total = run.steps.len();
+                driver
+                    .start_steps(
+                        "hidpi-click",
+                        [
+                            ("profile.0", Action::Wait),
+                            ("profile.0", Action::Click),
+                            ("activity.0", Action::Wait),
+                        ]
+                        .into_iter()
+                        .map(|(target, action)| Step {
+                            phase: "click",
+                            target: target.into(),
+                            action,
+                            after: 0.1,
+                        })
+                        .collect(),
+                    )
+                    .unwrap();
             } else if !context.plugin::<Driver>().lock().running() {
                 break;
             }

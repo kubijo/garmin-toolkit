@@ -4,18 +4,23 @@
 
 The data foundation creates these deterministic synthetic fixtures:
 
-| Case                    | Required content and expectation                                                                         |
-| ----------------------- | -------------------------------------------------------------------------------------------------------- |
-| `activity-basic`        | File identity, device info, one session/lap, timestamped GPS and sensor records; exact normalized data.  |
-| `activity-multisport`   | Multiple sessions and laps with distinct sports; hierarchy and ordering survive normalization.           |
-| `wellness`              | Timestamped monitoring and body measurements with absent optional values kept absent.                    |
-| `sleep-hrv`             | Interval sleep data and HRV samples spanning a synthetic day boundary.                                   |
-| `course`                | Route points and course metadata; encode/decode semantic equivalence.                                    |
-| `workout`               | Nested workout steps, targets, repetitions, and rest; encode/decode semantic equivalence.                |
-| `developer-unknown`     | Described developer fields plus an unknown message/field; supported values and original bytes survive.   |
-| `developer-undescribed` | A developer field without its required description; decoding fails cleanly.                              |
-| `truncated`             | A valid case cut at defined offsets; every cut returns an error without panic or committed partial data. |
-| `bad-checksum`          | A valid case with one controlled mutation; checksum failure is reported without a commit.                |
+| Case                    | Required content                                                          |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `activity-basic`        | File/device identity, one session/lap, timestamped GPS and sensors        |
+| `activity-multisport`   | Multiple sessions and laps with distinct sports                           |
+| `wellness`              | Timestamped monitoring and body measurements; some optional values absent |
+| `sleep-hrv`             | Interval sleep data and HRV samples spanning a synthetic day boundary     |
+| `course`                | Route points and course metadata                                          |
+| `workout`               | Nested steps, targets, repetitions, and rest                              |
+| `developer-unknown`     | Described developer fields plus an unknown message/field                  |
+| `developer-undescribed` | A developer field without its required description                        |
+| `truncated`             | A valid case cut at defined offsets                                       |
+| `bad-checksum`          | A valid case with one controlled mutation                                 |
+
+Basic activity normalization must match the synthetic definition exactly; multisport hierarchy and ordering must
+survive. Absent wellness values stay absent. Unknown fields preserve supported values and original bytes; undescribed
+developer fields fail cleanly. Every truncation returns an error without panic or committed partial data; checksum
+failure is reported without a commit.
 
 Course and workout cases compare semantics, not bytes. Expectations come from the synthetic definition, never Garmin SDK
 fixtures or parser output.

@@ -24,6 +24,14 @@ Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands an
 - Real-device manifest comparisons require a separately approved anonymization procedure. Never commit raw device
   identifiers or private captures; follow the [fixture policy](research/fixture-policy.md).
 
+## Tooling choices
+
+Prefer direct command composition and argument forwarding over shell wrappers and argument reconstruction.
+
+Tooling uses typed CLI definitions (Tyro for Python) and template engines for generated documents. Ask before using
+string concatenation or interpolation as a templating mechanism. JavaScript is a last-choice tooling language, reserved
+for web work whose production code is already JavaScript.
+
 ## Documentation ownership
 
 Keep current contracts in architecture, accepted choices in decisions, reproducible results and uncertainty in research,
@@ -32,3 +40,6 @@ a review, preserve its unique evidence, update incoming links, and remove the te
 narratives, routine test counts, command logs, and resolved checklists out of persistent documentation. Explain current
 behavior and design constraints directly; keep open questions concrete and remove them when answered. Retain empirical
 measurements and reproduction methods when they inform unresolved work.
+
+Cite tracked fixtures, maintained reproduction commands, or durable published artifacts. Do not cite ignored local files
+as evidence in committed documentation.

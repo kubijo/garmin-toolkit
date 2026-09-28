@@ -97,7 +97,11 @@ pub fn show(
     let enabled = !props.disabled.unwrap_or(false) && !choices.is_empty();
     let selected_choice = choices.get(*selected).or_else(|| choices.first()).copied();
 
-    ui.add(egui::Label::new(RichText::new(props.label).size(label_size(size))).selectable(false));
+    if !props.label.is_empty() {
+        ui.add(
+            egui::Label::new(RichText::new(props.label).size(label_size(size))).selectable(false),
+        );
+    }
     let output = ui.add_enabled_ui(enabled, |ui| {
         let row_height = height(size);
         let popup_id = id.with("popup");

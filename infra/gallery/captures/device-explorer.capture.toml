@@ -1,4 +1,4 @@
-out = "../../.tmp/gallery/device-explorer"
+out = "../../../.tmp/gallery/device-explorer"
 size = "1920x1080"
 sheet = "sheet.png"
 report = "capture.json"

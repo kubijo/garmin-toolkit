@@ -1,11 +1,9 @@
 """Headless analysis and comparison for guarded desktop profiling reports."""
 
-import argparse
 import gzip
 import json
 import math
 import re
-import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +14,6 @@ from desktop_profile import (
     MANIFEST_NAME,
     MANIFEST_SCHEMA_VERSION,
     METRICS_NAME,
-    REPORTS_ROOT,
     ProfileError,
     file_digest,
     load_metrics,
@@ -161,13 +158,6 @@ class SymbolResolver:
         code_id = library.get('codeId')
         address = frame_table['address'][frame_index]
         return self.addresses.get(code_id, {}).get(address, (raw,))
-
-
-def report_directory(value: str) -> Path:
-    candidate = Path(value)
-    if candidate.is_dir():
-        return candidate.resolve()
-    return (REPORTS_ROOT / value).resolve()
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -555,34 +545,3 @@ def print_comparison(analyses: list[ReportAnalysis], *, allow_incomparable: bool
     for analysis in analyses:
         if analysis.manifest.get('git', {}).get('dirty') is True:
             print(f'Warning: {analysis.directory.name} was captured from a dirty source tree.')
-
-
-def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(description=__doc__)
-    commands = result.add_subparsers(dest='command', required=True)
-    analyze = commands.add_parser('analyze', help='summarize one profiling report')
-    analyze.add_argument('report')
-    compare = commands.add_parser('compare', help='compare two or more profiling reports')
-    compare.add_argument('--allow-incomparable', action='store_true')
-    compare.add_argument('reports', nargs='+')
-    return result
-
-
-def main() -> None:
-    arguments = parser().parse_args()
-    try:
-        reports = [arguments.report] if arguments.command == 'analyze' else arguments.reports
-        if arguments.command == 'compare' and len(reports) < 2:
-            raise ProfileError('compare requires at least two profiling reports')
-        analyses = [analyze_report(report_directory(report)) for report in reports]
-        if arguments.command == 'analyze':
-            print_analysis(analyses[0])
-        else:
-            print_comparison(analyses, allow_incomparable=arguments.allow_incomparable)
-    except (OSError, json.JSONDecodeError, ProfileError) as error:
-        print(f'Error: {error}', file=sys.stderr)
-        raise SystemExit(1) from None
-
-
-if __name__ == '__main__':
-    main()

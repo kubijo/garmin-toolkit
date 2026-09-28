@@ -412,7 +412,7 @@ impl MapColors {
         let palette = crate::theme::palette(ui);
         Self {
             route: crate::theme::color32(crate::theme::selection_accent(ui)),
-            outline: egui::Color32::from_black_alpha(190),
+            outline: crate::theme::color32(palette.surfaces().background()).gamma_multiply(0.75),
             marker_fill: crate::theme::color32(palette.surfaces().background()),
             start: crate::theme::color32(palette.support().success()),
             end: crate::theme::color32(palette.support().error()),
@@ -665,8 +665,9 @@ struct ZoomPolicy {
     active: bool,
 }
 
-fn zoom_policy(ui: &mut Ui, camera: &MapCamera, map_rect: Rect) -> ZoomPolicy {
-    let (gesture, from_scroll) = zoom_gesture(ui);
+fn zoom_policy(ui: &Ui, camera: &MapCamera, map_rect: Rect) -> ZoomPolicy {
+    // egui distinguishes modified wheel/pinch gestures from ordinary scrolling.
+    let gesture = f64::from(ui.input(egui::InputState::zoom_delta)) - 1.0;
     let pointer_over_map = ui.input(|input| {
         input
             .pointer
@@ -675,10 +676,6 @@ fn zoom_policy(ui: &mut Ui, camera: &MapCamera, map_rect: Rect) -> ZoomPolicy {
     });
     let blocked =
         pointer_over_map && outward_zoom_at_bound(camera.zoom(), camera.min_zoom(), gesture);
-
-    if pointer_over_map && from_scroll && gesture.abs() > f64::EPSILON {
-        ui.input_mut(|input| input.smooth_scroll_delta.y = 0.0);
-    }
 
     let accepted = pointer_over_map && !blocked;
     ZoomPolicy {
@@ -691,22 +688,6 @@ fn zoom_policy(ui: &mut Ui, camera: &MapCamera, map_rect: Rect) -> ZoomPolicy {
         ),
         active: accepted && gesture.abs() > f64::EPSILON,
     }
-}
-
-fn zoom_gesture(ui: &Ui) -> (f64, bool) {
-    let zoom_delta = f64::from(ui.input(egui::InputState::zoom_delta));
-    if (zoom_delta - 1.0).abs() > f64::EPSILON {
-        return (zoom_delta - 1.0, false);
-    }
-
-    let gesture = f64::from(ui.input(|input| {
-        input.smooth_scroll_delta.y
-            * input
-                .stable_dt
-                .clamp(input.predicted_dt * 0.5, input.predicted_dt * 2.0)
-            / 4.0
-    }));
-    (gesture, true)
 }
 
 fn outward_zoom_at_bound(zoom: f64, min_zoom: f64, gesture: f64) -> bool {
@@ -725,11 +706,12 @@ fn clamped_zoom_speed(zoom: f64, min_zoom: f64, gesture: f64, default_speed: f64
 }
 
 fn attribution(ui: &mut Ui, source: &Attribution, performance: Option<&str>) {
-    super::map_diagnostics::RendererDiagnostics::show_installed(ui);
     let palette = crate::theme::palette(ui);
     let color = crate::theme::color32(palette.content().text_helper());
     ui.add_space(-ui.spacing().item_spacing.y);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 12.0), Sense::hover());
+    let height = ui.text_style_height(&egui::TextStyle::Small).max(12.0);
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::hover());
     ui.painter().rect_filled(
         rect,
         crate::theme::CONTROL_RADIUS,
@@ -754,6 +736,12 @@ fn attribution(ui: &mut Ui, source: &Attribution, performance: Option<&str>) {
     if let Some(performance) = performance {
         attribution_ui.label(RichText::new(performance).size(8.0).color(color));
     }
+    let mut diagnostics_ui = attribution_ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(attribution_ui.available_rect_before_wrap())
+            .layout(Layout::left_to_right(egui::Align::Center)),
+    );
+    super::map_diagnostics::RendererDiagnostics::show_installed(&mut diagnostics_ui);
 }
 
 fn map_status(ui: &mut Ui, map_rect: Rect, label: &str, detail: &str) {
@@ -1340,6 +1328,75 @@ mod tests {
     }
 
     #[test]
+    fn attribution_and_renderer_status_share_a_footer_touching_the_map() {
+        for installed in [false, true] {
+            for width in [360.0, 800.0] {
+                let context = egui::Context::default();
+                crate::install(&context);
+                if installed {
+                    crate::activity::map_diagnostics::RendererDiagnostics {
+                        label: "worker-gl · ready".to_owned(),
+                        detail: "Renderer details".to_owned(),
+                    }
+                    .install(&context);
+                }
+                let mut map_bottom = 0.0;
+                let output = context.run_ui(
+                    RawInput {
+                        screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 240.0))),
+                        ..RawInput::default()
+                    },
+                    |ui| {
+                        let (map, _) =
+                            ui.allocate_exact_size(vec2(width, 160.0), egui::Sense::hover());
+                        map_bottom = map.bottom();
+                        super::attribution(ui, &TileStore::attribution(), None);
+                    },
+                );
+                let footer = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if (rect.rect.width() - width).abs() < 0.01 => {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                });
+                let labels = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) => Some((
+                            text.galley.text().to_owned(),
+                            text.galley.rect.translate(text.pos.to_vec2()),
+                        )),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                output.drop_without_applying_deltas();
+                let footer = footer.expect("attribution background");
+                assert!((footer.top() - map_bottom).abs() < 0.01, "{footer:?}");
+                assert!(
+                    footer.height() <= 16.0,
+                    "footer must remain a single compact row"
+                );
+                assert!(
+                    labels
+                        .iter()
+                        .any(|(text, _)| text.contains("OpenStreetMap"))
+                );
+                assert_eq!(
+                    labels.iter().any(|(text, _)| text.contains("worker-gl")),
+                    installed
+                );
+                for (_, bounds) in &labels {
+                    assert!(
+                        footer.expand(0.5).contains_rect(*bounds),
+                        "{bounds:?} outside {footer:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn interaction_interval_begins_after_an_active_frame_and_keeps_its_tail() {
         let mut timing = FrameTiming {
             previous: Instant::now().checked_sub(Duration::from_millis(16)),
@@ -1492,6 +1549,74 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_wheel_scrolls_the_page_and_modified_wheel_zooms_the_map() {
+        for modifiers in [
+            egui::Modifiers::NONE,
+            egui::Modifiers::CTRL,
+            egui::Modifiers::COMMAND,
+        ] {
+            let context = egui::Context::default();
+            let mut camera = MapCamera::default();
+            camera.set_zoom(10.0);
+            let before = camera.zoom();
+            let should_zoom = modifiers != egui::Modifiers::NONE;
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(320.0, 240.0))),
+                events: vec![
+                    Event::PointerMoved(pos2(160.0, 120.0)),
+                    Event::MouseWheel {
+                        unit: MouseWheelUnit::Point,
+                        delta: vec2(0.0, 120.0),
+                        modifiers,
+                        phase: TouchPhase::Move,
+                    },
+                ],
+                ..RawInput::default()
+            };
+            context
+                .run_ui(input, |ui| {
+                    let rect = ui.available_rect_before_wrap();
+                    let scroll = ui.input(|input| input.smooth_scroll_delta);
+                    let policy = zoom_policy(ui, &camera, rect);
+                    assert_eq!(policy.active, should_zoom);
+                    assert_eq!(ui.input(|input| input.smooth_scroll_delta), scroll);
+                    if !should_zoom {
+                        assert!(
+                            scroll.y > 0.0,
+                            "the parent scroll area must receive the wheel"
+                        );
+                    }
+                    let (_, response) = ui.allocate_exact_size(rect.size(), egui::Sense::drag());
+                    camera.interact(ui, &response, policy.gesture * policy.speed);
+                })
+                .drop_without_applying_deltas();
+            assert_eq!(camera.zoom() > before, should_zoom);
+        }
+    }
+
+    #[test]
+    fn pinch_zooms_without_a_keyboard_modifier() {
+        let context = egui::Context::default();
+        let mut camera = MapCamera::default();
+        camera.set_zoom(10.0);
+        context
+            .run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(320.0, 240.0))),
+                    events: vec![Event::PointerMoved(pos2(160.0, 120.0)), Event::Zoom(1.2)],
+                    ..RawInput::default()
+                },
+                |ui| {
+                    let rect = ui.available_rect_before_wrap();
+                    let policy = zoom_policy(ui, &camera, rect);
+                    assert!(policy.active);
+                    assert!(policy.gesture > 0.0);
+                },
+            )
+            .drop_without_applying_deltas();
+    }
+
+    #[test]
     fn outward_wheel_at_maximum_is_consumed_without_moving_the_map() {
         assert_outward_wheel_is_consumed(true);
     }
@@ -1514,7 +1639,7 @@ mod tests {
         };
         camera.set_zoom(bound);
         let center_before = camera.center();
-        let mut scroll_before_policy = 0.0;
+        let mut zoom_before_policy = 1.0;
         let mut scroll_after_policy = f32::NAN;
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(320.0, 240.0))),
@@ -1523,7 +1648,7 @@ mod tests {
                 Event::MouseWheel {
                     unit: MouseWheelUnit::Point,
                     delta: vec2(0.0, if at_maximum { 120.0 } else { -120.0 }),
-                    modifiers: egui::Modifiers::NONE,
+                    modifiers: egui::Modifiers::CTRL,
                     phase: TouchPhase::Move,
                 },
             ],
@@ -1532,7 +1657,7 @@ mod tests {
 
         let output = context.run_ui(input, |ui| {
             let map_rect = ui.available_rect_before_wrap();
-            scroll_before_policy = ui.input(|input| input.smooth_scroll_delta.y);
+            zoom_before_policy = ui.input(egui::InputState::zoom_delta);
             let policy = zoom_policy(ui, &camera, map_rect);
             assert!(!policy.active);
             scroll_after_policy = ui.input(|input| input.smooth_scroll_delta.y);
@@ -1543,7 +1668,7 @@ mod tests {
         output.drop_without_applying_deltas();
 
         let center_after = camera.center();
-        assert!(scroll_before_policy.abs() > 0.0);
+        assert!((zoom_before_policy - 1.0).abs() > f32::EPSILON);
         assert!(scroll_after_policy.abs() < f32::EPSILON);
         assert!((camera.zoom() - bound).abs() < f64::EPSILON);
         assert!((center_after.x() - center_before.x()).abs() < f64::EPSILON);

@@ -4,7 +4,9 @@
 import argparse
 import filecmp
 import json
+import shlex
 import subprocess
+import sys
 import tempfile
 from collections import deque
 from pathlib import Path
@@ -15,13 +17,17 @@ DEFAULT_OUTPUT = REPOSITORY / 'assets' / 'licenses'
 
 
 def run_json(arguments: list[str]) -> dict[str, Any]:
-    result = subprocess.run(
-        arguments,
-        cwd=REPOSITORY,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            arguments,
+            cwd=REPOSITORY,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        sys.stderr.write(error.stderr or '')
+        raise
     return json.loads(result.stdout)
 
 
@@ -207,9 +213,13 @@ def main() -> int:
     parser.add_argument('--output', type=Path, default=DEFAULT_OUTPUT)
     arguments = parser.parse_args()
     config = json.loads(arguments.config.read_text())
-    if arguments.check:
-        return 0 if check(config, arguments.output) else 1
-    generate(config, arguments.output)
+    try:
+        if arguments.check:
+            return 0 if check(config, arguments.output) else 1
+        generate(config, arguments.output)
+    except subprocess.CalledProcessError as error:
+        print(f'license generation failed: {shlex.join(error.cmd)} (exit {error.returncode})', file=sys.stderr)
+        return 1
     return 0
 
 

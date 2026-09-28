@@ -767,7 +767,11 @@ impl Step {
                     phase: egui::TouchPhase::Move,
                     unit: egui::MouseWheelUnit::Point,
                     delta: egui::vec2(0.0, *delta),
-                    modifiers: Modifiers::NONE,
+                    modifiers: if matches!(self.action, Action::Wheel(_)) {
+                        Modifiers::CTRL | Modifiers::COMMAND
+                    } else {
+                        Modifiers::NONE
+                    },
                 });
             }
             Action::Text(text) => input.events.push(Event::Text(text.clone())),

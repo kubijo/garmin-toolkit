@@ -1,4 +1,4 @@
-out = "../../.tmp/gallery/web"
+out = "../../../.tmp/gallery/web"
 size = "1920x1080"
 sheet = "sheet.png"
 report = "capture.json"

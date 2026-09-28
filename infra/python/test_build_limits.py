@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,41 @@ WRAPPER = Path(__file__).resolve().parents[1] / 'just' / 'memory-capped.sh'
 
 
 class BuildLimitsTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Mold is selected only on Linux')
+    def test_gallery_stops_before_cargo_when_mold_is_incomplete(self) -> None:
+        for executable in (None, 'mold', 'ld.mold'):
+            for command in (['hot'], ['capture', 'captures/components.capture.toml']):
+                with self.subTest(executable=executable, command=command):
+                    result = self.linker_check(command, executable)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('require mold and ld.mold on PATH', result.stderr)
+                    self.assertNotIn('cargo', result.stderr)
+                    self.assertEqual(result.stdout, '')
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Mold is selected only on Linux')
+    def test_linker_preflight_accepts_complete_installation(self) -> None:
+        result = self.linker_check(['require-linker'], 'both')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+
+    def linker_check(self, command: list[str], executable: str | None) -> subprocess.CompletedProcess[str]:
+        just = shutil.which('just')
+        bash = shutil.which('bash')
+        assert just is not None and bash is not None
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'bash').symlink_to(bash)
+            for name in ('mold', 'ld.mold'):
+                if executable in (name, 'both'):
+                    (root / name).symlink_to(bash)
+            return subprocess.run(
+                [just, '--tempdir', directory, '--justfile', str(WRAPPER.parents[1] / 'gallery/justfile'), *command],
+                env={**os.environ, 'PATH': directory},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
     def test_macos_limits_builders_and_preserves_config_and_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             uname = Path(directory) / 'uname'

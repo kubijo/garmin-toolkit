@@ -30,6 +30,25 @@ from desktop_profile import (
 
 
 class DesktopProfileTests(unittest.TestCase):
+    def test_record_cli_forwards_samply_options(self) -> None:
+        with (
+            patch('sys.argv', ['desktop_profile.py', 'record', 'demo', 'probe', '--', '--gfx']),
+            patch('desktop_profile.capture') as record,
+        ):
+            main()
+        record.assert_called_once_with('demo', 'probe', ('--gfx',))
+
+    def test_compare_cli_rejects_a_single_report_before_reading(self) -> None:
+        with (
+            patch('sys.argv', ['desktop_profile.py', 'compare', 'probe']),
+            patch('desktop_profile_analysis.analyze_report') as analyze,
+            redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as status,
+        ):
+            main()
+        self.assertEqual(status.exception.code, 1)
+        analyze.assert_not_called()
+
     def report(self) -> tuple[tempfile.TemporaryDirectory[str], Path]:
         temporary = tempfile.TemporaryDirectory()
         report = Path(temporary.name)
@@ -139,7 +158,7 @@ class DesktopProfileTests(unittest.TestCase):
         finalize(report)
 
         lines = report_summary(report).splitlines()
-        analysis_command = shlex.join(('just', 'desktop::profile-analyze', report.name))
+        analysis_command = shlex.join(('just', 'desktop::profile', 'analyze', report.name))
         combined_command = shlex.join(('samply', 'load', str((report / COMBINED_NAME).resolve())))
         raw_command = shlex.join(('samply', 'load', str((report / PROFILE_NAME).resolve())))
 

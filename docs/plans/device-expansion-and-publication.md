@@ -17,9 +17,4 @@ Extend operation-specific device evidence, then publish only supported artifacts
 6. Audit configuration, fixtures, identities, URLs, images, notices, and provenance.
 7. Publish the support matrix and adaptation guide. Mobile requires a separate decision.
 
-Delete this plan after every advertised operation has recorded evidence, release artifacts pass policy, the public tree
-contains no private data, and the repository is understandable without plans.
-
-[USB synchronization](../research/usb-sync.md#map-maintenance-evidence) records CLI map-upgrade proof on the current
-devices. This plan owns broader device conformance and the published support matrix; a successful map operation proves
-no FIT or HASS workflow.
+Close when every advertised operation has evidence, artifacts pass policy, and the public tree contains no private data.

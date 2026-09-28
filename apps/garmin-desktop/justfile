@@ -14,25 +14,9 @@ run mode *options:
     shift
     exec just in-shell cargo run --locked -p garmin-desktop "${features[@]}" -- "$@"
 
-# Pre-warm the exact optimized binary used by a profiling capture.
-profile-build mode:
-    @just in-shell python infra/python/desktop_profile.py build {{ quote(mode) }}
-
-# Record immutable Samply/runtime evidence and derive one enriched profile; close the app to finish.
-profile mode REPORT='00-latest' *samply_args:
-    @shift 2; exec just in-shell python infra/python/desktop_profile.py record {{ quote(mode) }} {{ quote(REPORT) }} -- "$@"
-
-# Open a named enriched report in the local profiler UI.
-profile-load REPORT='00-latest':
-    just in-shell samply load {{ quote(repository_root) }}/.tmp/profiles/{{ quote(REPORT) }}/combined.json.gz
-
-# Summarize a named report without opening the profiler UI.
-profile-analyze REPORT='00-latest':
-    @just in-shell python infra/python/desktop_profile_analysis.py analyze {{ quote(REPORT) }}
-
-# Compare two or more named reports without opening the profiler UI.
-profile-compare *reports:
-    @exec just in-shell python infra/python/desktop_profile_analysis.py compare "$@"
+# Build, record, load, analyze, compare, or finalize a native profile.
+profile +args:
+    @just in-shell uv run --frozen --project infra/python python infra/python/desktop_profile.py "$@"
 
 # Write the selected AppImage to dist.
 appimage mode:

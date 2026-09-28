@@ -43,8 +43,8 @@ interface change, including prose wrapping and interaction. Scene compilation al
 
 CLI progress separates stage totals from identity-keyed file events. Active files retain arrival order across stages;
 their capped panel scrolls independently of history. Diagnostic changes and completed work enter history without
-resetting its scroll position. `infra/gallery/progress.capture.toml` covers concurrency, overflow, and completion in
-both fonts at the supported terminal sizes.
+resetting its scroll position. `infra/gallery/captures/progress.capture.toml` covers concurrency, overflow, and
+completion in both fonts at the supported terminal sizes.
 
 Every blocking CLI read uses the production `LoadingScreen` component with a typed activity. Discovery, device metadata,
 recovery, storage, and map-component loading share its layout, continuously increasing elapsed clock, and cancellation

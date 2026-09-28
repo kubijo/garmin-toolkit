@@ -1,4 +1,4 @@
-out = "../../.tmp/gallery/developer-header"
+out = "../../../.tmp/gallery/developer-header"
 size = "360x180"
 sheet = "sheet.png"
 report = "capture.json"

@@ -79,6 +79,10 @@
     "source": "Contact Garmin",
     "translation": "Kontaktovat Garmin"
   },
+  "1KfRoBpzII": {
+    "source": "All activities",
+    "translation": "Všechny aktivity"
+  },
   "1bZW4VoXLl": {
     "source": "garmin-cli — Removing map components",
     "translation": "garmin-cli — Odebírání mapových komponent"
@@ -142,6 +146,10 @@
   "55H791wmWM": {
     "source": "Mouse",
     "translation": "Myš"
+  },
+  "55hX8R/EJs": {
+    "source": "Search activities",
+    "translation": "Hledat aktivity"
   },
   "5NfX10Fkna": {
     "source": "waiting for active downloads",
@@ -215,6 +223,10 @@
     "source": "Could not inspect {device}",
     "translation": "Zařízení {device} se nepodařilo zkontrolovat",
     "description": "Notification title after device inspection failed"
+  },
+  "8mRNBDIXEf": {
+    "source": "Previous month",
+    "translation": "Předchozí měsíc"
   },
   "8naCTgLvDw": {
     "source": "No activities yet",
@@ -614,6 +626,10 @@
     "source": "{used} used · {free} free · {total} total",
     "translation": "Využito {used} · volno {free} · celkem {total}"
   },
+  "P+26PZCuAh": {
+    "source": "All sports",
+    "translation": "Všechny sporty"
+  },
   "P8JC58mIGs": {
     "source": "Distance",
     "translation": "Vzdálenost"
@@ -641,6 +657,10 @@
   "PlBReUqqzW": {
     "source": "Log out",
     "translation": "Odhlásit se"
+  },
+  "PqmLVnSl7X": {
+    "source": "Next month",
+    "translation": "Další měsíc"
   },
   "PtyktMpGIx": {
     "source": "FIT file opened",
@@ -1046,6 +1066,10 @@
     "source": "Refresh the files view and check the result before trying again.",
     "translation": "Obnovte seznam souborů a před dalším pokusem zkontrolujte výsledek."
   },
+  "icV9UhRqJE": {
+    "source": "Next activity",
+    "translation": "Další aktivita"
+  },
   "iwVTNwbNx0": {
     "source": "Select an activity",
     "translation": "Vyberte aktivitu"
@@ -1077,6 +1101,10 @@
   "ja+73nEtzy": {
     "source": "Importing the FIT file…",
     "translation": "Importování souboru FIT…"
+  },
+  "jhj8RYgF7I": {
+    "source": "No matching activities",
+    "translation": "Žádné odpovídající aktivity"
   },
   "k2veDAJW1p": {
     "source": "Write",
@@ -1186,6 +1214,10 @@
   "pNTyiXnDwf": {
     "source": "Keep",
     "translation": "Ponechat"
+  },
+  "pkEFYHEsTR": {
+    "source": "Previous activity",
+    "translation": "Předchozí aktivita"
   },
   "pvZIiQ5eWS": {
     "source": "recover",

@@ -1,6 +1,5 @@
 """Record and enrich a reproducible native desktop Samply profile."""
 
-import argparse
 import gzip
 import hashlib
 import json
@@ -17,7 +16,9 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+import tyro
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 REPORTS_ROOT = REPOSITORY_ROOT / '.tmp' / 'profiles'
@@ -365,7 +366,7 @@ def report_summary(report_dir: Path) -> str:
         *(f'  {path.name:<{name_width}}  {path.stat().st_size / 1024:9.1f} KiB' for path in artifacts),
         '',
         'Analyze report (headless)',
-        shlex.join(('just', 'desktop::profile-analyze', report_dir.name)),
+        shlex.join(('just', 'desktop::profile', 'analyze', report_dir.name)),
         '',
         'Open enriched profile (CPU samples + runtime counters)',
         shlex.join(('samply', 'load', str(combined))),
@@ -707,38 +708,58 @@ def build_only(mode: str) -> None:
     print(f'Binary SHA-256: {result.binary_sha256}')
 
 
-def parser() -> argparse.ArgumentParser:
-    """Build the command-line parser used by the just recipes and tests."""
-    result = argparse.ArgumentParser(description=__doc__)
+type Mode = Literal['demo', 'production']
 
-    commands = result.add_subparsers(dest='command', required=True)
-    build = commands.add_parser('build', help='pre-warm the optimized profiling binary')
-    build.add_argument('mode', choices=('production', 'demo'))
-    record = commands.add_parser('record', help='build and record a guarded desktop profile')
-    record.add_argument('mode', choices=('production', 'demo'))
-    record.add_argument('report', nargs='?', default='00-latest')
-    record.add_argument('samply_arguments', nargs=argparse.REMAINDER)
-    finalize_command = commands.add_parser('finalize', help='derive a combined profile from raw artifacts')
-    finalize_command.add_argument('report_dir', type=Path)
 
-    return result
+def build(mode: tyro.conf.Positional[Mode]) -> None:
+    """Pre-warm the optimized profiling binary."""
+    build_only(mode)
+
+
+def record(
+    mode: tyro.conf.Positional[Mode],
+    report: tyro.conf.Positional[str],
+    samply_arguments: tyro.conf.Positional[tuple[str, ...]] = (),
+) -> None:
+    """Record a named report; pass Samply options after --."""
+    capture(mode, report, samply_arguments)
+
+
+def derive(report: tyro.conf.Positional[str]) -> None:
+    """Regenerate the enriched profile from retained raw evidence."""
+    directory = report_directory(report)
+    count = finalize(directory)
+    print(f'Added {count} map counters to {(directory / COMBINED_NAME).resolve()}')
+
+
+def load(report: tyro.conf.Positional[str]) -> None:
+    """Open an enriched report in Samply."""
+    subprocess.run(['samply', 'load', str(report_directory(report) / COMBINED_NAME)], check=True)
+
+
+def analyze(report: tyro.conf.Positional[str]) -> None:
+    """Summarize a report without opening a window."""
+    from desktop_profile_analysis import analyze_report, print_analysis
+
+    print_analysis(analyze_report(report_directory(report)))
+
+
+def compare(reports: tyro.conf.Positional[tuple[str, ...]], *, allow_incomparable: bool = False) -> None:
+    """Compare at least two reports."""
+    from desktop_profile_analysis import analyze_report, print_comparison
+
+    if len(reports) < 2:
+        raise ProfileError('compare requires at least two profiling reports')
+    print_comparison(
+        [analyze_report(report_directory(report)) for report in reports], allow_incomparable=allow_incomparable
+    )
 
 
 def main() -> None:
-    """Run the selected profiling operation with concise guard failures."""
-    arguments = parser().parse_args()
-
     try:
-        if arguments.command == 'build':
-            build_only(arguments.mode)
-        elif arguments.command == 'record':
-            samply_arguments = arguments.samply_arguments
-            if samply_arguments[:1] == ['--']:
-                samply_arguments = samply_arguments[1:]
-            capture(arguments.mode, arguments.report, samply_arguments)
-        else:
-            count = finalize(arguments.report_dir.resolve())
-            print(f'Added {count} map counters to {(arguments.report_dir / COMBINED_NAME).resolve()}')
+        tyro.extras.subcommand_cli_from_dict(
+            {'build': build, 'record': record, 'finalize': derive, 'load': load, 'analyze': analyze, 'compare': compare}
+        )
     except ProfileCanceled as error:
         print(error, file=sys.stderr)
         raise SystemExit(130) from None
@@ -751,4 +772,6 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    # Analysis imports this module; use the same exception and state types in both paths.
+    sys.modules['desktop_profile'] = sys.modules[__name__]
     main()

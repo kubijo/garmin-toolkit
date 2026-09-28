@@ -36,6 +36,7 @@ geo-types.workspace = true
 fast-mvt.workspace = true
 geo.workspace = true
 image.workspace = true
+jiff = { workspace = true, features = ["js", "tzdb-bundle-platform", "tzdb-zoneinfo"] }
 lyon_path.workspace = true
 serde_json.workspace = true
 postcard.workspace = true

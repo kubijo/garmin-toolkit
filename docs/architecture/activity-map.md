@@ -2,8 +2,7 @@
 
 The shared `garmin-ui` workspace presents stored activities and device FIT previews in desktop and HASS. It owns the
 activity list, reusable viewer, map, charts, laps, and playback. The host exposes owned recording snapshots, not its
-storage objects. [Browser map evidence](../research/browser-map.md) records validation;
-[the active plan](../plans/activity-map-workspace.md) owns remaining isolation work and acceptance gates.
+storage objects. [Browser map evidence](../research/browser-map.md) records acceptance and measurement limits.
 
 ## Recording and interaction
 
@@ -12,10 +11,9 @@ Stored details and device FIT previews use the same projection. Activity selecti
 result protection. One authoritative original-sample cursor drives idle, hover, pinned, and playback state across the
 map, charts, metric readouts, and lap highlighting.
 
-The wide workspace uses resizable activity and summary/lap panes around the map and independently scrollable charts.
-Narrow views retain the viewer and expose subordinate panes as drawers. Missing coordinates do not remove charts,
-inspection, laps, or playback. The shared visual language applies; external activity viewers are behavioral references,
-not sources of copied implementation or design.
+The calendar and activity summary sit beside the map on wide screens and above it on narrow screens. Charts and laps
+span the width below, in one scrollable workspace. Missing coordinates preserve charts, inspection, laps, and playback.
+Layout and locale ownership: [visual language](visual-language.md#activities).
 
 `egui_plot` owns grids, lines, fills, transforms, clipping, and pointer coordinates; the viewer paints axis labels
 outside the plot background. Chart hover maps X to the nearest original sample. Missing measurements split rendered
@@ -125,24 +123,11 @@ Rebuilt-browser smoke acceptance and its visual-verification limits are recorded
 
 ## Regression contracts
 
-- Cover recording projection, gaps, domains, units, active-time calculation, lap ranges, playback scaling, and stale
-  results with unit tests.
-- Cover plot-X/index conversion, external cursors, linked X bounds, missing points, and render downsampling
-  independently of map behavior.
-- Cover fitting, dateline and no-coordinate paths, route hit testing, hover/pin/play transitions, lap reset, and
-  activity changes in shared UI tests.
-- Cover camera projection, pointer-anchored zoom, hard zoom limits, inertia, scene-generation coalescing, center-first
-  tile priority, stale-work rejection, cache eviction, and atomic scene publication with unit tests.
-- Compare uniform-grid route queries against brute-force nearest-segment results, including missing-coordinate segments
-  and wrapped longitudes. Cover deterministic label placement, camera rebasing, and zoom invalidation.
-- Cover browser transfer versioning, malformed lengths, indices and UTF-8, empty and oversized packets, bounded
-  admission, stale completions, and atomic publication. Cover browser upload chunking and budget accounting without
-  wall-clock-sensitive CI assertions. Verify that native typed geometry and browser packed geometry expose identical
-  WGPU bytes, partial uploads cannot become drawable, and both paths apply the same map scissor.
-- Cover TileJSON validation, cache freshness and eviction, offline hits/misses, response limits, concurrent
-  deduplication, retries, HASS relative routes, ETags, CSP, and cache-policy exclusions with local fixtures and servers.
-- Maintain deterministic gallery scenes for wide/compact and light/dark layouts, synchronized hover, pinning, playback,
-  selected laps, missing metrics, no GPS, loading, provider failure, and device FIT preview.
+Tests cover recording/gaps/domains/units/playback, chart sampling and cursors, camera/dateline/hit testing, scene
+publication and eviction, transfer validation and atomic uploads, tile-service cache/retries/CSP, and GPU readback.
+Route spatial-index queries are checked against brute force; typed/packed geometry must expose identical GPU bytes.
+Budget accounting tests avoid wall-clock assertions. Gallery covers both themes and sizes, hover/pinning/playback/laps,
+missing metrics/GPS, loading/provider failures, and device previews.
 
 Routing, geocoding, heatmaps, free chart zoom, offline-region downloads, and Garmin device-map management are separate
 capabilities; the background map uses one owned style family under

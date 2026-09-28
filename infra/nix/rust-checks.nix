@@ -16,9 +16,11 @@
 
 let
   cargo = lib.getExe' toolchain "cargo";
-  # The ordinary test suite includes real GPU upload/readback regressions. Pin a
-  # software Vulkan implementation instead of relying on host drivers or /dev/dri.
-  headlessGpuEnv = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+  # Tests need named time zones and GPU upload/readback without host resources.
+  testRuntimeEnv = {
+    TZDIR = "${pkgs.tzdata}/share/zoneinfo";
+  }
+  // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
     WGPU_BACKEND = "vulkan";
     VK_DRIVER_FILES = "${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.parsed.cpu.name}.json";
   };
@@ -148,6 +150,7 @@ let
         + text;
       runtimeInputs =
         runtimeInputs
+        ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.mold ]
         ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
           pkgs.stdenv.cc
           pkgs.cmake
@@ -156,7 +159,7 @@ let
       runtimeEnv = {
         CARGO_TARGET_DIR = nixCargoTargetDir;
       }
-      // headlessGpuEnv
+      // testRuntimeEnv
       // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
         CC = lib.getExe' pkgs.stdenv.cc "cc";
         CXX = lib.getExe' pkgs.stdenv.cc "c++";
@@ -177,6 +180,8 @@ let
     inherit craneLib lib workspaceSrc;
     extraFilesets = [
       (workspaceSrc + "/infra/python")
+      (workspaceSrc + "/infra/gallery/justfile")
+      (workspaceSrc + "/infra/just/common.just")
       (workspaceSrc + "/infra/just/memory-capped.sh")
     ];
   };
@@ -224,7 +229,12 @@ let
     trap 'rm -rf "$i18n_dir"' EXIT
 
     ${extractSourceCatalog "$i18n_dir/en-source.json"}
-    PATH=${lib.makeBinPath [ pkgs.bash ]}:$PATH \
+    PATH=${
+      lib.makeBinPath [
+        pkgs.bash
+        pkgs.just
+      ]
+    }:$PATH \
       ${pythonToolsEnv}/bin/python -m unittest discover -q --start-directory infra/python --pattern 'test_*.py'
     ${pythonToolsEnv}/bin/python infra/python/check_translation_metadata.py \
       "$i18n_dir/en-source.json" \
@@ -512,7 +522,7 @@ in
 
     rust-coverage = craneLib.cargoNextest (
       commonArgs
-      // headlessGpuEnv
+      // testRuntimeEnv
       // {
         inherit cargoArtifacts;
         CARGO_PROFILE = "dev";
@@ -613,7 +623,7 @@ in
 
     rust-tests = craneLib.cargoNextest (
       commonArgs
-      // headlessGpuEnv
+      // testRuntimeEnv
       // {
         inherit cargoArtifacts;
         cargoExtraArgs = lib.escapeShellArgs (lib.drop 2 testArgs);

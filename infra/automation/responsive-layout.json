@@ -7,9 +7,14 @@
       "height": 720
     },
     {
+      "kind": "scroll",
+      "target": "activity.viewer",
+      "delta": 100000
+    },
+    {
       "kind": "assert_value",
-      "target": "activity.0",
-      "value": "selected"
+      "target": "activity.selection",
+      "value": "0"
     },
     {
       "kind": "resize",
@@ -31,7 +36,12 @@
     },
     {
       "kind": "click",
-      "target": "activity.list.toggle"
+      "target": "activity.list.close"
+    },
+    {
+      "kind": "scroll",
+      "target": "activity.selection",
+      "delta": -460
     },
     {
       "kind": "assert_available",
@@ -51,9 +61,14 @@
       "height": 720
     },
     {
+      "kind": "scroll",
+      "target": "activity.viewer",
+      "delta": 100000
+    },
+    {
       "kind": "assert_value",
-      "target": "activity.0",
-      "value": "selected"
+      "target": "activity.selection",
+      "value": "0"
     },
     {
       "kind": "assert_available",

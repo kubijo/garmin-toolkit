@@ -21,18 +21,21 @@ use garmin_service_api::{
 
 use super::map;
 use super::map::ActivityMap;
-use super::{Action, ItemProps, ListProps, MetricProps, Presentation, list};
+use super::{Action, ItemProps, Presentation};
 use crate::{
     Size, button, icons,
     theme::{CONTROL_RADIUS, PANEL_RADIUS, color32},
 };
 
-const COMPACT_BREAKPOINT: f32 = 760.0;
-const LIST_WIDTH: f32 = 232.0;
-const DETAILS_WIDTH: f32 = 248.0;
 const CHART_HEIGHT: f32 = 112.0;
+const CHART_GAP: f32 = 4.0;
+const CHART_SUMMARY_WIDTH: f32 = 200.0;
+const CHART_SIDE_SUMMARY_MIN_WIDTH: f32 = 640.0;
 const CHART_VIEWPORT_OVERSCAN: f32 = 64.0;
 const PLAYBACK_SECONDS: f64 = 30.0;
+const NAVIGATION_WIDTH: f32 = 300.0;
+
+type MapSidebar<'a> = dyn FnMut(&mut Ui, &mut Viewer) + 'a;
 
 /// Inputs shared by desktop, HASS, and embedded FIT preview workspaces.
 pub struct WorkspaceProps<'a> {
@@ -50,26 +53,7 @@ pub struct WorkspaceProps<'a> {
 /// Stateful activity workspace. Hosts retain one instance for the life of their view.
 pub struct Workspace {
     viewer: Viewer,
-    compact_panel: Option<CompactPanel>,
-}
-
-#[derive(Clone, Copy)]
-enum PaneSurface {
-    Workspace,
-    Sidebar,
-    Details,
-}
-
-#[derive(Clone, Copy)]
-struct ResizeStrokeWidths {
-    hovered: f32,
-    active: f32,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CompactPanel {
-    Activities,
-    Details,
+    navigation: super::navigation::Navigation,
 }
 
 impl Workspace {
@@ -78,7 +62,7 @@ impl Workspace {
     pub fn new(runtime: &super::map_runtime::MapRuntimeHandle) -> Self {
         Self {
             viewer: Viewer::new(runtime),
-            compact_panel: None,
+            navigation: super::navigation::Navigation::default(),
         }
     }
 
@@ -104,274 +88,133 @@ impl Workspace {
         self.viewer.set_selected_lap(selected_lap);
     }
 
-    /// Render the workspace and return activity-list selection changes.
+    /// Open archive browsing without changing the selected activity.
+    pub fn open_archive(&mut self) {
+        self.navigation.open_archive();
+    }
+
+    /// Render calendar navigation and the full-width activity analysis.
     #[must_use]
     pub fn show(&mut self, ui: &mut Ui, intl: &Intl, props: &WorkspaceProps<'_>) -> Option<Action> {
-        if ui.available_width() >= COMPACT_BREAKPOINT {
-            self.compact_panel = None;
-            self.show_wide(ui, intl, props)
-        } else {
-            self.show_compact(ui, intl, props)
-        }
+        self.show_with_actions(ui, intl, props, |_| {})
     }
 
-    fn show_wide(
+    /// Add host-specific activity actions to the shared navigation.
+    #[must_use]
+    pub fn show_with_actions(
         &mut self,
         ui: &mut Ui,
         intl: &Intl,
         props: &WorkspaceProps<'_>,
+        mut actions: impl FnMut(&mut Ui),
     ) -> Option<Action> {
         let mut action = None;
-        let resize_strokes = suppress_resize_strokes(ui);
-        egui::Panel::left(Id::new((ui.id(), "activity-list")))
-            .resizable(true)
-            .show_separator_line(false)
-            .default_size(LIST_WIDTH)
-            .size_range(180.0..=360.0)
-            .frame(pane_frame(ui, PaneSurface::Sidebar))
+        let viewport_height = ui.available_height().min(ui.clip_rect().height());
+        ui.painter().rect_filled(
+            ui.available_rect_before_wrap(),
+            PANEL_RADIUS,
+            color32(crate::theme::palette(ui).surfaces().background()),
+        );
+        let background = ui.interact(
+            ui.available_rect_before_wrap(),
+            ui.id().with("activity-workspace"),
+            Sense::hover(),
+        );
+        background.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Other,
+                ui.is_enabled(),
+                format_message!(intl, default_message: "Activities"),
+            )
+        });
+        crate::semantics::target(ui, &background, "activity.viewer");
+        ScrollArea::vertical()
+            .id_salt("activity-workspace-scroll")
+            .auto_shrink([false, false])
             .show(ui, |ui| {
-                restore_resize_strokes(ui, resize_strokes);
-                ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        action = list(ui, &list_props(props));
-                    });
-            });
-        restore_resize_strokes(ui, resize_strokes);
-
-        let resize_strokes = suppress_resize_strokes(ui);
-        egui::Panel::right(Id::new((ui.id(), "activity-details")))
-            .resizable(true)
-            .show_separator_line(false)
-            .default_size(DETAILS_WIDTH)
-            .size_range(200.0..=420.0)
-            .frame(pane_frame(ui, PaneSurface::Details))
-            .show(ui, |ui| {
-                restore_resize_strokes(ui, resize_strokes);
-                self.show_details(ui, intl, props);
-            });
-        restore_resize_strokes(ui, resize_strokes);
-
-        egui::CentralPanel::default()
-            .frame(pane_frame(ui, PaneSurface::Workspace))
-            .show(ui, |ui| {
-                self.show_viewer(ui, intl, props);
-            });
-        action
-    }
-
-    fn show_compact(
-        &mut self,
-        ui: &mut Ui,
-        intl: &Intl,
-        props: &WorkspaceProps<'_>,
-    ) -> Option<Action> {
-        if ui.input(|input| input.key_pressed(Key::Escape)) {
-            self.compact_panel = None;
-        }
-        self.compact_controls(ui, intl, props.selected.is_some());
-        ui.add_space(8.0);
-        let drawer_rect = ui.available_rect_before_wrap();
-        self.show_viewer(ui, intl, props);
-
-        let mut action = None;
-        if let Some(panel) = self.compact_panel {
-            let drawer_width = drawer_rect.width().min(336.0);
-            let position = match panel {
-                CompactPanel::Activities => drawer_rect.left_top(),
-                CompactPanel::Details => {
-                    egui::pos2(drawer_rect.right() - drawer_width, drawer_rect.top())
-                }
-            };
-            egui::Area::new(ui.id().with("activity-workspace-drawer"))
-                .order(egui::Order::Foreground)
-                .fixed_pos(position)
-                .show(ui.ctx(), |ui| {
-                    ui.set_width(drawer_width);
-                    egui::Frame::new()
-                        .fill(color32(
-                            crate::theme::palette(ui)
-                                .surfaces()
-                                .layer(theme::Level::Two),
-                        ))
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            color32(crate::theme::palette(ui).borders().strong()),
-                        ))
-                        .shadow(egui::epaint::Shadow {
-                            offset: [0, 6],
-                            blur: 20,
-                            spread: 2,
-                            color: egui::Color32::from_black_alpha(120),
-                        })
-                        .inner_margin(12.0)
-                        .show(ui, |ui| match panel {
-                            CompactPanel::Activities => {
-                                ScrollArea::vertical()
-                                    .max_height(drawer_rect.height())
-                                    .show(ui, |ui| {
-                                        action = list(ui, &list_props(props));
-                                    });
-                            }
-                            CompactPanel::Details => {
-                                ui.set_max_height(drawer_rect.height());
-                                self.show_details(ui, intl, props);
+                let mut navigation = |ui: &mut Ui, viewer: &mut Viewer| {
+                    egui::Frame::new().inner_margin(8.0).show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        action = self.navigation.show(ui, intl, props, &mut |ui| {
+                            actions(ui);
+                            if let Some(recording) = props.recording {
+                                viewer.sync_recording(props.recording_key.unwrap_or("activity"));
+                                let domain = viewer.cache.domain(recording, props.units);
+                                ui.add_space(4.0);
+                                viewer.axis_controls(ui, intl, &domain, button::Width::Fill);
                             }
                         });
-                });
-        }
-        if action.is_some() {
-            self.compact_panel = None;
-        }
-        action
+                    });
+                };
+                if ui.available_width() >= 720.0 {
+                    Self::show_viewer(
+                        &mut self.viewer,
+                        ui,
+                        intl,
+                        props,
+                        activity_map_height(viewport_height),
+                        Some(&mut navigation),
+                    );
+                } else {
+                    let top = ui.cursor().top();
+                    navigation(ui, &mut self.viewer);
+                    // Scrolling must not resize the map.
+                    let height = (viewport_height - (ui.cursor().top() - top)).clamp(320.0, 560.0);
+                    Self::show_viewer(&mut self.viewer, ui, intl, props, height, None);
+                }
+            });
+        self.navigation.archive(ui, intl, props).or(action)
     }
 
-    fn compact_controls(&mut self, ui: &mut Ui, intl: &Intl, has_selection: bool) {
-        let activities = format_message!(intl, default_message: "Activities");
-        let details = format_message!(intl, default_message: "Details");
-        ui.horizontal(|ui| {
-            let activities_response = button::Props {
-                label: &activities,
-                icon: Some(icons::ACTIVITY),
-                kind: button::Kind::Tertiary,
-                size: Size::Small,
-                width: button::Width::Fit,
-                enabled: true,
-            }
-            .show(ui);
-            if activities_response.clicked() {
-                self.compact_panel = toggle_panel(self.compact_panel, CompactPanel::Activities);
-            }
-            let details_response = button::Props {
-                label: &details,
-                icon: Some(icons::INFO),
-                kind: button::Kind::Tertiary,
-                size: Size::Small,
-                width: button::Width::Fit,
-                enabled: has_selection,
-            }
-            .show(ui);
-            if details_response.clicked() {
-                self.compact_panel = toggle_panel(self.compact_panel, CompactPanel::Details);
-            }
-            for (response, target, panel) in [
-                (
-                    &activities_response,
-                    "activity.list.toggle",
-                    CompactPanel::Activities,
-                ),
-                (
-                    &details_response,
-                    "activity.details.toggle",
-                    CompactPanel::Details,
-                ),
-            ] {
-                crate::semantics::target(ui, response, target);
-                crate::semantics::value(
-                    response,
-                    if self.compact_panel == Some(panel) {
-                        "open"
+    fn show_viewer(
+        viewer: &mut Viewer,
+        ui: &mut Ui,
+        intl: &Intl,
+        props: &WorkspaceProps<'_>,
+        map_height: f32,
+        sidebar: Option<&mut MapSidebar<'_>>,
+    ) {
+        let Some(presentation) = props
+            .selected
+            .and_then(|index| props.presentations.get(index))
+        else {
+            map_section(ui, viewer, sidebar, |ui, _| {
+                empty_panel(
+                    ui,
+                    if props.items.is_empty() {
+                        props.empty_list
                     } else {
-                        "closed"
+                        props.empty_detail
                     },
                 );
-            }
-        });
-    }
-
-    fn show_viewer(&mut self, ui: &mut Ui, intl: &Intl, props: &WorkspaceProps<'_>) {
-        let Some(selected) = props.selected else {
-            empty_panel(ui, props.empty_detail);
-            return;
-        };
-        let Some(presentation) = props.presentations.get(selected) else {
-            empty_panel(ui, props.empty_detail);
+            });
             return;
         };
         let Some(recording) = props.recording else {
-            loading_panel(ui, intl, presentation);
+            map_section(ui, viewer, sidebar, |ui, _| {
+                loading_surface(
+                    ui,
+                    map_height,
+                    &format_message!(intl, default_message: "Loading activity data…"),
+                );
+            });
+            loading_charts(ui);
             return;
         };
-        self.viewer.show(
-            ui,
-            intl,
-            &ViewerProps {
-                presentation,
-                recording,
-                recording_key: props.recording_key.unwrap_or("activity"),
-                units: props.units,
-                no_route: props.no_route,
-            },
-        );
-    }
-
-    fn show_details(&mut self, ui: &mut Ui, intl: &Intl, props: &WorkspaceProps<'_>) {
-        let Some(selected) = props.selected else {
-            empty_panel(ui, props.empty_detail);
-            return;
+        let viewer_props = ViewerProps {
+            presentation,
+            recording,
+            recording_key: props.recording_key.unwrap_or("activity"),
+            units: props.units,
+            no_route: props.no_route,
         };
-        let Some(presentation) = props.presentations.get(selected) else {
-            empty_panel(ui, props.empty_detail);
-            return;
-        };
-        ScrollArea::vertical().show(ui, |ui| {
-            summary(ui, presentation);
-            let Some(recording) = props.recording else {
-                loading_details(ui);
-                return;
-            };
-            self.viewer
-                .sample_details(ui, intl, recording, presentation.sport(), props.units);
-            self.viewer.laps(ui, intl, recording, props.units);
-        });
-    }
-}
-
-fn suppress_resize_strokes(ui: &mut Ui) -> ResizeStrokeWidths {
-    let widgets = &mut ui.visuals_mut().widgets;
-    let widths = ResizeStrokeWidths {
-        hovered: widgets.hovered.fg_stroke.width,
-        active: widgets.active.fg_stroke.width,
-    };
-    widgets.hovered.fg_stroke.width = 0.0;
-    widgets.active.fg_stroke.width = 0.0;
-    widths
-}
-
-fn restore_resize_strokes(ui: &mut Ui, widths: ResizeStrokeWidths) {
-    let widgets = &mut ui.visuals_mut().widgets;
-    widgets.hovered.fg_stroke.width = widths.hovered;
-    widgets.active.fg_stroke.width = widths.active;
-}
-
-fn pane_frame(ui: &Ui, surface: PaneSurface) -> egui::Frame {
-    let palette = crate::theme::palette(ui);
-    let fill = match surface {
-        PaneSurface::Workspace => palette.surfaces().background(),
-        PaneSurface::Sidebar | PaneSurface::Details => palette.surfaces().layer(theme::Level::One),
-    };
-    let inner_margin = match surface {
-        PaneSurface::Workspace | PaneSurface::Sidebar => egui::Margin::ZERO,
-        PaneSurface::Details => egui::Margin::same(12),
-    };
-    egui::Frame::new()
-        .fill(color32(fill))
-        .inner_margin(inner_margin)
-}
-
-fn toggle_panel(current: Option<CompactPanel>, requested: CompactPanel) -> Option<CompactPanel> {
-    if current == Some(requested) {
-        None
-    } else {
-        Some(requested)
-    }
-}
-
-fn list_props<'a>(props: &'a WorkspaceProps<'a>) -> ListProps<'a> {
-    ListProps {
-        items: props.items,
-        selected: props.selected,
-        empty: props.empty_list,
+        viewer.show_content(ui, intl, &viewer_props, false, map_height, sidebar);
+        if !recording.laps.is_empty() {
+            ui.add_space(CHART_GAP - ui.spacing().item_spacing.y);
+            analysis_panel(ui, |ui| {
+                viewer.laps(ui, intl, recording, props.units);
+            });
+        }
     }
 }
 
@@ -389,6 +232,7 @@ pub struct ViewerProps<'a> {
 pub enum CursorMode {
     #[default]
     Idle,
+    /// Last inspected sample, retained when the pointer leaves the map or charts.
     Hover,
     Pinned,
     Playback,
@@ -605,14 +449,6 @@ impl ViewerInteraction {
         self.cursor = InteractionCursor::Idle;
     }
 
-    fn clear_hover(&mut self) -> bool {
-        if !matches!(self.cursor, InteractionCursor::Hover(_)) {
-            return false;
-        }
-        self.stop_and_clear_cursor();
-        true
-    }
-
     fn apply_pointer(&mut self, hovered: Option<usize>, clicked: Option<usize>) -> bool {
         let next = if let Some(index) = clicked {
             Some(InteractionCursor::Pinned {
@@ -763,6 +599,21 @@ impl Viewer {
     }
 
     pub fn show(&mut self, ui: &mut Ui, intl: &Intl, props: &ViewerProps<'_>) {
+        let map_height = activity_map_height(ui.clip_rect().height());
+        ScrollArea::vertical().show(ui, |ui| {
+            self.show_content(ui, intl, props, true, map_height, None);
+        });
+    }
+
+    fn show_content(
+        &mut self,
+        ui: &mut Ui,
+        intl: &Intl,
+        props: &ViewerProps<'_>,
+        heading: bool,
+        map_height: f32,
+        sidebar: Option<&mut MapSidebar<'_>>,
+    ) {
         self.sync_recording(props.recording_key);
         self.interaction
             .repair(props.recording.samples.len(), props.recording.laps.len());
@@ -785,16 +636,20 @@ impl Viewer {
         background.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Other, ui.is_enabled(), &viewer_label)
         });
-        crate::semantics::target(ui, &background, "activity.viewer");
-        ScrollArea::vertical().show_viewport(ui, |ui, _scroll_viewport| {
+        if heading {
+            crate::semantics::target(ui, &background, "activity.viewer");
+        }
+        ui.scope(|ui| {
             let visible_viewport = ui.clip_rect();
-            viewer_inset().show(ui, |ui| {
-                self.header(ui, intl, props, &domain);
+            if heading {
+                viewer_inset().show(ui, |ui| {
+                    self.header(ui, intl, props, &domain);
+                });
+                ui.add_space(8.0);
+            }
+            let route_output = map_section(ui, self, sidebar, |ui, viewer| {
+                viewer.route(ui, intl, props.recording, props.no_route, map_height)
             });
-            ui.add_space(8.0);
-            let map_height = activity_map_height(ui.available_height());
-            let route_output = self.route(ui, intl, props.recording, props.no_route, map_height);
-            let mut hover_seen = route_output.hovered.is_some();
             if route_output.empty_clicked {
                 self.interaction.stop_and_clear_cursor();
                 ui.ctx().request_repaint();
@@ -804,16 +659,17 @@ impl Viewer {
             {
                 ui.ctx().request_repaint();
             }
-            ui.add_space(8.0);
+            ui.add_space(CHART_GAP - ui.spacing().item_spacing.y);
             let analysis = self.analysis(props, Arc::clone(&domain));
-            hover_seen |= viewer_inset()
-                .show(ui, |ui| {
-                    self.charts(ui, intl, props, &analysis, visible_viewport)
-                })
-                .inner;
-            if !hover_seen && self.interaction.clear_hover() {
-                ui.ctx().request_repaint();
-            }
+            ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.y = CHART_GAP;
+                self.charts(ui, intl, props, &analysis, visible_viewport);
+                if !props.recording.samples.is_empty() {
+                    analysis_panel(ui, |ui| {
+                        self.sample_details(ui, intl, props, &analysis);
+                    });
+                }
+            });
         });
         if background.clicked() {
             self.interaction.stop_and_clear_cursor();
@@ -861,26 +717,34 @@ impl Viewer {
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let elapsed = format_message!(intl, default_message: "Time");
-                let distance = format_message!(intl, default_message: "Distance");
-                let choices = [
-                    button::GroupChoice::new(&distance, icons::ROUTE, Axis::Distance)
-                        .enabled(domain.distance_available),
-                    button::GroupChoice::new(&elapsed, icons::ACTIVITY, Axis::Elapsed),
-                ];
-                if let Some(axis) = button::compact_group(
-                    ui,
-                    self.axis,
-                    &choices,
-                    button::GroupProps {
-                        size: Size::Small,
-                        enabled: true,
-                    },
-                ) {
-                    self.axis = axis;
-                }
+                self.axis_controls(ui, intl, domain, button::Width::Fit);
             });
         });
+    }
+
+    fn axis_controls(&mut self, ui: &mut Ui, intl: &Intl, domain: &Domain, width: button::Width) {
+        if self.axis == Axis::Distance && !domain.distance_available {
+            self.axis = Axis::Elapsed;
+        }
+        let elapsed = format_message!(intl, default_message: "Time");
+        let distance = format_message!(intl, default_message: "Distance");
+        let choices = [
+            button::GroupChoice::new(&distance, icons::ROUTE, Axis::Distance)
+                .enabled(domain.distance_available),
+            button::GroupChoice::new(&elapsed, icons::ACTIVITY, Axis::Elapsed),
+        ];
+        if let Some(axis) = button::group(
+            ui,
+            self.axis,
+            &choices,
+            button::GroupProps {
+                size: Size::Small,
+                width,
+                enabled: true,
+            },
+        ) {
+            self.axis = axis;
+        }
     }
 
     fn route(
@@ -1099,10 +963,10 @@ impl Viewer {
         props: &ViewerProps<'_>,
         analysis: &ActivityAnalysis,
         viewport: egui::Rect,
-    ) -> bool {
+    ) {
         let visible = analysis.visible();
         if visible.is_empty() {
-            return false;
+            return;
         }
         let layout_environment = ChartLayoutEnvironment::capture(ui, intl);
         self.cache.prepare_chart_layout(layout_environment);
@@ -1114,6 +978,7 @@ impl Viewer {
             let layout_key = ChartLayoutKey {
                 kind,
                 width_bucket: (width / 16.0).round() as u16,
+                side_summary: width >= CHART_SIDE_SUMMARY_MIN_WIDTH,
                 sport: frame.sport,
                 units: frame.units,
             };
@@ -1136,12 +1001,10 @@ impl Viewer {
                     clicked = index;
                 }
             }
-            ui.add_space(8.0);
         }
         if self.interaction.apply_pointer(hovered, clicked) {
             ui.ctx().request_repaint();
         }
-        hovered.is_some()
     }
 
     fn prepare_chart(
@@ -1232,44 +1095,53 @@ impl Viewer {
         &self,
         ui: &mut Ui,
         intl: &Intl,
-        recording: &ActivityRecordingSnapshot,
-        sport: ActivitySport,
-        units: UnitSystem,
+        props: &ViewerProps<'_>,
+        analysis: &ActivityAnalysis,
     ) {
-        let Some(sample) = self
+        let sample = self
             .interaction
             .cursor()
             .sample_index
-            .and_then(|index| recording.samples.get(index))
-        else {
-            return;
-        };
-        ui.add_space(8.0);
+            .and_then(|index| props.recording.samples.get(index));
         ui.label(RichText::new(format_message!(intl, default_message: "At cursor")).strong());
-        let start = recording
+        let start = props
+            .recording
             .samples
             .first()
             .map_or(0, |sample| sample.timestamp.as_unix_milliseconds());
-        let elapsed = (sample.timestamp.as_unix_milliseconds() - start).max(0) as f64 / 1_000.0;
         let mut metrics = vec![(
             format_message!(intl, default_message: "Time"),
-            format_domain_tick(elapsed, Axis::Elapsed, units),
+            sample.map_or_else(
+                || "—".to_owned(),
+                |sample| {
+                    let elapsed =
+                        (sample.timestamp.as_unix_milliseconds() - start).max(0) as f64 / 1_000.0;
+                    format_domain_tick(elapsed, Axis::Elapsed, props.units)
+                },
+            ),
         )];
-        if let Some(distance) = sample.distance {
+        if analysis.domain.distance_available {
             metrics.push((
                 format_message!(intl, default_message: "Distance"),
-                format_distance(distance.as_millimeters(), units),
+                sample.and_then(|sample| sample.distance).map_or_else(
+                    || "—".to_owned(),
+                    |distance| format_distance(distance.as_millimeters(), props.units),
+                ),
             ));
         }
-        for kind in ChartKind::ALL {
-            if let Some(value) = kind.value(sample, sport, units) {
-                metrics.push((
-                    kind.label(intl, sport),
-                    kind.format_value(value, sport, units),
-                ));
-            }
+        let sport = props.presentation.sport();
+        for kind in analysis.visible() {
+            metrics.push((
+                kind.label(intl, sport),
+                sample
+                    .and_then(|sample| kind.value(sample, sport, props.units))
+                    .map_or_else(
+                        || "—".to_owned(),
+                        |value| kind.format_value(value, sport, props.units),
+                    ),
+            ));
         }
-        metric_grid(ui, &metrics);
+        sample_metric_row(ui, &metrics);
     }
 
     fn laps(
@@ -1279,12 +1151,7 @@ impl Viewer {
         recording: &ActivityRecordingSnapshot,
         units: UnitSystem,
     ) {
-        if recording.laps.is_empty() {
-            return;
-        }
-        ui.add_space(10.0);
         ui.label(RichText::new(format_message!(intl, default_message: "Laps")).strong());
-        ui.add_space(6.0);
         let active_lap = self
             .interaction
             .cursor()
@@ -1736,63 +1603,30 @@ fn activity_map_height(available_height: f32) -> f32 {
     (available_height * 0.68).clamp(320.0, 560.0)
 }
 
-fn summary(ui: &mut Ui, presentation: &Presentation) {
+fn sample_metric_row(ui: &mut Ui, metrics: &[(String, String)]) {
     let palette = crate::theme::palette(ui);
-    ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.y = 1.0;
-        ui.label(RichText::new(&presentation.title).size(16.0).strong());
-        ui.label(
-            RichText::new(&presentation.subtitle)
-                .small()
-                .color(color32(palette.content().text_secondary())),
-        );
-    });
-    ui.add_space(6.0);
-    let metrics = presentation
-        .metric_props()
-        .into_iter()
-        .map(|MetricProps { label, value }| (label.to_owned(), value.to_owned()))
-        .collect::<Vec<_>>();
-    metric_grid(ui, &metrics);
-}
-
-fn metric_grid(ui: &mut Ui, metrics: &[(String, String)]) {
-    const CELL_HEIGHT: f32 = 54.0;
-    const CELL_GAP: f32 = 2.0;
-    const CELL_PADDING: f32 = 10.0;
-
-    let palette = crate::theme::palette(ui);
-    let fill = color32(palette.surfaces().layer(theme::Level::Two));
     let primary = color32(palette.content().text_primary());
     let secondary = color32(palette.content().text_secondary());
+    let width = ui.available_width().min(128.0);
     ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.y = CELL_GAP;
-        for row in metrics.chunks(2) {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = CELL_GAP;
-                let cell_width = ((ui.available_width() - CELL_GAP) / 2.0).max(1.0);
-                for (label, value) in row {
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(cell_width, CELL_HEIGHT), Sense::hover());
-                    let painter = ui.painter().with_clip_rect(rect);
-                    painter.rect_filled(rect, CONTROL_RADIUS, fill);
-                    painter.text(
-                        rect.left_top() + egui::vec2(CELL_PADDING, 8.0),
-                        egui::Align2::LEFT_TOP,
-                        label,
-                        egui::TextStyle::Small.resolve(ui.style()),
-                        secondary,
-                    );
-                    painter.text(
-                        rect.left_top() + egui::vec2(CELL_PADDING, 23.0),
-                        egui::Align2::LEFT_TOP,
-                        value,
-                        egui::FontId::proportional(15.0),
-                        primary,
+        ui.spacing_mut().item_spacing = egui::vec2(16.0, 8.0);
+        ui.with_layout(
+            Layout::left_to_right(Align::Min).with_main_wrap(true),
+            |ui| {
+                for (label, value) in metrics {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(width, 0.0),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            ui.set_min_width(width);
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.label(RichText::new(label).small().color(secondary));
+                            ui.label(RichText::new(value).size(15.0).color(primary));
+                        },
                     );
                 }
-            });
-        }
+            },
+        );
     });
 }
 
@@ -1820,28 +1654,36 @@ fn empty_panel(ui: &mut Ui, message: &str) {
     );
 }
 
-fn loading_panel(ui: &mut Ui, intl: &Intl, presentation: &Presentation) {
-    ScrollArea::vertical().show(ui, |ui| {
-        viewer_inset().show(ui, |ui| {
-            ui.label(RichText::new(&presentation.title).size(18.0).strong());
-            ui.label(RichText::new(&presentation.subtitle).small().color(color32(
-                crate::theme::palette(ui).content().text_secondary(),
-            )));
-        });
-        ui.add_space(8.0);
-        let map_height = activity_map_height(ui.available_height());
-        loading_surface(
-            ui,
-            map_height,
-            &format_message!(intl, default_message: "Loading activity data…"),
-        );
-        ui.add_space(8.0);
-        viewer_inset().show(ui, |ui| {
-            loading_chart(ui);
-            ui.add_space(8.0);
-            loading_chart(ui);
-        });
+fn loading_charts(ui: &mut Ui) {
+    ui.add_space(CHART_GAP - ui.spacing().item_spacing.y);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = CHART_GAP;
+        loading_chart(ui);
+        loading_chart(ui);
     });
+}
+
+fn map_section<R>(
+    ui: &mut Ui,
+    viewer: &mut Viewer,
+    sidebar: Option<&mut MapSidebar<'_>>,
+    content: impl FnOnce(&mut Ui, &mut Viewer) -> R,
+) -> R {
+    let Some(sidebar) = sidebar else {
+        return content(ui, viewer);
+    };
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(NAVIGATION_WIDTH, 0.0),
+            Layout::top_down(Align::Min),
+            |ui| {
+                ui.set_width(NAVIGATION_WIDTH);
+                sidebar(ui, viewer);
+            },
+        );
+        ui.vertical(|ui| content(ui, viewer)).inner
+    })
+    .inner
 }
 
 fn loading_surface(ui: &mut Ui, height: f32, label: &str) {
@@ -1861,43 +1703,37 @@ fn loading_surface(ui: &mut Ui, height: f32, label: &str) {
 
 fn loading_chart(ui: &mut Ui) {
     let palette = crate::theme::palette(ui);
-    let surface = color32(palette.surfaces().layer(theme::Level::One));
     let field = color32(palette.surfaces().background_hover());
     let placeholder = color32(palette.borders().subtle()).gamma_multiply(0.7);
-    egui::Frame::new()
-        .fill(surface)
-        .inner_margin(12)
-        .show(ui, |ui| {
+    chart_panel(
+        ui,
+        |ui, beside| {
             skeleton_block(ui, egui::vec2(96.0, 14.0), placeholder);
-            ui.add_space(20.0);
-            ui.columns(3, |columns| {
-                for column in columns {
-                    let width = column.available_width();
-                    skeleton_block(column, egui::vec2(width.min(64.0), 8.0), placeholder);
-                    column.add_space(5.0);
-                    skeleton_block(column, egui::vec2(width.min(92.0), 14.0), placeholder);
+            if beside {
+                for _ in 0..3 {
+                    ui.horizontal(|ui| {
+                        skeleton_block(ui, egui::vec2(64.0, 12.0), placeholder);
+                        skeleton_block(ui, egui::vec2(72.0, 12.0), placeholder);
+                    });
                 }
-            });
-            ui.add_space(12.0);
+            } else {
+                ui.columns(3, |columns| {
+                    for column in columns {
+                        let width = column.available_width();
+                        skeleton_block(column, egui::vec2(width.min(64.0), 8.0), placeholder);
+                        skeleton_block(column, egui::vec2(width.min(92.0), 14.0), placeholder);
+                    }
+                });
+            }
+        },
+        |ui| {
             let (rect, _) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width(), CHART_HEIGHT),
                 Sense::hover(),
             );
             ui.painter().rect_filled(rect, CONTROL_RADIUS, field);
-        });
-}
-
-fn loading_details(ui: &mut Ui) {
-    let placeholder = color32(crate::theme::palette(ui).borders().subtle()).gamma_multiply(0.7);
-    ui.add_space(20.0);
-    for width in [0.72, 0.9, 0.64, 0.82] {
-        skeleton_block(
-            ui,
-            egui::vec2(ui.available_width() * width, 12.0),
-            placeholder,
-        );
-        ui.add_space(14.0);
-    }
+        },
+    );
 }
 
 fn skeleton_block(ui: &mut Ui, size: egui::Vec2, fill: egui::Color32) {
@@ -1909,7 +1745,6 @@ fn skeleton_block(ui: &mut Ui, size: egui::Vec2, fill: egui::Color32) {
 struct ChartVisuals {
     accent: egui::Color32,
     guide: egui::Color32,
-    surface: egui::Color32,
     field: egui::Color32,
     grid: egui::Color32,
 }
@@ -1953,7 +1788,6 @@ impl<'frame, 'recording> ChartFrame<'frame, 'recording> {
             visuals: ChartVisuals {
                 accent: color32(crate::theme::selection_accent(ui)),
                 guide: color32(palette.content().icon_secondary()),
-                surface: color32(palette.surfaces().layer(theme::Level::One)),
                 field: color32(palette.surfaces().background_hover()).gamma_multiply(0.5),
                 grid: color32(palette.borders().subtle()),
             },
@@ -1998,15 +1832,57 @@ fn chart_is_outside_viewport(
         return false;
     }
     ui.allocate_exact_size(candidate.size(), Sense::hover());
-    ui.add_space(8.0);
     true
 }
 
-fn show_chart(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) -> ChartUiOutput {
-    let rendered = egui::Frame::new()
-        .fill(frame.visuals.surface)
-        .inner_margin(12)
+fn analysis_panel<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
+    let palette = crate::theme::palette(ui);
+    let surface = color32(palette.surfaces().background())
+        .lerp_to_gamma(color32(palette.surfaces().layer(theme::Level::One)), 0.5);
+    egui::Frame::new()
+        .fill(surface)
+        .inner_margin(egui::Margin::symmetric(8, 6))
         .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = CHART_GAP;
+            content(ui)
+        })
+}
+
+fn chart_panel<R>(
+    ui: &mut Ui,
+    summary: impl FnOnce(&mut Ui, bool),
+    plot: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let beside = ui.available_width() >= CHART_SIDE_SUMMARY_MIN_WIDTH;
+    analysis_panel(ui, |ui| {
+        // Read-only summaries should not inherit the 40 px control target height.
+        ui.spacing_mut().interact_size.y = ui.text_style_height(&egui::TextStyle::Body);
+        if beside {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 12.0;
+                ui.allocate_ui_with_layout(
+                    egui::vec2(CHART_SUMMARY_WIDTH, 0.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(CHART_SUMMARY_WIDTH);
+                        summary(ui, true);
+                    },
+                );
+                plot(ui)
+            })
+            .inner
+        } else {
+            summary(ui, false);
+            plot(ui)
+        }
+    })
+}
+
+fn show_chart(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) -> ChartUiOutput {
+    let rendered = chart_panel(
+        ui,
+        |ui, beside| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&chart.label).size(14.0).strong());
                 if let Some(value) = &chart.value {
@@ -2015,7 +1891,6 @@ fn show_chart(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) ->
                     });
                 }
             });
-            ui.add_space(8.0);
             chart_summary(
                 ui,
                 frame.intl,
@@ -2023,16 +1898,11 @@ fn show_chart(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) ->
                 chart.stats,
                 frame.sport,
                 frame.units,
+                beside,
             );
-            ui.add_space(8.0);
-            let plot = egui::Frame::new()
-                .inner_margin(egui::Margin::symmetric(0, 4))
-                .show(ui, |ui| show_chart_plot(ui, chart, frame));
-            (
-                plot.inner,
-                plot.response.clicked() || plot.response.dragged_by(egui::PointerButton::Primary),
-            )
-        });
+        },
+        |ui| show_chart_plot(ui, chart, frame),
+    );
     ChartUiOutput {
         height: rendered.response.rect.height(),
         pointer_x: rendered.inner.0,
@@ -2040,7 +1910,11 @@ fn show_chart(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) ->
     }
 }
 
-fn show_chart_plot(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_>) -> Option<f64> {
+fn show_chart_plot(
+    ui: &mut Ui,
+    chart: &PreparedChart,
+    frame: &ChartFrame<'_, '_>,
+) -> (Option<f64>, bool) {
     let inverted = chart.kind == ChartKind::PaceSpeed && frame.sport == ActivitySport::Running;
     let peak = if inverted {
         chart.stats.minimum
@@ -2080,11 +1954,6 @@ fn show_chart_plot(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_
         .show(ui, |plot_ui| {
             plot_ui.set_plot_bounds_x(frame.x_bounds.clone());
             paint_chart_data(plot_ui, chart, frame);
-            plot_ui
-                .response()
-                .hovered()
-                .then(|| plot_ui.pointer_coordinate().map(|point| point.x))
-                .flatten()
         });
     ui.painter().set(
         background,
@@ -2095,7 +1964,15 @@ fn show_chart_plot(ui: &mut Ui, chart: &PreparedChart, frame: &ChartFrame<'_, '_
         egui::WidgetInfo::labeled(egui::WidgetType::Other, ui.is_enabled(), &chart.label)
     });
     crate::semantics::target(ui, &plot.response, format!("chart.{}", chart.chart_index));
-    plot.inner
+    // Scrubbing needs the current transform without PlotUi's panning compensation.
+    let pointer_x = plot
+        .response
+        .hover_pos()
+        .map(|position| plot.transform.value_from_position(position).x);
+    (
+        pointer_x,
+        plot.response.clicked() || plot.response.dragged_by(egui::PointerButton::Primary),
+    )
 }
 
 fn paint_chart_axis(ui: &Ui, transform: &egui_plot::PlotTransform, frame: &ChartFrame<'_, '_>) {
@@ -2319,6 +2196,7 @@ struct ChartCacheKey {
 struct ChartLayoutKey {
     kind: ChartKind,
     width_bucket: u16,
+    side_summary: bool,
     sport: ActivitySport,
     units: UnitSystem,
 }
@@ -2701,6 +2579,7 @@ fn chart_summary(
     stats: ChartStats,
     sport: ActivitySport,
     units: UnitSystem,
+    beside: bool,
 ) {
     let labels = [
         format_message!(intl, default_message: "Minimum"),
@@ -2713,13 +2592,39 @@ fn chart_summary(
         kind.format_value(stats.maximum, sport, units),
     ];
     let secondary = color32(crate::theme::palette(ui).content().text_secondary());
-    ui.columns(3, |columns| {
-        for ((column, label), value) in columns.iter_mut().zip(labels).zip(values) {
-            column.spacing_mut().item_spacing.y = 2.0;
-            column.label(RichText::new(label).small().color(secondary));
-            column.label(RichText::new(value).size(15.0).strong());
-        }
-    });
+    if beside {
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            let divider = egui::Stroke::new(
+                1.0,
+                color32(crate::theme::palette(ui).borders().subtle()).gamma_multiply(0.3),
+            );
+            for (index, (label, value)) in labels.into_iter().zip(values).enumerate() {
+                let row = ui.horizontal(|ui| {
+                    ui.label(RichText::new(label).color(secondary));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(value);
+                    });
+                });
+                let rect = row.response.rect;
+                let gap = if index == 0 {
+                    CHART_GAP
+                } else {
+                    ui.spacing().item_spacing.y
+                };
+                ui.painter()
+                    .hline(rect.x_range(), rect.top() - gap / 2.0, divider);
+            }
+        });
+    } else {
+        ui.columns(3, |columns| {
+            for ((column, label), value) in columns.iter_mut().zip(labels).zip(values) {
+                column.spacing_mut().item_spacing.y = 2.0;
+                column.label(RichText::new(label).small().color(secondary));
+                column.label(RichText::new(value).size(15.0).strong());
+            }
+        });
+    }
 }
 
 fn format_pace(minutes: f64) -> String {
@@ -3208,6 +3113,194 @@ mod tests {
     }
 
     #[test]
+    fn chart_pointer_click_and_drag_pin_the_sample() {
+        let intl = garmin_i18n::Translations::bundled()
+            .unwrap()
+            .formatter(garmin_i18n::Language::English)
+            .unwrap();
+        let recording = recording(vec![
+            sample(0, Some(0), Some(10.0), None),
+            sample(1_000, Some(1_000), Some(20.0), None),
+            sample(2_000, Some(2_000), Some(30.0), None),
+        ]);
+        let duration = ActivityDuration::from_milliseconds(2_000);
+        let summary = garmin_model::activity::ActivitySummary::from_parts(
+            ActivitySport::Cycling,
+            TimeRange::from_parts(timestamp(0), timestamp(2_000)).unwrap(),
+            ActivityTotals::from_parts(duration, duration, None, None, None, None).unwrap(),
+            ActivityMetrics::default(),
+        );
+        let presentation =
+            super::Presentation::from_summary(summary, "Test", &intl, UnitSystem::Metric);
+        let props = super::ViewerProps {
+            presentation: &presentation,
+            recording: &recording,
+            recording_key: "chart-pointer",
+            units: UnitSystem::Metric,
+            no_route: "No route",
+        };
+        for width in [320.0, 1_200.0] {
+            let context = egui::Context::default();
+            crate::install(&context);
+            let mut viewer = viewer();
+            let domain = Arc::new(Domain::new(&recording, UnitSystem::Metric));
+            let analysis = viewer.analysis(&props, domain);
+            let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 800.0));
+            let render = |viewer: &mut Viewer, events| {
+                let mut field = egui::Color32::TRANSPARENT;
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(viewport),
+                        events,
+                        ..egui::RawInput::default()
+                    },
+                    |ui| {
+                        field = super::ChartFrame::new(
+                            ui,
+                            &intl,
+                            &props,
+                            &analysis,
+                            Axis::Distance,
+                            "pointer",
+                        )
+                        .visuals
+                        .field;
+                        viewer.charts(ui, &intl, &props, &analysis, viewport);
+                    },
+                );
+                let plot = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.fill == field => Some(rect.rect),
+                    _ => None,
+                });
+                output.drop_without_applying_deltas();
+                plot.unwrap()
+            };
+            render(&mut viewer, Vec::new());
+            let plot = render(&mut viewer, Vec::new());
+            let center = plot.center();
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            render(&mut viewer, vec![egui::Event::PointerMoved(center)]);
+            assert_eq!(viewer.cursor().mode, CursorMode::Hover);
+            render(&mut viewer, vec![button(center, true)]);
+            render(&mut viewer, vec![button(center, false)]);
+            assert_eq!(viewer.cursor().mode, CursorMode::Pinned);
+            assert_eq!(viewer.cursor().sample_index, Some(1));
+            render(&mut viewer, vec![button(center, true)]);
+            let end = egui::pos2(plot.right() - 4.0, center.y);
+            render(&mut viewer, vec![egui::Event::PointerMoved(end)]);
+            assert_eq!(viewer.cursor().mode, CursorMode::Pinned);
+            assert_eq!(viewer.cursor().sample_index, Some(2));
+            render(
+                &mut viewer,
+                vec![button(end, false), egui::Event::PointerGone],
+            );
+            render(&mut viewer, vec![egui::Event::PointerGone]);
+            assert_eq!(viewer.cursor().sample_index, Some(2));
+        }
+    }
+
+    #[test]
+    fn chart_statistics_move_beside_the_plot_without_increasing_row_height() {
+        let translations = garmin_i18n::Translations::bundled().unwrap();
+        for language in [garmin_i18n::Language::English, garmin_i18n::Language::Czech] {
+            let intl = translations.formatter(language).unwrap();
+            let recording = recording(vec![
+                sample(0, Some(0), Some(10.0), None),
+                sample(1_000, Some(1_000), Some(20.0), None),
+            ]);
+            let duration = ActivityDuration::from_milliseconds(1_000);
+            let summary = garmin_model::activity::ActivitySummary::from_parts(
+                ActivitySport::Cycling,
+                TimeRange::from_parts(timestamp(0), timestamp(1_000)).unwrap(),
+                ActivityTotals::from_parts(duration, duration, None, None, None, None).unwrap(),
+                ActivityMetrics::default(),
+            );
+            let presentation =
+                super::Presentation::from_summary(summary, "Test", &intl, UnitSystem::Metric);
+            let props = super::ViewerProps {
+                presentation: &presentation,
+                recording: &recording,
+                recording_key: "chart-layout",
+                units: UnitSystem::Metric,
+                no_route: "No route",
+            };
+            for width in [320.0, 639.0, 640.0, 1_200.0] {
+                let context = egui::Context::default();
+                crate::install(&context);
+                let mut viewer = viewer();
+                let domain = Arc::new(Domain::new(&recording, UnitSystem::Metric));
+                let analysis = viewer.analysis(&props, domain);
+                let mut height = 0.0;
+                let mut field = egui::Color32::TRANSPARENT;
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 800.0),
+                        )),
+                        ..egui::RawInput::default()
+                    },
+                    |ui| {
+                        ui.spacing_mut().item_spacing.y = super::CHART_GAP;
+                        let frame = super::ChartFrame::new(
+                            ui,
+                            &intl,
+                            &props,
+                            &analysis,
+                            Axis::Distance,
+                            "layout",
+                        );
+                        field = frame.visuals.field;
+                        for index in 0..2 {
+                            let chart =
+                                viewer.prepare_chart(ui, ChartKind::Elevation, index, &frame);
+                            height = super::show_chart(ui, &chart, &frame).height;
+                        }
+                    },
+                );
+                let plots = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect) if rect.fill == field => Some(rect.rect),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let heading = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text)
+                        if text.galley.text()
+                            == ChartKind::Elevation.label(&intl, ActivitySport::Cycling) =>
+                    {
+                        Some(text.galley.rect.translate(text.pos.to_vec2()))
+                    }
+                    _ => None,
+                });
+                output.drop_without_applying_deltas();
+                assert_eq!(plots.len(), 2);
+                let heading = heading.unwrap();
+                if width >= super::CHART_SIDE_SUMMARY_MIN_WIDTH {
+                    assert!(heading.right() < plots[0].left());
+                    assert!(
+                        height <= super::CHART_HEIGHT + 12.5,
+                        "width {width}, height {height}, plots {plots:?}, heading {heading:?}"
+                    );
+                } else {
+                    assert!(heading.bottom() < plots[0].top());
+                    assert!(height > super::CHART_HEIGHT + 12.5);
+                }
+                assert!((plots[0].left() - plots[1].left()).abs() < 0.01);
+                assert!((plots[1].top() - plots[0].top() - height - super::CHART_GAP).abs() < 0.01);
+                assert!(plots.iter().all(|plot| plot.right() <= width));
+            }
+        }
+    }
+
+    #[test]
     fn chart_layout_environment_tracks_language_font_metrics_and_scale() {
         let baseline = ChartLayoutEnvironment::new("en".to_owned(), 1.0, egui::vec2(80.0, 16.0));
 
@@ -3693,6 +3786,126 @@ mod tests {
 
         assert!((coordinate.0.abs() - 180.0).abs() < 1.0e-9);
         assert!((coordinate.1 - 61.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn inspected_sample_survives_pointer_exit_and_scrolling() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        let intl = garmin_i18n::Translations::bundled()
+            .unwrap()
+            .formatter(garmin_i18n::Language::English)
+            .unwrap();
+        let recording = recording(vec![
+            sample(0, Some(0), Some(10.0), None),
+            sample(1_000, Some(1_000), Some(20.0), None),
+        ]);
+        let duration = ActivityDuration::from_milliseconds(1_000);
+        let summary = garmin_model::activity::ActivitySummary::from_parts(
+            ActivitySport::Cycling,
+            TimeRange::from_parts(timestamp(0), timestamp(1_000)).unwrap(),
+            ActivityTotals::from_parts(duration, duration, None, None, None, None).unwrap(),
+            ActivityMetrics::default(),
+        );
+        let presentation =
+            super::Presentation::from_summary(summary, "Test", &intl, UnitSystem::Metric);
+        let props = super::ViewerProps {
+            presentation: &presentation,
+            recording: &recording,
+            recording_key: "cursor-test",
+            units: UnitSystem::Metric,
+            no_route: "No route",
+        };
+        let mut viewer = viewer();
+        viewer.sync_recording(props.recording_key);
+        viewer.interaction.apply_pointer(Some(1), None);
+        for scroll in [0.0, 350.0, 0.0] {
+            context
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(800.0, 400.0),
+                        )),
+                        events: vec![egui::Event::PointerGone],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        egui::ScrollArea::vertical()
+                            .vertical_scroll_offset(scroll)
+                            .show(ui, |ui| {
+                                viewer.show_content(ui, &intl, &props, false, 320.0, None);
+                            });
+                    },
+                )
+                .drop_without_applying_deltas();
+            assert_eq!(
+                viewer.cursor().sample_index,
+                Some(1),
+                "scroll offset {scroll}"
+            );
+        }
+        viewer.interaction.stop_and_clear_cursor();
+        assert_eq!(viewer.cursor(), ActivityCursor::default());
+        viewer.interaction.apply_pointer(Some(1), None);
+        viewer.sync_recording("another activity");
+        assert_eq!(viewer.cursor(), ActivityCursor::default());
+    }
+
+    #[test]
+    fn sample_metrics_use_one_compact_row_and_wrap_on_narrow_views() {
+        for theme in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
+            for width in [900.0, 300.0] {
+                let context = egui::Context::default();
+                crate::install(&context);
+                context.set_theme(theme);
+                let metrics = ["Time", "Distance", "Elevation", "Speed", "Temperature"]
+                    .map(|label| (label.to_owned(), "12.0".to_owned()));
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 400.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        super::sample_metric_row(ui, &metrics);
+                    },
+                );
+                let labels = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text)
+                            if metrics.iter().any(|(label, _)| label == text.galley.text()) =>
+                        {
+                            Some((text.pos, text.galley.size()))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                output.drop_without_applying_deltas();
+                assert_eq!(labels.len(), metrics.len());
+                for (position, size) in &labels {
+                    assert!(position.x + size.x <= width);
+                }
+                if width > 800.0 {
+                    assert!(
+                        labels
+                            .iter()
+                            .all(|(position, _)| (position.y - labels[0].0.y).abs() < 1.0),
+                        "{labels:?}"
+                    );
+                    assert!(
+                        labels.last().unwrap().0.x < 650.0,
+                        "metrics must not stretch across the page"
+                    );
+                } else {
+                    assert!(labels.last().unwrap().0.y > labels[0].0.y);
+                }
+            }
+        }
     }
 
     #[test]
