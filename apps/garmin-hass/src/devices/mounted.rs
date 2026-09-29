@@ -3,8 +3,8 @@ use std::{sync::mpsc, time::Duration};
 use garmin_device::{attachments, attachments::Candidate as _};
 use garmin_progress::ProgressReporter;
 use garmin_service_api::{
-    DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCapability,
-    DeviceCatalogSnapshot, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
+    DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogSnapshot,
+    DeviceSnapshot,
 };
 
 use super::{
@@ -26,6 +26,7 @@ impl SourceProvider for Provider {
 
 pub(crate) struct MountedSource {
     requests: Option<mpsc::Sender<MountedRequest>>,
+    last_snapshot: Vec<DeviceSnapshot>,
 }
 
 impl MountedSource {
@@ -37,16 +38,34 @@ impl MountedSource {
         {
             Ok(_worker) => Self {
                 requests: Some(requests),
+                last_snapshot: Vec::new(),
             },
             Err(error) => {
                 tracing::error!(%error, "could not start device discovery");
-                Self { requests: None }
+                Self {
+                    requests: None,
+                    last_snapshot: Vec::new(),
+                }
             }
         }
     }
 }
 
 impl Source for MountedSource {
+    fn refresh_device(&mut self, key: &str) -> Result<(), String> {
+        let requests = self
+            .requests
+            .as_ref()
+            .ok_or_else(|| "device discovery is unavailable".to_owned())?;
+        let (reply, response) = mpsc::channel();
+        requests
+            .send(MountedRequest::Refresh(key.to_owned(), reply))
+            .map_err(|error| error.to_string())?;
+        response
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|error| error.to_string())?
+    }
+
     fn snapshot(&mut self) -> Vec<DeviceSnapshot> {
         let Some(requests) = &self.requests else {
             return Vec::new();
@@ -55,9 +74,11 @@ impl Source for MountedSource {
         if requests.send(MountedRequest::Snapshot(reply)).is_err() {
             return Vec::new();
         }
-        response
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap_or_default()
+        match response.recv_timeout(Duration::from_secs(2)) {
+            Ok(snapshot) => self.last_snapshot = snapshot,
+            Err(error) => tracing::warn!(%error, "device snapshot is delayed"),
+        }
+        self.last_snapshot.clone()
     }
 
     fn catalog(
@@ -153,6 +174,7 @@ fn receive_with_cancellation<T>(
 
 enum MountedRequest {
     Snapshot(mpsc::Sender<Vec<DeviceSnapshot>>),
+    Refresh(String, mpsc::Sender<Result<(), String>>),
     Catalog(
         String,
         ProgressReporter,
@@ -178,18 +200,39 @@ enum MountedRequest {
 }
 
 fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
-    let mut manager = attachments::Manager::new(garmin_device::MountedMtpMonitor::new());
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("device browser runtime must start");
+    let handle = runtime.handle().clone();
+    let mut manager = attachments::Manager::with_inspector(
+        garmin_device::MountedMtpMonitor::new(),
+        move |candidate| {
+            Ok(
+                handle.block_on(garmin_services::devices::inspect_attachment(
+                    &garmin_device::MountedMtpDevice::new(&candidate.mount_id),
+                    candidate.name(),
+                    candidate.inspect(),
+                )),
+            )
+        },
+    );
     loop {
         log_device_events(manager.poll());
         match requests.recv_timeout(Duration::from_millis(250)) {
             Ok(MountedRequest::Snapshot(reply)) => {
                 log_device_events(manager.poll());
-                let value = manager.presentations().into_iter().map(snapshot).collect();
+                let value = manager
+                    .presentations()
+                    .into_iter()
+                    .map(super::device_snapshot)
+                    .collect();
                 let _ignored = reply.send(value);
+            }
+            Ok(MountedRequest::Refresh(key, reply)) => {
+                let result = manager.refresh(&key);
+                log_device_events(manager.poll());
+                let _ignored = reply.send(result);
             }
             Ok(MountedRequest::Catalog(key, progress, reply)) => {
                 log_device_events(manager.poll());
@@ -207,6 +250,7 @@ fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
                     .candidate(&key)
                     .ok_or_else(|| "the selected device is no longer connected".to_owned())
                     .and_then(|candidate| browser(&runtime, &candidate, request, &progress));
+                manager.invalidate(&key);
                 let _ignored = reply.send(result);
             }
             Ok(MountedRequest::Download(key, target, progress, reply)) => {
@@ -226,6 +270,7 @@ fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
                     .and_then(|candidate| {
                         upload(&runtime, &candidate, &request, &contents, &progress)
                     });
+                manager.invalidate(&key);
                 let _ignored = reply.send(result);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -304,50 +349,4 @@ fn upload(
     candidate
         .browse_with_progress(progress)
         .map(|catalog| device_catalog(device_key, catalog))
-}
-
-fn snapshot(presentation: attachments::Presentation) -> DeviceSnapshot {
-    DeviceSnapshot {
-        key: presentation.key,
-        name: presentation.name,
-        identifier: presentation
-            .identifier
-            .map(garmin_device::DeviceId::into_u32),
-        software_version: presentation
-            .software_version
-            .map(garmin_device::SoftwareVersion::into_hundredths),
-        inspection: match presentation.state {
-            attachments::InspectionState::Running => InspectionState::Running,
-            attachments::InspectionState::Ready => InspectionState::Ready,
-            attachments::InspectionState::Failed => InspectionState::Failed,
-        },
-        inspection_error: presentation.inspection_error,
-        capabilities: presentation
-            .capabilities
-            .into_iter()
-            .filter_map(|capability| {
-                let data_type = match capability.data_type() {
-                    garmin_device::DataType::Activity => DeviceDataType::Activity,
-                    garmin_device::DataType::Workout => DeviceDataType::Workout,
-                    garmin_device::DataType::Course => DeviceDataType::Course,
-                    _ => return None,
-                };
-                let direction = match capability.direction() {
-                    garmin_device::TransferDirection::OutputFromUnit => {
-                        TransferDirection::OutputFromUnit
-                    }
-                    garmin_device::TransferDirection::InputToUnit => TransferDirection::InputToUnit,
-                    garmin_device::TransferDirection::InputOutput => TransferDirection::InputOutput,
-                };
-                Some(DeviceCapability {
-                    data_type,
-                    direction,
-                })
-            })
-            .collect(),
-        storages: presentation
-            .storage
-            .map(|state| state.storages)
-            .unwrap_or_default(),
-    }
 }

@@ -33,6 +33,7 @@ fn disconnected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         software_version: Some(3_220),
         inspection: InspectionState::Ready,
         inspection_error: None,
+        report: None,
         capabilities: Vec::new(),
         storages: Vec::new(),
     }];
@@ -49,6 +50,7 @@ fn disconnected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                 page: &workspace::Page::Activities,
                 navigation: shell::Navigation::Expanded,
                 devices: &devices,
+                backup_enabled: false,
                 window_controls: None,
             },
             |ui| {

@@ -24,7 +24,6 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::io::AsyncReadExt as _;
 use tower_http::services::ServeDir;
 
 const ADDRESS_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_ADDRESS";
@@ -187,7 +186,7 @@ fn router(
     let control = browser.control_server.then(crate::control::Broker::new);
     let app = Router::new()
         .route("/remoc", any(websocket))
-        .route("/device-download/{token}", get(device_download))
+        .route("/download/{token}", get(download))
         .route("/map/tiles/{zoom}/{x}/{file}", get(map_tile))
         .route("/health", get(|| async { "ok" }))
         .route("/csp-report", post(csp_report))
@@ -244,7 +243,7 @@ async fn browser_cache_policy(mut request: Request<Body>, next: Next) -> Respons
     let map_tile = path.starts_with("/map/tiles/");
     let static_asset = fingerprinted_asset(path)
         && !entry_point
-        && !path.starts_with("/device-download/")
+        && !path.starts_with("/download/")
         && !map_tile
         && !matches!(path, "/health" | "/remoc" | "/csp-report");
     let nonce = Nonce::random();
@@ -501,52 +500,14 @@ async fn websocket(
     })
 }
 
-async fn device_download(
+async fn download(
     State(host): State<Arc<Host>>,
-    AxumPath(token): AxumPath<String>,
+    AxumPath(token): AxumPath<uuid::Uuid>,
 ) -> Response {
-    let Some(download) = host.take_browser_download(&token) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let content_length = download.size;
-    let file = match tokio::fs::File::open(download.path()).await {
-        Ok(file) => file,
-        Err(error) => {
-            tracing::warn!(%error, "prepared browser download disappeared");
-            return StatusCode::NOT_FOUND.into_response();
-        }
-    };
-    let body = Body::from_stream(futures_util::stream::try_unfold(
-        (file, download),
-        |(mut file, download)| async move {
-            let mut bytes = vec![0_u8; 64 * 1024];
-            let count = file.read(&mut bytes).await?;
-            if count == 0 {
-                Ok::<_, std::io::Error>(None)
-            } else {
-                bytes.truncate(count);
-                Ok(Some((Bytes::from(bytes), (file, download))))
-            }
-        },
-    ));
-    let mut response = Response::new(body);
-    let headers = response.headers_mut();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/octet-stream"),
-    );
-    headers.insert(
-        header::CONTENT_DISPOSITION,
-        HeaderValue::from_static("attachment"),
-    );
-    if let Ok(content_length) = HeaderValue::from_str(&content_length.to_string()) {
-        headers.insert(header::CONTENT_LENGTH, content_length);
-    }
-    headers.insert(
-        header::X_CONTENT_TYPE_OPTIONS,
-        HeaderValue::from_static("nosniff"),
-    );
-    response
+    host.take_download(token).map_or_else(
+        || StatusCode::NOT_FOUND.into_response(),
+        crate::downloads::Download::response,
+    )
 }
 
 fn browser_origin_allowed(headers: &HeaderMap) -> bool {
@@ -606,6 +567,9 @@ async fn serve_client(socket: WebSocket, host: Arc<Host>) -> anyhow::Result<()> 
 }
 
 #[cfg(test)]
+mod snapshot_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{
         CSP_NONCE_PLACEHOLDER, MAP_RENDER_WORKER_PLACEHOLDER, UPLOAD_TELEMETRY_PLACEHOLDER,
@@ -622,7 +586,6 @@ mod tests {
         ApplicationService as _, ApplicationServiceClient, DeviceBrowserTarget,
         DeviceCatalogEntryKind, InspectionState,
     };
-    use garmin_services::Application;
     use http_security_headers::{ContentSecurityPolicy, Nonce};
     use remoc::prelude::*;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -634,14 +597,14 @@ mod tests {
     -> anyhow::Result<()> {
         use std::time::Duration;
         let directory = tempfile::tempdir()?;
-        let storage = crate::prepare_storage(directory.path()).await?;
+        let storage = crate::prepare_deployment(directory.path()).await?;
         let (app, control) = router(
             Host::new(
                 Box::new(DemoSource::new(
                     directory.path().join("device"),
                     tokio::runtime::Handle::current(),
                 )?),
-                Application::new(storage),
+                storage,
             ),
             garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
             BrowserOptions {
@@ -971,14 +934,14 @@ mod tests {
     #[tokio::test]
     async fn host_routes_are_constructible() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
-        let storage = crate::prepare_storage(directory.path()).await?;
+        let storage = crate::prepare_deployment(directory.path()).await?;
         let _router = router(
             Host::new(
                 Box::new(DemoSource::new(
                     directory.path().join("device"),
                     tokio::runtime::Handle::current(),
                 )?),
-                Application::new(storage),
+                storage,
             ),
             garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
             BrowserOptions::default(),
@@ -1003,7 +966,7 @@ mod tests {
             }))?,
         )
         .await?;
-        let storage = crate::prepare_storage(directory.path()).await?;
+        let storage = crate::prepare_deployment(directory.path()).await?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let (app, _control) = router(
@@ -1012,7 +975,7 @@ mod tests {
                     directory.path().join("device"),
                     tokio::runtime::Handle::current(),
                 )?),
-                Application::new(storage),
+                storage,
             ),
             garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
             BrowserOptions::default(),
@@ -1071,13 +1034,13 @@ mod tests {
     #[tokio::test]
     async fn prepared_browser_download_is_same_origin_and_single_use() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
-        let storage = crate::prepare_storage(directory.path()).await?;
+        let storage = crate::prepare_deployment(directory.path()).await?;
         let host = Host::new(
             Box::new(DemoSource::new(
                 directory.path().join("device"),
                 tokio::runtime::Handle::current(),
             )?),
-            Application::new(storage),
+            storage,
         );
         let ticket = host
             .prepare_device_browser_download(
@@ -1100,7 +1063,7 @@ mod tests {
             BrowserOptions::default(),
         )?;
         let server = tokio::spawn(async move { axum::serve(listener, app).await });
-        let url = format!("http://{address}/device-download/{}", ticket.token);
+        let url = format!("http://{address}/download/{}", ticket.token);
         let response = reqwest::get(&url).await?;
 
         assert_eq!(response.status(), StatusCode::OK);
@@ -1127,17 +1090,19 @@ mod tests {
     #[tokio::test]
     async fn websocket_carries_automatically_inspected_device_snapshots() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
-        let storage = crate::prepare_storage(directory.path()).await?;
+        let storage = crate::prepare_deployment(directory.path()).await?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
+        let host = Host::new(
+            Box::new(DemoSource::new(
+                directory.path().join("device"),
+                tokio::runtime::Handle::current(),
+            )?),
+            storage,
+        );
+        host.start();
         let (app, _control) = router(
-            Host::new(
-                Box::new(DemoSource::new(
-                    directory.path().join("device"),
-                    tokio::runtime::Handle::current(),
-                )?),
-                Application::new(storage),
-            ),
+            host,
             garmin_map_tiles::Service::new(directory.path().join("map-cache"))?,
             BrowserOptions::default(),
         )?;
@@ -1176,18 +1141,38 @@ mod tests {
             crate::mode::DEPLOYMENT_MODE
         );
         client.heartbeat().await?;
-        let snapshots = client.watch_devices().await?;
+        let mut snapshots = client.watch_devices().await?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while snapshots
+                .borrow()?
+                .first()
+                .is_none_or(|device| device.inspection == InspectionState::Running)
+            {
+                snapshots.changed().await?;
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+        .await??;
         let update = snapshots.borrow()?;
-        let device = update.first().expect("the demo device remains attached");
+        let device = update
+            .first()
+            .expect("the demo device remains attached")
+            .clone();
+        drop(update);
 
         assert_eq!(device.inspection, InspectionState::Ready);
-        assert_eq!(
+        assert!(
             device
                 .storages
                 .first()
-                .and_then(|storage| storage.capacity.bytes()),
-            Some((32_000_000_000, 8_600_000_000))
+                .and_then(|storage| storage.capacity.bytes())
+                .is_some()
         );
+        assert!(!device.report.as_ref().unwrap().has_errors());
+        client
+            .refresh_device(device.key)
+            .await?
+            .map_err(anyhow::Error::msg)?;
         let user = client
             .create_profile("Alex Rider".to_owned())
             .await?

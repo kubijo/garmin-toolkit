@@ -2114,30 +2114,7 @@ async fn device(command: DeviceCommand, json: bool) -> Result<()> {
             }
             Ok(())
         }
-        DeviceCommand::Inspect(args) => {
-            let manifest = load_target(&args).await?;
-            if json {
-                emit_json(&manifest.summary)
-            } else {
-                println!("Model: {}", manifest.summary.model);
-                println!(
-                    "Part number: {}",
-                    manifest.summary.part_number.as_deref().unwrap_or("unknown")
-                );
-                println!(
-                    "Software: {}",
-                    manifest
-                        .summary
-                        .software_version
-                        .as_deref()
-                        .unwrap_or("unknown")
-                );
-                println!("Transport: {:?}", manifest.summary.transport);
-                println!("Location: {}", manifest.summary.location);
-                println!("Identity digest: {}", manifest.identity_digest());
-                Ok(())
-            }
-        }
+        DeviceCommand::Inspect(args) => inspect_device(args, json).await,
         DeviceCommand::Recover(args) => recover_device(args, json).await,
         DeviceCommand::RecoverUpdate(args) => {
             Box::pin(recover_mounted_update_device(args, json)).await
@@ -3906,6 +3883,69 @@ pub(crate) async fn load_target(target: &TargetArgs) -> Result<DeviceManifest> {
             .with_context(|| format!("cannot open Garmin MTP device at location {location}")),
         _ => bail!("select exactly one of --path or --mtp-location"),
     }
+}
+
+async fn inspect_device(args: TargetArgs, json: bool) -> Result<()> {
+    use garmin_model::device::{DeviceInspection, InspectionSection};
+    use garmin_services::devices::{failure, manifest_inspection};
+
+    let manifest = load_target(&args).await;
+    let section = match &manifest {
+        Ok(manifest) => InspectionSection::Available(manifest_inspection(manifest)),
+        Err(error) => InspectionSection::Unavailable(failure(error.to_string())),
+    };
+    let device: Result<Box<dyn garmin_device::storage::DeviceRead>> =
+        match (&args.path, &args.mounted_mtp, args.mtp_location) {
+            (Some(path), None, None) => Ok(Box::new(DirectoryDevice::new(path.clone()))),
+            (None, Some(mount), None) => Ok(Box::new(MountedMtpDevice::new(mount))),
+            (None, None, Some(location)) => {
+                garmin_device::storage::MtpStorageDevice::discover(location)
+                    .await
+                    .map(|device| Box::new(device) as Box<dyn garmin_device::storage::DeviceRead>)
+                    .map_err(Into::into)
+            }
+            _ => bail!("select exactly one device transport"),
+        };
+    let report = match device {
+        Ok(device) => garmin_services::devices::inspect(device.as_ref(), section).await,
+        Err(error) => DeviceInspection {
+            manifest: section,
+            storage: InspectionSection::Unavailable(failure(error.to_string())),
+            toolkit: Vec::new(),
+        },
+    };
+    if json {
+        let mut output = match &manifest {
+            Ok(manifest) => serde_json::to_value(&manifest.summary)?,
+            Err(_) => serde_json::json!({}),
+        };
+        output["inspection"] = serde_json::to_value(&report)?;
+        emit_json(&output)?;
+    } else {
+        if let Ok(manifest) = &manifest {
+            println!("Model: {}", manifest.summary.model);
+            println!(
+                "Part number: {}",
+                manifest.summary.part_number.as_deref().unwrap_or("unknown")
+            );
+            println!(
+                "Software: {}",
+                manifest
+                    .summary
+                    .software_version
+                    .as_deref()
+                    .unwrap_or("unknown")
+            );
+            println!("Transport: {:?}", manifest.summary.transport);
+            println!("Location: {}", manifest.summary.location);
+            println!("Identity digest: {}", manifest.identity_digest());
+        }
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    }
+    if report.has_errors() {
+        bail!("device inspection is incomplete; see section errors above");
+    }
+    Ok(())
 }
 
 async fn inventory_target(

@@ -2,7 +2,7 @@ use gallery::prelude::*;
 use garmin_color::swatch;
 use garmin_ui::{profile, shell};
 
-scene_meta! { title: "Components / Navigation / Header selector" }
+scene_meta! { title: "Components / Header selector" }
 
 #[scene(default)]
 fn profile_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {

@@ -1683,6 +1683,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui-elegance"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "582c0660e958c3e5eb134d4dabdf76e3f588fdacd1ff472a0ab6294f4e8982c7"
+dependencies = [
+ "egui",
+ "js-sys",
+]
+
+[[package]]
 name = "egui-wgpu"
 version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2655,6 +2665,7 @@ dependencies = [
  "semver",
  "serde",
  "thiserror 2.0.20",
+ "uuid",
 ]
 
 [[package]]
@@ -2670,11 +2681,13 @@ name = "garmin-service-api"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "garmin-color",
  "garmin-macros",
  "garmin-model",
  "remoc",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -2688,6 +2701,7 @@ dependencies = [
  "camino",
  "cint",
  "egui",
+ "egui-elegance",
  "egui-wgpu",
  "egui_extras",
  "egui_ltreeview",

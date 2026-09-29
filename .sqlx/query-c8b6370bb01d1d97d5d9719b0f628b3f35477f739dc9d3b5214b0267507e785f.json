@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    version,\n    success,\n    checksum\nFROM _sqlx_migrations\nORDER BY version;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "version",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "_sqlx_migrations",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "name": "success",
+        "ordinal": 1,
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "_sqlx_migrations",
+            "name": "success"
+          }
+        }
+      },
+      {
+        "name": "checksum",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "_sqlx_migrations",
+            "name": "checksum"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "c8b6370bb01d1d97d5d9719b0f628b3f35477f739dc9d3b5214b0267507e785f"
+}

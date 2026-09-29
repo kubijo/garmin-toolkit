@@ -1,0 +1,25 @@
+out = "../../../.tmp/gallery/inputs"
+size = "640x720"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "text-dark"
+scene = "input::Text States"
+
+[[shot]]
+name = "text-light"
+scene = "input::Text States"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "number-dark"
+scene = "input_number::Number States"
+
+[[shot]]
+name = "number-light"
+scene = "input_number::Number States"
+[shot.globals]
+Theme = "Light"

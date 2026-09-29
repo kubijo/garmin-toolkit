@@ -1,6 +1,7 @@
 {
   craneLib,
   craneLibPortable,
+  formatjsCli,
   launcher,
   lib,
   demoIdentity,
@@ -56,7 +57,10 @@ let
     buildInputs = portableBuildInputs;
     cargoLock = workspaceSrc + "/Cargo.lock";
     doCheck = false;
-    nativeBuildInputs = [ pkgsPortable.pkg-config ];
+    nativeBuildInputs = [
+      pkgsPortable.pkg-config
+      formatjsCli
+    ];
     strictDeps = true;
   };
   portableCargoArtifacts = craneLibPortable.buildDepsOnly (

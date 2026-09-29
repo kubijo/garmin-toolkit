@@ -618,6 +618,13 @@ impl DeviceIoError {
 
 impl From<MountedMtpError> for DeviceIoError {
     fn from(error: MountedMtpError) -> Self {
+        #[cfg(target_os = "linux")]
+        if matches!(
+            error,
+            MountedMtpError::MetadataTooLarge { .. } | MountedMtpError::ManifestTooLarge
+        ) {
+            return Self::LimitExceeded(error.to_string());
+        }
         if error.is_cancelled() {
             Self::Cancelled
         } else if error.is_verification_failure() {
@@ -656,6 +663,14 @@ mod tests {
             DeviceIoError::Cancelled
         ));
         let path = super::SafeRelativePath::parse("Garmin/map.img").unwrap();
+        assert!(matches!(
+            DeviceIoError::from(MountedMtpError::MetadataTooLarge {
+                path: path.clone(),
+                limit: 64,
+                size: 65,
+            }),
+            DeviceIoError::LimitExceeded(_)
+        ));
         for error in [
             MountedMtpError::RemovalObjectSize {
                 path: path.clone(),

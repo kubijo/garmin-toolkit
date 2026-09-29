@@ -16,7 +16,7 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
-use gallery::{CatalogGlobals, Checkerboard, GlobalControls, Icon};
+use gallery::{CatalogGlobals, Checkerboard, GlobalControls, Icon, StageSpec};
 use garmin_i18n::{Intl, Language as IntlLanguage, Translations};
 use serde::{Deserialize, Serialize};
 
@@ -93,11 +93,12 @@ pub(crate) struct Globals {
 }
 
 impl Globals {
-    pub(crate) const fn checkerboard(&self) -> Checkerboard {
-        match self.theme {
+    /// Match the stage backdrop to the selected content theme.
+    pub(crate) fn stage(&self, stage: impl Into<StageSpec>) -> StageSpec {
+        stage.into().checkerboard(match self.theme {
             GalleryTheme::Light => Checkerboard::Light,
             GalleryTheme::Dark => Checkerboard::Dark,
-        }
+        })
     }
 
     pub(crate) fn intl(&self) -> Intl {

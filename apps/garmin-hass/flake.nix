@@ -18,6 +18,7 @@
       lib.mkTarget =
         {
           brandAssets,
+          formatjsCli,
           nixCargoTargetDir,
           system,
           toolchain,
@@ -37,6 +38,7 @@
           };
           commonArgs = {
             inherit src;
+            nativeBuildInputs = [ formatjsCli ];
             CARGO_TARGET_DIR = "target";
             cargoLock = workspaceSrc + "/Cargo.lock";
             doCheck = false;
@@ -44,7 +46,8 @@
           };
           nativeArgs = commonArgs // {
             buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.glib ];
-            nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
+            nativeBuildInputs =
+              commonArgs.nativeBuildInputs ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
           };
           cargoArtifacts = craneLib.buildDepsOnly (
             nativeArgs
@@ -72,7 +75,7 @@
               cargoArtifacts = webCargoArtifacts;
               trunkIndexPath = "apps/garmin-hass/web/index.html";
               wasm-bindgen-cli = pkgs.wasm-bindgen-cli_0_2_126;
-              nativeBuildInputs = [
+              nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
                 pkgs.nodejs
                 pkgs.esbuild
               ];
@@ -124,7 +127,7 @@
                 pname = "garmin-hass" + lib.optionalString demo "-demo";
                 meta.mainProgram = "garmin-hass";
                 inherit cargoArtifacts;
-                nativeBuildInputs = [
+                nativeBuildInputs = nativeArgs.nativeBuildInputs ++ [
                   pkgs.makeWrapper
                   pkgs.pkg-config
                 ];

@@ -117,9 +117,11 @@ impl crate::attachments::Candidate for MountedMtpCandidate {
             }
         }
         Ok(crate::attachments::Metadata {
-            id: manifest.id(),
+            id: Some(manifest.id()),
+            device_digest: Some(first.identity_digest()),
+            report: None,
             name: normalize_display_name(manifest.model().description()),
-            software_version: manifest.model().software_version(),
+            software_version: Some(manifest.model().software_version()),
             capabilities,
             storage,
         })
@@ -780,7 +782,7 @@ mod tests {
         let metadata =
             crate::attachments::Candidate::inspect(&candidate).map_err(io::Error::other)?;
 
-        assert_eq!(metadata.id, crate::DeviceId::from_u32(123_456));
+        assert_eq!(metadata.id, Some(crate::DeviceId::from_u32(123_456)));
         assert_eq!(metadata.name, "Mock Storage-o-Matic 9000");
         assert_eq!(metadata.storage.storages.len(), 1);
         Ok(())

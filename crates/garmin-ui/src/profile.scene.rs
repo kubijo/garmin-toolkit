@@ -17,9 +17,10 @@ struct ChooserSceneProps {
 fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let props = ChooserSceneProps {
         dataset: ctx.buttons("profiles", &["household", "single", "empty"], 0),
-        width: ctx.slider("width", 720.0, 320.0, 960.0, 1.0),
+        width: ctx.slider("width", 720.0, 320.0, 1920.0, 1.0),
         height: ctx.slider("height", 520.0, 400.0, 720.0, 1.0),
     };
+    let restored = ctx.toggle("restored", false);
     let texture = avatar_texture(ui);
     let image = profile::AvatarImage::texture(egui::load::SizedTexture::from_handle(&texture));
     let profiles = [
@@ -46,9 +47,23 @@ fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     };
     let intl = globals.intl();
 
-    stage!(ctx, ui, |ui| {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(props.width);
         ui.set_height(props.height);
+        let _ = garmin_ui::backup::show_operation(
+            ui,
+            &garmin_ui::backup::Props {
+                intl: &intl,
+                state: if restored {
+                    &garmin_ui::backup::State::Restored
+                } else {
+                    &garmin_ui::backup::State::Idle
+                },
+                file: None,
+                enabled: false,
+                server_files: true,
+            },
+        );
         let _ = profile::chooser(
             ui,
             &profile::ChooserProps {

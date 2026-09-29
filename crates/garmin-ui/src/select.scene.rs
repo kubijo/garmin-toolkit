@@ -9,14 +9,19 @@ const CHOICES: &[select::Choice<'_>] = &[
 ];
 
 #[scene(default)]
-fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let mut selected = ctx.buttons("selected", &["metric", "imperial"], 0);
     let disabled = ctx.toggle("disabled", false);
-    stage!(ctx, ui, |ui| {
+    let focused = ctx.toggle("focused", false);
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(360.0);
+        let id = egui::Id::new("units");
+        if focused && !disabled {
+            ui.memory_mut(|memory| memory.request_focus(id));
+        }
         let _ = select::show(
             ui,
-            egui::Id::new("units"),
+            id,
             &mut selected,
             CHOICES,
             select::Props::new("Unit system")
@@ -27,8 +32,8 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 #[scene]
-fn sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    stage!(ctx, ui, |ui| {
+fn sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(360.0);
         for (label, size) in [
             ("Small", Size::Small),
@@ -49,8 +54,8 @@ fn sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 #[scene]
-fn open_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    stage!(ctx, ui, (360, 240), |ui| {
+fn open_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage((360, 240)), |ui| {
         let id = egui::Id::new("open-units");
         egui::Popup::open_id(ui.ctx(), id.with("popup"));
         let mut selected = 0;
@@ -65,13 +70,13 @@ fn open_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 #[scene]
-fn leading_images(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+fn leading_images(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let mut selected = ctx.buttons("selected", &["english", "czech"], 0);
     let choices = [
         select::Choice::new("English").image(images::UNITED_KINGDOM),
         select::Choice::new("Čeština").image(images::CZECHIA),
     ];
-    stage!(ctx, ui, |ui| {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(360.0);
         let _ = select::show(
             ui,

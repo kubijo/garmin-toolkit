@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n    id,\n    role,\n    display_name,\n    accent_rgba,\n    avatar_artifact_id,\n    unit_system,\n    language,\n    theme\nFROM users\nWHERE id = ?;\n",
+  "query": "SELECT\n    id,\n    role,\n    display_name,\n    accent_rgba,\n    avatar_artifact_id,\n    unit_system,\n    language,\n    theme,\n    show_hidden_files,\n    inline_file_windows\nFROM users\nWHERE id = ?;\n",
   "describe": {
     "columns": [
       {
@@ -90,6 +90,28 @@
             "name": "theme"
           }
         }
+      },
+      {
+        "name": "show_hidden_files",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "show_hidden_files"
+          }
+        }
+      },
+      {
+        "name": "inline_file_windows",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "inline_file_windows"
+          }
+        }
       }
     ],
     "parameters": {
@@ -103,8 +125,10 @@
       true,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "b280d99ab9079736373e72040959cc0c9717e246a1a6d3cd498c71d0457d2c47"
+  "hash": "e7c59c8340ecb41342249f4dd006a21e1aea1d459d922ea8f88fdfdfffa5e5d6"
 }

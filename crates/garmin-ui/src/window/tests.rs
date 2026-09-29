@@ -2,6 +2,50 @@ use super::{Event, NativeWindow, Spec, WindowHost};
 use egui::{Context, RawInput};
 
 #[test]
+fn inline_host_delivers_actions_and_can_change_presentation_without_closing() {
+    let context = Context::default();
+    crate::install(&context);
+    let intl = garmin_i18n::Translations::bundled()
+        .unwrap()
+        .formatter(garmin_i18n::Language::English)
+        .unwrap();
+    let mut host = NativeWindow::<String, ()>::default();
+    host.open_inline(
+        &context,
+        Spec {
+            id: "inline-files".into(),
+            kind: "device-files".into(),
+            title: "Files".into(),
+            size: [640.0, 480.0],
+        },
+    );
+    for inline in [true, false, true] {
+        host.set_inline(&context, inline);
+        assert!(host.is_open());
+        let mut events = Vec::new();
+        let mut output = context.run_ui(RawInput::default(), |ui| {
+            events.extend(host.present(
+                ui.ctx(),
+                &intl,
+                || panic!("local views do not publish snapshots"),
+                |ui| {
+                    ui.label("Folder");
+                    Some("selected".into())
+                },
+            ));
+        });
+        output.textures_delta.clear();
+        assert!(
+            events.iter().any(
+                |event| matches!(event, Event::Command { command, .. } if command == "selected")
+            )
+        );
+    }
+    host.close(&context);
+    assert!(!host.is_open());
+}
+
+#[test]
 fn native_host_delivers_actions_without_constructing_remote_snapshots() {
     let context = Context::default();
     crate::install(&context);

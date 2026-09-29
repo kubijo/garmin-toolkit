@@ -43,3 +43,6 @@ uuid.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+garmin-fixtures.workspace = true

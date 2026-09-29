@@ -1,4 +1,4 @@
-use super::{DataError, Path, PathBuf, Storage};
+use super::{Arc, DataError, Deployment, Path, PathBuf};
 
 pub const DEPLOYMENT_MODE: garmin_service_api::DeploymentMode =
     garmin_service_api::DeploymentMode::Demo;
@@ -9,10 +9,15 @@ pub fn data_root(base: &Path) -> PathBuf {
     base.join("demo")
 }
 
-pub async fn open_storage(database: PathBuf) -> Result<Storage, DataError> {
-    garmin_fixtures::recreate(database)
-        .await
-        .map_err(|error| DataError::Deployment(Box::new(error)))
+pub async fn open(root: &Path) -> Result<Arc<Deployment>, DataError> {
+    Deployment::open_initialized(root, async |storage| {
+        garmin_fixtures::seed(storage)
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
+    })
+    .await
+    .map_err(DataError::Deployment)
 }
 
 #[cfg(test)]

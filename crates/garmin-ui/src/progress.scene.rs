@@ -10,6 +10,7 @@ fn determinate(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         progress::show(
             ui,
             &progress::Props {
+                height: None,
                 label: "Importing activities",
                 detail: Some("3 of 8 FIT files"),
                 value: progress::Value::Determinate {
@@ -28,6 +29,7 @@ fn indeterminate(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         progress::show(
             ui,
             &progress::Props {
+                height: None,
                 label: "Scanning a folder",
                 detail: None,
                 value: progress::Value::Indeterminate,

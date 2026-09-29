@@ -28,6 +28,12 @@ Closing or reloading the parent cannot connect an old popup to a different app d
 New window kinds register a typed Rust consumer and runner. Browser APIs, channels, liveness, and popup fallback stay in
 the platform implementation.
 
+The profile's **File browser windows** preference selects **Separate window** (the default) or **Inside the app** for
+device browsers and server backup choosers. Changes move an open view immediately, preserving its folder, selection,
+navigation history, and chooser filename. Browser popups hand their view state back to the parent before closing; active
+device transfers finish before that handoff. Inline views share the existing controllers and in-canvas window host.
+Developer tools and operating-system upload/download pickers are unaffected.
+
 ## Native Wayland focus
 
 The shared native host sends `ViewportCommand::Focus` when an existing window is opened again. The local

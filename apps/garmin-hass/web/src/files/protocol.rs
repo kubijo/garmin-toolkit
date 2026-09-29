@@ -1,5 +1,5 @@
 //! Typed file-window messages and parent-side command admission.
-use garmin_model::identity::{LanguagePreference, UserId};
+use garmin_model::identity::{ProfilePreferences, UserId};
 use garmin_service_api::DeviceCatalogSnapshot;
 use garmin_ui::device_browser;
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,7 @@ pub struct Command {
 pub enum Request {
     Action(device_browser::Action),
     Refresh,
+    Embed(Box<device_browser::ViewState>),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -30,9 +31,10 @@ pub struct Snapshot {
     pub catalog: Option<DeviceCatalogSnapshot>,
     pub available: bool,
     pub busy: bool,
-    pub language: LanguagePreference,
+    pub preferences: ProfilePreferences,
     pub dark: bool,
     pub notice: Option<String>,
+    pub view: Option<device_browser::ViewState>,
 }
 
 impl Command {
@@ -42,13 +44,18 @@ impl Command {
                 "The device or profile session changed. Reopen device files from the app.".into(),
             );
         }
+        if matches!(self.action, Request::Embed(_)) {
+            return Ok(());
+        }
         if busy {
             return Err("A file operation is already in progress.".into());
         }
         match self.action {
-            Request::Refresh => Ok(()),
+            Request::Refresh | Request::Embed(_) => Ok(()),
             Request::Action(
-                device_browser::Action::Open(_) | device_browser::Action::ImportFit(_),
+                device_browser::Action::Open(_)
+                | device_browser::Action::ImportFit(_)
+                | device_browser::Action::ShowHiddenFiles(_),
             ) => {
                 if snapshot.catalog.is_some() {
                     Ok(())

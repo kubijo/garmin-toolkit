@@ -657,7 +657,7 @@ pub const GRAY_100: Theme = Theme {
             },
         },
     },
-    overlay: swatch::BLACK.with_alpha(0x99),
+    overlay: swatch::BLACK.with_alpha(0x40),
 };
 
 /// Garmin Toolkit's Gray 10 color baseline.
@@ -888,7 +888,7 @@ pub const GRAY_10: Theme = Theme {
             },
         },
     },
-    overlay: swatch::BLACK.with_alpha(0x99),
+    overlay: swatch::BLACK.with_alpha(0x40),
 };
 
 #[cfg(test)]

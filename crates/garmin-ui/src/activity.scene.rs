@@ -189,24 +189,19 @@ fn workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
 
 #[scene]
 fn renderer_diagnostics(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
-    stage!(
-        ctx,
-        ui,
-        Stage::Fixed(egui::vec2(320.0, 150.0)).checkerboard(globals.checkerboard()),
-        |ui| {
-            for (label, backend, error) in [
-                ("main-gl · ready", "WebGL2", ""),
-                ("worker-gl · initializing", "pending", ""),
-                ("worker-gl · ready", "WebGL2", ""),
-                ("worker-webgpu · failed", "pending", "No compatible adapter"),
-            ] {
-                activity::map_diagnostics::RendererDiagnostics {
+    stage!(ctx, ui, globals.stage((320.0, 150.0)), |ui| {
+        for (label, backend, error) in [
+            ("main-gl · ready", "WebGL2", ""),
+            ("worker-gl · initializing", "pending", ""),
+            ("worker-gl · ready", "WebGL2", ""),
+            ("worker-webgpu · failed", "pending", "No compatible adapter"),
+        ] {
+            activity::map_diagnostics::RendererDiagnostics {
                 label: label.to_owned(),
                 detail: format!("mapBackend: {backend}\nuiBackend: WebGL2\nuiAdapter: ANGLE (NVIDIA GeForce RTX 4090)\nerror: {error}"),
             }.show(ui);
-            }
         }
-    );
+    });
 }
 
 #[scene]
@@ -221,6 +216,7 @@ fn narrow_application(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
 
 fn application_scene(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals, narrow: bool) {
     use garmin_ui::{profile, shell, workspace};
+    let empty = ctx.toggle("empty", false);
     let intl = globals.intl();
     let profiles = [profile::ProfileProps {
         display_name: "Alex Rider",
@@ -232,7 +228,7 @@ fn application_scene(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globa
     } else {
         egui::vec2(1360.0, 920.0)
     };
-    stage!(ctx, ui, Stage::Fixed(size), |ui| {
+    stage!(ctx, ui, globals.stage(Stage::Fixed(size)), |ui| {
         let _ = workspace::show(
             ui,
             &workspace::Props {
@@ -244,6 +240,7 @@ fn application_scene(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globa
                 page: &workspace::Page::Activities,
                 navigation: shell::Navigation::Expanded,
                 devices: &[],
+                backup_enabled: false,
                 window_controls: None,
             },
             |ui| {
@@ -255,7 +252,15 @@ fn application_scene(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globa
                     } else {
                         WorkspaceSlot::Application
                     },
-                    WorkspaceScene::COMPLETE,
+                    WorkspaceScene {
+                        recording: (!empty).then_some(RecordingKind::Complete),
+                        activities: if empty {
+                            ActivitiesKind::Empty
+                        } else {
+                            ActivitiesKind::Standard
+                        },
+                        ..WorkspaceScene::COMPLETE
+                    },
                 );
             },
         );
@@ -308,91 +313,81 @@ fn automation_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals
 
 #[scene]
 fn automation_status(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
-    stage!(
-        ctx,
-        ui,
-        Stage::Fixed(egui::vec2(350.0, 480.0)).checkerboard(globals.checkerboard()),
-        |ui| {
-            let cancelled_id = ui.id().with("automation-preview-cancelled");
-            let cancelled = ui
-                .data(|data| data.get_temp::<bool>(cancelled_id))
-                .unwrap_or_default();
-            for (state, phase, completed, reason) in [
-                (
-                    if cancelled { "cancelled" } else { "running" },
-                    "arrival",
-                    4,
-                    None,
-                ),
-                ("passed", "return", 10, None),
-                (
-                    "cancelled",
-                    "warm",
-                    6,
-                    Some("Document hidden; synthetic input released."),
-                ),
-                (
-                    "failed",
-                    "chart",
-                    7,
-                    Some("Target missing, disabled or clipped: chart.0"),
-                ),
-            ] {
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    if garmin_ui::automation::status_view(ui, state, phase, completed, 10, reason) {
-                        ui.data_mut(|data| data.insert_temp(cancelled_id, true));
-                    }
-                });
-                ui.add_space(8.0);
-            }
-            if ui.button("Restart preview").clicked() {
-                ui.data_mut(|data| data.insert_temp(cancelled_id, false));
-            }
+    stage!(ctx, ui, globals.stage((350.0, 480.0)), |ui| {
+        let cancelled_id = ui.id().with("automation-preview-cancelled");
+        let cancelled = ui
+            .data(|data| data.get_temp::<bool>(cancelled_id))
+            .unwrap_or_default();
+        for (state, phase, completed, reason) in [
+            (
+                if cancelled { "cancelled" } else { "running" },
+                "arrival",
+                4,
+                None,
+            ),
+            ("passed", "return", 10, None),
+            (
+                "cancelled",
+                "warm",
+                6,
+                Some("Document hidden; synthetic input released."),
+            ),
+            (
+                "failed",
+                "chart",
+                7,
+                Some("Target missing, disabled or clipped: chart.0"),
+            ),
+        ] {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                if garmin_ui::automation::status_view(ui, state, phase, completed, 10, reason) {
+                    ui.data_mut(|data| data.insert_temp(cancelled_id, true));
+                }
+            });
+            ui.add_space(8.0);
         }
-    );
+        if ui.button("Restart preview").clicked() {
+            ui.data_mut(|data| data.insert_temp(cancelled_id, false));
+        }
+    });
 }
 
 #[scene]
 fn automation_target(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
-    stage!(
-        ctx,
-        ui,
-        Stage::Fixed(egui::vec2(480.0, 240.0)).checkerboard(globals.checkerboard()),
-        |ui| {
-            ui.label("Last injected input — logical coordinates");
-            ui.add_space(40.0);
-            let response = ui.add_sized([440.0, 64.0], egui::Button::new("Alex Rider"));
-            let clicked_id = ui.id().with("automation-target-clicked");
-            if response.clicked() {
-                ui.data_mut(|data| data.insert_temp(clicked_id, true));
-            }
-            let rect = ui
-                .ctx()
-                .layer_transform_to_global(ui.layer_id())
-                .unwrap_or_default()
-                .mul_rect(response.rect);
-            garmin_ui::automation::ActionTiming {
-                phase: "setup".into(),
-                kind: "click".into(),
-                target: "profile.0".into(),
-                scheduled_seconds: 0.1,
-                actual_seconds: 0.1,
-                lateness_seconds: 0.0,
-                target_bounds: [rect.left(), rect.top(), rect.right(), rect.bottom()],
-                pointer_position: Some([rect.center().x, rect.center().y]),
-            }
-            .highlight(ui.ctx());
-            ui.add_space(16.0);
-            if ui
-                .data(|data| data.get_temp::<bool>(clicked_id))
-                .unwrap_or(false)
-            {
-                ui.label("Underlying profile button received the click.");
-            } else {
-                ui.label("The overlay does not capture input. Click the profile.");
-            }
+    stage!(ctx, ui, globals.stage((480.0, 240.0)), |ui| {
+        ui.label("Last injected input — logical coordinates");
+        ui.add_space(40.0);
+        let response = ui.add_sized([440.0, 64.0], egui::Button::new("Alex Rider"));
+        let clicked_id = ui.id().with("automation-target-clicked");
+        if response.clicked() {
+            ui.data_mut(|data| data.insert_temp(clicked_id, true));
         }
-    );
+        let rect = ui
+            .ctx()
+            .layer_transform_to_global(ui.layer_id())
+            .unwrap_or_default()
+            .mul_rect(response.rect);
+        garmin_ui::automation::ActionTiming {
+            phase: "setup".into(),
+            kind: "click".into(),
+            target: "profile.0".into(),
+            scheduled_seconds: 0.1,
+            actual_seconds: 0.1,
+            lateness_seconds: 0.0,
+            target_bounds: [rect.left(), rect.top(), rect.right(), rect.bottom()],
+            pointer_position: Some([rect.center().x, rect.center().y]),
+        }
+        .highlight(ui.ctx());
+        ui.add_space(16.0);
+        if ui
+            .data(|data| data.get_temp::<bool>(clicked_id))
+            .unwrap_or(false)
+        {
+            ui.label("Underlying profile button received the click.");
+        } else {
+            ui.label("The overlay does not capture input. Click the profile.");
+        }
+    });
 }
 
 #[scene]
@@ -636,44 +631,39 @@ fn provider_failure(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Global
 
 #[scene]
 fn device_fit_preview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
-    stage!(
-        ctx,
-        ui,
-        Stage::Fixed(egui::vec2(1_800.0, 920.0)).checkerboard(globals.checkerboard()),
-        |ui| {
-            let intl = globals.intl();
-            FIT_PREVIEW.with_scene(
-                0,
-                || {
-                    let runtime = gallery_map_runtime(false);
-                    device_fit_preview::Preview::new(
-                        DeviceBrowserTarget {
-                            storage_id: "internal".to_owned(),
-                            path: "Garmin/Activities/2026-09-15-ride.fit".into(),
-                            kind: DeviceCatalogEntryKind::File,
-                        },
-                        DeviceFitPreview {
-                            file_name: "2026-09-15-ride.fit".to_owned(),
-                            activities: vec![DeviceFitPreviewActivity {
-                                source: "Edge 850".to_owned(),
-                                summary: summary(
-                                    ActivitySport::Cycling,
-                                    RECORDING_START_MILLISECONDS,
-                                    43 * 60 * 1_000,
-                                    16_800_000,
-                                ),
-                                recording: sample_recording(RecordingKind::Complete),
-                            }],
-                        },
-                        &runtime,
-                    )
-                },
-                |preview| {
-                    let _ = preview.show(ui, &intl, false, UnitSystem::Metric);
-                },
-            );
-        },
-    );
+    stage!(ctx, ui, globals.stage((1_800.0, 920.0)), |ui| {
+        let intl = globals.intl();
+        FIT_PREVIEW.with_scene(
+            0,
+            || {
+                let runtime = gallery_map_runtime(false);
+                device_fit_preview::Preview::new(
+                    DeviceBrowserTarget {
+                        storage_id: "internal".to_owned(),
+                        path: "Garmin/Activities/2026-09-15-ride.fit".into(),
+                        kind: DeviceCatalogEntryKind::File,
+                    },
+                    DeviceFitPreview {
+                        file_name: "2026-09-15-ride.fit".to_owned(),
+                        activities: vec![DeviceFitPreviewActivity {
+                            source: "Edge 850".to_owned(),
+                            summary: summary(
+                                ActivitySport::Cycling,
+                                RECORDING_START_MILLISECONDS,
+                                43 * 60 * 1_000,
+                                16_800_000,
+                            ),
+                            recording: sample_recording(RecordingKind::Complete),
+                        }],
+                    },
+                    &runtime,
+                )
+            },
+            |preview| {
+                let _ = preview.show(ui, &intl, false, UnitSystem::Metric);
+            },
+        );
+    },);
 }
 
 fn show_workspace(
@@ -684,14 +674,9 @@ fn show_workspace(
     slot: WorkspaceSlot,
     scene: WorkspaceScene,
 ) {
-    stage!(
-        ctx,
-        ui,
-        Stage::Fixed(size).checkerboard(globals.checkerboard()),
-        |ui| {
-            workspace_contents(ui, globals, slot, scene);
-        }
-    );
+    stage!(ctx, ui, globals.stage(size), |ui| {
+        workspace_contents(ui, globals, slot, scene);
+    });
 }
 
 fn workspace_contents(

@@ -25,6 +25,7 @@
       lib.mkTarget =
         {
           brandAssets,
+          formatjsCli,
           nixCargoTargetDir,
           system,
           toolchain,
@@ -76,7 +77,10 @@
             buildInputs = runtimeLibraries;
             cargoLock = workspaceSrc + "/Cargo.lock";
             doCheck = false;
-            nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            nativeBuildInputs = [
+              formatjsCli
+            ]
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               pkgs.pkg-config
               pkgs.wrapGAppsNoGuiHook
             ];
@@ -168,6 +172,7 @@
             inherit
               craneLib
               craneLibPortable
+              formatjsCli
               lib
               demoIdentity
               demoLauncher

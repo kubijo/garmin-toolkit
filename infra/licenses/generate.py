@@ -152,8 +152,9 @@ def generate(config: dict[str, Any], output: Path) -> None:
 
     for target in config['targets']:
         linked: dict[tuple[str, str], bool] = {}
-        for triple in target['triples']:
-            linked.update(resolve_linked(cargo_metadata(triple), target['package']))
+        for component in [target, *target.get('bundled', [])]:
+            for triple in component['triples']:
+                linked.update(resolve_linked(cargo_metadata(triple), component['package']))
 
         external_missing = sorted(key for key, external in linked.items() if external and key not in cargo)
         if external_missing:

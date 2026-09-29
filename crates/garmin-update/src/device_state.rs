@@ -13,6 +13,8 @@ use uuid::Uuid;
 
 use crate::{BackupPolicy, DownloadSpec};
 
+pub mod inspection;
+
 pub const DEVICE_STATE_MAGIC: &str = "garmin-toolkit-device-state";
 pub const DEVICE_STATE_VERSION: u32 = 1;
 const NAMESPACE: &str = "GARMIN-TOOLKIT";
@@ -633,8 +635,8 @@ impl NamespaceManifest {
             .map_err(|_| DeviceStateError::InvalidManifest)?;
         let magic = toml_string(&document, "format", "magic")?;
         let kind = toml_string(&document, "format", "kind")?;
-        let version = document["format"]["version"]
-            .as_integer()
+        let version = toml_field(&document, "format", "version")
+            .and_then(toml_edit::Item::as_integer)
             .and_then(|value| u32::try_from(value).ok())
             .ok_or(DeviceStateError::InvalidManifest)?;
         DeviceStateHeader {
@@ -711,8 +713,8 @@ impl DeviceIdentityState {
         let header = DeviceStateHeader {
             magic: toml_string(&document, "format", "magic")?,
             kind: toml_string(&document, "format", "kind")?,
-            version: document["format"]["version"]
-                .as_integer()
+            version: toml_field(&document, "format", "version")
+                .and_then(toml_edit::Item::as_integer)
                 .and_then(|value| u32::try_from(value).ok())
                 .ok_or(DeviceStateError::InvalidIdentity)?,
         };
@@ -721,12 +723,12 @@ impl DeviceIdentityState {
         validate_device_digest(&device_digest)?;
         let device_id = Uuid::parse_str(&toml_string(&document, "identity", "device_id")?)
             .map_err(|_| DeviceStateError::InvalidIdentity)?;
-        let paired_user_id = document["identity"]
-            .get("paired_user_id")
-            .and_then(toml_edit::Item::as_str)
-            .map(Uuid::parse_str)
-            .transpose()
-            .map_err(|_| DeviceStateError::InvalidIdentity)?;
+        let paired_user_id = toml_field(&document, "identity", "paired_user_id")
+            .map(|value| {
+                let text = value.as_str().ok_or(DeviceStateError::InvalidIdentity)?;
+                Uuid::parse_str(text).map_err(|_| DeviceStateError::InvalidIdentity)
+            })
+            .transpose()?;
         Ok(Self(DeviceIdentityStateV1 {
             device_id,
             device_digest,
@@ -1189,13 +1191,21 @@ fn event_path(
     ))?)
 }
 
+fn toml_field<'a>(
+    document: &'a toml_edit::DocumentMut,
+    table: &str,
+    key: &str,
+) -> Option<&'a toml_edit::Item> {
+    document.get(table)?.get(key)
+}
+
 fn toml_string(
     document: &toml_edit::DocumentMut,
     table: &str,
     key: &str,
 ) -> Result<String, DeviceStateError> {
-    document[table][key]
-        .as_str()
+    toml_field(document, table, key)
+        .and_then(toml_edit::Item::as_str)
         .map(str::to_owned)
         .ok_or(DeviceStateError::InvalidManifest)
 }
@@ -1292,7 +1302,7 @@ mod tests {
         std::iter::repeat_n(byte, 64).collect()
     }
 
-    fn transaction() -> PortableTransaction {
+    pub(super) fn transaction() -> PortableTransaction {
         let mut transaction = PortableTransaction::new(
             DeviceTransactionKind::Update,
             std::iter::repeat_n('a', 32).collect(),

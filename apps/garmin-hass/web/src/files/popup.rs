@@ -94,6 +94,7 @@ impl Files {
     }
 
     fn apply_snapshot(&mut self, context: &Context, snapshot: Snapshot) {
+        let initial = self.snapshot.is_none();
         if self
             .snapshot
             .as_ref()
@@ -105,12 +106,10 @@ impl Files {
             state.device_browser_refresh = None;
             self.refresh_pending = false;
         }
-        if self
-            .snapshot
-            .as_ref()
-            .is_none_or(|previous| previous.language != snapshot.language)
-        {
-            let language = match snapshot.language {
+        if self.snapshot.as_ref().is_none_or(|previous| {
+            previous.preferences.language() != snapshot.preferences.language()
+        }) {
+            let language = match snapshot.preferences.language() {
                 LanguagePreference::English => Language::English,
                 LanguagePreference::Czech => Language::Czech,
             };
@@ -146,6 +145,12 @@ impl Files {
         }
         if let Some(document) = web_sys::window().and_then(|window| window.document()) {
             document.set_title(&format!("Device files · {}", snapshot.name));
+        }
+        if let Some(browser) = &mut self.browser {
+            browser.set_show_hidden_files(snapshot.preferences.show_hidden_files());
+            if initial && let Some(view) = &snapshot.view {
+                browser.restore_view(view.clone());
+            }
         }
         self.snapshot = Some(snapshot);
     }
@@ -198,6 +203,23 @@ impl eframe::App for Files {
         let context = ui.ctx().clone();
         let now = ui.input(|input| input.time);
         self.receive(&context, now);
+        if self.connection.link.connected(now)
+            && !self.connection.link.pending()
+            && !crate::device_browser_busy(&self.shared.borrow())
+            && !self.refresh_pending
+            && let (Some(snapshot), Some(browser)) = (&self.snapshot, &self.browser)
+            && snapshot.preferences.inline_file_windows()
+        {
+            self.connection.send(
+                Command {
+                    identity: snapshot.identity.clone(),
+                    action: Request::Embed(Box::new(browser.view_state())),
+                },
+                now,
+            );
+            context.request_repaint_after(Duration::from_millis(100));
+            return;
+        }
         let parent_connected = self.connection.link.connected(now);
         let (connected, busy, notice) = {
             let mut state = self.shared.borrow_mut();

@@ -43,6 +43,7 @@ fn show(
         software_version: Some(3_220),
         inspection: InspectionState::Ready,
         inspection_error: None,
+        report: None,
         capabilities: Vec::new(),
         storages: Vec::new(),
     }];
@@ -65,6 +66,7 @@ fn show(
                 page: &workspace::Page::Activities,
                 navigation: shell::Navigation::Expanded,
                 devices: &devices,
+                backup_enabled: false,
                 window_controls: native_controls.then_some(&controls),
             },
             |ui| {

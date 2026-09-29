@@ -17,6 +17,21 @@ pub fn transport(candidate: &Candidate) -> Device {
     selected::transport(candidate)
 }
 
+pub fn inspect(candidate: &Candidate) -> Result<garmin_device::attachments::Metadata, String> {
+    use garmin_device::attachments::Candidate as _;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())?;
+    Ok(
+        runtime.block_on(garmin_services::devices::inspect_attachment(
+            &transport(candidate),
+            candidate.name(),
+            candidate.inspect(),
+        )),
+    )
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[cfg(feature = "demo")]

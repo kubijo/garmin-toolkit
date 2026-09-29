@@ -15,6 +15,41 @@ pub mod theme;
 pub struct Color(u32);
 
 impl Color {
+    /// WCAG contrast ratio for opaque encoded-sRGB colors.
+    #[must_use]
+    pub fn contrast_ratio(self, other: Self) -> f32 {
+        fn luminance(color: Color) -> f32 {
+            let [r, g, b, _] = color.as_rgba();
+            let linear = Srgb::new(r, g, b).into_format::<f32>().into_linear();
+            0.2126 * linear.red + 0.7152 * linear.green + 0.0722 * linear.blue
+        }
+        let left = luminance(self);
+        let right = luminance(other);
+        (left.max(right) + 0.05) / (left.min(right) + 0.05)
+    }
+
+    /// Resolve a visible profile marker against its surface without changing stored color.
+    #[must_use]
+    pub fn contrasting_marker(self, surface: Self) -> Self {
+        let color = self.with_alpha(255);
+        if color.contrast_ratio(surface) >= 3.0 {
+            return color;
+        }
+        let target =
+            if swatch::WHITE.contrast_ratio(surface) > swatch::BLACK.contrast_ratio(surface) {
+                swatch::WHITE
+            } else {
+                swatch::BLACK
+            };
+        for step in 0..=32u8 {
+            let resolved = color.mix(target, f32::from(step) / 32.0).unwrap_or(target);
+            if resolved.contrast_ratio(surface) >= 3.0 {
+                return resolved;
+            }
+        }
+        target
+    }
+
     #[must_use]
     pub const fn from_rgb(red: u8, green: u8, blue: u8) -> Self {
         Self::from_rgba(red, green, blue, u8::MAX)
@@ -185,6 +220,21 @@ pub enum ColorError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn profile_markers_remain_visible_in_both_themes() {
+        for palette in [super::theme::GRAY_100, super::theme::GRAY_10] {
+            let surface = palette.surfaces().layer(super::theme::Level::One);
+            for color in [
+                super::swatch::BLACK,
+                super::swatch::WHITE,
+                super::swatch::ACTION,
+                super::swatch::magenta::G50,
+            ] {
+                assert!(color.contrasting_marker(surface).contrast_ratio(surface) >= 3.0);
+            }
+        }
+    }
+
     use super::*;
 
     #[test]

@@ -6,24 +6,26 @@
 )]
 
 use std::{
-    env, fs,
+    env,
     path::{Path, PathBuf},
 };
 
-use garmin_services::Application;
-use garmin_storage::Storage;
+use garmin_services::deployment::Deployment;
+use std::sync::Arc;
 use thiserror::Error;
 use tracing_subscriber::prelude::*;
 
 mod control;
 mod devices;
+mod downloads;
+mod files;
 mod mode;
 mod server;
+mod snapshots;
 
 pub use mode::DataError;
 
 const DATA_BASE: &str = "/data";
-const DATABASE_FILE: &str = "storage.sqlite3";
 const DATA_BASE_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_DATA_BASE";
 
 /// Startup-only browser controls, embedded in the uncached entry point.
@@ -71,10 +73,9 @@ impl BrowserOptions {
 /// deterministic examples through the production importer; target composition isolates its root.
 /// # Errors
 /// [`enum@Error`] when the data directory, database, or demo corpus cannot be prepared.
-pub async fn prepare_storage(data_root: impl AsRef<Path>) -> Result<Storage, Error> {
+pub async fn prepare_deployment(data_root: impl AsRef<Path>) -> Result<Arc<Deployment>, Error> {
     let data_root = data_root.as_ref();
-    fs::create_dir_all(data_root)?;
-    Ok(mode::open_storage(data_root.join(DATABASE_FILE)).await?)
+    Ok(mode::open(data_root).await?)
 }
 
 /// Runs the device host and browser service until shutdown.
@@ -98,11 +99,12 @@ pub async fn run(browser: BrowserOptions) -> Result<(), Error> {
         ))
         .try_init();
     tracing::info!("HASS starting");
-    let storage = prepare_storage(&data_root).await?;
-    let devices = devices::Host::new(mode::device_source(&data_root)?, Application::new(storage));
+    let deployment = prepare_deployment(&data_root).await?;
+    let devices = devices::Host::new(mode::device_source(&data_root)?, Arc::clone(&deployment));
     let map_tiles = garmin_map_tiles::Service::new(data_root.join("cache/activity-map"))?;
     devices.start();
     let result = server::serve(devices, map_tiles, browser).await;
+    deployment.close().await;
     if let Some(logs) = garmin_logging::Store::global() {
         logs.flush();
     }
@@ -137,7 +139,7 @@ mod tests {
     use futures_lite::future::block_on;
     use tempfile::tempdir;
 
-    use super::{DATA_BASE, configured_data_base, prepare_storage};
+    use super::{DATA_BASE, configured_data_base, prepare_deployment};
 
     #[test]
     fn worker_map_is_default_in_both_deployment_modes() {
@@ -183,7 +185,7 @@ mod tests {
     fn prepares_a_migrated_database() {
         block_on(async {
             let directory = tempdir().expect("the test data directory should be created");
-            let storage = prepare_storage(directory.path())
+            let storage = prepare_deployment(directory.path())
                 .await
                 .expect("the target database should be prepared");
 

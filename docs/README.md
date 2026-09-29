@@ -8,5 +8,7 @@
 | [Research](research/README.md)         | Reproducible evidence, including negative results  |
 | [Development](development.md)          | Execution safeguards and documentation maintenance |
 
+Desktop users: [backup and restore](backup-restore.md).
+
 Architecture changes with the system. Decisions are superseded, not rewritten. Completed plans are deleted after their
 lasting results move into code, architecture, decisions, or user documentation.

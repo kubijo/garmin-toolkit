@@ -1,0 +1,159 @@
+out = "../../../.tmp/gallery/backup"
+size = "1000x720"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "locations"
+scene = "backup::Playground"
+[shot.knobs]
+locations = "local-and-server"
+
+[[shot]]
+name = "locations-dark-narrow"
+scene = "backup::Playground"
+[shot.knobs]
+locations = "local-and-server"
+width = 320
+
+[[shot]]
+name = "locations-light-czech"
+scene = "backup::Playground"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+locations = "local-and-server"
+
+[[shot]]
+name = "idle"
+scene = "backup::Playground"
+
+[[shot]]
+name = "preparing"
+scene = "backup::Playground"
+settle = false
+frames = 8
+[shot.knobs]
+state = "preparing"
+
+[[shot]]
+name = "transfer"
+scene = "backup::Playground"
+[shot.knobs]
+state = "transfer"
+
+[[shot]]
+name = "verification"
+scene = "backup::Playground"
+settle = false
+frames = 8
+[shot.knobs]
+state = "verify"
+
+[[shot]]
+name = "transfer-light"
+scene = "backup::Playground"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+state = "transfer"
+
+[[shot]]
+name = "preparing-light"
+scene = "backup::Playground"
+settle = false
+frames = 8
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+state = "preparing"
+
+[[shot]]
+name = "confirmation-dark"
+scene = "backup::Playground"
+[shot.knobs]
+state = "confirm"
+
+[[shot]]
+name = "confirmation-light-czech-narrow"
+scene = "backup::Playground"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+state = "confirm"
+width = 320
+
+[[shot]]
+name = "restore"
+scene = "backup::Playground"
+settle = false
+frames = 8
+[shot.knobs]
+state = "restore"
+
+[[shot]]
+name = "saved"
+scene = "backup::Playground"
+[shot.knobs]
+state = "saved"
+
+[[shot]]
+name = "saved-server"
+scene = "backup::Playground"
+[shot.knobs]
+state = "saved"
+locations = "local-and-server"
+
+[[shot]]
+name = "saved-server-light-czech-narrow"
+scene = "backup::Playground"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+state = "saved"
+locations = "local-and-server"
+width = 320
+
+[[shot]]
+name = "cancelled"
+scene = "backup::Playground"
+[shot.knobs]
+state = "cancelled"
+
+[[shot]]
+name = "failed"
+scene = "backup::Playground"
+[shot.knobs]
+state = "failed"
+
+[[shot]]
+name = "restored"
+scene = "backup::Playground"
+[shot.knobs]
+state = "restored"
+
+[[shot]]
+name = "recovery-failed"
+scene = "backup::Playground"
+[shot.knobs]
+state = "recovery-failed"
+
+[[shot]]
+name = "download"
+scene = "backup::Playground"
+[shot.knobs]
+state = "download"
+
+[[shot]]
+name = "locations-light-czech-narrow"
+scene = "backup::Playground"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+locations = "local-and-server"
+width = 320

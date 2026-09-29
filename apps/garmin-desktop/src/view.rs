@@ -19,12 +19,14 @@ use garmin_service_api::{
     DeviceCatalogSnapshot, DeviceCatalogStorage, DeviceDataType, DeviceSnapshot, InspectionState,
     TransferDirection,
 };
-use garmin_services::{ActivityPreview, Application, UserContext};
+use garmin_services::{ActivityPreview, UserContext, deployment::Deployment};
 use garmin_ui::{
     activity, device, device_browser, device_fit_preview, file_import, icons, image_crop, modal,
     notification, profile, profile_settings, progress, shell,
     workspace::{self, Page},
 };
+use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::{
     Error, device_backend, profiling,
@@ -33,7 +35,12 @@ use crate::{
 
 use garmin_ui::window::{Event as WindowEvent, NativeWindow, Spec as WindowSpec, WindowHost as _};
 
+mod backup;
+
 pub struct Desktop {
+    deployment: Arc<Deployment>,
+    epoch: Uuid,
+    backup: crate::backup::Controller,
     context: Context,
     translations: Translations,
     intl: Intl,
@@ -46,7 +53,7 @@ pub struct Desktop {
     activity_detail: Option<ActivityDetailSnapshot>,
     activity_workspace: activity::Workspace,
     navigation: shell::Navigation,
-    loaded: bool,
+    load: LoadState,
     create_profile: Option<profile::CreateState>,
     avatar_editor: Option<AvatarEditor>,
     device_browser: Option<device_browser::Browser>,
@@ -69,7 +76,7 @@ pub struct Desktop {
 
 impl Desktop {
     pub fn new(
-        application: Application,
+        deployment: Arc<Deployment>,
         translations: Translations,
         context: eframe::egui::Context,
         device_platform: device_backend::Platform,
@@ -78,7 +85,14 @@ impl Desktop {
         profiling: profiling::RuntimeMetricsRecorder,
     ) -> Result<Self, Error> {
         let intl = translations.formatter_for_client(Language::English)?;
-        let worker = Worker::spawn(application, context.clone())?;
+        let worker = Worker::spawn(Arc::clone(&deployment), context.clone())?;
+        let epoch = deployment.epoch();
+        let backup = crate::backup::Controller::new(
+            Arc::clone(&deployment),
+            context.clone(),
+            data_root.to_owned(),
+        )
+        .map_err(std::io::Error::other)?;
         let map_worker = crate::map_worker::Worker::spawn(&data_root.join("cache/activity-map"))?;
         let map_runtime = activity::map_runtime::MapRuntimeHandle::new(
             map_worker,
@@ -87,6 +101,9 @@ impl Desktop {
         .with_metrics(profiling.clone());
         let activity_workspace = activity::Workspace::new(&map_runtime);
         Ok(Self {
+            deployment,
+            epoch,
+            backup,
             context,
             translations,
             intl,
@@ -99,7 +116,7 @@ impl Desktop {
             activity_detail: None,
             activity_workspace,
             navigation: shell::Navigation::Expanded,
-            loaded: false,
+            load: LoadState::Loading,
             create_profile: None,
             avatar_editor: None,
             device_browser: None,
@@ -113,7 +130,7 @@ impl Desktop {
             import: ImportStatus::default(),
             notice: None,
             toasts: notification::Toasts::default(),
-            devices: devices::Manager::new(device_platform),
+            devices: devices::Manager::with_inspector(device_platform, device_backend::inspect),
             device_toasts: HashMap::new(),
             worker,
             map_runtime,
@@ -142,16 +159,21 @@ impl Desktop {
     }
 
     fn show_chooser_content(&mut self, ui: &mut Ui) {
+        self.show_backup_result(ui);
+        if self.backup.state.switching() {
+            return;
+        }
         if let Some(notice) = &self.notice {
             notification::show(ui, &notice.props());
             ui.add_space(12.0);
         }
-        if !self.loaded {
+        if matches!(self.load, LoadState::Loading) {
             ui.vertical_centered(|ui| {
                 ui.set_max_width(360.0);
                 progress::show(
                     ui,
                     &progress::Props {
+                        height: None,
                         label: &format_message!(
                             &self.intl,
                             default_message: "Loading profiles",
@@ -161,6 +183,10 @@ impl Desktop {
                     },
                 );
             });
+            return;
+        }
+        if let LoadState::Unavailable(reason) = &self.load {
+            ui.label(reason);
             return;
         }
         let profiles = self.profile_props();
@@ -205,8 +231,10 @@ impl Desktop {
         );
         let profile = self.profiles[profile_index].user.profile();
         let settings_props = profile_settings::Props {
+            id: Id::new(self.profiles[profile_index].user.id()),
             intl: &self.intl,
             preferences: profile.preferences(),
+            accent: profile.accent(),
             profile: self.profiles[profile_index].profile_props(),
             picture_enabled: true,
             disabled: self.preferences_saving,
@@ -228,6 +256,8 @@ impl Desktop {
             navigation: self.navigation,
             devices: &device_snapshots,
             window_controls: Some(&window_controls),
+            backup_enabled: self.profiles[profile_index].user.role()
+                == garmin_model::identity::Role::Owner,
         };
         let output = workspace::show(ui, &props, |ui| {
             if let Some(notice) = notice {
@@ -238,6 +268,16 @@ impl Desktop {
                 Page::Activities => {
                     PageOutput::Activities(activities_page.show(ui, activity_workspace))
                 }
+                Page::Backup => PageOutput::Backup(garmin_ui::backup::show(
+                    ui,
+                    &garmin_ui::backup::Props {
+                        server_files: false,
+                        intl,
+                        state: &self.backup.state,
+                        file: self.backup.file.as_ref(),
+                        enabled: !matches!(self.load, LoadState::Unavailable(_)),
+                    },
+                )),
                 Page::ProfileSettings => {
                     PageOutput::Settings(profile_settings::show(ui, &settings_props))
                 }
@@ -266,6 +306,7 @@ impl Desktop {
 
     fn handle_page_output(&mut self, profile_index: usize, output: PageOutput) {
         match output {
+            PageOutput::Backup(action) => self.handle_backup_action(action),
             PageOutput::Activities((import, selected)) => {
                 if let Some(activity::Action::Select(index)) = selected {
                     self.select_activity(index);
@@ -281,6 +322,14 @@ impl Desktop {
                 key,
                 action: Some(device::Action::BrowseFiles),
             } => self.browse_device(key),
+            PageOutput::Device {
+                key,
+                action: Some(device::Action::Refresh),
+            } => {
+                if let Err(reason) = self.devices.refresh(&key) {
+                    self.notice = Some(Notice::error(reason));
+                }
+            }
             PageOutput::Settings(None) | PageOutput::Device { action: None, .. } => {}
         }
     }
@@ -298,10 +347,24 @@ impl Desktop {
             self.device_fit_preview = None;
             return;
         }
+        let show_hidden = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .is_some_and(|profile| profile.user.profile().preferences().show_hidden_files());
+        let inline = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .is_some_and(|profile| profile.user.profile().preferences().inline_file_windows());
+        self.file_window.set_inline(&self.context, inline);
         let browser = &mut self.device_browser;
+        if let Some(browser) = browser {
+            browser.set_show_hidden_files(show_hidden);
+        }
         let intl = &self.intl;
         let notice = &self.notice;
-        let busy = self.device_browser_status.is_busy() || self.device_browser_loading.is_some();
+        let busy = self.device_browser_status.is_busy()
+            || self.device_browser_loading.is_some()
+            || self.preferences_saving;
         let loading = self.device_browser_loading.is_some();
         let events = self.file_window.present(
             &self.context,
@@ -352,6 +415,10 @@ impl Desktop {
             return;
         };
         let operation = match action {
+            device_browser::Action::ShowHiddenFiles(show) => {
+                self.set_show_hidden_files(*show);
+                return;
+            }
             device_browser::Action::Refresh => {
                 self.device_browser_loading = Some(key);
                 self.worker.browse_device(candidate);
@@ -437,15 +504,21 @@ impl Desktop {
             .into_iter()
             .find(|device| device.key == key)
             .map_or_else(|| key.clone(), |device| device.name);
-        let _ = self.file_window.open(
-            &self.context,
-            WindowSpec {
-                id: format!("device-files-{key}"),
-                kind: "device-files".into(),
-                title: format_message!(&self.intl, default_message: "Files on {device}", values: { device: name.as_str() }),
-                size: [1000.0, 720.0],
-            },
-        );
+        let spec = WindowSpec {
+            id: format!("device-files-{key}"),
+            kind: "device-files".into(),
+            title: format_message!(&self.intl, default_message: "Files on {device}", values: { device: name.as_str() }),
+            size: [1000.0, 720.0],
+        };
+        let inline = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .is_some_and(|profile| profile.user.profile().preferences().inline_file_windows());
+        if inline {
+            self.file_window.open_inline(&self.context, spec);
+        } else {
+            let _ = self.file_window.open(&self.context, spec);
+        }
         self.file_window_device = Some(key.clone());
         self.file_window_owner = Some(owner);
         if busy {
@@ -478,6 +551,22 @@ impl Desktop {
             .collect()
     }
 
+    fn set_show_hidden_files(&mut self, show: bool) {
+        if !self.preferences_saving
+            && let Some(index) = self.selected_profile
+        {
+            let preferences = self.profiles[index]
+                .user
+                .profile()
+                .preferences()
+                .with_show_hidden_files(show);
+            self.handle_profile_settings_action(
+                index,
+                profile_settings::Action::UpdatePreferences(preferences),
+            );
+        }
+    }
+
     fn handle_profile_settings_action(
         &mut self,
         profile_index: usize,
@@ -485,6 +574,13 @@ impl Desktop {
     ) {
         match action {
             profile_settings::Action::ChoosePicture => self.choose_profile_picture(profile_index),
+            profile_settings::Action::UpdateAccent(accent) => {
+                self.preferences_saving = true;
+                self.worker.update_accent(
+                    UserContext::new(self.profiles[profile_index].user.id()),
+                    accent,
+                );
+            }
             profile_settings::Action::UpdatePreferences(preferences) => {
                 let user = &self.profiles[profile_index].user;
                 self.preferences_saving = true;
@@ -558,7 +654,8 @@ impl Desktop {
             }
             Some(shell::Action::Window(shell::WindowAction::Close)) => self.request_quit(context),
             Some(shell::Action::Navigate(index)) => {
-                self.page = Page::from_index(index, devices).unwrap_or(Page::Activities);
+                self.page = Page::from_index(index, devices, self.backup_enabled())
+                    .unwrap_or(Page::Activities);
                 self.profile_menu_expanded = false;
             }
             None => {}
@@ -566,7 +663,8 @@ impl Desktop {
     }
 
     fn work_in_progress(&self) -> bool {
-        !self.loaded
+        self.backup.state.busy()
+            || matches!(self.load, LoadState::Loading)
             || self.import.busy()
             || self.preferences_saving
             || self.create_profile.is_some()
@@ -577,7 +675,10 @@ impl Desktop {
 
     fn active_operations(&self) -> Vec<ActiveOperation> {
         let mut operations = Vec::new();
-        if !self.loaded {
+        if self.backup.state.busy() {
+            operations.push(ActiveOperation::Backup);
+        }
+        if matches!(self.load, LoadState::Loading) {
             operations.push(ActiveOperation::LoadingProfiles);
         }
         if let Some(operation) = self.import.operation() {
@@ -610,6 +711,9 @@ impl Desktop {
     }
 
     fn request_quit(&mut self, context: &Context) {
+        if self.backup.state.switching() {
+            return;
+        }
         if self.work_in_progress() {
             self.quit = QuitState::Confirming;
         } else {
@@ -619,6 +723,11 @@ impl Desktop {
     }
 
     fn handle_quit_input(&mut self, context: &Context) {
+        if self.backup.state.switching() {
+            context.send_viewport_cmd(ViewportCommand::CancelClose);
+            self.quit = QuitState::Idle;
+            return;
+        }
         let close_requested = context.input(|input| input.viewport().close_requested());
         if close_requested && self.quit != QuitState::Closing {
             if self.work_in_progress() {
@@ -637,6 +746,9 @@ impl Desktop {
 
     fn select_profile(&mut self, index: usize) {
         self.selected_profile = Some(index);
+        if matches!(self.page, Page::Backup) && !self.backup_enabled() {
+            self.page = Page::Activities;
+        }
         self.profile_menu_expanded = false;
         self.page = Page::Activities;
         self.selected_activity = 0;
@@ -688,6 +800,9 @@ impl Desktop {
     }
 
     fn start_import(&mut self, paths: Vec<PathBuf>) {
+        if self.backup.state.switching() || matches!(self.load, LoadState::Unavailable(_)) {
+            return;
+        }
         if paths.is_empty() || self.import.busy() {
             return;
         }
@@ -811,20 +926,24 @@ impl Desktop {
         }
     }
 
+    fn profiles_loaded(&mut self, result: Result<Vec<worker::ProfileData>, String>) {
+        match result {
+            Ok(profiles) => {
+                self.replace_profiles(profiles, None);
+                self.load = LoadState::Ready;
+            }
+            Err(reason) => self.load = LoadState::Unavailable(reason),
+        }
+    }
+
     fn process_events(&mut self) {
         let events = self.worker.drain().collect::<Vec<_>>();
         for event in events {
             match event {
-                worker::Event::Reloaded(result) => match result {
-                    Ok(profiles) => {
-                        self.replace_profiles(profiles, None);
-                        self.loaded = true;
-                    }
-                    Err(reason) => {
-                        self.loaded = true;
-                        self.notice = Some(Notice::error(reason));
-                    }
-                },
+                worker::Event::Unavailable(reason) => {
+                    self.load = LoadState::Unavailable(reason);
+                }
+                worker::Event::Reloaded(result) => self.profiles_loaded(result),
                 worker::Event::ProfileCreated(result) => match result {
                     Ok((user_id, profiles)) => {
                         self.replace_profiles(profiles, Some(user_id));
@@ -965,6 +1084,14 @@ impl Desktop {
         result: Result<worker::DeviceBrowserOutcome, String>,
     ) {
         self.device_browser_status = DeviceBrowserStatus::Idle;
+        if matches!(
+            kind,
+            worker::DeviceBrowserOperationKind::Upload
+                | worker::DeviceBrowserOperationKind::CreateDirectory
+                | worker::DeviceBrowserOperationKind::Remove
+        ) {
+            self.devices.invalidate(&key);
+        }
         if self
             .device_browser
             .as_ref()
@@ -1211,6 +1338,7 @@ impl Desktop {
         match output.action {
             Some(modal::Action::Cancel) => self.quit = QuitState::Idle,
             Some(modal::Action::Primary) => {
+                self.backup.cancel();
                 self.worker.abort();
                 self.quit = QuitState::Closing;
                 ui.ctx().send_viewport_cmd(ViewportCommand::Close);
@@ -1257,6 +1385,7 @@ impl eframe::App for Desktop {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         let started = Instant::now();
         let toast_bounds = shell::overlay_bounds(ui.available_rect_before_wrap());
+        self.process_backup();
         self.process_events();
         self.process_devices(ui.ctx());
         self.handle_quit_input(ui.ctx());
@@ -1291,6 +1420,12 @@ impl eframe::App for Desktop {
     }
 }
 
+enum LoadState {
+    Loading,
+    Ready,
+    Unavailable(String),
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum QuitState {
     #[default]
@@ -1314,6 +1449,7 @@ impl DeviceBrowserStatus {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ActiveOperation {
+    Backup,
     LoadingProfiles,
     ScanningFiles,
     ImportingActivities,
@@ -1329,6 +1465,7 @@ enum ActiveOperation {
 impl ActiveOperation {
     fn label(&self, intl: &Intl) -> String {
         match self {
+            Self::Backup => format_message!(intl, default_message: "Backup and restore"),
             Self::LoadingProfiles => {
                 format_message!(intl, default_message: "Loading profiles and activities")
             }
@@ -1415,6 +1552,7 @@ fn device_snapshot(presentation: devices::Presentation) -> DeviceSnapshot {
             devices::InspectionState::Failed => InspectionState::Failed,
         },
         inspection_error: presentation.inspection_error,
+        report: presentation.report,
         capabilities: presentation
             .capabilities
             .into_iter()
@@ -1479,6 +1617,7 @@ fn device_catalog_snapshot(
 }
 
 enum PageOutput {
+    Backup(Option<garmin_ui::backup::Action>),
     Activities((Option<file_import::Action>, Option<activity::Action>)),
     Settings(Option<profile_settings::Action>),
     Device {
@@ -1818,6 +1957,7 @@ fn show_import_status(ui: &mut Ui, intl: &Intl, status: &ImportStatus) {
         ImportPhase::Scanning => progress::show(
             ui,
             &progress::Props {
+                height: None,
                 label: &format_message!(intl, default_message: "Scanning selected files"),
                 detail: None,
                 value: progress::Value::Indeterminate,
@@ -1835,6 +1975,7 @@ fn show_import_status(ui: &mut Ui, intl: &Intl, status: &ImportStatus) {
             progress::show(
                 ui,
                 &progress::Props {
+                    height: None,
                     label: &format_message!(intl, default_message: "Importing FIT activities"),
                     detail: Some(&detail),
                     value: progress::Value::Determinate {

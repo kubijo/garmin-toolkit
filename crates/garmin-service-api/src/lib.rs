@@ -1,7 +1,9 @@
 //! Typed contracts shared by native hosts and isolated clients.
 
 pub mod control;
+pub mod files;
 pub mod logging;
+pub mod snapshots;
 
 use camino::Utf8PathBuf;
 use garmin_model::{
@@ -23,6 +25,7 @@ pub struct DeviceSnapshot {
     pub software_version: Option<u16>,
     pub inspection: InspectionState,
     pub inspection_error: Option<String>,
+    pub report: Option<garmin_model::device::DeviceInspection>,
     pub capabilities: Vec<DeviceCapability>,
     pub storages: Vec<DeviceStorageState>,
 }
@@ -83,9 +86,10 @@ pub struct DeviceBrowserUpload {
     pub size: u64,
 }
 
+/// Single-use, same-origin HTTP download capability. Contains no host path.
 #[garmin_macros::portable(eq)]
-pub struct DeviceBrowserDownloadTicket {
-    pub token: String,
+pub struct DownloadTicket {
+    pub token: uuid::Uuid,
     pub file_name: String,
 }
 
@@ -277,10 +281,9 @@ pub enum InspectionState {
 )]
 mod rpc {
     use super::{
-        ActivityDetailSnapshot, AvatarUpload, DeploymentMode, DeviceBrowserDownloadTicket,
-        DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogSnapshot,
-        DeviceFitImportOutcome, DeviceFitPreview, DeviceSnapshot, ProfileAvatarSnapshot,
-        ProfileSnapshot,
+        ActivityDetailSnapshot, AvatarUpload, DeploymentMode, DeviceBrowserRequest,
+        DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogSnapshot, DeviceFitImportOutcome,
+        DeviceFitPreview, DeviceSnapshot, DownloadTicket, ProfileAvatarSnapshot, ProfileSnapshot,
     };
     use garmin_model::{
         identity::{ProfilePreferences, User, UserId},
@@ -292,7 +295,32 @@ mod rpc {
     pub trait ApplicationService {
         async fn logs(&self) -> Result<crate::logging::LogServiceClient, rtc::CallError>;
         async fn deployment_mode(&self) -> Result<DeploymentMode, rtc::CallError>;
+        async fn deployment_epoch(&self) -> Result<uuid::Uuid, rtc::CallError>;
+        async fn snapshots(
+            &self,
+            user_id: UserId,
+            operation: Option<uuid::Uuid>,
+        ) -> Result<Result<crate::snapshots::SnapshotServiceClient, String>, rtc::CallError>;
+        async fn snapshot_download(
+            &self,
+            operation: uuid::Uuid,
+        ) -> Result<Result<DownloadTicket, String>, rtc::CallError>;
+        async fn server_directory(
+            &self,
+            user_id: UserId,
+            path: String,
+        ) -> Result<Result<crate::files::Directory, String>, rtc::CallError>;
+        async fn snapshot_file(
+            &self,
+            operation: uuid::Uuid,
+            selection: crate::files::Selection,
+        ) -> Result<Result<crate::snapshots::SnapshotStatus, String>, rtc::CallError>;
         async fn heartbeat(&self) -> Result<(), rtc::CallError>;
+        async fn refresh_device(
+            &self,
+            device_key: String,
+        ) -> Result<Result<(), String>, rtc::CallError>;
+
         async fn watch_devices(
             &self,
         ) -> Result<rch::watch::Receiver<Vec<DeviceSnapshot>>, rtc::CallError>;
@@ -313,7 +341,7 @@ mod rpc {
             &self,
             device_key: String,
             target: DeviceBrowserTarget,
-        ) -> Result<Result<DeviceBrowserDownloadTicket, String>, rtc::CallError>;
+        ) -> Result<Result<DownloadTicket, String>, rtc::CallError>;
         async fn device_fit_preview(
             &self,
             device_key: String,
@@ -334,6 +362,11 @@ mod rpc {
             &self,
             user_id: UserId,
             preferences: ProfilePreferences,
+        ) -> Result<Result<User, String>, rtc::CallError>;
+        async fn update_accent(
+            &self,
+            user_id: UserId,
+            accent: Option<garmin_color::Color>,
         ) -> Result<Result<User, String>, rtc::CallError>;
         async fn import_avatar(
             &self,

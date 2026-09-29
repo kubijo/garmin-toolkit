@@ -158,6 +158,50 @@ pub fn window_header(
     title: &str,
     controls: &WindowControls<'_>,
 ) -> Option<WindowAction> {
+    decorated_header(
+        ui,
+        title,
+        WINDOW_CONTROLS_WIDTH,
+        |ui, header, title_rect| match header_window_action(ui, header, title_rect, Some(controls))
+        {
+            Some(Action::Window(action)) => Some(action),
+            _ => None,
+        },
+    )
+}
+
+/// Shared window chrome for an in-application dialog: draggable title and close control.
+pub fn dialog_header(ui: &mut Ui, title: &str, close_label: &str) -> Option<WindowAction> {
+    decorated_header(ui, title, WINDOW_ACTION_SIZE, |ui, header, title_rect| {
+        let close = window_control(
+            ui,
+            Rect::from_min_max(title_rect.right_top(), header.right_bottom()),
+            "shell-window-close",
+            close_label,
+            icons::X,
+            true,
+        );
+        let drag = ui.interact(
+            title_rect,
+            ui.make_persistent_id("shell-window-drag"),
+            Sense::drag(),
+        );
+        if close.clicked() {
+            Some(WindowAction::Close)
+        } else if drag.dragged() {
+            Some(WindowAction::Drag)
+        } else {
+            None
+        }
+    })
+}
+
+fn decorated_header(
+    ui: &mut Ui,
+    title: &str,
+    controls_width: f32,
+    interaction: impl FnOnce(&Ui, Rect, Rect) -> Option<WindowAction>,
+) -> Option<WindowAction> {
     egui::Panel::top("native-window-header")
         .exact_size(HEADER_HEIGHT)
         .show_separator_line(false)
@@ -170,7 +214,7 @@ pub fn window_header(
             let title_rect = Rect::from_min_max(
                 header.min,
                 egui::pos2(
-                    (header.right() - WINDOW_CONTROLS_WIDTH).max(header.left()),
+                    (header.right() - controls_width).max(header.left()),
                     header.bottom(),
                 ),
             );
@@ -181,10 +225,7 @@ pub fn window_header(
                 typography::font(14.0, typography::Weight::SemiBold),
                 color32(palette.content().text_primary()),
             );
-            match header_window_action(ui, header, title_rect, Some(controls)) {
-                Some(Action::Window(action)) => Some(action),
-                _ => None,
-            }
+            interaction(ui, header, title_rect)
         })
         .inner
 }
@@ -276,11 +317,8 @@ fn paint_chrome(ui: &Ui, root: Rect, header: Rect, navigation: Rect, show_naviga
     ui.painter()
         .rect_filled(header, 0.0, theme.surfaces().chrome().into_cint());
     if show_navigation {
-        ui.painter().rect_filled(
-            navigation,
-            0.0,
-            theme.surfaces().layer(theme::Level::One).into_cint(),
-        );
+        ui.painter()
+            .rect_filled(navigation, 0.0, theme.surfaces().chrome().into_cint());
         ui.painter().vline(
             navigation.right(),
             navigation.y_range(),

@@ -144,7 +144,7 @@ impl State {
     }
 }
 
-#[cfg(feature = "automation")]
+#[cfg(any(test, feature = "automation"))]
 pub(crate) fn automation(
     context: &Context,
     window: &str,

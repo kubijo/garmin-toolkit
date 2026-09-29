@@ -150,6 +150,7 @@ let
         + text;
       runtimeInputs =
         runtimeInputs
+        ++ [ formatjsCli ]
         ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.mold ]
         ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
           pkgs.stdenv.cc
@@ -191,7 +192,10 @@ let
     SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
     buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.glib ];
     cargoLock = workspaceSrc + "/Cargo.lock";
-    nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
+    nativeBuildInputs = [
+      formatjsCli
+    ]
+    ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
     strictDeps = true;
   }
   // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
@@ -244,10 +248,6 @@ let
     echo "FormatJS source catalog: $message_count messages"
 
     ${compileCatalogs "$i18n_dir"}
-    if ! cmp --silent crates/garmin-i18n/catalogs/cs.json "$i18n_dir/cs.json"; then
-      printf 'Compiled Czech catalog is stale; run just dev::i18n-sync.\n' >&2
-      exit 1
-    fi
 
     ${formatjs} verify "$i18n_dir/en.json" "$i18n_dir/cs.json" \
       --source-locale en \
@@ -286,10 +286,6 @@ let
           } + if $message.description then { description: $message.description } else {} end))' \
           "$i18n_dir/en-source.json" > "$i18n_dir/cs-source.json"
         cp "$i18n_dir/cs-source.json" crates/garmin-i18n/translations/cs.json
-        ${formatjs} compile \
-          --format lokalise \
-          --out-file crates/garmin-i18n/catalogs/cs.json \
-          crates/garmin-i18n/translations/cs.json
       '';
 
   wasmLint = mkApp "wasm-lint" [ wasmToolchain ] ''

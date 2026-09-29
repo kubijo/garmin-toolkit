@@ -8,6 +8,7 @@
 pub mod activity;
 #[cfg(any(test, feature = "automation"))]
 pub mod automation;
+pub mod backup;
 pub mod brand;
 pub mod button;
 pub mod capacity;

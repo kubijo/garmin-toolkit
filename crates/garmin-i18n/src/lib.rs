@@ -11,7 +11,7 @@ use icu_locale::{Locale, LocaleExpander};
 use thiserror::Error;
 
 const DEFAULT_LOCALE: &str = "en";
-const CZECH_CATALOG: &str = include_str!("../catalogs/cs.json");
+const CZECH_CATALOG: &str = include_str!(concat!(env!("OUT_DIR"), "/cs.json"));
 
 /// A bundled application language.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]

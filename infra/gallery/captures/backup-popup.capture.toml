@@ -1,0 +1,52 @@
+out = "../../../.tmp/gallery/backup-popup"
+size = "1100x760"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "editable-path"
+scene = "chooser::Open file"
+[shot.knobs]
+"platform window" = true
+"edit path" = true
+
+[[shot]]
+name = "editable-path-light"
+scene = "chooser::Open file"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+"platform window" = true
+"edit path" = true
+
+[[shot]]
+name = "open"
+scene = "chooser::Open file"
+[shot.knobs]
+"platform window" = true
+
+[[shot]]
+name = "save"
+scene = "chooser::Save destination"
+[shot.knobs]
+"platform window" = true
+
+[[shot]]
+name = "loading"
+scene = "chooser::Save destination"
+settle = false
+frames = 8
+[shot.knobs]
+"platform window" = true
+mode = "loading"
+
+[[shot]]
+name = "light-czech-narrow"
+scene = "chooser::Open file"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+"platform window" = true
+width = 320

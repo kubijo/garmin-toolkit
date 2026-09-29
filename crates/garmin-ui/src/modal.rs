@@ -99,6 +99,8 @@ pub enum Action {
 pub struct Output<R> {
     pub action: Option<Action>,
     pub inner: R,
+    pub primary: Response,
+    pub cancel: Response,
 }
 
 /// Shows a dialog in its configured presentation.
@@ -183,8 +185,13 @@ fn render_surface<R>(
                     })
                 })
                 .inner;
-            let action = footer(ui, props);
-            Output { action, inner }
+            let (action, primary, cancel) = footer(ui, props);
+            Output {
+                action,
+                inner,
+                primary,
+                cancel,
+            }
         })
         .inner
 }
@@ -233,9 +240,8 @@ fn header(ui: &mut Ui, props: &Props<'_>) {
     ui.add_space(24.0);
 }
 
-fn footer(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
+fn footer(ui: &mut Ui, props: &Props<'_>) -> (Option<Action>, Response, Response) {
     let actions = crate::theme::palette(ui).modal_actions();
-    let mut action = None;
     egui::Frame::new()
         .inner_margin(FOOTER_MARGIN)
         .show(ui, |ui| {
@@ -265,14 +271,18 @@ fn footer(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
                     enabled: true,
                 }
                 .show_with_states(ui, actions.cancel());
-                if primary_activated(props.primary.kind, &primary) {
-                    action = Some(Action::Primary);
+                let action = if primary_activated(props.primary.kind, &primary) {
+                    Some(Action::Primary)
                 } else if cancel.clicked() {
-                    action = Some(Action::Cancel);
-                }
-            });
-        });
-    action
+                    Some(Action::Cancel)
+                } else {
+                    None
+                };
+                (action, primary, cancel)
+            })
+            .inner
+        })
+        .inner
 }
 
 fn primary_activated(_kind: PrimaryKind, response: &Response) -> bool {

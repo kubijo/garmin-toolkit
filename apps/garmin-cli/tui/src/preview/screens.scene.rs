@@ -699,7 +699,11 @@ fn font_stack(font: PreviewFont) -> FontStack {
     let (family, bytes, fallback_family, fallback_bytes) = match font {
         PreviewFont::DepartureMono => (
             "Departure Mono",
-            include_bytes!("../fonts/DepartureMono-Regular.otf").as_slice(),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/fonts/DepartureMono-Regular.otf"
+            ))
+            .as_slice(),
             NerdFont::FONT_FAMILY,
             NerdFont::FONT_BYTES,
         ),
@@ -707,7 +711,11 @@ fn font_stack(font: PreviewFont) -> FontStack {
             NerdFont::FONT_FAMILY,
             NerdFont::FONT_BYTES,
             "Departure Mono",
-            include_bytes!("../fonts/DepartureMono-Regular.otf").as_slice(),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/fonts/DepartureMono-Regular.otf"
+            ))
+            .as_slice(),
         ),
     };
     FontStack {

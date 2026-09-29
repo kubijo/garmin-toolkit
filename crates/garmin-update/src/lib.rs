@@ -10,6 +10,7 @@ mod removal;
 pub mod space;
 
 pub use backup::{BackupError, BackupFile, BackupReport, backup_mass_storage};
+pub use device_state::inspection::inspect as inspect_device_state;
 pub use device_state::{
     DEVICE_STATE_MAGIC, DEVICE_STATE_VERSION, DeviceIdentityState, DeviceStateError,
     DeviceTransactionKind, DeviceTransactionStore, PortableTransaction,

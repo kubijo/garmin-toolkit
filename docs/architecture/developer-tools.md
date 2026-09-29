@@ -72,6 +72,11 @@ string. Resize uses logical `width`/`height` (1–8192), subject to native minim
 resolve at execution; pointer bounds must stabilize across two frames within two seconds. Key/text establishes focus.
 Missing/ambiguous/disabled/clipped targets fail. Each window allows one workload.
 
+Profile creation exposes `profile.create` and `profile.create.{name,submit,cancel}`. File choosers expose
+`files.chooser.{name,confirm,cancel,replace,keep}`; directory and file rows use `files.entry.<catalog-relative-path>`.
+Select a directory row and send Enter to navigate; selecting a file fills the chooser's filename field. These targets
+remain stable across language changes.
+
 Named scenarios log out if needed and restore initial viewport on every exit; explicit sequences retain final size.
 Resize settles for 50 ms within five seconds; status exposes `resize_request`. Focus loss continues; hidden tabs pause
 active-time deadlines and release input. Geometry changes release/retry gestures after layout settles; prior movement is
@@ -139,7 +144,7 @@ CLI `--json` selects JSON/SSE; `--after` resumes; `--output` saves; Ctrl-C stops
 `garmin-logging::LogService` owns history, subscription, ingestion, export, persistence, and browser/worker records.
 Backend paths stay private; a failed transport does not log through itself. `garmin_logging::console` is the shared
 stderr/diagnostic formatter: cyan keys, green strings, orange booleans, purple numbers; plain output keeps
-layout/escaping. Gallery `logging::All variants` compares outputs; capture set `captures/logging.capture.toml` covers
+layout/escaping. Gallery `console::All variants` compares outputs; capture set `captures/logging.capture.toml` covers
 both terminal fonts.
 
 | Bound                     | Limit                   |

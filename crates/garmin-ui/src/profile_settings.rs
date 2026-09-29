@@ -6,6 +6,7 @@ use garmin_i18n::{Intl, format_message};
 use garmin_model::identity::{LanguagePreference, ProfilePreferences, ThemePreference, UnitSystem};
 
 use crate::{Size, button, icons, images, profile, select};
+mod accent;
 
 const fn unit_index(unit_system: UnitSystem) -> usize {
     match unit_system {
@@ -44,8 +45,10 @@ const fn language_from_index(index: usize) -> LanguagePreference {
 
 /// Profile-settings inputs.
 pub struct Props<'a> {
+    pub id: Id,
     pub intl: &'a Intl,
     pub preferences: ProfilePreferences,
+    pub accent: Option<garmin_color::Color>,
     pub profile: profile::ProfileProps<'a>,
     pub picture_enabled: bool,
     pub disabled: bool,
@@ -55,6 +58,7 @@ pub struct Props<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     ChoosePicture,
+    UpdateAccent(Option<garmin_color::Color>),
     UpdatePreferences(ProfilePreferences),
 }
 
@@ -65,16 +69,24 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     ui.add_space(24.0);
 
     let mut action = None;
-    crate::theme::layer(ui, theme::Level::One, |ui| {
-        ui.set_max_width(640.0);
-        if show_picture(ui, props) {
-            action = Some(Action::ChoosePicture);
-        }
-        ui.add_space(24.0);
-        if let Some(preferences) = show_preferences(ui, props) {
-            action = Some(Action::UpdatePreferences(preferences));
-        }
-    });
+    egui::ScrollArea::vertical()
+        .id_salt(props.id)
+        .show(ui, |ui| {
+            crate::theme::layer(ui, theme::Level::One, |ui| {
+                ui.set_max_width(ui.available_width().min(640.0));
+                if show_picture(ui, props) {
+                    action = Some(Action::ChoosePicture);
+                }
+                ui.add_space(24.0);
+                if let Some(update) = accent::show(ui, props) {
+                    action = Some(update);
+                }
+                ui.add_space(24.0);
+                if let Some(preferences) = show_preferences(ui, props) {
+                    action = Some(Action::UpdatePreferences(preferences));
+                }
+            });
+        });
     action
 }
 
@@ -86,7 +98,7 @@ fn show_picture(ui: &mut Ui, props: &Props<'_>) -> bool {
     ui.horizontal(|ui| {
         profile::AvatarProps {
             display_name: props.profile.display_name,
-            accent: props.profile.accent,
+            accent: accent::preview(ui, props),
             image: props.profile.avatar,
             size: 64.0,
         }
@@ -185,6 +197,28 @@ fn show_preferences(ui: &mut Ui, props: &Props<'_>) -> Option<ProfilePreferences
             preferences.language(),
             theme,
         );
+    }
+    preferences = preferences.with_show_hidden_files(props.preferences.show_hidden_files());
+    preferences = preferences.with_inline_file_windows(props.preferences.inline_file_windows());
+    ui.add_space(16.0);
+    let label = format_message!(props.intl, default_message: "File browser windows");
+    let separate = format_message!(props.intl, default_message: "Separate window");
+    let inline = format_message!(props.intl, default_message: "Inside the app");
+    let helper = format_message!(props.intl, default_message: "Choose where file browsers and choosers open.");
+    let choices = [select::Choice::new(&separate), select::Choice::new(&inline)];
+    let mut index = usize::from(preferences.inline_file_windows());
+    let response = select::show(
+        ui,
+        Id::new("profile-file-windows"),
+        &mut index,
+        &choices,
+        select::Props::new(&label)
+            .helper(&helper)
+            .disabled(props.disabled),
+    );
+    crate::semantics::target(ui, &response, "profile.file-windows");
+    if response.changed() {
+        preferences = preferences.with_inline_file_windows(index == 1);
     }
     (preferences != props.preferences).then_some(preferences)
 }

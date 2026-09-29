@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use garmin_fixtures::device::{self as fixture, Device, Presence};
+use garmin_device::attachments::{self, Candidate as _};
+use garmin_fixtures::device::{self as fixture, Device};
 use garmin_progress::ProgressReporter;
 use garmin_service_api::{
-    DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCapability,
-    DeviceCatalogSnapshot, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
+    DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogSnapshot,
+    DeviceSnapshot,
 };
 
 use super::{
@@ -33,6 +34,7 @@ impl SourceProvider for Provider {
 pub(crate) struct DemoSource {
     device: Device,
     runtime: tokio::runtime::Handle,
+    inspections: attachments::Manager<Device>,
 }
 
 impl DemoSource {
@@ -40,9 +42,21 @@ impl DemoSource {
         root: PathBuf,
         runtime: tokio::runtime::Handle,
     ) -> Result<Self, fixture::DeviceError> {
+        let device = Device::recreate(root)?;
+        let handle = runtime.clone();
+        let inspections = attachments::Manager::with_inspector(device.clone(), move |candidate| {
+            Ok(
+                handle.block_on(garmin_services::devices::inspect_attachment(
+                    &candidate.transport(),
+                    candidate.name(),
+                    candidate.inspect(),
+                )),
+            )
+        });
         Ok(Self {
-            device: Device::recreate(root)?,
+            device,
             runtime,
+            inspections,
         })
     }
 
@@ -52,15 +66,17 @@ impl DemoSource {
 }
 
 impl Source for DemoSource {
+    fn refresh_device(&mut self, key: &str) -> Result<(), String> {
+        self.inspections.refresh(key)
+    }
+
     fn snapshot(&mut self) -> Vec<DeviceSnapshot> {
-        match self.device.presence() {
-            Ok(Presence::Missing) => Vec::new(),
-            Ok(Presence::Present) => vec![device_snapshot(InspectionState::Ready, None)],
-            Err(error) => vec![device_snapshot(
-                InspectionState::Failed,
-                Some(error.to_string()),
-            )],
-        }
+        let _events = self.inspections.poll();
+        self.inspections
+            .presentations()
+            .into_iter()
+            .map(super::device_snapshot)
+            .collect()
     }
 
     fn catalog(
@@ -81,6 +97,7 @@ impl Source for DemoSource {
         progress: &ProgressReporter,
     ) -> Result<DeviceCatalogSnapshot, String> {
         ensure_device(browser_device_key(&request))?;
+        self.inspections.invalidate(DEVICE_KEY);
         ensure_running(progress)?;
         let catalog = self.native_catalog()?;
         self.runtime.block_on(execute_browser_operation(
@@ -118,6 +135,7 @@ impl Source for DemoSource {
         progress: &ProgressReporter,
     ) -> Result<DeviceCatalogSnapshot, String> {
         ensure_device(&request.device_key)?;
+        self.inspections.invalidate(DEVICE_KEY);
         ensure_running(progress)?;
         let catalog = self.native_catalog()?;
         self.runtime.block_on(execute_browser_upload(
@@ -149,57 +167,6 @@ fn ensure_device(device_key: &str) -> Result<(), String> {
     }
 }
 
-fn device_snapshot(
-    inspection: InspectionState,
-    inspection_error: Option<String>,
-) -> DeviceSnapshot {
-    let ready = inspection == InspectionState::Ready;
-    let metadata = ready.then(fixture::metadata);
-    let (identifier, software_version, capabilities, storages) = if let Some(metadata) = metadata {
-        (
-            Some(metadata.id.into_u32()),
-            Some(metadata.software_version.into_hundredths()),
-            metadata
-                .capabilities
-                .into_iter()
-                .filter_map(service_capability)
-                .collect(),
-            metadata.storage.storages,
-        )
-    } else {
-        (None, None, Vec::new(), Vec::new())
-    };
-    DeviceSnapshot {
-        key: DEVICE_KEY.to_owned(),
-        name: fixture::NAME.to_owned(),
-        identifier,
-        software_version,
-        inspection,
-        inspection_error,
-        capabilities,
-        storages,
-    }
-}
-
-fn service_capability(
-    capability: garmin_device::attachments::Capability,
-) -> Option<DeviceCapability> {
-    let data_type = match capability.data_type() {
-        garmin_device::DataType::Activity => DeviceDataType::Activity,
-        garmin_device::DataType::Workout => DeviceDataType::Workout,
-        garmin_device::DataType::Course => DeviceDataType::Course,
-        _ => return None,
-    };
-    Some(DeviceCapability {
-        data_type,
-        direction: match capability.direction() {
-            garmin_device::TransferDirection::OutputFromUnit => TransferDirection::OutputFromUnit,
-            garmin_device::TransferDirection::InputToUnit => TransferDirection::InputToUnit,
-            garmin_device::TransferDirection::InputOutput => TransferDirection::InputOutput,
-        },
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use garmin_service_api::InspectionState;
@@ -218,7 +185,20 @@ mod tests {
         assert!(source.snapshot().is_empty());
 
         std::fs::rename(&detached, &root).unwrap();
-        let snapshots = source.snapshot();
+        let snapshots = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let snapshots = source.snapshot();
+                if snapshots
+                    .first()
+                    .is_some_and(|snapshot| snapshot.inspection != InspectionState::Running)
+                {
+                    break snapshots;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].inspection, InspectionState::Ready);
     }

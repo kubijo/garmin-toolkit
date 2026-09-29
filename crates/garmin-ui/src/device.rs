@@ -7,7 +7,11 @@ use garmin_service_api::{
     DeviceCapability, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
 };
 
-use crate::{Size, button, icons};
+use crate::{Size, button, icons, text::format_bytes};
+
+#[cfg(test)]
+mod acceptance;
+mod inspection;
 
 const DEVICE_ICON_SIZE: f32 = 32.0;
 const CONTENT_MAX_WIDTH: f32 = 880.0;
@@ -47,6 +51,7 @@ pub enum CollectionState<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     BrowseFiles,
+    Refresh,
 }
 
 /// Renders collection-level feedback.
@@ -87,7 +92,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
             );
         });
     });
-    ui.add_space(20.0);
+    ui.add_space(8.0);
 
     egui::Frame::new()
         .fill(crate::theme::color32(
@@ -102,15 +107,15 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.vertical(|ui| {
-                metadata(ui, props.status_label, props.status);
+                summary_row(ui, props.status_label, props.status);
                 if let Some(error) = props.inspection_error {
                     inspection_error(ui, props.inspection_error_label, error);
                 }
                 if let Some(identifier) = props.identifier {
-                    metadata(ui, props.identifier_label, identifier);
+                    summary_row(ui, props.identifier_label, identifier);
                 }
                 if let Some(software) = props.software {
-                    metadata(ui, props.software_label, software);
+                    summary_row(ui, props.software_label, software);
                 }
                 if !props.transfers.is_empty() {
                     ui.label(
@@ -132,7 +137,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
         });
 
     if !props.storages.is_empty() {
-        ui.add_space(16.0);
+        ui.add_space(8.0);
         for storage in props.storages {
             crate::capacity::show(ui, storage);
         }
@@ -140,6 +145,20 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
 }
 
 pub fn show_snapshot(
+    ui: &mut Ui,
+    intl: &Intl,
+    snapshot: &DeviceSnapshot,
+    browser_loading: bool,
+) -> Option<Action> {
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.spacing_mut().interact_size.y = ui.text_style_height(&TextStyle::Body);
+        snapshot_content(ui, intl, snapshot, browser_loading)
+    })
+    .inner
+}
+
+fn snapshot_content(
     ui: &mut Ui,
     intl: &Intl,
     snapshot: &DeviceSnapshot,
@@ -182,26 +201,53 @@ pub fn show_snapshot(
             icon: snapshot_icon(snapshot),
         },
     );
-    if snapshot.inspection != InspectionState::Ready || snapshot.storages.is_empty() {
-        return None;
+    if let Some(report) = &snapshot.report {
+        inspection::show(ui, intl, report);
     }
-    ui.add_space(20.0);
-    let browse = if browser_loading {
-        format_message!(intl, default_message: "Reading files…")
-    } else {
-        format_message!(intl, default_message: "Browse files")
-    };
-    let response = button::Props {
-        label: &browse,
-        icon: Some(icons::FOLDER_OPEN),
-        kind: button::Kind::Secondary,
-        size: Size::Medium,
-        width: button::Width::Fit,
-        enabled: !browser_loading,
-    }
-    .show(ui);
-    crate::semantics::target(ui, &response, "device.files");
-    response.clicked().then_some(Action::BrowseFiles)
+    controls(ui, intl, snapshot, browser_loading)
+}
+
+fn controls(
+    ui: &mut Ui,
+    intl: &Intl,
+    snapshot: &DeviceSnapshot,
+    browser_loading: bool,
+) -> Option<Action> {
+    ui.horizontal_wrapped(|ui| {
+        let refresh = button::Props {
+            label: &format_message!(intl, default_message: "Refresh"),
+            icon: None,
+            kind: button::Kind::Secondary,
+            size: Size::Medium,
+            width: button::Width::Fit,
+            enabled: snapshot.inspection != InspectionState::Running,
+        }
+        .show(ui);
+        crate::semantics::target(ui, &refresh, "device.refresh");
+        let mut action = refresh.clicked().then_some(Action::Refresh);
+        if !snapshot.storages.is_empty() {
+            let browse = if browser_loading {
+                format_message!(intl, default_message: "Reading files…")
+            } else {
+                format_message!(intl, default_message: "Browse files")
+            };
+            let response = button::Props {
+                label: &browse,
+                icon: Some(icons::FOLDER_OPEN),
+                kind: button::Kind::Secondary,
+                size: Size::Medium,
+                width: button::Width::Fit,
+                enabled: !browser_loading,
+            }
+            .show(ui);
+            crate::semantics::target(ui, &response, "device.files");
+            if response.clicked() {
+                action = Some(Action::BrowseFiles);
+            }
+        }
+        action
+    })
+    .inner
 }
 
 #[must_use]
@@ -241,12 +287,15 @@ impl SnapshotView {
                 .software_version
                 .map(|value| format!("{}.{:02}", value / 100, value % 100)),
             status: match snapshot.inspection {
+                InspectionState::Running if snapshot.report.is_some() => {
+                    format_message!(intl, default_message: "Refreshing…")
+                }
                 InspectionState::Running => {
                     format_message!(intl, default_message: "Inspecting…")
                 }
                 InspectionState::Ready => format_message!(intl, default_message: "Ready"),
                 InspectionState::Failed => {
-                    format_message!(intl, default_message: "Inspection failed")
+                    format_message!(intl, default_message: "Some device information is unavailable")
                 }
             },
             status_label: format_message!(intl, default_message: "Status"),
@@ -366,13 +415,6 @@ impl StorageView {
     }
 }
 
-fn format_bytes(bytes: u64) -> String {
-    format!(
-        "{:.2}",
-        byte_unit::Byte::from_u64(bytes).get_appropriate_unit(byte_unit::UnitType::Decimal)
-    )
-}
-
 fn metadata(ui: &mut Ui, label: &str, value: &str) {
     let palette = crate::theme::palette(ui);
     ui.label(
@@ -382,6 +424,14 @@ fn metadata(ui: &mut Ui, label: &str, value: &str) {
     );
     ui.label(value);
     ui.add_space(8.0);
+}
+
+fn summary_row(ui: &mut Ui, label: &str, value: &str) {
+    let palette = crate::theme::palette(ui);
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(label).color(palette.content().text_secondary().into_cint()));
+        ui.label(value);
+    });
 }
 
 fn inspection_error(ui: &mut Ui, label: &str, value: &str) {
