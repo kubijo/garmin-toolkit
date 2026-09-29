@@ -274,7 +274,12 @@ impl DeviceRead for DirectoryDevice {
         if metadata.len() > limit {
             return Err(DeviceIoError::LimitExceeded(path.to_string()));
         }
-        let bytes = tokio::fs::read(resolved).await?;
+        let mut bytes = Vec::new();
+        tokio::fs::File::open(resolved)
+            .await?
+            .take(limit.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .await?;
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
             return Err(DeviceIoError::LimitExceeded(path.to_string()));
         }

@@ -23,13 +23,16 @@ pub struct Props<'a> {
     pub label: &'a str,
     pub detail: Option<&'a str>,
     pub value: Value,
+    /// Bar height in logical pixels. Defaults to 4 px.
+    pub height: Option<f32>,
 }
 
-/// Renders a thin operation progress bar.
+/// Renders operation progress at the requested height using the current track styling.
 pub fn show(ui: &mut Ui, props: &Props<'_>) {
     let palette = crate::theme::palette(ui);
+    let height = props.height.unwrap_or(4.0);
     ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.y = 6.0;
+        ui.spacing_mut().item_spacing.y = 8.0;
         ui.add(
             egui::Label::new(
                 RichText::new(props.label).color(palette.content().text_primary().into_cint()),
@@ -37,7 +40,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
             .selectable(false),
         );
         match props.value {
-            Value::Indeterminate => indeterminate(ui, palette),
+            Value::Indeterminate => indeterminate(ui, palette, height),
             Value::Determinate { completed, total } => {
                 let fraction = if total == 0 {
                     1.0
@@ -46,7 +49,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
                 };
                 ui.add(
                     widget_theme::progress_bar(fraction, palette.interaction().interactive())
-                        .desired_height(4.0)
+                        .desired_height(height)
                         .corner_radius(egui::CornerRadius::ZERO),
                 );
             }
@@ -64,9 +67,9 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
     });
 }
 
-fn indeterminate(ui: &mut Ui, palette: &garmin_color::theme::Theme) {
+fn indeterminate(ui: &mut Ui, palette: &garmin_color::theme::Theme, height: f32) {
     let width = ui.available_width().max(0.0);
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 4.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
     response.widget_info(|| egui::WidgetInfo::new(egui::WidgetType::ProgressIndicator));
     ui.painter().rect_filled(
         rect,

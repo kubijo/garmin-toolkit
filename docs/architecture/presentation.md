@@ -12,6 +12,12 @@ type, interaction, and verification rules. External applications are observation
 Profiles may store an accent and avatar. Import bounds content-detected PNG, JPEG, or WebP at 10 MiB and 4096 pixels per
 edge, retains the original, and derives a 256-pixel PNG thumbnail. These fields affect presentation only.
 
+Profile settings uses an egui-elegance color-picker popover with internal preset swatches, recent colors, a continuous
+selector, alpha slider, and hex entry. The profile circle previews the draft color immediately. Apply persists the
+chosen RGBA color; reset restores the default. Both clients preserve the profile's other settings. Avatar markers
+resolve the saved color against the current surface to maintain at least 3:1 contrast in both themes; text keeps
+semantic colors.
+
 `garmin-ui` owns component geometry, semantic color use, typed props and actions, and a curated Phosphor/local icon
 catalog. Inputs inherit their surface layer. Modals may block the viewport or remain parent-contained; callers control
 backdrop dismissal.
@@ -19,11 +25,18 @@ backdrop dismissal.
 The UI embeds hinted Noto Sans 2.015 Regular and SemiBold. Named egui families carry weight because egui lacks a
 font-weight field.
 
+Use `typography::body(ui, text)` for explanatory prose: regular 14 px type, 20 px line height, secondary text color, and
+balanced two-line wrapping when it fits. Longer paragraphs wrap naturally. The helper returns an egui response and keeps
+its style local. For composition inside another widget, `typography::body_text(text)` returns `RichText` with the same
+type metrics and inherits the widget's color. `typography::semibold(text)` selects the real semibold face for inline
+emphasis. Callers own the spacing between paragraphs, headings, and controls.
+
 The [activity workspace](activity-map.md) lazily loads recording details and links map, charts, laps, and playback
 through one sample cursor. Online vector tiles use a bounded preparation and rendering pipeline. Desktop runs
-application services on a worker thread and accepts native selection or file drops. Demo recreates an isolated database
-and seeds it through the production importer. The [device explorer](device-explorer.md) reuses the viewer for FIT
-previews.
+application services on a worker thread and accepts native selection or file drops. Database jobs and results carry a
+deployment epoch; restore discards results from the old database. Demo seeds an isolated deployment once through the
+production importer and preserves it across restarts. The [device explorer](device-explorer.md) reuses the viewer for
+FIT previews.
 
 The borderless shell owns drag space and window controls; the compositor moves and resizes. Close and `Ctrl+Q` exit;
 `Ctrl+W` does nothing. Active work is named before aborting, and shutdown waits between atomic imports.
@@ -65,6 +78,12 @@ typed actions as the visible interface; right-click is never the sole route to a
 same menu with the platform context-menu key or `Shift+F10`. Native window-titlebar secondary-click behavior remains
 owned by the operating system where supported.
 
+File browsers and server file choosers hide dot-prefixed entries in both the tree and file list by default. The
+toolbar's Show/Hide hidden files toggle saves to the active profile and follows it across windows and restarts. It is a
+display preference, not an access restriction.
+
 `garmin-i18n` wraps FormatJS. English ICU messages live beside call sites as fallback; Czech source, translation, and
-context compile into a flat catalog. Checks reject stale, missing, empty, extra, malformed, or incompatible messages.
-That proves catalog completeness, not how much visible copy uses FormatJS. Gallery scenes expose both languages.
+context in `translations/cs.json` compile into a flat catalog in Cargo's `OUT_DIR` using the pinned FormatJS CLI during
+the crate build. Generated catalogs are not tracked. `just dev::i18n-sync` updates editable translation metadata; checks
+reject stale, missing, empty, extra, malformed, or incompatible messages. That proves catalog completeness, not how much
+visible copy uses FormatJS. Gallery scenes expose both languages.

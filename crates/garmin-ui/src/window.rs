@@ -2,8 +2,10 @@
 use egui::{Context, Ui};
 use serde::{Deserialize, Serialize};
 
+mod inline;
 mod native;
-pub use native::{NativeWindow, surface};
+pub use inline::InlineWindow;
+pub use native::{NativeWindow, frame, surface};
 mod resize;
 pub use resize::resize;
 #[cfg(any(feature = "automation", test))]

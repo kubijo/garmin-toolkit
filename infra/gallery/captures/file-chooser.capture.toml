@@ -1,0 +1,56 @@
+out = "../../../.tmp/gallery/file-chooser"
+size = "1000x720"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "save"
+scene = "chooser::Save destination"
+
+[[shot]]
+name = "hidden-files"
+scene = "chooser::Open file"
+[shot.knobs]
+"hidden files" = true
+
+[[shot]]
+name = "open-light-czech"
+scene = "chooser::Open file"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+mode = "open"
+
+[[shot]]
+name = "loading"
+scene = "chooser::Save destination"
+settle = false
+frames = 8
+[shot.knobs]
+mode = "loading"
+
+[[shot]]
+name = "loading-light-czech-narrow"
+scene = "chooser::Open file"
+settle = false
+frames = 8
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+mode = "loading"
+width = 360
+
+[[shot]]
+name = "error"
+scene = "chooser::Save destination"
+[shot.knobs]
+mode = "error"
+
+[[shot]]
+name = "narrow"
+scene = "chooser::Save destination"
+[shot.knobs]
+width = 360

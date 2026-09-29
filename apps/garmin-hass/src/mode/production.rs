@@ -1,4 +1,4 @@
-use super::{DataError, Path, PathBuf, Storage};
+use super::{Arc, DataError, Deployment, Path, PathBuf};
 
 pub const DEPLOYMENT_MODE: garmin_service_api::DeploymentMode =
     garmin_service_api::DeploymentMode::Production;
@@ -9,8 +9,8 @@ pub fn data_root(base: &Path) -> PathBuf {
     base.to_owned()
 }
 
-pub async fn open_storage(database: PathBuf) -> Result<Storage, DataError> {
-    Storage::open(database).await.map_err(DataError::Storage)
+pub async fn open(root: &Path) -> Result<Arc<Deployment>, DataError> {
+    Deployment::open(root).await.map_err(DataError::Deployment)
 }
 
 #[cfg(test)]

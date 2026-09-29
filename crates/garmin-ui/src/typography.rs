@@ -2,7 +2,10 @@
 
 use std::sync::{Arc, LazyLock};
 
-use egui::{FontDefinitions, FontFamily, FontId, RichText, Style, TextStyle};
+use egui::{FontDefinitions, FontFamily, FontId, Response, RichText, Style, TextStyle, Ui};
+
+const BODY_SIZE: f32 = 14.0;
+const BODY_LINE_HEIGHT: f32 = 20.0;
 
 const REGULAR_DATA: &str = "NotoSans-Regular";
 const SEMIBOLD_DATA: &str = "NotoSans-SemiBold";
@@ -38,6 +41,30 @@ pub fn font(size: f32, weight: Weight) -> FontId {
 #[must_use]
 pub fn semibold(text: impl Into<String>) -> RichText {
     RichText::new(text).family(Weight::SemiBold.family())
+}
+
+/// Regular body typography for composition inside another widget (14 px / 20 px).
+/// Inherits the widget's text color; use [`body`] for a complete explanatory paragraph.
+#[must_use]
+pub fn body_text(text: impl Into<String>) -> RichText {
+    RichText::new(text)
+        .font(font(BODY_SIZE, Weight::Regular))
+        .line_height(Some(BODY_LINE_HEIGHT))
+}
+
+/// Render explanatory prose with the secondary text color and balanced wrapping.
+/// Balances two-line paragraphs when possible; longer paragraphs wrap normally.
+/// Returns the label response and leaves surrounding typography and spacing unchanged.
+pub fn body(ui: &mut Ui, text: &str) -> Response {
+    ui.scope(|ui| {
+        ui.style_mut()
+            .text_styles
+            .insert(TextStyle::Body, font(BODY_SIZE, Weight::Regular));
+        let text = crate::text::balanced(ui, text, &TextStyle::Body, false);
+        let color = crate::theme::color32(crate::theme::palette(ui).content().text_secondary());
+        ui.add(egui::Label::new(body_text(text.as_ref()).color(color)).wrap())
+    })
+    .inner
 }
 
 pub(crate) fn install(ctx: &egui::Context) {

@@ -70,6 +70,7 @@ let
           build = import ./packages.nix {
             inherit
               crane
+              formatjsCli
               lib
               pkgs
               system
@@ -96,6 +97,7 @@ let
           desktopTarget = desktop.lib.mkTarget {
             inherit
               brandAssets
+              formatjsCli
               system
               toolchain
               ;
@@ -104,6 +106,7 @@ let
           };
           galleryTarget = gallery.lib.mkTool {
             inherit
+              formatjsCli
               system
               toolchain
               ;
@@ -113,6 +116,7 @@ let
           hassTarget = hass.lib.mkTarget {
             inherit
               brandAssets
+              formatjsCli
               system
               toolchain
               wasmToolchain
@@ -156,6 +160,7 @@ let
             garmin-hass-demo = hassTarget.demoPackage;
             garmin-cli = build.garminCli;
             gallery = galleryTarget.package;
+            formatjs-cli = formatjsCli;
             default = build.garminCli;
           };
 
@@ -218,6 +223,7 @@ let
                     ++ galleryTarget.runtimeLibraries
                     ++ [
                       pkgs.bash
+                      formatjsCli
                       pkgs.cmake
                       pkgs.cargo-deny
                       pkgs.cargo-llvm-cov

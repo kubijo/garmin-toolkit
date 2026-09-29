@@ -330,6 +330,7 @@ pub struct MtpStorageDevice {
     target: Option<String>,
     keys: Vec<String>,
     primary: String,
+    physical_ids: bool,
 }
 
 impl MtpStorageDevice {
@@ -340,7 +341,33 @@ impl MtpStorageDevice {
             target,
             keys,
             primary,
+            physical_ids: false,
         }
+    }
+
+    /// Enumerates storage IDs without requiring a readable Garmin manifest.
+    /// # Errors
+    /// The selected transport or its storage metadata is unavailable.
+    pub async fn discover(location: u64) -> Result<Self, DeviceIoError> {
+        let device = crate::mtp::open_raw_mtp(location).await?;
+        let result = device
+            .storages()
+            .await
+            .map(|storages| {
+                let keys = storages
+                    .iter()
+                    .map(|storage| format!("{:016x}", storage.id().0))
+                    .collect::<Vec<_>>();
+                Self {
+                    location,
+                    target: None,
+                    primary: keys.first().cloned().unwrap_or_default(),
+                    keys,
+                    physical_ids: true,
+                }
+            })
+            .map_err(DeviceIoError::from);
+        finish(device, result).await
     }
 
     async fn connect(&self) -> Result<MtpDevice, DeviceIoError> {
@@ -348,6 +375,14 @@ impl MtpStorageDevice {
     }
 
     async fn storage(&self, device: &MtpDevice, key: &str) -> Result<Storage, DeviceIoError> {
+        if self.physical_ids {
+            return device
+                .storages()
+                .await?
+                .into_iter()
+                .find(|storage| format!("{:016x}", storage.id().0) == key)
+                .ok_or_else(|| DeviceIoError::Storage(key.to_owned()));
+        }
         let index = self
             .keys
             .iter()

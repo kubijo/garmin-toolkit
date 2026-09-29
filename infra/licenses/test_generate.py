@@ -10,7 +10,7 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
-from generate import bundle_document, expanded_entries, main, resolve_linked
+from generate import bundle_document, expanded_entries, generate, main, resolve_linked
 
 
 class LicenseGenerationTests(unittest.TestCase):
@@ -99,6 +99,42 @@ run_json([sys.executable, '-c', 'import sys; print("Cargo diagnostic", file=sys.
         self.assertEqual(bundle['license_texts'], ['same'])
         self.assertEqual([entry['name'] for entry in bundle['entries']], ['a', 'b'])
         self.assertTrue(all(entry['notices'][0]['text_index'] == 0 for entry in bundle['entries']))
+
+    def test_bundle_includes_shipped_web_client_dependencies(self) -> None:
+        config = {
+            'assets': [],
+            'targets': [
+                {
+                    'name': 'hass',
+                    'package': 'server',
+                    'triples': ['native'],
+                    'bundled': [{'package': 'web', 'triples': ['wasm']}],
+                }
+            ],
+        }
+        cargo = {
+            (name, '1'): {
+                'name': name,
+                'version': '1',
+                'license': 'MIT',
+                'notices': [{'license': 'MIT', 'text': name}],
+                'source': {'kind': 'cargo'},
+            }
+            for name in ('server-dep', 'picker')
+        }
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch('generate.harvested_entries', return_value=cargo),
+            patch('generate.cargo_metadata', side_effect=lambda triple: triple),
+            patch(
+                'generate.resolve_linked', side_effect=[{('server-dep', '1'): True}, {('picker', '1'): True}]
+            ) as resolve,
+        ):
+            output = Path(directory)
+            generate(config, output)
+            self.assertEqual(resolve.call_args_list[0].args, ('native', 'server'))
+            self.assertEqual(resolve.call_args_list[1].args, ('wasm', 'web'))
+            self.assertEqual(set(expanded_entries(output / 'bundle-hass.json')), {'server-dep 1', 'picker 1'})
 
     @staticmethod
     def package(name: str, source: str | None, kinds: list[str]) -> dict[str, object]:

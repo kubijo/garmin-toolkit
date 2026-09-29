@@ -14,9 +14,12 @@ Contracts live in [application windows](../architecture/application-windows.md),
 4. Report mutations through persistent notifications.
 5. Prove offline sync, visualization, export, cross-target snapshot/restore, and one confirmed upload on both clients.
 6. Audit keyboard navigation, focus, modal trapping, and reconnect recovery. Require licensed artwork and attribution.
-7. **Add the missing profile accent-color chooser.** Persist the existing accent field; test switching/restart,
-   accessibility, and both themes.
+7. **Profile accent-color chooser implemented.** Presets, custom hex, reset, persistence, profile isolation, and theme
+   contrast have automated coverage. Confirm live switching and restart on rebuilt clients.
 8. Restore browser Ctrl+wheel zoom over the HASS canvas. Vivaldi menu zoom works; Ctrl+wheel currently has no effect.
+9. **Deferred: headless color picker.** Fork `egui-elegance` to separate picker state and interaction logic from
+   rendering. Let the application own layout, typography, semantic colors, border radii (including zero), and localized
+   labels. Keep the current picker unchanged until that work is undertaken.
 
 ## Runtime acceptance
 

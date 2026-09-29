@@ -1,5 +1,10 @@
 # Device explorer
 
+Click the empty area of the breadcrumb bar, or press Ctrl+L (Cmd+L on macOS), to enter a folder path. Enter navigates;
+Escape or leaving the field restores breadcrumbs. Absolute paths start at the current storage root; relative paths, `.`
+and `..` resolve from the current folder. The same location bar serves server backup choosers, including folders that
+have not yet been visited. Invalid paths show an error without performing a file operation.
+
 The mounted-device explorer uses the [shared window host](application-windows.md): a native secondary viewport on
 desktop and an independent browser popup in HASS. The shared Rust/egui explorer fills that window; it is not a system
 file picker. It stays open when the main app navigates away from the device page. Its identity, navigation, and close

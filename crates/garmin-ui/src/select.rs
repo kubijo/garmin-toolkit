@@ -115,14 +115,14 @@ pub fn show(
             open,
         );
         let mut changed = false;
+        let mut menu_style = ui.style().as_ref().clone();
+        menu_style.spacing.menu_margin = MENU_MARGIN;
+        menu_style.spacing.item_spacing.y = MENU_ITEM_GAP;
+        menu_style.visuals.menu_corner_radius = MENU_RADIUS;
         let _ = Popup::menu(&response)
             .id(popup_id)
             .width(response.rect.width())
-            .style(egui::style::StyleModifier::new(|style| {
-                style.spacing.menu_margin = MENU_MARGIN;
-                style.spacing.item_spacing.y = MENU_ITEM_GAP;
-                style.visuals.menu_corner_radius = MENU_RADIUS;
-            }))
+            .style(menu_style)
             .show(|ui| {
                 ui.set_min_width(response.rect.width());
                 ScrollArea::vertical()
@@ -178,12 +178,22 @@ fn control(
     } else {
         ui.style().interact(&response)
     };
-    ui.painter().rect(
-        rect,
-        CONTROL_RADIUS,
-        visuals.weak_bg_fill,
-        visuals.bg_stroke,
-        egui::StrokeKind::Inside,
+    ui.painter()
+        .rect_filled(rect, CONTROL_RADIUS, visuals.bg_fill);
+    let palette = crate::theme::palette(ui);
+    let focused = response.has_focus() || open;
+    let border = if !ui.is_enabled() {
+        palette.borders().subtle()
+    } else if focused {
+        palette.borders().interactive()
+    } else {
+        palette.borders().strong()
+    };
+    let border_width = if focused { 2.0 } else { 1.0 };
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - border_width / 2.0,
+        egui::Stroke::new(border_width, color32(border)),
     );
     if let Some(choice) = choice {
         paint_choice(ui, rect, choice, visuals.fg_stroke.color);

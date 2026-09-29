@@ -1,0 +1,61 @@
+out = "../../../.tmp/gallery/backup-recovery"
+size = "900x720"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "review"
+scene = "recovery::Playground"
+
+[[shot]]
+name = "review-light-czech-narrow"
+scene = "recovery::Playground"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+width = 288
+
+[[shot]]
+name = "interrupted-upload"
+scene = "recovery::Playground"
+[shot.knobs]
+state = "upload"
+width = 320
+
+[[shot]]
+name = "active"
+scene = "recovery::Playground"
+[shot.knobs]
+state = "active"
+
+[[shot]]
+name = "restoring"
+scene = "recovery::Playground"
+[shot.knobs]
+state = "restoring"
+
+[[shot]]
+name = "saved"
+scene = "recovery::Playground"
+[shot.knobs]
+state = "saved"
+
+[[shot]]
+name = "loading"
+scene = "recovery::Playground"
+settle = false
+frames = 8
+[shot.knobs]
+state = "loading"
+
+[[shot]]
+name = "error"
+scene = "recovery::Playground"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+state = "error"
+width = 320

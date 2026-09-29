@@ -11,6 +11,7 @@ use wasm_bindgen::prelude::*;
 pub struct BrowserWindow<C, S> {
     session: Option<Session<C, S>>,
     error: Option<String>,
+    inline: garmin_ui::window::InlineWindow,
 }
 
 struct Session<C, S> {
@@ -43,6 +44,7 @@ impl<C, S> Default for BrowserWindow<C, S> {
         Self {
             session: None,
             error: None,
+            inline: garmin_ui::window::InlineWindow::default(),
         }
     }
 }
@@ -50,6 +52,15 @@ impl<C, S> Default for BrowserWindow<C, S> {
 impl<C: Serialize + DeserializeOwned + 'static, S: Serialize + DeserializeOwned + 'static>
     BrowserWindow<C, S>
 {
+    pub fn open_inline(&mut self, context: &Context, spec: Spec) {
+        self.close(context);
+        self.inline.open(context, spec);
+    }
+
+    pub fn is_inline(&self) -> bool {
+        self.inline.is_open()
+    }
+
     fn launch(&mut self, tab: bool) -> Result<(), String> {
         let session = self.session.as_mut().ok_or("No window session")?;
         if let Some(window) = &session.window
@@ -142,6 +153,7 @@ impl<C: Serialize + DeserializeOwned + 'static, S: Serialize + DeserializeOwned 
     }
 
     fn close(&mut self, _context: &Context) {
+        self.inline.close();
         if let Some(session) = self.session.take()
             && let Some(window) = &session.window
         {
@@ -151,16 +163,19 @@ impl<C: Serialize + DeserializeOwned + 'static, S: Serialize + DeserializeOwned 
     }
 
     fn is_open(&self) -> bool {
-        self.session.is_some()
+        self.session.is_some() || self.inline.is_open()
     }
 
     fn present(
         &mut self,
         context: &Context,
-        _intl: &garmin_i18n::Intl,
+        intl: &garmin_i18n::Intl,
         snapshot: impl FnOnce() -> S,
-        _render: impl FnMut(&mut Ui) -> Option<C>,
+        render: impl FnMut(&mut Ui) -> Option<C>,
     ) -> Vec<Event<C>> {
+        if self.inline.is_open() {
+            return self.inline.present(context, intl, render);
+        }
         self.show_error(context);
         let Some(session) = &self.session else {
             return Vec::new();
@@ -263,6 +278,7 @@ pub fn start_if_requested(canvas: &web_sys::HtmlCanvasElement) -> Result<bool, J
     let title = match kind.as_str() {
         "developer-tools" => "Developer tools · Garmin Toolkit",
         "device-files" => "Device files · Garmin Toolkit",
+        "backup-chooser" => "Backup files · Garmin Toolkit",
         _ => return Err(JsValue::from_str("Unknown window kind")),
     };
     if let Some(document) = window.document() {
@@ -286,6 +302,10 @@ pub fn start_if_requested(canvas: &web_sys::HtmlCanvasElement) -> Result<bool, J
                         "developer-tools" => {
                             crate::developer::popup::create(creation.egui_ctx.clone(), &session)
                         }
+                        "backup-chooser" => crate::backup::chooser::popup::create(
+                            creation.egui_ctx.clone(),
+                            &session,
+                        ),
                         _ => crate::files::popup::create(creation.egui_ctx.clone(), &session),
                     }
                     .map_err(std::io::Error::other)?;

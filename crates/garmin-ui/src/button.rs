@@ -103,7 +103,7 @@ where
     row(ui, choices.len(), props.width, |ui, index| {
         let choice = &choices[index];
         let is_selected = choice.value == selected;
-        let clicked = Props {
+        let button = Props {
             label: choice.label,
             icon: Some(choice.icon),
             kind: if is_selected {
@@ -114,9 +114,12 @@ where
             size: props.size,
             width: props.width,
             enabled: props.enabled && choice.enabled,
+        };
+        if props.width == Width::Fit && button.natural_width(ui) > ui.available_size_before_wrap().x
+        {
+            ui.end_row();
         }
-        .show(ui)
-        .clicked();
+        let clicked = button.show(ui).clicked();
         (clicked && !is_selected).then_some(choice.value)
     })
 }
@@ -140,14 +143,31 @@ pub(crate) fn row<T>(
                     .fold(None, |action, (index, ui)| show(ui, index).or(action))
             })
         } else {
-            ui.horizontal(|ui| (0..count).fold(None, |action, index| show(ui, index).or(action)))
-                .inner
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+            ui.horizontal_wrapped(|ui| {
+                (0..count).fold(None, |action, index| show(ui, index).or(action))
+            })
+            .inner
         }
     })
     .inner
 }
 
 impl Props<'_> {
+    pub(crate) fn natural_width(self, ui: &Ui) -> f32 {
+        let metrics = metrics(self.size);
+        let text = egui::WidgetText::from(RichText::new(self.label).size(metrics.font_size))
+            .into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Button,
+            );
+        text.size().x
+            + metrics.horizontal_padding * 2.0
+            + self.icon.map_or(0.0, |_| metrics.icon_size + metrics.gap)
+    }
+
     /// Renders the button.
     pub fn show(self, ui: &mut Ui) -> Response {
         let states = self.kind.states(ui);
@@ -205,7 +225,7 @@ impl Props<'_> {
                 ))
                 .corner_radius(CONTROL_RADIUS);
 
-            ui.add_enabled(self.enabled, button)
+            interaction_cursor(ui.add_enabled(self.enabled, button))
         })
         .inner
     }
@@ -268,8 +288,15 @@ impl IconProps<'_> {
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, self.enabled, self.label)
         });
-        response.on_hover_text(self.label)
+        interaction_cursor(response).on_hover_text(self.label)
     }
+}
+
+pub(crate) fn interaction_cursor(response: Response) -> Response {
+    if !response.enabled() && response.contains_pointer() {
+        response.ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 const fn icon_button_size(size: Size) -> f32 {

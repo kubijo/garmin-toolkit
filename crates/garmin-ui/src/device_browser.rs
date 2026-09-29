@@ -19,6 +19,11 @@ use garmin_service_api::{
 
 use crate::{Size, button, header_selector, icons, input, modal, theme::color32};
 
+pub mod chooser;
+mod path;
+mod view_state;
+pub use view_state::ViewState;
+
 const TREE_WIDTH: f32 = 200.0;
 const DETAILS_WIDTH: f32 = 248.0;
 const COMPACT_LAYOUT_WIDTH: f32 = 760.0;
@@ -131,9 +136,10 @@ pub enum Action {
     Remove(Selection),
     /// Reload the device catalogue while preserving the current directory and selection.
     Refresh,
+    ShowHiddenFiles(bool),
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
 struct DirectoryId {
     storage_index: usize,
     path: Utf8PathBuf,
@@ -288,6 +294,7 @@ enum EntryInteraction {
     Context { index: usize, action: ItemAction },
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct CreateDirectoryDialog {
     parent: Selection,
     name: String,
@@ -306,7 +313,7 @@ enum PaneSurface {
     Sidebar,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
 enum CompactPane {
     Storage,
     Details,
@@ -330,6 +337,8 @@ struct PathHeaderProps<'a> {
     back_label: &'a str,
     forward_label: &'a str,
     refresh_label: &'a str,
+    hidden_label: &'a str,
+    show_hidden_files: bool,
     can_go_back: bool,
     can_go_forward: bool,
     compact_controls: Option<(&'a str, &'a str, Option<CompactPane>)>,
@@ -350,6 +359,9 @@ pub struct Browser {
     pending_removal: Option<Selection>,
     compact_pane: Option<CompactPane>,
     window_position: Option<egui::Pos2>,
+    show_hidden_files: bool,
+    path_editor: path::Editor,
+    remote_directories: bool,
 }
 
 impl Browser {
@@ -367,13 +379,17 @@ impl Browser {
         for storage in &mut catalog.storages {
             storage.entries.sort_by(compare_entries);
         }
+        Ok(Self::from_catalog(catalog, device_name))
+    }
+
+    fn from_catalog(catalog: DeviceCatalogSnapshot, device_name: &str) -> Self {
         let current = DirectoryId {
             storage_index: 0,
             path: Utf8PathBuf::new(),
         };
         let mut tree_state = TreeViewState::default();
         tree_state.set_one_selected(current.clone());
-        Ok(Self {
+        Self {
             catalog,
             device_name: device_name.to_owned(),
             current,
@@ -385,7 +401,10 @@ impl Browser {
             pending_removal: None,
             compact_pane: None,
             window_position: None,
-        })
+            show_hidden_files: false,
+            path_editor: path::Editor::default(),
+            remote_directories: false,
+        }
     }
 
     /// Open an embedded explorer at a validated directory in one catalog storage.
@@ -427,6 +446,18 @@ impl Browser {
     #[must_use]
     pub fn device_key(&self) -> &str {
         &self.catalog.device_key
+    }
+
+    pub fn set_show_hidden_files(&mut self, show: bool) {
+        self.show_hidden_files = show;
+        if !show
+            && self
+                .selected
+                .as_ref()
+                .is_some_and(|entry| is_hidden(&entry.path))
+        {
+            self.selected = None;
+        }
     }
 
     /// Current validated catalogue for a secondary window snapshot.
@@ -774,7 +805,7 @@ impl Browser {
                 ui.visuals_mut().widgets.inactive.fg_stroke.width = 0.0;
                 let (_, actions) = tree.show_state(ui, &mut self.tree_state, |builder| {
                     for (storage_index, storage) in catalog.storages.iter().enumerate() {
-                        show_storage_tree(builder, storage_index, storage);
+                        show_storage_tree(builder, storage_index, storage, self.show_hidden_files);
                     }
                 });
                 (bookmark_target, actions)
@@ -812,6 +843,7 @@ impl Browser {
             .entries
             .iter()
             .filter(|entry| parent_path(&entry.path) == self.current.path)
+            .filter(|entry| self.show_hidden_files || !is_hidden(&entry.path))
             .cloned()
             .collect::<Vec<_>>();
 
@@ -835,15 +867,7 @@ impl Browser {
             .then(|| keyboard_move.map(|movement| moved_row_index(&rows, selected_path, movement)))
             .flatten();
         let keyboard_context = requested_context_menu(ui, table_id);
-        let background_rect = ui.available_rect_before_wrap().intersect(ui.clip_rect());
-        let background = ui.interact(background_rect, table_id, Sense::click());
-        background.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::WidgetType::Other,
-                true,
-                format_message!(intl, default_message: "Current directory contents"),
-            )
-        });
+        let background = entry_table_background(ui, intl, self.device_key());
         let interaction = if rows.is_empty() {
             ui.centered_and_justified(|ui| {
                 ui.label(format_message!(intl, default_message: "This folder is empty"));
@@ -857,7 +881,7 @@ impl Browser {
                 &rows,
                 selected_path,
                 keyboard_index,
-                keyboard_context,
+                Some(keyboard_context),
             )
         };
 
@@ -1092,11 +1116,14 @@ impl Browser {
         window_drag_delta: Option<&Cell<egui::Vec2>>,
     ) -> Option<Action> {
         let storage_index = self.current.storage_index;
-        let storage_label = self.catalog.storages[storage_index].label.clone();
-        let current_path = self.current.path.clone();
         let back_label = format_message!(intl, default_message: "Back");
         let forward_label = format_message!(intl, default_message: "Forward");
         let refresh_label = format_message!(intl, default_message: "Refresh");
+        let hidden_label = if self.show_hidden_files {
+            format_message!(intl, default_message: "Hide hidden files")
+        } else {
+            format_message!(intl, default_message: "Show hidden files")
+        };
         let storage_control_label = format_message!(intl, default_message: "Storage");
         let details_control_label = format_message!(intl, default_message: "Details");
         let mut target = None;
@@ -1106,6 +1133,8 @@ impl Browser {
                 back_label: &back_label,
                 forward_label: &forward_label,
                 refresh_label: &refresh_label,
+                hidden_label: &hidden_label,
+                show_hidden_files: self.show_hidden_files,
                 can_go_back: !self.back_stack.is_empty(),
                 can_go_forward: !self.forward_stack.is_empty(),
                 compact_controls: compact.then_some((
@@ -1117,30 +1146,15 @@ impl Browser {
                 window_drag_delta,
             },
             |ui| {
-                let root = DirectoryId {
+                target = self.show_path(ui, intl).map(|path| DirectoryId {
                     storage_index,
-                    path: Utf8PathBuf::new(),
-                };
-                if breadcrumb(ui, current_path.as_str().is_empty(), storage_label).clicked() {
-                    target = Some(root);
-                }
-                let mut path = Utf8PathBuf::new();
-                for component in current_path
-                    .as_str()
-                    .split('/')
-                    .filter(|part| !part.is_empty())
-                {
-                    show_breadcrumb_separator(ui);
-                    path.push(component);
-                    if breadcrumb(ui, path == current_path, component).clicked() {
-                        target = Some(DirectoryId {
-                            storage_index,
-                            path: path.clone(),
-                        });
-                    }
-                }
+                    path,
+                });
             },
         );
+        if let Some(error) = &self.path_editor.error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
         if let Some(compact_pane) = compact_pane {
             self.compact_pane = (self.compact_pane != Some(compact_pane)).then_some(compact_pane);
         }
@@ -1152,6 +1166,9 @@ impl Browser {
                     self.navigate(&target);
                 }
             }
+        }
+        if let Some(Action::ShowHiddenFiles(show)) = action {
+            self.set_show_hidden_files(show);
         }
         action
     }
@@ -1305,6 +1322,7 @@ impl Browser {
     }
 
     fn set_current(&mut self, directory: DirectoryId) {
+        self.path_editor = path::Editor::default();
         self.current = directory;
         self.selected = None;
         self.tree_state.set_one_selected(self.current.clone());
@@ -1726,7 +1744,7 @@ fn path_header(
         None
     };
 
-    let (trailing_pane, close) = show_path_trailing_controls(ui, header_rect, props);
+    let (trailing_pane, action) = show_path_trailing_controls(ui, header_rect, props);
     compact_pane = compact_pane.or(trailing_pane);
 
     let content_rect = path_rect.shrink2(egui::vec2(BREADCRUMB_CONTENT_PADDING, 0.0));
@@ -1739,11 +1757,7 @@ fn path_header(
     child.spacing_mut().button_padding = egui::vec2(BREADCRUMB_ITEM_PADDING, 0.0);
     child.spacing_mut().interact_size.y = BREADCRUMB_HEIGHT;
     content(&mut child);
-    let action = if close {
-        Some(Action::Close)
-    } else {
-        refresh.then_some(Action::Refresh)
-    };
+    let action = action.or_else(|| refresh.then_some(Action::Refresh));
     (history_move, compact_pane, action)
 }
 
@@ -1751,7 +1765,30 @@ fn show_path_trailing_controls(
     ui: &mut Ui,
     header_rect: Rect,
     props: &PathHeaderProps<'_>,
-) -> (Option<CompactPane>, bool) {
+) -> (Option<CompactPane>, Option<Action>) {
+    let hidden_rect = Rect::from_min_size(
+        egui::pos2(header_rect.right() - BREADCRUMB_HEIGHT, header_rect.top()),
+        egui::Vec2::splat(BREADCRUMB_HEIGHT),
+    );
+    let hidden = path_icon_button(
+        ui,
+        hidden_rect,
+        "hidden",
+        props.hidden_label,
+        if props.show_hidden_files {
+            icons::EYE
+        } else {
+            icons::EYE_SLASH
+        },
+        props.show_hidden_files,
+    );
+    let header_rect = Rect::from_min_max(
+        header_rect.min,
+        egui::pos2(
+            hidden_rect.left() - PATH_NAVIGATION_ITEM_GAP,
+            header_rect.bottom(),
+        ),
+    );
     let close_rect = props.close_label.map(|_| {
         Rect::from_min_size(
             egui::pos2(header_rect.right() - BREADCRUMB_HEIGHT, header_rect.top()),
@@ -1763,8 +1800,13 @@ fn show_path_trailing_controls(
         .zip(close_rect)
         .is_some_and(|(label, rect)| path_icon_button(ui, rect, "close", label, icons::X, false));
 
+    let action = if close {
+        Some(Action::Close)
+    } else {
+        hidden.then_some(Action::ShowHiddenFiles(!props.show_hidden_files))
+    };
     let Some((_, details_label, active_pane)) = props.compact_controls else {
-        return (None, close);
+        return (None, action);
     };
     let right = close_rect.map_or(header_rect.right(), |rect| {
         rect.left() - PATH_NAVIGATION_ITEM_GAP
@@ -1781,7 +1823,7 @@ fn show_path_trailing_controls(
         icons::INFO,
         active_pane == Some(CompactPane::Details),
     );
-    (details.then_some(CompactPane::Details), close)
+    (details.then_some(CompactPane::Details), action)
 }
 
 fn path_header_rects(rect: Rect, compact: bool, close: bool) -> (Rect, Rect, Rect) {
@@ -1800,7 +1842,7 @@ fn path_header_rects(rect: Rect, compact: bool, close: bool) -> (Rect, Rect, Rec
             header.bottom(),
         ),
     );
-    let trailing_controls = u8::from(compact) + u8::from(close);
+    let trailing_controls = 1 + u8::from(compact) + u8::from(close);
     let trailing_width = match trailing_controls {
         0 => 0.0,
         count => {
@@ -1936,6 +1978,7 @@ fn show_storage_tree(
     builder: &mut egui_ltreeview::TreeViewBuilder<'_, DirectoryId>,
     storage_index: usize,
     storage: &DeviceCatalogStorage,
+    show_hidden: bool,
 ) {
     let root = DirectoryId {
         storage_index,
@@ -1951,7 +1994,13 @@ fn show_storage_tree(
             .drop_allowed(false),
     );
     if open {
-        show_directory_children(builder, storage_index, storage, Utf8Path::new(""));
+        show_directory_children(
+            builder,
+            storage_index,
+            storage,
+            Utf8Path::new(""),
+            show_hidden,
+        );
     }
     builder.close_dir();
 }
@@ -1961,9 +2010,12 @@ fn show_directory_children(
     storage_index: usize,
     storage: &DeviceCatalogStorage,
     parent: &Utf8Path,
+    show_hidden: bool,
 ) {
     for entry in storage.entries.iter().filter(|entry| {
-        entry.kind == DeviceCatalogEntryKind::Directory && parent_path(&entry.path) == parent
+        entry.kind == DeviceCatalogEntryKind::Directory
+            && parent_path(&entry.path) == parent
+            && (show_hidden || !is_hidden(&entry.path))
     }) {
         let toolkit_managed = path_is_toolkit_managed(&entry.path);
         let label = file_name(&entry.path).to_owned();
@@ -1991,7 +2043,7 @@ fn show_directory_children(
                 .drop_allowed(false),
         );
         if open {
-            show_directory_children(builder, storage_index, storage, &entry.path);
+            show_directory_children(builder, storage_index, storage, &entry.path, show_hidden);
         }
         builder.close_dir();
     }
@@ -2220,7 +2272,7 @@ fn show_selection_icon(ui: &mut Ui, selection: &Selection, size: f32) {
     if selection.kind == DeviceCatalogEntryKind::Directory && selection.is_toolkit_managed() {
         show_toolkit_icon(ui, size);
     } else {
-        show_entry_icon_for_kind(ui, selection.kind, selection.is_fit_file(), size);
+        show_entry_icon_for_kind(ui, selection.kind, &selection.path, size);
     }
 }
 
@@ -2229,9 +2281,7 @@ fn show_entry_icon(ui: &mut Ui, entry: &DeviceCatalogEntry) {
         show_toolkit_icon(ui, ICON_SIZE);
         return;
     }
-    let is_fit = entry.kind == DeviceCatalogEntryKind::File
-        && entry.path.as_str().to_ascii_lowercase().ends_with(".fit");
-    show_entry_icon_for_kind(ui, entry.kind, is_fit, ICON_SIZE);
+    show_entry_icon_for_kind(ui, entry.kind, &entry.path, ICON_SIZE);
 }
 
 fn show_toolkit_icon(ui: &mut Ui, size: f32) {
@@ -2244,10 +2294,19 @@ fn show_toolkit_icon(ui: &mut Ui, size: f32) {
     .show(ui);
 }
 
-fn show_entry_icon_for_kind(ui: &mut Ui, kind: DeviceCatalogEntryKind, is_fit: bool, size: f32) {
+fn show_entry_icon_for_kind(ui: &mut Ui, kind: DeviceCatalogEntryKind, path: &Utf8Path, size: f32) {
+    let extension = path.extension().unwrap_or_default();
+    let is_fit = extension.eq_ignore_ascii_case("fit");
     let icon = match kind {
         DeviceCatalogEntryKind::Directory => icons::FOLDER,
         DeviceCatalogEntryKind::File if is_fit => icons::ACTIVITY,
+        DeviceCatalogEntryKind::File
+            if ["zst", "zip", "tar", "gz", "xz", "bz2", "7z", "rar"]
+                .iter()
+                .any(|archive| extension.eq_ignore_ascii_case(archive)) =>
+        {
+            icons::FILE_ARCHIVE
+        }
         DeviceCatalogEntryKind::File => icons::FILE,
     };
     let palette = crate::theme::palette(ui);
@@ -2356,6 +2415,20 @@ fn show_tree_icon(ui: &Ui, icon: icons::Icon, hovered: bool, color: Option<Color
     );
 }
 
+fn entry_table_background(ui: &mut Ui, intl: &Intl, device_key: &str) -> egui::Response {
+    let rect = ui.available_rect_before_wrap().intersect(ui.clip_rect());
+    let id = Id::new(("device-explorer-entry-table", device_key));
+    let response = ui.interact(rect, id, Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Other,
+            ui.is_enabled(),
+            format_message!(intl, default_message: "Current directory contents"),
+        )
+    });
+    response
+}
+
 fn requested_table_movement(ui: &mut Ui, table_id: Id) -> Option<RowMove> {
     ui.memory_mut(|memory| {
         memory.set_focus_lock_filter(
@@ -2394,7 +2467,7 @@ fn show_entry_table(
     rows: &[DeviceCatalogEntry],
     selected_path: Option<&str>,
     keyboard_index: Option<usize>,
-    keyboard_context: bool,
+    keyboard_context: Option<bool>,
 ) -> Option<EntryInteraction> {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
@@ -2418,9 +2491,19 @@ fn show_entry_table_content(
     rows: &[DeviceCatalogEntry],
     selected_path: Option<&str>,
     keyboard_index: Option<usize>,
-    keyboard_context: bool,
+    keyboard_context: Option<bool>,
 ) -> Option<EntryInteraction> {
     let table_id = Id::new(("device-explorer-entry-table", device_key));
+    let activate = ui.memory(|memory| memory.has_focus(table_id))
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Enter));
+    let keyboard_index = keyboard_index.or_else(|| {
+        activate
+            .then(|| {
+                rows.iter()
+                    .position(|entry| selected_path == Some(entry.path.as_str()))
+            })
+            .flatten()
+    });
     let mut interaction = None;
     let mut request_focus = false;
     let mut row_responses = Vec::new();
@@ -2444,8 +2527,13 @@ fn show_entry_table_content(
         // A resizable remainder column keeps its initial width in `egui_extras`.
         // Keep the name column fluid so it follows every pane resize; the size
         // column remains the user-adjustable boundary.
-        .column(Column::remainder().at_least(180.0).resizable(false))
-        .column(Column::initial(100.0).at_least(72.0));
+        .column(
+            Column::remainder()
+                .at_least(80.0)
+                .clip(true)
+                .resizable(false),
+        )
+        .column(Column::initial(100.0).at_least(72.0).clip(true));
     if let Some(index) = keyboard_index {
         table = table.scroll_to_row(index, Some(egui::Align::Center));
     }
@@ -2482,7 +2570,7 @@ fn show_entry_table_content(
                         }
                         show_entry_icon(ui, entry);
                         ui.add_space(ENTRY_ICON_GAP);
-                        ui.label(file_name(&entry.path));
+                        ui.add(egui::Label::new(file_name(&entry.path)).truncate());
                     });
                 });
                 row.col(|ui| {
@@ -2506,12 +2594,7 @@ fn show_entry_table_content(
     if request_focus {
         ui.memory_mut(|memory| memory.request_focus(table_id));
     }
-    interaction.or_else(|| {
-        keyboard_index.map(|index| EntryInteraction::Select {
-            index,
-            activate: false,
-        })
-    })
+    interaction.or_else(|| keyboard_index.map(|index| EntryInteraction::Select { index, activate }))
 }
 
 fn entry_pointer_interaction(
@@ -2521,26 +2604,36 @@ fn entry_pointer_interaction(
     rows: &[DeviceCatalogEntry],
     row_responses: Vec<(usize, egui::Response)>,
     selected_path: Option<&str>,
-    keyboard_context: bool,
+    keyboard_context: Option<bool>,
 ) -> Option<EntryInteraction> {
     let mut interaction = None;
     for (index, response) in row_responses {
         let entry = &rows[index];
-        let context_action = show_context_menu(
-            ui,
-            &response,
-            Id::new(("device-explorer-entry-menu", device_key, &entry.path)),
-            &Selection {
-                storage_id: String::new(),
-                storage_label: String::new(),
-                path: entry.path.clone(),
-                kind: entry.kind,
-                size: entry.size,
-            },
-            true,
-            keyboard_context && selected_path == Some(entry.path.as_str()),
-            intl,
-        );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::SelectableLabel,
+                ui.is_enabled(),
+                file_name(&entry.path),
+            )
+        });
+        crate::semantics::target(ui, &response, format!("files.entry.{}", entry.path));
+        let context_action = keyboard_context.and_then(|keyboard_context| {
+            show_context_menu(
+                ui,
+                &response,
+                Id::new(("device-explorer-entry-menu", device_key, &entry.path)),
+                &Selection {
+                    storage_id: String::new(),
+                    storage_label: String::new(),
+                    path: entry.path.clone(),
+                    kind: entry.kind,
+                    size: entry.size,
+                },
+                true,
+                keyboard_context && selected_path == Some(entry.path.as_str()),
+                intl,
+            )
+        });
         if let Some(action) = context_action {
             interaction = Some(EntryInteraction::Context { index, action });
         } else if response.double_clicked() {
@@ -2835,6 +2928,10 @@ fn path_is_toolkit_managed(path: &Utf8Path) -> bool {
     path.components()
         .next()
         .is_some_and(|component| component.as_str().eq_ignore_ascii_case("GARMIN-TOOLKIT"))
+}
+
+fn is_hidden(path: &Utf8Path) -> bool {
+    file_name(path).starts_with('.')
 }
 
 fn file_name(path: &Utf8Path) -> &str {

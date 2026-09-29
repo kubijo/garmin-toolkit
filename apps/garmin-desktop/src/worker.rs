@@ -3,7 +3,10 @@ use std::{
     fs,
     io::{self, Write as _},
     path::{Path, PathBuf},
-    sync::mpsc::{Receiver, Sender, channel},
+    sync::{
+        Arc,
+        mpsc::{Receiver, Sender, channel},
+    },
     thread::JoinHandle,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -19,6 +22,7 @@ use garmin_model::{
     value::Timestamp,
 };
 use garmin_progress::{CancellationToken, ProgressReporter};
+use garmin_services::deployment::Deployment;
 use garmin_services::{
     Application, AvatarImportRequest, FitImportRequest, FitImportResult, ImportDisposition,
     UserContext,
@@ -38,14 +42,16 @@ const DEVICE_SOURCE_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/device-files/source/v
 const DEVICE_OPERATION_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/device-files/acquisition/v1";
 
 pub struct Worker {
-    commands: Sender<Command>,
-    events: Receiver<Event>,
+    commands: Sender<(Uuid, Command)>,
+    events: Receiver<(Uuid, Event)>,
+    epoch: Uuid,
     abort: CancellationToken,
     join: Option<JoinHandle<()>>,
 }
 
 impl Worker {
-    pub fn spawn(application: Application, context: egui::Context) -> std::io::Result<Self> {
+    pub fn spawn(deployment: Arc<Deployment>, context: egui::Context) -> std::io::Result<Self> {
+        let epoch = deployment.epoch();
         let (commands, command_rx) = channel();
         let (event_tx, events) = channel();
         let abort = CancellationToken::default();
@@ -53,11 +59,12 @@ impl Worker {
         let join = std::thread::Builder::new()
             .name("garmin-toolkit-application".to_owned())
             .spawn(move || {
-                run(application, &command_rx, &event_tx, &context, &worker_abort);
+                run(&deployment, &command_rx, &event_tx, &context, &worker_abort);
             })?;
         let worker = Self {
             commands,
             events,
+            epoch,
             abort,
             join: Some(join),
         };
@@ -65,26 +72,36 @@ impl Worker {
         Ok(worker)
     }
 
+    fn send(&self, command: Command) {
+        let _ignored = self.commands.send((self.epoch, command));
+    }
+
+    pub fn set_epoch(&mut self, epoch: Uuid) {
+        self.epoch = epoch;
+    }
+
     pub fn reload(&self) {
-        let _ignored = self.commands.send(Command::Reload);
+        self.send(Command::Reload);
     }
 
     pub fn create_profile(&self, display_name: DisplayName) {
-        let _ignored = self.commands.send(Command::CreateProfile(display_name));
+        self.send(Command::CreateProfile(display_name));
     }
 
     pub fn update_preferences(&self, user: UserContext, preferences: ProfilePreferences) {
-        let _ignored = self
-            .commands
-            .send(Command::UpdatePreferences { user, preferences });
+        self.send(Command::UpdatePreferences { user, preferences });
+    }
+
+    pub fn update_accent(&self, user: UserContext, accent: Option<garmin_color::Color>) {
+        self.send(Command::UpdateAccent { user, accent });
     }
 
     pub fn import(&self, user: UserContext, paths: Vec<PathBuf>) {
-        let _ignored = self.commands.send(Command::Import { user, paths });
+        self.send(Command::Import { user, paths });
     }
 
     pub fn load_activity(&self, user: UserContext, observation_id: ObservationId) {
-        let _ignored = self.commands.send(Command::LoadActivity {
+        self.send(Command::LoadActivity {
             user,
             observation_id,
         });
@@ -97,7 +114,7 @@ impl Worker {
         bytes: Vec<u8>,
         crop: garmin_importer::AvatarCrop,
     ) {
-        let _ignored = self.commands.send(Command::ImportAvatar {
+        self.send(Command::ImportAvatar {
             user,
             path,
             bytes,
@@ -106,7 +123,7 @@ impl Worker {
     }
 
     pub fn browse_device(&self, candidate: crate::device_backend::Candidate) {
-        let _ignored = self.commands.send(Command::BrowseDevice(candidate));
+        self.send(Command::BrowseDevice(candidate));
     }
 
     pub fn operate_device(
@@ -114,13 +131,13 @@ impl Worker {
         candidate: crate::device_backend::Candidate,
         operation: DeviceBrowserOperation,
     ) {
-        let _ignored = self
-            .commands
-            .send(Command::OperateDevice(candidate, operation));
+        self.send(Command::OperateDevice(candidate, operation));
     }
 
     pub fn drain(&self) -> impl Iterator<Item = Event> + '_ {
-        self.events.try_iter()
+        self.events
+            .try_iter()
+            .filter_map(|(epoch, event)| (epoch == self.epoch).then_some(event))
     }
 
     pub fn abort(&self) {
@@ -131,7 +148,7 @@ impl Worker {
 impl Drop for Worker {
     fn drop(&mut self) {
         self.abort();
-        let _ignored = self.commands.send(Command::Shutdown);
+        self.send(Command::Shutdown);
         if let Some(join) = self.join.take() {
             let _ignored = join.join();
         }
@@ -144,6 +161,10 @@ enum Command {
     UpdatePreferences {
         user: UserContext,
         preferences: ProfilePreferences,
+    },
+    UpdateAccent {
+        user: UserContext,
+        accent: Option<garmin_color::Color>,
     },
     Import {
         user: UserContext,
@@ -165,6 +186,7 @@ enum Command {
 }
 
 pub enum Event {
+    Unavailable(String),
     Reloaded(Result<Vec<ProfileData>, String>),
     ProfileCreated(Result<(garmin_model::identity::UserId, Vec<ProfileData>), String>),
     ProfileUpdated(Result<Vec<ProfileData>, String>),
@@ -267,9 +289,9 @@ pub enum DeviceBrowserOutcome {
 }
 
 fn run(
-    application: Application,
-    commands: &Receiver<Command>,
-    events: &Sender<Event>,
+    deployment: &Deployment,
+    commands: &Receiver<(Uuid, Command)>,
+    event_tx: &Sender<(Uuid, Event)>,
     context: &egui::Context,
     abort: &CancellationToken,
 ) {
@@ -278,94 +300,130 @@ fn run(
         .build()
         .expect("device browser runtime must start");
     while !abort.is_cancelled() {
-        let Ok(command) = commands.recv() else {
+        let Ok((epoch, command)) = commands.recv() else {
             break;
         };
-        match command {
-            Command::Reload => {
-                if !emit(
-                    events,
-                    context,
-                    Event::Reloaded(block_on(load_profiles(&application))),
-                ) {
-                    break;
-                }
+        if matches!(command, Command::Shutdown) {
+            break;
+        }
+        let events = &EventSender {
+            sender: event_tx.clone(),
+            epoch,
+        };
+        let application = match block_on(deployment.application(epoch)) {
+            Ok(application) => application,
+            Err(garmin_services::deployment::Error::Stale) => continue,
+            Err(error) => {
+                emit(events, context, Event::Unavailable(error.to_string()));
+                continue;
             }
-            Command::CreateProfile(display_name) => {
-                let result = block_on(application.create_profile(display_name))
-                    .map_err(|error| error.to_string())
-                    .and_then(|user| {
-                        block_on(load_profiles(&application)).map(|profiles| (user.id(), profiles))
-                    });
-                if !emit(events, context, Event::ProfileCreated(result)) {
-                    break;
-                }
-            }
-            Command::UpdatePreferences { user, preferences } => {
-                let result = block_on(application.update_profile_preferences(user, preferences))
-                    .map_err(|error| error.to_string())
-                    .and_then(|_| block_on(load_profiles(&application)));
-                if !emit(events, context, Event::ProfileUpdated(result)) {
-                    break;
-                }
-            }
-            Command::Import { user, paths } => {
-                if !import_paths(&application, user, paths, events, context, abort) {
-                    break;
-                }
-            }
-            Command::LoadActivity {
-                user,
-                observation_id,
-            } => {
-                let result = block_on(application.activity(user, observation_id))
-                    .map(|details| details.map(Box::new))
-                    .map_err(|error| error.to_string());
-                if !emit(
-                    events,
-                    context,
-                    Event::ActivityLoaded {
-                        observation_id,
-                        result,
-                    },
-                ) {
-                    break;
-                }
-            }
-            Command::ImportAvatar {
-                user,
-                path,
-                bytes,
-                crop,
-            } => {
-                let result = block_on(import_avatar(&application, user, &path, &bytes, crop))
-                    .and_then(|()| block_on(load_profiles(&application)));
-                if !emit(events, context, Event::AvatarUpdated(result)) {
-                    break;
-                }
-            }
-            Command::BrowseDevice(candidate) => {
-                let key = candidate.key().to_owned();
-                let progress = ProgressReporter::default().with_cancellation(abort.clone());
-                let result = candidate.browse_with_progress(&progress);
-                if !emit(events, context, Event::DeviceCatalog { key, result }) {
-                    break;
-                }
-            }
-            Command::OperateDevice(candidate, operation) => {
-                let key = candidate.key().to_owned();
-                let kind = operation.kind();
-                let progress = ProgressReporter::default().with_cancellation(abort.clone());
-                let result =
-                    operate_device(&runtime, &application, &candidate, operation, &progress);
-                if !emit(events, context, Event::DeviceBrowser { key, kind, result }) {
-                    break;
-                }
-            }
-            Command::Shutdown => break,
+        };
+        if !execute_command(&runtime, &application, command, events, context, abort) {
+            break;
         }
     }
-    block_on(application.close());
+    block_on(deployment.close());
+}
+
+fn execute_command(
+    runtime: &tokio::runtime::Runtime,
+    application: &Application,
+    command: Command,
+    events: &EventSender,
+    context: &egui::Context,
+    abort: &CancellationToken,
+) -> bool {
+    match command {
+        Command::Reload => {
+            if !emit(
+                events,
+                context,
+                Event::Reloaded(block_on(load_profiles(application))),
+            ) {
+                return false;
+            }
+        }
+        Command::CreateProfile(display_name) => {
+            let result = block_on(application.create_profile(display_name))
+                .map_err(|error| error.to_string())
+                .and_then(|user| {
+                    block_on(load_profiles(application)).map(|profiles| (user.id(), profiles))
+                });
+            if !emit(events, context, Event::ProfileCreated(result)) {
+                return false;
+            }
+        }
+        Command::UpdateAccent { user, accent } => {
+            let result = block_on(application.update_profile_accent(user, accent))
+                .map_err(|error| error.to_string())
+                .and_then(|_| block_on(load_profiles(application)));
+            if !emit(events, context, Event::ProfileUpdated(result)) {
+                return false;
+            }
+        }
+        Command::UpdatePreferences { user, preferences } => {
+            let result = block_on(application.update_profile_preferences(user, preferences))
+                .map_err(|error| error.to_string())
+                .and_then(|_| block_on(load_profiles(application)));
+            if !emit(events, context, Event::ProfileUpdated(result)) {
+                return false;
+            }
+        }
+        Command::Import { user, paths } => {
+            if !import_paths(application, user, paths, events, context, abort) {
+                return false;
+            }
+        }
+        Command::LoadActivity {
+            user,
+            observation_id,
+        } => {
+            let result = block_on(application.activity(user, observation_id))
+                .map(|details| details.map(Box::new))
+                .map_err(|error| error.to_string());
+            if !emit(
+                events,
+                context,
+                Event::ActivityLoaded {
+                    observation_id,
+                    result,
+                },
+            ) {
+                return false;
+            }
+        }
+        Command::ImportAvatar {
+            user,
+            path,
+            bytes,
+            crop,
+        } => {
+            let result = block_on(import_avatar(application, user, &path, &bytes, crop))
+                .and_then(|()| block_on(load_profiles(application)));
+            if !emit(events, context, Event::AvatarUpdated(result)) {
+                return false;
+            }
+        }
+        Command::BrowseDevice(candidate) => {
+            let key = candidate.key().to_owned();
+            let progress = ProgressReporter::default().with_cancellation(abort.clone());
+            let result = candidate.browse_with_progress(&progress);
+            if !emit(events, context, Event::DeviceCatalog { key, result }) {
+                return false;
+            }
+        }
+        Command::OperateDevice(candidate, operation) => {
+            let key = candidate.key().to_owned();
+            let kind = operation.kind();
+            let progress = ProgressReporter::default().with_cancellation(abort.clone());
+            let result = operate_device(runtime, application, &candidate, operation, &progress);
+            if !emit(events, context, Event::DeviceBrowser { key, kind, result }) {
+                return false;
+            }
+        }
+        Command::Shutdown => return false,
+    }
+    true
 }
 
 fn operate_device(
@@ -614,7 +672,7 @@ fn import_paths(
     application: &Application,
     user: UserContext,
     paths: Vec<PathBuf>,
-    events: &Sender<Event>,
+    events: &EventSender,
     context: &egui::Context,
     abort: &CancellationToken,
 ) -> bool {
@@ -950,8 +1008,13 @@ impl Candidate {
     }
 }
 
-fn emit(events: &Sender<Event>, context: &egui::Context, event: Event) -> bool {
-    if events.send(event).is_err() {
+struct EventSender {
+    sender: Sender<(Uuid, Event)>,
+    epoch: Uuid,
+}
+
+fn emit(events: &EventSender, context: &egui::Context, event: Event) -> bool {
+    if events.sender.send((events.epoch, event)).is_err() {
         return false;
     }
     context.request_repaint();
@@ -966,6 +1029,29 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[test]
+    fn epoch_change_discards_queued_results_and_tags_new_commands() {
+        let (commands, received) = channel();
+        let (sent, events) = channel();
+        let old = Uuid::new_v4();
+        let new = Uuid::new_v4();
+        let mut worker = Worker {
+            commands,
+            events,
+            epoch: old,
+            abort: CancellationToken::default(),
+            join: None,
+        };
+        sent.send((old, Event::Unavailable("old result".into())))
+            .unwrap();
+        worker.set_epoch(new);
+        sent.send((new, Event::Unavailable("new result".into())))
+            .unwrap();
+        assert_eq!(worker.drain().count(), 1);
+        worker.reload();
+        assert!(matches!(received.recv().unwrap(), (epoch, Command::Reload) if epoch == new));
+    }
 
     #[test]
     fn path_expansion_is_recursive_filtered_sorted_and_deduplicated() -> Result<(), Box<dyn Error>>

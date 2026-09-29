@@ -222,7 +222,7 @@ def capture(args: Options) -> int:
         if 'nightly' in compiler_version
         else BASE / 'target'
         if args.target == 'web'
-        else ROOT / '.tmp' / 'gallery-target'
+        else ROOT / '.tmp' / 'gallery-check-target'
         if args.target == 'gallery'
         else ROOT / '.tmp' / 'cargo-target'
     )

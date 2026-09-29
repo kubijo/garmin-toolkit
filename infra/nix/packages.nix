@@ -1,5 +1,6 @@
 {
   crane,
+  formatjsCli,
   lib,
   pkgs,
   toolchain,
@@ -26,6 +27,7 @@ let
     version = "0.1.0";
     strictDeps = true;
     nativeBuildInputs = [
+      formatjsCli
       pkgs.pkg-config
     ]
     ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [

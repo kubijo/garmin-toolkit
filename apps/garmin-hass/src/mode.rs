@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use garmin_storage::Storage;
+use garmin_services::deployment::Deployment;
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::devices::SourceProvider as _;
@@ -9,7 +10,7 @@ use crate::devices::SourceProvider as _;
 #[cfg_attr(not(feature = "demo"), path = "mode/production.rs")]
 mod selected;
 
-pub(super) use selected::{DEPLOYMENT_MODE, PRODUCT_NAME, data_root, open_storage};
+pub(super) use selected::{DEPLOYMENT_MODE, PRODUCT_NAME, data_root, open};
 
 pub(super) fn device_source(
     data_root: &Path,
@@ -24,9 +25,7 @@ pub(super) fn device_source(
 #[derive(Debug, Error)]
 pub enum DataError {
     #[error(transparent)]
-    Storage(#[from] garmin_storage::Error),
-    #[error("could not prepare deployment data: {0}")]
-    Deployment(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    Deployment(#[from] garmin_services::deployment::Error),
     #[error("could not prepare the device source: {0}")]
     DeviceSource(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
 }

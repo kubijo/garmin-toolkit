@@ -2,7 +2,7 @@
 #[path = "../src/files/protocol.rs"]
 mod protocol;
 
-use garmin_model::identity::{LanguagePreference, UserId};
+use garmin_model::identity::{ProfilePreferences, UserId};
 use garmin_service_api::{DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceCatalogStorage};
 use garmin_ui::{
     device_browser::{Action, Selection},
@@ -28,9 +28,10 @@ fn snapshot() -> Snapshot {
         }),
         available: true,
         busy: false,
-        language: LanguagePreference::English,
+        preferences: ProfilePreferences::default(),
         dark: true,
         notice: None,
+        view: None,
     }
 }
 
@@ -92,5 +93,18 @@ fn transport_preserves_action_identity_and_parent_rejects_popup_owned_operations
         parent: "".into(),
         name: "Folder".into(),
     });
+    assert!(request.validate(&view, false).is_err());
+}
+
+#[test]
+fn hidden_files_preference_cannot_cross_profiles_or_overlap_a_save() {
+    let mut view = snapshot();
+    let request = Command {
+        identity: view.identity.clone(),
+        action: Request::Action(Action::ShowHiddenFiles(true)),
+    };
+    assert!(request.validate(&view, false).is_ok());
+    assert!(request.validate(&view, true).is_err());
+    view.identity.profile = Some(UserId::new_v4());
     assert!(request.validate(&view, false).is_err());
 }

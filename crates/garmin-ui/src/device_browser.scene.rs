@@ -8,7 +8,7 @@ use garmin_service_api::{
 };
 use garmin_ui::{device, device_browser, profile, shell, workspace};
 
-scene_meta! { title: "Application / Devices / File browser" }
+scene_meta! { title: "Components / File browser" }
 
 thread_local! {
     static BROWSERS: crate::SceneState<device_browser::Browser, 6> = const { crate::SceneState::empty() };
@@ -45,30 +45,25 @@ const INITIAL_DIRECTORY: &str = "Garmin/Activity/History";
 
 #[scene(default)]
 fn populated(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
-    stage!(
-        ctx,
-        ui,
-        Stage::Fixed(egui::vec2(960.0, 640.0)).checkerboard(globals.checkerboard()),
-        |ui| {
-            let intl = globals.intl();
-            BROWSERS.with_scene(
-                BrowserSlot::Default as usize,
-                || {
-                    device_browser::Browser::open_directory(
-                        catalog(),
-                        &intl,
-                        "Mock Watch-o-Matic 9000",
-                        "mock-internal",
-                        INITIAL_DIRECTORY,
-                    )
-                    .expect("the gallery catalog and initial directory are valid")
-                },
-                |browser| {
-                    let _ = browser.show(ui, &intl);
-                },
-            );
-        },
-    );
+    stage!(ctx, ui, globals.stage((960.0, 640.0)), |ui| {
+        let intl = globals.intl();
+        BROWSERS.with_scene(
+            BrowserSlot::Default as usize,
+            || {
+                device_browser::Browser::open_directory(
+                    catalog(),
+                    &intl,
+                    "Mock Watch-o-Matic 9000",
+                    "mock-internal",
+                    INITIAL_DIRECTORY,
+                )
+                .expect("the gallery catalog and initial directory are valid")
+            },
+            |browser| {
+                let _ = browser.show(ui, &intl);
+            },
+        );
+    },);
 }
 
 #[scene]
@@ -100,68 +95,65 @@ fn show_window_scene(
     size: egui::Vec2,
     slot: BrowserSlot,
 ) {
-    stage!(
-        ctx,
-        ui,
-        Stage::Fixed(size).checkerboard(globals.checkerboard()),
-        |ui| {
-            let intl = globals.intl();
-            let profiles = [profile::ProfileProps {
-                display_name: "Alex Rider",
-                accent: swatch::cyan::G40,
-                avatar: None,
-            }];
-            let devices = [DeviceSnapshot {
-                key: "mock:watch-o-matic-9000".to_owned(),
-                name: "Mock Watch-o-Matic 9000".to_owned(),
-                identifier: Some(36_264_719),
-                software_version: Some(3_220),
-                inspection: InspectionState::Ready,
-                inspection_error: None,
-                capabilities: Vec::new(),
-                storages: vec![DeviceStorageState {
-                    id: "mock-internal".to_owned(),
-                    label: "Internal storage".to_owned(),
-                    capacity: StorageCapacity::new(32_000_000_000, 8_600_000_000),
-                    writable: Some(true),
-                }],
-            }];
-            let page = workspace::Page::Device(devices[0].key.clone());
-            let _ = workspace::show(
-                ui,
-                &workspace::Props {
-                    product_name: "Garmin Toolkit Demo",
-                    intl: &intl,
-                    profiles: &profiles,
-                    selected_profile: 0,
-                    profile_menu_expanded: false,
-                    page: &page,
-                    navigation: shell::Navigation::Expanded,
-                    devices: &devices,
-                    window_controls: None,
-                },
-                |ui| {
-                    let _ = device::show_snapshot(ui, &intl, &devices[0], false);
-                },
-            );
-            BROWSERS.with_scene(
-                slot as usize,
-                || {
-                    device_browser::Browser::open_directory(
-                        catalog(),
-                        &intl,
-                        &devices[0].name,
-                        "mock-internal",
-                        INITIAL_DIRECTORY,
-                    )
-                    .expect("the gallery catalog and initial directory are valid")
-                },
-                |browser| {
-                    let _ = browser.show_window(ui, &intl);
-                },
-            );
-        },
-    );
+    stage!(ctx, ui, globals.stage(size), |ui| {
+        let intl = globals.intl();
+        let profiles = [profile::ProfileProps {
+            display_name: "Alex Rider",
+            accent: swatch::cyan::G40,
+            avatar: None,
+        }];
+        let devices = [DeviceSnapshot {
+            key: "mock:watch-o-matic-9000".to_owned(),
+            name: "Mock Watch-o-Matic 9000".to_owned(),
+            identifier: Some(36_264_719),
+            software_version: Some(3_220),
+            inspection: InspectionState::Ready,
+            inspection_error: None,
+            report: None,
+            capabilities: Vec::new(),
+            storages: vec![DeviceStorageState {
+                id: "mock-internal".to_owned(),
+                label: "Internal storage".to_owned(),
+                capacity: StorageCapacity::new(32_000_000_000, 8_600_000_000),
+                writable: Some(true),
+            }],
+        }];
+        let page = workspace::Page::Device(devices[0].key.clone());
+        let _ = workspace::show(
+            ui,
+            &workspace::Props {
+                product_name: "Garmin Toolkit Demo",
+                intl: &intl,
+                profiles: &profiles,
+                selected_profile: 0,
+                profile_menu_expanded: false,
+                page: &page,
+                navigation: shell::Navigation::Expanded,
+                devices: &devices,
+                backup_enabled: false,
+                window_controls: None,
+            },
+            |ui| {
+                let _ = device::show_snapshot(ui, &intl, &devices[0], false);
+            },
+        );
+        BROWSERS.with_scene(
+            slot as usize,
+            || {
+                device_browser::Browser::open_directory(
+                    catalog(),
+                    &intl,
+                    &devices[0].name,
+                    "mock-internal",
+                    INITIAL_DIRECTORY,
+                )
+                .expect("the gallery catalog and initial directory are valid")
+            },
+            |browser| {
+                let _ = browser.show_window(ui, &intl);
+            },
+        );
+    },);
 }
 
 #[scene]
@@ -229,30 +221,25 @@ fn show_directory_scene(
     fixture: fn() -> DeviceCatalogSnapshot,
     slot: BrowserSlot,
 ) {
-    stage!(
-        ctx,
-        ui,
-        Stage::Fixed(size).checkerboard(globals.checkerboard()),
-        |ui| {
-            let intl = globals.intl();
-            BROWSERS.with_scene(
-                slot as usize,
-                || {
-                    device_browser::Browser::open_directory(
-                        fixture(),
-                        &intl,
-                        "Mock Watch-o-Matic 9000",
-                        "mock-internal",
-                        directory,
-                    )
-                    .expect("the gallery catalog and initial directory are valid")
-                },
-                |browser| {
-                    let _ = browser.show(ui, &intl);
-                },
-            );
-        },
-    );
+    stage!(ctx, ui, globals.stage(size), |ui| {
+        let intl = globals.intl();
+        BROWSERS.with_scene(
+            slot as usize,
+            || {
+                device_browser::Browser::open_directory(
+                    fixture(),
+                    &intl,
+                    "Mock Watch-o-Matic 9000",
+                    "mock-internal",
+                    directory,
+                )
+                .expect("the gallery catalog and initial directory are valid")
+            },
+            |browser| {
+                let _ = browser.show(ui, &intl);
+            },
+        );
+    },);
 }
 
 fn show_selected_scene(
@@ -263,49 +250,44 @@ fn show_selected_scene(
     selection_steps: u8,
     slot: SelectedBrowserSlot,
 ) {
-    stage!(
-        ctx,
-        ui,
-        Stage::Fixed(egui::vec2(960.0, 640.0)).checkerboard(globals.checkerboard()),
-        |ui| {
-            let intl = globals.intl();
-            SELECTED_BROWSERS.with_scene(
-                slot as usize,
-                || {
-                    (
-                        device_browser::Browser::open_directory(
-                            catalog(),
-                            &intl,
-                            "Mock Watch-o-Matic 9000",
-                            "mock-internal",
-                            directory,
-                        )
-                        .expect("the gallery catalog and initial directory are valid"),
-                        0,
+    stage!(ctx, ui, globals.stage((960.0, 640.0)), |ui| {
+        let intl = globals.intl();
+        SELECTED_BROWSERS.with_scene(
+            slot as usize,
+            || {
+                (
+                    device_browser::Browser::open_directory(
+                        catalog(),
+                        &intl,
+                        "Mock Watch-o-Matic 9000",
+                        "mock-internal",
+                        directory,
                     )
-                },
-                |(browser, completed_steps)| {
-                    if *completed_steps < selection_steps {
-                        let table_id =
-                            egui::Id::new(("device-explorer-entry-table", browser.device_key()));
-                        ui.memory_mut(|memory| memory.request_focus(table_id));
-                        ui.input_mut(|input| {
-                            input.events.push(egui::Event::Key {
-                                key: egui::Key::ArrowDown,
-                                physical_key: None,
-                                pressed: true,
-                                repeat: false,
-                                modifiers: egui::Modifiers::NONE,
-                            });
+                    .expect("the gallery catalog and initial directory are valid"),
+                    0,
+                )
+            },
+            |(browser, completed_steps)| {
+                if *completed_steps < selection_steps {
+                    let table_id =
+                        egui::Id::new(("device-explorer-entry-table", browser.device_key()));
+                    ui.memory_mut(|memory| memory.request_focus(table_id));
+                    ui.input_mut(|input| {
+                        input.events.push(egui::Event::Key {
+                            key: egui::Key::ArrowDown,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
                         });
-                        *completed_steps += 1;
-                        ui.ctx().request_repaint();
-                    }
-                    let _ = browser.show(ui, &intl);
-                },
-            );
-        },
-    );
+                    });
+                    *completed_steps += 1;
+                    ui.ctx().request_repaint();
+                }
+                let _ = browser.show(ui, &intl);
+            },
+        );
+    },);
 }
 
 #[scene]
@@ -324,57 +306,52 @@ fn show_context_menu_scene(
     globals: &crate::Globals,
     slot: ContextBrowserSlot,
 ) {
-    stage!(
-        ctx,
-        ui,
-        Stage::Fixed(egui::vec2(960.0, 640.0)).checkerboard(globals.checkerboard()),
-        |ui| {
-            let intl = globals.intl();
-            CONTEXT_BROWSERS.with_scene(
-                slot as usize,
-                || {
-                    (
-                        device_browser::Browser::open_directory(
-                            catalog(),
-                            &intl,
-                            "Mock Watch-o-Matic 9000",
-                            "mock-internal",
-                            INITIAL_DIRECTORY,
-                        )
-                        .expect("the gallery catalog and initial directory are valid"),
-                        false,
+    stage!(ctx, ui, globals.stage((960.0, 640.0)), |ui| {
+        let intl = globals.intl();
+        CONTEXT_BROWSERS.with_scene(
+            slot as usize,
+            || {
+                (
+                    device_browser::Browser::open_directory(
+                        catalog(),
+                        &intl,
+                        "Mock Watch-o-Matic 9000",
+                        "mock-internal",
+                        INITIAL_DIRECTORY,
                     )
-                },
-                |(browser, selected)| {
-                    let table_id =
-                        egui::Id::new(("device-explorer-entry-table", "mock:watch-o-matic-9000"));
-                    ui.memory_mut(|memory| memory.request_focus(table_id));
-                    ui.input_mut(|input| {
-                        input.events.push(egui::Event::Key {
-                            key: if *selected {
-                                egui::Key::F10
-                            } else {
-                                egui::Key::ArrowDown
-                            },
-                            physical_key: None,
-                            pressed: true,
-                            repeat: false,
-                            modifiers: if *selected {
-                                egui::Modifiers::SHIFT
-                            } else {
-                                egui::Modifiers::NONE
-                            },
-                        });
+                    .expect("the gallery catalog and initial directory are valid"),
+                    false,
+                )
+            },
+            |(browser, selected)| {
+                let table_id =
+                    egui::Id::new(("device-explorer-entry-table", "mock:watch-o-matic-9000"));
+                ui.memory_mut(|memory| memory.request_focus(table_id));
+                ui.input_mut(|input| {
+                    input.events.push(egui::Event::Key {
+                        key: if *selected {
+                            egui::Key::F10
+                        } else {
+                            egui::Key::ArrowDown
+                        },
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: if *selected {
+                            egui::Modifiers::SHIFT
+                        } else {
+                            egui::Modifiers::NONE
+                        },
                     });
-                    let _ = browser.show(ui, &intl);
-                    if !*selected {
-                        *selected = true;
-                        ui.ctx().request_repaint();
-                    }
-                },
-            );
-        },
-    );
+                });
+                let _ = browser.show(ui, &intl);
+                if !*selected {
+                    *selected = true;
+                    ui.ctx().request_repaint();
+                }
+            },
+        );
+    },);
 }
 
 fn catalog() -> DeviceCatalogSnapshot {

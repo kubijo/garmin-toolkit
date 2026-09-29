@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 pub struct NativeWindow<C, S> {
     spec: Option<Spec>,
+    inline: super::InlineWindow,
     #[cfg(any(feature = "automation", test))]
     control: Option<super::control::Registration>,
     types: PhantomData<fn() -> (C, S)>,
@@ -13,10 +14,31 @@ impl<C, S> Default for NativeWindow<C, S> {
     fn default() -> Self {
         Self {
             spec: None,
+            inline: super::InlineWindow::default(),
             #[cfg(any(feature = "automation", test))]
             control: None,
             types: PhantomData,
         }
+    }
+}
+
+impl<C, S> NativeWindow<C, S> {
+    pub fn set_inline(&mut self, context: &Context, inline: bool) {
+        if inline == self.inline.is_open() {
+            return;
+        }
+        if let Some(spec) = self.spec.as_ref().or_else(|| self.inline.spec()).cloned() {
+            if inline {
+                self.open_inline(context, spec);
+            } else {
+                let _ = self.open(context, spec);
+            }
+        }
+    }
+
+    pub fn open_inline(&mut self, context: &Context, spec: Spec) {
+        self.close(context);
+        self.inline.open(context, spec);
     }
 }
 
@@ -45,6 +67,7 @@ impl<C, S> WindowHost for NativeWindow<C, S> {
     }
 
     fn close(&mut self, context: &Context) {
+        self.inline.close();
         #[cfg(any(feature = "automation", test))]
         {
             self.control = None;
@@ -55,7 +78,7 @@ impl<C, S> WindowHost for NativeWindow<C, S> {
     }
 
     fn is_open(&self) -> bool {
-        self.spec.is_some()
+        self.spec.is_some() || self.inline.is_open()
     }
 
     fn present(
@@ -65,6 +88,9 @@ impl<C, S> WindowHost for NativeWindow<C, S> {
         _snapshot: impl FnOnce() -> S,
         mut render: impl FnMut(&mut Ui) -> Option<C>,
     ) -> Vec<Event<C>> {
+        if self.inline.is_open() {
+            return self.inline.present(context, intl, render);
+        }
         #[cfg(any(feature = "automation", test))]
         if self.control.as_ref().is_some_and(|control| !control.live()) {
             self.close(context);
@@ -126,28 +152,28 @@ fn surface_bounds(ui: &Ui) -> egui::Rect {
         .shrink(if expanded { 0.0 } else { 12.0 })
 }
 
-/// Paint the native child window frame, leaving transparent space for its shadow.
-pub fn surface<R>(ui: &mut Ui, render: impl FnOnce(&mut Ui) -> R) -> R {
-    let bounds = surface_bounds(ui);
+/// Shared decoration for native and embedded windows.
+pub fn frame(ui: &Ui) -> egui::Frame {
     let palette = crate::theme::palette(ui);
-    let border = palette.borders().subtle();
-    ui.painter().add(
-        egui::Shadow {
+    egui::Frame::NONE
+        .fill(crate::theme::color32(palette.surfaces().background()))
+        .stroke(egui::Stroke::new(
+            1.0,
+            crate::theme::color32(palette.borders().subtle()),
+        ))
+        .shadow(egui::Shadow {
             offset: [0, 3],
             blur: 16,
             spread: 0,
             color: egui::Color32::from_black_alpha(110),
-        }
-        .as_shape(bounds, 0),
-    );
-    ui.painter().rect(
-        bounds,
-        0.0,
-        crate::theme::color32(palette.surfaces().background()),
-        egui::Stroke::new(1.0, crate::theme::color32(border)),
-        egui::StrokeKind::Inside,
-    );
-    let contents = bounds.shrink(1.0);
+        })
+}
+
+/// Paint the native child window frame, leaving transparent space for its shadow.
+pub fn surface<R>(ui: &mut Ui, render: impl FnOnce(&mut Ui) -> R) -> R {
+    let frame = frame(ui);
+    let contents = surface_bounds(ui).shrink(frame.stroke.width);
+    ui.painter().add(frame.paint(contents));
     ui.scope_builder(egui::UiBuilder::new().max_rect(contents), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(contents));
         render(ui)

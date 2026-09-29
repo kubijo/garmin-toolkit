@@ -3,10 +3,7 @@
 use cint::ColorInterop;
 use egui::{Response, RichText, Ui, emath::Numeric};
 
-use crate::{
-    Size, button, icons,
-    theme::{CONTROL_RADIUS, PANEL_RADIUS},
-};
+use crate::{Size, button, icons, theme::PANEL_RADIUS};
 
 /// Supporting or validation text below an input.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,6 +32,7 @@ pub struct Props<'a> {
     message: Option<Message<'a>>,
     size: Option<Size>,
     disabled: Option<bool>,
+    subtle_border: bool,
 }
 
 impl<'a> Props<'a> {
@@ -46,12 +44,20 @@ impl<'a> Props<'a> {
             message: None,
             size: None,
             disabled: None,
+            subtle_border: false,
         }
     }
 
     #[must_use]
     pub const fn placeholder(mut self, placeholder: &'a str) -> Self {
         self.placeholder = placeholder;
+        self
+    }
+
+    /// Uses a quieter resting border; hover, focus, and validation remain visible.
+    #[must_use]
+    pub const fn subtle_border(mut self, subtle_border: bool) -> Self {
+        self.subtle_border = subtle_border;
         self
     }
 
@@ -165,6 +171,7 @@ pub fn show(ui: &mut Ui, value: &mut String, props: Props<'_>) -> Response {
             message: props.message,
             enabled: !disabled,
             readonly: false,
+            subtle_border: props.subtle_border,
         },
         |ui, fill| {
             control_style(ui, fill, false);
@@ -210,6 +217,7 @@ pub fn show_number<N: Numeric>(ui: &mut Ui, value: &mut N, props: NumberProps<'_
             message: props.message,
             enabled: !disabled,
             readonly,
+            subtle_border: false,
         },
         |ui, fill| {
             number_control(
@@ -236,6 +244,7 @@ struct FieldProps<'a> {
     message: Option<Message<'a>>,
     enabled: bool,
     readonly: bool,
+    subtle_border: bool,
 }
 
 fn field(
@@ -277,7 +286,7 @@ fn field(
             app_theme.support().error()
         } else if response.has_focus() {
             app_theme.borders().interactive()
-        } else if props.enabled && !props.readonly {
+        } else if props.enabled && !props.readonly && (!props.subtle_border || response.hovered()) {
             app_theme.borders().strong()
         } else {
             app_theme.borders().subtle()
@@ -287,11 +296,10 @@ fn field(
         } else {
             1.0
         };
-        ui.painter().rect_stroke(
-            response.rect,
-            CONTROL_RADIUS,
+        ui.painter().hline(
+            response.rect.x_range(),
+            response.rect.bottom() - width / 2.0,
             egui::Stroke::new(width, border.into_cint()),
-            egui::StrokeKind::Inside,
         );
 
         if let Some(message) = props.message {

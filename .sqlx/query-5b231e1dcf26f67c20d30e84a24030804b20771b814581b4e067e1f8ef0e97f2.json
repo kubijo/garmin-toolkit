@@ -1,0 +1,42 @@
+{
+  "db_name": "SQLite",
+  "query": "PRAGMA foreign_key_check;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "table",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "name": "rowid",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "parent",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "name": "fkid",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5b231e1dcf26f67c20d30e84a24030804b20771b814581b4e067e1f8ef0e97f2"
+}

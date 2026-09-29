@@ -108,6 +108,10 @@ pub struct ProfilePreferences {
     unit_system: UnitSystem,
     language: LanguagePreference,
     theme: ThemePreference,
+    #[serde(default)]
+    show_hidden_files: bool,
+    #[serde(default)]
+    inline_file_windows: bool,
 }
 
 impl ProfilePreferences {
@@ -121,6 +125,8 @@ impl ProfilePreferences {
             unit_system,
             language,
             theme,
+            show_hidden_files: false,
+            inline_file_windows: false,
         }
     }
 
@@ -137,6 +143,28 @@ impl ProfilePreferences {
     #[must_use]
     pub const fn theme(self) -> ThemePreference {
         self.theme
+    }
+
+    #[must_use]
+    pub const fn show_hidden_files(self) -> bool {
+        self.show_hidden_files
+    }
+
+    #[must_use]
+    pub const fn with_show_hidden_files(mut self, show: bool) -> Self {
+        self.show_hidden_files = show;
+        self
+    }
+
+    #[must_use]
+    pub const fn inline_file_windows(self) -> bool {
+        self.inline_file_windows
+    }
+
+    #[must_use]
+    pub const fn with_inline_file_windows(mut self, inline: bool) -> Self {
+        self.inline_file_windows = inline;
+        self
     }
 }
 
@@ -228,6 +256,11 @@ impl Profile {
     #[must_use]
     pub const fn accent(&self) -> Option<Color> {
         self.accent
+    }
+
+    /// Replaces the optional profile accent without changing other profile data.
+    pub const fn replace_accent(&mut self, accent: Option<Color>) -> Option<Color> {
+        std::mem::replace(&mut self.accent, accent)
     }
 
     #[must_use]

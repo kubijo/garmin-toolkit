@@ -1,2 +1,5 @@
-scene_globs = ["scenes/**/*.scene.rs", "../../crates/garmin-ui/src/**/*.scene.rs"]
+scene_globs = [
+    "../../apps/**/*.scene.rs",
+    "../../crates/**/*.scene.rs",
+]
 title = "Garmin Toolkit gallery"

@@ -1,6 +1,7 @@
 #![cfg(target_arch = "wasm32")]
 
 mod automation;
+mod backup;
 mod browser_timing;
 mod control;
 mod developer;
@@ -19,9 +20,9 @@ use garmin_i18n::{Intl, Language, Translations, format_message};
 use garmin_model::identity::{LanguagePreference, ProfilePreferences, ThemePreference, UserId};
 use garmin_service_api::{
     ActivityDetailSnapshot, ApplicationService, ApplicationServiceClient, AvatarCrop, AvatarUpload,
-    DeploymentMode, DeviceBrowserDownloadTicket, DeviceBrowserRequest, DeviceBrowserTarget,
-    DeviceBrowserUpload, DeviceCatalogSnapshot, DeviceFitImportOutcome, DeviceFitPreview,
-    DeviceSnapshot, ProfileSnapshot,
+    DeploymentMode, DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload,
+    DeviceCatalogSnapshot, DeviceFitImportOutcome, DeviceFitPreview, DeviceSnapshot,
+    DownloadTicket, ProfileSnapshot,
 };
 use garmin_ui::{
     activity, device, device_browser, device_fit_preview, icons, image_crop, modal, notification,
@@ -176,6 +177,7 @@ struct App {
     translations: Translations,
     intl: Intl,
     shared: Rc<RefCell<State>>,
+    epoch: Option<String>,
     first_frame: bool,
     navigation: shell::Navigation,
     page: Page,
@@ -229,6 +231,7 @@ impl App {
             translations,
             intl,
             shared,
+            epoch: None,
             first_frame: true,
             navigation: shell::Navigation::Expanded,
             page: Page::Activities,
@@ -337,6 +340,14 @@ impl App {
                 window_controls: None,
             },
             |ui| {
+                let action = self.show_backup_outcome(ui);
+                if let Some(action) = action {
+                    self.shared.borrow_mut().backup.action(action);
+                }
+                if self.shared.borrow().backup.state.switching() {
+                    return None;
+                }
+
                 if let Some(error) = error {
                     let title = format_message!(
                         &self.intl,
@@ -369,6 +380,7 @@ impl App {
                     progress::show(
                         ui,
                         &progress::Props {
+                            height: None,
                             label: &label,
                             detail: None,
                             value: progress::Value::Indeterminate,
@@ -411,6 +423,10 @@ impl App {
         device_catalog_loading: Option<&str>,
         notice: Option<&Notice>,
     ) {
+        if self.shared.borrow().backup.state.switching() {
+            let _ = backup::show(ui, &self.intl, &self.shared, None);
+            return;
+        }
         let profiles = Rc::clone(&self.profiles);
         let Some(profile_index) = self
             .selected_profile
@@ -425,63 +441,72 @@ impl App {
             .map(profile::Presentation::props)
             .collect::<Vec<_>>();
         let current_profile = &profiles[profile_index];
-        let output =
-            workspace::show(
-                ui,
-                &workspace::Props {
-                    product_name,
-                    intl: &self.intl,
-                    profiles: &profile_props,
-                    selected_profile: profile_index,
-                    profile_menu_expanded: self.profile_menu_expanded,
-                    page: &self.page,
-                    navigation: self.navigation,
-                    devices,
-                    window_controls: None,
-                },
-                |ui| {
-                    if let Some(notice) = notice {
-                        notification::show(ui, &notice.props());
-                        ui.add_space(12.0);
-                    }
-                    match &self.page {
-                        Page::Activities => PageAction::Activities(show_activities(
-                            ui,
+        let output = workspace::show(
+            ui,
+            &workspace::Props {
+                product_name,
+                intl: &self.intl,
+                profiles: &profile_props,
+                selected_profile: profile_index,
+                profile_menu_expanded: self.profile_menu_expanded,
+                page: &self.page,
+                navigation: self.navigation,
+                devices,
+                backup_enabled: current_profile.user.role() == garmin_model::identity::Role::Owner,
+                window_controls: None,
+            },
+            |ui| {
+                if let Some(notice) = notice {
+                    notification::show(ui, &notice.props());
+                    ui.add_space(12.0);
+                }
+                match &self.page {
+                    Page::Activities => PageAction::Activities(show_activities(
+                        ui,
+                        &self.intl,
+                        current_profile,
+                        &self.activity_presentations,
+                        self.selected_activity,
+                        self.activity_detail.as_deref(),
+                        &mut self.activity_workspace,
+                    )),
+                    Page::Backup => PageAction::Backup(backup::show(
+                        ui,
+                        &self.intl,
+                        &self.shared,
+                        (current_profile.user.role() == garmin_model::identity::Role::Owner)
+                            .then_some(current_profile.user.id()),
+                    )),
+                    Page::ProfileSettings => PageAction::Settings(profile_settings::show(
+                        ui,
+                        &settings_props(
                             &self.intl,
                             current_profile,
-                            &self.activity_presentations,
-                            self.selected_activity,
-                            self.activity_detail.as_deref(),
-                            &mut self.activity_workspace,
-                        )),
-                        Page::ProfileSettings => PageAction::Settings(profile_settings::show(
-                            ui,
-                            &settings_props(
-                                &self.intl,
-                                current_profile,
-                                self.profile_presentations[profile_index].props(),
-                                preferences_saving,
-                            ),
-                        )),
-                        Page::Device(key) => {
-                            let action = devices.iter().find(|device| &device.key == key).and_then(
-                                |snapshot| {
+                            self.profile_presentations[profile_index].props(),
+                            preferences_saving,
+                        ),
+                    )),
+                    Page::Device(key) => {
+                        let action =
+                            devices
+                                .iter()
+                                .find(|device| &device.key == key)
+                                .and_then(|snapshot| {
                                     device::show_snapshot(
                                         ui,
                                         &self.intl,
                                         snapshot,
                                         device_catalog_loading == Some(key.as_str()),
                                     )
-                                },
-                            );
-                            PageAction::Device {
-                                key: key.clone(),
-                                action,
-                            }
+                                });
+                        PageAction::Device {
+                            key: key.clone(),
+                            action,
                         }
                     }
-                },
-            );
+                }
+            },
+        );
         self.handle_page_action(output.inner, &profiles);
         self.handle_shell_action(output.action, &profiles, devices);
     }
@@ -517,12 +542,46 @@ impl App {
 
     fn handle_page_action(&mut self, action: PageAction, profiles: &[ProfileSnapshot]) {
         match action {
+            PageAction::Backup(Some(action)) => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
+                    if matches!(
+                        action,
+                        garmin_ui::backup::Action::Backup
+                            | garmin_ui::backup::Action::Restore
+                            | garmin_ui::backup::Action::ServerBackup
+                            | garmin_ui::backup::Action::ServerRestore
+                    ) {
+                        if profile.user.role() == garmin_model::identity::Role::Owner {
+                            backup::start(
+                                Rc::clone(&self.shared),
+                                self.context.clone(),
+                                profile.user.id(),
+                                action,
+                                &self.intl,
+                            );
+                        }
+                    } else {
+                        self.shared.borrow_mut().backup.action(action);
+                    }
+                }
+            }
             PageAction::Activities(Some(activity::Action::Select(index))) => {
                 self.selected_activity = index;
                 self.load_selected_activity(profiles);
             }
             PageAction::Settings(Some(profile_settings::Action::ChoosePicture)) => {
                 self.choose_profile_picture(profiles);
+            }
+            PageAction::Settings(Some(profile_settings::Action::UpdateAccent(accent))) => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
+                    spawn_update_accent(
+                        Rc::clone(&self.shared),
+                        self.context.clone(),
+                        profile.user.id(),
+                        accent,
+                        format_message!(&self.intl, default_message: "Could not save profile settings"),
+                    );
+                }
             }
             PageAction::Settings(Some(profile_settings::Action::UpdatePreferences(
                 preferences,
@@ -533,7 +592,31 @@ impl App {
                 key,
                 action: Some(device::Action::BrowseFiles),
             } => self.open_file_window(key),
-            PageAction::Activities(None)
+            PageAction::Device {
+                key,
+                action: Some(device::Action::Refresh),
+            } => {
+                let shared = Rc::clone(&self.shared);
+                let context = self.context.clone();
+                let failure =
+                    format_message!(&self.intl, default_message: "Could not refresh device");
+                let client = shared.borrow().client.clone();
+                if let Some(client) = client {
+                    spawn_local(async move {
+                        let result = client
+                            .refresh_device(key)
+                            .await
+                            .map_err(ConnectError::call)
+                            .and_then(|result| result.map_err(ConnectError::domain));
+                        if let Err(error) = result {
+                            shared.borrow_mut().notice = Some(Notice::error(failure, error));
+                        }
+                        context.request_repaint();
+                    });
+                }
+            }
+            PageAction::Backup(None)
+            | PageAction::Activities(None)
             | PageAction::Settings(None)
             | PageAction::Device { action: None, .. } => {}
         }
@@ -619,7 +702,16 @@ impl App {
                 };
             }
             Some(shell::Action::Navigate(index)) => {
-                self.page = Page::from_index(index, devices).unwrap_or(Page::Activities);
+                self.page = Page::from_index(
+                    index,
+                    devices,
+                    self.selected_profile
+                        .and_then(|index| profiles.get(index))
+                        .is_some_and(|profile| {
+                            profile.user.role() == garmin_model::identity::Role::Owner
+                        }),
+                )
+                .unwrap_or(Page::Activities);
                 self.profile_menu_expanded = false;
             }
             Some(shell::Action::Profile(profile::Action::Toggle)) => {
@@ -696,6 +788,9 @@ impl App {
                 default_message: "Could not save profile settings",
             ),
         );
+        if !preferences.inline_file_windows() {
+            self.detach_file_windows();
+        }
     }
 
     fn choose_profile_picture(&self, profiles: &[ProfileSnapshot]) {
@@ -1045,6 +1140,7 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        self.reset_changed_database();
         map_composition::update_diagnostics(ui.ctx());
         garmin_ui::automation::show_status(ui.ctx());
         if self.first_frame {
@@ -1138,11 +1234,13 @@ impl eframe::App for App {
         automation::dispatch_menu(ui.ctx());
         self.developer.update(&self.intl);
         self.update_file_window();
+        self.update_server_chooser();
         developer::update_logs(ui.ctx(), self.shared.borrow().logs.clone());
     }
 }
 
 enum PageAction {
+    Backup(Option<garmin_ui::backup::Action>),
     Activities(Option<activity::Action>),
     Settings(Option<profile_settings::Action>),
     Device {
@@ -1198,8 +1296,10 @@ fn settings_props<'a>(
     disabled: bool,
 ) -> profile_settings::Props<'a> {
     profile_settings::Props {
+        id: eframe::egui::Id::new(snapshot.user.id()),
         intl,
         preferences: snapshot.user.profile().preferences(),
+        accent: snapshot.user.profile().accent(),
         profile,
         picture_enabled: true,
         disabled,
@@ -1218,6 +1318,8 @@ fn set_profile_preferences(snapshot: &mut ProfileSnapshot, preferences: ProfileP
     reason = "profile readiness and three independent asynchronous operations may overlap"
 )]
 struct State {
+    epoch: Option<String>,
+    backup: backup::Controller,
     client: Option<ApplicationServiceClient>,
     logs: Option<garmin_service_api::logging::LogServiceClient>,
     deployment_mode: DeploymentMode,
@@ -1366,6 +1468,7 @@ fn spawn_choose_avatar(
     user_id: UserId,
     failure: String,
 ) {
+    let generation = shared.borrow().connection_generation;
     spawn_local(async move {
         let Some(file) = rfd::AsyncFileDialog::new()
             .add_filter("Profile picture", &["png", "jpg", "jpeg", "webp"])
@@ -1374,6 +1477,9 @@ fn spawn_choose_avatar(
         else {
             return;
         };
+        if shared.borrow().connection_generation != generation {
+            return;
+        }
         if file.inner().size() > MAX_AVATAR_UPLOAD_BYTES {
             shared.borrow_mut().notice = Some(Notice::error(
                 failure,
@@ -1386,6 +1492,9 @@ fn spawn_choose_avatar(
         let bytes = file.read().await;
         let result = avatar_draft(user_id, file_name, bytes);
         let mut state = shared.borrow_mut();
+        if state.connection_generation != generation {
+            return;
+        }
         match result {
             Ok(draft) => state.avatar_draft = Some(draft),
             Err(error) => state.notice = Some(Notice::error(failure, error)),
@@ -1448,6 +1557,7 @@ fn spawn_import_avatar(
         state.avatar_saving = true;
         state.notice = None;
     }
+    let generation = shared.borrow().connection_generation;
     spawn_local(async move {
         let result = client
             .import_avatar(user_id, upload)
@@ -1455,6 +1565,9 @@ fn spawn_import_avatar(
             .map_err(ConnectError::call)
             .and_then(|result| result.map_err(ConnectError::domain));
         let mut state = shared.borrow_mut();
+        if state.connection_generation != generation {
+            return;
+        }
         state.avatar_saving = false;
         state.avatar_finished = Some(result.is_ok());
         match result {
@@ -1592,12 +1705,10 @@ fn spawn_device_download(
         if !finish_device_browser_request(&mut state, token) {
             return;
         }
-        state.notice = Some(
-            match result.and_then(|ticket| trigger_browser_download(&ticket)) {
-                Ok(()) => Notice::success(complete),
-                Err(error) => Notice::error(failure, error),
-            },
-        );
+        state.notice = Some(match result.and_then(|ticket| trigger_download(&ticket)) {
+            Ok(()) => Notice::success(complete),
+            Err(error) => Notice::error(failure, error),
+        });
         drop(state);
         context.request_repaint();
     });
@@ -1844,7 +1955,7 @@ async fn execute_device_browser_request(
     context.request_repaint();
 }
 
-fn trigger_browser_download(ticket: &DeviceBrowserDownloadTicket) -> Result<(), String> {
+fn trigger_download(ticket: &DownloadTicket) -> Result<(), String> {
     (|| -> Result<(), JsValue> {
         let document = web_sys::window()
             .and_then(|window| window.document())
@@ -1852,7 +1963,7 @@ fn trigger_browser_download(ticket: &DeviceBrowserDownloadTicket) -> Result<(), 
         let anchor = document
             .create_element("a")?
             .dyn_into::<web_sys::HtmlAnchorElement>()?;
-        anchor.set_href(&format!("device-download/{}", ticket.token));
+        anchor.set_href(&format!("download/{}", ticket.token));
         anchor.set_download(&ticket.file_name);
         anchor.set_attribute("hidden", "")?;
         let body = document
@@ -1914,9 +2025,9 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
         let mut retry_milliseconds = 1_000;
         loop {
             match connect().await {
-                Ok((client, mut snapshots, profiles, deployment_mode)) => {
+                Ok((client, mut snapshots, profiles, deployment_mode, epoch)) => {
                     retry_milliseconds = 1_000;
-                    shared.borrow_mut().logs = client.logs().await.ok();
+                    let logs = client.logs().await.ok();
                     garmin_ui::developer::reconnect(&context);
                     garmin_ui::developer::state(&context)
                         .lock()
@@ -1929,6 +2040,17 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                     match snapshots.borrow_and_update() {
                         Ok(initial) => {
                             let mut state = shared.borrow_mut();
+                            if state.epoch.as_ref() != Some(&epoch) {
+                                let backup = std::mem::take(&mut state.backup);
+                                let generation = state.connection_generation.wrapping_add(1);
+                                *state = State {
+                                    backup,
+                                    connection_generation: generation,
+                                    ..State::default()
+                                };
+                            }
+                            state.logs = logs;
+                            state.epoch = Some(epoch);
                             state.client = Some(client.clone());
                             state.deployment_mode = deployment_mode;
                             state.snapshots = Rc::new(initial.clone());
@@ -2046,6 +2168,7 @@ fn spawn_create_profile(
         state.profile_create_problem = None;
         state.notice = None;
     }
+    let generation = shared.borrow().connection_generation;
     spawn_local(async move {
         let result = client
             .create_profile(display_name)
@@ -2053,6 +2176,9 @@ fn spawn_create_profile(
             .map_err(ConnectError::call)
             .and_then(|result| result.map_err(ConnectError::domain));
         let mut state = shared.borrow_mut();
+        if state.connection_generation != generation {
+            return;
+        }
         state.profile_creating = false;
         match result {
             Ok(user) => {
@@ -2083,6 +2209,48 @@ fn spawn_create_profile(
     });
 }
 
+fn spawn_update_accent(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    user_id: UserId,
+    accent: Option<garmin_color::Color>,
+    failure: String,
+) {
+    let Some(client) = shared.borrow().client.clone() else {
+        return;
+    };
+    if shared.borrow().preferences_saving {
+        return;
+    }
+    shared.borrow_mut().preferences_saving = true;
+    let generation = shared.borrow().connection_generation;
+    spawn_local(async move {
+        let result = client
+            .update_accent(user_id, accent)
+            .await
+            .map_err(ConnectError::call)
+            .and_then(|result| result.map_err(ConnectError::domain));
+        let mut state = shared.borrow_mut();
+        if state.connection_generation != generation {
+            return;
+        }
+        state.preferences_saving = false;
+        match result {
+            Ok(user) => {
+                if let Some(profile) = Rc::make_mut(&mut state.profiles)
+                    .iter_mut()
+                    .find(|profile| profile.user.id() == user_id)
+                {
+                    profile.user = user;
+                }
+            }
+            Err(error) => state.notice = Some(Notice::error(failure, error)),
+        }
+        drop(state);
+        context.request_repaint();
+    });
+}
+
 fn spawn_update_preferences(
     shared: Rc<RefCell<State>>,
     context: eframe::egui::Context,
@@ -2105,6 +2273,7 @@ fn spawn_update_preferences(
             set_profile_preferences(profile, preferences);
         }
     }
+    let generation = shared.borrow().connection_generation;
     spawn_local(async move {
         let result = client
             .update_preferences(user_id, preferences)
@@ -2112,6 +2281,9 @@ fn spawn_update_preferences(
             .map_err(ConnectError::call)
             .and_then(|result| result.map_err(ConnectError::domain));
         let mut state = shared.borrow_mut();
+        if state.connection_generation != generation {
+            return;
+        }
         state.preferences_saving = false;
         match result {
             Ok(user) => {
@@ -2154,6 +2326,7 @@ fn spawn_activity(
         state.activity_detail = None;
         state.notice = None;
     }
+    let generation = shared.borrow().connection_generation;
     spawn_local(async move {
         let result = client
             .activity(user_id, observation_id)
@@ -2161,6 +2334,9 @@ fn spawn_activity(
             .map_err(ConnectError::call)
             .and_then(|result| result.map_err(ConnectError::domain));
         let mut state = shared.borrow_mut();
+        if state.connection_generation != generation {
+            return;
+        }
         if state.requested_activity == Some(observation_id) {
             match result {
                 Ok(Some(detail)) => state.activity_detail = Some(Rc::new(detail)),
@@ -2183,18 +2359,24 @@ async fn connect() -> Result<
         remoc::rch::watch::Receiver<Vec<DeviceSnapshot>>,
         Vec<ProfileSnapshot>,
         DeploymentMode,
+        String,
     ),
     ConnectError,
 > {
     let client = connect_client().await?;
     let deployment_mode = client.deployment_mode().await.map_err(ConnectError::call)?;
+    let epoch = client
+        .deployment_epoch()
+        .await
+        .map_err(ConnectError::call)?
+        .to_string();
     let snapshots = client.watch_devices().await.map_err(ConnectError::call)?;
     let profiles = client
         .profiles()
         .await
         .map_err(ConnectError::call)?
         .map_err(ConnectError::domain)?;
-    Ok((client, snapshots, profiles, deployment_mode))
+    Ok((client, snapshots, profiles, deployment_mode, epoch))
 }
 
 async fn connect_client() -> Result<ApplicationServiceClient, ConnectError> {

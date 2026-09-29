@@ -5,6 +5,18 @@ report = "capture.json"
 settle = true
 
 [[shot]]
+name = "device-inspection-dark"
+scene = "garmin_gallery::device::Partial Inspection"
+
+[[shot]]
+name = "device-inspection-light-czech"
+scene = "garmin_gallery::device::Partial Inspection"
+
+[shot.globals]
+theme = "Light"
+language = "Čeština"
+
+[[shot]]
 name = "attached-device-storage"
 scene = "capacity::Multiple Storages"
 

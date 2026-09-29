@@ -6,26 +6,26 @@ settle = true
 
 [[shot]]
 name = "jetbrains-80"
-scene = "logging::All variants"
+scene = "console::All variants"
 knobs = { font = "JetBrains Mono Nerd Font", columns = "80" }
 
 [[shot]]
 name = "departure-80"
-scene = "logging::All variants"
+scene = "console::All variants"
 knobs = { font = "Departure Mono", columns = "80" }
 
 [[shot]]
 name = "jetbrains-100"
-scene = "logging::All variants"
+scene = "console::All variants"
 knobs = { font = "JetBrains Mono Nerd Font", columns = "100" }
 
 [[shot]]
 name = "departure-100"
-scene = "logging::All variants"
+scene = "console::All variants"
 knobs = { font = "Departure Mono", columns = "100" }
 
 [[shot]]
 name = "compact"
-scene = "logging::All variants"
+scene = "console::All variants"
 size = "1280x900"
 knobs = { font = "JetBrains Mono Nerd Font", columns = "80" }

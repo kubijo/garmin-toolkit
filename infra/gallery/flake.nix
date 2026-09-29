@@ -17,6 +17,7 @@
     {
       lib.mkTool =
         {
+          formatjsCli,
           nixCargoTargetDir,
           system,
           toolchain,
@@ -59,6 +60,7 @@
             buildInputs = runtimeLibraries;
             inherit cargoLock;
             nativeBuildInputs = [
+              formatjsCli
               pkgs.cmake
             ]
             ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];

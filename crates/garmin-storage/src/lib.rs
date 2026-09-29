@@ -21,6 +21,7 @@ mod activity;
 mod avatar;
 mod ingestion;
 mod route;
+pub mod snapshot;
 
 pub use activity::{
     ActivityProjection, ActivityProjectionError, StoredActivity, StoredActivitySummary,
@@ -78,6 +79,8 @@ impl Storage {
         let unit_system = encode_unit_system(preferences.unit_system());
         let language = encode_language(preferences.language());
         let theme = encode_theme(preferences.theme());
+        let show_hidden_files = preferences.show_hidden_files();
+        let inline_file_windows = preferences.inline_file_windows();
         let stored = sqlx::query_file!(
             "queries/save-user.sql",
             id,
@@ -88,6 +91,8 @@ impl Storage {
             unit_system,
             language,
             theme,
+            show_hidden_files,
+            inline_file_windows,
             avatar_artifact_id,
             id,
             avatar_artifact_id,
@@ -191,9 +196,26 @@ struct UserRow {
     unit_system: String,
     language: String,
     theme: String,
+    show_hidden_files: i64,
+    inline_file_windows: i64,
 }
 
 fn decode_user(row: UserRow) -> Result<User, Error> {
+    let inline_file_windows = match row.inline_file_windows {
+        0 => false,
+        1 => true,
+        value => {
+            return Err(invalid_preference(
+                "inline_file_windows",
+                &value.to_string(),
+            ));
+        }
+    };
+    let show_hidden_files = match row.show_hidden_files {
+        0 => false,
+        1 => true,
+        value => return Err(invalid_preference("show_hidden_files", &value.to_string())),
+    };
     let id = row
         .id
         .parse::<UserId>()
@@ -237,7 +259,9 @@ fn decode_user(row: UserRow) -> Result<User, Error> {
                 decode_unit_system(&row.unit_system)?,
                 decode_language(&row.language)?,
                 decode_theme(&row.theme)?,
-            ),
+            )
+            .with_show_hidden_files(show_hidden_files)
+            .with_inline_file_windows(inline_file_windows),
         ),
     ))
 }

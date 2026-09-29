@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -11,16 +12,83 @@ WRAPPER = Path(__file__).resolve().parents[1] / 'just' / 'memory-capped.sh'
 
 
 class BuildLimitsTests(unittest.TestCase):
+    def test_gallery_checks_cannot_replace_live_scene_library(self) -> None:
+        just = shutil.which('just')
+        assert just is not None
+        root = WRAPPER.parents[2]
+        command = [just, '--justfile', str(root / 'infra/gallery/justfile')]
+        environment = {**os.environ, 'CARGO_TARGET_DIR': str(root / '.tmp/gallery-target')}
+        evaluated = subprocess.run(
+            [*command, '--evaluate', 'CARGO_TARGET_DIR'],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(evaluated.stdout.strip(), str(root / '.tmp/gallery-check-target'))
+        for recipe in (
+            ['hot'],
+            ['run', '--hot'],
+            ['capture'],
+            ['render', 'scene', 'out.png'],
+            ['test'],
+            ['build'],
+            ['lint'],
+            ['check'],
+        ):
+            with self.subTest(recipe=recipe):
+                result = subprocess.run(
+                    [*command, '--dry-run', *recipe],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                arguments = shlex.split(result.stderr)
+                self.assertEqual(arguments[:2], ['just', 'in-gallery'])
+                override = f'CARGO_TARGET_DIR={root / ".tmp/gallery-target"}'
+                self.assertEqual(override in arguments, recipe[0] in ('run', 'hot'))
+
+    def test_gallery_adds_catalog_compiler_without_replacing_graphics_runtime(self) -> None:
+        root = WRAPPER.parents[2]
+        result = subprocess.run(
+            [
+                'just',
+                '--justfile',
+                str(root / 'infra/gallery/justfile'),
+                '--dry-run',
+                '--no-deps',
+                'in-gallery',
+                'cargo',
+                'check',
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(
+            shlex.split(result.stderr.replace('\\\n', '')),
+            [
+                str(WRAPPER),
+                'nix',
+                'shell',
+                f'git+file://{root}#formatjs-cli',
+                '--command',
+                'env',
+                f'CARGO_TARGET_DIR={root / ".tmp/gallery-check-target"}',
+                '$@',
+            ],
+        )
+
     @unittest.skipUnless(sys.platform.startswith('linux'), 'Mold is selected only on Linux')
-    def test_gallery_stops_before_cargo_when_mold_is_incomplete(self) -> None:
+    def test_linker_preflight_rejects_incomplete_installation(self) -> None:
         for executable in (None, 'mold', 'ld.mold'):
-            for command in (['hot'], ['capture', 'captures/components.capture.toml']):
-                with self.subTest(executable=executable, command=command):
-                    result = self.linker_check(command, executable)
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertIn('require mold and ld.mold on PATH', result.stderr)
-                    self.assertNotIn('cargo', result.stderr)
-                    self.assertEqual(result.stdout, '')
+            with self.subTest(executable=executable):
+                result = self.linker_check(['require-linker'], executable)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('require mold and ld.mold on PATH', result.stderr)
+                self.assertNotIn('cargo', result.stderr)
+                self.assertEqual(result.stdout, '')
 
     @unittest.skipUnless(sys.platform.startswith('linux'), 'Mold is selected only on Linux')
     def test_linker_preflight_accepts_complete_installation(self) -> None:

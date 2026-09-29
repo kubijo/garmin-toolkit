@@ -7,21 +7,21 @@ use garmin_model::{
 use garmin_progress::{CancellationToken, ProgressReporter};
 use garmin_service_api::{
     ActivityDetailSnapshot, ActivitySnapshot, ApplicationService, AvatarUpload,
-    DeviceBrowserDownloadTicket, DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload,
-    DeviceCatalogEntry, DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceCatalogStorage,
-    DeviceFitImportOutcome, DeviceFitPreview, DeviceFitPreviewActivity, DeviceSnapshot,
+    DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogEntry,
+    DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceCatalogStorage, DeviceFitImportOutcome,
+    DeviceFitPreview, DeviceFitPreviewActivity, DeviceSnapshot, DownloadTicket,
     ProfileAvatarSnapshot, ProfileSnapshot,
 };
 use garmin_services::{
     Application, AvatarImportRequest, FitImportRequest, FitImportResult, ImportDisposition,
-    UserContext,
+    UserContext, deployment::Deployment, snapshots::SnapshotOperations,
 };
+use remoc::prelude::ServerShared as _;
 use remoc::{rch, rtc};
-use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt as _;
 use uuid::Uuid;
 
@@ -37,10 +37,9 @@ const AVATAR_OPERATION_ID_DOMAIN_V1: &[u8] =
 const DEVICE_SOURCE_LABEL: &str = "Connected Garmin device";
 const DEVICE_SOURCE_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/device-files/source/v1";
 const DEVICE_OPERATION_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/device-files/acquisition/v1";
-const BROWSER_DOWNLOAD_TTL: Duration = Duration::from_secs(60);
-const MAX_PENDING_BROWSER_DOWNLOADS: usize = 8;
 
 pub(super) trait Source: Send {
+    fn refresh_device(&mut self, device_key: &str) -> Result<(), String>;
     fn snapshot(&mut self) -> Vec<DeviceSnapshot>;
     fn catalog(
         &mut self,
@@ -80,28 +79,45 @@ pub(super) trait SourceProvider {
 pub(super) struct Host {
     source: Arc<Mutex<Box<dyn Source>>>,
     snapshots: Arc<rch::watch::Sender<Vec<DeviceSnapshot>>>,
-    browser_downloads: PendingBrowserDownloads,
-    application: Arc<Application>,
+    downloads: crate::downloads::Downloads,
+    refresh_gate: Arc<tokio::sync::Mutex<()>>,
+    deployment: Arc<Deployment>,
+    operations: Arc<SnapshotOperations>,
+    snapshot_session:
+        Arc<tokio::sync::Mutex<Option<Arc<garmin_services::snapshots::SnapshotSession>>>>,
+    epoch: Uuid,
     control: Option<crate::control::Connection>,
 }
 
 impl Host {
-    pub(super) fn new(mut source: Box<dyn Source>, application: Application) -> Arc<Self> {
+    pub(super) fn new(mut source: Box<dyn Source>, deployment: Arc<Deployment>) -> Arc<Self> {
         let (snapshots, _receiver) = rch::watch::channel(source.snapshot());
+        let operations = SnapshotOperations::new(
+            Arc::clone(&deployment),
+            garmin_storage::snapshot::Limits::default(),
+        )
+        .expect("built-in snapshot limits are valid");
         Arc::new(Self {
             source: Arc::new(Mutex::new(source)),
             snapshots: Arc::new(snapshots),
-            browser_downloads: PendingBrowserDownloads::default(),
-            application: Arc::new(application),
+            downloads: crate::downloads::Downloads::default(),
+            refresh_gate: Arc::new(tokio::sync::Mutex::new(())),
+            epoch: deployment.epoch(),
+            deployment,
+            operations,
+            snapshot_session: Arc::default(),
             control: None,
         })
     }
 
     pub(super) fn start(self: &Arc<Self>) {
-        let host = Arc::clone(self);
+        let host = Arc::downgrade(self);
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
+                let Some(host) = host.upgrade() else {
+                    break;
+                };
                 host.refresh().await;
             }
         });
@@ -110,104 +126,112 @@ impl Host {
     pub(super) fn with_control(&self, control: Option<crate::control::Connection>) -> Arc<Self> {
         Arc::new(Self {
             control,
+            epoch: self.deployment.epoch(),
+            snapshot_session: Arc::default(),
             ..self.clone()
         })
     }
 
+    async fn application(
+        &self,
+    ) -> Result<tokio::sync::RwLockReadGuard<'_, Application>, rtc::CallError> {
+        self.deployment
+            .application(self.epoch)
+            .await
+            .map_err(|_| rtc::CallError::NotServed)
+    }
+
     async fn refresh(&self) {
+        let _guard = self.refresh_gate.lock().await;
         match source_snapshot(Arc::clone(&self.source)).await {
             Ok(next) => publish_snapshot(&self.snapshots, next),
             Err(error) => tracing::warn!(%error, "device snapshot worker failed"),
         }
     }
 
-    pub(super) fn take_browser_download(
-        &self,
-        token: &str,
-    ) -> Option<garmin_device::PreparedDeviceBrowserDownload> {
-        self.browser_downloads.take(token)
-    }
-}
-
-#[derive(Clone, Default)]
-struct PendingBrowserDownloads {
-    entries: Arc<Mutex<HashMap<Uuid, PendingBrowserDownload>>>,
-}
-
-struct PendingBrowserDownload {
-    expires_at: Instant,
-    download: garmin_device::PreparedDeviceBrowserDownload,
-}
-
-impl PendingBrowserDownloads {
-    fn insert(
-        &self,
-        download: garmin_device::PreparedDeviceBrowserDownload,
-    ) -> Result<DeviceBrowserDownloadTicket, String> {
-        let now = Instant::now();
-        let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
-        entries.retain(|_, pending| pending.expires_at > now);
-        if entries.len() >= MAX_PENDING_BROWSER_DOWNLOADS {
-            return Err("too many browser downloads are waiting to be collected".to_owned());
-        }
-        let pending_bytes = entries.values().try_fold(0_u64, |total, pending| {
-            total.checked_add(pending.download.size)
-        });
-        if pending_bytes.is_none_or(|total| {
-            total.saturating_add(download.size) > garmin_device::MAX_BROWSER_TRANSFER_BYTES
-        }) {
-            return Err("pending browser downloads exceed the 512 MiB limit".to_owned());
-        }
-
-        let token = loop {
-            let candidate = Uuid::new_v4();
-            if !entries.contains_key(&candidate) {
-                break candidate;
-            }
-        };
-        let ticket = DeviceBrowserDownloadTicket {
-            token: token.to_string(),
-            file_name: download.file_name.clone(),
-        };
-        entries.insert(
-            token,
-            PendingBrowserDownload {
-                expires_at: now + BROWSER_DOWNLOAD_TTL,
-                download,
-            },
-        );
-        drop(entries);
-
-        let pending = self.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(BROWSER_DOWNLOAD_TTL).await;
-            pending.expire(token);
-        });
-        Ok(ticket)
-    }
-
-    fn take(&self, token: &str) -> Option<garmin_device::PreparedDeviceBrowserDownload> {
-        let token = Uuid::parse_str(token).ok()?;
-        let pending = self
-            .entries
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&token)?;
-        (pending.expires_at > Instant::now()).then_some(pending.download)
-    }
-
-    fn expire(&self, token: Uuid) {
-        let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
-        if entries
-            .get(&token)
-            .is_some_and(|pending| pending.expires_at <= Instant::now())
-        {
-            entries.remove(&token);
-        }
+    pub(super) fn take_download(&self, token: Uuid) -> Option<crate::downloads::Download> {
+        self.downloads.take(token)
     }
 }
 
 impl ApplicationService for Host {
+    async fn server_directory(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        path: String,
+    ) -> Result<Result<garmin_service_api::files::Directory, String>, rtc::CallError> {
+        if self.epoch != self.deployment.epoch() {
+            return Err(rtc::CallError::NotServed);
+        }
+        if let Err(error) = self.operations.connect(UserContext::new(user_id)).await {
+            return Ok(Err(error.message));
+        }
+        Ok(
+            tokio::task::spawn_blocking(move || crate::files::directory(Path::new(&path)))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(std::convert::identity),
+        )
+    }
+
+    async fn snapshot_file(
+        &self,
+        operation: Uuid,
+        selection: garmin_service_api::files::Selection,
+    ) -> Result<Result<garmin_service_api::snapshots::SnapshotStatus, String>, rtc::CallError> {
+        let session = self.snapshot_session.lock().await.clone();
+        Ok(match session {
+            Some(session) => session
+                .file(operation, selection)
+                .await
+                .map_err(|error| error.message),
+            None => Err("open an owner snapshot session first".into()),
+        })
+    }
+
+    fn deployment_epoch(&self) -> impl Future<Output = Result<Uuid, rtc::CallError>> {
+        std::future::ready(Ok(self.epoch))
+    }
+
+    async fn snapshots(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        operation: Option<Uuid>,
+    ) -> Result<Result<garmin_service_api::snapshots::SnapshotServiceClient, String>, rtc::CallError>
+    {
+        if self.epoch != self.deployment.epoch() {
+            return Err(rtc::CallError::NotServed);
+        }
+        let actor = UserContext::new(user_id);
+        let session = match match operation {
+            Some(operation) => self.operations.reconnect(actor, operation).await,
+            None => self.operations.connect(actor).await,
+        } {
+            Ok(session) => session,
+            Err(error) => return Ok(Err(error.message)),
+        };
+        let session = Arc::new(session);
+        *self.snapshot_session.lock().await = Some(Arc::clone(&session));
+        let (server, client) = garmin_service_api::snapshots::SnapshotServiceServerShared::<
+            _,
+            remoc::codec::Default,
+        >::new(session);
+        tokio::spawn(server.serve());
+        Ok(Ok(client))
+    }
+
+    async fn snapshot_download(
+        &self,
+        operation: Uuid,
+    ) -> Result<Result<DownloadTicket, String>, rtc::CallError> {
+        let session = self.snapshot_session.lock().await.clone();
+        Ok(match session {
+            Some(session) => crate::snapshots::prepare(session, operation)
+                .await
+                .and_then(|prepared| self.downloads.insert(prepared)),
+            None => Err("open an owner snapshot session first".into()),
+        })
+    }
     fn register_control(
         &self,
         browser: String,
@@ -240,7 +264,29 @@ impl ApplicationService for Host {
     }
 
     fn heartbeat(&self) -> impl Future<Output = Result<(), rtc::CallError>> {
-        std::future::ready(Ok(()))
+        std::future::ready(if self.epoch == self.deployment.epoch() {
+            Ok(())
+        } else {
+            Err(rtc::CallError::NotServed)
+        })
+    }
+
+    async fn refresh_device(
+        &self,
+        device_key: String,
+    ) -> Result<Result<(), String>, rtc::CallError> {
+        let source = Arc::clone(&self.source);
+        let result = tokio::task::spawn_blocking(move || {
+            source
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .refresh_device(&device_key)
+        })
+        .await
+        .map_err(|error| error.to_string())
+        .and_then(std::convert::identity);
+        self.refresh().await;
+        Ok(result)
     }
 
     fn watch_devices(
@@ -280,10 +326,20 @@ impl ApplicationService for Host {
         &self,
         device_key: String,
         target: DeviceBrowserTarget,
-    ) -> Result<Result<DeviceBrowserDownloadTicket, String>, rtc::CallError> {
-        let result = source_download(Arc::clone(&self.source), device_key, target)
-            .await
-            .and_then(|download| self.browser_downloads.insert(download));
+    ) -> Result<Result<DownloadTicket, String>, rtc::CallError> {
+        let result = async {
+            let download = source_download(Arc::clone(&self.source), device_key, target).await?;
+            let file = tokio::fs::File::open(download.path())
+                .await
+                .map_err(|error| error.to_string())?;
+            self.downloads.insert(crate::downloads::Prepared::from_file(
+                download.file_name.clone(),
+                download.size,
+                file,
+                download,
+            ))
+        }
+        .await;
         Ok(result)
     }
 
@@ -305,7 +361,7 @@ impl ApplicationService for Host {
         target: DeviceBrowserTarget,
     ) -> Result<Result<DeviceFitImportOutcome, String>, rtc::CallError> {
         Ok(import_device_fit(
-            &self.application,
+            &*self.application().await?,
             Arc::clone(&self.source),
             UserContext::new(user_id),
             device_key,
@@ -315,7 +371,7 @@ impl ApplicationService for Host {
     }
 
     async fn profiles(&self) -> Result<Result<Vec<ProfileSnapshot>, String>, rtc::CallError> {
-        Ok(profile_snapshots(&self.application).await)
+        Ok(profile_snapshots(&*self.application().await?).await)
     }
 
     async fn create_profile(
@@ -327,7 +383,8 @@ impl ApplicationService for Host {
             Err(error) => return Ok(Err(error.to_string())),
         };
         Ok(self
-            .application
+            .application()
+            .await?
             .create_profile(display_name)
             .await
             .map_err(|error| error.to_string()))
@@ -339,8 +396,22 @@ impl ApplicationService for Host {
         preferences: garmin_model::identity::ProfilePreferences,
     ) -> Result<Result<garmin_model::identity::User, String>, rtc::CallError> {
         Ok(self
-            .application
+            .application()
+            .await?
             .update_profile_preferences(UserContext::new(user_id), preferences)
+            .await
+            .map_err(|error| error.to_string()))
+    }
+
+    async fn update_accent(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        accent: Option<garmin_color::Color>,
+    ) -> Result<Result<garmin_model::identity::User, String>, rtc::CallError> {
+        Ok(self
+            .application()
+            .await?
+            .update_profile_accent(UserContext::new(user_id), accent)
             .await
             .map_err(|error| error.to_string()))
     }
@@ -350,7 +421,12 @@ impl ApplicationService for Host {
         user_id: garmin_model::identity::UserId,
         upload: AvatarUpload,
     ) -> Result<Result<ProfileAvatarSnapshot, String>, rtc::CallError> {
-        Ok(import_avatar(&self.application, UserContext::new(user_id), upload).await)
+        Ok(import_avatar(
+            &*self.application().await?,
+            UserContext::new(user_id),
+            upload,
+        )
+        .await)
     }
 
     async fn activity(
@@ -359,7 +435,8 @@ impl ApplicationService for Host {
         observation_id: ObservationId,
     ) -> Result<Result<Option<ActivityDetailSnapshot>, String>, rtc::CallError> {
         Ok(self
-            .application
+            .application()
+            .await?
             .activity(UserContext::new(user_id), observation_id)
             .await
             .map(|details| details.as_ref().map(activity_detail_snapshot))
@@ -875,9 +952,61 @@ fn publish_snapshot(
     }
 }
 
+fn device_snapshot(presentation: garmin_device::attachments::Presentation) -> DeviceSnapshot {
+    use garmin_device::attachments;
+    use garmin_service_api::{
+        DeviceCapability, DeviceDataType, InspectionState, TransferDirection,
+    };
+    DeviceSnapshot {
+        key: presentation.key,
+        name: presentation.name,
+        identifier: presentation
+            .identifier
+            .map(garmin_device::DeviceId::into_u32),
+        software_version: presentation
+            .software_version
+            .map(garmin_device::SoftwareVersion::into_hundredths),
+        inspection: match presentation.state {
+            attachments::InspectionState::Running => InspectionState::Running,
+            attachments::InspectionState::Ready => InspectionState::Ready,
+            attachments::InspectionState::Failed => InspectionState::Failed,
+        },
+        inspection_error: presentation.inspection_error,
+        report: presentation.report,
+        capabilities: presentation
+            .capabilities
+            .into_iter()
+            .filter_map(|capability| {
+                let data_type = match capability.data_type() {
+                    garmin_device::DataType::Activity => DeviceDataType::Activity,
+                    garmin_device::DataType::Workout => DeviceDataType::Workout,
+                    garmin_device::DataType::Course => DeviceDataType::Course,
+                    _ => return None,
+                };
+                let direction = match capability.direction() {
+                    garmin_device::TransferDirection::OutputFromUnit => {
+                        TransferDirection::OutputFromUnit
+                    }
+                    garmin_device::TransferDirection::InputToUnit => TransferDirection::InputToUnit,
+                    garmin_device::TransferDirection::InputOutput => TransferDirection::InputOutput,
+                };
+                Some(DeviceCapability {
+                    data_type,
+                    direction,
+                })
+            })
+            .collect(),
+        storages: presentation
+            .storage
+            .map(|state| state.storages)
+            .unwrap_or_default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{Cursor, Write as _};
+    use std::time::Duration;
 
     use super::{
         DeviceBrowserFile, Host, Source, SourceProvider,
@@ -892,7 +1021,6 @@ mod tests {
         DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogEntryKind, DeviceCatalogSnapshot,
         DeviceFitImportOutcome, DeviceSnapshot, InspectionState,
     };
-    use garmin_services::Application;
     use image::{DynamicImage, ImageFormat, RgbImage};
 
     struct FitSource {
@@ -953,14 +1081,14 @@ mod tests {
             .await
             .unwrap()?;
         let prepared = host
-            .take_browser_download(&ticket.token)
+            .take_download(ticket.token)
             .ok_or_else(|| "prepared download is missing".to_owned())?;
-        let bytes = tokio::fs::read(prepared.path())
+        let bytes = axum::body::to_bytes(prepared.response().into_body(), usize::MAX)
             .await
             .map_err(|error| error.to_string())?;
         Ok(DeviceBrowserFile {
-            file_name: prepared.file_name,
-            bytes,
+            file_name: ticket.file_name,
+            bytes: bytes.to_vec(),
         })
     }
 
@@ -973,6 +1101,9 @@ mod tests {
     }
 
     impl Source for FitSource {
+        fn refresh_device(&mut self, _key: &str) -> Result<(), String> {
+            Ok(())
+        }
         fn snapshot(&mut self) -> Vec<DeviceSnapshot> {
             Vec::new()
         }
@@ -1026,23 +1157,50 @@ mod tests {
     #[tokio::test]
     async fn automatic_inspection_publishes_capacity_through_the_service_contract() {
         let directory = tempfile::tempdir().unwrap();
-        let storage = crate::prepare_storage(directory.path()).await.unwrap();
-        let host = Host::new(demo_source(&directory), Application::new(storage));
+        let storage = crate::prepare_deployment(directory.path()).await.unwrap();
+        let host = Host::new(demo_source(&directory), storage);
         let snapshots = host.watch_devices().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                host.refresh().await;
+                if snapshots.borrow().unwrap()[0].inspection != InspectionState::Running {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
         let ready = snapshots.borrow().unwrap();
-
         assert_eq!(ready[0].inspection, InspectionState::Ready);
-        assert_eq!(
-            ready[0].storages[0].capacity.bytes(),
-            Some((32_000_000_000, 8_600_000_000))
+        assert!(ready[0].storages[0].capacity.bytes().is_some());
+        let report = ready[0].report.as_ref().unwrap();
+        assert!(!report.has_errors());
+        assert!(
+            matches!(&report.storage, garmin_model::device::InspectionSection::Available(state) if state.storages == ready[0].storages)
         );
+        let previous = ready[0].report.clone();
+        drop(ready);
+        assert!(
+            host.refresh_device("detached".to_owned())
+                .await
+                .unwrap()
+                .is_err()
+        );
+        host.refresh_device(DEMO_DEVICE_KEY.to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let refreshing = snapshots.borrow().unwrap();
+        assert_eq!(refreshing[0].inspection, InspectionState::Running);
+        assert_eq!(refreshing[0].report, previous);
     }
 
     #[tokio::test]
     async fn profile_workflows_use_the_same_application_service_contract() {
         let directory = tempfile::tempdir().unwrap();
-        let storage = crate::prepare_storage(directory.path()).await.unwrap();
-        let host = Host::new(demo_source(&directory), Application::new(storage));
+        let storage = crate::prepare_deployment(directory.path()).await.unwrap();
+        let host = Host::new(demo_source(&directory), storage);
 
         let created = host
             .create_profile("Alex Rider".to_owned())
@@ -1056,8 +1214,8 @@ mod tests {
     #[tokio::test]
     async fn explicit_device_browser_returns_only_device_relative_entries() {
         let directory = tempfile::tempdir().unwrap();
-        let storage = crate::prepare_storage(directory.path()).await.unwrap();
-        let host = Host::new(demo_source(&directory), Application::new(storage));
+        let storage = crate::prepare_deployment(directory.path()).await.unwrap();
+        let host = Host::new(demo_source(&directory), storage);
 
         let catalog = host
             .device_catalog("demo:watch-o-matic-9000".to_owned())
@@ -1085,8 +1243,8 @@ mod tests {
     #[tokio::test]
     async fn demo_browser_mutations_refresh_and_download_the_isolated_device() {
         let directory = tempfile::tempdir().unwrap();
-        let storage = crate::prepare_storage(directory.path()).await.unwrap();
-        let host = Host::new(demo_source(&directory), Application::new(storage));
+        let storage = crate::prepare_deployment(directory.path()).await.unwrap();
+        let host = Host::new(demo_source(&directory), storage);
 
         let created = demo_browser(
             &host,
@@ -1151,8 +1309,8 @@ mod tests {
     #[tokio::test]
     async fn demo_browser_preserves_the_toolkit_managed_namespace() {
         let directory = tempfile::tempdir().unwrap();
-        let storage = crate::prepare_storage(directory.path()).await.unwrap();
-        let host = Host::new(demo_source(&directory), Application::new(storage));
+        let storage = crate::prepare_deployment(directory.path()).await.unwrap();
+        let host = Host::new(demo_source(&directory), storage);
         let request = DeviceBrowserRequest::CreateDirectory {
             device_key: DEMO_DEVICE_KEY.to_owned(),
             storage_id: DEMO_STORAGE_ID.to_owned(),
@@ -1168,8 +1326,8 @@ mod tests {
     #[tokio::test]
     async fn browser_avatar_upload_uses_the_application_importer() {
         let directory = tempfile::tempdir().unwrap();
-        let storage = crate::prepare_storage(directory.path()).await.unwrap();
-        let host = Host::new(demo_source(&directory), Application::new(storage));
+        let storage = crate::prepare_deployment(directory.path()).await.unwrap();
+        let host = Host::new(demo_source(&directory), storage);
         let user = host
             .create_profile("Mock Rider".to_owned())
             .await
@@ -1213,9 +1371,9 @@ mod tests {
     #[tokio::test]
     async fn device_fit_preview_and_import_use_the_shared_service_contract() {
         let directory = tempfile::tempdir().unwrap();
-        let storage = crate::prepare_storage(directory.path()).await.unwrap();
+        let storage = crate::prepare_deployment(directory.path()).await.unwrap();
         let bytes = fixture::activity(fixture::Sport::Cycling).unwrap();
-        let host = Host::new(Box::new(FitSource { bytes }), Application::new(storage));
+        let host = Host::new(Box::new(FitSource { bytes }), storage);
         let user = host
             .create_profile("Mock Rider".to_owned())
             .await

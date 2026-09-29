@@ -1,0 +1,24 @@
+out = "../../../.tmp/gallery/profile-settings"
+size = "820x1020"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "dark"
+scene = "profile_settings::Playground"
+
+[[shot]]
+name = "light"
+scene = "profile_settings::Playground"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "czech-narrow"
+scene = "profile_settings::Playground"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+width = 320

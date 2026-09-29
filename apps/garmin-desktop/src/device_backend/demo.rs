@@ -39,7 +39,7 @@ impl attachments::Backend for Platform {
     type Candidate = Candidate;
 
     fn poll_changed(&self) -> bool {
-        false
+        attachments::Backend::poll_changed(&self.candidate.fixture)
     }
 
     fn candidates(&self) -> Vec<Self::Candidate> {

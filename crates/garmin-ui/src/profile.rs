@@ -140,9 +140,12 @@ pub fn create_dialog(ui: &mut Ui, intl: &Intl, state: &mut CreateState) -> Optio
             if response.changed() {
                 state.problem = None;
             }
+            crate::semantics::target(ui, &response, "profile.create.name");
             response
         },
     );
+    crate::semantics::target(ui, &output.primary, "profile.create.submit");
+    crate::semantics::target(ui, &output.cancel, "profile.create.cancel");
     match output.action {
         Some(modal::Action::Cancel) if !state.submitting => Some(CreateAction::Cancel),
         Some(modal::Action::Primary) => parsed.ok().map(CreateAction::Submit),
@@ -187,7 +190,10 @@ impl AvatarProps<'_> {
         let palette = crate::theme::palette(ui);
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(self.size), Sense::hover());
         let painter = ui.painter();
-        painter.circle_filled(rect.center(), self.size / 2.0, self.accent.into_cint());
+        let accent = self
+            .accent
+            .contrasting_marker(palette.surfaces().layer(theme::Level::One));
+        painter.circle_filled(rect.center(), self.size / 2.0, accent.into_cint());
 
         let image_rect = rect.shrink(2.0);
         painter.circle_filled(
@@ -304,10 +310,6 @@ pub(crate) fn preferred_header_width(ui: &Ui, props: &SelectorProps<'_>) -> f32 
 
 #[must_use]
 pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
-    let heading = format_message!(
-        props.intl,
-        default_message: "Choose a profile",
-    );
     let empty = format_message!(
         props.intl,
         default_message: "No profiles yet",
@@ -334,11 +336,6 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
             egui::vec2(width, content_height),
             Layout::top_down(Align::Min),
             |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.label(crate::typography::semibold(heading).size(24.0));
-                });
-                ui.add_space(32.0);
-
                 // The explicit gaps below include all spacing between chooser rows.
                 ui.spacing_mut().item_spacing.y = 0.0;
 
@@ -365,7 +362,9 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
 
                 // Gap is doubled before the create button
                 ui.add_space(gap_add);
-                if chooser_create_row(ui, &create).clicked() {
+                let response = chooser_create_row(ui, &create);
+                crate::semantics::target(ui, &response, "profile.create");
+                if response.clicked() {
                     action = Some(Action::Create);
                 }
             },

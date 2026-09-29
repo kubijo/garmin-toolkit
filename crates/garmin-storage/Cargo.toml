@@ -16,10 +16,17 @@ blake3.workspace = true
 garmin-color.workspace = true
 garmin-fit.workspace = true
 garmin-model.workspace = true
+hex.workspace = true
 semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 sqlx.workspace = true
+tar.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
+time.workspace = true
+zstd.workspace = true
 
 [dev-dependencies]
 futures-lite.workspace = true
-tempfile.workspace = true

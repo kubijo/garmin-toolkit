@@ -10,7 +10,7 @@ use std::{fmt::Write as _, fs};
 
 use futures_lite::future::block_on;
 use garmin_i18n::Translations;
-use garmin_services::Application;
+
 use thiserror::Error;
 use tracing_subscriber::prelude::*;
 
@@ -18,6 +18,7 @@ const MULTISAMPLING: u16 = 4;
 
 mod developer;
 pub use developer::Options;
+mod backup;
 mod device_backend;
 mod map_worker;
 mod mode;
@@ -26,7 +27,7 @@ mod view;
 mod window;
 mod worker;
 
-pub use mode::DataError;
+pub use garmin_services::deployment::Error as DataError;
 
 /// Opens the platform database and native window.
 ///
@@ -60,9 +61,8 @@ pub fn run_with_options(options: Options) -> Result<(), Error> {
         ))
         .try_init();
     tracing::info!("Desktop starting");
-    let storage = block_on(mode::open_storage(mode::database_path(&data_root)))?;
+    let deployment = block_on(mode::open(&data_root))?;
     let device_platform = device_backend::open(&data_root)?;
-    let application = Application::new(storage);
     let translations = Translations::bundled()?;
     let viewport = eframe::egui::ViewportBuilder::default()
         .with_app_id(mode::APP_ID)
@@ -113,7 +113,7 @@ pub fn run_with_options(options: Options) -> Result<(), Error> {
                     garmin_ui::activity::install_wgpu_map(render_state, u32::from(MULTISAMPLING))
                 })?;
             Ok(Box::new(view::Desktop::new(
-                application,
+                deployment,
                 translations,
                 creation.egui_ctx.clone(),
                 device_platform,

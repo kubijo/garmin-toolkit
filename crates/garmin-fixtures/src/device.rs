@@ -20,6 +20,21 @@ pub const KEY: &str = "demo:watch-o-matic-9000";
 pub const NAME: &str = "Mock Watch-o-Matic 9000";
 pub const STORAGE_ID: &str = "internal";
 pub const STORAGE_LABEL: &str = "Mock internal storage";
+const MANIFEST_XML: &str =
+    include_str!("../../../infra/fixtures/device/demo-watch/GarminDevice.xml");
+
+#[must_use]
+/// # Panics
+/// The committed fixture must remain a valid Garmin manifest.
+pub fn manifest() -> garmin_device::DeviceManifest {
+    garmin_device::parse_manifest(
+        MANIFEST_XML,
+        garmin_device::TransportKind::MassStorage,
+        KEY.to_owned(),
+    )
+    .expect("the committed demo manifest is valid")
+}
+
 const MAX_DEPTH: usize = 32;
 const MAX_ENTRIES: usize = 4_096;
 const ROOT_MARKER: &str = ".garmin-toolkit-demo-device";
@@ -29,6 +44,7 @@ const ROOT_MARKER_CONTENTS: &[u8] = b"garmin-toolkit demo device v1\n";
 #[derive(Clone, Debug)]
 pub struct Device {
     root: PathBuf,
+    last_present: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Device {
@@ -52,12 +68,12 @@ impl Device {
         std::fs::write(&activity, ActivityCase::CityRide.encode()?)
             .map_err(|source| io_error("write", activity, source))?;
         let description = root.join("Garmin/GarminDevice.xml");
-        std::fs::write(
-            &description,
-            br#"<?xml version="1.0" encoding="UTF-8"?><Device><Description>Mock Watch-o-Matic 9000</Description></Device>"#,
-        )
-        .map_err(|source| io_error("write", description, source))?;
-        Ok(Self { root })
+        std::fs::write(&description, MANIFEST_XML.as_bytes())
+            .map_err(|source| io_error("write", description, source))?;
+        Ok(Self {
+            root,
+            last_present: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        })
     }
 
     /// Whether the backing directory is still attached.
@@ -80,6 +96,37 @@ impl Device {
     }
 }
 
+impl garmin_device::attachments::Candidate for Device {
+    fn key(&self) -> &str {
+        KEY
+    }
+    fn name(&self) -> &str {
+        NAME
+    }
+    fn inspect(&self) -> Result<Metadata, String> {
+        match self.presence().map_err(|error| error.to_string())? {
+            Presence::Present => Ok(metadata()),
+            Presence::Missing => Err("the mock device is no longer connected".to_owned()),
+        }
+    }
+}
+
+impl garmin_device::attachments::Backend for Device {
+    type Candidate = Self;
+    fn poll_changed(&self) -> bool {
+        let present = !matches!(self.presence(), Ok(Presence::Missing));
+        self.last_present
+            .swap(present, std::sync::atomic::Ordering::Relaxed)
+            != present
+    }
+    fn candidates(&self) -> Vec<Self> {
+        match self.presence() {
+            Ok(Presence::Missing) => Vec::new(),
+            _ => vec![self.clone()],
+        }
+    }
+}
+
 #[must_use]
 pub fn state() -> DeviceStateSnapshot {
     DeviceStateSnapshot {
@@ -95,9 +142,11 @@ pub fn state() -> DeviceStateSnapshot {
 #[must_use]
 pub fn metadata() -> Metadata {
     Metadata {
-        id: garmin_device::DeviceId::from_u32(42_530_200),
+        id: Some(garmin_device::DeviceId::from_u32(42_530_200)),
+        device_digest: Some(manifest().identity_digest()),
+        report: None,
         name: NAME.to_owned(),
-        software_version: garmin_device::SoftwareVersion::from_hundredths(1_870),
+        software_version: Some(garmin_device::SoftwareVersion::from_hundredths(1_870)),
         capabilities: vec![
             Capability::new(
                 garmin_device::DataType::Activity,

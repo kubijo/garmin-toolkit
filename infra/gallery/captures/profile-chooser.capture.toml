@@ -1,0 +1,34 @@
+out = "../../../.tmp/gallery/profile-chooser"
+size = "1920x900"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "wide"
+scene = "profile::Chooser"
+[shot.knobs]
+width = 1808
+height = 720
+
+[[shot]]
+name = "restored"
+scene = "profile::Chooser"
+[shot.knobs]
+width = 1808
+height = 720
+restored = true
+
+[[shot]]
+name = "narrow"
+scene = "profile::Chooser"
+[shot.knobs]
+width = 360
+
+[[shot]]
+name = "light-empty"
+scene = "profile::Chooser"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+profiles = "empty"

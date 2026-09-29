@@ -1,40 +1,48 @@
 import '../just/common.just'
 
-export CARGO_TARGET_DIR := repository_root / ".tmp/gallery-target"
+export CARGO_TARGET_DIR := repository_root / ".tmp/gallery-check-target"
+gallery_live_target := repository_root / ".tmp/gallery-target"
 gallery_backend := env('WGPU_BACKEND', if os() == 'macos' { 'metal' } else { 'vulkan' })
 
+# Add the catalog compiler without replacing the host graphics runtime.
+[private]
+in-gallery +cmd: require-linker
+    @{{ quote(memory_capped) }} nix shell {{ quote(flake + "#formatjs-cli") }} --command \
+        env CARGO_TARGET_DIR={{ quote(CARGO_TARGET_DIR) }} "$@"
+
 # Run the gallery; --hot enables scene reload.
-run *args: require-linker
-    @{{ quote(memory_capped) }} cargo run --manifest-path Cargo.toml -- "$@"
+run *args:
+    @just in-gallery env CARGO_TARGET_DIR={{ quote(gallery_live_target) }} \
+        cargo run --manifest-path Cargo.toml -- "$@"
 
 # Run the gallery with scene hot reload.
 hot: (run "--hot")
 
 # Type-check the gallery and every discovered scene.
-check: require-linker
-    {{ quote(memory_capped) }} \
+check:
+    just in-gallery \
         cargo check --manifest-path Cargo.toml --all-features
 
 # Lint the gallery host, adapter, and every discovered scene.
-lint: require-linker
-    {{ quote(memory_capped) }} \
+lint:
+    just in-gallery \
         cargo clippy --manifest-path Cargo.toml --all-targets --all-features -- --deny warnings
 
 # Link the gallery host and reloadable scene library.
-build: require-linker
-    {{ quote(memory_capped) }} \
+build:
+    just in-gallery \
         cargo build --manifest-path Cargo.toml --all-features
 
 # Render one scene without opening a window.
-render SCENE OUT SIZE='1280x720': require-linker
-    {{ quote(memory_capped) }} env WGPU_BACKEND={{ quote(gallery_backend) }} \
+render SCENE OUT SIZE='1280x720':
+    just in-gallery env WGPU_BACKEND={{ quote(gallery_backend) }} \
         cargo run --quiet \
         --manifest-path Cargo.toml --all-features -- \
         --scene "{{ SCENE }}" --render "{{ OUT }}" --size {{ SIZE }}
 
 # Render a capture set; pass --out PATH to override its output directory.
-capture FILE='captures/components.capture.toml' *options: require-linker
-    @{{ quote(memory_capped) }} env WGPU_BACKEND={{ quote(gallery_backend) }} \
+capture FILE='captures/components.capture.toml' *options:
+    @just in-gallery env WGPU_BACKEND={{ quote(gallery_backend) }} \
         cargo run --quiet --manifest-path Cargo.toml --all-features -- --capture "$@"
 
 # Render all maintained capture sets.
@@ -46,8 +54,8 @@ capture-all:
     done
 
 # Run gallery tests; pass a filter and -- --ignored for opt-in captures.
-test *args: require-linker
-    @{{ quote(memory_capped) }} env WGPU_BACKEND={{ quote(gallery_backend) }} cargo test --manifest-path Cargo.toml "$@"
+test *args:
+    @just in-gallery env WGPU_BACKEND={{ quote(gallery_backend) }} cargo test --manifest-path Cargo.toml "$@"
 
 # Build the isolated gallery and its lints through Nix.
 ci:
@@ -55,7 +63,7 @@ ci:
         nix build -L {{ flake }}#checks.{{ arch() }}-{{ if os() == 'macos' { 'darwin' } else { 'linux' } }}.gallery
 
 # List a scene's configurable capture values.
-knobs SCENE: require-linker
-    {{ quote(memory_capped) }} \
+knobs SCENE:
+    just in-gallery \
         cargo run --quiet --manifest-path Cargo.toml --all-features -- \
         --scene "{{ SCENE }}" --list-knobs
