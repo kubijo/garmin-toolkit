@@ -106,11 +106,7 @@ where
         let button = Props {
             label: choice.label,
             icon: Some(choice.icon),
-            kind: if is_selected {
-                Kind::Primary
-            } else {
-                Kind::Secondary
-            },
+            kind: Kind::Secondary,
             size: props.size,
             width: props.width,
             enabled: props.enabled && choice.enabled,
@@ -119,7 +115,14 @@ where
         {
             ui.end_row();
         }
-        let clicked = button.show(ui).clicked();
+        let clicked = button
+            .show_with_states_and_metrics(
+                ui,
+                button.kind.states(ui),
+                metrics(button.size),
+                Some(is_selected),
+            )
+            .clicked();
         (clicked && !is_selected).then_some(choice.value)
     })
 }
@@ -188,7 +191,7 @@ impl Props<'_> {
             height,
             ..metrics(self.size)
         };
-        self.show_with_states_and_metrics(ui, states, metrics)
+        self.show_with_states_and_metrics(ui, states, metrics, None)
     }
 
     fn show_with_states_and_metrics(
@@ -196,15 +199,29 @@ impl Props<'_> {
         ui: &mut Ui,
         states: &theme::ButtonStates,
         metrics: Metrics,
+        selection: Option<bool>,
     ) -> Response {
         ui.scope(|ui| {
             ui.spacing_mut().interact_size.y = metrics.height;
+            let palette = crate::theme::palette(ui);
             let visuals = &mut ui.style_mut().visuals;
             visuals.widgets.inactive = state_visuals(states.rest());
             visuals.widgets.hovered = state_visuals(states.hover());
             visuals.widgets.active = state_visuals(states.active());
             visuals.widgets.open = visuals.widgets.active;
             visuals.widgets.noninteractive = state_visuals(states.disabled());
+            if selection.is_some() {
+                for (widget, level) in [
+                    (&mut visuals.widgets.inactive, theme::Level::One),
+                    (&mut visuals.widgets.hovered, theme::Level::Two),
+                    (&mut visuals.widgets.active, theme::Level::Three),
+                ] {
+                    let fill = palette.surfaces().layer_hover(level);
+                    *widget =
+                        crate::theme::widget(fill, fill, fill, palette.content().text_primary());
+                }
+                visuals.widgets.open = visuals.widgets.active;
+            }
             visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
             ui.spacing_mut().button_padding = egui::vec2(metrics.horizontal_padding, 0.0);
 
@@ -225,7 +242,24 @@ impl Props<'_> {
                 ))
                 .corner_radius(CONTROL_RADIUS);
 
-            interaction_cursor(ui.add_enabled(self.enabled, button))
+            let response = interaction_cursor(ui.add_enabled(self.enabled, button));
+            if selection == Some(true) {
+                let fill = ui.style().interact(&response).bg_fill;
+                let surface =
+                    garmin_color::Color::from_u32(u32::from_be_bytes(fill.to_srgba_unmultiplied()));
+                let accent = if response.enabled() {
+                    crate::theme::selection_accent_on(ui, surface)
+                } else {
+                    palette.content().icon_disabled()
+                };
+                let marker = egui::Rect::from_min_max(
+                    response.rect.left_bottom() - egui::vec2(0.0, 2.0),
+                    response.rect.right_bottom(),
+                );
+                ui.painter()
+                    .rect_filled(marker, CONTROL_RADIUS, crate::theme::color32(accent));
+            }
+            response
         })
         .inner
     }

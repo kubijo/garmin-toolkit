@@ -14,6 +14,50 @@ struct ChooserSceneProps {
 }
 
 #[scene]
+fn header_buttons(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let compact = ctx.toggle("compact", false);
+    let intl = globals.intl();
+    let profiles = [
+        profile::ProfileProps {
+            display_name: "Alex Rider",
+            accent: swatch::cyan::G40,
+            avatar: None,
+        },
+        profile::ProfileProps {
+            display_name: "Sam Runner",
+            accent: swatch::magenta::G40,
+            avatar: None,
+        },
+        profile::ProfileProps {
+            display_name: "Taylor Cyclist",
+            accent: swatch::green::G40,
+            avatar: None,
+        },
+    ];
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
+        for (index, profile) in profiles.iter().enumerate() {
+            ui.push_id(index, |ui| {
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(if compact { 48.0 } else { 180.0 }, 32.0),
+                    egui::Sense::hover(),
+                );
+                let _ = profile::header(
+                    ui,
+                    rect,
+                    &profile::SelectorProps {
+                        intl: &intl,
+                        profiles: &profiles,
+                        selected: Some(index),
+                        expanded: false,
+                    },
+                    profile.display_name,
+                );
+            });
+        }
+    });
+}
+
+#[scene]
 fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let props = ChooserSceneProps {
         dataset: ctx.buttons("profiles", &["household", "single", "empty"], 0),
@@ -75,7 +119,7 @@ fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
 }
 
 #[scene]
-fn avatars(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+fn avatars(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let size = ctx.slider("size", 48.0, 24.0, 96.0, 1.0);
     let texture = avatar_texture(ui);
     let image = profile::AvatarImage::texture(egui::load::SizedTexture::from_handle(&texture));
@@ -90,10 +134,29 @@ fn avatars(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         ),
     ];
 
-    stage!(ctx, ui, |ui| {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.horizontal(|ui| {
             for (name, accent, image) in samples {
                 avatar_sample(ui, name, accent, image, size);
+            }
+        });
+    });
+}
+
+#[scene]
+fn initials_contrast(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let size = ctx.slider("size", 48.0, 20.0, 96.0, 1.0);
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
+        ui.horizontal(|ui| {
+            for (name, accent) in [
+                ("Black", swatch::BLACK),
+                ("White", swatch::WHITE),
+                ("Yellow", swatch::yellow::G30),
+                ("Pink", Color::from_rgb(238, 83, 150)),
+                ("Blue", swatch::ACTION),
+                ("Transparent", Color::from_rgba(0, 255, 0, 0)),
+            ] {
+                avatar_sample(ui, name, accent, None, size);
             }
         });
     });

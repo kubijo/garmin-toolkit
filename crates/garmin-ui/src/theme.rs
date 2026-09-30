@@ -63,7 +63,60 @@ pub fn palette(ui: &Ui) -> &'static theme::Theme {
 /// Accent shared by selected-row and active-navigation markers.
 #[must_use]
 pub fn selection_accent(ui: &Ui) -> Color {
-    palette(ui).interaction().interactive()
+    selection_accent_on(ui, palette(ui).surfaces().layer(theme::Level::One))
+}
+
+const PROFILE_ACCENT: &str = "garmin-profile-accent";
+
+pub(crate) fn profile_accent_info(accent: Color) -> egui::UiStackInfo {
+    egui::UiStackInfo::default().with_tag_value(PROFILE_ACCENT, accent)
+}
+
+/// Scope profile styling to this UI and its children, without changing the application theme.
+pub fn with_profile_accent<R>(ui: &mut Ui, accent: Color, show: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope_builder(
+        egui::UiBuilder::new().ui_stack_info(profile_accent_info(accent)),
+        show,
+    )
+    .inner
+}
+
+/// Resolve an opaque profile marker against the surface it will actually be painted on.
+#[must_use]
+pub fn selection_accent_on(ui: &Ui, surface: Color) -> Color {
+    profile_accent(ui).contrasting_marker(surface)
+}
+
+pub(crate) fn profile_accent(ui: &Ui) -> Color {
+    ui.stack()
+        .iter()
+        .find_map(|entry| entry.tags().get_downcast::<Color>(PROFILE_ACCENT).copied())
+        .unwrap_or_else(|| palette(ui).interaction().interactive())
+}
+
+/// Color radio dots and checkbox marks while retaining neutral labels and disabled states.
+pub fn selected_control<R>(ui: &mut Ui, selected: bool, show: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope(|ui| {
+        if selected && ui.is_enabled() {
+            let palette = palette(ui);
+            let foreground = color32(palette.content().text_primary());
+            let accent = profile_accent(ui);
+            let visuals = &mut ui.style_mut().visuals;
+            visuals.override_text_color = Some(foreground);
+            for widget in [
+                &mut visuals.widgets.inactive,
+                &mut visuals.widgets.hovered,
+                &mut visuals.widgets.active,
+                &mut visuals.widgets.open,
+            ] {
+                let background =
+                    Color::from_u32(u32::from_be_bytes(widget.bg_fill.to_srgba_unmultiplied()));
+                widget.fg_stroke.color = color32(accent.contrasting_marker(background));
+            }
+        }
+        show(ui)
+    })
+    .inner
 }
 
 /// Applies one semantic surface level to nested controls.

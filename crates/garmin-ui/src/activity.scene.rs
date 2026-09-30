@@ -217,10 +217,15 @@ fn narrow_application(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
 fn application_scene(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals, narrow: bool) {
     use garmin_ui::{profile, shell, workspace};
     let empty = ctx.toggle("empty", false);
+    let accent = if ctx.buttons("accent", &["cyan", "pink"], 0) == 0 {
+        garmin_color::swatch::cyan::G40
+    } else {
+        garmin_color::swatch::magenta::G50
+    };
     let intl = globals.intl();
     let profiles = [profile::ProfileProps {
         display_name: "Alex Rider",
-        accent: garmin_color::swatch::cyan::G40,
+        accent,
         avatar: None,
     }];
     let size = if narrow {

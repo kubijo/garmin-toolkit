@@ -107,31 +107,39 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.vertical(|ui| {
-                summary_row(ui, props.status_label, props.status);
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let summary = [
+                    Some((props.status_label, props.status)),
+                    props
+                        .identifier
+                        .map(|value| (props.identifier_label, value)),
+                    props.software.map(|value| (props.software_label, value)),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+                let transfers = props
+                    .transfers
+                    .iter()
+                    .map(|transfer| (transfer.data, transfer.directions))
+                    .collect::<Vec<_>>();
+                let table = crate::facts::Table::new(
+                    ui,
+                    summary.iter().chain(&transfers).map(|(label, _)| *label),
+                );
+                table.show(ui, "device-summary", &summary);
                 if let Some(error) = props.inspection_error {
+                    ui.add_space(8.0);
                     inspection_error(ui, props.inspection_error_label, error);
                 }
-                if let Some(identifier) = props.identifier {
-                    summary_row(ui, props.identifier_label, identifier);
-                }
-                if let Some(software) = props.software {
-                    summary_row(ui, props.software_label, software);
-                }
                 if !props.transfers.is_empty() {
+                    ui.add_space(16.0);
                     ui.label(
                         RichText::new(props.transfers_label)
-                            .small()
                             .color(palette.content().text_secondary().into_cint()),
                     );
-                    for transfer in props.transfers {
-                        ui.horizontal(|ui| {
-                            ui.label(transfer.data);
-                            ui.label(
-                                RichText::new(transfer.directions)
-                                    .color(palette.content().text_secondary().into_cint()),
-                            );
-                        });
-                    }
+                    ui.add_space(8.0);
+                    table.show(ui, "device-transfers", &transfers);
                 }
             });
         });
@@ -424,14 +432,6 @@ fn metadata(ui: &mut Ui, label: &str, value: &str) {
     );
     ui.label(value);
     ui.add_space(8.0);
-}
-
-fn summary_row(ui: &mut Ui, label: &str, value: &str) {
-    let palette = crate::theme::palette(ui);
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(label).color(palette.content().text_secondary().into_cint()));
-        ui.label(value);
-    });
 }
 
 fn inspection_error(ui: &mut Ui, label: &str, value: &str) {

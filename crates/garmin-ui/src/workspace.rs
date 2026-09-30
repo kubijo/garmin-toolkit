@@ -110,7 +110,7 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
         selected: Some(props.selected_profile),
         expanded: props.profile_menu_expanded,
     };
-    let show = if matches!(props.page, Page::Activities) {
+    let show = if matches!(props.page, Page::Activities | Page::ProfileSettings) {
         shell::show_edge_to_edge
     } else {
         shell::show

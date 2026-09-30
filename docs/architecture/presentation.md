@@ -18,6 +18,10 @@ chosen RGBA color; reset restores the default. Both clients preserve the profile
 resolve the saved color against the current surface to maintain at least 3:1 contrast in both themes; text keeps
 semantic colors.
 
+Initials-only avatars blend the profile accent with the perceptual inverse of primary text for an opaque background. The
+blend starts evenly and moves toward that inverse as needed to maintain at least 4.5:1 contrast with the primary-text
+initials. Photo avatars retain their neutral backing.
+
 `garmin-ui` owns component geometry, semantic color use, typed props and actions, and a curated Phosphor/local icon
 catalog. Inputs inherit their surface layer. Modals may block the viewport or remain parent-contained; callers control
 backdrop dismissal.

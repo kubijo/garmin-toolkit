@@ -13,6 +13,10 @@ if [[ $(uname -s) == Darwin ]]; then
     exec "$@"
 fi
 
+# Cargo otherwise uses every logical CPU, which can make rustdoc workers thrash
+# against MemoryHigh before reaching the hard memory limit.
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
+
 if ! command -v systemd-run >/dev/null 2>&1 \
     || ! command -v systemctl >/dev/null 2>&1 \
     || ! systemctl --user show-environment >/dev/null 2>&1; then

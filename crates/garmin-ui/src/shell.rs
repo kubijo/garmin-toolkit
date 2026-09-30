@@ -19,6 +19,7 @@ const NAV_ITEM_VERTICAL_INSET: f32 = 0.0;
 const ACTIVE_MARKER_WIDTH: f32 = 3.0;
 const ICON_SIZE: f32 = 20.0;
 const NAV_ICON_CENTER_INSET: f32 = RAIL_WIDTH / 2.0;
+const NAV_ITEM_START_PADDING: f32 = 16.0;
 const CONTENT_PADDING: f32 = 24.0;
 const PROFILE_MENU_WIDTH: f32 = 280.0;
 const PROFILE_CONTROL_GAP: f32 = 8.0;
@@ -254,9 +255,21 @@ fn show_with_padding<R>(
     let size = ui.available_size_before_wrap();
     let (root, _) = ui.allocate_exact_size(size, Sense::hover());
     let shell_clip = bounded_clip(root, ui.clip_rect());
+    let accent = props
+        .profile_selector
+        .and_then(|selector| {
+            selector
+                .selected
+                .and_then(|index| selector.profiles.get(index))
+        })
+        .map_or_else(
+            || crate::theme::palette(ui).interaction().interactive(),
+            |profile| profile.accent,
+        );
     let mut shell_ui = ui.new_child(
         UiBuilder::new()
             .id_salt("application-shell")
+            .ui_stack_info(crate::theme::profile_accent_info(accent))
             .max_rect(root)
             .layout(Layout::top_down(Align::Min)),
     );
@@ -648,7 +661,10 @@ fn navigation_contents(ui: &Ui, rect: Rect, props: &Props<'_>) -> Option<Action>
                 break;
             }
             ui.painter().text(
-                egui::pos2(group_rect.left() + 16.0, group_rect.center().y),
+                egui::pos2(
+                    group_rect.left() + NAV_ITEM_START_PADDING,
+                    group_rect.center().y,
+                ),
                 Align2::LEFT_CENTER,
                 label,
                 egui::TextStyle::Small.resolve(ui.style()),
@@ -724,11 +740,18 @@ fn paint_destination(
         ui.painter().rect_filled(
             Rect::from_min_size(rect.min, egui::vec2(ACTIVE_MARKER_WIDTH, rect.height())),
             egui::CornerRadius::ZERO,
-            crate::theme::selection_accent(ui).into_cint(),
+            crate::theme::selection_accent_on(ui, theme.surfaces().layer_hover(theme::Level::One))
+                .into_cint(),
         );
     }
 
-    let icon_center = navigation_icon_center(rect);
+    let icon_center = match navigation {
+        Navigation::Expanded => egui::pos2(
+            rect.left() + NAV_ITEM_START_PADDING + ICON_SIZE / 2.0,
+            rect.center().y,
+        ),
+        Navigation::Rail => navigation_icon_center(rect),
+    };
     icons::Props {
         icon: destination.icon,
         size: ICON_SIZE,

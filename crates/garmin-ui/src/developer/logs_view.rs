@@ -152,8 +152,7 @@ fn time_filter(ui: &mut Ui, label: &str, value: &mut Option<u64>) {
         let mut enabled = value.is_some();
         ui.scope(|ui| {
             ui.spacing_mut().interact_size.y = 24.0;
-            if ui
-                .checkbox(&mut enabled, label)
+            if crate::theme::selected_control(ui, enabled, |ui| ui.checkbox(&mut enabled, label))
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .changed()
             {
