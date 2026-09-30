@@ -24,6 +24,7 @@ const CHOOSER_AVATAR_SIZE: f32 = 48.0;
 const CHOOSER_ROW_HEIGHT: f32 = 64.0;
 const CHOOSER_ROW_PADDING: f32 = 12.0;
 const HEADER_AVATAR_SIZE: f32 = 20.0;
+const ACCENT_WASH_OPACITY: f32 = 0.16;
 
 pub struct Presentation {
     display_name: String,
@@ -196,10 +197,15 @@ impl AvatarProps<'_> {
         painter.circle_filled(rect.center(), self.size / 2.0, accent.into_cint());
 
         let image_rect = rect.shrink(2.0);
+        let background = if self.image.is_some() {
+            palette.surfaces().layer(theme::Level::One)
+        } else {
+            initials_background(self.accent, palette.content())
+        };
         painter.circle_filled(
             image_rect.center(),
             image_rect.width() / 2.0,
-            palette.surfaces().layer(theme::Level::One).into_cint(),
+            background.into_cint(),
         );
         if let Some(image) = self.image {
             Image::new(image.source())
@@ -217,6 +223,21 @@ impl AvatarProps<'_> {
         }
         response
     }
+}
+
+fn initials_background(accent: Color, content: &theme::Content) -> Color {
+    let inverse = content.text_primary().invert();
+    // An opaque fill keeps contrast independent of both accent alpha and the host surface.
+    let accent = accent.with_alpha(255);
+    for step in 16..=32u8 {
+        let background = accent
+            .mix(inverse, f32::from(step) / 32.0)
+            .unwrap_or(inverse);
+        if background.contrast_ratio(content.text_primary()) >= 4.5 {
+            return background;
+        }
+    }
+    inverse
 }
 
 /// Presentation data for one profile.
@@ -259,6 +280,7 @@ pub enum Action {
 pub fn header(ui: &mut Ui, rect: egui::Rect, props: &SelectorProps<'_>, label: &str) -> Response {
     let selected = props.selected.and_then(|index| props.profiles.get(index));
     let palette = crate::theme::palette(ui);
+    let painter = ui.painter().clone();
     let response = header_selector::control(
         ui,
         rect,
@@ -267,6 +289,7 @@ pub fn header(ui: &mut Ui, rect: egui::Rect, props: &SelectorProps<'_>, label: &
         props.expanded,
         |ui, wide| {
             if let Some(profile) = selected {
+                paint_accent_wash(&painter, rect, profile.accent);
                 AvatarProps {
                     display_name: profile.display_name,
                     accent: profile.accent,
@@ -405,6 +428,7 @@ fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>) -> Response {
     };
     ui.painter()
         .rect_filled(rect, CONTROL_RADIUS, fill.into_cint());
+    paint_accent_wash(ui.painter(), rect, profile.accent);
     ui.painter().rect_stroke(
         rect,
         CONTROL_RADIUS,
@@ -579,6 +603,32 @@ fn paint_focus_ring(ui: &Ui, response: &Response) {
             egui::StrokeKind::Inside,
         );
     }
+}
+
+fn paint_accent_wash(painter: &egui::Painter, rect: egui::Rect, accent: Color) {
+    // Shift the 45° fade right, keeping the preceding corner filled to avoid a hard edge.
+    let reach = rect.height() * 2.0;
+    let offset = rect.height() * 0.25;
+    let corner = rect.left_bottom();
+    let tint = color32(accent).gamma_multiply(ACCENT_WASH_OPACITY);
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(corner, tint);
+    mesh.colored_vertex(corner - egui::vec2(0.0, offset), tint);
+    mesh.colored_vertex(corner + egui::vec2(offset, 0.0), tint);
+    mesh.colored_vertex(
+        corner - egui::vec2(0.0, offset + reach),
+        egui::Color32::TRANSPARENT,
+    );
+    mesh.colored_vertex(
+        corner + egui::vec2(offset + reach, 0.0),
+        egui::Color32::TRANSPARENT,
+    );
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(1, 3, 4);
+    mesh.add_triangle(1, 4, 2);
+    painter
+        .with_clip_rect(painter.clip_rect().intersect(rect))
+        .add(mesh);
 }
 
 fn avatar(ui: &mut Ui, profile: &ProfileProps<'_>, size: f32) {

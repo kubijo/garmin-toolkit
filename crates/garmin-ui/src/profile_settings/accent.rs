@@ -1,6 +1,6 @@
 //! Profile accent selection using the shared egui-elegance picker.
 use super::{Action, Props};
-use crate::{Size, button, semantics, theme, typography};
+use crate::{Size, button, icons, semantics, theme};
 use egui::{Color32, Ui};
 use garmin_color::{Color, swatch};
 use garmin_i18n::format_message;
@@ -33,61 +33,47 @@ pub(super) fn preview(ui: &Ui, props: &Props<'_>) -> Color {
 
 pub(super) fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     let intl = props.intl;
-    ui.label(format_message!(intl, default_message: "Profile accent color"));
-    typography::body(
-        ui,
-        &format_message!(intl, default_message: "Identifies your profile in avatars and profile lists."),
-    );
+    ui.label(format_message!(intl, default_message: "Profile accent color"))
+        .on_hover_text(format_message!(intl, default_message: "Identifies your profile in avatars and profile lists."));
     let id = props.id.with("profile-accent-draft");
     let mut draft = Draft::load(ui, props);
     let mut action = None;
     ui.add_enabled_ui(!props.disabled, |ui| {
-        install_picker_theme(ui);
-        // The upstream picker does not expose popover width. Bound the Area's
-        // default only during this widget so swatches stay compact.
-        let style = ui.ctx().global_style();
-        ui.ctx()
-            .global_style_mut(|style| style.spacing.default_area_size.x = 288.0);
-        let response = button::interaction_cursor(
-            ui.add(
-                elegance::ColorPicker::new(id, &mut draft.color)
-                    .palette(presets())
-                    .palette_columns(8)
-                    .recents_max(8),
-            ),
-        );
-        ui.ctx().set_global_style(style);
-        semantics::target(ui, &response, "profile.accent.picker");
-        if response.changed() {
-            // The avatar appears above the picker and was already painted this frame.
-            ui.ctx().request_repaint();
-        }
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+        ui.spacing_mut().interact_size.y = 32.0;
+        ui.horizontal_wrapped(|ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+            show_picker(ui, id, &mut draft.color);
             let apply = format_message!(intl, default_message: "Apply color");
-            let response = button::Props {
+            let apply_button = button::Props {
                 label: &apply,
-                icon: None,
+                icon: Some(icons::CHECK),
                 kind: button::Kind::Secondary,
                 size: Size::Small,
                 width: button::Width::Fit,
                 enabled: draft.color != theme::color32(props.accent.unwrap_or(swatch::ACTION)),
+            };
+            if apply_button.natural_width(ui) > ui.available_size_before_wrap().x {
+                ui.end_row();
             }
-            .show(ui);
+            let response = apply_button.show(ui);
             semantics::target(ui, &response, "profile.accent.apply");
             if response.clicked() {
                 action = Some(Action::UpdateAccent(Some(draft.accent())));
             }
             let reset = format_message!(intl, default_message: "Use default color");
-            let response = button::Props {
+            let reset_button = button::Props {
                 label: &reset,
-                icon: None,
+                icon: Some(icons::CLOCK_COUNTER_CLOCKWISE),
                 kind: button::Kind::Ghost,
                 size: Size::Small,
                 width: button::Width::Fit,
                 enabled: props.accent.is_some(),
+            };
+            if reset_button.natural_width(ui) > ui.available_size_before_wrap().x {
+                ui.end_row();
             }
-            .show(ui);
+            let response = reset_button.show(ui);
             semantics::target(ui, &response, "profile.accent.reset");
             if response.clicked() {
                 action = Some(Action::UpdateAccent(None));
@@ -96,6 +82,29 @@ pub(super) fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     });
     ui.data_mut(|data| data.insert_temp(id, draft));
     action
+}
+
+fn show_picker(ui: &mut Ui, id: egui::Id, color: &mut Color32) {
+    install_picker_theme(ui);
+    // The upstream picker does not expose popover width. Bound the Area's
+    // default only during this widget so swatches stay compact.
+    let style = ui.ctx().global_style();
+    ui.ctx()
+        .global_style_mut(|style| style.spacing.default_area_size.x = 288.0);
+    let response = button::interaction_cursor(
+        ui.add(
+            elegance::ColorPicker::new(id, color)
+                .palette(presets())
+                .palette_columns(8)
+                .recents_max(8),
+        ),
+    );
+    ui.ctx().set_global_style(style);
+    semantics::target(ui, &response, "profile.accent.picker");
+    if response.changed() {
+        // The avatar appears above the picker and was already painted this frame.
+        ui.ctx().request_repaint();
+    }
 }
 
 fn presets() -> [Color32; 8] {

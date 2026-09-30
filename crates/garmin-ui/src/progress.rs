@@ -40,7 +40,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
             .selectable(false),
         );
         match props.value {
-            Value::Indeterminate => indeterminate(ui, palette, height),
+            Value::Indeterminate => indeterminate(ui, height),
             Value::Determinate { completed, total } => {
                 let fraction = if total == 0 {
                     1.0
@@ -48,7 +48,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
                     f32::from_f64(completed.to_f64() / total.to_f64())
                 };
                 ui.add(
-                    widget_theme::progress_bar(fraction, palette.interaction().interactive())
+                    widget_theme::progress_bar(fraction, progress_accent(ui))
                         .desired_height(height)
                         .corner_radius(egui::CornerRadius::ZERO),
                 );
@@ -67,7 +67,12 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
     });
 }
 
-fn indeterminate(ui: &mut Ui, palette: &garmin_color::theme::Theme, height: f32) {
+fn progress_accent(ui: &Ui) -> garmin_color::Color {
+    let [r, g, b, _] = ui.visuals().extreme_bg_color.to_srgba_unmultiplied();
+    widget_theme::selection_accent_on(ui, garmin_color::Color::from_rgb(r, g, b))
+}
+
+fn indeterminate(ui: &mut Ui, height: f32) {
     let width = ui.available_width().max(0.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
     response.widget_info(|| egui::WidgetInfo::new(egui::WidgetType::ProgressIndicator));
@@ -88,7 +93,7 @@ fn indeterminate(ui: &mut Ui, palette: &garmin_color::theme::Theme, height: f32)
     ui.painter().with_clip_rect(rect).rect_filled(
         segment,
         egui::CornerRadius::ZERO,
-        widget_theme::color32(palette.interaction().interactive()),
+        widget_theme::color32(progress_accent(ui)),
     );
     ui.request_repaint();
 }

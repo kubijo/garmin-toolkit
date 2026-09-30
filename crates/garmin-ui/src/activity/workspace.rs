@@ -1528,7 +1528,11 @@ fn lap_row(
         ui.painter().rect_filled(
             egui::Rect::from_min_size(rect.min, egui::vec2(2.0, rect.height())),
             egui::CornerRadius::ZERO,
-            crate::theme::selection_accent(ui).into_cint(),
+            crate::theme::selection_accent_on(
+                ui,
+                palette.surfaces().layer_hover(theme::Level::Two),
+            )
+            .into_cint(),
         );
     }
     let columns = LapColumns::new(rect);
@@ -2481,7 +2485,7 @@ impl ChartKind {
         let palette = crate::theme::palette(ui);
         color32(match self {
             Self::Elevation => palette.support().success(),
-            Self::PaceSpeed => crate::theme::selection_accent(ui),
+            Self::PaceSpeed => palette.interaction().interactive(),
             Self::HeartRate => palette.support().error(),
             Self::Cadence => palette.interaction().link_visited(),
             Self::Power => palette.support().warning(),

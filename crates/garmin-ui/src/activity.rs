@@ -491,7 +491,11 @@ fn paint_row(ui: &Ui, rect: Rect, props: &ItemProps<'_>, selected: bool, respons
         ui.painter().rect_filled(
             Rect::from_min_size(rect.min, egui::vec2(SELECTED_MARKER_WIDTH, rect.height())),
             egui::CornerRadius::ZERO,
-            crate::theme::selection_accent(ui).into_cint(),
+            crate::theme::selection_accent_on(
+                ui,
+                palette.surfaces().layer_hover(theme::Level::Two),
+            )
+            .into_cint(),
         );
     }
 

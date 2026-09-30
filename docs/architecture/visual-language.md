@@ -10,6 +10,11 @@ Toolkit primitives and roles.
   parents. Components use `garmin-color` semantic roles, never swatch grades.
 - Primary buttons use action blue; links, focus, progress, and active destinations use accent roles. Selection and open
   controls use neutral layers. Permanent panes use layers/dividers; shadows belong to menus, popovers, dialogs, toasts.
+- The selected profile supplies selection markers, radio/checkbox marks, selected segmented options, routes, and
+  operation progress. Markers are opaque and adjusted to at least 3:1 contrast against their surface. Segmented options
+  use neutral fills and text with an accent underline. Profile styling is scoped to the shell's UI tree. Primary
+  actions, links, focus, status colors, chart metrics, and route metric gradients retain their semantic colors. Login
+  profile cards keep each profile's own accent.
 - Spacing: 2, 4, 8, 12, 16, 24, 32 logical pixels. Rows: 32; controls: 40; prominent controls: 48. Default desktop page
   inset: 24; dense workspaces: 12/16. Narrow layouts reduce insets deliberately.
 - Controls, rows, cards, panes, menus, dialogs, and toasts are square. Radius tokens stay centralized; avatars/status
@@ -31,6 +36,9 @@ uses compact full-width neutral selection, a leading full-height accent rail and
 destination order and semantics. The navigation trailing edge is the shell divider; no header/content rule.
 
 ### Pages, cards, and forms
+
+Two-value selections use visible radio groups; do not hide either choice in a dropdown. Use `radio::show` for shared
+labels, helper text, optional leading images, wrapping, and enabled/disabled interaction cues.
 
 One page title, aligned content, optional contextual actions. Cards group objects or forms; avoid nested cards and
 low-information full-width slabs. Form labels sit above filled/outlined controls, helper/error text below. Destructive

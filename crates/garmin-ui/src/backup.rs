@@ -2,7 +2,7 @@
 
 use crate::{Size, button, icons, progress};
 use cint::ColorInterop;
-use egui::{RichText, TextStyle, Ui};
+use egui::{RichText, Ui};
 use garmin_i18n::{Intl, format_message};
 use garmin_service_api::snapshots::{SnapshotPreview, SnapshotState, SnapshotStatus};
 
@@ -432,7 +432,6 @@ fn show_preview(ui: &mut Ui, intl: &Intl, preview: &SnapshotPreview) {
     ui.add_space(8.0);
     let explanation = format_message!(intl, default_message: "This replaces all profiles and stored data in this application. Save a current backup first if you want to keep them.");
     crate::typography::body(ui, &explanation);
-    let secondary = crate::theme::color32(crate::theme::palette(ui).content().text_secondary());
     ui.add_space(8.0);
     let created = garmin_model::value::Timestamp::from_unix_seconds(preview.created_at);
     let date = created.map_or_else(
@@ -457,45 +456,14 @@ fn show_preview(ui: &mut Ui, intl: &Intl, preview: &SnapshotPreview) {
             size.as_str(),
         ),
     ];
-    let label_width = facts
-        .iter()
-        .map(|(label, _)| {
-            ui.painter()
-                .layout_no_wrap(
-                    label.clone(),
-                    TextStyle::Body.resolve(ui.style()),
-                    secondary,
-                )
-                .size()
-                .x
-        })
-        .fold(0.0_f32, f32::max)
-        .min(ui.available_width() * 0.4);
-    let value_width = (ui.available_width() - label_width - 8.0).max(0.0);
-    egui::Grid::new("backup-preview-facts")
-        .num_columns(2)
-        .min_col_width(0.0)
-        .min_row_height(0.0)
-        .spacing(egui::vec2(8.0, 2.0))
-        .show(ui, |ui| {
-            for (label, value) in facts {
-                ui.allocate_ui_with_layout(
-                    egui::vec2(label_width, 0.0),
-                    egui::Layout::top_down(egui::Align::Max),
-                    |ui| {
-                        ui.add(egui::Label::new(RichText::new(label).color(secondary)).wrap());
-                    },
-                );
-                ui.allocate_ui_with_layout(
-                    egui::vec2(value_width, 0.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.add(egui::Label::new(crate::typography::semibold(value)).wrap());
-                    },
-                );
-                ui.end_row();
-            }
-        });
+    let rows = facts
+        .each_ref()
+        .map(|(label, value)| (label.as_str(), *value));
+    crate::facts::Table::new(ui, rows.iter().map(|(label, _)| *label)).show(
+        ui,
+        "backup-preview-facts",
+        &rows,
+    );
     ui.add_space(16.0);
 }
 

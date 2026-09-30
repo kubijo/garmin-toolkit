@@ -68,9 +68,47 @@ fn harness_for(language: garmin_i18n::Language, size: [f32; 2]) -> Harness<'stat
 }
 
 #[test]
+fn scrolling_from_the_empty_side_moves_the_heading_and_reaches_preferences() {
+    let mut view = harness_for(garmin_i18n::Language::English, [960.0, 480.0]);
+    view.run();
+    assert!(view.get_by_label("Profile settings").rect().top() > 0.0);
+    view.hover_at(egui::pos2(900.0, 240.0));
+    view.event(egui::Event::MouseWheel {
+        phase: egui::TouchPhase::Move,
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -600.0),
+        modifiers: egui::Modifiers::NONE,
+    });
+    view.run();
+    assert!(
+        view.query_by_label("Profile settings")
+            .is_none_or(|node| node.rect().bottom() <= 0.0)
+    );
+    let field = view
+        .get(By::new().predicate(|node| node.author_id() == Some("profile.file-windows.inline")));
+    assert!(field.rect().top() >= 0.0 && field.rect().bottom() <= 480.0);
+}
+
+#[test]
 fn narrow_czech_settings_keep_theme_choices_visible_and_clickable() {
     let mut view = harness_for(garmin_i18n::Language::Czech, [320.0, 1000.0]);
     view.run();
+    for target in [
+        "profile.units.metric",
+        "profile.units.imperial",
+        "profile.language.english",
+        "profile.language.czech",
+        "profile.file-windows.separate",
+        "profile.file-windows.inline",
+    ] {
+        let bounds = view
+            .get(By::new().predicate(|node| node.author_id() == Some(target)))
+            .rect();
+        assert!(
+            bounds.left() >= 0.0 && bounds.right() <= 320.0,
+            "{target}: {bounds:?}"
+        );
+    }
     for label in ["Automaticky", "Tmavý", "Světlý"] {
         let bounds = view.get_by_label(label).rect();
         assert!(
@@ -158,9 +196,6 @@ fn avatar_ring(view: &Harness<'_, Model>) -> egui::Color32 {
 fn window_and_theme_changes_preserve_other_profile_preferences() {
     let mut view = harness();
     view.run();
-    view.get(By::new().predicate(|node| node.author_id() == Some("profile.file-windows")))
-        .click();
-    view.run();
     view.get_by_label("Separate window").click();
     view.run();
     assert!(!view.state().preferences.inline_file_windows());
@@ -168,6 +203,71 @@ fn window_and_theme_changes_preserve_other_profile_preferences() {
     view.run();
     assert!(view.state().preferences.show_hidden_files());
     assert!(!view.state().preferences.inline_file_windows());
+}
+
+#[test]
+fn binary_preferences_are_visible_radios_and_preserve_other_settings() {
+    let mut view = harness();
+    view.run();
+    for label in [
+        "Metric",
+        "Imperial",
+        "English",
+        "Čeština",
+        "Separate window",
+        "Inside the app",
+    ] {
+        assert_eq!(
+            view.get_by_label(label).accesskit_node().role(),
+            egui::accesskit::Role::RadioButton
+        );
+    }
+    view.get_by_label("Imperial").click();
+    view.run();
+    assert_eq!(
+        view.state().preferences.unit_system(),
+        garmin_model::identity::UnitSystem::Imperial
+    );
+    view.get_by_label("Čeština").click();
+    view.run();
+    assert_eq!(
+        view.state().preferences.language(),
+        garmin_model::identity::LanguagePreference::Czech
+    );
+    assert_eq!(
+        view.state().preferences.unit_system(),
+        garmin_model::identity::UnitSystem::Imperial
+    );
+    assert!(view.state().preferences.show_hidden_files());
+    assert!(view.state().preferences.inline_file_windows());
+    view.get_by_label("Separate window").focus();
+    view.key_press(egui::Key::Space);
+    view.run();
+    assert!(!view.state().preferences.inline_file_windows());
+}
+
+#[test]
+fn radio_controls_have_correct_cursors_and_cannot_change_when_disabled() {
+    let mut view = harness();
+    view.run();
+    let center = view.get_by_label("Imperial").rect().center();
+    view.hover_at(center);
+    view.run();
+    assert_eq!(
+        view.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand
+    );
+    view.state_mut().disabled = true;
+    view.run();
+    assert!(view.get_by_label("Imperial").accesskit_node().is_disabled());
+    assert_eq!(
+        view.output().platform_output.cursor_icon,
+        egui::CursorIcon::NotAllowed
+    );
+    let initial = view.state().preferences;
+    view.get_by_label("Imperial").click();
+    view.run();
+    assert_eq!(view.state().preferences, initial);
 }
 
 #[test]

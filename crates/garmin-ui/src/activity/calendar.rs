@@ -184,6 +184,22 @@ fn day_button(
         tile,
         egui::Shape::rect_filled(response.rect, egui::CornerRadius::ZERO, fill),
     );
+    if is_selected {
+        let [r, g, b, _] = fill.to_srgba_unmultiplied();
+        ui.painter().line_segment(
+            [
+                response.rect.left_bottom() - egui::vec2(0.0, 1.0),
+                response.rect.right_bottom() - egui::vec2(0.0, 1.0),
+            ],
+            egui::Stroke::new(
+                2.0,
+                crate::theme::color32(crate::theme::selection_accent_on(
+                    ui,
+                    garmin_color::Color::from_rgb(r, g, b),
+                )),
+            ),
+        );
+    }
     if response.has_focus() {
         ui.painter().rect_stroke(
             response.rect,

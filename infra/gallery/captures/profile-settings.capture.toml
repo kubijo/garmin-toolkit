@@ -1,5 +1,5 @@
 out = "../../../.tmp/gallery/profile-settings"
-size = "820x1020"
+size = "1200x1100"
 sheet = "sheet.png"
 report = "capture.json"
 settle = true
@@ -22,3 +22,27 @@ Theme = "Light"
 Language = "Čeština"
 [shot.knobs]
 width = 320
+
+[[shot]]
+name = "disabled"
+scene = "profile_settings::Playground"
+[shot.knobs]
+disabled = true
+
+[[shot]]
+name = "wide-scroll"
+scene = "profile_settings::Playground"
+[shot.knobs]
+width = 1120
+height = 640
+application = true
+
+[[shot]]
+name = "wide-scroll-light"
+scene = "profile_settings::Playground"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+width = 1120
+height = 640
+application = true

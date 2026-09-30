@@ -2,7 +2,10 @@
 
 use std::{fmt, num::ParseIntError, str::FromStr};
 
-use ::palette::{Clamp, FromColor, IntoColor, Mix, Oklab, Oklch, Srgb, Srgba};
+use ::palette::{
+    Clamp, FromColor, IntoColor, IsWithinBounds, Mix, Oklab, Oklaba, Oklch, Srgb, Srgba, WithAlpha,
+    convert::FromColorUnclamped,
+};
 use cint::{Alpha, ColorInterop, EncodedSrgb};
 use thiserror::Error;
 
@@ -91,7 +94,28 @@ impl Color {
         Self::from_rgba(red, green, blue, alpha)
     }
 
+    /// Inverts perceptual lightness and opponent color axes in `OKLab`, preserving alpha.
+    ///
+    /// Maps `(L, a, b)` to `(1 - L, -a, -b)`.
+    ///
+    /// Out-of-sRGB results lose chroma at constant lightness and hue until they fit.
+    ///
+    /// Gamut mapping and byte rounding mean that applying
+    /// this twice may not recover the original color exactly.
+    #[must_use]
+    pub fn invert(self) -> Self {
+        let original: Oklaba = Srgba::from(self.0).into_format::<f32, f32>().into_color();
+        let inverted = Oklab::new(1.0 - original.l, -original.a, -original.b);
+        Self(
+            gamut_mapped_srgb(inverted)
+                .with_alpha(original.alpha)
+                .into_format::<u8, u8>()
+                .into(),
+        )
+    }
+
     /// Mixes colors in `OKLab` and alpha linearly.
+    ///
     /// # Errors
     /// [`ColorError::InvalidUnitInterval`] unless `amount` is finite and within `0..=1`.
     pub fn mix(self, other: Self, amount: f32) -> Result<Self, ColorError> {
@@ -197,6 +221,30 @@ impl fmt::Display for Color {
     }
 }
 
+/// Reduce chroma while preserving `OKLab` lightness and hue.
+/// Palette's OKHSL/OKHSV conversions can lose hue for colors far outside sRGB.
+fn gamut_mapped_srgb(color: Oklab) -> Srgb {
+    let color = color.clamp();
+    let rgb: Srgb = Srgb::from_color_unclamped(color);
+    if rgb.is_within_bounds() {
+        return rgb;
+    }
+    let (mut lower, mut upper) = (0.0, 1.0);
+    let mut result = Srgb::from_color(Oklab::new(color.l, 0.0, 0.0));
+    for _ in 0..16 {
+        let scale = f32::midpoint(lower, upper);
+        let candidate: Srgb =
+            Srgb::from_color_unclamped(Oklab::new(color.l, color.a * scale, color.b * scale));
+        if candidate.is_within_bounds() {
+            lower = scale;
+            result = candidate;
+        } else {
+            upper = scale;
+        }
+    }
+    result
+}
+
 fn validate_unit_interval(value: f32) -> Result<(), ColorError> {
     if value.is_finite() && (0.0..=1.0).contains(&value) {
         Ok(())
@@ -220,6 +268,54 @@ pub enum ColorError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn perceptual_inverse_preserves_alpha_and_neutral_midpoint() {
+        assert_eq!(swatch::BLACK.invert(), swatch::WHITE);
+        assert_eq!(swatch::WHITE.invert(), swatch::BLACK);
+        // Encoded sRGB 99 is approximately OKLab L=0.5, the inversion midpoint.
+        let midpoint = Color::from_rgba(99, 99, 99, 73);
+        assert_eq!(midpoint.invert(), midpoint);
+        assert_eq!(
+            Color::from_rgba(128, 128, 128, 0).invert().as_rgba(),
+            [72, 72, 72, 0]
+        );
+    }
+
+    #[test]
+    fn perceptual_inverse_reverses_color_axes_and_maps_gamut_without_hue_shift() {
+        for color in [
+            Color::from_rgb(140, 100, 110),
+            Color::from_rgb(255, 0, 0),
+            Color::from_rgb(0, 255, 0),
+            Color::from_rgb(0, 0, 255),
+        ] {
+            let to_lab = |color: Color| -> Oklab {
+                let [r, g, b, _] = color.as_rgba();
+                Srgb::new(r, g, b).into_format::<f32>().into_color()
+            };
+            let original = to_lab(color);
+            let inverse = to_lab(color.invert());
+            assert!((inverse.l - (1.0 - original.l)).abs() < 0.003);
+            let original_chroma = original.a.hypot(original.b);
+            let inverse_chroma = inverse.a.hypot(inverse.b);
+            let opposite_alignment = -(original.a * inverse.a + original.b * inverse.b)
+                / (original_chroma * inverse_chroma);
+            assert!(
+                opposite_alignment > 0.999,
+                "{color:?}: {inverse:?}, alignment={opposite_alignment}"
+            );
+            assert!(inverse_chroma <= original_chroma + 0.003);
+        }
+        let color = Color::from_rgba(140, 100, 110, 127);
+        for (original, restored) in color
+            .as_rgba()
+            .into_iter()
+            .zip(color.invert().invert().as_rgba())
+        {
+            assert!(original.abs_diff(restored) <= 1);
+        }
+    }
+
     #[test]
     fn profile_markers_remain_visible_in_both_themes() {
         for palette in [super::theme::GRAY_100, super::theme::GRAY_10] {

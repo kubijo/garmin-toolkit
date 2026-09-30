@@ -26,11 +26,15 @@ impl Image {
 
     /// Paints the image into an allocated rectangle.
     pub fn paint_at(self, ui: &Ui, rect: Rect) {
+        self.widget().paint_at(ui, rect);
+    }
+
+    /// Creates a widget that can also be used inside a labelled control.
+    pub fn widget(self) -> egui::Image<'static> {
         egui::Image::new(ImageSource::Bytes {
             uri: self.uri.into(),
             bytes: Bytes::Static(self.bytes),
         })
-        .paint_at(ui, rect);
     }
 }
 

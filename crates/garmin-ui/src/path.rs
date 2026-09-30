@@ -60,7 +60,7 @@ pub fn preview(ui: &mut Ui, props: &Props<'_>) {
     };
 
     let target = rect.shrink(PADDING);
-    let stroke = Stroke::new(PATH_WIDTH, palette.interaction().interactive().into_cint());
+    let stroke = Stroke::new(PATH_WIDTH, crate::theme::selection_accent(ui).into_cint());
     for segment in drawable {
         let points = segment
             .points

@@ -18,7 +18,9 @@ Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands an
   on Linux run under a hard memory-limited cgroup; an unconstrained workload previously caused an OOM session loss.
   Apple Silicon macOS development has an approved exception: the maintained wrapper forces one Cargo job, one Nix build
   at a time, and one core per Nix builder. This is a parallelism limit, not a hard RAM limit. Run heavyweight commands
-  serially through the Just recipes or `infra/just/memory-capped.sh`; do not run concurrent builds.
+  serially through the Just recipes or `infra/just/memory-capped.sh`; do not run concurrent builds. On Linux the wrapper
+  defaults Cargo to two jobs unless `CARGO_BUILD_JOBS` is set, avoiding memory throttling from excessive parallel
+  workers.
 - Keep diagnostics and analysis in maintained tooling, not disposable scripts. Temporary outputs belong under the
   repository's ignored `.tmp/` directories; gallery captures belong under `.tmp/gallery/`.
 - Real-device manifest comparisons require a separately approved anonymization procedure. Never commit raw device

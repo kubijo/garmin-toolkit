@@ -79,6 +79,23 @@ impl Navigation {
                                 .gap(0.0)
                                 .min_size(egui::vec2(ui.available_width(), 24.0)),
                         );
+                        if props.selected == Some(index) {
+                            let background = ui.visuals().selection.bg_fill;
+                            let surface = garmin_color::Color::from_u32(u32::from_be_bytes(
+                                background.to_srgba_unmultiplied(),
+                            ));
+                            let accent = crate::theme::color32(crate::theme::selection_accent_on(
+                                ui, surface,
+                            ));
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    response.rect.min,
+                                    egui::vec2(2.0, response.rect.height()),
+                                ),
+                                egui::CornerRadius::ZERO,
+                                accent,
+                            );
+                        }
                         crate::semantics::target(ui, &response, format!("activity.day.{index}"));
                         if response.clicked() {
                             action = Some(Action::Select(index));
@@ -157,41 +174,44 @@ impl Navigation {
         let mut close = false;
         let width = (ui.ctx().content_rect().width() - 48.0).clamp(1.0, 560.0);
         let style = ui.style().clone();
+        let accent = crate::theme::profile_accent(ui);
         let response = egui::Modal::new(ui.id().with("activity-archive"))
             .frame(crate::modal::surface_frame(ui).inner_margin(16))
             .backdrop_color(crate::theme::color32(crate::theme::palette(ui).overlay()))
             .show(ui.ctx(), |ui| {
-                ui.set_style(style);
-                ui.set_width(width);
-                ui.heading(format_message!(intl, default_message: "All activities"));
-                self.archive_filters(ui, intl);
-                let query = self.query.to_lowercase();
-                egui::ScrollArea::vertical()
-                    .max_height((ui.ctx().content_rect().height() - 180.0).max(80.0))
-                    .show(ui, |ui| {
-                        let mut any = false;
-                        for index in calendar::chronological(props.presentations)
-                            .into_iter()
-                            .rev()
-                        {
-                            let item = &props.presentations[index];
-                            if !matches_query(item, self.sport, &query) {
-                                continue;
+                crate::theme::with_profile_accent(ui, accent, |ui| {
+                    ui.set_style(style);
+                    ui.set_width(width);
+                    ui.heading(format_message!(intl, default_message: "All activities"));
+                    self.archive_filters(ui, intl);
+                    let query = self.query.to_lowercase();
+                    egui::ScrollArea::vertical()
+                        .max_height((ui.ctx().content_rect().height() - 180.0).max(80.0))
+                        .show(ui, |ui| {
+                            let mut any = false;
+                            for index in calendar::chronological(props.presentations)
+                                .into_iter()
+                                .rev()
+                            {
+                                let item = &props.presentations[index];
+                                if !matches_query(item, self.sport, &query) {
+                                    continue;
+                                }
+                                any = true;
+                                if archive_row(ui, item, index, props.selected == Some(index)) {
+                                    action = Some(Action::Select(index));
+                                }
                             }
-                            any = true;
-                            if archive_row(ui, item, index, props.selected == Some(index)) {
-                                action = Some(Action::Select(index));
-                            }
-                        }
-                        if !any {
-                            ui.label(
+                            if !any {
+                                ui.label(
                                 format_message!(intl, default_message: "No matching activities"),
                             );
-                        }
-                    });
-                let response = ui.button(format_message!(intl, default_message: "Close"));
-                crate::semantics::target(ui, &response, "activity.list.close");
-                close = response.clicked();
+                            }
+                        });
+                    let response = ui.button(format_message!(intl, default_message: "Close"));
+                    crate::semantics::target(ui, &response, "activity.list.close");
+                    close = response.clicked();
+                });
             });
         if response.should_close() || close || action.is_some() {
             self.archive_open = false;
