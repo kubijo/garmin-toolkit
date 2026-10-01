@@ -38,6 +38,7 @@ garmin-service-api.workspace = true
 garmin-services.workspace = true
 garmin-storage.workspace = true
 garmin-ui.workspace = true
+jiff.workspace = true
 rfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true

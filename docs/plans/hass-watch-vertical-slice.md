@@ -10,15 +10,17 @@ excluded.
 
 1. Add opaque plan/job IDs and watch import/route operations to `garmin-service-api` through `garmin-services`. Reject
    caller-selected host paths/adapters.
-2. Wire map catalog, exact-plan approval, progress, cancellation, and recovery. Retain completed history across
-   reconnects; never replay writes or stale approvals. Physical/virtual adapters use the same flow.
+2. Complete [map workflow runtime acceptance](shared-interface-workflows.md#map-workflow-acceptance) in the packaged
+   host, including disconnects, retained outcomes, device exclusion, and recovery after restart.
 3. Verify marker pairing/reassociation and selected FIT import with interruption recovery and idempotent retries.
 4. Extend the map to [route-plan editing](../decisions/0028-user-owned-route-plans.md): GPX selection, freehand
    geometry, revisions, reverse/trim/split/simplification. Resolve
    [routing](open-questions.md#oq-022-route-plan-routing).
 5. Transfer one FIT Course after preflight and confirmation; record readback and firmware acceptance. Cleanup requires
    separate consent. Verify disconnect/recovery without unintended mutation.
-6. Integrate host backup and [portable snapshots](data-foundation.md).
+6. Integrate Home Assistant host backups with the managed deployment and verify recovery of its selected storage
+   generation. Portable application snapshots have a separate
+   [storage contract](../architecture/storage.md#portable-snapshots).
 7. Build self-contained amd64/aarch64 add-ons with persistent `/data`; verify ingress-only mutation access, USB
    permissions/ownership, disconnects, and workflow on Raspberry Pi 5. Do not assume desktop GIO mounts exist.
 

@@ -65,10 +65,10 @@ pub(super) fn render_pending_recovery_preview(frame: &mut ratatui::Frame<'_>) {
 pub(super) fn render_device_preview(frame: &mut ratatui::Frame<'_>, area: Rect, empty: bool) {
     let intl = selected_formatter();
     let rows = if empty {
-        vec![format_message!(
+        Vec::from([format_message!(
             &intl,
             default_message: "No Garmin device is currently visible"
-        )]
+        )])
     } else {
         update_device_rows(
             &intl,

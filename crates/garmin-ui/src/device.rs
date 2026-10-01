@@ -51,6 +51,7 @@ pub enum CollectionState<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     BrowseFiles,
+    ManageMaps,
     Refresh,
 }
 
@@ -210,7 +211,9 @@ fn snapshot_content(
         },
     );
     if let Some(report) = &snapshot.report {
-        inspection::show(ui, intl, report);
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(16, 0))
+            .show(ui, |ui| inspection::show(ui, intl, report));
     }
     controls(ui, intl, snapshot, browser_loading)
 }
@@ -224,7 +227,7 @@ fn controls(
     ui.horizontal_wrapped(|ui| {
         let refresh = button::Props {
             label: &format_message!(intl, default_message: "Refresh"),
-            icon: None,
+            icon: Some(icons::ARROWS_CLOCKWISE),
             kind: button::Kind::Secondary,
             size: Size::Medium,
             width: button::Width::Fit,
@@ -251,6 +254,19 @@ fn controls(
             crate::semantics::target(ui, &response, "device.files");
             if response.clicked() {
                 action = Some(Action::BrowseFiles);
+            }
+            let response = button::Props {
+                label: &format_message!(intl, default_message: "Manage maps"),
+                icon: Some(icons::MAP_TRIFOLD),
+                kind: button::Kind::Secondary,
+                size: Size::Medium,
+                width: button::Width::Fit,
+                enabled: snapshot.inspection == InspectionState::Ready,
+            }
+            .show(ui);
+            crate::semantics::target(ui, &response, "device.maps");
+            if response.clicked() {
+                action = Some(Action::ManageMaps);
             }
         }
         action
@@ -421,17 +437,6 @@ impl StorageView {
             bytes,
         }
     }
-}
-
-fn metadata(ui: &mut Ui, label: &str, value: &str) {
-    let palette = crate::theme::palette(ui);
-    ui.label(
-        RichText::new(label)
-            .small()
-            .color(palette.content().text_secondary().into_cint()),
-    );
-    ui.label(value);
-    ui.add_space(8.0);
 }
 
 fn inspection_error(ui: &mut Ui, label: &str, value: &str) {

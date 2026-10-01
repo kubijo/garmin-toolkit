@@ -52,6 +52,26 @@ impl MountedSource {
 }
 
 impl Source for MountedSource {
+    fn map_connector(
+        &mut self,
+        key: &str,
+    ) -> Result<std::sync::Arc<dyn garmin_services::maps::device::Connector>, String> {
+        let requests = self
+            .requests
+            .as_ref()
+            .ok_or_else(|| "device discovery is unavailable".to_owned())?;
+        let (reply, response) = mpsc::channel();
+        requests
+            .send(MountedRequest::Maps(key.to_owned(), reply))
+            .map_err(|error| error.to_string())?;
+        let mount_id = response
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|error| error.to_string())??;
+        Ok(std::sync::Arc::new(
+            garmin_services::maps::device::MountedConnector(mount_id),
+        ))
+    }
+
     fn refresh_device(&mut self, key: &str) -> Result<(), String> {
         let requests = self
             .requests
@@ -173,6 +193,7 @@ fn receive_with_cancellation<T>(
 }
 
 enum MountedRequest {
+    Maps(String, mpsc::Sender<Result<String, String>>),
     Snapshot(mpsc::Sender<Vec<DeviceSnapshot>>),
     Refresh(String, mpsc::Sender<Result<(), String>>),
     Catalog(
@@ -232,6 +253,14 @@ fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
             Ok(MountedRequest::Refresh(key, reply)) => {
                 let result = manager.refresh(&key);
                 log_device_events(manager.poll());
+                let _ignored = reply.send(result);
+            }
+            Ok(MountedRequest::Maps(key, reply)) => {
+                log_device_events(manager.poll());
+                let result = manager
+                    .candidate(&key)
+                    .map(|candidate| candidate.mount_id.clone())
+                    .ok_or_else(|| "the selected device is no longer connected".to_owned());
                 let _ignored = reply.send(result);
             }
             Ok(MountedRequest::Catalog(key, progress, reply)) => {

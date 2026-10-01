@@ -82,6 +82,25 @@ Resize settles for 50 ms within five seconds; status exposes `resize_request`. F
 active-time deadlines and release input. Geometry changes release/retry gestures after layout settles; prior movement is
 retained. Real pointer/keyboard/wheel/touch input is blocked during runs and restored afterward.
 
+For functional testing without keeping the browser in front, opt in when launching each automation run:
+
+```sh
+just hass::control command start --argument '"activity-smoke"' --run-in-background
+```
+
+The flag applies to `start`, `action`, and `sequence`. Browser calls accept a second options argument, for example
+`window.garminAutomation.start('activity-smoke', {run_in_background: true})`. HTTP callers wrap the usual command
+argument as `{"argument": ..., "run_in_background": true}`. The option applies only to that run; subsequent runs default
+to visibility pausing. Opted-in runs use a timer fallback when animation callbacks stop, including while Chrome still
+reports the page as visible. The fallback ends after input release and viewport restoration complete
+(`needs_background_frames` in control reports). Hidden browser windows continue UI passes without being focused. Browser
+timer throttling still applies, so the two-second frame/action timing checks are disabled in this mode; readiness and
+overall run timeouts remain enforced. These runs have `performance_eligible: false` and must not be used for performance
+comparisons.
+
+Native desktop automation still requires a visible window: on Wayland, fully covered windows can stop processing control
+commands before a run is admitted. The browser fallback does not bypass the native redraw gate.
+
 The runner removes AccessKit's root pixel-scale transform before ordinary egui input injection. Assertions read fresh
 layout after delivery. Deadlines, renderer errors, and readiness failures fail runs. Reports retain target bounds,
 pointer position, viewport/DPR, renderer, readiness, pauses and input/tree CPU. The target/crosshair overlay has no

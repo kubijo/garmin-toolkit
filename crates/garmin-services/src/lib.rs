@@ -3,6 +3,7 @@
 pub mod deployment;
 pub mod devices;
 pub mod maps;
+pub mod paths;
 pub mod snapshots;
 
 use garmin_fit::{CreatorDiagnostics, NormalizedActivity};

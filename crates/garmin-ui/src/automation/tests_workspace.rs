@@ -63,6 +63,7 @@ fn responsive_archive_preserves_the_selected_activity() {
                     &mut body,
                     &intl,
                     &activity::WorkspaceProps {
+                        today: jiff::civil::date(2026, 3, 1),
                         items: &items,
                         presentations: &presentations,
                         selected: Some(selected),

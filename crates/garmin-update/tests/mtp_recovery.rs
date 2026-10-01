@@ -1218,7 +1218,8 @@ async fn cancellation_between_each_upload_rolls_back_the_transaction() -> Result
 
         assert!(matches!(
             transaction.apply_with(&device, &authorization).await,
-            Err(MountedInstallError::Cancelled)
+            Err(MountedInstallError::RolledBack(operation))
+                if matches!(*operation, MountedInstallError::Cancelled)
         ));
         verify_multi_file_originals(&device).await?;
     }

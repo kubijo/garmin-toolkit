@@ -46,6 +46,7 @@ pub fn apply_palette(style: &mut Style, palette: &theme::Theme) {
     visuals.menu_corner_radius = PANEL_RADIUS;
     visuals.panel_fill = color32(surfaces.background());
     visuals.button_frame = true;
+    visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     visuals.collapsing_header_frame = false;
     visuals.indent_has_left_vline = false;
     visuals.striped = false;

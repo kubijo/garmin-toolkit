@@ -39,6 +39,12 @@ const DEVICE_SOURCE_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/device-files/source/v
 const DEVICE_OPERATION_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/device-files/acquisition/v1";
 
 pub(super) trait Source: Send {
+    fn map_connector(
+        &mut self,
+        _device_key: &str,
+    ) -> Result<Arc<dyn garmin_services::maps::device::Connector>, String> {
+        Err("map management is unavailable for this source".to_owned())
+    }
     fn refresh_device(&mut self, device_key: &str) -> Result<(), String>;
     fn snapshot(&mut self) -> Vec<DeviceSnapshot>;
     fn catalog(
@@ -83,6 +89,7 @@ pub(super) struct Host {
     refresh_gate: Arc<tokio::sync::Mutex<()>>,
     deployment: Arc<Deployment>,
     operations: Arc<SnapshotOperations>,
+    maps: Arc<garmin_services::maps::Operations>,
     snapshot_session:
         Arc<tokio::sync::Mutex<Option<Arc<garmin_services::snapshots::SnapshotSession>>>>,
     epoch: Uuid,
@@ -98,6 +105,9 @@ impl Host {
         )
         .expect("built-in snapshot limits are valid");
         Arc::new(Self {
+            maps: Arc::new(garmin_services::maps::Operations::new(Arc::clone(
+                &deployment,
+            ))),
             source: Arc::new(Mutex::new(source)),
             snapshots: Arc::new(snapshots),
             downloads: crate::downloads::Downloads::default(),
@@ -155,6 +165,41 @@ impl Host {
 }
 
 impl ApplicationService for Host {
+    async fn maps(
+        &self,
+        device_key: String,
+    ) -> Result<Result<garmin_service_api::maps::MapServiceClient, String>, rtc::CallError> {
+        let _lease = self.application().await?;
+        let source = Arc::clone(&self.source);
+        let key = device_key.clone();
+        let connector = tokio::task::spawn_blocking(move || {
+            source
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .map_connector(&key)
+        })
+        .await
+        .map_err(|_| rtc::CallError::NotServed)?;
+        let connector = match connector {
+            Ok(connector) => connector,
+            Err(error) => return Ok(Err(error)),
+        };
+        let session = match self
+            .maps
+            .open(device_key, connector, cfg!(feature = "demo"))
+            .await
+        {
+            Ok(session) => session,
+            Err(error) => return Ok(Err(format!("{error:#}"))),
+        };
+        let (server, client) = garmin_service_api::maps::MapServiceServerShared::<
+            _,
+            remoc::codec::Default,
+        >::new(Arc::new(session));
+        tokio::spawn(server.serve());
+        Ok(Ok(client))
+    }
+
     async fn server_directory(
         &self,
         user_id: garmin_model::identity::UserId,
@@ -307,7 +352,12 @@ impl ApplicationService for Host {
         &self,
         request: DeviceBrowserRequest,
     ) -> Result<Result<DeviceCatalogSnapshot, String>, rtc::CallError> {
-        Ok(source_browser(Arc::clone(&self.source), request).await)
+        let locks = self.maps.mutations();
+        let guard = match locks.acquire(browser_device_key(&request)) {
+            Ok(guard) => guard,
+            Err(error) => return Ok(Err(error.to_owned())),
+        };
+        Ok(source_browser(Arc::clone(&self.source), request, guard).await)
     }
 
     async fn upload_device_browser_file(
@@ -315,8 +365,13 @@ impl ApplicationService for Host {
         request: DeviceBrowserUpload,
         contents: rch::io::Receiver,
     ) -> Result<Result<DeviceCatalogSnapshot, String>, rtc::CallError> {
+        let locks = self.maps.mutations();
+        let guard = match locks.acquire(&request.device_key) {
+            Ok(guard) => guard,
+            Err(error) => return Ok(Err(error.to_owned())),
+        };
         let result = match receive_browser_upload(&request, contents).await {
-            Ok(contents) => source_upload(Arc::clone(&self.source), request, contents).await,
+            Ok(contents) => source_upload(Arc::clone(&self.source), request, contents, guard).await,
             Err(error) => Err(error),
         };
         Ok(result)
@@ -639,11 +694,13 @@ async fn source_catalog(
 async fn source_browser(
     source: Arc<Mutex<Box<dyn Source>>>,
     request: DeviceBrowserRequest,
+    guard: tokio::sync::OwnedMutexGuard<()>,
 ) -> Result<DeviceCatalogSnapshot, String> {
     let cancellation = CancellationToken::default();
     let progress = ProgressReporter::default().with_cancellation(cancellation.clone());
     let _cancel_on_drop = CancelOnDrop(cancellation);
     tokio::task::spawn_blocking(move || {
+        let _guard = guard;
         source
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -675,11 +732,13 @@ async fn source_upload(
     source: Arc<Mutex<Box<dyn Source>>>,
     request: DeviceBrowserUpload,
     contents: tempfile::TempPath,
+    guard: tokio::sync::OwnedMutexGuard<()>,
 ) -> Result<DeviceCatalogSnapshot, String> {
     let cancellation = CancellationToken::default();
     let progress = ProgressReporter::default().with_cancellation(cancellation.clone());
     let _cancel_on_drop = CancelOnDrop(cancellation);
     tokio::task::spawn_blocking(move || {
+        let _guard = guard;
         source
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1322,6 +1381,9 @@ mod tests {
 
         assert!(error.contains("browse/download-only"));
     }
+
+    #[cfg(feature = "demo")]
+    mod maps;
 
     #[tokio::test]
     async fn browser_avatar_upload_uses_the_application_importer() {

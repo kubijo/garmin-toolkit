@@ -48,6 +48,27 @@ pub struct Device {
 }
 
 impl Device {
+    /// Root of this host-owned fixture, for composing existing device transports.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Open the owned device, initializing it only on its first launch.
+    /// Existing files and transaction evidence survive host restarts.
+    ///
+    /// # Errors
+    /// The path is unsafe, unowned, or cannot be initialized.
+    pub fn open(root: PathBuf) -> Result<Self, DeviceError> {
+        match inspect_root(&root)? {
+            Presence::Missing => Self::recreate(root),
+            Presence::Present => Ok(Self {
+                root,
+                last_present: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            }),
+        }
+    }
+
     /// Recreates the complete disposable device tree.
     /// # Errors
     /// The target cannot be safely replaced or the fixture cannot be encoded or written.
@@ -57,6 +78,7 @@ impl Device {
             "Garmin/Activity/History/2026",
             "Garmin/Courses",
             "Garmin/Workouts",
+            "Garmin/Mock",
             "GARMIN-TOOLKIT/transactions",
             "Music",
             "Podcasts",
@@ -70,6 +92,12 @@ impl Device {
         let description = root.join("Garmin/GarminDevice.xml");
         std::fs::write(&description, MANIFEST_XML.as_bytes())
             .map_err(|source| io_error("write", description, source))?;
+        // Installed files advertised by the loopback map catalog, before any update.
+        for name in ["europe-old.img", "trails-old.img", "global-old.img"] {
+            let path = root.join("Garmin/Mock").join(name);
+            std::fs::write(&path, b"old mock content\n")
+                .map_err(|source| io_error("write", path, source))?;
+        }
         Ok(Self {
             root,
             last_present: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -319,6 +347,33 @@ fn io_error(operation: &'static str, path: PathBuf, source: io::Error) -> Device
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reopening_retains_mutations_and_recovery_evidence() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("device");
+        Device::open(root.clone()).unwrap();
+        let journal = root.join("GARMIN-TOOLKIT/transactions/interrupted.json");
+        std::fs::write(&journal, b"retained transaction").unwrap();
+        let removed_map = root.join("Garmin/Mock/europe-old.img");
+        std::fs::remove_file(&removed_map).unwrap();
+        let updated_map = root.join("Garmin/Mock/trails-old.img");
+        std::fs::write(&updated_map, b"modified map").unwrap();
+        std::fs::remove_file(root.join("Garmin/Activity/History/2026/city-ride.fit")).unwrap();
+        let reopened = Device::open(root.clone()).unwrap();
+        assert_eq!(reopened.presence().unwrap(), Presence::Present);
+        assert_eq!(std::fs::read(journal).unwrap(), b"retained transaction");
+        assert!(
+            !removed_map.exists(),
+            "reopening must not resurrect removed maps"
+        );
+        assert_eq!(std::fs::read(updated_map).unwrap(), b"modified map");
+        assert!(
+            !root
+                .join("Garmin/Activity/History/2026/city-ride.fit")
+                .exists()
+        );
+    }
 
     #[test]
     fn repeated_start_recreates_the_complete_demo_device() {

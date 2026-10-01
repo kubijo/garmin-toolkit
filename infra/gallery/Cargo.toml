@@ -30,6 +30,7 @@ garmin-model = { path = "../../crates/garmin-model" }
 garmin-service-api = { path = "../../crates/garmin-service-api" }
 garmin-progress = { path = "../../crates/garmin-progress" }
 garmin-ui = { path = "../../crates/garmin-ui", features = ["automation"] }
+jiff = { version = "=0.2.35", default-features = false, features = ["std"] }
 nerd_font = "=0.3.1"
 num-traits = "=0.2.19"
 parley_ratatui = "=0.3.4"

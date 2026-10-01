@@ -50,7 +50,11 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn spawn(deployment: Arc<Deployment>, context: egui::Context) -> std::io::Result<Self> {
+    pub fn spawn(
+        deployment: Arc<Deployment>,
+        context: egui::Context,
+        mutations: Arc<garmin_services::maps::MutationLocks>,
+    ) -> std::io::Result<Self> {
         let epoch = deployment.epoch();
         let (commands, command_rx) = channel();
         let (event_tx, events) = channel();
@@ -59,7 +63,14 @@ impl Worker {
         let join = std::thread::Builder::new()
             .name("garmin-toolkit-application".to_owned())
             .spawn(move || {
-                run(&deployment, &command_rx, &event_tx, &context, &worker_abort);
+                run(
+                    &deployment,
+                    &command_rx,
+                    &event_tx,
+                    &context,
+                    &worker_abort,
+                    &mutations,
+                );
             })?;
         let worker = Self {
             commands,
@@ -294,6 +305,7 @@ fn run(
     event_tx: &Sender<(Uuid, Event)>,
     context: &egui::Context,
     abort: &CancellationToken,
+    mutations: &garmin_services::maps::MutationLocks,
 ) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -318,7 +330,15 @@ fn run(
                 continue;
             }
         };
-        if !execute_command(&runtime, &application, command, events, context, abort) {
+        if !execute_command(
+            &runtime,
+            &application,
+            command,
+            events,
+            context,
+            abort,
+            mutations,
+        ) {
             break;
         }
     }
@@ -332,6 +352,7 @@ fn execute_command(
     events: &EventSender,
     context: &egui::Context,
     abort: &CancellationToken,
+    mutations: &garmin_services::maps::MutationLocks,
 ) -> bool {
     match command {
         Command::Reload => {
@@ -416,7 +437,12 @@ fn execute_command(
             let key = candidate.key().to_owned();
             let kind = operation.kind();
             let progress = ProgressReporter::default().with_cancellation(abort.clone());
-            let result = operate_device(runtime, application, &candidate, operation, &progress);
+            let result = mutations
+                .acquire(&key)
+                .map_err(str::to_owned)
+                .and_then(|_guard| {
+                    operate_device(runtime, application, &candidate, operation, &progress)
+                });
             if !emit(events, context, Event::DeviceBrowser { key, kind, result }) {
                 return false;
             }

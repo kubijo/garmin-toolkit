@@ -665,7 +665,13 @@ fn device_fit_preview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
                 )
             },
             |preview| {
-                let _ = preview.show(ui, &intl, false, UnitSystem::Metric);
+                let _ = preview.show(
+                    ui,
+                    &intl,
+                    false,
+                    UnitSystem::Metric,
+                    jiff::civil::date(2026, 3, 1),
+                );
             },
         );
     },);
@@ -720,6 +726,7 @@ fn workspace_contents(
                 ui,
                 &intl,
                 &activity::WorkspaceProps {
+                    today: jiff::civil::date(2026, 3, 1),
                     items: &items,
                     presentations: &presentations,
                     selected: (!items.is_empty()).then_some(*selected),

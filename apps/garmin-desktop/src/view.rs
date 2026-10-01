@@ -36,11 +36,13 @@ use crate::{
 use garmin_ui::window::{Event as WindowEvent, NativeWindow, Spec as WindowSpec, WindowHost as _};
 
 mod backup;
+mod maps;
 
 pub struct Desktop {
     deployment: Arc<Deployment>,
     epoch: Uuid,
     backup: crate::backup::Controller,
+    maps: maps::Controller,
     context: Context,
     translations: Translations,
     intl: Intl,
@@ -85,7 +87,12 @@ impl Desktop {
         profiling: profiling::RuntimeMetricsRecorder,
     ) -> Result<Self, Error> {
         let intl = translations.formatter_for_client(Language::English)?;
-        let worker = Worker::spawn(Arc::clone(&deployment), context.clone())?;
+        let maps = maps::Controller::new(Arc::clone(&deployment))?;
+        let worker = Worker::spawn(
+            Arc::clone(&deployment),
+            context.clone(),
+            maps.operations.mutations(),
+        )?;
         let epoch = deployment.epoch();
         let backup = crate::backup::Controller::new(
             Arc::clone(&deployment),
@@ -104,6 +111,7 @@ impl Desktop {
             deployment,
             epoch,
             backup,
+            maps,
             context,
             translations,
             intl,
@@ -281,6 +289,10 @@ impl Desktop {
                 Page::ProfileSettings => {
                     PageOutput::Settings(profile_settings::show(ui, &settings_props))
                 }
+                Page::Maps(key) => PageOutput::Maps {
+                    key: key.clone(),
+                    command: self.maps.show(ui, intl, key),
+                },
                 Page::Device(key) => {
                     let action = device_snapshots
                         .iter()
@@ -306,6 +318,19 @@ impl Desktop {
 
     fn handle_page_output(&mut self, profile_index: usize, output: PageOutput) {
         match output {
+            PageOutput::Maps {
+                key,
+                command: Some((revision, command)),
+            } => self.maps.submit(&key, revision, command),
+            PageOutput::Device {
+                key,
+                action: Some(device::Action::ManageMaps),
+            } => {
+                if let Some(candidate) = self.devices.candidate(&key) {
+                    self.maps.open(&candidate);
+                    self.page = Page::Maps(key);
+                }
+            }
             PageOutput::Backup(action) => self.handle_backup_action(action),
             PageOutput::Activities((import, selected)) => {
                 if let Some(activity::Action::Select(index)) = selected {
@@ -330,7 +355,9 @@ impl Desktop {
                     self.notice = Some(Notice::error(reason));
                 }
             }
-            PageOutput::Settings(None) | PageOutput::Device { action: None, .. } => {}
+            PageOutput::Maps { command: None, .. }
+            | PageOutput::Settings(None)
+            | PageOutput::Device { action: None, .. } => {}
         }
     }
 
@@ -1352,7 +1379,13 @@ impl Desktop {
         let Some(preview) = self.device_fit_preview.as_mut() else {
             return;
         };
-        match preview.show(ui, &self.intl, self.device_browser_status.is_busy(), units) {
+        match preview.show(
+            ui,
+            &self.intl,
+            self.device_browser_status.is_busy(),
+            units,
+            jiff::Zoned::now().date(),
+        ) {
             Some(device_fit_preview::Action::Close) => self.device_fit_preview = None,
             Some(device_fit_preview::Action::Import(target)) => {
                 self.device_fit_preview = None;
@@ -1617,6 +1650,10 @@ fn device_catalog_snapshot(
 }
 
 enum PageOutput {
+    Maps {
+        key: String,
+        command: Option<(Uuid, garmin_service_api::maps::Command)>,
+    },
     Backup(Option<garmin_ui::backup::Action>),
     Activities((Option<file_import::Action>, Option<activity::Action>)),
     Settings(Option<profile_settings::Action>),
@@ -1754,6 +1791,7 @@ impl<'a> ActivitiesPage<'a> {
             ui,
             self.intl,
             &activity::WorkspaceProps {
+                today: jiff::Zoned::now().date(),
                 items: &items,
                 presentations: &self.profile.activities,
                 selected: (!items.is_empty()).then_some(self.selected_activity),

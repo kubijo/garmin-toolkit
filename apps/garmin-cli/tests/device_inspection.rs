@@ -2,6 +2,7 @@ use std::process::Command;
 
 fn inspect(root: &std::path::Path, cache: &std::path::Path) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_garmin-cli"))
+        .env("GARMIN_TOOLKIT_STATE_DIR", cache.join("state"))
         .args(["--json", "--cache-dir"])
         .arg(cache)
         .args(["device", "inspect", "--path"])

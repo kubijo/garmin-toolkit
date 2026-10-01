@@ -22,6 +22,7 @@ garmin-model.workspace = true
 garmin-service-api.workspace = true
 garmin-ui = { workspace = true, features = ["automation"] }
 js-sys.workspace = true
+jiff.workspace = true
 image.workspace = true
 rfd = { workspace = true, features = ["file-handle-inner"] }
 remoc = { workspace = true, features = ["js"] }

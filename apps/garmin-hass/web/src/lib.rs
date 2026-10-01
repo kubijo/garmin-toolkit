@@ -8,6 +8,7 @@ mod developer;
 mod files;
 mod map_composition;
 mod map_worker;
+mod maps;
 mod window;
 mod window_channel;
 mod window_client;
@@ -486,6 +487,9 @@ impl App {
                             preferences_saving,
                         ),
                     )),
+                    Page::Maps(key) => {
+                        PageAction::Maps(maps::show(ui, &self.intl, &self.shared, key))
+                    }
                     Page::Device(key) => {
                         let action =
                             devices
@@ -588,6 +592,19 @@ impl App {
             ))) => {
                 self.update_preferences(preferences, profiles);
             }
+            PageAction::Maps(Some((revision, command))) => maps::submit(
+                Rc::clone(&self.shared),
+                self.context.clone(),
+                revision,
+                command,
+            ),
+            PageAction::Device {
+                key,
+                action: Some(device::Action::ManageMaps),
+            } => {
+                maps::open(Rc::clone(&self.shared), self.context.clone(), key.clone());
+                self.page = Page::Maps(key);
+            }
             PageAction::Device {
                 key,
                 action: Some(device::Action::BrowseFiles),
@@ -615,7 +632,8 @@ impl App {
                     });
                 }
             }
-            PageAction::Backup(None)
+            PageAction::Maps(None)
+            | PageAction::Backup(None)
             | PageAction::Activities(None)
             | PageAction::Settings(None)
             | PageAction::Device { action: None, .. } => {}
@@ -944,7 +962,7 @@ impl App {
         let Some(preview) = self.device_fit_preview.as_mut() else {
             return;
         };
-        match preview.show(ui, &self.intl, busy, units) {
+        match preview.show(ui, &self.intl, busy, units, jiff::Zoned::now().date()) {
             Some(device_fit_preview::Action::Close) => self.device_fit_preview = None,
             Some(device_fit_preview::Action::Import(target)) => {
                 let Some(user_id) = self
@@ -1139,6 +1157,14 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn raw_input_hook(
+        &mut self,
+        context: &eframe::egui::Context,
+        input: &mut eframe::egui::RawInput,
+    ) {
+        garmin_ui::automation::prepare_background_input(context, input);
+    }
+
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.reset_changed_database();
         map_composition::update_diagnostics(ui.ctx());
@@ -1240,6 +1266,7 @@ impl eframe::App for App {
 }
 
 enum PageAction {
+    Maps(Option<(uuid::Uuid, garmin_service_api::maps::Command)>),
     Backup(Option<garmin_ui::backup::Action>),
     Activities(Option<activity::Action>),
     Settings(Option<profile_settings::Action>),
@@ -1276,6 +1303,7 @@ fn show_activities(
         ui,
         intl,
         &activity::WorkspaceProps {
+            today: jiff::Zoned::now().date(),
             items: &items,
             presentations,
             selected: (!items.is_empty()).then_some(selected),
@@ -1320,6 +1348,7 @@ fn set_profile_preferences(snapshot: &mut ProfileSnapshot, preferences: ProfileP
 struct State {
     epoch: Option<String>,
     backup: backup::Controller,
+    maps: maps::Controller,
     client: Option<ApplicationServiceClient>,
     logs: Option<garmin_service_api::logging::LogServiceClient>,
     deployment_mode: DeploymentMode,
@@ -2042,9 +2071,11 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                             let mut state = shared.borrow_mut();
                             if state.epoch.as_ref() != Some(&epoch) {
                                 let backup = std::mem::take(&mut state.backup);
+                                let maps = std::mem::take(&mut state.maps);
                                 let generation = state.connection_generation.wrapping_add(1);
                                 *state = State {
                                     backup,
+                                    maps,
                                     connection_generation: generation,
                                     ..State::default()
                                 };
@@ -2067,6 +2098,7 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                         }
                     }
                     context.request_repaint();
+                    maps::reconnect(Rc::clone(&shared), context.clone());
                     let _control = control::register(&client, &context).await;
                     let reason = loop {
                         match next_connection_event(&mut snapshots).await {

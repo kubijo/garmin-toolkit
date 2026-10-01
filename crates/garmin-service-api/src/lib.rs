@@ -3,6 +3,7 @@
 pub mod control;
 pub mod files;
 pub mod logging;
+pub mod maps;
 pub mod snapshots;
 
 use camino::Utf8PathBuf;
@@ -293,6 +294,10 @@ mod rpc {
 
     #[rtc::remote]
     pub trait ApplicationService {
+        async fn maps(
+            &self,
+            device_key: String,
+        ) -> Result<Result<crate::maps::MapServiceClient, String>, rtc::CallError>;
         async fn logs(&self) -> Result<crate::logging::LogServiceClient, rtc::CallError>;
         async fn deployment_mode(&self) -> Result<DeploymentMode, rtc::CallError>;
         async fn deployment_epoch(&self) -> Result<uuid::Uuid, rtc::CallError>;

@@ -456,14 +456,7 @@ fn show_preview(ui: &mut Ui, intl: &Intl, preview: &SnapshotPreview) {
             size.as_str(),
         ),
     ];
-    let rows = facts
-        .each_ref()
-        .map(|(label, value)| (label.as_str(), *value));
-    crate::facts::Table::new(ui, rows.iter().map(|(label, _)| *label)).show(
-        ui,
-        "backup-preview-facts",
-        &rows,
-    );
+    crate::facts::show(ui, "backup-preview-facts", &facts);
     ui.add_space(16.0);
 }
 

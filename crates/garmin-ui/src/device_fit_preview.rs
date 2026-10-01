@@ -40,11 +40,12 @@ impl Preview {
         intl: &Intl,
         busy: bool,
         units: UnitSystem,
+        today: jiff::civil::Date,
     ) -> Option<Action> {
         self.selected = self
             .selected
             .min(self.data.activities.len().saturating_sub(1));
-        let output = self.render(ui, intl, busy, units);
+        let output = self.render(ui, intl, busy, units, today);
         if let Some(activity::Action::Select(index)) = output.inner {
             self.selected = index;
         }
@@ -61,6 +62,7 @@ impl Preview {
         intl: &Intl,
         busy: bool,
         units: UnitSystem,
+        today: jiff::civil::Date,
     ) -> modal::Output<Option<activity::Action>> {
         let presentations = self
             .data
@@ -113,6 +115,7 @@ impl Preview {
                     ui,
                     intl,
                     &activity::WorkspaceProps {
+                        today,
                         items: &items,
                         presentations: &presentations,
                         selected: (!items.is_empty()).then_some(self.selected),

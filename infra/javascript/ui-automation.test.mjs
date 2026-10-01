@@ -118,6 +118,12 @@ test('window screenshot rejects closure, owner revocation and reload while await
 
 function fixture() {
     let report = null;
+    let background = false;
+    let cleanup = false;
+    let nextFrame = 0;
+    let nextTimer = 0;
+    const frames = new Map();
+    const timeouts = new Map();
     const listeners = {};
     const marks = [];
     const calls = [];
@@ -136,6 +142,16 @@ function fixture() {
             listeners[name] = fn;
         },
         performance: { now: () => 0, mark: (name, options) => marks.push([name, options.detail]) },
+        requestAnimationFrame: callback => {
+            frames.set(++nextFrame, callback);
+            return nextFrame;
+        },
+        cancelAnimationFrame: id => frames.delete(id),
+        setTimeout: callback => {
+            timeouts.set(++nextTimer, callback);
+            return nextTimer;
+        },
+        clearTimeout: id => timeouts.delete(id),
         setInterval: fn => {
             listeners.tick = fn;
             return 1;
@@ -146,17 +162,31 @@ function fixture() {
     };
     const command = (operation, argument) => {
         calls.push([operation, argument]);
+        let requestedBackground = false;
+        if (['start', 'action', 'sequence'].includes(operation) && argument.startsWith('{')) {
+            const request = JSON.parse(argument);
+            if ('run_in_background' in request) {
+                if (typeof request.run_in_background !== 'boolean')
+                    return JSON.stringify({ error: 'invalid automation run options' });
+                requestedBackground = request.run_in_background;
+                argument = operation === 'start' ? request.argument : JSON.stringify(request.argument);
+            }
+        }
         if (operation === 'list') return JSON.stringify({ value: ['stationary-arrival'] });
         if (operation === 'start') {
-            if (report?.state === 'running') return JSON.stringify({ error: 'already running' });
+            if (['running', 'paused'].includes(report?.state)) return JSON.stringify({ error: 'already running' });
             if (argument !== 'stationary-arrival') return JSON.stringify({ error: 'unknown scenario' });
             report = { state: 'running', phase: 'setup' };
+            background = requestedBackground;
         }
         if (operation === 'pause' && report?.state === 'running') report.state = 'paused';
         if (operation === 'resume' && report?.state === 'paused') report.state = 'running';
         if (operation === 'cancel' && ['running', 'paused'].includes(report?.state))
             report = { ...report, state: 'cancelled', failure: argument };
-        return JSON.stringify({ value: operation === 'status' ? report : null });
+        const status = report
+            ? { ...report, needs_background_frames: background && (report.state === 'running' || cleanup) }
+            : null;
+        return JSON.stringify({ value: operation === 'status' ? status : null });
     };
     installAutomation(command, browser);
     return {
@@ -164,8 +194,14 @@ function fixture() {
         listeners,
         marks,
         calls,
-        complete: () => {
+        frames,
+        timeouts,
+        complete: (pendingCleanup = false) => {
             report.state = 'passed';
+            cleanup = pendingCleanup;
+        },
+        settle: () => {
+            cleanup = false;
         },
     };
 }
@@ -186,6 +222,121 @@ test('bridge exposes named commands, metadata and terminal-only results without 
     assert.equal(api.result().environment.dpr, 2);
     assert.deepEqual([...new Set(f.calls.map(([op]) => op))].sort(), ['list', 'start', 'status']);
     assert.equal(f.marks.at(-1)[1].state, 'passed');
+});
+
+test('background fallback wakes an already-pending frame while the page reports visible', () => {
+    const f = fixture();
+    const delivered = [];
+    f.browser.performance.now = () => 1234;
+    f.browser.requestAnimationFrame(timestamp => delivered.push(timestamp));
+    const nativeCallback = [...f.frames.values()][0];
+    assert.equal(f.timeouts.size, 0);
+    f.browser.garminAutomation.start('stationary-arrival', { run_in_background: true });
+    assert.equal(f.browser.document.hidden, false);
+    assert.equal(f.timeouts.size, 1);
+    [...f.timeouts.values()][0]();
+    assert.deepEqual(delivered, [1234]);
+    assert.equal(f.frames.size, 0);
+    nativeCallback(1235);
+    assert.deepEqual(delivered, [1234], 'a late native callback must not deliver the frame twice');
+});
+
+test('native frame delivery and explicit cancellation clear their timer fallback', () => {
+    const f = fixture();
+    f.browser.garminAutomation.start('stationary-arrival', { run_in_background: true });
+    const delivered = [];
+    f.browser.requestAnimationFrame(timestamp => delivered.push(timestamp));
+    const delayedTimer = [...f.timeouts.values()][0];
+    [...f.frames.values()][0](100);
+    assert.deepEqual(delivered, [100]);
+    assert.equal(f.timeouts.size, 0);
+    delayedTimer();
+    assert.deepEqual(delivered, [100]);
+
+    const id = f.browser.requestAnimationFrame(timestamp => delivered.push(timestamp));
+    const cancelledTimer = [...f.timeouts.values()][0];
+    const cancelledNative = [...f.frames.values()][0];
+    f.browser.cancelAnimationFrame(id);
+    assert.equal(f.timeouts.size, 0);
+    assert.equal(f.frames.size, 0);
+    cancelledTimer();
+    cancelledNative(101);
+    assert.deepEqual(delivered, [100]);
+});
+
+test('background frame delivery continues through cleanup then restores ordinary scheduling', () => {
+    const f = fixture();
+    const api = f.browser.garminAutomation;
+    api.start('stationary-arrival', { run_in_background: true });
+    let delivered = 0;
+    f.browser.requestAnimationFrame(() => {
+        delivered++;
+        f.browser.requestAnimationFrame(() => delivered++);
+    });
+    [...f.timeouts.values()][0]();
+    assert.equal(delivered, 1);
+    assert.equal(f.timeouts.size, 1, 'frames scheduled by callbacks also get a fallback');
+    f.complete(true);
+    f.listeners.tick();
+    assert.equal(f.timeouts.size, 1);
+    assert.ok(f.listeners.tick, 'the observer must wait for cleanup');
+    f.settle();
+    f.listeners.tick();
+    assert.equal(f.timeouts.size, 0);
+    assert.equal(f.listeners.tick, undefined);
+    assert.equal(f.frames.size, 1, 'the original pending animation request remains intact');
+    [...f.frames.values()][0](200);
+    assert.equal(delivered, 2);
+    api.start('stationary-arrival');
+    f.browser.requestAnimationFrame(() => delivered++);
+    assert.equal(f.timeouts.size, 0, 'a subsequent ordinary run must not inherit the fallback');
+});
+
+test('background execution is requested per run through HTTP without changing subsequent runs', () => {
+    const f = fixture();
+    const api = f.browser.garminAutomation;
+    f.browser.document.hidden = true;
+    const request = { argument: 'stationary-arrival', run_in_background: true };
+    const response = JSON.parse(
+        executeAutomation(JSON.stringify({ operation: 'start', argument: request }), f.browser),
+    );
+    assert.equal(response.value, null);
+    assert.equal(api.status().state, 'running');
+    f.listeners.visibilitychange();
+    assert.equal(api.status().state, 'running');
+    assert.throws(() => api.start('stationary-arrival', { run_in_background: 'yes' }), /invalid/);
+    assert.throws(() => api.start('stationary-arrival'), /already/);
+    f.listeners.visibilitychange();
+    assert.equal(api.status().state, 'running');
+    f.complete();
+    api.start('stationary-arrival');
+    assert.equal(api.status().state, 'paused');
+    f.browser.document.hidden = false;
+    f.listeners.visibilitychange();
+    assert.equal(api.status().state, 'running');
+});
+
+test('browser actions and sequences pass background options on the same launch command', () => {
+    for (const [operation, argument] of [
+        ['action', { kind: 'click', target: 'profile.0' }],
+        ['sequence', [{ kind: 'click', target: 'profile.0' }]],
+    ]) {
+        const f = fixture();
+        f.browser.garminAutomation[operation](argument, { run_in_background: true });
+        assert.deepEqual(f.calls[0], [operation, JSON.stringify({ run_in_background: true, argument })]);
+        assert.ok(!f.calls.some(([op]) => op === 'pause'));
+    }
+});
+
+test('background execution retains the watchdog and cancellation', () => {
+    const f = fixture();
+    const api = f.browser.garminAutomation;
+    f.browser.document.hidden = true;
+    api.start('stationary-arrival', { run_in_background: true });
+    f.browser.performance.now = () => 126000;
+    f.listeners.tick();
+    assert.equal(api.result().state, 'cancelled');
+    assert.match(api.result().failure, /watchdog/);
 });
 
 test('focus loss is harmless and hidden tabs pause without expiring the watchdog', () => {

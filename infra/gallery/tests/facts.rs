@@ -4,6 +4,41 @@ use egui_kittest::{Harness, kittest::Queryable as _};
 use garmin_ui::facts;
 
 #[test]
+fn wrapped_rows_start_at_the_table_top_and_keep_the_next_row_clear() {
+    let mut installed = false;
+    let mut view = Harness::builder().with_size([280.0, 300.0]).build_ui_state(
+        move |ui, top: &mut f32| {
+            if !installed {
+                garmin_ui::install(ui.ctx());
+                installed = true;
+                ui.ctx().request_repaint();
+                return;
+            }
+            ui.set_width(220.0);
+            *top = ui.next_widget_position().y;
+            facts::show(
+                ui,
+                "wrapped",
+                &[
+                    ("ID\u{a0}toolkitu", "9e132b21-4910-47bd-93ac-1ea7a9afb2da"),
+                    ("State", "Ready"),
+                ],
+            );
+        },
+        0.0,
+    );
+    view.run();
+    let label = view.get_by_label("ID\u{a0}toolkitu").rect();
+    let value = view
+        .get_by_label("9e132b21-4910-47bd-93ac-1ea7a9afb2da")
+        .rect();
+    assert!((label.top() - view.state()).abs() < 1.0);
+    assert!((value.top() - label.top()).abs() < 1.0);
+    assert!(value.height() > label.height());
+    assert!(view.get_by_label("Ready").rect().top() >= value.bottom() + 7.0);
+}
+
+#[test]
 fn sections_keep_separate_aligned_columns_after_locale_and_width_changes() {
     let mut installed = false;
     let mut view = Harness::builder().with_size([400.0, 400.0]).build_ui_state(
@@ -23,7 +58,11 @@ fn sections_keep_separate_aligned_columns_after_locale_and_width_changes() {
             let table = facts::Table::new(ui, labels);
             table.show(ui, "summary", &[(labels[0], "42530200")]);
             ui.add_space(16.0);
-            table.show(ui, "transfers", &[(labels[1], "Read and write")]);
+            table.show(
+                ui,
+                "transfers",
+                &[(labels[1].to_owned(), "Read and write".to_owned())],
+            );
         },
         (false, 360.0),
     );

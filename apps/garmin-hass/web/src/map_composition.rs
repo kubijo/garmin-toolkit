@@ -209,6 +209,10 @@ impl Fixture {
 }
 
 impl eframe::App for Fixture {
+    fn raw_input_hook(&mut self, context: &egui::Context, input: &mut egui::RawInput) {
+        garmin_ui::automation::prepare_background_input(context, input);
+    }
+
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         visuals.panel_fill.to_normalized_gamma_f32()
     }

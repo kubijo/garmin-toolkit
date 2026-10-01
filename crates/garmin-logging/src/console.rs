@@ -72,8 +72,11 @@ impl fmt::Display for Text<'_> {
 /// Render retained or live fields using the same escaping and palette.
 #[must_use]
 pub fn fields(values: &BTreeMap<String, String>, ansi: bool) -> String {
+    render_fields(values.iter(), ansi)
+}
+
+fn render_fields<'a>(values: impl Iterator<Item = (&'a String, &'a String)>, ansi: bool) -> String {
     values
-        .iter()
         .map(|(key, value)| {
             format!(
                 "{}{}{}",
@@ -120,9 +123,33 @@ pub fn line(record: &Record, ansi: bool) -> String {
             ansi,
         ));
     }
-    if !record.fields.is_empty() {
+    let query = record.component == "sqlx::query";
+    let statement = record
+        .fields
+        .get("db.statement")
+        .map(|sql| sql.trim())
+        .filter(|sql| query && !sql.is_empty());
+    let inline = render_fields(
+        record.fields.iter().filter(|(key, _)| {
+            !query
+                || match key.as_str() {
+                    "db.statement" => false,
+                    "summary" => statement.is_none(),
+                    "elapsed_secs" => !record.fields.contains_key("elapsed"),
+                    _ => true,
+                }
+        }),
+        ansi,
+    );
+    if !inline.is_empty() {
         output.push(' ');
-        output.push_str(&fields(&record.fields, ansi));
+        output.push_str(&inline);
+    }
+    if let Some(statement) = statement {
+        for line in statement.lines() {
+            output.push_str("\n    ");
+            output.push_str(&paint(Text(line), Color::Fixed(71).normal(), ansi));
+        }
     }
     output
 }
@@ -189,7 +216,13 @@ where
             message: values.0.remove("message").unwrap_or_default(),
             fields: values.0,
         };
-        writer.write_str(&line(&record, writer.has_ansi_escapes()))?;
+        let rendered = line(&record, writer.has_ansi_escapes());
+        let (header, details) = rendered
+            .split_once('\n')
+            .map_or((rendered.as_str(), None), |(header, details)| {
+                (header, Some(details))
+            });
+        writer.write_str(header)?;
         if let Some(scope) = ctx.event_scope() {
             for span in scope.from_root() {
                 let extensions = span.extensions();
@@ -200,6 +233,9 @@ where
                 }
             }
         }
+        if let Some(details) = details {
+            write!(writer, "\n{details}")?;
+        }
         writeln!(writer)
     }
 }
@@ -209,7 +245,7 @@ struct Values(BTreeMap<String, String>);
 
 impl Visit for Values {
     fn record_str(&mut self, field: &Field, value: &str) {
-        if field.name() == "message" {
+        if matches!(field.name(), "message" | "db.statement") {
             self.0.insert(field.name().into(), value.into());
         } else {
             self.record_debug(field, &value);
@@ -426,5 +462,75 @@ mod tests {
             );
         }
         assert!(line(&record, false).starts_with("1970-01-01T00:00:00Z INFO"));
+    }
+
+    #[test]
+    fn query_warnings_put_sanitized_sql_below_timing_and_span_fields() {
+        let sql = "\n\nINSERT INTO sources (id)\nVALUES (?)\nRETURNING id;\x1b[2J\n\n";
+        for ansi in [false, true] {
+            let output = capture(ansi, || {
+                let _span = tracing::info_span!("seed", profile = "demo").entered();
+                tracing::warn!(target: "sqlx::query", {
+                    db.statement = sql, summary = "INSERT INTO sources …",
+                    elapsed = "1.108s", elapsed_secs = 1.108,
+                    slow_threshold = "1s", rows_returned = 1 },
+                    "slow statement: execution time exceeded alert threshold");
+            });
+            let (header, statement) = output.split_once('\n').unwrap();
+            assert!(header.contains("elapsed"));
+            assert!(header.contains("slow_threshold"));
+            assert!(header.contains("rows_returned"));
+            assert!(header.contains("profile"));
+            assert!(!header.contains("db.statement"));
+            assert!(!header.contains("summary"));
+            assert!(!header.contains("elapsed_secs"));
+            assert!(!statement.contains("\\n"));
+            assert!(!statement.contains("\x1b[2J"));
+            assert!(statement.contains("\\u{1b}[2J"));
+            assert_eq!(statement.lines().count(), 3);
+            assert!(statement.lines().all(|line| line.starts_with("    ")));
+            if !ansi {
+                assert!(statement.starts_with("    INSERT INTO sources (id)\n    VALUES (?)\n"));
+            }
+        }
+    }
+
+    #[test]
+    fn retained_query_presentation_matches_live_without_changing_evidence() {
+        let fields = BTreeMap::from([
+            ("db.statement".into(), "\nSELECT id\nFROM sources;\n".into()),
+            ("summary".into(), "SELECT id FROM sources;".into()),
+            ("elapsed".into(), "1.108s".into()),
+            ("elapsed_secs".into(), "1.108".into()),
+        ]);
+        let mut record = Record {
+            sequence: 1,
+            timestamp_ms: 0,
+            source_sequence: 1,
+            level: Level::Warn,
+            source: "test".into(),
+            component: "sqlx::query".into(),
+            session: String::new(),
+            message: "slow statement".into(),
+            fields: fields.clone(),
+        };
+        for ansi in [false, true] {
+            let live = capture(ansi, || {
+                tracing::warn!(target: "sqlx::query", {
+                    db.statement = "\nSELECT id\nFROM sources;\n",
+                    summary = "SELECT id FROM sources;", elapsed = %"1.108s", elapsed_secs = 1.108 },
+                    "slow statement");
+            });
+            assert_eq!(
+                live.split_once(' ').unwrap().1,
+                line(&record, ansi).split_once(' ').unwrap().1
+            );
+        }
+        assert_eq!(record.fields, fields);
+        record.fields.insert("db.statement".into(), String::new());
+        record.fields.remove("elapsed");
+        let output = line(&record, false);
+        assert!(output.ends_with("elapsed_secs=1.108 summary=SELECT id FROM sources;"));
+        assert!(!output.contains('\n'));
     }
 }

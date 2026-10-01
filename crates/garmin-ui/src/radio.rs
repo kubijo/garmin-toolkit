@@ -10,6 +10,7 @@ pub struct Choice<'a, T> {
     value: T,
     target: &'a str,
     image: Option<images::Image>,
+    enabled: bool,
 }
 
 impl<'a, T> Choice<'a, T> {
@@ -19,12 +20,19 @@ impl<'a, T> Choice<'a, T> {
             value,
             target,
             image: None,
+            enabled: true,
         }
     }
 
     #[must_use]
     pub const fn image(mut self, image: images::Image) -> Self {
         self.image = Some(image);
+        self
+    }
+
+    #[must_use]
+    pub const fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
         self
     }
 }
@@ -37,7 +45,7 @@ pub struct Props<'a> {
     pub enabled: bool,
 }
 
-/// Renders every option, wrapping whole controls onto another row as needed.
+/// Renders one row when all options fit, otherwise one compact vertical group.
 pub fn show<T: Copy + PartialEq>(
     ui: &mut Ui,
     selected: T,
@@ -48,9 +56,20 @@ pub fn show<T: Copy + PartialEq>(
     let mut changed = None;
     ui.add_enabled_ui(props.enabled, |ui| {
         ui.spacing_mut().item_spacing = egui::vec2(16.0, 4.0);
-        ui.spacing_mut().interact_size.y = 32.0;
+        ui.spacing_mut().interact_size.y = 24.0;
         ui.spacing_mut().icon_spacing = 8.0;
-        ui.horizontal_wrapped(|ui| {
+        let width = choices
+            .iter()
+            .fold(-ui.spacing().item_spacing.x, |width, choice| {
+                width + choice_width(ui, choice) + ui.spacing().item_spacing.x
+            });
+        let layout = if width <= ui.available_width() {
+            egui::Layout::left_to_right(egui::Align::Center)
+        } else {
+            egui::Layout::top_down(egui::Align::Min)
+        };
+        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 24.0), layout, |ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
             for choice in choices {
                 let mut atoms = Atoms::new(choice.label);
                 if let Some(image) = choice.image {
@@ -63,9 +82,10 @@ pub fn show<T: Copy + PartialEq>(
                 let response = ui
                     .push_id(choice.target, |ui| {
                         crate::theme::selected_control(ui, selected == choice.value, |ui| {
-                            button::interaction_cursor(
-                                ui.add(RadioButton::new(selected == choice.value, atoms)),
-                            )
+                            button::interaction_cursor(ui.add_enabled(
+                                choice.enabled,
+                                RadioButton::new(selected == choice.value, atoms),
+                            ))
                         })
                     })
                     .inner;
@@ -80,4 +100,21 @@ pub fn show<T: Copy + PartialEq>(
         ui.add(egui::Label::new(egui::RichText::new(helper).weak().size(12.0)).wrap());
     }
     changed
+}
+
+fn choice_width<T>(ui: &Ui, choice: &Choice<'_, T>) -> f32 {
+    egui::WidgetText::from(choice.label)
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Body,
+        )
+        .size()
+        .x
+        + ui.spacing().icon_width
+        + ui.spacing().icon_spacing
+        + choice.image.map_or(0.0, |image| {
+            image.size_for_height(16.0).x + ui.spacing().icon_spacing
+        })
 }

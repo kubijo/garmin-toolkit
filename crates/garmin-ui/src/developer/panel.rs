@@ -1,9 +1,8 @@
 //! Shared developer panel layout and controls.
 use egui::{RichText, Ui};
-use garmin_color::theme::Level;
 
 use super::{Request, State};
-use crate::{Size, button, icons, theme::color32};
+use crate::{Size, button, theme::color32};
 
 pub(super) fn show(ui: &mut Ui, state: &mut State) {
     let previous_requests = state.requests.len();
@@ -38,66 +37,16 @@ pub(super) fn section(
     default_open: bool,
     body: impl FnOnce(&mut Ui),
 ) {
-    let target = format!("developer.section.{id}");
-    let id = ui.make_persistent_id(id);
-    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
-        ui.ctx(),
-        id,
-        default_open,
-    );
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::click());
-    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title)
-    });
-    if response.clicked() {
-        state.toggle(ui);
-    }
-    crate::semantics::target(ui, &response, target);
-    crate::semantics::value(&response, if state.is_open() { "open" } else { "closed" });
-    let palette = crate::theme::palette(ui);
-    let fill = if response.hovered() || response.is_pointer_button_down_on() {
-        palette.surfaces().layer_hover(Level::One)
-    } else {
-        palette.surfaces().layer(Level::One)
-    };
-    ui.painter().rect_filled(rect, 0.0, color32(fill));
-    icons::Props {
-        icon: if state.is_open() {
-            icons::CARET_DOWN
-        } else {
-            icons::CARET_RIGHT
-        },
-        size: 16.0,
-        color: palette.content().icon_primary(),
-    }
-    .paint_at(ui, egui::pos2(rect.left() + 20.0, rect.center().y));
-    let galley = egui::WidgetText::from(crate::typography::semibold(title)).into_galley(
+    crate::accordion::show(
         ui,
-        Some(egui::TextWrapMode::Truncate),
-        (rect.width() - 48.0).max(0.0),
-        egui::TextStyle::Body,
+        &crate::accordion::Props {
+            id: &format!("developer.section.{id}"),
+            label: title,
+            default_open,
+            inline_padding: 16,
+        },
+        body,
     );
-    ui.painter().galley(
-        egui::pos2(rect.left() + 36.0, rect.center().y - galley.size().y / 2.0),
-        galley,
-        color32(palette.content().text_primary()),
-    );
-    if response.has_focus() {
-        ui.painter().rect_stroke(
-            rect,
-            0.0,
-            egui::Stroke::new(2.0, color32(palette.interaction().focus())),
-            egui::StrokeKind::Inside,
-        );
-    }
-    state.show_body_unindented(ui, |ui| {
-        egui::Frame::new().inner_margin(12).show(ui, |ui| {
-            ui.set_width((rect.width() - 24.0).max(0.0));
-            body(ui);
-        });
-    });
 }
 
 /// Action groups consume their controls' height, never the remaining viewport height.

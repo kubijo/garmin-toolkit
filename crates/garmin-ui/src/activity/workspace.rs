@@ -39,6 +39,8 @@ type MapSidebar<'a> = dyn FnMut(&mut Ui, &mut Viewer) + 'a;
 
 /// Inputs shared by desktop, HASS, and embedded FIT preview workspaces.
 pub struct WorkspaceProps<'a> {
+    /// Host-local date; fixtures supply a fixed date instead of reading the wall clock.
+    pub today: jiff::civil::Date,
     pub items: &'a [ItemProps<'a>],
     pub presentations: &'a [Presentation],
     pub selected: Option<usize>,
@@ -741,6 +743,7 @@ impl Viewer {
                 size: Size::Small,
                 width,
                 enabled: true,
+                style: button::GroupStyle::Subtle,
             },
         ) {
             self.axis = axis;
@@ -1109,7 +1112,7 @@ impl Viewer {
             .samples
             .first()
             .map_or(0, |sample| sample.timestamp.as_unix_milliseconds());
-        let mut metrics = vec![(
+        let mut metrics = Vec::from([(
             format_message!(intl, default_message: "Time"),
             sample.map_or_else(
                 || "—".to_owned(),
@@ -1119,7 +1122,7 @@ impl Viewer {
                     format_domain_tick(elapsed, Axis::Elapsed, props.units)
                 },
             ),
-        )];
+        )]);
         if analysis.domain.distance_available {
             metrics.push((
                 format_message!(intl, default_message: "Distance"),

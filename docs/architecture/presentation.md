@@ -55,6 +55,30 @@ Captures cover states, sizes, layouts, flows, and the searchable icon catalog.
 Desktop and HASS use the same per-storage capacity component. The native HASS host serves an egui/WASM client and a
 streaming download loader; browser code receives owned models through the typed service boundary.
 
+Map management uses `garmin-service-api::maps` commands and snapshots. Desktop calls the host session locally; HASS
+serves that session through Remoc. `garmin-ui::maps` renders either snapshot and returns choices without owning jobs,
+planning downloads, or replaying progress events. The host registry owns one workflow per deployment epoch and device,
+shared across profiles. Leaving the page or disconnecting a client does not cancel an operation.
+
+`garmin-services::maps` shares catalog access, validated planning, payload preparation, execution, recovery receipts,
+and progress reduction with the CLI. The transaction engine remains in `garmin-update`. CLI arguments, JSON reports,
+terminal confirmations, and capture layouts remain presentation contracts; GUI jobs do not invoke the CLI.
+
+Control revisions change with choices and phase transitions, independently of progress. Request IDs retain their
+original replies for bounded retry deduplication. Approval tokens identify a prepared plan, device, backup policy, and
+execution mode. A mixed selection removes first, then prepares an update requiring its own approval. Verified backups
+are the default. Device browser operations and map jobs acquire the same host device gate.
+
+Restart inspects portable device transactions and retained host receipts before admitting mutations. Production hosts
+also discover the legacy CLI registry without relocating captures. Recovery, proven state clearing, and discarding an
+unprepared notice remain distinct actions. Simulation receipts reopen their retained copy and validate its source
+identity and plan before recovery. Restart never resumes writes automatically. Bounded outcomes persist independently of
+the connection; demo device trees preserve files and journals across restarts. First creation seeds the installed map
+files advertised by the loopback catalog. Reopening a device never recreates removed files or overwrites changed ones.
+
+The maintained `infra/gallery/captures/maps.capture.toml` recipe covers consent, catalog, review, progress, recovery,
+completion, failure, cancellation, and empty results, including both themes and Czech at a narrow width.
+
 [ADR 0038](../decisions/0038-validated-interface-previews.md) requires rendered and inspected preview evidence for every
 interface change, including prose wrapping and interaction. Scene compilation alone does not satisfy that gate.
 
@@ -91,3 +115,10 @@ context in `translations/cs.json` compile into a flat catalog in Cargo's `OUT_DI
 the crate build. Generated catalogs are not tracked. `just dev::i18n-sync` updates editable translation metadata; checks
 reject stale, missing, empty, extra, malformed, or incompatible messages. That proves catalog completeness, not how much
 visible copy uses FormatJS. Gallery scenes expose both languages.
+
+Preflight Grit checks keep messages outside other macro token trees, reject whitespace that FormatJS would collapse, and
+reject apostrophe-quoted ICU arguments. Deliberate message line breaks travel as interpolation values.
+
+Shared presentation takes wall-clock dates from the host; gallery fixtures supply fixed dates. Monotonic timers for
+animation and platform telemetry are allowed. Map adapters retain typed request failures until the shared presenter
+localizes them with the current client language; the original host diagnostic remains available under Details.

@@ -16,3 +16,11 @@ pub fn open(_data_root: &Path) -> Result<Platform, super::Error> {
 pub fn transport(candidate: &Candidate) -> Device {
     Device::new(candidate.mount_id.clone())
 }
+
+pub fn map_connector(
+    candidate: &Candidate,
+) -> std::sync::Arc<dyn garmin_services::maps::device::Connector> {
+    std::sync::Arc::new(garmin_services::maps::device::MountedConnector(
+        candidate.mount_id.clone(),
+    ))
+}

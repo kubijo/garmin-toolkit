@@ -27,9 +27,9 @@ impl Navigation {
         props: &WorkspaceProps<'_>,
         actions: &mut impl FnMut(&mut Ui),
     ) -> Option<Action> {
-        let mut action = self
-            .calendar
-            .show(ui, intl, props.presentations, props.selected);
+        let mut action =
+            self.calendar
+                .show(ui, intl, props.presentations, props.selected, props.today);
         ui.add_space(8.0);
         action = self.details(ui, intl, props).or(action);
         actions(ui);

@@ -6,6 +6,7 @@ use std::path::Path;
 #[cfg_attr(not(feature = "demo"), path = "device_backend/production.rs")]
 mod selected;
 
+pub use selected::map_connector;
 pub use selected::{Candidate, Device, Platform};
 
 pub fn open(data_root: &Path) -> Result<Platform, Error> {
