@@ -17,7 +17,8 @@ use garmin_map_service::{ClientIdentity, OmtClient};
 use garmin_progress::{OperationStage, ProgressReporter, ProgressState};
 use garmin_services::maps::{
     GarminDownloadAuthorizer, PhysicalTarget, RecoveryExecution, SimulatedTarget, UpdateExecution,
-    execute_update_plan, recover_update,
+    execute_registered_update, execute_update_plan, pending_recovery::PendingRecoveryStore,
+    recover_update, recovery::PendingState,
 };
 use garmin_simulator::{MockAuthorization, MockServer};
 use garmin_update::UpdatePlan;
@@ -79,6 +80,7 @@ impl Fixture {
 
     fn execution(&self, device: Box<dyn garmin_services::maps::UpdateTarget>) -> UpdateExecution {
         UpdateExecution {
+            prepared: None,
             client: self.client.clone(),
             manifest: self.manifest.clone(),
             plan: self.plan.clone(),
@@ -106,6 +108,8 @@ enum Fault {
     DisconnectDuringBackup,
     Upload,
     UploadAcceptance,
+    Restore,
+    ClearTransaction,
 }
 
 struct FaultDevice {
@@ -237,6 +241,15 @@ impl DeviceWrite for FaultDevice {
         size: u64,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
+        if matches!(self.fault, Fault::ClearTransaction)
+            && path
+                .to_string()
+                .eq_ignore_ascii_case("GARMIN-TOOLKIT/active.json")
+        {
+            return Err(DeviceIoError::Transport(
+                "injected transaction cleanup failure".to_owned(),
+            ));
+        }
         if matches!(self.fault, Fault::ChangedBeforeDelete)
             && path
                 .to_string()
@@ -287,7 +300,10 @@ impl DeviceWrite for FaultDevice {
                         .await?;
                     return Err(DeviceIoError::Verification(path.to_string()));
                 }
-                Fault::ChangedBeforeDelete | Fault::DisconnectDuringBackup => {}
+                Fault::ChangedBeforeDelete
+                | Fault::DisconnectDuringBackup
+                | Fault::Restore
+                | Fault::ClearTransaction => {}
             }
         }
         self.inner
@@ -303,6 +319,11 @@ impl DeviceWrite for FaultDevice {
         backup: &Path,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
+        if matches!(self.fault, Fault::Restore) {
+            return Err(DeviceIoError::Transport(
+                "injected restore failure".to_owned(),
+            ));
+        }
         self.inner
             .restore(storage, path, size, backup, sha256)
             .await
@@ -424,6 +445,212 @@ async fn simulated_disconnect_preserves_source_and_records_the_failure() -> Resu
     fixture.server.shutdown().await?;
     drop(fixture.root);
     Ok(())
+}
+
+#[tokio::test]
+async fn cancelled_writes_clear_recovery_only_after_verified_rollback() -> Result<()> {
+    for simulated in [false, true] {
+        let fixture = Fixture::new(MockAuthorization::Supported).await?;
+        let receipts = PendingRecoveryStore::new(fixture.root.path().join("receipts"));
+        let progress = cancelling_commit_progress();
+        let device = DirectoryDevice::new(fixture.device.clone());
+        let target: Box<dyn garmin_services::maps::UpdateTarget> = if simulated {
+            Box::new(SimulatedTarget {
+                source: Box::new(device),
+                fixture: None,
+            })
+        } else {
+            Box::new(PhysicalTarget(Box::new(device)))
+        };
+        let mut execution = fixture.execution(target);
+        execution.progress = progress.clone();
+        let result = execute_registered_update(execution, Some(&receipts)).await;
+        assert!(
+            progress.is_cancelled(),
+            "cancel after mutation, not during preparation"
+        );
+        assert!(
+            result.is_err(),
+            "cancellation must remain an unsuccessful operation"
+        );
+        assert_pristine(&fixture).await?;
+        assert!(
+            fixture
+                .capture
+                .root()
+                .join("mounted-update/transaction/rolled-back.json")
+                .is_file()
+        );
+        assert!(
+            receipts
+                .for_selected_device(&fixture.manifest.identity_digest(), None)?
+                .is_none(),
+            "verified rollback must clear its host notice"
+        );
+        let reopened = PendingRecoveryStore::new(fixture.root.path().join("receipts"));
+        assert!(
+            PendingState::inspect(
+                &DirectoryDevice::new(fixture.device.clone()),
+                &fixture.manifest.identity_digest(),
+                &reopened,
+            )
+            .await?
+            .is_none(),
+            "refresh/restart must not ask for recovery again"
+        );
+        assert!(
+            fixture.capture.root().join("error.txt").is_file(),
+            "retain failure evidence"
+        );
+        fixture.server.shutdown().await?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_cancellation_rollback_retains_update_recovery() -> Result<()> {
+    for fault in [Fault::Restore, Fault::ClearTransaction] {
+        let fixture = Fixture::new(MockAuthorization::Supported).await?;
+        tokio::fs::write(fixture.new_path("europe.img"), b"installed original").await?;
+        let receipts = PendingRecoveryStore::new(fixture.root.path().join("receipts"));
+        let progress = cancelling_commit_progress();
+        let mut execution = fixture.execution(Box::new(PhysicalTarget(Box::new(
+            FaultDevice::new(&fixture.device, fault),
+        ))));
+        execution.progress = progress.clone();
+        let error = execute_registered_update(execution, Some(&receipts))
+            .await
+            .err()
+            .expect("cancelled update");
+        assert!(progress.is_cancelled());
+        assert!(
+            matches!(
+                error.downcast_ref::<garmin_update::MountedInstallError>(),
+                Some(garmin_update::MountedInstallError::Rollback { .. })
+            ),
+            "{error:#}"
+        );
+        let pending = PendingState::inspect(
+            &DirectoryDevice::new(fixture.device.clone()),
+            &fixture.manifest.identity_digest(),
+            &receipts,
+        )
+        .await?
+        .expect("failed rollback requires recovery");
+        assert!(pending.receipt.is_some());
+        if matches!(fault, Fault::Restore) {
+            assert!(pending.transaction.is_some());
+        }
+        if matches!(fault, Fault::ClearTransaction) {
+            assert!(
+                fixture
+                    .capture
+                    .root()
+                    .join("mounted-update/transaction/rolled-back.json")
+                    .is_file(),
+                "a rollback journal alone is not proof that device transaction cleanup succeeded"
+            );
+            assert_eq!(
+                tokio::fs::read(fixture.new_path("europe.img")).await?,
+                b"installed original"
+            );
+        }
+        fixture.server.shutdown().await?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn cancelled_removal_clears_notice_only_when_restoration_is_proven() -> Result<()> {
+    for fault in [None, Some(Fault::Restore), Some(Fault::ClearTransaction)] {
+        let fixture = Fixture::new(MockAuthorization::Supported).await?;
+        let receipts = PendingRecoveryStore::new(fixture.root.path().join("receipts"));
+        let mut catalog = fixture
+            .client
+            .check_maps(
+                fixture.manifest.raw_xml(),
+                fixture.manifest.capabilities().installed_map_files(),
+            )
+            .await?;
+        // Both old files exist in this fixture; advertise both as installed for multi-file removal.
+        catalog.bundled_maps[0].installation_state = catalog.maps[0].installation_state;
+        let plan = garmin_update::RemovalPlan::from_response_selection(
+            &catalog,
+            fixture.manifest.identity_digest(),
+            [0, 1],
+        )?;
+        let device: Box<dyn DeviceWrite> = if let Some(fault) = fault {
+            Box::new(FaultDevice::new(&fixture.device, fault))
+        } else {
+            Box::new(DirectoryDevice::new(fixture.device.clone()))
+        };
+        let plan = plan.bind_inventory(&device.inventory(&plan.paths_to_inventory()).await?)?;
+        assert!(plan.files_to_remove.len() > 1, "cancel between removals");
+        let progress = cancelling_commit_progress();
+        let error = garmin_services::maps::execute_removal(
+            &plan,
+            &fixture.capture,
+            &progress,
+            device.as_ref(),
+            &receipts,
+        )
+        .await
+        .expect_err("cancelled removal");
+        assert!(progress.is_cancelled());
+        let pending = PendingState::inspect(
+            &DirectoryDevice::new(fixture.device.clone()),
+            &fixture.manifest.identity_digest(),
+            &receipts,
+        )
+        .await?;
+        if fault.is_some() {
+            assert!(
+                matches!(
+                    error.downcast_ref::<garmin_update::RemovalExecutionError>(),
+                    Some(garmin_update::RemovalExecutionError::Rollback { .. })
+                ),
+                "{error:#}"
+            );
+            let pending = pending.expect("failed rollback requires recovery");
+            assert!(pending.receipt.is_some());
+            if matches!(fault, Some(Fault::Restore)) {
+                assert!(pending.transaction.is_some());
+            }
+        } else {
+            assert!(
+                matches!(
+                    error.downcast_ref::<garmin_update::RemovalExecutionError>(),
+                    Some(garmin_update::RemovalExecutionError::RolledBack(_))
+                ),
+                "{error:#}"
+            );
+            assert!(pending.is_none());
+            assert_pristine(&fixture).await?;
+            assert!(
+                fixture
+                    .capture
+                    .root()
+                    .join("removal-transaction/rolled-back.json")
+                    .is_file()
+            );
+        }
+        fixture.server.shutdown().await?;
+    }
+    Ok(())
+}
+
+fn cancelling_commit_progress() -> ProgressReporter {
+    let progress = ProgressReporter::default();
+    let cancellation = progress.cancellation_token();
+    progress.observe(move |event| {
+        if event.stage == OperationStage::Commit
+            && event.state == ProgressState::Advanced
+            && event.completed > 0
+            && event.path.is_some()
+        {
+            cancellation.cancel();
+        }
+    })
 }
 
 #[tokio::test]

@@ -119,6 +119,7 @@ fn group(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
                 size: Size::Medium,
                 width: Width::Fit,
                 enabled: true,
+                style: button::GroupStyle::Subtle,
             },
         );
     });

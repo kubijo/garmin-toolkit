@@ -733,22 +733,22 @@ pub const GRAY_10: Theme = Theme {
         },
         secondary: ButtonStates {
             rest: ButtonState {
-                background: swatch::gray::G80,
-                foreground: swatch::WHITE,
-                border: swatch::TRANSPARENT,
+                background: swatch::gray::G20,
+                foreground: swatch::gray::G100,
+                border: swatch::gray::G40,
             },
             hover: ButtonState {
-                background: swatch::gray::G70,
-                foreground: swatch::WHITE,
-                border: swatch::TRANSPARENT,
+                background: swatch::gray::G30,
+                foreground: swatch::gray::G100,
+                border: swatch::gray::G50,
             },
             active: ButtonState {
-                background: swatch::gray::G60,
-                foreground: swatch::WHITE,
-                border: swatch::TRANSPARENT,
+                background: swatch::gray::G40,
+                foreground: swatch::gray::G100,
+                border: swatch::gray::G60,
             },
             disabled: ButtonState {
-                background: swatch::gray::G30,
+                background: swatch::gray::G20,
                 foreground: swatch::gray::G100.with_alpha(0x40),
                 border: swatch::TRANSPARENT,
             },

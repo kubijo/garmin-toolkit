@@ -11,6 +11,7 @@ pub enum Page {
     ProfileSettings,
     Backup,
     Device(String),
+    Maps(String),
 }
 
 impl Page {
@@ -20,7 +21,7 @@ impl Page {
             Self::Activities => Some(0),
             Self::ProfileSettings => Some(1),
             Self::Backup => backup_enabled.then_some(2),
-            Self::Device(key) => devices
+            Self::Device(key) | Self::Maps(key) => devices
                 .iter()
                 .position(|device| &device.key == key)
                 .map(|index| index + 2 + usize::from(backup_enabled)),
@@ -110,7 +111,10 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
         selected: Some(props.selected_profile),
         expanded: props.profile_menu_expanded,
     };
-    let show = if matches!(props.page, Page::Activities | Page::ProfileSettings) {
+    let show = if matches!(
+        props.page,
+        Page::Activities | Page::ProfileSettings | Page::Maps(_)
+    ) {
         shell::show_edge_to_edge
     } else {
         shell::show

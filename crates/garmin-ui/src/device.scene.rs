@@ -5,6 +5,7 @@ scene_meta! { title: "Application / Devices" }
 
 #[scene]
 fn details(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    use garmin_model::device::{DeviceInspection, InspectionSection, StorageInspection};
     use garmin_service_api::{
         DeviceCapability, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
     };
@@ -40,7 +41,20 @@ fn details(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             Vec::new()
         },
         storages: Vec::new(),
-        report: None,
+        report: (state == 0).then(|| DeviceInspection {
+            manifest: InspectionSection::Missing,
+            storage: InspectionSection::Missing,
+            toolkit: vec![StorageInspection {
+                storage_id: "internal".to_owned(),
+                namespace: InspectionSection::Available(
+                    "9e132b21-4910-47bd-93ac-1ea7a9afb2da"
+                        .parse()
+                        .expect("valid demo toolkit UUID"),
+                ),
+                identity: InspectionSection::Missing,
+                transaction: InspectionSection::Missing,
+            }],
+        }),
     };
     stage!(ctx, ui, globals.stage((width, 400.0)), |ui| {
         egui::Frame::new()

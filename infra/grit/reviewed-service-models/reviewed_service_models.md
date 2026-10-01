@@ -6,6 +6,9 @@ level: error
 
 Public service-boundary models must be explicitly reviewed and added to the approved model set.
 
+The map workflow models use owned, Postcard-compatible values and fixed-width counts. Commands carry opaque request,
+revision, and approval identities; host captures, transport handles, payloads, and raw progress events stay server-side.
+
 ```grit
 language rust
 
@@ -16,6 +19,22 @@ or {
 } where {
   $item <: contains visibility_modifier(),
   $name <: not or {
+    `Action`,
+    `Phase`,
+    `Choice`,
+    `CatalogService`,
+    `Component`,
+    `Plan`,
+    `StorageRequirement`,
+    `Recovery`,
+    `Progress`,
+    `ProgressStatus`,
+    `Outcome`,
+    `State`,
+    `Command`,
+    `Request`,
+    `FailureKind`,
+    `Failure`,
     `DeviceSnapshot`,
     `SnapshotState`,
     `Directory`,

@@ -1,0 +1,166 @@
+out = "../../../.tmp/gallery/maps"
+size = "1200x1200"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "details-open-dark"
+scene = "accordion::Playground"
+[shot.knobs]
+open = true
+
+[[shot]]
+name = "details-open-light"
+scene = "accordion::Playground"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+open = true
+
+[[shot]]
+name = "details-open-czech-narrow"
+scene = "accordion::Playground"
+[shot.globals]
+Language = "Čeština"
+[shot.knobs]
+open = true
+width = 288
+
+[[shot]]
+name = "catalog-dark"
+scene = "maps::Playground"
+
+[[shot]]
+name = "catalog-light"
+scene = "maps::Playground"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "catalog-czech-narrow"
+scene = "maps::Playground"
+[shot.globals]
+Language = "Čeština"
+[shot.knobs]
+width = 320
+
+[[shot]]
+name = "consent"
+scene = "maps::Playground"
+[shot.knobs]
+state = "consent"
+
+[[shot]]
+name = "catalog-simulation"
+scene = "maps::Playground"
+[shot.knobs]
+simulation = true
+height = 1120
+
+[[shot]]
+name = "loading"
+scene = "maps::Playground"
+[shot.knobs]
+state = "loading"
+
+[[shot]]
+name = "review"
+scene = "maps::Playground"
+[shot.knobs]
+state = "review"
+
+[[shot]]
+name = "running"
+scene = "maps::Playground"
+[shot.knobs]
+state = "running"
+
+[[shot]]
+name = "rollback-dark"
+scene = "maps::Playground"
+[shot.knobs]
+state = "rollback"
+height = 1120
+
+[[shot]]
+name = "rollback-light"
+scene = "maps::Playground"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+state = "rollback"
+height = 1120
+
+[[shot]]
+name = "running-czech-narrow"
+scene = "maps::Playground"
+[shot.globals]
+Language = "Čeština"
+[shot.knobs]
+state = "running"
+width = 320
+height = 1120
+
+[[shot]]
+name = "review-czech-narrow"
+scene = "maps::Playground"
+[shot.globals]
+Language = "Čeština"
+[shot.knobs]
+state = "review"
+width = 320
+
+[[shot]]
+name = "recovery"
+scene = "maps::Playground"
+[shot.knobs]
+state = "recovery"
+history = true
+height = 1120
+
+[[shot]]
+name = "recovery-light"
+scene = "maps::Playground"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+state = "recovery"
+history = true
+height = 1120
+
+[[shot]]
+name = "recovery-czech-narrow"
+scene = "maps::Playground"
+[shot.globals]
+Language = "Čeština"
+[shot.knobs]
+state = "recovery"
+history = true
+width = 320
+height = 1120
+
+[[shot]]
+name = "completed"
+scene = "maps::Playground"
+[shot.knobs]
+state = "complete"
+
+[[shot]]
+name = "failed-narrow"
+scene = "maps::Playground"
+[shot.knobs]
+state = "failed"
+width = 320
+
+[[shot]]
+name = "cancelled"
+scene = "maps::Playground"
+[shot.knobs]
+state = "cancelled"
+
+[[shot]]
+name = "empty"
+scene = "maps::Playground"
+[shot.knobs]
+state = "empty"

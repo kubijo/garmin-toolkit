@@ -53,7 +53,7 @@ impl attachments::Backend for Platform {
 pub fn open(data_root: &Path) -> Result<Platform, super::Error> {
     Ok(Platform {
         candidate: Candidate {
-            fixture: Fixture::recreate(data_root.join("device"))?,
+            fixture: Fixture::open(data_root.join("device"))?,
         },
     })
 }
@@ -61,6 +61,16 @@ pub fn open(data_root: &Path) -> Result<Platform, super::Error> {
 #[must_use]
 pub fn transport(candidate: &Candidate) -> Device {
     candidate.fixture.transport()
+}
+
+pub fn map_connector(
+    candidate: &Candidate,
+) -> std::sync::Arc<dyn garmin_services::maps::device::Connector> {
+    std::sync::Arc::new(garmin_services::maps::device::DirectoryConnector {
+        root: candidate.fixture.root().to_owned(),
+        storage_id: fixture::STORAGE_ID.to_owned(),
+        storage_label: fixture::STORAGE_LABEL.to_owned(),
+    })
 }
 
 #[cfg(test)]

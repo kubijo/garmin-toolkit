@@ -5,6 +5,7 @@
     reason = "egui and resvg require compatible bitflags, kurbo, and miniz_oxide versions"
 )]
 
+pub mod accordion;
 pub mod activity;
 #[cfg(any(test, feature = "automation"))]
 pub mod automation;
@@ -26,6 +27,7 @@ pub mod icons;
 pub mod image_crop;
 pub mod images;
 pub mod input;
+pub mod maps;
 pub mod modal;
 pub mod notification;
 pub mod offline;

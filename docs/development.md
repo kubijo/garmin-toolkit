@@ -28,6 +28,10 @@ Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands an
 
 ## Tooling choices
 
+`GARMIN_TOOLKIT_STATE_DIR` overrides the platform state-directory parent for CLI logs, automatic captures, and the
+legacy map recovery registry. Tests that launch the CLI use a temporary directory through this application-level
+setting; they do not depend on Linux XDG variables or write to the developer's normal state directory.
+
 Prefer direct command composition and argument forwarding over shell wrappers and argument reconstruction.
 
 Tooling uses typed CLI definitions (Tyro for Python) and template engines for generated documents. Ask before using

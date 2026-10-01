@@ -978,6 +978,191 @@ fn focus_loss_keeps_the_workload_running() {
 }
 
 #[test]
+fn cancelled_background_drag_keeps_frames_until_input_is_released() {
+    let context = Context::default();
+    context.add_plugin(Driver::default());
+    let _ = frame(&context, 0.0, vec![], "ready");
+    command(
+        &context,
+        "sequence",
+        &serde_json::json!({
+            "run_in_background": true,
+            "argument": [{"kind":"drag", "target":"map", "x":0.7, "y":0.6}]
+        }),
+    )
+    .unwrap();
+    for tick in 1..=10 {
+        let _ = frame(&context, f64::from(tick), vec![], "ready");
+        if context.plugin::<Driver>().lock().held.is_some() {
+            break;
+        }
+    }
+    assert!(context.plugin::<Driver>().lock().held.is_some());
+    command(&context, "cancel", &serde_json::Value::Null).unwrap();
+    let report = command(&context, "status", &serde_json::Value::Null).unwrap();
+    assert_eq!(report["state"], "cancelled");
+    assert_eq!(report["needs_background_frames"], true);
+    let _ = frame(&context, 11.0, vec![], "ready");
+    assert!(context.plugin::<Driver>().lock().held.is_none());
+    let report = command(&context, "status", &serde_json::Value::Null).unwrap();
+    assert_eq!(report["needs_background_frames"], false);
+}
+
+#[test]
+fn background_mode_drives_hidden_ui_with_throttled_frames() {
+    for background in [false, true] {
+        let context = Context::default();
+        context.add_plugin(Driver::default());
+        let _ = frame(&context, 0.0, vec![], "ready");
+        command(
+            &context,
+            "action",
+            &serde_json::json!({"argument":{"kind":"click", "target":"profile.0"}, "run_in_background":background}),
+        )
+        .unwrap();
+        let mut input = RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .occluded = Some(true);
+        prepare_background_input(&context, &mut input);
+        assert_eq!(input.viewport().occluded, Some(!background));
+        for tick in 0..20 {
+            let _ = frame(&context, f64::from(tick) * 3.0, vec![], "ready");
+            if !context.plugin::<Driver>().lock().running() {
+                break;
+            }
+        }
+        let report = command(&context, "result", &serde_json::Value::Null).unwrap();
+        assert_eq!(
+            report["state"],
+            if background { "passed" } else { "failed" },
+            "{report}"
+        );
+        assert_eq!(report["performance_eligible"], !background);
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .occluded = Some(true);
+        prepare_background_input(&context, &mut input);
+        assert_eq!(input.viewport().occluded, Some(true));
+    }
+}
+
+#[test]
+fn background_options_are_strict_atomic_and_limited_to_one_run() {
+    let context = Context::default();
+    context.add_plugin(Driver::default());
+    for invalid in [
+        serde_json::json!({}),
+        serde_json::json!({"argument":"stationary-arrival", "run_in_background":"true"}),
+        serde_json::json!({"argument":"stationary-arrival", "run_in_background":true,"extra":true}),
+    ] {
+        assert!(command(&context, "start", &invalid).is_err());
+        assert!(context.plugin::<Driver>().lock().report().is_none());
+    }
+    command(
+        &context,
+        "start",
+        &serde_json::json!({"argument":"stationary-arrival", "run_in_background":true}),
+    )
+    .unwrap();
+    assert!(command(&context, "start", &serde_json::json!("stationary-arrival"),).is_err());
+    assert!(
+        context
+            .plugin::<Driver>()
+            .lock()
+            .run
+            .as_ref()
+            .unwrap()
+            .background
+    );
+    assert!(
+        !context
+            .plugin::<Driver>()
+            .lock()
+            .report()
+            .unwrap()
+            .performance_eligible
+    );
+    command(&context, "cancel", &serde_json::Value::Null).unwrap();
+    command(&context, "start", &serde_json::json!("stationary-arrival")).unwrap();
+    assert!(
+        !context
+            .plugin::<Driver>()
+            .lock()
+            .run
+            .as_ref()
+            .unwrap()
+            .background
+    );
+    assert!(
+        context
+            .plugin::<Driver>()
+            .lock()
+            .report()
+            .unwrap()
+            .performance_eligible
+    );
+}
+
+#[test]
+fn background_clicks_activate_buttons_despite_throttled_frames() {
+    for interval in [1.0, 3.0] {
+        let context = Context::default();
+        context.add_plugin(Driver::default());
+        let mut clicked = false;
+        let mut render = |time| {
+            let mut output = context.run_ui(
+                RawInput {
+                    time: Some(time),
+                    focused: false,
+                    ..Default::default()
+                },
+                |ui| {
+                    if clicked {
+                        let response = ui.button("Signed in");
+                        crate::semantics::target(ui, &response, "profile.toggle");
+                    } else {
+                        let response = ui.button("Profile");
+                        crate::semantics::target(ui, &response, "profile.0");
+                        clicked = response.clicked();
+                    }
+                },
+            );
+            output.textures_delta.clear();
+        };
+        render(0.0);
+        command(
+            &context,
+            "sequence",
+            &serde_json::json!({
+                "run_in_background": true,
+                "argument": [
+                    {"kind":"click", "target":"profile.0"},
+                    {"kind":"assert_available", "target":"profile.toggle"}
+                ]
+            }),
+        )
+        .unwrap();
+        for tick in 1..=20 {
+            render(f64::from(tick) * interval);
+            if !context.plugin::<Driver>().lock().running() {
+                break;
+            }
+        }
+        assert!(
+            clicked,
+            "background click must activate the button at {interval}s per frame"
+        );
+        let report = command(&context, "result", &serde_json::Value::Null).unwrap();
+        assert_eq!(report["state"], "passed", "{report}");
+    }
+}
+
+#[test]
 fn individual_actions_use_semantic_targets_and_reject_overlapping_work() {
     let context = Context::default();
     assert!(command(&context, "targets", &serde_json::Value::Null).is_err());

@@ -198,6 +198,12 @@ impl Shadow {
         self
     }
 
+    /// Bind reopened simulation evidence to the originally selected source and plan.
+    #[must_use]
+    pub fn matches_source(&self, device: &str, plan: &str) -> bool {
+        self.snapshot.source_device == device && self.snapshot.plan_digest == plan
+    }
+
     /// Reopen retained state; no physical-device access or new snapshot.
     ///
     /// # Errors

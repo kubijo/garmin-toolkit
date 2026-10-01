@@ -293,6 +293,7 @@ fn accent_examples(ui: &mut Ui) {
             size: Size::Medium,
             width: button::Width::Fit,
             enabled: true,
+            style: button::GroupStyle::Subtle,
         },
     ) {
         first = value;

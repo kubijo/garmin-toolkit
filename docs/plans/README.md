@@ -5,6 +5,10 @@ Unfinished work only. On completion, move lasting contracts/evidence to their ow
 [interface validation](../decisions/0038-validated-interface-previews.md). Close each working slice before advancing;
 run full QA and audit, plus package evidence for deployment claims.
 
+Next acceptance slice:
+[review shared map workflows in rebuilt desktop and HASS](shared-interface-workflows.md#map-workflow-acceptance) before
+adding new export features. The outcome list below retains the broader dependency order.
+
 | Order | Outcome                                                                 |
 | ----- | ----------------------------------------------------------------------- |
 | 01    | [Read-only device inspection](device-state.md)                          |

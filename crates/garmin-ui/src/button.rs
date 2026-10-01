@@ -58,9 +58,11 @@ pub struct Props<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct GroupChoice<'a, T> {
     label: &'a str,
-    icon: Icon,
+    icon: Option<Icon>,
     value: T,
     enabled: bool,
+    target: Option<&'a str>,
+    tint: Option<garmin_color::Color>,
 }
 
 impl<'a, T> GroupChoice<'a, T> {
@@ -68,10 +70,37 @@ impl<'a, T> GroupChoice<'a, T> {
     pub const fn new(label: &'a str, icon: Icon, value: T) -> Self {
         Self {
             label,
-            icon,
+            icon: Some(icon),
             value,
             enabled: true,
+            target: None,
+            tint: None,
         }
+    }
+
+    /// Creates a text-only option for a compact segmented control.
+    pub const fn text(label: &'a str, value: T) -> Self {
+        Self {
+            label,
+            icon: None,
+            value,
+            enabled: true,
+            target: None,
+            tint: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn target(mut self, target: &'a str) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    /// Tint this option with a semantic color, preserving readable foregrounds.
+    #[must_use]
+    pub const fn tint(mut self, color: garmin_color::Color) -> Self {
+        self.tint = Some(color);
+        self
     }
 
     /// Controls whether this individual option can be selected.
@@ -88,6 +117,23 @@ pub struct GroupProps {
     pub size: Size,
     pub width: Width,
     pub enabled: bool,
+    pub style: GroupStyle,
+}
+
+/// Presentation of a group of mutually exclusive choices.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GroupStyle {
+    Subtle,
+    /// Solid surfaces with icons consistently above their labels.
+    Tiles,
+}
+
+#[derive(Clone, Copy)]
+struct Selection {
+    selected: bool,
+    solid: bool,
+    stacked: bool,
+    tint: Option<garmin_color::Color>,
 }
 
 #[must_use]
@@ -100,12 +146,28 @@ pub fn group<T>(
 where
     T: Copy + Eq,
 {
+    let count = f32::from(u16::try_from(choices.len()).unwrap_or(u16::MAX));
+    let cell_width = (ui.available_width() - (count - 1.0) * 2.0) / count.max(1.0);
+    let stacked = props.style == GroupStyle::Tiles
+        || props.width == Width::Fill
+            && choices.iter().any(|choice| {
+                Props {
+                    label: choice.label,
+                    icon: choice.icon,
+                    kind: Kind::Secondary,
+                    size: props.size,
+                    width: props.width,
+                    enabled: true,
+                }
+                .natural_width(ui)
+                    > cell_width
+            });
     row(ui, choices.len(), props.width, |ui, index| {
         let choice = &choices[index];
         let is_selected = choice.value == selected;
         let button = Props {
             label: choice.label,
-            icon: Some(choice.icon),
+            icon: choice.icon,
             kind: Kind::Secondary,
             size: props.size,
             width: props.width,
@@ -115,15 +177,23 @@ where
         {
             ui.end_row();
         }
-        let clicked = button
+        let response = button
             .show_with_states_and_metrics(
                 ui,
                 button.kind.states(ui),
                 metrics(button.size),
-                Some(is_selected),
+                Some(Selection {
+                    selected: is_selected,
+                    solid: props.style == GroupStyle::Tiles,
+                    stacked,
+                    tint: choice.tint,
+                }),
             )
-            .clicked();
-        (clicked && !is_selected).then_some(choice.value)
+            .on_hover_text(choice.label);
+        if let Some(target) = choice.target {
+            crate::semantics::target(ui, &response, target);
+        }
+        (response.clicked() && !is_selected).then_some(choice.value)
     })
 }
 
@@ -139,6 +209,7 @@ pub(crate) fn row<T>(
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         if width == Width::Fill {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             ui.columns(count, |columns| {
                 columns
                     .iter_mut()
@@ -173,6 +244,9 @@ impl Props<'_> {
 
     /// Renders the button.
     pub fn show(self, ui: &mut Ui) -> Response {
+        if ui.layout().main_wrap() && self.natural_width(ui) > ui.available_size_before_wrap().x {
+            ui.end_row();
+        }
         let states = self.kind.states(ui);
         self.show_with_states(ui, states)
     }
@@ -199,7 +273,7 @@ impl Props<'_> {
         ui: &mut Ui,
         states: &theme::ButtonStates,
         metrics: Metrics,
-        selection: Option<bool>,
+        selection: Option<Selection>,
     ) -> Response {
         ui.scope(|ui| {
             ui.spacing_mut().interact_size.y = metrics.height;
@@ -210,27 +284,43 @@ impl Props<'_> {
             visuals.widgets.active = state_visuals(states.active());
             visuals.widgets.open = visuals.widgets.active;
             visuals.widgets.noninteractive = state_visuals(states.disabled());
-            if selection.is_some() {
-                for (widget, level) in [
-                    (&mut visuals.widgets.inactive, theme::Level::One),
-                    (&mut visuals.widgets.hovered, theme::Level::Two),
-                    (&mut visuals.widgets.active, theme::Level::Three),
-                ] {
-                    let fill = palette.surfaces().layer_hover(level);
-                    *widget =
-                        crate::theme::widget(fill, fill, fill, palette.content().text_primary());
-                }
-                visuals.widgets.open = visuals.widgets.active;
-            }
             visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
-            ui.spacing_mut().button_padding = egui::vec2(metrics.horizontal_padding, 0.0);
+            if let Some(selection) = selection {
+                group_visuals(ui, selection);
+            }
+            let stacked = selection.is_some_and(|selection| selection.stacked);
+            ui.spacing_mut().button_padding = egui::vec2(
+                if stacked {
+                    4.0
+                } else {
+                    metrics.horizontal_padding
+                },
+                0.0,
+            );
 
             let label = RichText::new(self.label).size(metrics.font_size);
             let image = self.icon.map(|icon| {
-                icon.mask()
-                    .fit_to_exact_size(egui::Vec2::splat(metrics.icon_size))
+                let image = icon
+                    .mask()
+                    .fit_to_exact_size(egui::Vec2::splat(metrics.icon_size));
+                if stacked {
+                    image.tint(ui.visuals().widgets.inactive.fg_stroke.color)
+                } else {
+                    image
+                }
             });
-            let button = egui::Button::opt_image_and_text(image, Some(label.into()))
+            let button = match (stacked, image) {
+                (true, Some(image)) => egui::Button::new(egui::Atom::layout(
+                    egui::AtomLayout::new((image, label))
+                        .direction(egui::Direction::TopDown)
+                        .align2(egui::Align2::CENTER_CENTER)
+                        .min_size(egui::vec2(ui.available_width() - 8.0, 0.0))
+                        .fallback_text_color(ui.visuals().widgets.inactive.fg_stroke.color)
+                        .gap(4.0),
+                )),
+                (_, image) => egui::Button::opt_image_and_text(image, Some(label.into())),
+            };
+            let button = button
                 .image_tint_follows_text_color(true)
                 .gap(metrics.gap)
                 .min_size(egui::vec2(
@@ -238,12 +328,22 @@ impl Props<'_> {
                         Width::Fit => 0.0,
                         Width::Fill => ui.available_width(),
                     },
-                    metrics.height,
+                    if stacked { 56.0 } else { metrics.height },
                 ))
                 .corner_radius(CONTROL_RADIUS);
 
             let response = interaction_cursor(ui.add_enabled(self.enabled, button));
-            if selection == Some(true) {
+            if let Some(selection) = selection {
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::WidgetType::Button,
+                        response.enabled(),
+                        selection.selected,
+                        self.label,
+                    )
+                });
+            }
+            if selection.is_some_and(|selection| selection.selected) {
                 let fill = ui.style().interact(&response).bg_fill;
                 let surface =
                     garmin_color::Color::from_u32(u32::from_be_bytes(fill.to_srgba_unmultiplied()));
@@ -263,6 +363,27 @@ impl Props<'_> {
         })
         .inner
     }
+}
+
+fn group_visuals(ui: &mut Ui, selection: Selection) {
+    let palette = crate::theme::palette(ui);
+    let visuals = &mut ui.style_mut().visuals;
+    for (widget, level, amount) in [
+        (&mut visuals.widgets.inactive, theme::Level::One, 0.16),
+        (&mut visuals.widgets.hovered, theme::Level::Two, 0.24),
+        (&mut visuals.widgets.active, theme::Level::Three, 0.32),
+    ] {
+        let fill = if let Some(tint) = selection.tint {
+            let base = palette.surfaces().layer_hover(theme::Level::Two);
+            base.mix(tint, amount).unwrap_or(base)
+        } else if !selection.solid {
+            palette.surfaces().layer_hover(level)
+        } else {
+            continue;
+        };
+        *widget = crate::theme::widget(fill, fill, fill, palette.content().text_primary());
+    }
+    visuals.widgets.open = visuals.widgets.active;
 }
 
 /// Inputs for an icon-only button.

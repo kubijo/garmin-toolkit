@@ -67,6 +67,7 @@ fn harness() -> Harness<'static, usize> {
                 ui,
                 &intl,
                 &activity::WorkspaceProps {
+                    today: jiff::civil::date(2026, 3, 1),
                     items: &items,
                     presentations: &presentations,
                     selected: Some(*selected),
@@ -83,6 +84,57 @@ fn harness() -> Harness<'static, usize> {
         },
         1,
     )
+}
+
+#[test]
+fn empty_calendar_uses_the_supplied_date_and_tracks_host_rollover() {
+    let intl = Translations::bundled()
+        .expect("catalog")
+        .formatter(Language::English)
+        .expect("locale");
+    let runtime = activity::map_runtime::MapRuntimeHandle::new(
+        NoTiles,
+        activity::map_runtime::Renderer::software(),
+    );
+    let mut workspace = activity::Workspace::new(&runtime);
+    let mut installed = false;
+    let mut harness = Harness::builder().with_size([900.0, 720.0]).build_ui_state(
+        move |ui, today: &mut jiff::civil::Date| {
+            if !installed {
+                garmin_ui::install(ui.ctx());
+                installed = true;
+                ui.ctx().request_repaint();
+                return;
+            }
+            let _ = workspace.show(
+                ui,
+                &intl,
+                &activity::WorkspaceProps {
+                    today: *today,
+                    items: &[],
+                    presentations: &[],
+                    selected: None,
+                    recording: None,
+                    recording_key: None,
+                    units: UnitSystem::Metric,
+                    empty_list: "Empty",
+                    empty_detail: "Select",
+                    no_route: "No route",
+                },
+            );
+        },
+        jiff::civil::date(2040, 2, 29),
+    );
+    harness.run();
+    let day = |date: &str| {
+        let id = format!("activity.calendar.{date}");
+        By::new().predicate(move |node| node.author_id() == Some(id.as_str()))
+    };
+    assert!(harness.query(day("2040-02-29")).is_some());
+    *harness.state_mut() = jiff::civil::date(2040, 3, 1);
+    harness.run();
+    assert!(harness.query(day("2040-03-01")).is_some());
+    assert!(harness.query(day("2040-02-29")).is_none());
 }
 
 #[test]

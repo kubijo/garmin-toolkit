@@ -6,6 +6,7 @@ use egui::{FontDefinitions, FontFamily, FontId, Response, RichText, Style, TextS
 
 const BODY_SIZE: f32 = 14.0;
 const BODY_LINE_HEIGHT: f32 = 20.0;
+const PROSE_WIDTH: f32 = 560.0;
 
 const REGULAR_DATA: &str = "NotoSans-Regular";
 const SEMIBOLD_DATA: &str = "NotoSans-SemiBold";
@@ -52,11 +53,12 @@ pub fn body_text(text: impl Into<String>) -> RichText {
         .line_height(Some(BODY_LINE_HEIGHT))
 }
 
-/// Render explanatory prose with the secondary text color and balanced wrapping.
+/// Render explanatory prose with a readable measure, secondary color, and balanced wrapping.
 /// Balances two-line paragraphs when possible; longer paragraphs wrap normally.
 /// Returns the label response and leaves surrounding typography and spacing unchanged.
 pub fn body(ui: &mut Ui, text: &str) -> Response {
     ui.scope(|ui| {
+        ui.set_max_width(ui.available_width().min(PROSE_WIDTH));
         ui.style_mut()
             .text_styles
             .insert(TextStyle::Body, font(BODY_SIZE, Weight::Regular));

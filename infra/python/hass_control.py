@@ -197,6 +197,7 @@ def main() -> int:
     command.add_argument('--argument', type=json.loads, help='JSON argument, including quotes for strings')
     command.add_argument('--request-id', type=int, help='Optional explicit ID for replay checks')
     command.add_argument('--window', help='Child handle returned by the windows command; defaults to root')
+    command.add_argument('--run-in-background', action='store_true', help='Run this automation even in a hidden tab')
     checks = commands.add_parser('check')
     checks.add_argument('--output', type=Path, default=Path('.tmp/hass-control-runtime'))
     capture = commands.add_parser('screenshot')
@@ -212,6 +213,10 @@ def main() -> int:
         else:
             if args.operation == 'screenshot':
                 parser.error('Use screenshot --output FILE.png to save a capture')
+            if args.run_in_background:
+                if args.operation not in ('start', 'action', 'sequence'):
+                    parser.error('--run-in-background applies only to start, action, or sequence')
+                args.argument = {'argument': args.argument, 'run_in_background': True}
             status, result = client.command(
                 args.operation, args.argument, request_id=args.request_id, window=args.window
             )

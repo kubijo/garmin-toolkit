@@ -99,7 +99,7 @@ mod actions;
 mod control;
 mod resize;
 mod scenarios;
-pub use control::command;
+pub use control::{command, prepare_background_input};
 pub use resize::{ResizeCommand, ResizeHandler, ResizeRequest};
 #[cfg(test)]
 mod tests;
@@ -234,6 +234,7 @@ pub struct ViewportChange {
 }
 
 struct Run {
+    background: bool,
     steps: Vec<Step>,
     report: Report,
     start: Option<f64>,
@@ -359,7 +360,7 @@ impl Run {
             return Err("automation clock moved backwards or became invalid".into());
         }
         let elapsed = elapsed.max(self.report.elapsed_seconds);
-        if elapsed - self.report.elapsed_seconds > 2.0 {
+        if !self.background && elapsed - self.report.elapsed_seconds > 2.0 {
             return Err("automation frame missed its two second deadline".into());
         }
         self.report.elapsed_seconds = elapsed;
@@ -472,6 +473,7 @@ impl Driver {
         tracing::info!(scenario = name, "Automation started");
         self.launch_error = None;
         Ok(self.run.insert(Run {
+            background: false,
             report: Report {
                 version: 2,
                 scenario: name.into(),
@@ -669,7 +671,7 @@ impl Driver {
         if matches!(step.action, Action::Ready) && !run.map_ready(value.as_deref(), elapsed)? {
             return Ok(());
         }
-        if !waiting && elapsed - run.due > 2.0 {
+        if !run.background && !waiting && elapsed - run.due > 2.0 {
             return Err(format!("action missed its deadline: {}", step.target));
         }
         if !run.pointer_ready(&step.action, rect, elapsed) {
@@ -687,7 +689,13 @@ impl Driver {
             }
         }
         let before = input.events.len();
-        let complete = step.input(input, &mut self.held, start, frame, rect, value.as_deref())?;
+        let mut complete =
+            step.input(input, &mut self.held, start, frame, rect, value.as_deref())?;
+        if run.background && matches!(step.action, Action::Click) && frame == 0 {
+            // Background timers can leave more than egui's click duration between frames.
+            // Deliver press and release together so an ordinary click remains a click.
+            complete = step.input(input, &mut self.held, start, 1, rect, value.as_deref())?;
+        }
         run.report.input_events += input.events.len() - before;
         let pointer_position = last_pointer_position(&input.events[before..]);
         if frame == 0 {
@@ -1000,21 +1008,32 @@ pub fn show_status(context: &Context) {
     let Some((state, phase, completed, total, failure, attempt)) = status else {
         return;
     };
-    if matches!(state.as_str(), "running" | "paused")
-        && let Some(attempt) = attempt
-    {
+    let running = matches!(state.as_str(), "running" | "paused");
+    if running && let Some(attempt) = attempt {
         attempt.highlight(context);
     }
+    let id = egui::Id::new("automation-status");
+    let hovered = context.pointer_hover_pos().is_some_and(|pointer| {
+        context.memory(|memory| {
+            memory
+                .area_rect(id)
+                .is_some_and(|rect| rect.contains(pointer))
+        })
+    });
+    let opacity = if hovered { 0.15 } else { 1.0 };
     let cancel = egui::Window::new("Automation")
-        .id(egui::Id::new("automation-status"))
+        .id(id)
         .title_bar(false)
         .movable(false)
         .resizable(false)
         .collapsible(false)
+        .interactable(running)
+        .frame(egui::Frame::window(&context.global_style()).multiply_with_opacity(opacity))
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::RIGHT_TOP, [-12.0, 48.0])
         .default_width(240.0)
         .show(context, |ui| {
+            ui.multiply_opacity(opacity);
             ui.set_max_width(240.0);
             status_view(ui, &state, &phase, completed, total, failure.as_deref())
         })

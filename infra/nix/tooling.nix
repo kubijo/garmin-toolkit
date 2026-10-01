@@ -60,6 +60,24 @@ let
     inherit (pkgs) nodejs;
     lint = {
       grit.profiles = {
+        extractable-messages = {
+          patterns = ../grit/extractable-messages;
+          paths = [
+            "apps"
+            "crates"
+          ];
+        };
+        presentation-inputs = {
+          patterns = ../grit/presentation-inputs;
+          paths = [ "crates/garmin-ui/src" ];
+        };
+        map-client-errors = {
+          patterns = ../grit/map-client-errors;
+          paths = [
+            "apps/garmin-desktop/src/view"
+            "apps/garmin-hass/web/src"
+          ];
+        };
         postcard-compatible-models = {
           patterns = ../grit/postcard-compatible-models;
           paths = [ "crates/garmin-model" ];

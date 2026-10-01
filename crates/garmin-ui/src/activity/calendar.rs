@@ -39,9 +39,10 @@ impl Calendar {
         intl: &Intl,
         activities: &[Presentation],
         selected: Option<usize>,
+        today: Date,
     ) -> Option<Action> {
         self.sync(activities, selected);
-        let anchor = self.month.unwrap_or_else(|| jiff::Zoned::now().date());
+        let anchor = self.month.unwrap_or(today);
         let locale = intl.dates().locale();
         let grid = self
             .grid

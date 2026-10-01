@@ -2602,6 +2602,7 @@ dependencies = [
  "garmin-progress",
  "garmin-service-api",
  "garmin-ui",
+ "jiff",
  "nerd_font",
  "num-traits",
  "parley_ratatui",

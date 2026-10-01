@@ -18,18 +18,18 @@ use garmin_device::{
     mtp_usb_reset_known_ineffective, open_mass_storage, open_mtp, reset_mtp_transport,
 };
 use garmin_i18n::Language;
-use garmin_map_service::{ClientIdentity, OmtClient};
+use garmin_map_service::OmtClient;
 use garmin_model::map::{MapCatalog, MapComponent, MapVersionStatus};
 use garmin_progress::ProgressReporter;
 use garmin_services::maps::{
-    GarminDownloadAuthorizer, PhysicalTarget, RecoveryExecution, SimulatedTarget, UpdateExecution,
-    UpdateOutcome, UpdateTarget, execute_update_plan, recover_update,
+    GarminDownloadAuthorizer, PhysicalTarget, RecoveryExecution, RemovalPlanReport,
+    SimulatedTarget, UpdateExecution, UpdateOutcome, UpdateTarget, execute_removal,
+    prepare_removal, recover_update,
 };
 use garmin_simulator::require_mock_device_root;
 use garmin_update::{
-    BackupPolicy, DeviceTransactionKind, DeviceTransactionStore, RecoveryOutcome,
-    RemovalApplyReport, RemovalPlan, UpdatePlan, execute_removal, recover_mass_storage,
-    recover_removal,
+    BackupPolicy, RecoveryOutcome, RemovalApplyReport, RemovalPlan, UpdatePlan,
+    recover_mass_storage, recover_removal,
 };
 use indoc::{formatdoc, indoc};
 use pending_recovery::{PendingRecovery, PendingRecoveryKind, PendingRecoveryStore};
@@ -505,9 +505,7 @@ fn resolve_language(choice: LanguageChoice) -> Language {
 }
 
 fn default_session_capture_path() -> Result<PathBuf> {
-    let state = dirs::state_dir()
-        .or_else(dirs::data_local_dir)
-        .context("no user state directory is available for the automatic session capture")?;
+    let state = garmin_services::paths::host_state_directory()?;
     let started = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
@@ -563,23 +561,16 @@ fn cancellation_step(error: &anyhow::Error) -> Option<&'static str> {
     ) {
         return Some("device backup");
     }
-    if matches!(
-        error.downcast_ref::<garmin_update::RemovalExecutionError>(),
-        Some(garmin_update::RemovalExecutionError::Cancelled)
-    ) {
+    if error
+        .downcast_ref::<garmin_update::RemovalExecutionError>()
+        .is_some_and(garmin_update::RemovalExecutionError::is_cancelled)
+    {
         return Some("component removal");
     }
-    if matches!(
-        error.downcast_ref::<garmin_update::RemovalExecutionError>(),
-        Some(garmin_update::RemovalExecutionError::Device(source))
-            if source.is_cancelled()
-    ) {
-        return Some("component removal");
-    }
-    if matches!(
-        error.downcast_ref::<garmin_update::MountedInstallError>(),
-        Some(garmin_update::MountedInstallError::Cancelled)
-    ) {
+    if error
+        .downcast_ref::<garmin_update::MountedInstallError>()
+        .is_some_and(garmin_update::MountedInstallError::is_cancelled)
+    {
         return Some("device update");
     }
     if matches!(
@@ -638,7 +629,7 @@ async fn run_cli(cli: Cli, capture: Option<SessionCapture>) -> Result<()> {
                 cache_override: None,
                 capture,
             };
-            updates(command, runtime, None).await
+            Box::pin(updates(command, runtime, None)).await
         }
         Some(Command::Benchmark { command }) => {
             Box::pin(benchmark(
@@ -650,16 +641,13 @@ async fn run_cli(cli: Cli, capture: Option<SessionCapture>) -> Result<()> {
             .await
         }
         Some(Command::Doctor) => doctor(cli.json).await,
-        Some(Command::Mock { command }) => mock_command(command, cli.json, capture).await,
+        Some(Command::Mock { command }) => Box::pin(mock_command(command, cli.json, capture)).await,
     }
 }
 
 fn initialize_tracing(capture: Option<&SessionCapture>, terminal_ui: bool) -> Result<()> {
     use tracing_subscriber::prelude::*;
-    let directory = dirs::state_dir()
-        .or_else(dirs::data_local_dir)
-        .context("application log directory unavailable")?
-        .join("garmin-toolkit/cli/logs");
+    let directory = garmin_services::paths::host_state_directory()?.join("garmin-toolkit/cli/logs");
     let logs = garmin_logging::Store::open(directory, "cli")?;
     logs.install_global();
     let filter = if capture.is_some() {
@@ -739,6 +727,12 @@ enum MapService<'a> {
 }
 
 impl<'a> MapService<'a> {
+    fn shared(self) -> garmin_services::maps::CatalogSource {
+        match self {
+            Self::Garmin => garmin_services::maps::CatalogSource::Garmin,
+            Self::Loopback(base) => garmin_services::maps::CatalogSource::Loopback(base.clone()),
+        }
+    }
     fn from_mock_base(base: Option<&'a url::Url>) -> Self {
         base.map_or(Self::Garmin, Self::Loopback)
     }
@@ -774,12 +768,6 @@ struct SelectedUpdateResult {
 struct SelectedUpdatePlan {
     plan: UpdatePlan,
     components: Vec<tui::SelectedMapAction>,
-}
-
-#[derive(Serialize)]
-struct RemovalPlanReport {
-    service_plan: RemovalPlan,
-    execution_plan: garmin_update::RemovalExecutionPlan,
 }
 
 enum UpdateCommandOutput {
@@ -967,80 +955,55 @@ async fn offer_pending_recovery(
     device: &dyn garmin_device::storage::DeviceWrite,
     session: &mut tui::Session,
 ) -> Result<()> {
-    let device_store = DeviceTransactionStore::open(device).await?;
-    let device_digest = manifest.identity_digest();
-    let transaction = device_store.active(&device_digest).await?;
     let receipt_store = PendingRecoveryStore::application()?;
-    let active_identity = transaction.as_ref().map(|transaction| {
-        (
-            pending_recovery_kind(transaction.kind()),
-            transaction.plan_digest(),
-        )
-    });
-    let recovery = receipt_store.for_selected_device(&device_digest, active_identity)?;
-    let (kind, plan_digest, actions) = match (transaction.as_ref(), recovery.as_ref()) {
-        (Some(transaction), _) => (
-            pending_recovery_kind(transaction.kind()),
-            transaction.plan_digest(),
-            tui::PendingRecoveryActions::RecoverOrClear,
-        ),
-        (None, Some(recovery)) if recovery.is_prepared()? => (
-            recovery.kind,
-            recovery.plan_digest.as_str(),
-            tui::PendingRecoveryActions::RecoverOnly,
-        ),
-        (None, Some(recovery)) => (
-            recovery.kind,
-            recovery.plan_digest.as_str(),
-            tui::PendingRecoveryActions::DiscardOnly,
-        ),
-        (None, None) => return Ok(()),
+    let Some(pending) = garmin_services::maps::recovery::PendingState::inspect(
+        device,
+        &manifest.identity_digest(),
+        &receipt_store,
+    )
+    .await?
+    else {
+        return Ok(());
     };
-    let operation = match kind {
+    let actions = if pending.transaction.is_some() {
+        tui::PendingRecoveryActions::RecoverOrClear
+    } else if pending.prepared {
+        tui::PendingRecoveryActions::RecoverOnly
+    } else {
+        tui::PendingRecoveryActions::DiscardOnly
+    };
+    let operation = match pending.kind {
         PendingRecoveryKind::Update => tui::RecoveryOperation::Update,
         PendingRecoveryKind::Removal => tui::RecoveryOperation::Removal,
     };
     let body = tui::pending_recovery_confirmation_body(
         update_confirmation_device(manifest),
         operation,
-        plan_digest,
-        recovery
+        &pending.plan,
+        pending
+            .receipt
             .as_ref()
             .map(|recovery| recovery.transaction.display().to_string()),
         actions,
     );
     match session.pending_recovery(body, actions)? {
         tui::PendingRecoveryDecision::Recover => {
-            let recovery = recovery
+            let recovery = pending
+                .receipt
+                .as_ref()
                 .context("this host has no retained payload for the device's active transaction")?;
-            Box::pin(run_detected_recovery(manifest, session, &recovery)).await?;
-            clear_recovery_notice(&receipt_store, &recovery);
+            Box::pin(run_detected_recovery(manifest, session, recovery)).await?;
+            receipt_store.clear_completed(recovery);
         }
         tui::PendingRecoveryDecision::ClearState => {
-            let transaction = transaction
-                .as_ref()
-                .context("host-only recovery receipts cannot clear device state")?;
-            device_store.prove_and_clear(transaction).await?;
-            if let Some(recovery) = recovery {
-                receipt_store.clear(&recovery)?;
-            }
+            pending.prove_and_clear(device, &receipt_store).await?;
         }
-        tui::PendingRecoveryDecision::Discard => {
-            let recovery = recovery.context("no interrupted preparation is retained")?;
-            receipt_store.discard_unprepared(&recovery)?;
-        }
+        tui::PendingRecoveryDecision::Discard => pending.discard(&receipt_store)?,
         tui::PendingRecoveryDecision::Cancel => {
             return Err(tui::Cancelled::new("pending recovery decision").into());
         }
     }
     Ok(())
-}
-
-const fn pending_recovery_kind(kind: DeviceTransactionKind) -> PendingRecoveryKind {
-    match kind {
-        DeviceTransactionKind::Update => PendingRecoveryKind::Update,
-        DeviceTransactionKind::Removal => PendingRecoveryKind::Removal,
-    }
 }
 
 fn clear_recovery_notice(store: &PendingRecoveryStore, recovery: &PendingRecovery) {
@@ -2627,22 +2590,7 @@ async fn build_removal_plan(
     let plan =
         RemovalPlan::from_response_selection(response, manifest.identity_digest(), selected)?;
     let inventory = inventory_target(target, &plan.paths_to_inventory()).await?;
-    let execution = plan.bind_inventory(&inventory)?;
-    if let Some(capture) = &runtime.capture {
-        capture
-            .write_json(Path::new("removal-plan.json"), &plan)
-            .await?;
-        capture
-            .write_json(Path::new("device-inventory.json"), &inventory)
-            .await?;
-        capture
-            .write_json(Path::new("removal-execution-plan.json"), &execution)
-            .await?;
-    }
-    Ok(RemovalPlanReport {
-        service_plan: plan,
-        execution_plan: execution,
-    })
+    prepare_removal(plan, &inventory, runtime.capture.as_ref()).await
 }
 
 async fn run_removal(
@@ -2729,34 +2677,29 @@ async fn execute_removal_report(
         bail!("the selected device changed after the removal plan was confirmed");
     }
     let pending_store = PendingRecoveryStore::application()?;
-    let pending = pending_store.register(
-        PendingRecoveryKind::Removal,
-        capture.root(),
-        &report.execution_plan.device_digest,
-        &report.execution_plan.digest,
-    )?;
-    let result = if let Some(session) = session {
+    if let Some(session) = session {
         let (progress, receiver) = ProgressReporter::channel();
         let cancellation = progress.cancellation_token();
-        let progress = captured_progress(capture.clone(), &progress);
-        let task = async {
-            Ok::<_, anyhow::Error>(
-                execute_removal(&report.execution_plan, &capture, &progress, &adapter).await?,
-            )
-        };
+        let task = execute_removal(
+            &report.execution_plan,
+            &capture,
+            &progress,
+            &adapter,
+            &pending_store,
+        );
         session
             .run_removal_progress(receiver, task, cancellation)
-            .await?
+            .await
     } else {
-        let downstream = ProgressReporter::default();
-        let progress = captured_progress(capture.clone(), &downstream);
-        execute_removal(&report.execution_plan, &capture, &progress, &adapter).await?
-    };
-    capture
-        .write_json(Path::new("removal-report.json"), &result)
-        .await?;
-    clear_recovery_notice(&pending_store, &pending);
-    Ok(result)
+        execute_removal(
+            &report.execution_plan,
+            &capture,
+            &ProgressReporter::default(),
+            &adapter,
+            &pending_store,
+        )
+        .await
+    }
 }
 
 fn mounted_removal_target(target: &TargetArgs) -> Result<&str> {
@@ -2943,18 +2886,11 @@ async fn execute_selected_update(
     capture: SessionCapture,
     context: SelectedUpdateContext<'_>,
 ) -> Result<UpdateOutcome> {
-    let pending = if request.device.modifies_device()
+    let receipts = if request.device.modifies_device()
         && request.device.fixture_root().is_none()
         && context.manifest.summary.transport == TransportKind::MountedMtp
     {
-        let store = PendingRecoveryStore::application()?;
-        let recovery = store.register(
-            PendingRecoveryKind::Update,
-            capture.root(),
-            &plan.device_digest,
-            &plan.digest,
-        )?;
-        Some((store, recovery))
+        Some(PendingRecoveryStore::application()?)
     } else {
         None
     };
@@ -2964,6 +2900,7 @@ async fn execute_selected_update(
         ..
     } = request;
     let mut execution = UpdateExecution {
+        prepared: None,
         client: context.client,
         manifest: context.manifest,
         plan,
@@ -2974,12 +2911,12 @@ async fn execute_selected_update(
         capture,
         device,
     };
-    let result = if let Some(session) = context.session {
+    if let Some(session) = context.session {
         let (screen_progress, receiver) = ProgressReporter::channel();
         let cancellation = screen_progress.cancellation_token();
         execution.progress = screen_progress;
         let backup_policy = execution.plan.backup_policy;
-        let task = execute_update_plan(execution);
+        let task = garmin_services::maps::execute_registered_update(execution, receipts.as_ref());
         Box::pin(session.run_update_progress(receiver, task, cancellation, backup_policy)).await
     } else {
         eprintln!(
@@ -2989,24 +2926,8 @@ async fn execute_selected_update(
         if !execution.plan.identifiers.is_empty() {
             eprintln!("Obtaining device-bound map authorization data…");
         }
-        execute_update_plan(execution).await
-    };
-    if let Some((store, recovery)) = pending {
-        if result.is_ok() {
-            clear_recovery_notice(&store, &recovery);
-        } else {
-            match recovery.is_prepared() {
-                Ok(false) => clear_recovery_notice(&store, &recovery),
-                Ok(true) => {}
-                Err(error) => tracing::warn!(
-                    %error,
-                    capture = %recovery.transaction.display(),
-                    "pending update state could not be inspected"
-                ),
-            }
-        }
+        garmin_services::maps::execute_registered_update(execution, receipts.as_ref()).await
     }
-    result
 }
 
 fn print_apply_report(
@@ -3596,13 +3517,7 @@ fn interactive_confirmation_available(json: bool) -> bool {
 }
 
 fn omt_client(service: MapService<'_>) -> Result<OmtClient> {
-    let identity = ClientIdentity::default();
-    match service {
-        MapService::Garmin => OmtClient::anonymous(&identity).map_err(Into::into),
-        MapService::Loopback(base) => {
-            OmtClient::local_mock(&identity, base.clone()).map_err(Into::into)
-        }
-    }
+    service.shared().client()
 }
 
 async fn query_device_updates(
@@ -3610,22 +3525,7 @@ async fn query_device_updates(
     service: MapService<'_>,
     capture: Option<SessionCapture>,
 ) -> Result<(OmtClient, MapCatalog)> {
-    if let Some(capture) = &capture {
-        capture
-            .write_bytes(
-                Path::new("device/GarminDevice.xml"),
-                manifest.raw_xml().as_bytes(),
-            )
-            .await?;
-    }
-    let client = omt_client(service)?.with_capture(capture);
-    let response = client
-        .check_maps(
-            manifest.raw_xml(),
-            manifest.capabilities().installed_map_files(),
-        )
-        .await?;
-    Ok((client, response))
+    service.shared().query(manifest, capture).await
 }
 
 async fn query_device_updates_with_feedback(
@@ -3647,19 +3547,7 @@ fn build_update_plan(
     selected: Vec<usize>,
     service: MapService<'_>,
 ) -> Result<UpdatePlan> {
-    match service {
-        MapService::Loopback(base) => Ok(UpdatePlan::from_mock_response_selection(
-            response,
-            device_digest,
-            selected,
-            base,
-        )?),
-        MapService::Garmin => Ok(UpdatePlan::from_response_selection(
-            response,
-            device_digest,
-            selected,
-        )?),
-    }
+    service.shared().plan(response, device_digest, selected)
 }
 
 fn build_selected_update_plan(
@@ -3793,12 +3681,14 @@ async fn map_choices_with_cache(
     if choices.is_empty() {
         bail!("Garmin returned no map components for this device");
     }
-    for (index, choice) in choices.iter_mut().enumerate() {
-        let plan = build_update_plan(response, manifest.identity_digest(), vec![index], service)?;
-        let cached = garmin_update::inspect_artifact_cache(&plan.downloads, cache).await?;
+    let components = service
+        .shared()
+        .components(response, &manifest.identity_digest(), cache)
+        .await?;
+    for (choice, cached) in choices.iter_mut().zip(components) {
         choice.cache = (cached.total_files > 0).then_some(tui::MapCacheAvailability {
-            cached_files: cached.cached_files,
-            total_files: cached.total_files,
+            cached_files: usize::try_from(cached.cached_files)?,
+            total_files: usize::try_from(cached.total_files)?,
         });
     }
     Ok(choices)
@@ -4424,10 +4314,10 @@ fn format_rate(bytes_per_second: f64) -> String {
 mod tests {
     use super::{
         ApplyArgs, BackupChoice, Cli, ColorChoice, Command, LanguageChoice, MapSelectionArgs,
-        MockCommand, UpdateCommand, UpdatePlanArgs, color_enabled, device_identification,
-        format_bytes, map_choices, mock_command, mounted_install_failure_presentation,
-        parse_byte_size, resolve_cache_dir, resolve_language, select_maps, selected_map_actions,
-        should_prompt, tui, write_json,
+        MockCommand, UpdateCommand, UpdatePlanArgs, cancellation_step, color_enabled,
+        device_identification, format_bytes, map_choices, mock_command,
+        mounted_install_failure_presentation, parse_byte_size, resolve_cache_dir, resolve_language,
+        select_maps, selected_map_actions, should_prompt, tui, write_json,
     };
     use clap::Parser;
     use garmin_device::{TransportKind, parse_manifest};
@@ -4438,9 +4328,31 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let capture =
             garmin_capture::SessionCapture::create(&temporary.path().join("capture")).unwrap();
-        mock_command(MockCommand::Test, true, Some(capture))
+        Box::pin(mock_command(MockCommand::Test, true, Some(capture)))
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn verified_rollback_preserves_cancellation_classification() {
+        use garmin_update::{MountedInstallError, RemovalExecutionError};
+        let update = MountedInstallError::RolledBack(Box::new(MountedInstallError::Cancelled));
+        assert_eq!(cancellation_step(&update.into()), Some("device update"));
+        let removal = RemovalExecutionError::RolledBack(Box::new(RemovalExecutionError::Cancelled));
+        assert_eq!(
+            cancellation_step(&removal.into()),
+            Some("component removal")
+        );
+        let incomplete = MountedInstallError::Rollback {
+            operation: Box::new(MountedInstallError::Cancelled),
+            rollback: Box::new(MountedInstallError::RecoveryUnavailable),
+        };
+        assert_eq!(cancellation_step(&incomplete.into()), None);
+        let incomplete = RemovalExecutionError::Rollback {
+            operation: "cancelled".to_owned(),
+            rollback: "disconnected".to_owned(),
+        };
+        assert_eq!(cancellation_step(&incomplete.into()), None);
     }
 
     #[test]

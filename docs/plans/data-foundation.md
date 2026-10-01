@@ -1,7 +1,7 @@
 # Portable data foundation
 
-Complete export contracts against publishable fixtures. Snapshot coverage includes native file save/restore, HASS server
-files, and a large native snapshot transferred through HASS and reopened locally.
+Complete export contracts against publishable fixtures. Portable snapshot contracts and interoperability coverage live
+in [storage architecture](../architecture/storage.md#portable-snapshots).
 
 ## Work
 
@@ -11,5 +11,4 @@ Keep users independent of host and connector identities; keep database handles b
 through services; persist no credentials; keep snapshots opaque and exports plaintext. These are compatibility
 constraints from [ADR 0023](../decisions/0023-deferred-security-hardening.md), not security claims.
 
-Delete this plan after clean-root restore is atomic, export semantics have compatibility tests, and lasting contracts
-live in code and architecture.
+Delete this plan after export semantics have compatibility tests and lasting contracts live in code and architecture.

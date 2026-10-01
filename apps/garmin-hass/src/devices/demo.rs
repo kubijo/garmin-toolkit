@@ -42,7 +42,7 @@ impl DemoSource {
         root: PathBuf,
         runtime: tokio::runtime::Handle,
     ) -> Result<Self, fixture::DeviceError> {
-        let device = Device::recreate(root)?;
+        let device = Device::open(root)?;
         let handle = runtime.clone();
         let inspections = attachments::Manager::with_inspector(device.clone(), move |candidate| {
             Ok(
@@ -66,6 +66,25 @@ impl DemoSource {
 }
 
 impl Source for DemoSource {
+    fn map_connector(
+        &mut self,
+        key: &str,
+    ) -> Result<std::sync::Arc<dyn garmin_services::maps::device::Connector>, String> {
+        if key != fixture::KEY
+            || self.device.presence().map_err(|error| error.to_string())?
+                != fixture::Presence::Present
+        {
+            return Err("the selected device is no longer connected".to_owned());
+        }
+        Ok(std::sync::Arc::new(
+            garmin_services::maps::device::DirectoryConnector {
+                root: self.device.root().to_owned(),
+                storage_id: fixture::STORAGE_ID.to_owned(),
+                storage_label: fixture::STORAGE_LABEL.to_owned(),
+            },
+        ))
+    }
+
     fn refresh_device(&mut self, key: &str) -> Result<(), String> {
         self.inspections.refresh(key)
     }

@@ -32,6 +32,12 @@ name = "button-states"
 scene = "button::States"
 
 [[shot]]
+name = "button-states-light"
+scene = "button::States"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
 name = "text-input-states"
 scene = "input::Text States"
 

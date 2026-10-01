@@ -4,6 +4,27 @@ use egui::Context;
 use kittest::{By, Queryable as _};
 use serde_json::{Value, json};
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunRequest {
+    argument: Value,
+    run_in_background: bool,
+}
+
+/// Keep eframe UI passes running for explicitly enabled background automation.
+/// Call from the host's raw-input hook, before eframe checks viewport visibility.
+pub fn prepare_background_input(context: &Context, input: &mut egui::RawInput) {
+    let Some(plugin) = context.plugin_opt::<Driver>() else {
+        return;
+    };
+    let driver = plugin.lock();
+    if driver.needs_background_frames()
+        && let Some(viewport) = input.viewports.get_mut(&driver.viewport)
+    {
+        viewport.occluded = Some(false);
+    }
+}
+
 /// Execute a control command on the UI thread.
 /// # Errors
 /// Disabled automation, malformed requests, or an active workload.
@@ -18,12 +39,46 @@ pub fn command(context: &Context, operation: &str, argument: &Value) -> Result<V
 }
 
 impl Driver {
+    fn needs_background_frames(&self) -> bool {
+        self.run.as_ref().is_some_and(|run| run.background)
+            && (self.running()
+                || self.resumed_at.is_some()
+                || self.release
+                || self.viewport_restore.is_some())
+    }
+
+    fn control_report(&self) -> Value {
+        let mut report = json!(self.report());
+        if let Some(fields) = report.as_object_mut() {
+            // The browser keeps delivering frames through input release and viewport
+            // restoration, then returns to its ordinary animation-frame scheduling.
+            fields.insert(
+                "needs_background_frames".into(),
+                self.needs_background_frames().into(),
+            );
+        }
+        report
+    }
+
     pub(crate) fn command(
         &mut self,
         context: &Context,
         operation: &str,
         argument: &Value,
     ) -> Result<Value, String> {
+        let launching = matches!(operation, "start" | "action" | "sequence");
+        let request: Option<RunRequest> =
+            if launching && argument.get("run_in_background").is_some() {
+                Some(
+                    serde_json::from_value(argument.clone())
+                        .map_err(|error| format!("invalid automation run options: {error}"))?,
+                )
+            } else {
+                None
+            };
+        let argument = request
+            .as_ref()
+            .map_or(argument, |request| &request.argument);
         let screen = context.input_for(self.viewport, egui::InputState::viewport_rect);
         let driver = self;
         let result = match operation {
@@ -35,11 +90,11 @@ impl Driver {
             "start" => driver
                 .start(argument.as_str().ok_or("scenario must be a string")?)
                 .map(|()| Value::Null),
-            "status" => Ok(json!(driver.report())),
+            "status" => Ok(driver.control_report()),
             "result" => Ok(if driver.running() || driver.paused_at.is_some() {
                 Value::Null
             } else {
-                json!(driver.report())
+                driver.control_report()
             }),
             "cancel" => {
                 driver.cancel(argument.as_str().unwrap_or("cancelled through control API"));
@@ -90,6 +145,11 @@ impl Driver {
             }
             _ => Err("unknown automation command".into()),
         };
+        if result.is_ok() && launching {
+            let run = driver.run.as_mut().expect("successfully started run");
+            run.background = request.is_some_and(|request| request.run_in_background);
+            run.report.performance_eligible &= !run.background;
+        }
         context.request_repaint_of(driver.viewport);
         result
     }

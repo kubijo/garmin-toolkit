@@ -12,6 +12,7 @@ use crossterm::terminal::{
 use garmin_device::{DeviceSummary, TransportKind};
 use garmin_i18n::{Intl, Language, Translations, format_message};
 use garmin_model::map::MapOperation;
+use garmin_progress::metrics::{stage_elapsed, stale_byte_progress};
 use garmin_progress::{
     CancellationToken, DeviceStateUpdate, OperationStage, ProgressReceiver, ProgressState,
     ProgressUnit,
@@ -52,8 +53,6 @@ use system::close_signal;
 
 type CrosstermTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 const DEVICE_RESCAN_INTERVAL: Duration = Duration::from_secs(2);
-const STALE_BYTE_PROGRESS_AFTER: Duration = Duration::from_secs(10);
-const MIN_RATE_SAMPLE_DURATION: Duration = Duration::from_millis(250);
 pub const LOADING_SPINNER_INTERVAL: Duration = Duration::from_millis(80);
 const LOADING_SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 pub const PIPELINE_PROBE_WRITE_WARNING: &str = indoc! {"
@@ -573,7 +572,7 @@ pub fn pending_recovery_confirmation_body(
     };
     ConfirmationBody {
         introduction: Text::raw(introduction),
-        fields: vec![
+        fields: Vec::from([
             ConfirmationField::new(
                 format_message!(&intl, default_message: "Device"),
                 device,
@@ -597,7 +596,7 @@ pub fn pending_recovery_confirmation_body(
                 ),
                 ConfirmationValueTone::Path,
             ),
-        ],
+        ]),
         note: Some(Text::raw(note)),
     }
 }
@@ -665,7 +664,7 @@ pub fn update_confirmation_body(
                 &intl,
                 default_message: "Review the device and selected changes."
             )),
-            fields: vec![
+            fields: Vec::from([
                 ConfirmationField::new(
                     format_message!(&intl, default_message: "Device"),
                     device,
@@ -701,7 +700,7 @@ pub fn update_confirmation_body(
                     capture,
                     ConfirmationValueTone::Path,
                 ),
-            ],
+            ]),
             note: Some(Text::raw(format_message!(
                 &intl,
                 default_message: "Map authorization — protected maps require device-bound authorization."
@@ -748,7 +747,7 @@ pub fn removal_confirmation_body(
             &intl,
             default_message: "Review the device and selected removals."
         )),
-        fields: vec![
+        fields: Vec::from([
             ConfirmationField::new(
                 format_message!(&intl, default_message: "Device"),
                 device,
@@ -779,7 +778,7 @@ pub fn removal_confirmation_body(
                 capture,
                 ConfirmationValueTone::Path,
             ),
-        ],
+        ]),
         note: Some(Text::raw(format_message!(
             &intl,
             default_message: "Backups are verified before deletion and retained for recovery."
@@ -804,11 +803,12 @@ pub fn verification_completion_message(
     let intl = selected_formatter();
     format_message!(
         &intl,
-        default_message: "Verified {bytes} across {files, plural, one {# selected file} other {# selected files}}; captured Garmin's authorization response.\n\nDevice unchanged. Evidence: {capture}",
+        default_message: "Verified {bytes} across {files, plural, one {# selected file} other {# selected files}}; captured Garmin's authorization response.{br}Device unchanged. Evidence: {capture}",
         values: {
             bytes: bytes.to_string(),
             files: i64::try_from(files).unwrap_or(i64::MAX),
             capture: capture.to_string(),
+            br: "\n\n",
         },
     )
 }
@@ -1840,13 +1840,13 @@ fn confirmation_dialog_config(title: &str, confirm_label: &str) -> DialogConfig 
         .border_color(Color::Yellow)
         .focused_border_color(Color::Yellow)
         .close_on_outside_click(false)
-        .buttons(vec![
+        .buttons(Vec::from([
             (
                 format_message!(&intl, default_message: "Cancel"),
                 ContainerAction::Close,
             ),
             (confirm_label.to_owned(), ContainerAction::Submit),
-        ])
+        ]))
 }
 
 fn pending_recovery_dialog_config(actions: PendingRecoveryActions) -> DialogConfig {
@@ -1854,7 +1854,7 @@ fn pending_recovery_dialog_config(actions: PendingRecoveryActions) -> DialogConf
     let (title, buttons) = if actions.allows_clear() {
         (
             format_message!(&intl, default_message: "Pending device recovery"),
-            vec![
+            Vec::from([
                 (
                     format_message!(&intl, default_message: "Clear state"),
                     ContainerAction::custom("clear-state"),
@@ -1863,23 +1863,23 @@ fn pending_recovery_dialog_config(actions: PendingRecoveryActions) -> DialogConf
                     format_message!(&intl, default_message: "Recover now"),
                     ContainerAction::Submit,
                 ),
-            ],
+            ]),
         )
     } else if actions.allows_discard() {
         (
             format_message!(&intl, default_message: "Interrupted preparation"),
-            vec![(
+            Vec::from([(
                 format_message!(&intl, default_message: "Discard attempt"),
                 ContainerAction::custom("discard"),
-            )],
+            )]),
         )
     } else {
         (
             format_message!(&intl, default_message: "Pending device recovery"),
-            vec![(
+            Vec::from([(
                 format_message!(&intl, default_message: "Recover now"),
                 ContainerAction::Submit,
-            )],
+            )]),
         )
     };
     DialogConfig::new(&title)
@@ -2090,7 +2090,7 @@ fn render_backup_option(
         )
     };
     frame.render_widget(
-        Paragraph::new(Text::from(vec![
+        Paragraph::new(Text::from(Vec::from([
             Line::from(Span::styled(
                 format_message!(
                     &intl,
@@ -2099,7 +2099,7 @@ fn render_backup_option(
                 label_style,
             )),
             Line::from(Span::styled(explanation, secondary_style)),
-        ]))
+        ])))
         .wrap(Wrap { trim: true }),
         columns[1],
     );
@@ -2757,7 +2757,7 @@ impl LoadingScreen {
         ])
         .split(inner);
         frame.render_widget(
-            Paragraph::new(Text::from(vec![
+            Paragraph::new(Text::from(Vec::from([
                 Line::from(vec![
                     Span::styled(
                         LOADING_SPINNER_FRAMES[self.frame_index % LOADING_SPINNER_FRAMES.len()],
@@ -2781,7 +2781,7 @@ impl LoadingScreen {
                             .add_modifier(Modifier::BOLD),
                     )
                 },
-            ]))
+            ])))
             .alignment(Alignment::Center),
             sections[1],
         );
@@ -2884,10 +2884,10 @@ fn notice_dialog_config(title: &str) -> DialogConfig {
         .border_color(Color::Green)
         .focused_border_color(Color::Green)
         .close_on_outside_click(false)
-        .buttons(vec![(
+        .buttons(Vec::from([(
             format_message!(&intl, default_message: "Close"),
             ContainerAction::Close,
-        )])
+        )]))
 }
 
 fn failure_dialog_config(title: &str) -> DialogConfig {
@@ -2900,10 +2900,10 @@ fn failure_dialog_config(title: &str) -> DialogConfig {
         .border_color(Color::Red)
         .focused_border_color(Color::Red)
         .close_on_outside_click(false)
-        .buttons(vec![(
+        .buttons(Vec::from([(
             format_message!(&intl, default_message: "Close"),
             ContainerAction::Close,
-        )])
+        )]))
 }
 
 fn draw_notice_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut NoticeBody) {
@@ -3021,10 +3021,10 @@ fn completion_dialog_config() -> DialogConfig {
         .border_color(Color::Green)
         .focused_border_color(Color::Green)
         .close_on_outside_click(false)
-        .buttons(vec![(
+        .buttons(Vec::from([(
             format_message!(&intl, default_message: "Close"),
             ContainerAction::Close,
-        )])
+        )]))
 }
 
 fn draw_completion_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut CompletionBody) {
@@ -3532,7 +3532,7 @@ fn abort_dialog_config() -> DialogConfig {
         .border_color(Color::Yellow)
         .focused_border_color(Color::Yellow)
         .close_on_outside_click(false)
-        .buttons(vec![
+        .buttons(Vec::from([
             (
                 format_message!(&intl, default_message: "Keep running"),
                 ContainerAction::Close,
@@ -3541,7 +3541,7 @@ fn abort_dialog_config() -> DialogConfig {
                 format_message!(&intl, default_message: "Request abort"),
                 ContainerAction::Submit,
             ),
-        ])
+        ]))
 }
 
 fn draw_abort_body(frame: &mut ratatui::Frame<'_>, area: Rect, body: &mut AbortBody) {
@@ -3874,104 +3874,25 @@ fn gauge_label_with_metrics(stage: OperationStage, view: &StageView, metrics: &[
     label
 }
 
-fn stage_elapsed(view: &StageView) -> Option<Duration> {
-    view.elapsed
-        .or_else(|| {
-            view.started_recorded_at
-                .and_then(|started| SystemTime::now().duration_since(started).ok())
-        })
-        .or_else(|| view.started_at.map(|started| started.elapsed()))
-}
-
-fn stale_byte_progress(view: &StageView) -> Option<Duration> {
-    if view.unit != ProgressUnit::Bytes || !view.is_active() {
-        return None;
-    }
-    view.updated_at
-        .map(|updated| updated.elapsed())
-        .filter(|idle| *idle >= STALE_BYTE_PROGRESS_AFTER)
-}
-
-fn byte_sample_elapsed(view: &StageView) -> Option<Duration> {
-    view.started_recorded_at
-        .zip(view.updated_recorded_at)
-        .and_then(|(started, updated)| updated.duration_since(started).ok())
-        .or_else(|| {
-            view.started_at
-                .zip(view.updated_at)
-                .map(|(started, updated)| updated.saturating_duration_since(started))
-        })
-        .or(view.elapsed)
-}
-
 fn progress_metrics(_stage: OperationStage, view: &StageView) -> Vec<String> {
     let intl = selected_formatter();
-    let Some(elapsed) = stage_elapsed(view) else {
+    let observation = garmin_progress::metrics::metrics(view);
+    let Some(elapsed) = observation.elapsed else {
         return Vec::new();
     };
-    if let Some(idle) = stale_byte_progress(view) {
-        return vec![
-            format_message!(
-                &intl,
-                default_message: "{duration} elapsed",
-                values: { duration: progress_elapsed(elapsed) },
-            ),
-            format_message!(
-                &intl,
-                default_message: "no progress for {duration}; device finalizing or stalled",
-                values: { duration: progress_elapsed(idle) },
-            ),
-        ];
+    if let Some(idle) = observation.idle {
+        return Vec::from([
+            format_message!(&intl, default_message: "{duration} elapsed", values: { duration: progress_elapsed(elapsed) }),
+            format_message!(&intl, default_message: "no progress for {duration}; device finalizing or stalled", values: { duration: progress_elapsed(idle) }),
+        ]);
     }
     let mut metrics = Vec::with_capacity(3);
-    let bytes_per_second = if let Some(sample_elapsed) = byte_sample_elapsed(view)
-        && view.unit == ProgressUnit::Bytes
-        && view.completed > 0
-        && sample_elapsed >= MIN_RATE_SAMPLE_DURATION
-    {
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "an approximate transfer rate is intentionally represented as f64"
-        )]
-        let rate = view.completed as f64 / sample_elapsed.as_secs_f64();
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "the non-negative rounded rate is saturated for display as bytes"
-        )]
-        let rounded = rate.max(0.0).round() as u64;
-        metrics.push(format_message!(
-            &intl,
-            default_message: "avg {rate}/s",
-            values: { rate: decimal_bytes(rounded) },
-        ));
-        Some(rate)
-    } else {
-        None
-    };
-    metrics.push(format_message!(
-        &intl,
-        default_message: "{duration} elapsed",
-        values: { duration: progress_elapsed(elapsed) },
-    ));
-    if view.is_active()
-        && let (Some(total), Some(rate)) = (view.total, bytes_per_second)
-        && total > view.completed
-        && rate.is_finite()
-        && rate > 0.0
-    {
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "an approximate transfer ETA is intentionally represented as f64"
-        )]
-        let seconds = (total - view.completed) as f64 / rate;
-        if let Ok(eta) = Duration::try_from_secs_f64(seconds.max(0.0)) {
-            metrics.push(format_message!(
-                &intl,
-                default_message: "ETA {duration}",
-                values: { duration: elapsed_clock(eta) },
-            ));
-        }
+    if let Some(rate) = observation.bytes_per_second {
+        metrics.push(format_message!(&intl, default_message: "avg {rate}/s", values: { rate: decimal_bytes(rate) }));
+    }
+    metrics.push(format_message!(&intl, default_message: "{duration} elapsed", values: { duration: progress_elapsed(elapsed) }));
+    if let Some(eta) = observation.remaining {
+        metrics.push(format_message!(&intl, default_message: "ETA {duration}", values: { duration: elapsed_clock(eta) }));
     }
     metrics
 }
@@ -4350,6 +4271,9 @@ mod tests {
         assert_eq!(localized_file_count(&intl, 2), "2 files");
         assert!(verification_completion_message("1 GB", 1, "capture").contains("1 selected file"));
         assert!(verification_completion_message("2 GB", 2, "capture").contains("2 selected files"));
+        assert!(
+            verification_completion_message("2 GB", 2, "capture").contains("\n\nDevice unchanged.")
+        );
     }
 
     #[test]

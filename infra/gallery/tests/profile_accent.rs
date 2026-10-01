@@ -33,6 +33,7 @@ fn arbitrary_accents_do_not_change_segment_fills_or_action_buttons() {
                             size: Size::Medium,
                             width: button::Width::Fit,
                             enabled: true,
+                            style: button::GroupStyle::Subtle,
                         },
                     );
                     button::Props {

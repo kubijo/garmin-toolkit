@@ -96,6 +96,10 @@ impl Popup {
 }
 
 impl eframe::App for Popup {
+    fn raw_input_hook(&mut self, context: &egui::Context, input: &mut egui::RawInput) {
+        garmin_ui::automation::prepare_background_input(context, input);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if self.first_frame {
             self.first_frame = false;

@@ -19,6 +19,37 @@ class Response(io.BytesIO):
         self.headers = Message()
 
 
+class BackgroundRunTests(unittest.TestCase):
+    def test_cli_sends_background_option_with_launch_and_never_configures_the_session(self):
+        client = Mock()
+        client.command.return_value = (200, {'value': None})
+        for operation, argument in (
+            ('start', 'activity-smoke'),
+            ('action', {'kind': 'click', 'target': 'profile.0'}),
+            ('sequence', [{'kind': 'click', 'target': 'profile.0'}]),
+        ):
+            client.reset_mock()
+            with (
+                patch(
+                    'sys.argv',
+                    [
+                        'hass_control.py',
+                        'command',
+                        operation,
+                        '--argument',
+                        json.dumps(argument),
+                        '--run-in-background',
+                    ],
+                ),
+                patch('hass_control.Client', return_value=client),
+                patch('sys.stdout', new_callable=io.StringIO),
+            ):
+                self.assertEqual(main(), 0)
+            client.command.assert_called_once_with(
+                operation, {'argument': argument, 'run_in_background': True}, request_id=None, window=None
+            )
+
+
 class CaptureTests(unittest.TestCase):
     def response(self, request_id='1', width=2):
         png = b'\x89PNG\r\n\x1a\n\0\0\0\rIHDR' + (2).to_bytes(4) + (3).to_bytes(4)
