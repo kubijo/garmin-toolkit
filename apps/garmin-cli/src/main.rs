@@ -841,6 +841,7 @@ impl GuidedDeviceAdapter {
             return Ok(Box::new(SimulatedTarget {
                 source: Box::new(DirectoryDevice::new(device.clone())),
                 fixture: Some(device.clone()),
+                write_bytes_per_second: None,
             }));
         }
         let Self::Production(commit) = self else {
@@ -868,6 +869,7 @@ impl GuidedDeviceAdapter {
             CommitPolicy::Skip => Box::new(SimulatedTarget {
                 source: device,
                 fixture: None,
+                write_bytes_per_second: None,
             }),
         })
     }
@@ -1983,6 +1985,7 @@ async fn mock_command(
                     device: Box::new(SimulatedTarget {
                         source: Box::new(DirectoryDevice::new(device.clone())),
                         fixture: Some(device.clone()),
+                        write_bytes_per_second: None,
                     }),
                     approval: UpdateApproval::ScriptedMock,
                 },

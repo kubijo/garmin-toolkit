@@ -28,7 +28,7 @@ pub use mode::DataError;
 const DATA_BASE: &str = "/data";
 const DATA_BASE_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_DATA_BASE";
 
-/// Startup-only browser controls, embedded in the uncached entry point.
+/// Startup browser controls and demo simulation options.
 #[derive(Clone, Copy, Debug)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -43,6 +43,8 @@ pub struct BrowserOptions {
     pub ui_automation: bool,
     /// Expose localhost-only automation routes on the HTTP listener (demo only).
     pub control_server: bool,
+    /// Limit retained-copy payload uploads in bytes per second (demo only).
+    pub simulation_write_bytes_per_second: Option<std::num::NonZeroU64>,
 }
 
 impl Default for BrowserOptions {
@@ -52,15 +54,20 @@ impl Default for BrowserOptions {
             map_render_worker: true,
             ui_automation: false,
             control_server: false,
+            simulation_write_bytes_per_second: None,
         }
     }
 }
 
 impl BrowserOptions {
     fn validate(self) -> std::io::Result<()> {
-        if (self.ui_automation || self.control_server) && !cfg!(feature = "demo") {
+        if (self.ui_automation
+            || self.control_server
+            || self.simulation_write_bytes_per_second.is_some())
+            && !cfg!(feature = "demo")
+        {
             return Err(std::io::Error::other(
-                "automation and control server require a demo build",
+                "automation, control server, and simulation pacing require a demo build",
             ));
         }
         Ok(())
@@ -100,7 +107,11 @@ pub async fn run(browser: BrowserOptions) -> Result<(), Error> {
         .try_init();
     tracing::info!("HASS starting");
     let deployment = prepare_deployment(&data_root).await?;
-    let devices = devices::Host::new(mode::device_source(&data_root)?, Arc::clone(&deployment));
+    let devices = devices::Host::with_simulation_write_rate(
+        mode::device_source(&data_root)?,
+        Arc::clone(&deployment),
+        browser.simulation_write_bytes_per_second,
+    );
     let map_tiles = garmin_map_tiles::Service::new(data_root.join("cache/activity-map"))?;
     devices.start();
     let result = server::serve(devices, map_tiles, browser).await;
@@ -191,5 +202,14 @@ mod tests {
 
             storage.close().await;
         });
+    }
+
+    #[test]
+    fn simulation_pacing_requires_a_demo_build() {
+        let paced = super::BrowserOptions {
+            simulation_write_bytes_per_second: std::num::NonZeroU64::new(1_000_000),
+            ..super::BrowserOptions::default()
+        };
+        assert_eq!(paced.validate().is_ok(), cfg!(feature = "demo"));
     }
 }

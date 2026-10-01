@@ -97,7 +97,16 @@ pub(super) struct Host {
 }
 
 impl Host {
-    pub(super) fn new(mut source: Box<dyn Source>, deployment: Arc<Deployment>) -> Arc<Self> {
+    #[cfg(test)]
+    pub(super) fn new(source: Box<dyn Source>, deployment: Arc<Deployment>) -> Arc<Self> {
+        Self::with_simulation_write_rate(source, deployment, None)
+    }
+
+    pub(super) fn with_simulation_write_rate(
+        mut source: Box<dyn Source>,
+        deployment: Arc<Deployment>,
+        bytes_per_second: Option<std::num::NonZeroU64>,
+    ) -> Arc<Self> {
         let (snapshots, _receiver) = rch::watch::channel(source.snapshot());
         let operations = SnapshotOperations::new(
             Arc::clone(&deployment),
@@ -105,9 +114,10 @@ impl Host {
         )
         .expect("built-in snapshot limits are valid");
         Arc::new(Self {
-            maps: Arc::new(garmin_services::maps::Operations::new(Arc::clone(
-                &deployment,
-            ))),
+            maps: Arc::new(
+                garmin_services::maps::Operations::new(Arc::clone(&deployment))
+                    .with_simulation_write_rate(bytes_per_second),
+            ),
             source: Arc::new(Mutex::new(source)),
             snapshots: Arc::new(snapshots),
             downloads: crate::downloads::Downloads::default(),

@@ -422,6 +422,7 @@ async fn simulated_disconnect_preserves_source_and_records_the_failure() -> Resu
     let target = SimulatedTarget {
         source,
         fixture: Some(fixture.device.clone()),
+        write_bytes_per_second: None,
     };
     let result = execute_update_plan(fixture.execution(Box::new(target))).await;
 
@@ -449,7 +450,11 @@ async fn simulated_disconnect_preserves_source_and_records_the_failure() -> Resu
 
 #[tokio::test]
 async fn cancelled_writes_clear_recovery_only_after_verified_rollback() -> Result<()> {
-    for simulated in [false, true] {
+    for (simulated, write_bytes_per_second) in [
+        (false, None),
+        (true, None),
+        (true, std::num::NonZeroU64::new(1_000_000)),
+    ] {
         let fixture = Fixture::new(MockAuthorization::Supported).await?;
         let receipts = PendingRecoveryStore::new(fixture.root.path().join("receipts"));
         let progress = cancelling_commit_progress();
@@ -458,6 +463,7 @@ async fn cancelled_writes_clear_recovery_only_after_verified_rollback() -> Resul
             Box::new(SimulatedTarget {
                 source: Box::new(device),
                 fixture: None,
+                write_bytes_per_second,
             })
         } else {
             Box::new(PhysicalTarget(Box::new(device)))
@@ -666,6 +672,7 @@ async fn simulated_cancellation_preserves_source_and_reports_virtual_state() -> 
     let target = SimulatedTarget {
         source: Box::new(DirectoryDevice::new(fixture.device.clone())),
         fixture: Some(fixture.device.clone()),
+        write_bytes_per_second: None,
     };
     let mut execution = fixture.execution(Box::new(target));
     execution.progress = progress;
