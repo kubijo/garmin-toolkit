@@ -87,8 +87,32 @@ Wayland redraw gate can prevent admission of even a `run_in_background` command;
 this native event-loop path. The proposed upstream renderer/event-loop patch was rejected and removed. Native acceptance
 uses a visible window.
 
-1. Complete live client reconnect during approved writes. Retain the host regression for lost approval replies and
-   browser-write exclusion.
+Live HASS reload during an approved retained-copy simulation passed on 2026-10-01. The browser unloaded 4 ms after the
+write phase began; host diagnostics confirmed its connection closed before the first payload write. All three payloads
+(30 MB) completed while disconnected and matched the planned hashes. Reopening map management showed exactly one new
+completed outcome. All six source-device files retained their original hashes, and the isolated transaction was cleared.
+Local evidence is in `.tmp/hass-reconnect-acceptance` (browser timing, host connection events, file hashes, verification
+report, and screenshots). The 209 ms write phase completed before the new browser connection arrived; this proves write
+survival and retained completion, not rendering a still-active write after reconnect. The demo host was left running
+throughout.
+
+HASS demo now accepts `--simulation-write-bytes-per-second 1000000` to pace retained-copy uploads. The host regression
+observes a partial write, drops the client, reconnects to the same active operation with increased progress, and reaches
+one completion without changing the source file. Stream tests cover gradual progress, payload integrity, and prompt
+cancellation during pacing; transaction coverage includes rollback of a paced upload.
+
+The paced live reload passed on 2026-10-01 using the rebuilt HASS demo. Captured transfer progress increased from 4.5 MB
+before reload to 18.4 MB after reconnect, then 25.3 MB while the reopened view still showed an active operation, and
+finally 30 MB. Host connection events confirm a 524 ms disconnect with writes continuing across it. All three payloads
+matched their planned sizes and hashes; all six source files were unchanged. The tested run produced exactly one new
+completed outcome and left no transaction debris. Screenshots, connection events, source hashes, and the verification
+report are retained in `.tmp/hass-paced-reconnect`; capture `ed924edc-15fe-43d4-bdae-d67506e5fcfb` contains the host
+events and simulated files. An earlier timing attempt also completed safely before the reopened view was captured. HASS
+remains running on the completed view. Validation passed: 882 workspace tests, 52 gallery tests, and the full project
+lint gate.
+
+1. Retain the host regressions for active reconnect, lost approval replies, and browser-write exclusion. Complete
+   packaged host restart/recovery and deployment acceptance in the HASS watch slice.
 2. Retain shared gallery coverage for keyboard interaction, translated layouts, and progress visibility.
 3. Perform separately authorized physical-device acceptance after synthetic and packaged-host checks pass.
 

@@ -36,6 +36,7 @@ zip.workspace = true
 gio.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 indoc.workspace = true
 mtp-rs = { workspace = true, features = ["virtual-device"] }
 tempfile.workspace = true

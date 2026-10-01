@@ -16,6 +16,11 @@ just hass::control command status
 just hass::control check
 ```
 
+To exercise reconnects during retained-copy map writes, add `--simulation-write-bytes-per-second 1000000` to the HASS
+demo command. This paces actual payload chunks at about 1 MB/s, preserving progress and cancellation. The default is
+unpaced; physical-device writes and reopened recovery evidence are unaffected. Production builds reject this demo
+option.
+
 The checker writes `.tmp/hass-control-runtime`; `--url URL` selects another running listener.
 
 | Endpoint                | Result                                  |

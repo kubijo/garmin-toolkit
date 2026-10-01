@@ -67,6 +67,14 @@ impl VirtualDevice {
     pub const fn device(&self) -> &MtpStorageDevice {
         &self.device
     }
+
+    /// Pace uploads for this registration only;
+    /// retained files are unchanged.
+    #[must_use]
+    pub fn with_upload_rate(mut self, bytes_per_second: Option<std::num::NonZeroU64>) -> Self {
+        self.device.set_upload_rate(bytes_per_second);
+        self
+    }
 }
 
 impl Drop for VirtualDevice {

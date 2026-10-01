@@ -550,6 +550,7 @@ async fn probe_mtp_file_with_device(
             path: None,
             complete_payload_stage: true,
         },
+        None,
     )
     .await;
     match outcome {

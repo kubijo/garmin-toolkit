@@ -26,6 +26,9 @@ struct Args {
     /// Enable localhost-only HTTP automation control (demo builds only).
     #[arg(long)]
     control_server: bool,
+    /// Pace retained-copy map writes in bytes per second (demo builds only).
+    #[arg(long)]
+    simulation_write_bytes_per_second: Option<std::num::NonZeroU64>,
 }
 
 #[tokio::main]
@@ -36,6 +39,7 @@ async fn main() -> Result<(), garmin_hass::Error> {
         map_render_worker: !args.no_map_render_worker,
         ui_automation: args.ui_automation,
         control_server: args.control_server,
+        simulation_write_bytes_per_second: args.simulation_write_bytes_per_second,
     })
     .await
 }
@@ -43,6 +47,30 @@ async fn main() -> Result<(), garmin_hass::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn simulation_pacing_is_opt_in_and_requires_a_positive_rate() {
+        assert!(
+            Args::try_parse_from(["garmin-hass"])
+                .unwrap()
+                .simulation_write_bytes_per_second
+                .is_none()
+        );
+        assert!(
+            Args::try_parse_from(["garmin-hass", "--simulation-write-bytes-per-second", "0"])
+                .is_err()
+        );
+        let args = Args::try_parse_from([
+            "garmin-hass",
+            "--simulation-write-bytes-per-second",
+            "1000000",
+        ])
+        .unwrap();
+        assert_eq!(
+            args.simulation_write_bytes_per_second.unwrap().get(),
+            1_000_000
+        );
+    }
 
     #[test]
     fn worker_map_is_enabled_unless_explicitly_disabled() {

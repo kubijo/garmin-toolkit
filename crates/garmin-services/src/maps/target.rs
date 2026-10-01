@@ -79,6 +79,7 @@ impl TargetSession for PhysicalTarget {
 pub struct SimulatedTarget {
     pub source: Box<dyn DeviceRead>,
     pub fixture: Option<PathBuf>,
+    pub write_bytes_per_second: Option<std::num::NonZeroU64>,
 }
 
 #[async_trait]
@@ -109,7 +110,8 @@ impl UpdateTarget for SimulatedTarget {
                 capture,
                 progress,
             )
-            .await?,
+            .await?
+            .with_upload_rate(self.write_bytes_per_second),
         ))
     }
 }

@@ -43,7 +43,7 @@ fn create_folder() -> DeviceBrowserRequest {
     }
 }
 
-async fn start_then_disconnect(host: &Host) -> (Request, State) {
+async fn start_then_disconnect(host: &Host, dry_run: bool) -> (Request, State) {
     let connection = host.with_control(None);
     let client = connection
         .maps(DEMO_DEVICE_KEY.into())
@@ -69,8 +69,13 @@ async fn start_then_disconnect(host: &Host) -> (Request, State) {
         .await
         .unwrap()
         .unwrap();
+    let configured = client
+        .request(change(&chosen, Command::DryRun(dry_run)))
+        .await
+        .unwrap()
+        .unwrap();
     client
-        .request(change(&chosen, Command::Review))
+        .request(change(&configured, Command::Review))
         .await
         .unwrap()
         .unwrap();
@@ -133,7 +138,7 @@ async fn reconnect_retries_approval_and_excludes_browser_writes() {
     let storage = crate::prepare_deployment(directory.path()).await.unwrap();
     let host = Host::new(demo_source(&directory), storage);
     let device = directory.path().join("device");
-    let (approval, running) = start_then_disconnect(&host).await;
+    let (approval, running) = start_then_disconnect(&host, false).await;
     assert_browser_writes_blocked(&host, &device).await;
 
     let connection = host.with_control(None);
@@ -171,5 +176,84 @@ async fn reconnect_retries_approval_and_excludes_browser_writes() {
     assert_eq!(
         std::fs::read(device.join("Garmin/AfterMaps/allowed.bin")).unwrap(),
         b"after completion"
+    );
+}
+
+async fn partial_write(watch: &mut remoc::rch::watch::Receiver<State>, after: u64) -> State {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let state = watch.borrow_and_update().unwrap().clone();
+            assert_eq!(
+                state.phase,
+                Phase::Running,
+                "write should still be active: {state:?}"
+            );
+            if written(&state) > after {
+                return state;
+            }
+            watch.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("paced upload must make progress")
+}
+
+fn written(state: &State) -> u64 {
+    state
+        .progress
+        .iter()
+        .filter(|progress| progress.stage == "Commit" && progress.bytes)
+        .map(|progress| progress.completed)
+        .max()
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn paced_simulation_continues_progress_after_reconnect() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = crate::prepare_deployment(directory.path()).await.unwrap();
+    let host = Host::with_simulation_write_rate(
+        demo_source(&directory),
+        storage,
+        std::num::NonZeroU64::new(11_000_000),
+    );
+    let (approval, running) = start_then_disconnect(&host, true).await;
+    let before_disconnect = {
+        let connection = host.with_control(None);
+        let client = connection
+            .maps(DEMO_DEVICE_KEY.into())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut watch = client.watch().await.unwrap();
+        partial_write(&mut watch, 0).await
+    };
+    // No client or progress watch exists while the host advances the upload.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let connection = host.with_control(None);
+    let client = connection
+        .maps(DEMO_DEVICE_KEY.into())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut watch = client.watch().await.unwrap();
+    let after_reconnect = partial_write(&mut watch, written(&before_disconnect)).await;
+    assert_eq!(after_reconnect.id, running.id);
+    assert!(after_reconnect.dry_run);
+    let completed = phase(&mut watch, Phase::Completed).await;
+    assert_eq!(completed.id, running.id);
+    assert_eq!(completed.history.len(), 1);
+    client.request(approval).await.unwrap().unwrap();
+    let state = client.request(Request::State).await.unwrap().unwrap();
+    assert_eq!(
+        state.history.len(),
+        1,
+        "approval replay must not create a second operation"
+    );
+    let device = directory.path().join("device/Garmin/Mock");
+    assert!(!device.join("europe.img").exists());
+    assert_eq!(
+        std::fs::read(device.join("europe-old.img")).unwrap(),
+        b"old mock content\n"
     );
 }

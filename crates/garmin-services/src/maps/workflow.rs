@@ -29,6 +29,7 @@ pub struct Settings {
     pub captures: PathBuf,
     pub receipts: PendingRecoveryStore,
     pub concurrency: usize,
+    pub simulation_write_bytes_per_second: Option<std::num::NonZeroU64>,
 }
 
 enum PreparedPlan {
@@ -342,6 +343,7 @@ impl Workflow {
                     Box::new(SimulatedTarget {
                         source: connection.device,
                         fixture: None,
+                        write_bytes_per_second: self.settings.simulation_write_bytes_per_second,
                     })
                 } else {
                     Box::new(PhysicalTarget(connection.device))

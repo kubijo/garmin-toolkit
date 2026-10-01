@@ -13,6 +13,7 @@ pub struct Operations {
     mutations: Arc<MutationLocks>,
     deployment: Option<Arc<crate::deployment::Deployment>>,
     simulator: tokio::sync::OnceCell<garmin_simulator::MockServer>,
+    simulation_write_bytes_per_second: Option<std::num::NonZeroU64>,
 }
 
 impl Operations {
@@ -22,6 +23,17 @@ impl Operations {
             deployment: Some(deployment),
             ..Self::default()
         }
+    }
+
+    /// Pace retained-copy uploads for acceptance tests.
+    /// Physical writes are unaffected.
+    #[must_use]
+    pub const fn with_simulation_write_rate(
+        mut self,
+        bytes_per_second: Option<std::num::NonZeroU64>,
+    ) -> Self {
+        self.simulation_write_bytes_per_second = bytes_per_second;
+        self
     }
 
     /// Compose a deployment's workflow with the host-selected device and service.
@@ -63,6 +75,7 @@ impl Operations {
                 captures: root.join("captures"),
                 receipts,
                 concurrency: 2,
+                simulation_write_bytes_per_second: self.simulation_write_bytes_per_second,
             },
         ))
     }

@@ -44,6 +44,7 @@ fn settings(root: &Path, server: &MockServer) -> Settings {
         captures: root.join("captures"),
         receipts: PendingRecoveryStore::new(root.join("receipts")),
         concurrency: 2,
+        simulation_write_bytes_per_second: None,
     }
 }
 
