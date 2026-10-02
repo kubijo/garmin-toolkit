@@ -711,6 +711,11 @@ impl Desktop {
                 self.page = Page::from_index(index, devices).unwrap_or(Page::Activities);
                 self.profile_menu_expanded = false;
             }
+            Some(shell::Action::NavigateAndCollapse(index)) => {
+                self.page = Page::from_index(index, devices).unwrap_or(Page::Activities);
+                self.navigation = shell::Navigation::Rail;
+                self.profile_menu_expanded = false;
+            }
             None => {}
         }
     }

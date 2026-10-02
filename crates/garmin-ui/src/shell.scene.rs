@@ -121,6 +121,25 @@ fn narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
 }
 
 #[scene]
+fn narrow_navigation_open(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_shell(
+        ctx,
+        ui,
+        globals,
+        SceneProps {
+            navigation: shell::Navigation::Expanded,
+            active: 3,
+            profile: true,
+            profile_open: false,
+            window_controls: false,
+            width: 320.0,
+            height: 720.0,
+        },
+        "narrow-navigation-open",
+    );
+}
+
+#[scene]
 fn profile_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     show_shell(
         ctx,
