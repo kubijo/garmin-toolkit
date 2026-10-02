@@ -24,6 +24,7 @@ const CONTENT_PADDING: f32 = 24.0;
 const PROFILE_MENU_WIDTH: f32 = 280.0;
 const PROFILE_CONTROL_GAP: f32 = 8.0;
 const COMPACT_HEADER_WIDTH: f32 = 600.0;
+const OVERLAY_NAV_WIDTH: f32 = 280.0;
 const NAV_GROUP_HEIGHT: f32 = 32.0;
 const WINDOW_ACTION_SIZE: f32 = HEADER_HEIGHT;
 const WINDOW_CONTROLS_WIDTH: f32 = WINDOW_ACTION_SIZE * 3.0;
@@ -128,6 +129,7 @@ pub enum WindowAction {
 pub enum Action {
     ToggleNavigation,
     Navigate(usize),
+    NavigateAndCollapse(usize),
     Profile(profile::Action),
     Window(WindowAction),
 }
@@ -275,8 +277,13 @@ fn show_with_padding<R>(
     );
     shell_ui.set_clip_rect(shell_clip);
     let ui = &mut shell_ui;
+    let overlay_navigation = !props.navigation_groups.is_empty()
+        && props.navigation == Navigation::Expanded
+        && root.width() < COMPACT_HEADER_WIDTH;
     let nav_width = if props.navigation_groups.is_empty() {
         0.0
+    } else if overlay_navigation {
+        OVERLAY_NAV_WIDTH.min((root.width() - RAIL_WIDTH).max(0.0))
     } else {
         props.navigation.width().min(root.width())
     };
@@ -287,15 +294,32 @@ fn show_with_padding<R>(
         egui::pos2(root.left() + nav_width, root.bottom()),
     );
     let content = Rect::from_min_max(
-        egui::pos2(navigation.right(), header.bottom()),
+        egui::pos2(
+            if overlay_navigation {
+                (root.left() + RAIL_WIDTH).min(root.right())
+            } else {
+                navigation.right()
+            },
+            header.bottom(),
+        ),
         root.right_bottom(),
     );
 
-    paint_chrome(ui, root, header, navigation, nav_width > 0.0);
+    let base_navigation = if overlay_navigation {
+        Rect::from_min_max(
+            navigation.min,
+            egui::pos2(content.left(), navigation.bottom()),
+        )
+    } else {
+        navigation
+    };
+    paint_chrome(ui, root, header, base_navigation, nav_width > 0.0);
 
     let selectors = header_selectors(ui, header, props);
     let mut action = header_contents(ui, header, selectors, props);
-    let nav_action = navigation_contents(ui, navigation, props);
+    let nav_action = (!overlay_navigation)
+        .then(|| navigation_contents(ui, navigation, props))
+        .flatten();
     if action.is_none() {
         action = nav_action;
     }
@@ -312,7 +336,12 @@ fn show_with_padding<R>(
     );
     let inner = page(&mut page_ui);
 
-    if nav_width > 0.0 {
+    if overlay_navigation {
+        let overlay_action = navigation_overlay(ui, root, navigation, props);
+        if overlay_action.is_some() {
+            action = overlay_action;
+        }
+    } else if nav_width > 0.0 {
         paint_navigation_divider(ui, navigation);
     }
     if let Some(profile_action) = profile_menu(ui, selectors.profile, shell_clip, props) {
@@ -320,6 +349,52 @@ fn show_with_padding<R>(
     }
     paint_window_border(ui, root);
     Output { action, inner }
+}
+
+fn navigation_overlay(ui: &Ui, root: Rect, navigation: Rect, props: &Props<'_>) -> Option<Action> {
+    let overlay = overlay_bounds(root);
+    let accent = crate::theme::profile_accent(ui);
+    egui::Area::new(ui.make_persistent_id("shell-navigation-overlay"))
+        .order(Order::Foreground)
+        .movable(false)
+        .fixed_pos(overlay.min)
+        .show(ui.ctx(), |area_ui| {
+            area_ui.set_min_size(overlay.size());
+            let mut overlay_ui = area_ui.new_child(
+                UiBuilder::new()
+                    .max_rect(overlay)
+                    .ui_stack_info(crate::theme::profile_accent_info(accent)),
+            );
+            overlay_ui.set_clip_rect(overlay.intersect(ui.clip_rect()));
+            let area_ui = &overlay_ui;
+            let outside = Rect::from_min_max(
+                egui::pos2(navigation.right(), overlay.top()),
+                overlay.right_bottom(),
+            );
+            let dismiss = area_ui.interact(
+                outside,
+                area_ui.make_persistent_id("shell-navigation-dismiss"),
+                Sense::click_and_drag(),
+            );
+            area_ui
+                .painter()
+                .rect_filled(outside, 0.0, egui::Color32::from_black_alpha(120));
+            area_ui.painter().rect_filled(
+                navigation,
+                0.0,
+                color32(crate::theme::palette(ui).surfaces().chrome()),
+            );
+            let action = navigation_contents(area_ui, navigation, props);
+            paint_navigation_divider(area_ui, navigation);
+            if let Some(Action::Navigate(index)) = action {
+                Some(Action::NavigateAndCollapse(index))
+            } else if dismiss.clicked() {
+                Some(Action::ToggleNavigation)
+            } else {
+                action
+            }
+        })
+        .inner
 }
 
 fn bounded_clip(root: Rect, caller_clip: Rect) -> Rect {
