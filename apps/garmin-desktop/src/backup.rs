@@ -9,14 +9,14 @@ use garmin_services::{
     deployment::Deployment,
     snapshots::{SnapshotOperations, SnapshotSession},
 };
-use garmin_ui::backup::{SelectedFile, State};
+use garmin_ui::backup::{RestoreSummary, SelectedFile, State};
 use std::{
     fs::File,
     io::{Read, Write},
     path::PathBuf,
     sync::{Arc, mpsc},
     thread::JoinHandle,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use uuid::Uuid;
@@ -315,9 +315,13 @@ impl Transfer<'_> {
         if current.state == SnapshotState::Cancelled {
             return Ok(State::Cancelled);
         }
+        let preview = current.preview.as_ref();
+        let database_bytes = preview.map(|preview| preview.database_bytes);
+        let created_at = preview.map(|preview| preview.created_at);
         let Some(Command::Approve(approval)) = self.commands.recv().await else {
             return Ok(State::Cancelled);
         };
+        let restore_started = Instant::now();
         current = status(
             self.execute(SnapshotRequest::Approve {
                 operation: current.operation,
@@ -327,7 +331,12 @@ impl Transfer<'_> {
         )?;
         current = self.wait(current, SnapshotState::Completed).await?;
         if current.state == SnapshotState::Completed {
-            Ok(State::Restored)
+            Ok(State::Restored(RestoreSummary {
+                elapsed: Some(restore_started.elapsed()),
+                archive_bytes: Some(metadata.len()),
+                database_bytes,
+                created_at,
+            }))
         } else {
             Ok(State::Cancelled)
         }

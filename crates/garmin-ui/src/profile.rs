@@ -120,7 +120,7 @@ pub fn create_dialog(ui: &mut Ui, intl: &Intl, state: &mut CreateState) -> Optio
             description: Some(&description),
             size: modal::Size::Medium,
             presentation: modal::Presentation::Modal,
-            cancel_label: &cancel,
+            cancel_label: Some(&cancel),
             backdrop_closes: Some(!state.submitting),
             primary: modal::Primary {
                 label: &create,
@@ -146,7 +146,9 @@ pub fn create_dialog(ui: &mut Ui, intl: &Intl, state: &mut CreateState) -> Optio
         },
     );
     crate::semantics::target(ui, &output.primary, "profile.create.submit");
-    crate::semantics::target(ui, &output.cancel, "profile.create.cancel");
+    if let Some(cancel) = &output.cancel {
+        crate::semantics::target(ui, cancel, "profile.create.cancel");
+    }
     match output.action {
         Some(modal::Action::Cancel) if !state.submitting => Some(CreateAction::Cancel),
         Some(modal::Action::Primary) => parsed.ok().map(CreateAction::Submit),
@@ -253,17 +255,20 @@ pub struct SelectorProps<'a> {
     pub profiles: &'a [ProfileProps<'a>],
     pub selected: Option<usize>,
     pub expanded: bool,
+    pub backup_enabled: bool,
 }
 
-/// Inputs for account actions below a separate trigger.
+/// Inputs for profile and application actions below a separate trigger.
 pub struct MenuProps<'a> {
     pub intl: &'a Intl,
+    pub backup_enabled: bool,
 }
 
 /// Inputs for the application-entry profile chooser.
 pub struct ChooserProps<'a> {
     pub intl: &'a Intl,
     pub profiles: &'a [ProfileProps<'a>],
+    pub owner_index: Option<usize>,
 }
 
 /// A profile selector interaction.
@@ -273,6 +278,7 @@ pub enum Action {
     Select(usize),
     Create,
     Settings,
+    Backup,
     Logout,
 }
 
@@ -341,6 +347,7 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
         props.intl,
         default_message: "Create a profile",
     );
+    let owner = format_message!(props.intl, default_message: "Owner");
     let available = ui.available_size_before_wrap();
     let content_height = chooser_content_height(props.profiles.len());
     let top_padding = if available.y.is_finite() {
@@ -370,7 +377,8 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
                 else {
                     let count = props.profiles.len();
                     for (index, profile) in props.profiles.iter().enumerate() {
-                        let response = chooser_profile_row(ui, profile);
+                        let badge = (props.owner_index == Some(index)).then_some(owner.as_str());
+                        let response = chooser_profile_row(ui, profile, badge);
                         crate::semantics::target(ui, &response, format!("profile.{index}"));
 
                         if response.clicked() {
@@ -402,18 +410,18 @@ fn chooser_content_height(profile_count: usize) -> f32 {
     32.0 + 32.0 + profiles_height + empty_height + 48.0
 }
 
-fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>) -> Response {
+fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>, badge: Option<&str>) -> Response {
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), CHOOSER_ROW_HEIGHT),
         Sense::click(),
     );
     let response = row_response(ui, response);
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            profile.display_name,
-        )
+        let label = badge.map_or_else(
+            || profile.display_name.to_owned(),
+            |badge| format!("{}, {badge}", profile.display_name),
+        );
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     let palette = crate::theme::palette(ui);
     let fill = if response.highlighted() {
@@ -448,6 +456,9 @@ fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>) -> Response {
     avatar(&mut child, profile, CHOOSER_AVATAR_SIZE);
     child
         .add(egui::Label::new(crate::typography::semibold(profile.display_name)).selectable(false));
+    if let Some(badge) = badge {
+        chooser_owner_badge(&mut child, badge);
+    }
     child.with_layout(Layout::right_to_left(Align::Center), |ui| {
         icons::Props {
             icon: icons::CARET_RIGHT,
@@ -458,6 +469,31 @@ fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>) -> Response {
     });
     paint_focus_ring(ui, &response);
     response
+}
+
+fn chooser_owner_badge(ui: &mut Ui, label: &str) {
+    let palette = crate::theme::palette(ui);
+    let color = color32(palette.content().text_secondary());
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        crate::typography::font(11.0, crate::typography::Weight::SemiBold),
+        color,
+    );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(galley.size().x + 12.0, 20.0), Sense::hover());
+    ui.painter().rect_filled(
+        rect,
+        3.0,
+        color32(palette.surfaces().layer(theme::Level::Two)),
+    );
+    ui.painter().rect_stroke(
+        rect,
+        3.0,
+        egui::Stroke::new(1.0, color32(palette.borders().subtle())),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, color);
 }
 
 fn chooser_create_row(ui: &mut Ui, label: &str) -> Response {
@@ -512,6 +548,7 @@ pub fn menu(ui: &mut Ui, props: &MenuProps<'_>) -> Option<Action> {
         props.intl,
         default_message: "Log out",
     );
+    let backup = format_message!(props.intl, default_message: "Backup and restore");
     let mut action = None;
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
@@ -526,6 +563,19 @@ pub fn menu(ui: &mut Ui, props: &MenuProps<'_>) -> Option<Action> {
             .clicked()
             {
                 action = Some(Action::Settings);
+            }
+            if props.backup_enabled {
+                let response = action_row(
+                    ui,
+                    &backup,
+                    icons::FOLDER_OPEN,
+                    header_selector::RowKind::Default,
+                    false,
+                );
+                crate::semantics::target(ui, &response, "profile.backup");
+                if response.clicked() {
+                    action = Some(Action::Backup);
+                }
             }
             let logout = action_row(
                 ui,

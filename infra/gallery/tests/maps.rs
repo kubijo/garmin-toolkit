@@ -119,6 +119,7 @@ fn map_disclosures_share_cursor_and_keyboard_expansion() {
             id: state.id,
             phase: Phase::Cancelled,
             message: "Original device files restored".into(),
+            recovered: false,
         });
         let outcome_id = format!("maps.outcome.{}", state.id);
         let mut installed = false;
@@ -303,6 +304,7 @@ fn approval_cancel_and_recovery_dispatch_only_the_displayed_choice() {
                 (Action::Recover, Command::Recover),
                 (Action::ClearRecovery, Command::ClearRecovery),
                 (Action::DiscardPreparation, Command::DiscardPreparation),
+                (Action::ReviewRecovery, Command::ReviewRecovery),
             ] {
                 let model = harness.state_mut();
                 model.state.phase = Phase::Recovery;
@@ -312,6 +314,7 @@ fn approval_cancel_and_recovery_dispatch_only_the_displayed_choice() {
                     removal: false,
                     simulated: false,
                     actions: vec![action],
+                    review: None,
                 });
                 model.command = None;
                 harness.run();
@@ -322,6 +325,42 @@ fn approval_cancel_and_recovery_dispatch_only_the_displayed_choice() {
                 harness.run();
                 assert_eq!(harness.state().command, Some(command));
             }
+            assert_assisted_approval(&mut harness);
         }
+    }
+}
+
+fn assert_assisted_approval(harness: &mut Harness<'_, Model>) {
+    let approval = harness.state().state.id;
+    let model = harness.state_mut();
+    model.state.actions = vec![Action::ApproveRecovery, Action::Back, Action::Refresh];
+    model.state.recovery.as_mut().expect("recovery").review =
+        Some(garmin_service_api::maps::RecoveryReview {
+            approval,
+            files: vec![garmin_service_api::maps::RecoveryFile {
+                storage: "Internal storage".into(),
+                path: "Garmin/Mock/europe-routing.img".into(),
+            }],
+        });
+    model.command = None;
+    harness.run();
+    assert!(harness.state().command.is_none());
+    assert!(
+        harness
+            .query(By::new().predicate(|node| node.author_id() == Some("maps.Recover")))
+            .is_none()
+    );
+    for (target, command) in [
+        ("maps.Back", Command::Back),
+        (
+            "maps.ApproveRecovery",
+            Command::ApproveRecovery { approval },
+        ),
+    ] {
+        harness
+            .get(By::new().predicate(|node| node.author_id() == Some(target)))
+            .click();
+        harness.run();
+        assert_eq!(harness.state().command, Some(command));
     }
 }

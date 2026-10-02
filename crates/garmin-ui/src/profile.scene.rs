@@ -49,6 +49,7 @@ fn header_buttons(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals)
                         profiles: &profiles,
                         selected: Some(index),
                         expanded: false,
+                        backup_enabled: true,
                     },
                     profile.display_name,
                 );
@@ -90,7 +91,14 @@ fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         _ => &profiles[..],
     };
     let intl = globals.intl();
-
+    let restored_file =
+        garmin_ui::backup::SelectedFile::RestoreSource("garmin-backup.tar.zst".to_owned());
+    let restored_state = garmin_ui::backup::State::Restored(garmin_ui::backup::RestoreSummary {
+        elapsed: Some(std::time::Duration::from_secs(18)),
+        archive_bytes: Some(1_200_000),
+        database_bytes: Some(8_000_000),
+        created_at: Some(1_790_640_000),
+    });
     stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(props.width);
         ui.set_height(props.height);
@@ -99,11 +107,11 @@ fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             &garmin_ui::backup::Props {
                 intl: &intl,
                 state: if restored {
-                    &garmin_ui::backup::State::Restored
+                    &restored_state
                 } else {
                     &garmin_ui::backup::State::Idle
                 },
-                file: None,
+                file: restored.then_some(&restored_file),
                 enabled: false,
                 server_files: true,
             },
@@ -113,6 +121,7 @@ fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             &profile::ChooserProps {
                 intl: &intl,
                 profiles,
+                owner_index: (props.dataset != 2).then_some(0),
             },
         );
     });

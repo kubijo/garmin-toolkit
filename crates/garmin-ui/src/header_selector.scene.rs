@@ -15,12 +15,13 @@ fn profile_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         avatar: None,
     }];
 
-    stage!(ctx, ui, (640, 160), |ui| {
+    stage!(ctx, ui, (640, 216), |ui| {
         let props = profile::SelectorProps {
             intl: &intl,
             profiles: &profiles,
             selected: Some(0),
             expanded,
+            backup_enabled: true,
         };
         let output = shell::show(
             ui,

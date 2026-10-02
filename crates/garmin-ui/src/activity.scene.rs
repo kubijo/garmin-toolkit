@@ -294,6 +294,7 @@ fn automation_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals
                 profiles: &profiles,
                 selected: Some(0),
                 expanded: false,
+                backup_enabled: false,
             },
             "Profile",
         );

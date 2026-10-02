@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -7,8 +7,8 @@ use std::{
 
 use camino::Utf8Path;
 use eframe::egui::{
-    ColorImage, Context, Id, Key, Modifiers, TextureHandle, TextureOptions, Ui, ViewportCommand,
-    load::SizedTexture,
+    ColorImage, Context, Id, Key, Modifiers, ScrollArea, TextureHandle, TextureOptions, Ui,
+    ViewportCommand, load::SizedTexture,
 };
 use garmin_color::{Color, swatch};
 use garmin_device::attachments as devices;
@@ -71,6 +71,7 @@ pub struct Desktop {
     toasts: notification::Toasts,
     devices: devices::Manager<device_backend::Platform>,
     device_toasts: HashMap<notification::ToastId, String>,
+    notify_on_inspection: HashSet<String>,
     worker: Worker,
     map_runtime: activity::map_runtime::MapRuntimeHandle,
     profiling: profiling::RuntimeMetricsRecorder,
@@ -140,6 +141,7 @@ impl Desktop {
             toasts: notification::Toasts::default(),
             devices: devices::Manager::with_inspector(device_platform, device_backend::inspect),
             device_toasts: HashMap::new(),
+            notify_on_inspection: HashSet::new(),
             worker,
             map_runtime,
             profiling,
@@ -203,6 +205,10 @@ impl Desktop {
             &profile::ChooserProps {
                 intl: &self.intl,
                 profiles: &profiles,
+                owner_index: self
+                    .profiles
+                    .iter()
+                    .position(|profile| profile.user.role() == garmin_model::identity::Role::Owner),
             },
         ) {
             Some(profile::Action::Select(index)) => {
@@ -211,7 +217,12 @@ impl Desktop {
             Some(profile::Action::Create) => {
                 self.create_profile = Some(profile::CreateState::default());
             }
-            Some(profile::Action::Toggle | profile::Action::Settings | profile::Action::Logout)
+            Some(
+                profile::Action::Toggle
+                | profile::Action::Settings
+                | profile::Action::Backup
+                | profile::Action::Logout,
+            )
             | None => {}
         }
     }
@@ -276,16 +287,24 @@ impl Desktop {
                 Page::Activities => {
                     PageOutput::Activities(activities_page.show(ui, activity_workspace))
                 }
-                Page::Backup => PageOutput::Backup(garmin_ui::backup::show(
-                    ui,
-                    &garmin_ui::backup::Props {
-                        server_files: false,
-                        intl,
-                        state: &self.backup.state,
-                        file: self.backup.file.as_ref(),
-                        enabled: !matches!(self.load, LoadState::Unavailable(_)),
-                    },
-                )),
+                Page::Backup => PageOutput::Backup(
+                    ScrollArea::vertical()
+                        .id_salt("backup-page")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            garmin_ui::backup::show(
+                                ui,
+                                &garmin_ui::backup::Props {
+                                    server_files: false,
+                                    intl,
+                                    state: &self.backup.state,
+                                    file: self.backup.file.as_ref(),
+                                    enabled: !matches!(self.load, LoadState::Unavailable(_)),
+                                },
+                            )
+                        })
+                        .inner,
+                ),
                 Page::ProfileSettings => {
                     PageOutput::Settings(profile_settings::show(ui, &settings_props))
                 }
@@ -353,6 +372,8 @@ impl Desktop {
             } => {
                 if let Err(reason) = self.devices.refresh(&key) {
                     self.notice = Some(Notice::error(reason));
+                } else {
+                    self.notify_on_inspection.insert(key);
                 }
             }
             PageOutput::Maps { command: None, .. }
@@ -660,6 +681,12 @@ impl Desktop {
                 self.page = Page::ProfileSettings;
                 self.profile_menu_expanded = false;
             }
+            Some(shell::Action::Profile(profile::Action::Backup)) => {
+                if self.backup_enabled() {
+                    self.page = Page::Backup;
+                }
+                self.profile_menu_expanded = false;
+            }
             Some(shell::Action::Profile(profile::Action::Logout)) => {
                 self.selected_profile = None;
                 self.page = Page::Activities;
@@ -681,8 +708,7 @@ impl Desktop {
             }
             Some(shell::Action::Window(shell::WindowAction::Close)) => self.request_quit(context),
             Some(shell::Action::Navigate(index)) => {
-                self.page = Page::from_index(index, devices, self.backup_enabled())
-                    .unwrap_or(Page::Activities);
+                self.page = Page::from_index(index, devices).unwrap_or(Page::Activities);
                 self.profile_menu_expanded = false;
             }
             None => {}
@@ -866,9 +892,11 @@ impl Desktop {
                             .detail(detail)
                             .action(action),
                     );
+                    self.notify_on_inspection.insert(key.clone());
                     self.device_toasts.insert(id, key);
                 }
                 devices::Event::Detached { key } => {
+                    self.notify_on_inspection.remove(&key);
                     if self.file_window_device.as_deref() == Some(key.as_str()) {
                         self.file_window.close(&self.context);
                         self.file_window_device = None;
@@ -892,16 +920,19 @@ impl Desktop {
                 }
                 devices::Event::Inspected { key, name } => {
                     self.dismiss_device_toasts(&key);
-                    let title = format_message!(
-                        &self.intl,
-                        default_message: "{device} inspected",
-                        description: "Notification title after device metadata was read",
-                        values: { device: name.as_str() },
-                    );
-                    self.toasts
-                        .push(notification::Toast::new(notification::Kind::Success, title));
+                    if self.notify_on_inspection.remove(&key) {
+                        let title = format_message!(
+                            &self.intl,
+                            default_message: "{device} inspected",
+                            description: "Notification title after device metadata was read",
+                            values: { device: name.as_str() },
+                        );
+                        self.toasts
+                            .push(notification::Toast::new(notification::Kind::Success, title));
+                    }
                 }
                 devices::Event::InspectionFailed { key, name, reason } => {
+                    self.notify_on_inspection.remove(&key);
                     self.dismiss_device_toasts(&key);
                     let title = format_message!(
                         &self.intl,
@@ -1260,7 +1291,7 @@ impl Desktop {
                 description: Some(&description),
                 size: modal::Size::Medium,
                 presentation: modal::Presentation::Modal,
-                cancel_label: &cancel,
+                cancel_label: Some(&cancel),
                 backdrop_closes: Some(!editor.submitting),
                 primary: modal::Primary {
                     label: &save,
@@ -1345,7 +1376,7 @@ impl Desktop {
                 description: Some(&description),
                 size: modal::Size::Small,
                 presentation: modal::Presentation::Modal,
-                cancel_label: &cancel,
+                cancel_label: Some(&cancel),
                 backdrop_closes: Some(false),
                 primary: modal::Primary {
                     label: &quit,

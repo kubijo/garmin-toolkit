@@ -7,8 +7,9 @@ use garmin_service_api::snapshots::{
     SnapshotState, SnapshotStatus,
 };
 use garmin_service_api::{ApplicationService as _, snapshots::SnapshotService as _};
-use garmin_ui::backup::{Action, SelectedFile, State as ViewState};
+use garmin_ui::backup::{Action, RestoreSummary, SelectedFile, State as ViewState};
 use uuid::Uuid;
+use web_time::Instant;
 
 pub(super) mod chooser;
 mod recovery;
@@ -102,6 +103,8 @@ pub(super) fn start(
             server: None,
             operation: None,
             recover: false,
+            restore_facts: None,
+            restore_started: None,
         }
         .run()
         .await;
@@ -117,6 +120,8 @@ struct Runner {
     operation: Option<Uuid>,
     origin: SnapshotSource,
     recover: bool,
+    restore_facts: Option<(u64, i64)>,
+    restore_started: Option<Instant>,
 }
 
 enum Failure {
@@ -221,8 +226,16 @@ impl Runner {
         loop {
             let command = self.shared.borrow_mut().backup.command.take();
             if let Some(command) = command {
+                if matches!(command, Command::Approve(_))
+                    && current.state == SnapshotState::AwaitingApproval
+                {
+                    self.restore_started = Some(Instant::now());
+                }
                 current = self.command(session, &current, command).await?;
                 continue;
+            }
+            if let Some(preview) = &current.preview {
+                self.restore_facts = Some((preview.database_bytes, preview.created_at));
             }
             self.publish(ViewState::Running(current.clone()));
             match current.state {
@@ -242,7 +255,12 @@ impl Runner {
                     return Ok(if matches!(self.origin, SnapshotSource::ServerSave(_)) {
                         ViewState::Saved
                     } else {
-                        ViewState::Restored
+                        ViewState::Restored(RestoreSummary {
+                            elapsed: self.restore_started.map(|started| started.elapsed()),
+                            archive_bytes: current.total,
+                            database_bytes: self.restore_facts.map(|(bytes, _)| bytes),
+                            created_at: self.restore_facts.map(|(_, created_at)| created_at),
+                        })
                     });
                 }
                 SnapshotState::Cancelled => return Ok(ViewState::Cancelled),
@@ -403,7 +421,10 @@ pub(super) fn show(
         .id_salt("backup-page")
         .show(ui, |ui| {
             if let Some(actor) = actor {
-                recovery::show(ui, intl, shared, actor);
+                let inline_padding = if ui.available_width() < 480.0 { 16 } else { 24 };
+                eframe::egui::Frame::NONE
+                    .inner_margin(eframe::egui::Margin::symmetric(inline_padding, 0))
+                    .show(ui, |ui| recovery::show(ui, intl, shared, actor));
             }
             let state = shared.borrow();
             garmin_ui::backup::show(

@@ -50,6 +50,19 @@ restart, rollback, marker collisions, exact completed-write reuse, failed-upload
 recovery ordering through production orchestration and directory-backed devices. Demo and dry-run execute the same
 transaction engine against an isolated shadow.
 
+A zero-byte interrupted upload is deliberately not accepted as a matching payload prefix. The 2026-10-01 packaged HASS
+crash test reproduced this limit: restart found the transaction, but recovery preserved the empty object and retained
+evidence instead of deleting it. Quarantining that object in the disposable simulation allowed verified rollback to
+finish; this assisted result does not establish automatic recovery for empty uploads.
+
+The shared map workflow now offers an explicit review of empty uploads. Only started, unapplied writes with verified
+host backups and retained payloads qualify. Approval is bound to the reviewed files, portable transaction, and host
+capture, and all evidence is checked again before mutation. The host reads the empty objects into a durable quarantine
+with an approval manifest before removing them by checked size and invoking ordinary verified rollback. The recovered
+outcome retains the quarantine location. Back, refresh, stale approvals, cancellation, and changed evidence cannot
+bypass the review. Simulation recovery operates on the retained copy and preserves the source device. The
+[acceptance record](../plans/shared-interface-workflows.md#map-workflow-acceptance) retains the test details.
+
 This does not prove every desktop-MTP implementation or recovery after a real cable disconnect. Current fēnix and Edge
 mounted-MTP update, firmware-restart acceptance, and process-interruption recovery evidence lives in
 [USB synchronization](usb-sync.md#map-maintenance-evidence).

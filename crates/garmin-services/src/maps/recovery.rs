@@ -83,6 +83,61 @@ impl PendingState {
         Ok(Some(shadow))
     }
 
+    /// Review blocked empty uploads without changing the target.
+    ///
+    /// # Errors
+    /// Missing, changed, or unprovable transaction evidence.
+    pub async fn review_assisted(
+        &self,
+        identity: &str,
+        device: &dyn DeviceWrite,
+        progress: &ProgressReporter,
+    ) -> Result<garmin_update::AssistedRecoveryPlan> {
+        let receipt = self
+            .receipt
+            .as_ref()
+            .context("recovery requires its original host receipt")?;
+        let shadow = self.shadow().await?;
+        let device = shadow
+            .as_ref()
+            .map_or(device, garmin_simulator::shadow::Shadow::device);
+        garmin_update::review_assisted_recovery(&receipt.transaction, identity, device, progress)
+            .await?
+            .context("no empty interrupted uploads require approval; use ordinary recovery")
+    }
+
+    /// Preserve explicitly reviewed empty uploads, then restore verified originals.
+    ///
+    /// # Errors
+    /// Stale approval, changed evidence, failed preservation, or failed rollback.
+    pub async fn approve_assisted(
+        &self,
+        identity: &str,
+        device: &dyn DeviceWrite,
+        reviewed: &garmin_update::AssistedRecoveryPlan,
+        progress: &ProgressReporter,
+        receipts: &PendingRecoveryStore,
+    ) -> Result<std::path::PathBuf> {
+        let receipt = self
+            .receipt
+            .as_ref()
+            .context("recovery requires its original host receipt")?;
+        let shadow = self.shadow().await?;
+        let device = shadow
+            .as_ref()
+            .map_or(device, garmin_simulator::shadow::Shadow::device);
+        let report = garmin_update::approve_assisted_recovery(
+            &receipt.transaction,
+            identity,
+            device,
+            reviewed,
+            progress,
+        )
+        .await?;
+        receipts.clear_completed(receipt);
+        Ok(report.quarantine)
+    }
+
     /// Restore/finalize the original transaction using its retained host evidence.
     ///
     /// # Errors

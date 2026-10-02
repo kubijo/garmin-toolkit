@@ -39,7 +39,11 @@ fn verified() -> SnapshotStatus {
 #[test]
 fn backup_status_keeps_the_profile_chooser_centered() {
     for width in [360.0, 960.0, 1808.0] {
-        for state in [State::Idle, State::Restored] {
+        let mut idle_row_top: Option<f32> = None;
+        for state in [
+            State::Idle,
+            State::Restored(backup::RestoreSummary::default()),
+        ] {
             let intl = Translations::bundled()
                 .expect("catalog")
                 .formatter(Language::English)
@@ -71,6 +75,7 @@ fn backup_status_keeps_the_profile_chooser_centered() {
                             accent: garmin_color::swatch::cyan::G40,
                             avatar: None,
                         }],
+                        owner_index: Some(0),
                     },
                 );
             });
@@ -80,8 +85,63 @@ fn backup_status_keeps_the_profile_chooser_centered() {
                 .rect();
             assert!((row.center().x - width / 2.0).abs() <= 1.0);
             assert!(row.left() >= 0.0 && row.right() <= width);
+            if let Some(idle_top) = idle_row_top {
+                assert!((row.top() - idle_top).abs() <= 1.0);
+            } else {
+                idle_row_top = Some(row.top());
+            }
         }
     }
+}
+
+#[test]
+fn restored_backup_is_acknowledged_in_a_one_action_modal() {
+    let intl = Translations::bundled()
+        .expect("catalog")
+        .formatter(Language::English)
+        .expect("English");
+    let file = backup::SelectedFile::RestoreSource("garmin-backup.tar.zst".into());
+    let mut installed = false;
+    let mut view = Harness::builder().with_size([960.0, 720.0]).build_ui_state(
+        move |ui, action: &mut Option<Action>| {
+            if !installed {
+                garmin_ui::install(ui.ctx());
+                installed = true;
+                ui.ctx().request_repaint();
+                return;
+            }
+            if let Some(chosen) = backup::show_operation(
+                ui,
+                &backup::Props {
+                    intl: &intl,
+                    state: &State::Restored(backup::RestoreSummary {
+                        elapsed: Some(std::time::Duration::from_secs(18)),
+                        archive_bytes: Some(1_200_000),
+                        database_bytes: Some(8_000_000),
+                        created_at: Some(1_790_640_000),
+                    }),
+                    file: Some(&file),
+                    enabled: false,
+                    server_files: true,
+                },
+            ) {
+                *action = Some(chosen);
+            }
+        },
+        None,
+    );
+    view.run();
+    let _ = view.get_by_label("Backup restored");
+    let _ = view.get_by_label("garmin-backup.tar.zst");
+    let _ = view.get_by_label("Restore time");
+    let _ = view.get_by_label("Backup size");
+    let _ = view.get_by_label("Database size");
+    assert!(view.query_by_label("Clear selection").is_none());
+    assert!(view.query_by_label("Cancel").is_none());
+    view.get(By::new().predicate(|node| node.author_id() == Some("backup.restore.acknowledge")))
+        .click();
+    view.run_steps(3);
+    assert_eq!(*view.state(), Some(Action::Clear));
 }
 
 #[test]

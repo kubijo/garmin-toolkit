@@ -101,7 +101,7 @@ impl Preview {
                 description: Some(&description),
                 size: modal::Size::Large,
                 presentation: modal::Presentation::Modal,
-                cancel_label: &close,
+                cancel_label: Some(&close),
                 backdrop_closes: Some(!busy),
                 primary: modal::Primary {
                     label: &import,

@@ -109,6 +109,7 @@ fn shell_accent_follows_profile_switches_and_does_not_leak() {
                         profiles: &profiles,
                         selected,
                         expanded: false,
+                        backup_enabled: false,
                     };
                     let _ = shell::show(
                         ui,

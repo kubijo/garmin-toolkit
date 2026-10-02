@@ -3,6 +3,7 @@
 mod backup;
 mod device_state;
 mod download;
+mod host;
 mod install;
 mod mounted_install;
 mod plan;
@@ -24,9 +25,10 @@ pub use install::{
     apply_mass_storage_with_progress, preflight_mass_storage_update, recover_mass_storage,
 };
 pub use mounted_install::{
-    MountedInstallError, MountedMtpPreflight, MountedUpdateRecoveryOutcome,
-    MountedUpdateRecoveryReport, UnprotectedMutationEvidence, apply_mounted_mtp_with_progress,
-    preflight_mounted_mtp_update, recover_mounted_mtp_update,
+    AssistedRecoveryPlan, AssistedRecoveryReport, EmptyUpload, MountedInstallError,
+    MountedMtpPreflight, MountedUpdateRecoveryOutcome, MountedUpdateRecoveryReport,
+    UnprotectedMutationEvidence, apply_mounted_mtp_with_progress, approve_assisted_recovery,
+    preflight_mounted_mtp_update, recover_mounted_mtp_update, review_assisted_recovery,
 };
 pub use plan::{
     BackupPolicy, DownloadSpec, UPDATE_PLAN_SCHEMA_VERSION, UpdatePlan, UpdatePlanError,

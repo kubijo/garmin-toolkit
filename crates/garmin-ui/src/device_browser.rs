@@ -1012,7 +1012,7 @@ impl Browser {
                 description: Some(&description),
                 size: modal::Size::Small,
                 presentation: modal::Presentation::Modal,
-                cancel_label: &cancel,
+                cancel_label: Some(&cancel),
                 backdrop_closes: Some(false),
                 primary: modal::Primary {
                     label: &remove,
@@ -1072,7 +1072,7 @@ impl Browser {
                 description: Some(&description),
                 size: modal::Size::Small,
                 presentation: modal::Presentation::Modal,
-                cancel_label: &cancel,
+                cancel_label: Some(&cancel),
                 backdrop_closes: Some(false),
                 primary: modal::Primary {
                     label: &create,

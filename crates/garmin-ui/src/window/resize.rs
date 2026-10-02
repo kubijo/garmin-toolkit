@@ -3,6 +3,7 @@ use egui::{CursorIcon, Pos2, Rect, ResizeDirection, Ui, ViewportCommand};
 
 const EDGE_WIDTH: f32 = 6.0;
 const CORNER_WIDTH: f32 = 12.0;
+const GRIP_SIZE: f32 = 32.0;
 
 /// Starts native resizing from the current viewport's edges and corners.
 pub fn resize(ui: &Ui) {
@@ -18,26 +19,30 @@ pub(super) fn resize_at(ui: &Ui, bounds: Rect) {
     if unavailable {
         return;
     }
+    paint_south_east_grip(ui, bounds);
     let Some(pointer) = context.pointer_hover_pos() else {
         return;
     };
+    let on_grip = south_east_grip(bounds).contains(pointer);
     let Some((direction, cursor)) = resize_target(bounds, pointer) else {
         return;
     };
     // Scrollbars and controls can reach the client edge.
     // Respect egui's hit test instead of starting an OS resize over a widget that owns the pointer.
-    if context.egui_is_using_pointer() {
+    if !on_grip && context.egui_is_using_pointer() {
         return;
     }
-    let hovered = context.interaction_snapshot(|interaction| {
-        interaction.hovered.iter().copied().collect::<Vec<_>>()
-    });
-    if hovered.into_iter().any(|id| {
-        context
-            .read_response(id)
-            .is_some_and(|response| response.sense.senses_click() || response.sense.senses_drag())
-    }) {
-        return;
+    if !on_grip {
+        let hovered = context.interaction_snapshot(|interaction| {
+            interaction.hovered.iter().copied().collect::<Vec<_>>()
+        });
+        if hovered.into_iter().any(|id| {
+            context.read_response(id).is_some_and(|response| {
+                response.sense.senses_click() || response.sense.senses_drag()
+            })
+        }) {
+            return;
+        }
     }
     context.set_cursor_icon(cursor);
     if context.input(|input| input.pointer.primary_pressed()) {
@@ -48,6 +53,9 @@ pub(super) fn resize_at(ui: &Ui, bounds: Rect) {
 fn resize_target(bounds: Rect, pointer: Pos2) -> Option<(ResizeDirection, CursorIcon)> {
     if !bounds.contains(pointer) {
         return None;
+    }
+    if south_east_grip(bounds).contains(pointer) {
+        return Some((ResizeDirection::SouthEast, CursorIcon::ResizeSouthEast));
     }
     let left = pointer.x <= bounds.left() + EDGE_WIDTH;
     let right = pointer.x >= bounds.right() - EDGE_WIDTH;
@@ -74,6 +82,32 @@ fn resize_target(bounds: Rect, pointer: Pos2) -> Option<(ResizeDirection, Cursor
     Some(target)
 }
 
+fn south_east_grip(bounds: Rect) -> Rect {
+    Rect::from_min_max(
+        Pos2::new(bounds.right() - GRIP_SIZE, bounds.bottom() - GRIP_SIZE),
+        bounds.right_bottom(),
+    )
+}
+
+fn paint_south_east_grip(ui: &Ui, bounds: Rect) {
+    let right = bounds.right();
+    let bottom = bounds.bottom();
+    let stroke = egui::Stroke::new(
+        1.5,
+        crate::theme::color32(crate::theme::palette(ui).content().icon_secondary())
+            .gamma_multiply(0.2),
+    );
+    for length in [6.0, 12.0, 18.0] {
+        ui.painter().line_segment(
+            [
+                Pos2::new(right - length, bottom),
+                Pos2::new(right, bottom - length),
+            ],
+            stroke,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,6 +131,44 @@ mod tests {
         assert_eq!(resize_target(BOUNDS, BOUNDS.center()), None);
         assert_eq!(resize_target(BOUNDS, Pos2::new(8.0, 8.0)), None);
         assert_eq!(resize_target(BOUNDS, Pos2::new(-1.0, 40.0)), None);
+    }
+
+    #[test]
+    fn lower_right_grip_resizes_over_draggable_content() {
+        let context = egui::Context::default();
+        let pointer = Pos2::new(88.0, 68.0);
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(BOUNDS),
+                events: vec![
+                    egui::Event::PointerMoved(pointer),
+                    egui::Event::PointerButton {
+                        pos: pointer,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..egui::RawInput::default()
+            },
+            |ui| {
+                ui.interact(
+                    BOUNDS,
+                    egui::Id::new("draggable-chart"),
+                    egui::Sense::drag(),
+                );
+                resize_at(ui, BOUNDS);
+            },
+        );
+        assert!(output.viewport_output.values().any(|viewport| {
+            viewport.commands.iter().any(|command| {
+                matches!(
+                    command,
+                    ViewportCommand::BeginResize(ResizeDirection::SouthEast)
+                )
+            })
+        }));
+        output.drop_without_applying_deltas();
     }
 
     #[test]

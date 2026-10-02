@@ -1,8 +1,10 @@
 //! Deployment-wide backup and restore presentation.
 
-use crate::{Size, button, icons, progress};
+use std::time::Duration;
+
+use crate::{Size, button, icons, modal, progress};
 use cint::ColorInterop;
-use egui::{RichText, Ui};
+use egui::{Id, RichText, Ui};
 use garmin_i18n::{Intl, format_message};
 use garmin_service_api::snapshots::{SnapshotPreview, SnapshotState, SnapshotStatus};
 
@@ -16,7 +18,7 @@ pub enum State {
     Running(SnapshotStatus),
     Saved,
     DownloadStarted,
-    Restored,
+    Restored(RestoreSummary),
     Cancelled,
     Failed(String),
 }
@@ -31,6 +33,19 @@ impl State {
     pub fn switching(&self) -> bool {
         matches!(self, Self::Running(status) if status.state == SnapshotState::Restoring)
     }
+}
+
+/// Verified facts retained after a completed restore.
+#[derive(Clone, Debug, Default)]
+pub struct RestoreSummary {
+    /// Time spent applying the approved restore, excluding the approval wait.
+    pub elapsed: Option<Duration>,
+    /// Size of the compressed backup file.
+    pub archive_bytes: Option<u64>,
+    /// Size of the verified database inside the backup.
+    pub database_bytes: Option<u64>,
+    /// Creation time from the verified backup manifest.
+    pub created_at: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -61,26 +76,53 @@ pub struct Props<'a> {
 #[must_use]
 pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     let intl = props.intl;
-    ui.set_max_width(ui.available_width().min(640.0));
-    ui.heading(format_message!(intl, default_message: "Backup and restore"));
-    let description = format_message!(intl, default_message: "A backup includes all profiles, activities, original files, routes, and pictures. Device pairing and cloud credentials are excluded.");
-    crate::typography::body(ui, &description);
-    ui.add_space(16.0);
+    let inline_padding = if ui.available_width() < 480.0 { 16 } else { 24 };
+    egui::Frame::NONE
+        .inner_margin(egui::Margin {
+            left: inline_padding,
+            right: inline_padding,
+            top: 24,
+            bottom: 24,
+        })
+        .show(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(640.0));
+            ui.heading(format_message!(intl, default_message: "Backup and restore"));
+            let description = format_message!(intl, default_message: "A backup includes all profiles, activities, original files, routes, and pictures. Device pairing and cloud credentials are excluded.");
+            crate::typography::body(ui, &description);
+        });
     if props.file.is_none() && !props.state.busy() && props.enabled {
-        let action = show_picker(ui, props);
+        let action = if props.server_files {
+            show_locations(ui, props)
+        } else {
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(inline_padding, 0))
+                .show(ui, |ui| {
+                    ui.set_max_width(ui.available_width().min(640.0));
+                    show_picker(ui, props)
+                })
+                .inner
+        };
         if !matches!(props.state, State::Idle) {
             ui.add_space(16.0);
-            return show_operation(ui, props).or(action);
+            return egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(inline_padding, 0))
+                .show(ui, |ui| show_operation(ui, props))
+                .inner
+                .or(action);
         }
         return action;
     }
-    show_operation(ui, props)
+    if props.file.is_some() {
+        show_operation(ui, props)
+    } else {
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(inline_padding, 0))
+            .show(ui, |ui| show_operation(ui, props))
+            .inner
+    }
 }
 
 fn show_picker(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
-    if props.server_files {
-        return ui.scope(|ui| show_locations(ui, props)).inner;
-    }
     let intl = props.intl;
     let save = format_message!(intl, default_message: "Save backup");
     let open = format_message!(intl, default_message: "Open backup");
@@ -115,13 +157,13 @@ fn show_picker(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
 
 fn show_locations(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     let intl = props.intl;
+    let inline_padding = if ui.available_width() < 480.0 { 16 } else { 24 };
     let download = format_message!(intl, default_message: "Download to this device");
     let save = format_message!(intl, default_message: "Save on server");
     let upload = format_message!(intl, default_message: "Upload from this device");
     let open = format_message!(intl, default_message: "Open from server");
     let mut action = None;
-    ui.spacing_mut().item_spacing = egui::vec2(8.0, 16.0);
-    for (title, description, pictogram, buttons) in [
+    for (index, (title, description, pictogram, buttons)) in [
         (
             format_message!(intl, default_message: "Create a backup"),
             format_message!(intl, default_message: "Save a copy of the current application data."),
@@ -160,12 +202,19 @@ fn show_locations(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
                 ),
             ],
         ),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if index > 0 {
+            ui.add_space(8.0);
+        }
         let selected = location_card(
             ui,
             &title,
             &description,
             pictogram,
+            inline_padding,
             &buttons.map(|(id, requested, label, icon)| {
                 (
                     id,
@@ -191,50 +240,55 @@ fn location_card(
     title: &str,
     description: &str,
     pictogram: icons::Icon,
+    inline_padding: i8,
     buttons: &[(&str, Action, button::Props<'_>)],
 ) -> Option<Action> {
     let palette = crate::theme::palette(ui);
-    egui::Frame::new()
+    egui::Frame::NONE
         .fill(crate::theme::color32(
             palette.surfaces().layer(garmin_color::theme::Level::One),
         ))
-        .inner_margin(16)
+        .inner_margin(egui::Margin::symmetric(inline_padding, 16))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing = egui::vec2(16.0, 8.0);
-            let compact = buttons
-                .iter()
-                .map(|(_, _, button)| button.natural_width(ui))
-                .sum::<f32>()
-                + 8.0
-                + 64.0
-                + 16.0
-                > ui.available_width();
-            let mut action = None;
-            ui.horizontal(|ui| {
-                icons::Props {
-                    icon: pictogram,
-                    size: 64.0,
-                    color: palette.content().text_primary(),
-                }
-                .show(ui);
-                ui.vertical(|ui| {
-                    ui.set_width(ui.available_width());
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                    ui.heading(title);
-                    crate::typography::body(ui, description);
-                    if !compact {
-                        ui.add_space(8.0);
-                        action = action_row(ui, buttons);
+            ui.scope(|ui| {
+                ui.set_max_width(ui.available_width().min(640.0));
+                ui.spacing_mut().item_spacing = egui::vec2(16.0, 8.0);
+                let compact = buttons
+                    .iter()
+                    .map(|(_, _, button)| button.natural_width(ui))
+                    .sum::<f32>()
+                    + 8.0
+                    + 64.0
+                    + 16.0
+                    > ui.available_width();
+                let mut action = None;
+                ui.horizontal(|ui| {
+                    icons::Props {
+                        icon: pictogram,
+                        size: 64.0,
+                        color: palette.content().text_primary(),
                     }
+                    .show(ui);
+                    ui.vertical(|ui| {
+                        ui.set_width(ui.available_width());
+                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                        ui.heading(title);
+                        crate::typography::body(ui, description);
+                        if !compact {
+                            ui.add_space(8.0);
+                            action = action_row(ui, buttons);
+                        }
+                    });
                 });
-            });
-            if compact {
-                ui.add_space(8.0);
-                ui.spacing_mut().item_spacing.x = 8.0;
-                action = action_row(ui, buttons);
-            }
-            action
+                if compact {
+                    ui.add_space(8.0);
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    action = action_row(ui, buttons);
+                }
+                action
+            })
+            .inner
         })
         .inner
 }
@@ -273,12 +327,97 @@ pub fn show_operation(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     if matches!(props.state, State::Idle) && props.file.is_none() {
         return None;
     }
+    if matches!(props.state, State::Restored(_)) {
+        return show_restore_acknowledgement(ui, props);
+    }
     ui.scope(|ui| operation(ui, props)).inner
+}
+
+fn show_restore_acknowledgement(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
+    let title = format_message!(props.intl, default_message: "Backup restored");
+    let description = format_message!(props.intl, default_message: "Choose a profile to continue.");
+    let continue_label = format_message!(props.intl, default_message: "Continue");
+    let source_label = format_message!(props.intl, default_message: "Restore source");
+    let State::Restored(summary) = props.state else {
+        unreachable!("restore acknowledgement requires a completed restore");
+    };
+    let output = modal::show(
+        ui,
+        Id::new("backup-restore-complete"),
+        &modal::Props {
+            title: &title,
+            description: Some(&description),
+            size: modal::Size::Small,
+            presentation: modal::Presentation::Modal,
+            cancel_label: None,
+            backdrop_closes: Some(false),
+            primary: modal::Primary {
+                label: &continue_label,
+                icon: Some(icons::CHECK),
+                kind: modal::PrimaryKind::Confirm,
+                enabled: true,
+            },
+        },
+        |ui| {
+            ui.style_mut().interaction.selectable_labels = false;
+            if let Some(SelectedFile::RestoreSource(name)) = props.file {
+                ui.label(RichText::new(&source_label).weak());
+                ui.add(egui::Label::new(RichText::new(name).strong()).wrap());
+            }
+            show_restore_summary(ui, props.intl, summary);
+        },
+    );
+    crate::semantics::target(ui, &output.primary, "backup.restore.acknowledge");
+    (output.action == Some(modal::Action::Primary)).then_some(Action::Clear)
+}
+
+fn show_restore_summary(ui: &mut Ui, intl: &Intl, summary: &RestoreSummary) {
+    let mut facts = Vec::new();
+    if let Some(elapsed) = summary.elapsed {
+        let duration = if elapsed.as_secs() == 0 {
+            format_message!(intl, default_message: "Less than a second")
+        } else {
+            crate::offline::format_duration(elapsed.as_secs())
+        };
+        facts.push((
+            format_message!(intl, default_message: "Restore time"),
+            duration,
+        ));
+    }
+    if let Some(bytes) = summary.archive_bytes {
+        facts.push((
+            format_message!(intl, default_message: "Backup size"),
+            crate::text::format_bytes(bytes),
+        ));
+    }
+    if let Some(bytes) = summary.database_bytes {
+        facts.push((
+            format_message!(intl, default_message: "Database size"),
+            crate::text::format_bytes(bytes),
+        ));
+    }
+    if let Some(created_at) = summary.created_at {
+        let created = garmin_model::value::Timestamp::from_unix_seconds(created_at);
+        let date = created.map_or_else(
+            |_| created_at.to_string(),
+            |time| {
+                intl.dates()
+                    .datetime(time.as_jiff().to_zoned(jiff::tz::TimeZone::UTC).datetime())
+            },
+        );
+        facts.push((
+            format_message!(intl, default_message: "Backup created (UTC)"),
+            date,
+        ));
+    }
+    if !facts.is_empty() {
+        ui.add_space(24.0);
+        crate::facts::show(ui, "backup-restored-facts", &facts);
+    }
 }
 
 fn operation(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     let intl = props.intl;
-    ui.set_max_width(ui.available_width().min(640.0));
     if let Some(file) = props.file {
         let (label, name) = match file {
             SelectedFile::SaveDestination(name) => (
@@ -291,29 +430,31 @@ fn operation(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
             ),
         };
         let palette = crate::theme::palette(ui);
-        return egui::Frame::new()
+        let inline_padding = if ui.available_width() < 480.0 { 16 } else { 24 };
+        return egui::Frame::NONE
             .fill(crate::theme::color32(
                 palette.surfaces().layer(garmin_color::theme::Level::One),
             ))
-            .inner_margin(16)
+            .inner_margin(egui::Margin::symmetric(inline_padding, 16))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                if matches!(props.state, State::Saved) {
-                    return show_saved(ui, intl, &label, name);
-                }
-                ui.label(
-                    RichText::new(label).color(palette.content().text_secondary().into_cint()),
-                );
-                ui.add(egui::Label::new(RichText::new(name).strong()).wrap());
-                ui.add_space(16.0);
-                crate::theme::layer(ui, garmin_color::theme::Level::Two, |ui| {
-                    ui.visuals_mut().extreme_bg_color =
-                        crate::theme::color32(palette.borders().subtle());
+                ui.scope(|ui| {
+                    ui.set_max_width(ui.available_width().min(640.0));
+                    if matches!(props.state, State::Saved) {
+                        return show_saved(ui, intl, &label, name);
+                    }
+                    ui.label(
+                        RichText::new(label).color(palette.content().text_secondary().into_cint()),
+                    );
+                    ui.add(egui::Label::new(RichText::new(name).strong()).wrap());
+                    ui.add_space(16.0);
                     show_operation_content(ui, props)
                 })
+                .inner
             })
             .inner;
     }
+    ui.set_max_width(ui.available_width().min(640.0));
     show_operation_content(ui, props)
 }
 
@@ -368,7 +509,7 @@ fn show_operation_content(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     let intl = props.intl;
     let mut action = None;
     match props.state {
-        State::Idle => {}
+        State::Idle | State::Restored(_) => {}
         State::Starting => {
             progress::show(
                 ui,
@@ -391,9 +532,6 @@ fn show_operation_content(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
         }
         State::DownloadStarted => {
             ui.label(format_message!(intl, default_message: "Backup download started. Check your browser’s downloads for completion."));
-        }
-        State::Restored => {
-            ui.label(format_message!(intl, default_message: "Backup restored. Choose a profile to continue."));
         }
         State::Cancelled => {
             ui.label(format_message!(intl, default_message: "Backup operation cancelled"));

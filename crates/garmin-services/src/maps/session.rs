@@ -184,6 +184,13 @@ impl Session {
 
     fn apply(&self, control: &mut Control, command: &Command) -> Result<Option<Pending>, Failure> {
         let state = &mut control.state;
+        if !approval_matches(state, command) {
+            return Err(failure(
+                state,
+                FailureKind::InvalidChoice,
+                "approval does not match the displayed review",
+            ));
+        }
         match command {
             Command::Choose { component, choice } => {
                 let position = state
@@ -220,7 +227,12 @@ impl Session {
             }
             Command::DryRun(value) => state.dry_run = *value,
             Command::Back => {
-                state.phase = Phase::Catalog;
+                state.phase = if let Some(recovery) = &mut state.recovery {
+                    recovery.review = None;
+                    Phase::Recovery
+                } else {
+                    Phase::Catalog
+                };
                 state.plan = None;
             }
             Command::Cancel => {
@@ -229,18 +241,6 @@ impl Session {
                     .as_ref()
                     .ok_or_else(|| failure(state, FailureKind::Unavailable, "no job is running"))?
                     .cancel();
-            }
-            Command::Approve { approval }
-                if state
-                    .plan
-                    .as_ref()
-                    .is_none_or(|plan| plan.approval != *approval) =>
-            {
-                return Err(failure(
-                    state,
-                    FailureKind::InvalidChoice,
-                    "approval does not match the displayed plan",
-                ));
             }
             _ => {
                 // Reads also hold the gate so a browser write cannot invalidate their inventory mid-plan.
@@ -253,7 +253,10 @@ impl Session {
                 control.cancellation = Some(reporter.cancellation_token());
                 state.phase = if matches!(
                     command,
-                    Command::Approve { .. } | Command::Recover | Command::ClearRecovery
+                    Command::Approve { .. }
+                        | Command::Recover
+                        | Command::ClearRecovery
+                        | Command::ApproveRecovery { .. }
                 ) {
                     Phase::Running
                 } else {
@@ -386,6 +389,7 @@ impl Session {
             state.history.push(Outcome {
                 id: Uuid::new_v4(),
                 phase: state.phase,
+                recovered: false,
                 message: state
                     .error
                     .clone()
@@ -447,6 +451,23 @@ fn action(command: &Command) -> Action {
         Command::ClearRecovery => Action::ClearRecovery,
         Command::DiscardPreparation => Action::DiscardPreparation,
         Command::Refresh => Action::Refresh,
+        Command::ReviewRecovery => Action::ReviewRecovery,
+        Command::ApproveRecovery { .. } => Action::ApproveRecovery,
+    }
+}
+
+fn approval_matches(state: &State, command: &Command) -> bool {
+    match command {
+        Command::Approve { approval } => state
+            .plan
+            .as_ref()
+            .is_some_and(|plan| plan.approval == *approval),
+        Command::ApproveRecovery { approval } => state
+            .recovery
+            .as_ref()
+            .and_then(|recovery| recovery.review.as_ref())
+            .is_some_and(|review| review.approval == *approval),
+        _ => true,
     }
 }
 
@@ -462,6 +483,9 @@ fn actions(state: &State) -> Vec<Action> {
         ],
         Phase::Review => vec![Action::Approve, Action::Back, Action::Refresh],
         Phase::Recovery => state.recovery.as_ref().map_or_else(Vec::new, |recovery| {
+            if recovery.review.is_some() {
+                return vec![Action::ApproveRecovery, Action::Back, Action::Refresh];
+            }
             let mut actions = recovery.actions.clone();
             actions.push(Action::Refresh);
             actions

@@ -27,6 +27,8 @@ or {
     `Plan`,
     `StorageRequirement`,
     `Recovery`,
+    `RecoveryReview`,
+    `RecoveryFile`,
     `Progress`,
     `ProgressStatus`,
     `Outcome`,

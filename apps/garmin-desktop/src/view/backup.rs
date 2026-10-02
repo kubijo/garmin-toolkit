@@ -65,12 +65,14 @@ impl Desktop {
         self.notice = None;
         self.toasts = notification::Toasts::default();
         self.device_toasts.clear();
+        self.notify_on_inspection.clear();
         self.load = LoadState::Loading;
         self.worker.reload();
     }
 
     pub(super) fn show_backup_result(&mut self, ui: &mut Ui) {
         if !matches!(self.backup.state, State::Idle) {
+            let restored = matches!(self.backup.state, State::Restored(_));
             let action = ui
                 .scope(|ui| {
                     garmin_ui::backup::show_operation(
@@ -86,7 +88,9 @@ impl Desktop {
                 })
                 .inner;
             self.handle_backup_action(action);
-            ui.add_space(16.0);
+            if !restored {
+                ui.add_space(16.0);
+            }
         }
     }
 }

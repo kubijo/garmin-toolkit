@@ -55,6 +55,7 @@ pub(super) struct Workflow {
     identity: Option<String>,
     catalog: Option<MapCatalog>,
     prepared: Option<Prepared>,
+    assisted: Option<garmin_update::AssistedRecoveryPlan>,
     history_loaded: bool,
 }
 
@@ -65,6 +66,7 @@ impl Workflow {
             identity: None,
             catalog: None,
             prepared: None,
+            assisted: None,
             history_loaded: false,
         }
     }
@@ -135,6 +137,7 @@ impl Workflow {
         };
         state.plan = None;
         self.prepared = None;
+        self.assisted = None;
         Ok(())
     }
 
@@ -149,16 +152,18 @@ impl Workflow {
         }
         let read_only = matches!(
             command,
-            Command::Refresh | Command::ContactService | Command::Review
+            Command::Refresh | Command::ContactService | Command::Review | Command::ReviewRecovery
         );
         let result = match command {
             Command::Refresh => self.inspect(state).await,
             Command::ContactService => self.query(state).await,
             Command::Review => self.review(state, progress).await,
             Command::Approve { approval } => self.execute(approval, state, progress).await,
-            Command::Recover | Command::ClearRecovery | Command::DiscardPreparation => {
-                self.recover(command, state, progress).await
-            }
+            Command::Recover
+            | Command::ClearRecovery
+            | Command::DiscardPreparation
+            | Command::ReviewRecovery
+            | Command::ApproveRecovery { .. } => self.recover(command, state, progress).await,
             _ => bail!("command does not require host execution"),
         };
         if read_only && progress.is_cancelled() {
@@ -398,6 +403,7 @@ impl Workflow {
                 id: Uuid::new_v4(),
                 phase: Phase::Completed,
                 message: "Removal completed".to_owned(),
+                recovered: false,
             });
             if state.history.len() > super::outcomes::MAX_OUTCOMES {
                 state.history.remove(0);
@@ -432,7 +438,41 @@ impl Workflow {
         {
             bail!("pending transaction changed; review its state again");
         }
+        let mut quarantine = None;
         match command {
+            Command::ReviewRecovery => {
+                let reviewed = pending
+                    .review_assisted(&identity, connection.device.as_ref(), progress)
+                    .await?;
+                let view = state
+                    .recovery
+                    .as_mut()
+                    .context("recovery state is missing")?;
+                view.review = Some(recovery_review_view(&reviewed));
+                self.assisted = Some(reviewed);
+                state.phase = Phase::Recovery;
+                return Ok(());
+            }
+            Command::ApproveRecovery { approval } => {
+                let reviewed = self
+                    .assisted
+                    .take()
+                    .context("review the blocked files again before approving recovery")?;
+                if reviewed.approval() != approval {
+                    bail!("approval does not match the reviewed recovery files");
+                }
+                quarantine = Some(
+                    pending
+                        .approve_assisted(
+                            &identity,
+                            connection.device.as_ref(),
+                            &reviewed,
+                            progress,
+                            &self.settings.receipts,
+                        )
+                        .await?,
+                );
+            }
             Command::Recover => {
                 pending
                     .recover(
@@ -451,7 +491,27 @@ impl Workflow {
             Command::DiscardPreparation => pending.discard(&self.settings.receipts)?,
             _ => unreachable!("recovery dispatch accepts recovery commands"),
         }
-        self.inspect(state).await
+        self.inspect(state).await?;
+        if matches!(command, Command::Recover | Command::ApproveRecovery { .. }) {
+            state.history.push(garmin_service_api::maps::Outcome {
+                id: Uuid::new_v4(),
+                phase: Phase::Completed,
+                message: quarantine.map_or_else(
+                    || "Recovery completed".to_owned(),
+                    |path| {
+                        format!(
+                            "Recovery completed. Empty uploads preserved in {}",
+                            path.display()
+                        )
+                    },
+                ),
+                recovered: true,
+            });
+            if state.history.len() > super::outcomes::MAX_OUTCOMES {
+                state.history.remove(0);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -468,6 +528,9 @@ fn recovery_view(pending: &PendingState) -> Recovery {
     let mut actions = Vec::new();
     if pending.receipt.is_some() && pending.prepared {
         actions.push(Action::Recover);
+        if pending.kind == PendingRecoveryKind::Update {
+            actions.push(Action::ReviewRecovery);
+        }
     }
     if pending.transaction.is_some() {
         actions.push(Action::ClearRecovery);
@@ -480,6 +543,23 @@ fn recovery_view(pending: &PendingState) -> Recovery {
         removal: pending.kind == PendingRecoveryKind::Removal,
         simulated: pending.simulated,
         actions,
+        review: None,
+    }
+}
+
+fn recovery_review_view(
+    reviewed: &garmin_update::AssistedRecoveryPlan,
+) -> garmin_service_api::maps::RecoveryReview {
+    garmin_service_api::maps::RecoveryReview {
+        approval: reviewed.approval(),
+        files: reviewed
+            .files()
+            .iter()
+            .map(|file| garmin_service_api::maps::RecoveryFile {
+                storage: file.storage_label.clone(),
+                path: file.path.to_string(),
+            })
+            .collect(),
     }
 }
 
