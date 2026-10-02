@@ -22,8 +22,8 @@ use garmin_model::identity::{LanguagePreference, ProfilePreferences, ThemePrefer
 use garmin_service_api::{
     ActivityDetailSnapshot, ApplicationService, ApplicationServiceClient, AvatarCrop, AvatarUpload,
     DeploymentMode, DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload,
-    DeviceCatalogSnapshot, DeviceFitImportOutcome, DeviceFitPreview, DeviceSnapshot,
-    DownloadTicket, ProfileSnapshot,
+    DeviceCatalogSnapshot, DeviceFitImportOutcome, DeviceFitImportPlan, DeviceFitImportStatus,
+    DeviceSnapshot, DownloadTicket, ProfileSnapshot,
 };
 use garmin_ui::{
     activity, device, device_browser, device_fit_preview, icons, image_crop, modal, notification,
@@ -196,6 +196,8 @@ struct App {
     avatar_editor: Option<AvatarEditor>,
     device_browser: Option<device_browser::Browser>,
     device_fit_preview: Option<device_fit_preview::Preview>,
+    device_fit_plan: Option<uuid::Uuid>,
+    device_fit_job: Option<uuid::Uuid>,
 }
 
 impl App {
@@ -250,6 +252,8 @@ impl App {
             avatar_editor: None,
             device_browser: None,
             device_fit_preview: None,
+            device_fit_plan: None,
+            device_fit_job: None,
         })
     }
 
@@ -686,14 +690,8 @@ impl App {
             device_browser::Action::Refresh => {
                 spawn_device_catalog(self.shared.clone(), self.context.clone(), device_key);
             }
-            device_browser::Action::Open(selection) => spawn_device_fit_preview(
-                Rc::clone(&self.shared),
-                self.context.clone(),
-                device_key,
-                browser_target(selection),
-                &format_message!(&self.intl, default_message: "Opening the FIT file…"),
-            ),
-            device_browser::Action::ImportFit(selection) => {
+            device_browser::Action::Open(selection)
+            | device_browser::Action::ImportFit(selection) => {
                 let Some(user_id) = self
                     .selected_profile
                     .and_then(|index| self.profiles.get(index))
@@ -701,13 +699,13 @@ impl App {
                 else {
                     return;
                 };
-                spawn_device_fit_import(
+                spawn_device_fit_preview(
                     Rc::clone(&self.shared),
                     self.context.clone(),
                     user_id,
                     device_key,
                     browser_target(selection),
-                    &format_message!(&self.intl, default_message: "Importing the FIT file…"),
+                    &format_message!(&self.intl, default_message: "Opening the FIT file…"),
                 );
             }
             _ => unreachable!("filesystem actions and close were handled above"),
@@ -975,12 +973,21 @@ impl App {
                 profile.user.profile().preferences().unit_system()
             });
         let busy = device_browser_busy(&self.shared.borrow());
+        let plan = self.device_fit_plan;
+        let job = self.device_fit_job;
         let Some(preview) = self.device_fit_preview.as_mut() else {
             return;
         };
         match preview.show(ui, &self.intl, busy, units, jiff::Zoned::now().date()) {
-            Some(device_fit_preview::Action::Close) => self.device_fit_preview = None,
+            Some(device_fit_preview::Action::Close) => {
+                self.device_fit_preview = None;
+                self.device_fit_plan = None;
+                self.device_fit_job = None;
+            }
             Some(device_fit_preview::Action::Import(target)) => {
+                let Some((plan, job)) = plan.zip(job) else {
+                    return;
+                };
                 let Some(user_id) = self
                     .selected_profile
                     .and_then(|index| self.profiles.get(index))
@@ -994,6 +1001,8 @@ impl App {
                     .map(|browser| browser.device_key().to_owned())
                 else {
                     self.device_fit_preview = None;
+                    self.device_fit_plan = None;
+                    self.device_fit_job = None;
                     return;
                 };
                 spawn_device_fit_import(
@@ -1002,7 +1011,17 @@ impl App {
                     user_id,
                     device_key,
                     target,
-                    &format_message!(&self.intl, default_message: "Importing the FIT file…"),
+                    (plan, job),
+                    FitImportMessages {
+                        progress: format_message!(
+                            &self.intl,
+                            default_message: "Importing the FIT file…",
+                        ),
+                        checking: format_message!(
+                            &self.intl,
+                            default_message: "Checking FIT import status…",
+                        ),
+                    },
                 );
             }
             None => {}
@@ -1097,19 +1116,28 @@ impl App {
                 state.device_fit_import.take(),
             )
         };
-        if let Some((requested_key, target, result)) = device_fit_preview
+        if let Some((requested_user, requested_key, target, result)) = device_fit_preview
+            && self
+                .selected_profile
+                .and_then(|index| self.profiles.get(index))
+                .is_some_and(|profile| profile.user.id() == requested_user)
             && self
                 .device_browser
                 .as_ref()
                 .is_some_and(|browser| browser.device_key() == requested_key)
         {
             match result {
-                Ok(preview) => {
+                Ok(plan) => {
                     let fit_preview =
-                        device_fit_preview::Preview::new(target, preview, &self.map_runtime);
+                        device_fit_preview::Preview::new(target, plan.preview, &self.map_runtime);
                     self.device_fit_preview = Some(fit_preview);
+                    self.device_fit_plan = Some(plan.id);
+                    self.device_fit_job = Some(plan.job);
                 }
                 Err(error) => {
+                    self.device_fit_preview = None;
+                    self.device_fit_plan = None;
+                    self.device_fit_job = None;
                     let title =
                         format_message!(&self.intl, default_message: "Could not open FIT file");
                     self.shared.borrow_mut().notice = Some(Notice::error(title, error));
@@ -1117,8 +1145,16 @@ impl App {
             }
         }
         if let Some(result) = device_fit_import {
+            let imported = matches!(
+                &result,
+                Ok(DeviceFitImportOutcome::Imported { .. } | DeviceFitImportOutcome::Duplicate)
+            );
             self.device_fit_preview = None;
-            self.page = Page::Activities;
+            self.device_fit_plan = None;
+            self.device_fit_job = None;
+            if imported {
+                self.page = Page::Activities;
+            }
             self.shared.borrow_mut().notice = Some(match result {
                 Ok(DeviceFitImportOutcome::Imported { activities }) => {
                     Notice::success(format_message!(
@@ -1233,6 +1269,8 @@ impl eframe::App for App {
         {
             self.device_browser = None;
             self.device_fit_preview = None;
+            self.device_fit_plan = None;
+            self.device_fit_job = None;
             self.page = Page::Activities;
         }
         if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
@@ -1276,6 +1314,7 @@ impl eframe::App for App {
         automation::dispatch_menu(ui.ctx());
         self.developer.update(&self.intl);
         self.update_file_window();
+        reconcile_pending_fit_import(Rc::clone(&self.shared), self.context.clone(), &self.intl);
         self.update_server_chooser();
         developer::update_logs(ui.ctx(), self.shared.borrow().logs.clone());
     }
@@ -1385,11 +1424,14 @@ struct State {
     connection_generation: u64,
     device_browser_refresh: Option<(String, Result<DeviceCatalogSnapshot, String>)>,
     device_fit_preview: Option<(
+        UserId,
         String,
         DeviceBrowserTarget,
-        Result<DeviceFitPreview, String>,
+        Result<DeviceFitImportPlan, String>,
     )>,
     device_fit_import: Option<Result<DeviceFitImportOutcome, String>>,
+    pending_fit_import: Option<PendingFitImport>,
+    reconciling_fit_import: Option<u64>,
     profile_creating: bool,
     profile_create_problem: Option<String>,
     created_profile: Option<UserId>,
@@ -1398,10 +1440,21 @@ struct State {
     disconnected_since_milliseconds: Option<f64>,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct PendingFitImport {
+    user_id: UserId,
+    job: uuid::Uuid,
+}
+
+struct FitImportMessages {
+    progress: String,
+    checking: String,
+}
+
 impl State {
     fn interrupt_device_browser_operation(&mut self) -> bool {
         let interrupted = self.active_device_browser_operation.take().is_some();
-        self.device_browser_interrupted |= interrupted;
+        self.device_browser_interrupted |= interrupted && self.pending_fit_import.is_none();
         interrupted
     }
 
@@ -1874,6 +1927,7 @@ struct DeviceUploadCopy {
 fn spawn_device_fit_preview(
     shared: Rc<RefCell<State>>,
     context: eframe::egui::Context,
+    user_id: UserId,
     device_key: String,
     target: DeviceBrowserTarget,
     progress: &str,
@@ -1883,7 +1937,7 @@ fn spawn_device_fit_preview(
     };
     spawn_local(async move {
         let result = client
-            .device_fit_preview(device_key.clone(), target.clone())
+            .device_fit_preview(user_id, device_key.clone(), target.clone())
             .await
             .map_err(ConnectError::call)
             .and_then(|result| result.map_err(ConnectError::domain))
@@ -1893,7 +1947,7 @@ fn spawn_device_fit_preview(
             return;
         }
         state.notice = None;
-        state.device_fit_preview = Some((device_key, target, result));
+        state.device_fit_preview = Some((user_id, device_key, target, result));
         drop(state);
         context.request_repaint();
     });
@@ -1905,19 +1959,30 @@ fn spawn_device_fit_import(
     user_id: UserId,
     device_key: String,
     target: DeviceBrowserTarget,
-    progress: &str,
+    review: (uuid::Uuid, uuid::Uuid),
+    messages: FitImportMessages,
 ) {
-    let Some((client, token)) = begin_device_browser_request(&shared, progress) else {
+    let Some((client, token)) = begin_device_browser_request(&shared, &messages.progress) else {
         return;
     };
+    let (plan, job) = review;
+    shared.borrow_mut().pending_fit_import = Some(PendingFitImport { user_id, job });
     spawn_local(async move {
-        let result = client
-            .import_device_fit(user_id, device_key, target)
+        let result = match client
+            .import_device_fit(user_id, device_key, target, plan)
             .await
-            .map_err(ConnectError::call)
-            .and_then(|result| result.map_err(ConnectError::domain))
-            .map_err(|error| error.to_string());
-        let profiles = if result.is_ok() {
+        {
+            Ok(result) => Some(result),
+            Err(error) => match wait_for_fit_import_settled(&client, user_id, job).await {
+                Ok(DeviceFitImportStatus::Completed) => Some(Ok(DeviceFitImportOutcome::Duplicate)),
+                Ok(DeviceFitImportStatus::Stopped) => {
+                    Some(Err(ConnectError::call(error).to_string()))
+                }
+                Ok(DeviceFitImportStatus::Running) => unreachable!("settled status is terminal"),
+                Err(_) => None,
+            },
+        };
+        let profiles = if matches!(result.as_ref(), Some(Ok(_))) {
             client.profiles().await.ok().and_then(Result::ok)
         } else {
             None
@@ -1926,10 +1991,102 @@ fn spawn_device_fit_import(
         if !finish_device_browser_request(&mut state, token) {
             return;
         }
+        if result.is_some() {
+            state.pending_fit_import = None;
+            state.reconciling_fit_import = None;
+        }
         if let Some(profiles) = profiles {
             state.profiles = Rc::new(profiles);
         }
-        state.device_fit_import = Some(result);
+        if let Some(result) = result {
+            state.device_fit_import = Some(result);
+        } else {
+            state.notice = Some(Notice::information(messages.checking));
+        }
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+async fn wait_for_fit_import_settled(
+    client: &ApplicationServiceClient,
+    user_id: UserId,
+    job: uuid::Uuid,
+) -> Result<DeviceFitImportStatus, ConnectError> {
+    loop {
+        match client
+            .device_fit_import_status(user_id, job)
+            .await
+            .map_err(ConnectError::call)?
+            .map_err(ConnectError::domain)?
+        {
+            DeviceFitImportStatus::Running => wait_milliseconds(1_000).await,
+            status => return Ok(status),
+        }
+    }
+}
+
+fn reconcile_pending_fit_import(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    intl: &Intl,
+) {
+    let (pending, generation, client) = {
+        let mut state = shared.borrow_mut();
+        let Some(pending) = state.pending_fit_import else {
+            return;
+        };
+        let generation = state.connection_generation;
+        if state.active_device_browser_operation.is_some()
+            || state.reconciling_fit_import == Some(generation)
+        {
+            return;
+        }
+        let Some(client) = state.client.clone() else {
+            return;
+        };
+        state.reconciling_fit_import = Some(generation);
+        (pending, generation, client)
+    };
+    let stopped_message = format_message!(
+        intl,
+        default_message: "The FIT import stopped before it completed. Open the file again to retry.",
+    );
+    spawn_local(async move {
+        let status = loop {
+            let status = wait_for_fit_import_settled(&client, pending.user_id, pending.job).await;
+            if let Ok(status) = status {
+                break status;
+            }
+            let still_pending = {
+                let state = shared.borrow();
+                state.connection_generation == generation
+                    && state.pending_fit_import == Some(pending)
+            };
+            if !still_pending {
+                return;
+            }
+            wait_milliseconds(1_000).await;
+        };
+        let profiles = if status == DeviceFitImportStatus::Completed {
+            client.profiles().await.ok().and_then(Result::ok)
+        } else {
+            None
+        };
+        let mut state = shared.borrow_mut();
+        if state.connection_generation != generation || state.pending_fit_import != Some(pending) {
+            return;
+        }
+        state.pending_fit_import = None;
+        state.reconciling_fit_import = None;
+        if let Some(profiles) = profiles {
+            state.profiles = Rc::new(profiles);
+        }
+        state.device_fit_import = Some(match status {
+            DeviceFitImportStatus::Completed => Ok(DeviceFitImportOutcome::Duplicate),
+            DeviceFitImportStatus::Stopped => Err(stopped_message),
+            DeviceFitImportStatus::Running => unreachable!("settled status is terminal"),
+        });
         drop(state);
         context.request_repaint();
     });
@@ -1956,7 +2113,7 @@ fn begin_device_browser_request(
 }
 
 fn device_browser_busy(state: &State) -> bool {
-    state.active_device_browser_operation.is_some()
+    state.active_device_browser_operation.is_some() || state.pending_fit_import.is_some()
 }
 
 fn finish_device_browser_request(state: &mut State, token: DeviceBrowserOperationToken) -> bool {
@@ -2088,10 +2245,12 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                             if state.epoch.as_ref() != Some(&epoch) {
                                 let backup = std::mem::take(&mut state.backup);
                                 let maps = std::mem::take(&mut state.maps);
+                                let pending_fit_import = state.pending_fit_import;
                                 let generation = state.connection_generation.wrapping_add(1);
                                 *state = State {
                                     backup,
                                     maps,
+                                    pending_fit_import,
                                     connection_generation: generation,
                                     ..State::default()
                                 };
@@ -2171,6 +2330,7 @@ fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     state.logs = None;
     state.interrupt_device_browser_operation();
     state.device_catalog_request.invalidate();
+    state.reconciling_fit_import = None;
     state.connection_generation = state.connection_generation.wrapping_add(1);
     if state.profiles_loaded && state.disconnected_since_milliseconds.is_none() {
         state.disconnected_since_milliseconds = Some(js_sys::Date::now());

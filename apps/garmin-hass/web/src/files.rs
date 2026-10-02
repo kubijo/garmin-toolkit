@@ -97,6 +97,8 @@ impl crate::App {
         self.files.view = None;
         self.device_browser = None;
         self.device_fit_preview = None;
+        self.device_fit_plan = None;
+        self.device_fit_job = None;
         let mut state = self.shared.borrow_mut();
         // Late results must not restore another user's catalogue or FIT preview.
         state.device_catalog_request.invalidate();
@@ -106,6 +108,8 @@ impl crate::App {
         state.device_browser_interrupted = false;
         state.device_fit_preview = None;
         state.device_fit_import = None;
+        state.pending_fit_import = None;
+        state.reconciling_fit_import = None;
         state.notice = None;
     }
 

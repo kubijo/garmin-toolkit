@@ -260,6 +260,21 @@ impl Application {
         Ok(FitImportResult::from_outcome(outcome, disposition))
     }
 
+    /// Reports whether a selected FIT acquisition was committed for this profile.
+    /// # Errors
+    /// [`enum@Error`] when persisted acquisition state cannot be loaded.
+    pub async fn fit_import_completed(
+        &self,
+        user: UserContext,
+        operation: AcquisitionOperationId,
+    ) -> Result<bool, Error> {
+        Ok(self
+            .storage
+            .acquisition_time(user.user_id(), operation)
+            .await?
+            .is_some())
+    }
+
     /// Inspects GPX bytes without storing them.
     /// # Errors
     /// [`enum@Error`] when the GPX document cannot be parsed.

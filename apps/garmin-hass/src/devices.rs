@@ -1,6 +1,6 @@
 use garmin_model::{
     artifact::{AcquisitionOperationId, ArtifactDigest, SourceIdentity},
-    identity::{DisplayName, Source as ProfileSource, SourceId},
+    identity::{DisplayName, Source as ProfileSource, SourceId, UserId},
     observation::ObservationId,
     value::Timestamp,
 };
@@ -9,15 +9,17 @@ use garmin_service_api::{
     ActivityDetailSnapshot, ActivitySnapshot, ApplicationService, AvatarUpload,
     DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogEntry,
     DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceCatalogStorage, DeviceFitImportOutcome,
-    DeviceFitPreview, DeviceFitPreviewActivity, DeviceSnapshot, DownloadTicket,
-    ProfileAvatarSnapshot, ProfileSnapshot,
+    DeviceFitImportPlan, DeviceFitImportStatus, DeviceFitPreview, DeviceFitPreviewActivity,
+    DeviceSnapshot, DownloadTicket, ProfileAvatarSnapshot, ProfileSnapshot,
 };
 use garmin_services::{
     Application, AvatarImportRequest, FitImportRequest, FitImportResult, ImportDisposition,
-    UserContext, deployment::Deployment, snapshots::SnapshotOperations,
+    UserContext, deployment::Deployment, devices::fit_import::Plan as FitPlan,
+    snapshots::SnapshotOperations,
 };
 use remoc::prelude::ServerShared as _;
 use remoc::{rch, rtc};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -36,7 +38,71 @@ const AVATAR_OPERATION_ID_DOMAIN_V1: &[u8] =
     b"garmin-toolkit/browser-profile-pictures/acquisition/v1";
 const DEVICE_SOURCE_LABEL: &str = "Connected Garmin device";
 const DEVICE_SOURCE_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/device-files/source/v1";
-const DEVICE_OPERATION_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/device-files/acquisition/v1";
+const MAX_FIT_PLANS: usize = 64;
+
+struct FitPlans {
+    epoch: Uuid,
+    issued: HashMap<Uuid, Uuid>,
+    order: VecDeque<Uuid>,
+    active: HashSet<(UserId, Uuid)>,
+}
+
+impl FitPlans {
+    fn new(epoch: Uuid) -> Self {
+        Self {
+            epoch,
+            issued: HashMap::new(),
+            order: VecDeque::new(),
+            active: HashSet::new(),
+        }
+    }
+
+    fn reset_for_epoch(&mut self, epoch: Uuid) {
+        if self.epoch != epoch {
+            self.epoch = epoch;
+            self.issued.clear();
+            self.order.clear();
+            self.active.clear();
+        }
+    }
+
+    fn issue(&mut self, id: Uuid, job: Uuid) {
+        if self.order.len() == MAX_FIT_PLANS
+            && let Some(expired) = self.order.pop_front()
+        {
+            self.issued.remove(&expired);
+        }
+        self.order.push_back(id);
+        self.issued.insert(id, job);
+    }
+
+    fn begin(&mut self, user_id: UserId, approval: Uuid) -> Result<Uuid, &'static str> {
+        let job = *self
+            .issued
+            .get(&approval)
+            .ok_or("the FIT file changed since review; open it again")?;
+        if !self.active.insert((user_id, job)) {
+            return Err("this FIT import is already running");
+        }
+        Ok(job)
+    }
+}
+
+struct FitImportLease {
+    plans: Arc<Mutex<FitPlans>>,
+    epoch: Uuid,
+    user_id: UserId,
+    job: Uuid,
+}
+
+impl Drop for FitImportLease {
+    fn drop(&mut self) {
+        let mut plans = self.plans.lock().unwrap_or_else(PoisonError::into_inner);
+        if plans.epoch == self.epoch {
+            plans.active.remove(&(self.user_id, self.job));
+        }
+    }
+}
 
 pub(super) trait Source: Send {
     fn map_connector(
@@ -90,6 +156,7 @@ pub(super) struct Host {
     deployment: Arc<Deployment>,
     operations: Arc<SnapshotOperations>,
     maps: Arc<garmin_services::maps::Operations>,
+    fit_plans: Arc<Mutex<FitPlans>>,
     snapshot_session:
         Arc<tokio::sync::Mutex<Option<Arc<garmin_services::snapshots::SnapshotSession>>>>,
     epoch: Uuid,
@@ -113,16 +180,18 @@ impl Host {
             garmin_storage::snapshot::Limits::default(),
         )
         .expect("built-in snapshot limits are valid");
+        let epoch = deployment.epoch();
         Arc::new(Self {
             maps: Arc::new(
                 garmin_services::maps::Operations::new(Arc::clone(&deployment))
                     .with_simulation_write_rate(bytes_per_second),
             ),
+            fit_plans: Arc::new(Mutex::new(FitPlans::new(epoch))),
             source: Arc::new(Mutex::new(source)),
             snapshots: Arc::new(snapshots),
             downloads: crate::downloads::Downloads::default(),
             refresh_gate: Arc::new(tokio::sync::Mutex::new(())),
-            epoch: deployment.epoch(),
+            epoch,
             deployment,
             operations,
             snapshot_session: Arc::default(),
@@ -144,9 +213,14 @@ impl Host {
     }
 
     pub(super) fn with_control(&self, control: Option<crate::control::Connection>) -> Arc<Self> {
+        let epoch = self.deployment.epoch();
+        self.fit_plans
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .reset_for_epoch(epoch);
         Arc::new(Self {
             control,
-            epoch: self.deployment.epoch(),
+            epoch,
             snapshot_session: Arc::default(),
             ..self.clone()
         })
@@ -410,12 +484,30 @@ impl ApplicationService for Host {
 
     async fn device_fit_preview(
         &self,
+        user_id: garmin_model::identity::UserId,
         device_key: String,
         target: DeviceBrowserTarget,
-    ) -> Result<Result<DeviceFitPreview, String>, rtc::CallError> {
-        let result = read_device_browser_file(Arc::clone(&self.source), device_key, target)
-            .await
-            .and_then(|download| device_fit_preview(download.file_name, &download.bytes));
+    ) -> Result<Result<DeviceFitImportPlan, String>, rtc::CallError> {
+        let _lease = self.application().await?;
+        let result = async {
+            let identity = device_fit_identity(&device_key, &target)?;
+            let source = device_source(UserContext::new(user_id))?;
+            let download =
+                read_device_browser_file(Arc::clone(&self.source), device_key, target).await?;
+            let plan = FitPlan::for_file(&source, &identity, &download.bytes);
+            Ok(DeviceFitImportPlan {
+                id: plan.id(),
+                job: plan.job(),
+                preview: device_fit_preview(download.file_name, &download.bytes)?,
+            })
+        }
+        .await;
+        if let Ok(plan) = &result {
+            self.fit_plans
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .issue(plan.id, plan.job);
+        }
         Ok(result)
     }
 
@@ -424,15 +516,101 @@ impl ApplicationService for Host {
         user_id: garmin_model::identity::UserId,
         device_key: String,
         target: DeviceBrowserTarget,
+        approval: Uuid,
     ) -> Result<Result<DeviceFitImportOutcome, String>, rtc::CallError> {
-        Ok(import_device_fit(
-            &*self.application().await?,
-            Arc::clone(&self.source),
-            UserContext::new(user_id),
-            device_key,
-            target,
-        )
-        .await)
+        let lease = self.application().await?;
+        let identity = match device_fit_identity(&device_key, &target) {
+            Ok(identity) => identity,
+            Err(error) => return Ok(Err(error)),
+        };
+        let job = match self
+            .fit_plans
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .begin(user_id, approval)
+        {
+            Ok(job) => job,
+            Err(error) => return Ok(Err(error.to_owned())),
+        };
+        let import_lease = FitImportLease {
+            plans: Arc::clone(&self.fit_plans),
+            epoch: self.epoch,
+            user_id,
+            job,
+        };
+        let bytes =
+            match read_device_browser_file(Arc::clone(&self.source), device_key, target).await {
+                Ok(download) => download.bytes,
+                Err(error) => return Ok(Err(error)),
+            };
+        let user = UserContext::new(user_id);
+        let source = match device_source(user) {
+            Ok(source) => source,
+            Err(error) => return Ok(Err(error)),
+        };
+        let plan = FitPlan::for_file(&source, &identity, &bytes);
+        if job != plan.job() {
+            return Ok(Err(
+                "the FIT file changed since review; open it again".to_owned()
+            ));
+        }
+        let deployment = Arc::clone(&self.deployment);
+        let epoch = self.epoch;
+        drop(lease);
+        let result = tokio::spawn(async move {
+            let _import_lease = import_lease;
+            let application = deployment
+                .application(epoch)
+                .await
+                .map_err(|error| error.to_string())?;
+            import_device_fit(
+                &application,
+                user,
+                &source,
+                identity,
+                plan.operation(),
+                &bytes,
+            )
+            .await
+        })
+        .await
+        .map_err(|error| error.to_string());
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => return Ok(Err(error)),
+        };
+        Ok(result)
+    }
+
+    async fn device_fit_import_status(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        job: Uuid,
+    ) -> Result<Result<DeviceFitImportStatus, String>, rtc::CallError> {
+        let application = self.application().await?;
+        if self
+            .fit_plans
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .active
+            .contains(&(user_id, job))
+        {
+            return Ok(Ok(DeviceFitImportStatus::Running));
+        }
+        Ok(application
+            .fit_import_completed(
+                UserContext::new(user_id),
+                AcquisitionOperationId::from_u128(job.as_u128()),
+            )
+            .await
+            .map(|completed| {
+                if completed {
+                    DeviceFitImportStatus::Completed
+                } else {
+                    DeviceFitImportStatus::Stopped
+                }
+            })
+            .map_err(|error| error.to_string()))
     }
 
     async fn profiles(&self) -> Result<Result<Vec<ProfileSnapshot>, String>, rtc::CallError> {
@@ -594,21 +772,6 @@ fn avatar_operation_id(
     digest.update(&crop.left.to_le_bytes());
     digest.update(&crop.top.to_le_bytes());
     digest.update(&crop.edge.to_le_bytes());
-    let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, digest.finalize().as_bytes());
-    AcquisitionOperationId::from_u128(id.as_u128())
-}
-
-fn device_operation_id(
-    source: &ProfileSource,
-    identity: &SourceIdentity,
-    bytes: &[u8],
-) -> AcquisitionOperationId {
-    let mut digest = blake3::Hasher::new();
-    digest.update(DEVICE_OPERATION_ID_DOMAIN_V1);
-    digest.update(source.id().to_string().as_bytes());
-    digest.update(&(identity.as_str().len() as u64).to_le_bytes());
-    digest.update(identity.as_str().as_bytes());
-    digest.update(ArtifactDigest::from_bytes(bytes).as_blake3().as_bytes());
     let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, digest.finalize().as_bytes());
     AcquisitionOperationId::from_u128(id.as_u128())
 }
@@ -841,29 +1004,33 @@ fn device_fit_preview(file_name: String, bytes: &[u8]) -> Result<DeviceFitPrevie
     })
 }
 
-async fn import_device_fit(
-    application: &Application,
-    browser: Arc<Mutex<Box<dyn Source>>>,
-    user: UserContext,
-    device_key: String,
-    target: DeviceBrowserTarget,
-) -> Result<DeviceFitImportOutcome, String> {
-    let identity = SourceIdentity::from_string(format!(
+fn device_fit_identity(
+    device_key: &str,
+    target: &DeviceBrowserTarget,
+) -> Result<SourceIdentity, String> {
+    SourceIdentity::from_string(format!(
         "device/{device_key}/{}/{}",
         target.storage_id, target.path
     ))
-    .map_err(|error| error.to_string())?;
-    let download = read_device_browser_file(browser, device_key, target).await?;
-    let source = device_source(user)?;
-    let operation = device_operation_id(&source, &identity, &download.bytes);
+    .map_err(|error| error.to_string())
+}
+
+async fn import_device_fit(
+    application: &Application,
+    user: UserContext,
+    source: &ProfileSource,
+    identity: SourceIdentity,
+    operation: AcquisitionOperationId,
+    bytes: &[u8],
+) -> Result<DeviceFitImportOutcome, String> {
     let result = application
         .import_fit(FitImportRequest::from_parts(
             user,
-            &source,
+            source,
             identity,
             operation,
             timestamp(SystemTime::now())?,
-            &download.bytes,
+            bytes,
         ))
         .await
         .map_err(|error| error.to_string())?;
@@ -1075,10 +1242,11 @@ fn device_snapshot(presentation: garmin_device::attachments::Presentation) -> De
 #[cfg(test)]
 mod tests {
     use std::io::{Cursor, Write as _};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use super::{
-        DeviceBrowserFile, Host, Source, SourceProvider,
+        DeviceBrowserFile, FitImportLease, Host, Source, SourceProvider,
         demo::{
             DEVICE_KEY as DEMO_DEVICE_KEY, Provider as DemoProvider, STORAGE_ID as DEMO_STORAGE_ID,
         },
@@ -1088,12 +1256,13 @@ mod tests {
     use garmin_service_api::{
         ApplicationService as _, AvatarCrop, AvatarUpload, DeviceBrowserRequest,
         DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogEntryKind, DeviceCatalogSnapshot,
-        DeviceFitImportOutcome, DeviceSnapshot, InspectionState,
+        DeviceFitImportOutcome, DeviceFitImportStatus, DeviceSnapshot, InspectionState,
     };
     use image::{DynamicImage, ImageFormat, RgbImage};
+    use uuid::Uuid;
 
     struct FitSource {
-        bytes: Vec<u8>,
+        bytes: Arc<Mutex<Vec<u8>>>,
     }
 
     fn demo_source(directory: &tempfile::TempDir) -> Box<dyn Source> {
@@ -1202,7 +1371,7 @@ mod tests {
             let mut temporary =
                 tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
             temporary
-                .write_all(&self.bytes)
+                .write_all(&self.bytes.lock().unwrap())
                 .and_then(|()| temporary.flush())
                 .and_then(|()| temporary.as_file().sync_all())
                 .map_err(|error| error.to_string())?;
@@ -1440,48 +1609,298 @@ mod tests {
         );
     }
 
+    fn fit_target() -> DeviceBrowserTarget {
+        DeviceBrowserTarget {
+            storage_id: "internal".to_owned(),
+            path: "Garmin/Activity/activity.fit".into(),
+            kind: DeviceCatalogEntryKind::File,
+        }
+    }
+
     #[tokio::test]
-    async fn device_fit_preview_and_import_use_the_shared_service_contract() {
+    async fn device_fit_preview_approval_binds_profile_and_bytes() {
         let directory = tempfile::tempdir().unwrap();
         let storage = crate::prepare_deployment(directory.path()).await.unwrap();
-        let bytes = fixture::activity(fixture::Sport::Cycling).unwrap();
-        let host = Host::new(Box::new(FitSource { bytes }), storage);
+        let original = fixture::activity(fixture::Sport::Cycling).unwrap();
+        let bytes = Arc::new(Mutex::new(original.clone()));
+        let host = Host::new(
+            Box::new(FitSource {
+                bytes: Arc::clone(&bytes),
+            }),
+            storage,
+        );
         let user = host
             .create_profile("Mock Rider".to_owned())
             .await
             .unwrap()
             .unwrap();
-        let target = DeviceBrowserTarget {
-            storage_id: "internal".to_owned(),
-            path: "Garmin/Activity/activity.fit".into(),
-            kind: DeviceCatalogEntryKind::File,
-        };
+        let target = fit_target();
 
         let preview = host
-            .device_fit_preview("device".to_owned(), target.clone())
+            .device_fit_preview(user.id(), "device".to_owned(), target.clone())
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(preview.file_name, "activity.fit");
-        assert_eq!(preview.activities.len(), 1);
+        assert_eq!(preview.preview.file_name, "activity.fit");
+        assert_eq!(preview.preview.activities.len(), 1);
+        assert_ne!(preview.id, preview.job);
+        let other_user = host
+            .create_profile("Other Rider".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let other_plan = host
+            .device_fit_preview(other_user.id(), "device".to_owned(), target.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(other_plan.id, preview.id);
+        assert!(
+            host.import_device_fit(
+                user.id(),
+                "device".to_owned(),
+                target.clone(),
+                Uuid::new_v4(),
+            )
+            .await
+            .unwrap()
+            .unwrap_err()
+            .contains("changed since review")
+        );
+        assert!(
+            host.import_device_fit(
+                other_user.id(),
+                "device".to_owned(),
+                target.clone(),
+                preview.id,
+            )
+            .await
+            .unwrap()
+            .unwrap_err()
+            .contains("changed since review")
+        );
+
+        *bytes.lock().unwrap() = fixture::activity(fixture::Sport::Running).unwrap();
+        let stale = host
+            .import_device_fit(user.id(), "device".to_owned(), target.clone(), preview.id)
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(stale.contains("changed since review"));
+        assert_eq!(
+            host.device_fit_import_status(user.id(), preview.job)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportStatus::Stopped
+        );
+    }
+
+    #[tokio::test]
+    async fn device_fit_import_is_idempotent_after_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let storage = crate::prepare_deployment(directory.path()).await.unwrap();
+        let bytes = Arc::new(Mutex::new(
+            fixture::activity(fixture::Sport::Cycling).unwrap(),
+        ));
+        let host = Host::new(
+            Box::new(FitSource {
+                bytes: Arc::clone(&bytes),
+            }),
+            storage,
+        );
+        let user = host
+            .create_profile("Mock Rider".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let target = fit_target();
+        let preview = host
+            .device_fit_preview(user.id(), "device".to_owned(), target.clone())
+            .await
+            .unwrap()
+            .unwrap();
 
         let first = host
-            .import_device_fit(user.id(), "device".to_owned(), target.clone())
+            .import_device_fit(user.id(), "device".to_owned(), target.clone(), preview.id)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(first, DeviceFitImportOutcome::Imported { activities: 1 });
         let second = host
-            .import_device_fit(user.id(), "device".to_owned(), target)
+            .import_device_fit(user.id(), "device".to_owned(), target.clone(), preview.id)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(second, DeviceFitImportOutcome::Duplicate);
+        assert_eq!(
+            host.device_fit_import_status(user.id(), preview.job)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportStatus::Completed
+        );
+        let other_user = host
+            .create_profile("Other Rider".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            host.device_fit_import_status(other_user.id(), preview.job)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportStatus::Stopped
+        );
         let profiles = host.profiles().await.unwrap().unwrap();
         let imported = profiles
             .iter()
             .find(|profile| profile.user.id() == user.id())
             .unwrap();
         assert_eq!(imported.activities.len(), 1);
+
+        let user_id = user.id();
+        host.deployment.close().await;
+        drop(host);
+        let reopened = crate::prepare_deployment(directory.path()).await.unwrap();
+        let restarted = Host::new(Box::new(FitSource { bytes }), reopened);
+        assert_eq!(
+            restarted
+                .device_fit_import_status(user_id, preview.job)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportStatus::Completed
+        );
+        assert!(
+            restarted
+                .import_device_fit(user_id, "device".to_owned(), target.clone(), preview.id)
+                .await
+                .unwrap()
+                .unwrap_err()
+                .contains("changed since review")
+        );
+        let renewed = restarted
+            .device_fit_preview(user_id, "device".to_owned(), target.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(renewed.id, preview.id);
+        assert_eq!(renewed.job, preview.job);
+        assert_eq!(
+            restarted
+                .import_device_fit(user_id, "device".to_owned(), target, renewed.id)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportOutcome::Duplicate
+        );
+    }
+
+    #[tokio::test]
+    async fn fit_import_status_tracks_running_job_and_blocks_concurrent_retry() {
+        let directory = tempfile::tempdir().unwrap();
+        let deployment = crate::prepare_deployment(directory.path()).await.unwrap();
+        let bytes = Arc::new(Mutex::new(
+            fixture::activity(fixture::Sport::Cycling).unwrap(),
+        ));
+        let host = Host::new(Box::new(FitSource { bytes }), deployment);
+        let user = host
+            .create_profile("Mock Rider".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let target = fit_target();
+        let preview = host
+            .device_fit_preview(user.id(), "device".to_owned(), target.clone())
+            .await
+            .unwrap()
+            .unwrap();
+
+        let job = host
+            .fit_plans
+            .lock()
+            .unwrap()
+            .begin(user.id(), preview.id)
+            .unwrap();
+        let lease = FitImportLease {
+            plans: Arc::clone(&host.fit_plans),
+            epoch: host.epoch,
+            user_id: user.id(),
+            job,
+        };
+        assert_eq!(
+            host.device_fit_import_status(user.id(), job)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportStatus::Running
+        );
+        assert!(
+            host.import_device_fit(user.id(), "device".to_owned(), target.clone(), preview.id)
+                .await
+                .unwrap()
+                .unwrap_err()
+                .contains("already running")
+        );
+
+        drop(lease);
+        assert_eq!(
+            host.device_fit_import_status(user.id(), job)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportStatus::Stopped
+        );
+        assert_eq!(
+            host.import_device_fit(user.id(), "device".to_owned(), target, preview.id)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportOutcome::Imported { activities: 1 }
+        );
+        assert_eq!(
+            host.device_fit_import_status(user.id(), job)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportStatus::Completed
+        );
+    }
+
+    #[tokio::test]
+    async fn fit_approval_survives_reconnect_after_deployment_epoch_change() {
+        let directory = tempfile::tempdir().unwrap();
+        let deployment = crate::prepare_deployment(directory.path()).await.unwrap();
+        let bytes = Arc::new(Mutex::new(
+            fixture::activity(fixture::Sport::Cycling).unwrap(),
+        ));
+        let host = Host::new(Box::new(FitSource { bytes }), deployment);
+        let user = host
+            .create_profile("Mock Rider".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        // The server's root Host retains its original epoch after a database restore.
+        let stale_root = Host {
+            epoch: Uuid::new_v4(),
+            ..(*host).clone()
+        };
+        let first = stale_root.with_control(None);
+        let target = fit_target();
+        let preview = first
+            .device_fit_preview(user.id(), "device".to_owned(), target.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        let reconnected = stale_root.with_control(None);
+        assert_eq!(
+            reconnected
+                .import_device_fit(user.id(), "device".to_owned(), target, preview.id)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportOutcome::Imported { activities: 1 }
+        );
     }
 }
