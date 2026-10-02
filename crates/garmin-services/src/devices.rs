@@ -1,5 +1,7 @@
 //! Shared, read-only device inspection for local and remote clients.
 
+pub mod fit_import;
+
 use garmin_device::{attachments::Metadata, storage::DeviceRead};
 use garmin_model::device::{
     DeviceInspection, InspectionFailure, InspectionFailureKind, InspectionSection,

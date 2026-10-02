@@ -479,8 +479,10 @@ impl super::App {
             chooser::close(&mut state.backup, &self.context);
             state.backup.recovery = recovery::Discovery::default();
         }
+        let pending_fit_import = self.shared.borrow().pending_fit_import;
         self.selected_profile = None;
         self.sync_file_window_owner();
+        self.shared.borrow_mut().pending_fit_import = pending_fit_import;
         self.page = garmin_ui::workspace::Page::Activities;
         self.profile_menu_expanded = false;
         self.selected_activity = 0;
@@ -494,5 +496,7 @@ impl super::App {
         self.avatar_editor = None;
         self.device_browser = None;
         self.device_fit_preview = None;
+        self.device_fit_plan = None;
+        self.device_fit_job = None;
     }
 }

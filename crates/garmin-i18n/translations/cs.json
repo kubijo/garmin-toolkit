@@ -569,6 +569,10 @@
     "source": "Minimize window",
     "translation": "Minimalizovat okno"
   },
+  "DIak58D1DQ": {
+    "source": "Checking FIT import status…",
+    "translation": "Kontrola stavu importu FIT…"
+  },
   "DUIDEquXSb": {
     "source": "Storage",
     "translation": "Úložiště"
@@ -1970,6 +1974,10 @@
   "sZ+6emuebS": {
     "source": "Garmin map components",
     "translation": "Mapové komponenty Garmin"
+  },
+  "sdOt3rN4Dm": {
+    "source": "The FIT import stopped before it completed. Open the file again to retry.",
+    "translation": "Import FIT se zastavil před dokončením. Otevřete soubor znovu a opakujte pokus."
   },
   "sk6RoEELTT": {
     "source": "Check available maps",

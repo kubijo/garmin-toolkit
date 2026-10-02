@@ -100,6 +100,14 @@ pub struct DeviceFitPreview {
     pub activities: Vec<DeviceFitPreviewActivity>,
 }
 
+/// A reviewed device FIT file, bound to exact bytes and a profile.
+#[garmin_macros::portable]
+pub struct DeviceFitImportPlan {
+    pub id: uuid::Uuid,
+    pub job: uuid::Uuid,
+    pub preview: DeviceFitPreview,
+}
+
 #[garmin_macros::portable]
 pub struct DeviceFitPreviewActivity {
     pub source: String,
@@ -112,6 +120,13 @@ pub enum DeviceFitImportOutcome {
     Imported { activities: u64 },
     Duplicate,
     Rejected { reason: String },
+}
+
+#[garmin_macros::portable(copy, eq)]
+pub enum DeviceFitImportStatus {
+    Running,
+    Completed,
+    Stopped,
 }
 
 #[garmin_macros::portable(copy, eq)]
@@ -284,7 +299,8 @@ mod rpc {
     use super::{
         ActivityDetailSnapshot, AvatarUpload, DeploymentMode, DeviceBrowserRequest,
         DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogSnapshot, DeviceFitImportOutcome,
-        DeviceFitPreview, DeviceSnapshot, DownloadTicket, ProfileAvatarSnapshot, ProfileSnapshot,
+        DeviceFitImportPlan, DeviceFitImportStatus, DeviceSnapshot, DownloadTicket,
+        ProfileAvatarSnapshot, ProfileSnapshot,
     };
     use garmin_model::{
         identity::{ProfilePreferences, User, UserId},
@@ -349,15 +365,22 @@ mod rpc {
         ) -> Result<Result<DownloadTicket, String>, rtc::CallError>;
         async fn device_fit_preview(
             &self,
+            user_id: UserId,
             device_key: String,
             target: DeviceBrowserTarget,
-        ) -> Result<Result<DeviceFitPreview, String>, rtc::CallError>;
+        ) -> Result<Result<DeviceFitImportPlan, String>, rtc::CallError>;
         async fn import_device_fit(
             &self,
             user_id: UserId,
             device_key: String,
             target: DeviceBrowserTarget,
+            plan: uuid::Uuid,
         ) -> Result<Result<DeviceFitImportOutcome, String>, rtc::CallError>;
+        async fn device_fit_import_status(
+            &self,
+            user_id: UserId,
+            job: uuid::Uuid,
+        ) -> Result<Result<DeviceFitImportStatus, String>, rtc::CallError>;
         async fn profiles(&self) -> Result<Result<Vec<ProfileSnapshot>, String>, rtc::CallError>;
         async fn create_profile(
             &self,

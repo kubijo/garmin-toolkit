@@ -8,6 +8,8 @@ Public service-boundary models must be explicitly reviewed and added to the appr
 
 The map workflow models use owned, Postcard-compatible values and fixed-width counts. Commands carry opaque request,
 revision, and approval identities; host captures, transport handles, payloads, and raw progress events stay server-side.
+`DeviceFitImportPlan` carries opaque review/job IDs and the existing owned FIT preview; device bytes stay server-side.
+`DeviceFitImportStatus` carries only a fixed lifecycle state; the host retains the running job and stored acquisition.
 
 ```grit
 language rust
@@ -65,8 +67,10 @@ or {
     `DeviceBrowserUpload`,
     `DownloadTicket`,
     `DeviceFitPreview`,
+    `DeviceFitImportPlan`,
     `DeviceFitPreviewActivity`,
     `DeviceFitImportOutcome`,
+    `DeviceFitImportStatus`,
     `DeviceCapability`,
     `DeviceDataType`,
     `DeploymentMode`,

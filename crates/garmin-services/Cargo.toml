@@ -16,6 +16,7 @@ dirs.workspace = true
 garmin-color.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
+blake3.workspace = true
 fs2.workspace = true
 garmin-service-api.workspace = true
 garmin-capture.workspace = true
