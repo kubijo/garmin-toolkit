@@ -21,6 +21,8 @@ pub enum Action {
     ClearRecovery,
     DiscardPreparation,
     Refresh,
+    ReviewRecovery,
+    ApproveRecovery,
 }
 
 #[garmin_macros::portable(copy, eq)]
@@ -91,6 +93,19 @@ pub struct Recovery {
     pub removal: bool,
     pub simulated: bool,
     pub actions: Vec<Action>,
+    pub review: Option<RecoveryReview>,
+}
+
+#[garmin_macros::portable(eq)]
+pub struct RecoveryReview {
+    pub approval: Uuid,
+    pub files: Vec<RecoveryFile>,
+}
+
+#[garmin_macros::portable(eq)]
+pub struct RecoveryFile {
+    pub storage: String,
+    pub path: String,
 }
 
 #[garmin_macros::portable(eq)]
@@ -121,6 +136,8 @@ pub struct Outcome {
     pub id: Uuid,
     pub phase: Phase,
     pub message: String,
+    #[serde(default)]
+    pub recovered: bool,
 }
 
 #[garmin_macros::portable(eq)]
@@ -159,6 +176,8 @@ pub enum Command {
     ClearRecovery,
     DiscardPreparation,
     Refresh,
+    ReviewRecovery,
+    ApproveRecovery { approval: Uuid },
 }
 
 #[garmin_macros::portable(eq)]

@@ -478,3 +478,224 @@ async fn retained_simulation_recovery_reopens_the_copy_and_never_mutates_its_sou
     server.shutdown().await?;
     Ok(())
 }
+
+const ASSISTED_WORKER_ROOT: &str = "GARMIN_MAP_ASSISTED_WORKER_ROOT";
+
+#[tokio::test]
+async fn assisted_recovery_crash_worker() -> Result<()> {
+    let Some(root) = std::env::var_os(ASSISTED_WORKER_ROOT).map(PathBuf::from) else {
+        return Ok(());
+    };
+    let server = MockServer::start().await?;
+    let mut configuration = settings(&root, &server);
+    configuration.simulation_write_bytes_per_second = std::num::NonZeroU64::new(1_000_000);
+    let session = Operations::default().connect("fixture".to_owned(), configuration);
+    settled(&session).await;
+    session
+        .submit(change(&session, Command::ContactService))
+        .unwrap();
+    settled(&session).await;
+    session
+        .submit(change(
+            &session,
+            Command::Choose {
+                component: 0,
+                choice: Choice::Install,
+            },
+        ))
+        .unwrap();
+    session
+        .submit(change(&session, Command::DryRun(true)))
+        .unwrap();
+    session.submit(change(&session, Command::Review)).unwrap();
+    let approval = settled(&session).await.plan.unwrap().approval;
+    session
+        .submit(change(&session, Command::Approve { approval }))
+        .unwrap();
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+async fn interrupted_simulation(root: &Path) -> Result<PathBuf> {
+    struct Worker(std::process::Child);
+    impl Drop for Worker {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut worker = Worker(
+        std::process::Command::new(std::env::current_exe()?)
+            .args(["--exact", "assisted_recovery_crash_worker", "--nocapture"])
+            .env(ASSISTED_WORKER_ROOT, root)
+            .spawn()?,
+    );
+    let capture = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(entries) = std::fs::read_dir(root.join("captures")) {
+                for entry in entries {
+                    let capture = entry?.path();
+                    if !capture
+                        .join("mounted-update/transaction/000000-prepared.json")
+                        .exists()
+                    {
+                        continue;
+                    }
+                    let events = std::fs::read_to_string(capture.join("events.jsonl"))?;
+                    let writing = events
+                        .lines()
+                        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                        .any(|event| {
+                            event["stage"] == "commit"
+                                && event["path"] == "Garmin/Mock/europe.img"
+                                && event["completed"]
+                                    .as_u64()
+                                    .is_some_and(|bytes| bytes >= 100_000)
+                        });
+                    if writing {
+                        return Ok::<_, anyhow::Error>(capture);
+                    }
+                }
+            }
+            if let Some(status) = worker.0.try_wait()? {
+                anyhow::bail!("simulation worker exited before interruption: {status}");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await??;
+    worker.0.kill()?;
+    worker.0.wait()?;
+    Ok(capture)
+}
+
+#[tokio::test]
+async fn assisted_recovery_requires_current_approval_and_survives_client_reconnect() -> Result<()> {
+    use garmin_service_api::maps::Action;
+    let root = tempfile::tempdir()?;
+    garmin_simulator::create_fixture(&root.path().join("device")).await?;
+    let capture = interrupted_simulation(root.path()).await?;
+    let server = MockServer::start().await?;
+    let operations = Operations::default();
+    let session = operations.connect("fixture".to_owned(), settings(root.path(), &server));
+    assert_eq!(settled(&session).await.phase, Phase::Recovery);
+    assert_eq!(
+        session
+            .submit(change(
+                &session,
+                Command::ApproveRecovery {
+                    approval: Uuid::new_v4()
+                }
+            ))
+            .unwrap_err()
+            .kind,
+        FailureKind::Unavailable
+    );
+    session.submit(change(&session, Command::Recover)).unwrap();
+    let blocked = settled(&session).await;
+    assert_eq!(blocked.phase, Phase::Recovery);
+    assert!(
+        blocked.error.is_some(),
+        "ordinary recovery must still refuse the empty upload"
+    );
+    session
+        .submit(change(&session, Command::ReviewRecovery))
+        .unwrap();
+    let reviewed = settled(&session).await;
+    assert!(reviewed.error.is_none(), "{:?}", reviewed.error);
+    assert!(!reviewed.actions.contains(&Action::Recover));
+    let original = reviewed.recovery.unwrap().review.unwrap();
+    assert_eq!(original.files.len(), 1);
+    assert_eq!(original.files[0].path, "Garmin/Mock/europe.img");
+    session.submit(change(&session, Command::Back)).unwrap();
+    session
+        .submit(change(&session, Command::ReviewRecovery))
+        .unwrap();
+    let review = settled(&session).await.recovery.unwrap().review.unwrap();
+    assert_ne!(original.approval, review.approval);
+    assert_eq!(
+        session
+            .submit(change(
+                &session,
+                Command::ApproveRecovery {
+                    approval: original.approval
+                }
+            ))
+            .unwrap_err()
+            .kind,
+        FailureKind::InvalidChoice
+    );
+    let reconnected = operations.connect("fixture".to_owned(), settings(root.path(), &server));
+    assert_eq!(
+        reconnected.snapshot().recovery.unwrap().review.unwrap(),
+        review
+    );
+    let request = change(
+        &reconnected,
+        Command::ApproveRecovery {
+            approval: review.approval,
+        },
+    );
+    let reply = reconnected.submit(request.clone()).unwrap();
+    assert_eq!(reconnected.submit(request.clone()).unwrap(), reply);
+    let recovered = settled(&reconnected).await;
+    assert_eq!(recovered.phase, Phase::Consent, "{:?}", recovered.error);
+    assert!(recovered.error.is_none());
+    assert_eq!(
+        recovered
+            .history
+            .iter()
+            .filter(|outcome| outcome.recovered)
+            .count(),
+        1
+    );
+    assert_eq!(reconnected.submit(request).unwrap(), reply);
+    verify_assisted_files(root.path(), &capture, &recovered)?;
+    let restarted =
+        Operations::default().connect("fixture".to_owned(), settings(root.path(), &server));
+    let persisted = settled(&restarted).await;
+    assert_eq!(persisted.phase, Phase::Consent);
+    assert_eq!(persisted.history, recovered.history);
+    server.shutdown().await?;
+    Ok(())
+}
+
+fn verify_assisted_files(root: &Path, capture: &Path, recovered: &State) -> Result<()> {
+    let quarantines = std::fs::read_dir(capture)?
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("assisted-recovery-")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        quarantines.len(),
+        1,
+        "retry must not execute recovery twice"
+    );
+    assert_eq!(
+        std::fs::metadata(quarantines[0].path().join("000000.bin"))?.len(),
+        0
+    );
+    assert!(recovered.history.iter().any(|outcome| {
+        outcome.recovered
+            && outcome
+                .message
+                .contains(quarantines[0].path().to_str().unwrap())
+    }));
+    for device in [
+        root.join("device"),
+        capture.join("simulation/device/storage-001"),
+    ] {
+        assert_eq!(
+            std::fs::read(device.join("Garmin/Mock/europe-old.img"))?,
+            b"old mock content\n"
+        );
+        assert!(!device.join("Garmin/Mock/europe.img").exists());
+    }
+    Ok(())
+}

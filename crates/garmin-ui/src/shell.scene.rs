@@ -193,6 +193,7 @@ fn show_shell(
         profiles: &profiles,
         selected: Some(state.selected),
         expanded: state.profile_open,
+        backup_enabled: true,
     };
     let navigation_groups = [
         shell::NavigationGroup {

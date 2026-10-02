@@ -16,32 +16,25 @@ pub enum Page {
 
 impl Page {
     #[must_use]
-    pub fn index(&self, devices: &[DeviceSnapshot], backup_enabled: bool) -> Option<usize> {
+    pub fn index(&self, devices: &[DeviceSnapshot]) -> Option<usize> {
         match self {
             Self::Activities => Some(0),
             Self::ProfileSettings => Some(1),
-            Self::Backup => backup_enabled.then_some(2),
+            Self::Backup => None,
             Self::Device(key) | Self::Maps(key) => devices
                 .iter()
                 .position(|device| &device.key == key)
-                .map(|index| index + 2 + usize::from(backup_enabled)),
+                .map(|index| index + 2),
         }
     }
 
     #[must_use]
-    pub fn from_index(
-        index: usize,
-        devices: &[DeviceSnapshot],
-        backup_enabled: bool,
-    ) -> Option<Self> {
-        if backup_enabled && index == 2 {
-            return Some(Self::Backup);
-        }
+    pub fn from_index(index: usize, devices: &[DeviceSnapshot]) -> Option<Self> {
         match index {
             0 => Some(Self::Activities),
             1 => Some(Self::ProfileSettings),
             _ => devices
-                .get(index.checked_sub(2 + usize::from(backup_enabled))?)
+                .get(index.checked_sub(2)?)
                 .map(|device| Self::Device(device.key.clone())),
         }
     }
@@ -69,7 +62,6 @@ pub struct Output<R> {
 pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) -> Output<R> {
     let activities = format_message!(props.intl, default_message: "Activities");
     let settings = format_message!(props.intl, default_message: "Profile settings");
-    let backup_label = format_message!(props.intl, default_message: "Backup and restore");
     let primary_destinations = [
         shell::Destination {
             label: &activities,
@@ -78,10 +70,6 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
         shell::Destination {
             label: &settings,
             icon: icons::GEAR,
-        },
-        shell::Destination {
-            label: &backup_label,
-            icon: icons::FOLDER_OPEN,
         },
     ];
     let device_destinations = props
@@ -96,7 +84,7 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
     let navigation_groups = [
         shell::NavigationGroup {
             label: None,
-            destinations: &primary_destinations[..2 + usize::from(props.backup_enabled)],
+            destinations: &primary_destinations,
         },
         shell::NavigationGroup {
             label: (!device_destinations.is_empty()).then_some(devices_label.as_str()),
@@ -110,10 +98,11 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
         profiles: props.profiles,
         selected: Some(props.selected_profile),
         expanded: props.profile_menu_expanded,
+        backup_enabled: props.backup_enabled,
     };
     let show = if matches!(
         props.page,
-        Page::Activities | Page::ProfileSettings | Page::Maps(_)
+        Page::Activities | Page::ProfileSettings | Page::Backup | Page::Maps(_)
     ) {
         shell::show_edge_to_edge
     } else {
@@ -124,7 +113,7 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
         &shell::Props {
             product_name: props.product_name,
             navigation_groups: &navigation_groups,
-            active: props.page.index(props.devices, props.backup_enabled),
+            active: props.page.index(props.devices),
             navigation: props.navigation,
             profile_selector: Some(&profile_selector),
             toggle_label: &toggle_label,
@@ -162,21 +151,16 @@ mod tests {
     fn page_indices_keep_primary_destinations_before_devices() {
         let devices = [device("mock-cycle"), device("mock-watch")];
 
-        assert_eq!(Page::Activities.index(&devices, false), Some(0));
-        assert_eq!(Page::ProfileSettings.index(&devices, false), Some(1));
+        assert_eq!(Page::Activities.index(&devices), Some(0));
+        assert_eq!(Page::ProfileSettings.index(&devices), Some(1));
         assert_eq!(
-            Page::Device("mock-watch".to_owned()).index(&devices, false),
+            Page::Device("mock-watch".to_owned()).index(&devices),
             Some(3)
         );
         assert_eq!(
-            Page::from_index(2, &devices, false),
+            Page::from_index(2, &devices),
             Some(Page::Device("mock-cycle".to_owned()))
         );
-        assert_eq!(Page::Backup.index(&devices, false), None);
-        assert_eq!(Page::from_index(2, &devices, true), Some(Page::Backup));
-        assert_eq!(
-            Page::from_index(3, &devices, true),
-            Some(Page::Device("mock-cycle".to_owned()))
-        );
+        assert_eq!(Page::Backup.index(&devices), None);
     }
 }

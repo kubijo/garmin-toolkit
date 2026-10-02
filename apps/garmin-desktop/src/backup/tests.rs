@@ -47,7 +47,7 @@ fn native_backup_confirmation_restore_and_restart() -> Result<(), Box<dyn std::e
             .await?
             .create_profile("After backup".parse()?)
             .await?;
-        controller.start(actor, epoch, Job::Restore(path));
+        controller.start(actor, epoch, Job::Restore(path.clone()));
         wait(
             &mut controller,
             |state| matches!(state, State::Running(status) if status.preview.is_some()),
@@ -60,7 +60,13 @@ fn native_backup_confirmation_restore_and_restart() -> Result<(), Box<dyn std::e
             2
         );
         controller.approve();
-        wait(&mut controller, |state| matches!(state, State::Restored));
+        wait(&mut controller, |state| matches!(state, State::Restored(_)));
+        let State::Restored(summary) = &controller.state else {
+            unreachable!("restore completed");
+        };
+        assert_eq!(summary.archive_bytes, Some(std::fs::metadata(&path)?.len()));
+        assert!(summary.database_bytes.is_some_and(|bytes| bytes > 0));
+        assert!(summary.elapsed.is_some());
         assert!(deployment.application(epoch).await.is_err());
         let restored = deployment.epoch();
         assert_eq!(

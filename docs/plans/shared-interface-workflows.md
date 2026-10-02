@@ -111,8 +111,42 @@ events and simulated files. An earlier timing attempt also completed safely befo
 remains running on the completed view. Validation passed: 882 workspace tests, 52 gallery tests, and the full project
 lint gate.
 
-1. Retain the host regressions for active reconnect, lost approval replies, and browser-write exclusion. Complete
-   packaged host restart/recovery and deployment acceptance in the HASS watch slice.
+Packaged HASS process-stop testing on 2026-10-01 distinguished graceful shutdown from a crash. SIGTERM during a paced
+simulation let the active transaction finish before the host exited cleanly. SIGKILL after one 12 MB payload was written
+and 1 MB of the next payload was streamed retained the receipt and interrupted transaction. Restart detected the
+retained simulation and offered recovery without resuming writes. Automatic recovery then refused the second upload's
+zero-byte file: an empty object has no verifiable payload prefix. This is the existing safety contract, covered by
+`task_abort_refuses_an_empty_partial_file`, not a successful automatic-recovery result.
+
+For this disposable simulation only, the empty object was moved into the test evidence directory before retrying
+recovery. Assisted rollback restored all four retained original files, removed all three new payload paths, and cleared
+the device transaction and host receipt. All six source files remained unchanged. Another clean host restart preserved
+the cleared state and the single failed-recovery outcome without duplication. Three task-abort regressions passed.
+Evidence, including the quarantined empty object and failure/recovery screenshots, is in `.tmp/hass-restart-recovery`;
+capture `f83fc1dd-37cf-4cbc-b2d8-2b4c55efbfb9` retains the interrupted and rolled-back journals. HASS remains running at
+service consent. No recovery checks or upstream dependencies were changed during that experiment.
+
+Explicit assisted recovery is now implemented in the shared host workflow. The review lists empty interrupted upload
+paths and their storage. Approval preserves the reviewed objects in a host quarantine before removing them and running
+verified rollback. The engine rechecks the exact transaction, capture, payloads, backups, and files; ordinary recovery
+still refuses empty payload prefixes. A recovered history entry retains the quarantine location. Engine regressions
+cover stale evidence, missing/applied write intents, and cancellation before and after preservation. A service test
+kills a paced simulation process, then verifies explicit approval, stale-approval rejection, client reconnect, duplicate
+requests, source preservation, rollback, and persistence across restart. Gallery coverage exercises both locales at 320
+px and 720 px, including Back and approval dispatch.
+
+Packaged HASS assisted recovery passed on 2026-10-01 using controlled Chrome and per-run background automation. SIGKILL
+after the first 12 MB payload and 1 MB of the next upload reproduced the zero-byte routing file. Ordinary recovery
+refused it. The new review identified the path without mutation and survived a browser reload. Approving quarantine and
+recovery restored all four originals, removed all three new payload paths, and preserved all six source-file hashes. The
+empty object and approval manifest remain in the capture's quarantine; the portable transaction and host receipt were
+cleared. A clean host restart retained exactly one recovered outcome, including the quarantine location, without
+reopening recovery. Evidence is in `.tmp/hass-assisted-recovery`; capture `79940743-f866-4851-be75-fff7da4d0155` retains
+the journals and quarantine. Validation passed: 889 workspace tests, 52 gallery tests, native/WASM lint, documentation,
+catalog, and dependency checks. HASS remains running on port 8099.
+
+1. Complete deployment acceptance in the HASS watch slice and retain the host regressions for reconnect, assisted
+   recovery, lost approval replies, and browser-write exclusion.
 2. Retain shared gallery coverage for keyboard interaction, translated layouts, and progress visibility.
 3. Perform separately authorized physical-device acceptance after synthetic and packaged-host checks pass.
 

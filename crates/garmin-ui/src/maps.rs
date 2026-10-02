@@ -668,6 +668,13 @@ fn recovery_content(
     state: &State,
     inline_padding: i8,
 ) -> Option<Command> {
+    if let Some(review) = state
+        .recovery
+        .as_ref()
+        .and_then(|recovery| recovery.review.as_ref())
+    {
+        return recovery_review(ui, intl, state, review, inline_padding);
+    }
     let mut command = None;
     egui::Frame::NONE.inner_margin(egui::Margin::symmetric(inline_padding, 0)).show(ui, |ui| {
     ui.set_max_width(ui.available_width().min(560.0));
@@ -702,6 +709,13 @@ fn recovery_content(
                 Command::ClearRecovery,
                 format_message!(intl, default_message: "Verify and clear"),
                 icons::CHECK,
+                button::Kind::Tertiary,
+            ),
+            (
+                Action::ReviewRecovery,
+                Command::ReviewRecovery,
+                format_message!(intl, default_message: "Review blocked files"),
+                icons::WARNING,
                 button::Kind::Tertiary,
             ),
             (
@@ -740,6 +754,42 @@ fn recovery_content(
             },
         );
     }
+    command
+}
+
+fn recovery_review(
+    ui: &mut Ui,
+    intl: &Intl,
+    state: &State,
+    review: &garmin_service_api::maps::RecoveryReview,
+    inline_padding: i8,
+) -> Option<Command> {
+    let mut command = None;
+    egui::Frame::NONE.inner_margin(egui::Margin::symmetric(inline_padding, 0)).show(ui, |ui| {
+        ui.set_max_width(ui.available_width().min(560.0));
+        ui.heading(format_message!(intl, default_message: "Review empty uploads"));
+        typography::body(ui, &format_message!(intl, default_message: "These empty files are at recorded upload destinations, but their contents cannot prove they belong to the interrupted operation."));
+        ui.add_space(8.0);
+        typography::body(ui, &format_message!(intl, default_message: "Approval preserves each file in quarantine on this host, removes it from the target, then restores the verified original files. Recovery evidence is checked again before any change."));
+        if state.recovery.as_ref().is_some_and(|recovery| recovery.simulated) {
+            typography::body(ui, &format_message!(intl, default_message: "This recovery applies to the retained simulation. The source device remains unchanged."));
+        }
+        ui.add_space(8.0);
+        for file in &review.files {
+            ui.label(typography::semibold(&file.path));
+            ui.label(egui::RichText::new(format_message!(intl, default_message: "{storage} · Empty file (0 bytes)", values: { storage: file.storage.as_str() })).weak());
+            ui.add_space(8.0);
+        }
+        ui.horizontal_wrapped(|ui| {
+            if control(ui, state, Action::ApproveRecovery,
+                &format_message!(intl, default_message: "Quarantine and recover"), icons::CLOCK_COUNTER_CLOCKWISE, button::Kind::Primary) {
+                command = Some(Command::ApproveRecovery { approval: review.approval });
+            }
+            if control(ui, state, Action::Back, &format_message!(intl, default_message: "Back"), icons::CARET_LEFT, button::Kind::Tertiary) {
+                command = Some(Command::Back);
+            }
+        });
+    });
     command
 }
 
@@ -840,10 +890,14 @@ fn history(ui: &mut Ui, intl: &Intl, state: &State) {
 }
 
 fn outcome_row(ui: &mut Ui, intl: &Intl, outcome: &garmin_service_api::maps::Outcome) {
-    let label = match outcome.phase {
-        Phase::Completed => format_message!(intl, default_message: "Map operation completed"),
-        Phase::Cancelled => format_message!(intl, default_message: "Map operation cancelled"),
-        _ => format_message!(intl, default_message: "Map operation failed"),
+    let label = if outcome.recovered {
+        format_message!(intl, default_message: "Map operation recovered")
+    } else {
+        match outcome.phase {
+            Phase::Completed => format_message!(intl, default_message: "Map operation completed"),
+            Phase::Cancelled => format_message!(intl, default_message: "Map operation cancelled"),
+            _ => format_message!(intl, default_message: "Map operation failed"),
+        }
     };
     crate::accordion::show(
         ui,

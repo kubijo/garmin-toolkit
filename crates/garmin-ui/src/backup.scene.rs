@@ -72,7 +72,12 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         6 => backup::State::Saved,
         7 => backup::State::Cancelled,
         8 => backup::State::Failed("The selected backup failed its database integrity check. Your current data is unchanged.".into()),
-        9 => backup::State::Restored,
+        9 => backup::State::Restored(backup::RestoreSummary {
+            elapsed: Some(std::time::Duration::from_secs(18)),
+            archive_bytes: Some(1_200_000),
+            database_bytes: Some(8_000_000),
+            created_at: Some(1_790_640_000),
+        }),
         11 => backup::State::DownloadStarted,
         10 => backup::State::Failed("The selected database could not be reopened: permission denied. The application is unavailable until recovery succeeds.".into()),
         _ => backup::State::Running(status),
@@ -81,7 +86,6 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         ui.set_width(width);
         egui::Frame::new()
             .fill(ui.visuals().panel_fill)
-            .inner_margin(16)
             .show(ui, |ui| {
                 let _ = backup::show(
                     ui,

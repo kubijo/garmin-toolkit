@@ -19,6 +19,7 @@ const BODY_MARGIN: egui::Margin = egui::Margin {
 const FOOTER_MARGIN: egui::Margin = egui::Margin::ZERO;
 const ACTION_GAP: f32 = 2.0;
 const VIEWPORT_MARGIN: f32 = 32.0;
+const BACKDROP_ALPHA: u8 = 0xA0;
 
 /// Dialog placement and input scope.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -83,7 +84,8 @@ pub struct Props<'a> {
     pub description: Option<&'a str>,
     pub size: Size,
     pub presentation: Presentation,
-    pub cancel_label: &'a str,
+    /// Omit for a one-action acknowledgement dialog.
+    pub cancel_label: Option<&'a str>,
     pub backdrop_closes: Option<bool>,
     pub primary: Primary<'a>,
 }
@@ -100,7 +102,7 @@ pub struct Output<R> {
     pub action: Option<Action>,
     pub inner: R,
     pub primary: Response,
-    pub cancel: Response,
+    pub cancel: Option<Response>,
 }
 
 /// Shows a dialog in its configured presentation.
@@ -117,10 +119,9 @@ pub fn show<R>(
         Presentation::Modal => {
             let ctx = ui.ctx().clone();
             let viewport = ctx.content_rect().size();
-            let palette = crate::theme::palette(ui);
             let response = egui::Modal::new(id)
                 .frame(egui::Frame::new())
-                .backdrop_color(color32(palette.overlay()))
+                .backdrop_color(egui::Color32::from_black_alpha(BACKDROP_ALPHA))
                 .show(&ctx, |ui| render_surface(ui, props, viewport, body));
             let mut output = response.inner;
             let close_requested = response.response.should_close()
@@ -130,7 +131,10 @@ pub fn show<R>(
                 && !response.any_popup_open
                 && ctx
                     .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-            if output.action.is_none() && (close_requested || escaped) {
+            if output.action.is_none()
+                && props.cancel_label.is_some()
+                && (close_requested || escaped)
+            {
                 output.action = Some(Action::Cancel);
             }
             output
@@ -212,7 +216,7 @@ pub(crate) fn surface_frame(ui: &Ui) -> egui::Frame {
 
 fn contained_backdrop(ui: &Ui, id: Id, bounds: egui::Rect) -> Response {
     ui.painter()
-        .rect_filled(bounds, 0.0, color32(crate::theme::palette(ui).overlay()));
+        .rect_filled(bounds, 0.0, egui::Color32::from_black_alpha(BACKDROP_ALPHA));
     ui.interact(bounds, id, egui::Sense::click_and_drag())
 }
 
@@ -240,7 +244,7 @@ fn header(ui: &mut Ui, props: &Props<'_>) {
     ui.add_space(24.0);
 }
 
-fn footer(ui: &mut Ui, props: &Props<'_>) -> (Option<Action>, Response, Response) {
+fn footer(ui: &mut Ui, props: &Props<'_>) -> (Option<Action>, Response, Option<Response>) {
     let actions = crate::theme::palette(ui).modal_actions();
     egui::Frame::new()
         .inner_margin(FOOTER_MARGIN)
@@ -262,18 +266,20 @@ fn footer(ui: &mut Ui, props: &Props<'_>) -> (Option<Action>, Response, Response
                         PrimaryKind::Danger => actions.danger(),
                     },
                 );
-                let cancel = button::Props {
-                    label: props.cancel_label,
-                    icon: None,
-                    kind: button::Kind::Secondary,
-                    size: ComponentSize::Medium,
-                    width: button::Width::Fit,
-                    enabled: true,
-                }
-                .show_with_states(ui, actions.cancel());
+                let cancel = props.cancel_label.map(|label| {
+                    button::Props {
+                        label,
+                        icon: None,
+                        kind: button::Kind::Secondary,
+                        size: ComponentSize::Medium,
+                        width: button::Width::Fit,
+                        enabled: true,
+                    }
+                    .show_with_states(ui, actions.cancel())
+                });
                 let action = if primary_activated(props.primary.kind, &primary) {
                     Some(Action::Primary)
-                } else if cancel.clicked() {
+                } else if cancel.as_ref().is_some_and(Response::clicked) {
                     Some(Action::Cancel)
                 } else {
                     None

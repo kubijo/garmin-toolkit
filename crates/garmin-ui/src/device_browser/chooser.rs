@@ -401,7 +401,7 @@ impl Chooser {
                 description: self.overwrite.as_deref(),
                 size: modal::Size::Medium,
                 presentation: modal::Presentation::Modal,
-                cancel_label: &cancel,
+                cancel_label: Some(&cancel),
                 backdrop_closes: Some(false),
                 primary: modal::Primary {
                     label: &replace,
@@ -413,7 +413,9 @@ impl Chooser {
             |_| (),
         );
         crate::semantics::target(ui, &output.primary, "files.chooser.replace");
-        crate::semantics::target(ui, &output.cancel, "files.chooser.keep");
+        if let Some(cancel) = &output.cancel {
+            crate::semantics::target(ui, cancel, "files.chooser.keep");
+        }
         match output.action {
             Some(modal::Action::Primary) => self.overwrite.take().map(|path| Action::Select {
                 path,

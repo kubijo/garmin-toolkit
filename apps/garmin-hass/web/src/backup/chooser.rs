@@ -372,6 +372,8 @@ fn action(intl: &Intl, shared: Rc<RefCell<State>>, context: Context, action: Act
                     operation: None,
                     origin,
                     recover: false,
+                    restore_facts: None,
+                    restore_started: None,
                 }
                 .run(),
             );

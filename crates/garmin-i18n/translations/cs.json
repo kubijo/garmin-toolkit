@@ -23,6 +23,10 @@
     "source": "Recommended; enables automatic rollback if the update fails.",
     "translation": "Doporučeno; umožňuje automatický návrat při selhání aktualizace."
   },
+  "+fh5vubl8h": {
+    "source": "Approval preserves each file in quarantine on this host, removes it from the target, then restores the verified original files. Recovery evidence is checked again before any change.",
+    "translation": "Po schválení se každý soubor uloží do karantény na tomto hostiteli, odebere z cíle a poté se obnoví ověřené původní soubory. Před jakoukoli změnou se znovu zkontrolují podklady pro obnovu."
+  },
   "+iDQqIbGxR": {
     "source": "Cancellation waits for required transaction cleanup. Keep the device connected.",
     "translation": "Zrušení počká na nezbytné dokončení transakce. Nechte zařízení připojené."
@@ -58,6 +62,10 @@
   "/UnJ3SDiCO": {
     "source": "Zoom out",
     "translation": "Oddálit"
+  },
+  "/ayTrkk6L/": {
+    "source": "Choose a profile to continue.",
+    "translation": "Pro pokračování vyberte profil."
   },
   "/quHYgXvvj": {
     "source": "The connection was lost, so the result is unknown. The operation wasn’t retried.",
@@ -331,6 +339,14 @@
     "source": "Paired user recorded",
     "translation": "Spárovaný uživatel je zaznamenán"
   },
+  "82UBO8iQE3": {
+    "source": "Backup created (UTC)",
+    "translation": "Záloha vytvořena (UTC)"
+  },
+  "83y+McjOnf": {
+    "source": "Restore time",
+    "translation": "Doba obnovy"
+  },
   "8IM6iWwT81": {
     "source": "Cadence",
     "translation": "Kadence"
@@ -339,6 +355,10 @@
     "source": "Could not inspect {device}",
     "translation": "Zařízení {device} se nepodařilo zkontrolovat",
     "description": "Notification title after device inspection failed"
+  },
+  "8QBEXy+S0W": {
+    "source": "Review empty uploads",
+    "translation": "Kontrola prázdných souborů"
   },
   "8a5Q/l4DQE": {
     "source": "Verifying backup",
@@ -557,9 +577,17 @@
     "source": "Preparing guarded removal…",
     "translation": "Příprava zabezpečeného odebrání…"
   },
+  "DjnrrdY0ZU": {
+    "source": "{storage} · Empty file (0 bytes)",
+    "translation": "{storage} · Prázdný soubor (0 bajtů)"
+  },
   "DkTXT8/72n": {
     "source": "Could not load activity",
     "translation": "Aktivitu se nepodařilo načíst"
+  },
+  "DlLLZYgiwc": {
+    "source": "Map operation recovered",
+    "translation": "Operace s mapami obnovena"
   },
   "DsXoifF7dp": {
     "source": "Discard preparation",
@@ -786,6 +814,10 @@
     "source": "Saving profile picture",
     "translation": "Ukládání profilového obrázku"
   },
+  "Jz8bGv8l8v": {
+    "source": "These empty files are at recorded upload destinations, but their contents cannot prove they belong to the interrupted operation.",
+    "translation": "Tyto prázdné soubory jsou na zaznamenaných cílových cestách, ale jejich obsah nemůže prokázat, že patří k přerušené operaci."
+  },
   "K09WxxEly8": {
     "source": "Workouts",
     "translation": "Tréninky"
@@ -985,6 +1017,10 @@
   "Q825BzTWHX": {
     "source": "Device discovery",
     "translation": "Hledání zařízení"
+  },
+  "Q8p4aw8p/r": {
+    "source": "Quarantine and recover",
+    "translation": "Izolovat a obnovit"
   },
   "QJoBLlX8db": {
     "source": "{free} available",
@@ -1246,6 +1282,10 @@
     "source": "Run simulation",
     "translation": "Spustit simulaci"
   },
+  "Xs5erpuz9K": {
+    "source": "Less than a second",
+    "translation": "Méně než sekunda"
+  },
   "XslFtApJNA": {
     "source": "Cleanup",
     "translation": "Úklid"
@@ -1357,6 +1397,10 @@
   "cLkz9FtcuZ": {
     "source": "Map operation completed",
     "translation": "Operace s mapami dokončena"
+  },
+  "cM+yJmr0Iw": {
+    "source": "Backup size",
+    "translation": "Velikost zálohy"
   },
   "cREnQVyDOw": {
     "source": "Choose a profile before importing files",
@@ -1513,6 +1557,10 @@
   "hRcDjG7HM7": {
     "source": "Back to device",
     "translation": "Zpět na zařízení"
+  },
+  "hW7szF6DsI": {
+    "source": "Review blocked files",
+    "translation": "Zkontrolovat soubory"
   },
   "hX5jJfBpJZ": {
     "source": "Backup",
@@ -2012,6 +2060,10 @@
     "source": "mass storage",
     "translation": "velkokapacitní úložiště"
   },
+  "w6p7ChZxnD": {
+    "source": "Backup restored",
+    "translation": "Záloha obnovena"
+  },
   "wKFKwGsbrz": {
     "source": "Adjust profile picture",
     "translation": "Upravit profilový obrázek"
@@ -2107,6 +2159,10 @@
   "z2tmIUfxTM": {
     "source": "Checking previous operations…",
     "translation": "Kontrola předchozích operací…"
+  },
+  "zINlaoBlL/": {
+    "source": "Owner",
+    "translation": "Vlastník"
   },
   "zPxvqJZI9C": {
     "source": "Upload complete",

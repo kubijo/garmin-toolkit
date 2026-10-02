@@ -28,6 +28,12 @@ use crate::{
 const TRANSACTION_VERSION: u8 = 1;
 const DEVICE_STATE_HEADROOM_BYTES: u64 = 16 * 1024 * 1024;
 
+mod assisted;
+pub use assisted::{
+    AssistedRecoveryPlan, AssistedRecoveryReport, EmptyUpload, approve_assisted_recovery,
+    review_assisted_recovery,
+};
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MountedMtpPreflight {
     pub files_to_write: usize,

@@ -21,6 +21,7 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             "cancelled",
             "empty",
             "rollback",
+            "recovery review",
         ],
         2,
     );
@@ -33,7 +34,7 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         1 => Phase::Loading,
         3 => Phase::Review,
         4 | 10 => Phase::Running,
-        5 => Phase::Recovery,
+        5 | 11 => Phase::Recovery,
         6 => Phase::Completed,
         7 => Phase::Failed,
         8 => Phase::Cancelled,
@@ -45,9 +46,17 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         Phase::Catalog => vec![Action::Choose, Action::Review, Action::ContactService],
         Phase::Review => vec![Action::Approve, Action::Back],
         Phase::Running => vec![Action::Cancel],
-        Phase::Recovery => vec![Action::Recover, Action::ClearRecovery, Action::Refresh],
+        Phase::Recovery => vec![
+            Action::Recover,
+            Action::ClearRecovery,
+            Action::ReviewRecovery,
+            Action::Refresh,
+        ],
         _ => vec![Action::Refresh],
     };
+    if variant == 11 {
+        recovery_review(&mut state);
+    }
     if variant == 7 {
         state.error = Some("The device disconnected while writing Garmin/Mock/europe-routing.img. Reconnect the same device to inspect its retained recovery evidence.".to_owned());
     }
@@ -83,6 +92,7 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                     .expect("synthetic outcome UUID"),
                 phase,
                 message: message.to_owned(),
+                recovered: false,
             },
         )
         .collect();
@@ -92,6 +102,20 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             .rect_filled(ui.max_rect(), 0.0, ui.visuals().panel_fill);
         let _command = garmin_ui::maps::show(ui, &globals.intl(), &state);
     });
+}
+
+fn recovery_review(state: &mut State) {
+    state.actions = vec![Action::ApproveRecovery, Action::Back, Action::Refresh];
+    if let Some(recovery) = &mut state.recovery {
+        recovery.simulated = state.dry_run;
+        recovery.review = Some(garmin_service_api::maps::RecoveryReview {
+            approval: state.id,
+            files: vec![garmin_service_api::maps::RecoveryFile {
+                storage: "Internal storage".to_owned(),
+                path: "Garmin/Mock/europe-routing.img".to_owned(),
+            }],
+        });
+    }
 }
 
 fn progress_steps(state: &mut State, rollback: bool) {
@@ -213,6 +237,7 @@ fn fixture() -> State {
             removal: false,
             simulated: false,
             actions: vec![Action::Recover, Action::ClearRecovery],
+            review: None,
         }),
         progress: vec![Progress {
             stage: "Download".to_owned(),

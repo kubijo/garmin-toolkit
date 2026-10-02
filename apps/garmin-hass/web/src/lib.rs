@@ -398,6 +398,9 @@ impl App {
                     &profile::ChooserProps {
                         intl: &self.intl,
                         profiles: &profile_props,
+                        owner_index: self.profiles.iter().position(|profile| {
+                            profile.user.role() == garmin_model::identity::Role::Owner
+                        }),
                     },
                 )
             },
@@ -410,7 +413,12 @@ impl App {
             Some(profile::Action::Create) => {
                 self.create_profile = Some(profile::CreateState::default());
             }
-            Some(profile::Action::Toggle | profile::Action::Settings | profile::Action::Logout)
+            Some(
+                profile::Action::Toggle
+                | profile::Action::Settings
+                | profile::Action::Backup
+                | profile::Action::Logout,
+            )
             | None => {}
         }
     }
@@ -720,16 +728,7 @@ impl App {
                 };
             }
             Some(shell::Action::Navigate(index)) => {
-                self.page = Page::from_index(
-                    index,
-                    devices,
-                    self.selected_profile
-                        .and_then(|index| profiles.get(index))
-                        .is_some_and(|profile| {
-                            profile.user.role() == garmin_model::identity::Role::Owner
-                        }),
-                )
-                .unwrap_or(Page::Activities);
+                self.page = Page::from_index(index, devices).unwrap_or(Page::Activities);
                 self.profile_menu_expanded = false;
             }
             Some(shell::Action::Profile(profile::Action::Toggle)) => {
@@ -744,6 +743,18 @@ impl App {
             }
             Some(shell::Action::Profile(profile::Action::Settings)) => {
                 self.page = Page::ProfileSettings;
+                self.profile_menu_expanded = false;
+            }
+            Some(shell::Action::Profile(profile::Action::Backup)) => {
+                if self
+                    .selected_profile
+                    .and_then(|index| profiles.get(index))
+                    .is_some_and(|profile| {
+                        profile.user.role() == garmin_model::identity::Role::Owner
+                    })
+                {
+                    self.page = Page::Backup;
+                }
                 self.profile_menu_expanded = false;
             }
             Some(shell::Action::Profile(profile::Action::Logout)) => {
@@ -898,7 +909,7 @@ impl App {
                 description: Some(&description),
                 size: modal::Size::Medium,
                 presentation: modal::Presentation::Modal,
-                cancel_label: &cancel,
+                cancel_label: Some(&cancel),
                 backdrop_closes: Some(!editor.submitting),
                 primary: modal::Primary {
                     label: &save,

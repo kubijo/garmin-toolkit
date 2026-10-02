@@ -312,6 +312,9 @@ fn show_with_padding<R>(
     );
     let inner = page(&mut page_ui);
 
+    if nav_width > 0.0 {
+        paint_navigation_divider(ui, navigation);
+    }
     if let Some(profile_action) = profile_menu(ui, selectors.profile, shell_clip, props) {
         action = Some(Action::Profile(profile_action));
     }
@@ -332,12 +335,18 @@ fn paint_chrome(ui: &Ui, root: Rect, header: Rect, navigation: Rect, show_naviga
     if show_navigation {
         ui.painter()
             .rect_filled(navigation, 0.0, theme.surfaces().chrome().into_cint());
-        ui.painter().vline(
-            navigation.right(),
-            navigation.y_range(),
-            egui::Stroke::new(1.0, theme.borders().subtle().into_cint()),
-        );
     }
+}
+
+fn paint_navigation_divider(ui: &Ui, navigation: Rect) {
+    ui.painter().vline(
+        navigation.right(),
+        navigation.y_range(),
+        egui::Stroke::new(
+            1.0,
+            crate::theme::palette(ui).borders().subtle().into_cint(),
+        ),
+    );
 }
 
 fn paint_window_border(ui: &Ui, root: Rect) {
@@ -639,6 +648,7 @@ fn profile_menu(
                 ui,
                 &profile::MenuProps {
                     intl: selector.intl,
+                    backup_enabled: selector.backup_enabled,
                 },
             )
         })

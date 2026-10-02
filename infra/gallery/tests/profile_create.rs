@@ -43,7 +43,8 @@ fn profile_creation_and_cancellation_use_locale_independent_targets() {
                         ui,
                         &profile::ChooserProps {
                             intl: &intl,
-                            profiles: &[]
+                            profiles: &[],
+                            owner_index: None,
                         }
                     ),
                     Some(profile::Action::Create)
