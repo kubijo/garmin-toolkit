@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO users (id, role, display_name) VALUES (\n    ?, 'owner', 'Snapshot Rider'\n);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1caf94c49b393725b15e3f4bf5acf3f2e8141c412a7fcbbc5ed07c8f71eb2713"
+}

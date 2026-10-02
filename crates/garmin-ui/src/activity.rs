@@ -10,9 +10,28 @@ use garmin_model::{
 };
 use garmin_service_api::ActivitySnapshot;
 
-use crate::{icons, path, theme::color32};
+use crate::{
+    icons, path,
+    theme::{CONTROL_RADIUS, PANEL_RADIUS, color32},
+};
 
-const ROW_HEIGHT: f32 = 72.0;
+mod calendar;
+mod map;
+pub mod map_composition;
+pub mod map_diagnostics;
+pub mod map_runtime;
+pub use map::remote as map_remote;
+mod map_style;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_latest;
+mod navigation;
+mod route_index;
+mod workspace;
+
+pub use map::{WgpuMapHandle, install_wgpu_map};
+pub use workspace::{ActivityCursor, CursorMode, Viewer, ViewerProps, Workspace, WorkspaceProps};
+
+const ROW_HEIGHT: f32 = 52.0;
 const PADDING: f32 = 16.0;
 const ICON_SIZE: f32 = 24.0;
 const SELECTED_MARKER_WIDTH: f32 = 3.0;
@@ -24,6 +43,9 @@ const METRIC_GAP: f32 = 1.0;
 const METRIC_MAX_HEIGHT: f32 = 96.0;
 
 pub struct Presentation {
+    started_at: jiff::Timestamp,
+    local_start: jiff::civil::DateTime,
+    sport: ActivitySport,
     icon: icons::Icon,
     title: String,
     subtitle: String,
@@ -40,20 +62,7 @@ impl Presentation {
         intl: &Intl,
         units: UnitSystem,
     ) -> Self {
-        Self::new(
-            summary.sport(),
-            summary.time().start().to_string(),
-            source,
-            summary.totals().timer().into_milliseconds(),
-            summary.totals().distance().map(Distance::into_millimeters),
-            summary
-                .metrics()
-                .average_heart_rate()
-                .map(HeartRate::into_beats_per_minute),
-            summary.totals().ascent().map(Distance::into_millimeters),
-            intl,
-            units,
-        )
+        Self::new(summary, source, intl, units)
     }
 
     #[must_use]
@@ -61,27 +70,24 @@ impl Presentation {
         Self::from_summary(snapshot.summary, &snapshot.source, intl, units)
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the arguments are the activity summary fields"
-    )]
-    fn new(
-        sport: ActivitySport,
-        started_at: String,
-        source: &str,
-        timer_milliseconds: u64,
-        distance_millimeters: Option<u64>,
-        average_heart_rate: Option<u16>,
-        ascent_millimeters: Option<u64>,
-        intl: &Intl,
-        units: UnitSystem,
-    ) -> Self {
+    fn new(summary: ActivitySummary, source: &str, intl: &Intl, units: UnitSystem) -> Self {
+        let sport = summary.sport();
+        let started_at = *summary.time().start().as_jiff();
+        let local_start = started_at.to_zoned(jiff::tz::TimeZone::system()).datetime();
+        let start_label = calendar::date_time_label(intl, local_start);
+        let timer_milliseconds = summary.totals().timer().into_milliseconds();
+        let distance_millimeters = summary.totals().distance().map(Distance::into_millimeters);
+        let average_heart_rate = summary
+            .metrics()
+            .average_heart_rate()
+            .map(HeartRate::into_beats_per_minute);
+        let ascent_millimeters = summary.totals().ascent().map(Distance::into_millimeters);
         let title = sport_title(sport, intl);
         let subtitle = format_message!(
             intl,
             default_message: "{start} · {source}",
             values: {
-                start: started_at,
+                start: start_label,
                 source: source,
             },
         );
@@ -111,6 +117,9 @@ impl Presentation {
             });
         }
         Self {
+            started_at,
+            local_start,
+            sport,
             icon: sport_icon(sport),
             title,
             subtitle,
@@ -118,6 +127,11 @@ impl Presentation {
             duration,
             metrics,
         }
+    }
+
+    #[must_use]
+    pub const fn sport(&self) -> ActivitySport {
+        self.sport
     }
 
     #[must_use]
@@ -213,6 +227,7 @@ const fn sport_icon(sport: ActivitySport) -> icons::Icon {
     match sport {
         ActivitySport::Running => icons::PERSON_SIMPLE_RUN,
         ActivitySport::Cycling => icons::BICYCLE,
+        ActivitySport::Swimming => icons::PERSON_SIMPLE_SWIM,
     }
 }
 
@@ -220,6 +235,7 @@ fn sport_title(sport: ActivitySport, intl: &Intl) -> String {
     match sport {
         ActivitySport::Running => format_message!(intl, default_message: "Running"),
         ActivitySport::Cycling => format_message!(intl, default_message: "Cycling"),
+        ActivitySport::Swimming => format_message!(intl, default_message: "Swimming"),
     }
 }
 
@@ -283,7 +299,7 @@ pub fn list(ui: &mut Ui, props: &ListProps<'_>) -> Option<Action> {
     let palette = crate::theme::palette(ui);
     ui.painter().rect_filled(
         rect,
-        0.0,
+        PANEL_RADIUS,
         palette.surfaces().layer(theme::Level::Two).into_cint(),
     );
 
@@ -307,7 +323,21 @@ pub fn list(ui: &mut Ui, props: &ListProps<'_>) -> Option<Action> {
         );
         row_top += ROW_HEIGHT;
         let response = row_response(ui, row, index, item.title);
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_value(if props.selected == Some(index) {
+                "selected"
+            } else {
+                "unselected"
+            });
+        });
         paint_row(ui, row, item, props.selected == Some(index), &response);
+        if index + 1 < props.items.len() {
+            ui.painter().hline(
+                row.x_range(),
+                row.bottom(),
+                Stroke::new(1.0, palette.borders().subtle().into_cint()),
+            );
+        }
         if response.clicked() {
             action = Some(Action::Select(index));
         }
@@ -322,14 +352,14 @@ pub fn detail(ui: &mut Ui, props: &DetailProps<'_>) {
     let palette = crate::theme::palette(ui);
     ui.painter().rect_filled(
         rect,
-        0.0,
+        PANEL_RADIUS,
         palette.surfaces().layer(theme::Level::One).into_cint(),
     );
 
     let header_bottom = rect.top() + 88.0;
     ui.painter().rect_filled(
         Rect::from_min_max(rect.min, egui::pos2(rect.right(), header_bottom)),
-        0.0,
+        PANEL_RADIUS,
         palette.surfaces().layer(theme::Level::Two).into_cint(),
     );
     let icon_center = egui::pos2(rect.left() + PADDING + ICON_SIZE / 2.0, rect.top() + 40.0);
@@ -414,7 +444,7 @@ fn detail_or_empty(ui: &mut Ui, detail_props: Option<&DetailProps<'_>>, empty: &
         let palette = crate::theme::palette(ui);
         ui.painter().rect_filled(
             rect,
-            0.0,
+            PANEL_RADIUS,
             palette.surfaces().layer(theme::Level::Two).into_cint(),
         );
         ui.painter().text(
@@ -436,6 +466,7 @@ fn row_response(ui: &Ui, rect: Rect, index: usize, label: &str) -> Response {
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
+    crate::semantics::target(ui, &response, format!("activity.{index}"));
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         response.highlight()
@@ -449,7 +480,7 @@ fn paint_row(ui: &Ui, rect: Rect, props: &ItemProps<'_>, selected: bool, respons
     if response.highlighted() || selected {
         ui.painter().rect_filled(
             rect,
-            0.0,
+            CONTROL_RADIUS,
             palette
                 .surfaces()
                 .layer_hover(theme::Level::Two)
@@ -459,8 +490,12 @@ fn paint_row(ui: &Ui, rect: Rect, props: &ItemProps<'_>, selected: bool, respons
     if selected {
         ui.painter().rect_filled(
             Rect::from_min_size(rect.min, egui::vec2(SELECTED_MARKER_WIDTH, rect.height())),
-            0.0,
-            palette.interaction().interactive().into_cint(),
+            egui::CornerRadius::ZERO,
+            crate::theme::selection_accent_on(
+                ui,
+                palette.surfaces().layer_hover(theme::Level::Two),
+            )
+            .into_cint(),
         );
     }
 
@@ -517,7 +552,7 @@ fn paint_row(ui: &Ui, rect: Rect, props: &ItemProps<'_>, selected: bool, respons
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect,
-            0.0,
+            CONTROL_RADIUS,
             Stroke::new(2.0, palette.interaction().focus().into_cint()),
             egui::StrokeKind::Inside,
         );
@@ -550,7 +585,7 @@ fn paint_metrics(ui: &Ui, rect: Rect, top: f32, metrics: &[MetricProps<'_>]) {
             cell_left += cell_width;
             ui.painter().rect_filled(
                 cell,
-                0.0,
+                CONTROL_RADIUS,
                 palette.surfaces().layer(theme::Level::Two).into_cint(),
             );
             ui.painter().text(

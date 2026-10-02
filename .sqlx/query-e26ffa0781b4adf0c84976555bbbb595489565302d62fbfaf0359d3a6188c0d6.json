@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO users (\n    id,\n    role,\n    display_name,\n    accent_rgba,\n    avatar_artifact_id,\n    unit_system,\n    language,\n    theme,\n    show_hidden_files,\n    inline_file_windows\n)\nSELECT\n    ? AS id,\n    ? AS role,\n    ? AS display_name,\n    ? AS accent_rgba,\n    ? AS avatar_artifact_id,\n    ? AS unit_system,\n    ? AS language,\n    ? AS theme,\n    ? AS show_hidden_files,\n    ? AS inline_file_windows\nWHERE\n    ? IS NULL OR EXISTS (\n        SELECT 1\n        FROM profile_avatars\n        WHERE\n            profile_avatars.owner_id = ?\n            AND profile_avatars.original_artifact_id = ?\n    )\nON CONFLICT (id) DO UPDATE SET\n    role = excluded.role,\n    display_name = excluded.display_name,\n    accent_rgba = excluded.accent_rgba,\n    avatar_artifact_id = excluded.avatar_artifact_id,\n    unit_system = excluded.unit_system,\n    language = excluded.language,\n    theme = excluded.theme,\n    show_hidden_files = excluded.show_hidden_files,\n    inline_file_windows = excluded.inline_file_windows\nRETURNING id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e26ffa0781b4adf0c84976555bbbb595489565302d62fbfaf0359d3a6188c0d6"
+}

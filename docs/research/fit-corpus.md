@@ -4,18 +4,23 @@
 
 The data foundation creates these deterministic synthetic fixtures:
 
-| Case                    | Required content and expectation                                                                         |
-| ----------------------- | -------------------------------------------------------------------------------------------------------- |
-| `activity-basic`        | File identity, device info, one session/lap, timestamped GPS and sensor records; exact normalized data.  |
-| `activity-multisport`   | Multiple sessions and laps with distinct sports; hierarchy and ordering survive normalization.           |
-| `wellness`              | Timestamped monitoring and body measurements with absent optional values kept absent.                    |
-| `sleep-hrv`             | Interval sleep data and HRV samples spanning a synthetic day boundary.                                   |
-| `course`                | Route points and course metadata; encode/decode semantic equivalence.                                    |
-| `workout`               | Nested workout steps, targets, repetitions, and rest; encode/decode semantic equivalence.                |
-| `developer-unknown`     | Described developer fields plus an unknown message/field; supported values and original bytes survive.   |
-| `developer-undescribed` | A developer field without its required description; decoding fails cleanly.                              |
-| `truncated`             | A valid case cut at defined offsets; every cut returns an error without panic or committed partial data. |
-| `bad-checksum`          | A valid case with one controlled mutation; checksum failure is reported without a commit.                |
+| Case                    | Required content                                                          |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `activity-basic`        | File/device identity, one session/lap, timestamped GPS and sensors        |
+| `activity-multisport`   | Multiple sessions and laps with distinct sports                           |
+| `wellness`              | Timestamped monitoring and body measurements; some optional values absent |
+| `sleep-hrv`             | Interval sleep data and HRV samples spanning a synthetic day boundary     |
+| `course`                | Route points and course metadata                                          |
+| `workout`               | Nested steps, targets, repetitions, and rest                              |
+| `developer-unknown`     | Described developer fields plus an unknown message/field                  |
+| `developer-undescribed` | A developer field without its required description                        |
+| `truncated`             | A valid case cut at defined offsets                                       |
+| `bad-checksum`          | A valid case with one controlled mutation                                 |
+
+Basic activity normalization must match the synthetic definition exactly; multisport hierarchy and ordering must
+survive. Absent wellness values stay absent. Unknown fields preserve supported values and original bytes; undescribed
+developer fields fail cleanly. Every truncation returns an error without panic or committed partial data; checksum
+failure is reported without a commit.
 
 Course and workout cases compare semantics, not bytes. Expectations come from the synthetic definition, never Garmin SDK
 fixtures or parser output.
@@ -33,10 +38,15 @@ Real device files stay ignored. They extend support only through a synthetic reg
 
 ## Development corpus
 
-`garmin-fixtures` seeds three fake profiles and six generated run/ride files through the production importer and storage
-APIs. Stable IDs make the seed idempotent.
-[`fixture.toml`](../../infra/fixtures/fit/development-activities/fixture.toml) records its provenance; no generated
-binary or database is committed.
+`garmin-fixtures` seeds three fake profiles and six generated run, ride, and swim files through the production importer
+and storage APIs. Four outdoor activities contain real route geometry and varied chart data; a sensor-rich indoor ride
+contains speed, cadence, and power. Stable IDs make the seed idempotent.
+
+The compact normalized recordings are derived from the GPL-3-licensed real-data examples in `trackeR` 1.6.1. Source
+timestamps, athlete identity, and device identity are discarded; the generated FIT files use deterministic 2026 dates
+and fake device metadata. [`fixture.toml`](../../infra/fixtures/fit/development-activities/fixture.toml) pins the CRAN
+archive, every selected member, generator, transformation, committed-input hash, and expected output case. Generated FIT
+files and databases remain build products rather than committed binaries.
 
 Community files help select missing cases. A case becomes durable only after it is recreated synthetically or cleared
 for redistribution with its provenance intact.

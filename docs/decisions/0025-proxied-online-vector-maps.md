@@ -10,7 +10,7 @@ The native host discovers TileJSON, fetches, and caches. HASS exposes same-origi
 component in-process. Do not use walkers' built-in OpenFreeMap URL.
 
 Use HTTP-aware caching with upstream freshness rules and storage bounds; exclude it from snapshots. Offline regions and
-prefetch are unsupported. Cache misses fail explicitly when offline.
+prefetch are unsupported. Cached tiles remain usable when the provider is unavailable; uncached misses fail explicitly.
 
 ## Why
 

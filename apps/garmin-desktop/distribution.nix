@@ -1,6 +1,7 @@
 {
   craneLib,
   craneLibPortable,
+  formatjsCli,
   launcher,
   lib,
   demoIdentity,
@@ -56,11 +57,15 @@ let
     buildInputs = portableBuildInputs;
     cargoLock = workspaceSrc + "/Cargo.lock";
     doCheck = false;
-    nativeBuildInputs = [ pkgsPortable.pkg-config ];
+    nativeBuildInputs = [
+      pkgsPortable.pkg-config
+      formatjsCli
+    ];
     strictDeps = true;
   };
   portableCargoArtifacts = craneLibPortable.buildDepsOnly (
     portableCommonArgs
+    // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
     // {
       cargoExtraArgs = "--locked -p garmin-desktop --all-features";
       pname = "garmin-toolkit-portable-deps";

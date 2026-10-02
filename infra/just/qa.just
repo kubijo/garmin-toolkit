@@ -9,6 +9,10 @@ full:
     just in-shell nix run {{ flake }}#validate
     just in-shell nix run {{ flake }}#project-lint
 
+# Lint the actual browser target using the pinned Nix WASM toolchain.
+wasm:
+    just in-shell nix run {{ flake }}#wasm-lint
+
 # Evaluate and build every pure Nix flake check.
 check:
     just in-shell nix flake check {{ flake }}
@@ -20,11 +24,6 @@ audit *args:
 # Run the complete Rust test suite.
 test:
     just in-shell nix run {{ flake }}#test
-
-# Run repository policy before the complete Rust and gallery lint suite.
-lint:
-    just in-shell nix run {{ flake }}#lint
-    just in-shell nix run {{ flake }}#project-lint
 
 # Format every maintained source type.
 format:
@@ -45,3 +44,7 @@ licenses:
 # Verify committed SQLx metadata against every static query.
 sqlx:
     just in-shell nix run {{ flake }}#sqlx-check
+
+# Check bindgen cache restoration and invalidation with a real WASM fixture.
+trunk-cache:
+    just in-shell nix develop {{ flake }} --max-jobs 1 --cores 2 --command uv run --frozen --project infra/python python infra/python/trunk_cache_acceptance.py

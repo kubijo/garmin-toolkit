@@ -6,6 +6,11 @@ level: error
 
 Public service-boundary models must be explicitly reviewed and added to the approved model set.
 
+The map workflow models use owned, Postcard-compatible values and fixed-width counts. Commands carry opaque request,
+revision, and approval identities; host captures, transport handles, payloads, and raw progress events stay server-side.
+`DeviceFitImportPlan` carries opaque review/job IDs and the existing owned FIT preview; device bytes stay server-side.
+`DeviceFitImportStatus` carries only a fixed lifecycle state; the host retains the running job and stored acquisition.
+
 ```grit
 language rust
 
@@ -16,7 +21,56 @@ or {
 } where {
   $item <: contains visibility_modifier(),
   $name <: not or {
+    `Action`,
+    `Phase`,
+    `Choice`,
+    `CatalogService`,
+    `Component`,
+    `Plan`,
+    `StorageRequirement`,
+    `Recovery`,
+    `RecoveryReview`,
+    `RecoveryFile`,
+    `Progress`,
+    `ProgressStatus`,
+    `Outcome`,
+    `State`,
+    `Command`,
+    `Request`,
+    `FailureKind`,
+    `Failure`,
     `DeviceSnapshot`,
+    `SnapshotState`,
+    `Directory`,
+    `Operation`,
+    `Selection`,
+    `SnapshotPreview`,
+    `SnapshotStatus`,
+    `SnapshotSource`,
+    `SnapshotOperation`,
+    `SnapshotRequest`,
+    `SnapshotReply`,
+    `SnapshotFailureKind`,
+    `SnapshotFailure`,
+    `ControlCommand`,
+    `ControlSession`,
+    `ControlDispatch`,
+    `CaptureInfo`,
+    `Capture`,
+    `Batch`,
+    `DeviceCatalogSnapshot`,
+    `DeviceCatalogStorage`,
+    `DeviceCatalogEntry`,
+    `DeviceCatalogEntryKind`,
+    `DeviceBrowserTarget`,
+    `DeviceBrowserRequest`,
+    `DeviceBrowserUpload`,
+    `DownloadTicket`,
+    `DeviceFitPreview`,
+    `DeviceFitImportPlan`,
+    `DeviceFitPreviewActivity`,
+    `DeviceFitImportOutcome`,
+    `DeviceFitImportStatus`,
     `DeviceCapability`,
     `DeviceDataType`,
     `DeploymentMode`,
@@ -24,8 +78,15 @@ or {
     `TransferDirection`,
     `ProfileSnapshot`,
     `ProfileAvatarSnapshot`,
+    `AvatarUpload`,
+    `AvatarCrop`,
     `ActivitySnapshot`,
     `ActivityDetailSnapshot`,
+    `ActivityRecordingSnapshot`,
+    `ActivityLapSnapshot`,
+    `ActivitySampleSnapshot`,
+    `ActivityTimerEventSnapshot`,
+    `ActivityTimerStateSnapshot`,
   }
 }
 ```

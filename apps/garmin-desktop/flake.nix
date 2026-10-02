@@ -25,6 +25,7 @@
       lib.mkTarget =
         {
           brandAssets,
+          formatjsCli,
           nixCargoTargetDir,
           system,
           toolchain,
@@ -76,7 +77,10 @@
             buildInputs = runtimeLibraries;
             cargoLock = workspaceSrc + "/Cargo.lock";
             doCheck = false;
-            nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            nativeBuildInputs = [
+              formatjsCli
+            ]
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               pkgs.pkg-config
               pkgs.wrapGAppsNoGuiHook
             ];
@@ -84,6 +88,7 @@
           };
           cargoArtifacts = craneLib.buildDepsOnly (
             commonArgs
+            // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
             // {
               cargoExtraArgs = "-p garmin-desktop --all-features";
               pname = "garmin-desktop-deps";
@@ -167,6 +172,7 @@
             inherit
               craneLib
               craneLibPortable
+              formatjsCli
               lib
               demoIdentity
               demoLauncher

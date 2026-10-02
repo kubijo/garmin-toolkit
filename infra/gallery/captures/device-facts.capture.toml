@@ -1,0 +1,63 @@
+out = "../../../.tmp/gallery/device-facts"
+size = "1000x800"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "ready-dark"
+scene = "device::Details"
+
+[[shot]]
+name = "ready-light"
+scene = "device::Details"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "ready-czech-narrow"
+scene = "device::Details"
+[shot.globals]
+Language = "Čeština"
+[shot.knobs]
+width = 320
+
+[[shot]]
+name = "ready-czech-narrow-light"
+scene = "device::Details"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+width = 320
+
+[[shot]]
+name = "inspecting"
+scene = "device::Details"
+[shot.knobs]
+state = "inspecting"
+
+[[shot]]
+name = "failed-czech-narrow"
+scene = "device::Details"
+[shot.globals]
+Language = "Čeština"
+[shot.knobs]
+state = "failed"
+width = 320
+
+[[shot]]
+name = "restore-confirmation"
+scene = "backup::Playground"
+[shot.knobs]
+state = "confirm"
+
+[[shot]]
+name = "restore-confirmation-czech-narrow"
+scene = "backup::Playground"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+state = "confirm"
+width = 320

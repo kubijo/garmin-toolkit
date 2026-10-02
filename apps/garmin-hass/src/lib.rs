@@ -6,23 +6,73 @@
 )]
 
 use std::{
-    env, fs,
+    env,
     path::{Path, PathBuf},
 };
 
-use garmin_services::Application;
-use garmin_storage::Storage;
+use garmin_services::deployment::Deployment;
+use std::sync::Arc;
 use thiserror::Error;
+use tracing_subscriber::prelude::*;
 
+mod control;
 mod devices;
+mod downloads;
+mod files;
 mod mode;
 mod server;
+mod snapshots;
 
 pub use mode::DataError;
 
 const DATA_BASE: &str = "/data";
-const DATABASE_FILE: &str = "storage.sqlite3";
 const DATA_BASE_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_DATA_BASE";
+
+/// Startup browser controls and demo simulation options.
+#[derive(Clone, Copy, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent startup feature switches"
+)]
+pub struct BrowserOptions {
+    /// Record map upload lifecycle telemetry.
+    pub map_upload_telemetry: bool,
+    /// Enable isolated worker map rendering.
+    pub map_render_worker: bool,
+    /// Expose named semantic interaction scenarios in demo builds only.
+    pub ui_automation: bool,
+    /// Expose localhost-only automation routes on the HTTP listener (demo only).
+    pub control_server: bool,
+    /// Limit retained-copy payload uploads in bytes per second (demo only).
+    pub simulation_write_bytes_per_second: Option<std::num::NonZeroU64>,
+}
+
+impl Default for BrowserOptions {
+    fn default() -> Self {
+        Self {
+            map_upload_telemetry: true,
+            map_render_worker: true,
+            ui_automation: false,
+            control_server: false,
+            simulation_write_bytes_per_second: None,
+        }
+    }
+}
+
+impl BrowserOptions {
+    fn validate(self) -> std::io::Result<()> {
+        if (self.ui_automation
+            || self.control_server
+            || self.simulation_write_bytes_per_second.is_some())
+            && !cfg!(feature = "demo")
+        {
+            return Err(std::io::Error::other(
+                "automation, control server, and simulation pacing require a demo build",
+            ));
+        }
+        Ok(())
+    }
+}
 
 /// Prepares the deployment database.
 ///
@@ -30,21 +80,46 @@ const DATA_BASE_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_DATA_BASE";
 /// deterministic examples through the production importer; target composition isolates its root.
 /// # Errors
 /// [`enum@Error`] when the data directory, database, or demo corpus cannot be prepared.
-pub async fn prepare_storage(data_root: impl AsRef<Path>) -> Result<Storage, Error> {
+pub async fn prepare_deployment(data_root: impl AsRef<Path>) -> Result<Arc<Deployment>, Error> {
     let data_root = data_root.as_ref();
-    fs::create_dir_all(data_root)?;
-    Ok(mode::open_storage(data_root.join(DATABASE_FILE)).await?)
+    Ok(mode::open(data_root).await?)
 }
 
 /// Runs the device host and browser service until shutdown.
 /// # Errors
 /// [`enum@Error`] when persistent state cannot be prepared.
-pub async fn run() -> Result<(), Error> {
+pub async fn run(browser: BrowserOptions) -> Result<(), Error> {
+    browser.validate()?;
     let data_root = deployment_data_root();
-    let storage = prepare_storage(data_root).await?;
-    let devices = devices::Host::new(mode::device_source(), Application::new(storage));
+    let logs = garmin_logging::Store::open(data_root.join("logs"), "hass")?;
+    logs.install_global();
+    let _ = tracing_subscriber::registry()
+        .with(logs)
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "warn,garmin=info".into()),
+        )
+        .with(garmin_logging::console::layer(
+            "hass",
+            std::io::stderr,
+            garmin_logging::console::stderr_ansi(),
+        ))
+        .try_init();
+    tracing::info!("HASS starting");
+    let deployment = prepare_deployment(&data_root).await?;
+    let devices = devices::Host::with_simulation_write_rate(
+        mode::device_source(&data_root)?,
+        Arc::clone(&deployment),
+        browser.simulation_write_bytes_per_second,
+    );
+    let map_tiles = garmin_map_tiles::Service::new(data_root.join("cache/activity-map"))?;
     devices.start();
-    server::serve(devices).await?;
+    let result = server::serve(devices, map_tiles, browser).await;
+    deployment.close().await;
+    if let Some(logs) = garmin_logging::Store::global() {
+        logs.flush();
+    }
+    result?;
     Ok(())
 }
 
@@ -64,6 +139,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Data(#[from] DataError),
+    #[error(transparent)]
+    MapTiles(#[from] garmin_map_tiles::Error),
 }
 
 #[cfg(test)]
@@ -73,7 +150,20 @@ mod tests {
     use futures_lite::future::block_on;
     use tempfile::tempdir;
 
-    use super::{DATA_BASE, configured_data_base, prepare_storage};
+    use super::{DATA_BASE, configured_data_base, prepare_deployment};
+
+    #[test]
+    fn worker_map_is_default_in_both_deployment_modes() {
+        let defaults = super::BrowserOptions::default();
+        assert!(defaults.validate().is_ok());
+        assert!(defaults.map_upload_telemetry);
+        assert!(defaults.map_render_worker);
+        let rollback = super::BrowserOptions {
+            map_render_worker: false,
+            ..defaults
+        };
+        assert!(rollback.validate().is_ok());
+    }
 
     #[test]
     fn configured_data_base_overrides_the_default() {
@@ -85,14 +175,41 @@ mod tests {
     }
 
     #[test]
+    fn automation_is_independently_opt_in_and_demo_only() {
+        let defaults = super::BrowserOptions::default();
+        assert!(!defaults.ui_automation);
+        assert!(!defaults.control_server);
+        let control = super::BrowserOptions {
+            control_server: true,
+            ..defaults
+        };
+        assert_eq!(control.validate().is_ok(), cfg!(feature = "demo"));
+        let automation = super::BrowserOptions {
+            ui_automation: true,
+            ..defaults
+        };
+        assert!(automation.map_render_worker);
+        assert_eq!(automation.validate().is_ok(), cfg!(feature = "demo"));
+    }
+
+    #[test]
     fn prepares_a_migrated_database() {
         block_on(async {
             let directory = tempdir().expect("the test data directory should be created");
-            let storage = prepare_storage(directory.path())
+            let storage = prepare_deployment(directory.path())
                 .await
                 .expect("the target database should be prepared");
 
             storage.close().await;
         });
+    }
+
+    #[test]
+    fn simulation_pacing_requires_a_demo_build() {
+        let paced = super::BrowserOptions {
+            simulation_write_bytes_per_second: std::num::NonZeroU64::new(1_000_000),
+            ..super::BrowserOptions::default()
+        };
+        assert_eq!(paced.validate().is_ok(), cfg!(feature = "demo"));
     }
 }

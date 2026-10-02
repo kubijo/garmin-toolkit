@@ -5,21 +5,8 @@ use garmin_color::theme;
 use garmin_i18n::{Intl, format_message};
 use garmin_model::identity::{LanguagePreference, ProfilePreferences, ThemePreference, UnitSystem};
 
-use crate::{Size, button, icons, images, profile, select};
-
-const fn unit_index(unit_system: UnitSystem) -> usize {
-    match unit_system {
-        UnitSystem::Metric => 0,
-        UnitSystem::Imperial => 1,
-    }
-}
-
-const fn unit_from_index(index: usize) -> UnitSystem {
-    match index {
-        1 => UnitSystem::Imperial,
-        _ => UnitSystem::Metric,
-    }
-}
+use crate::{Size, button, icons, images, profile, radio};
+mod accent;
 
 const fn language_autonym(language: LanguagePreference) -> &'static str {
     match language {
@@ -28,24 +15,12 @@ const fn language_autonym(language: LanguagePreference) -> &'static str {
     }
 }
 
-const fn language_index(language: LanguagePreference) -> usize {
-    match language {
-        LanguagePreference::English => 0,
-        LanguagePreference::Czech => 1,
-    }
-}
-
-const fn language_from_index(index: usize) -> LanguagePreference {
-    match index {
-        1 => LanguagePreference::Czech,
-        _ => LanguagePreference::English,
-    }
-}
-
 /// Profile-settings inputs.
 pub struct Props<'a> {
+    pub id: Id,
     pub intl: &'a Intl,
     pub preferences: ProfilePreferences,
+    pub accent: Option<garmin_color::Color>,
     pub profile: profile::ProfileProps<'a>,
     pub picture_enabled: bool,
     pub disabled: bool,
@@ -55,26 +30,37 @@ pub struct Props<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     ChoosePicture,
+    UpdateAccent(Option<garmin_color::Color>),
     UpdatePreferences(ProfilePreferences),
 }
 
 #[must_use]
 pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     let title = format_message!(props.intl, default_message: "Profile settings");
-    ui.heading(title);
-    ui.add_space(24.0);
-
     let mut action = None;
-    crate::theme::layer(ui, theme::Level::One, |ui| {
-        ui.set_max_width(640.0);
-        if show_picture(ui, props) {
-            action = Some(Action::ChoosePicture);
-        }
-        ui.add_space(24.0);
-        if let Some(preferences) = show_preferences(ui, props) {
-            action = Some(Action::UpdatePreferences(preferences));
-        }
-    });
+    egui::ScrollArea::vertical()
+        .id_salt(props.id)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            egui::Frame::NONE.inner_margin(24).show(ui, |ui| {
+                ui.heading(title);
+                ui.add_space(24.0);
+                crate::theme::layer(ui, theme::Level::One, |ui| {
+                    ui.set_max_width(ui.available_width().min(480.0));
+                    if show_picture(ui, props) {
+                        action = Some(Action::ChoosePicture);
+                    }
+                    ui.add_space(24.0);
+                    if let Some(update) = accent::show(ui, props) {
+                        action = Some(update);
+                    }
+                    ui.add_space(24.0);
+                    if let Some(preferences) = show_preferences(ui, props) {
+                        action = Some(Action::UpdatePreferences(preferences));
+                    }
+                });
+            });
+        });
     action
 }
 
@@ -86,7 +72,7 @@ fn show_picture(ui: &mut Ui, props: &Props<'_>) -> bool {
     ui.horizontal(|ui| {
         profile::AvatarProps {
             display_name: props.profile.display_name,
-            accent: props.profile.accent,
+            accent: accent::preview(ui, props),
             image: props.profile.avatar,
             size: 64.0,
         }
@@ -115,21 +101,22 @@ fn show_preferences(ui: &mut Ui, props: &Props<'_>) -> Option<ProfilePreferences
     );
     let metric = format_message!(props.intl, default_message: "Metric");
     let imperial = format_message!(props.intl, default_message: "Imperial");
-    let units = [select::Choice::new(&metric), select::Choice::new(&imperial)];
-    let mut unit_system = unit_index(preferences.unit_system());
-    if select::show(
+    let units = [
+        radio::Choice::new(&metric, UnitSystem::Metric, "profile.units.metric"),
+        radio::Choice::new(&imperial, UnitSystem::Imperial, "profile.units.imperial"),
+    ];
+    if let Some(unit_system) = radio::show(
         ui,
-        Id::new("profile-unit-system"),
-        &mut unit_system,
+        preferences.unit_system(),
         &units,
-        select::Props::new(&unit_label)
-            .helper(&unit_helper)
-            .disabled(props.disabled),
-    )
-    .changed()
-    {
+        radio::Props {
+            label: &unit_label,
+            helper: Some(&unit_helper),
+            enabled: !props.disabled,
+        },
+    ) {
         preferences = ProfilePreferences::from_parts(
-            unit_from_index(unit_system),
+            unit_system,
             preferences.language(),
             preferences.theme(),
         );
@@ -138,23 +125,32 @@ fn show_preferences(ui: &mut Ui, props: &Props<'_>) -> Option<ProfilePreferences
 
     let language_label = format_message!(props.intl, default_message: "Language");
     let languages = [
-        select::Choice::new(language_autonym(LanguagePreference::English))
-            .image(images::UNITED_KINGDOM),
-        select::Choice::new(language_autonym(LanguagePreference::Czech)).image(images::CZECHIA),
+        radio::Choice::new(
+            language_autonym(LanguagePreference::English),
+            LanguagePreference::English,
+            "profile.language.english",
+        )
+        .image(images::UNITED_KINGDOM),
+        radio::Choice::new(
+            language_autonym(LanguagePreference::Czech),
+            LanguagePreference::Czech,
+            "profile.language.czech",
+        )
+        .image(images::CZECHIA),
     ];
-    let mut language = language_index(preferences.language());
-    if select::show(
+    if let Some(language) = radio::show(
         ui,
-        Id::new("profile-language"),
-        &mut language,
+        preferences.language(),
         &languages,
-        select::Props::new(&language_label).disabled(props.disabled),
-    )
-    .changed()
-    {
+        radio::Props {
+            label: &language_label,
+            helper: None,
+            enabled: !props.disabled,
+        },
+    ) {
         preferences = ProfilePreferences::from_parts(
             preferences.unit_system(),
-            language_from_index(language),
+            language,
             preferences.theme(),
         );
     }
@@ -176,7 +172,9 @@ fn show_preferences(ui: &mut Ui, props: &Props<'_>) -> Option<ProfilePreferences
         &themes,
         button::GroupProps {
             size: Size::Medium,
+            width: button::Width::Fit,
             enabled: !props.disabled,
+            style: button::GroupStyle::Subtle,
         },
     ) {
         preferences = ProfilePreferences::from_parts(
@@ -185,5 +183,32 @@ fn show_preferences(ui: &mut Ui, props: &Props<'_>) -> Option<ProfilePreferences
             theme,
         );
     }
+    preferences = preferences.with_show_hidden_files(props.preferences.show_hidden_files());
+    preferences = preferences.with_inline_file_windows(props.preferences.inline_file_windows());
+    ui.add_space(16.0);
+    if let Some(inline) = show_file_windows(ui, props, preferences.inline_file_windows()) {
+        preferences = preferences.with_inline_file_windows(inline);
+    }
     (preferences != props.preferences).then_some(preferences)
+}
+
+fn show_file_windows(ui: &mut Ui, props: &Props<'_>, selected: bool) -> Option<bool> {
+    let label = format_message!(props.intl, default_message: "File browser windows");
+    let separate = format_message!(props.intl, default_message: "Separate window");
+    let inline = format_message!(props.intl, default_message: "Inside the app");
+    let helper = format_message!(props.intl, default_message: "Choose where file browsers and choosers open.");
+    let choices = [
+        radio::Choice::new(&separate, false, "profile.file-windows.separate"),
+        radio::Choice::new(&inline, true, "profile.file-windows.inline"),
+    ];
+    radio::show(
+        ui,
+        selected,
+        &choices,
+        radio::Props {
+            label: &label,
+            helper: Some(&helper),
+            enabled: !props.disabled,
+        },
+    )
 }

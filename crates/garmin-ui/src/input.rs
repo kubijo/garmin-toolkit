@@ -3,7 +3,7 @@
 use cint::ColorInterop;
 use egui::{Response, RichText, Ui, emath::Numeric};
 
-use crate::{Size, button, icons};
+use crate::{Size, button, icons, theme::PANEL_RADIUS};
 
 /// Supporting or validation text below an input.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -32,6 +32,7 @@ pub struct Props<'a> {
     message: Option<Message<'a>>,
     size: Option<Size>,
     disabled: Option<bool>,
+    subtle_border: bool,
 }
 
 impl<'a> Props<'a> {
@@ -43,12 +44,20 @@ impl<'a> Props<'a> {
             message: None,
             size: None,
             disabled: None,
+            subtle_border: false,
         }
     }
 
     #[must_use]
     pub const fn placeholder(mut self, placeholder: &'a str) -> Self {
         self.placeholder = placeholder;
+        self
+    }
+
+    /// Uses a quieter resting border; hover, focus, and validation remain visible.
+    #[must_use]
+    pub const fn subtle_border(mut self, subtle_border: bool) -> Self {
+        self.subtle_border = subtle_border;
         self
     }
 
@@ -162,6 +171,7 @@ pub fn show(ui: &mut Ui, value: &mut String, props: Props<'_>) -> Response {
             message: props.message,
             enabled: !disabled,
             readonly: false,
+            subtle_border: props.subtle_border,
         },
         |ui, fill| {
             control_style(ui, fill, false);
@@ -207,6 +217,7 @@ pub fn show_number<N: Numeric>(ui: &mut Ui, value: &mut N, props: NumberProps<'_
             message: props.message,
             enabled: !disabled,
             readonly,
+            subtle_border: false,
         },
         |ui, fill| {
             number_control(
@@ -233,6 +244,7 @@ struct FieldProps<'a> {
     message: Option<Message<'a>>,
     enabled: bool,
     readonly: bool,
+    subtle_border: bool,
 }
 
 fn field(
@@ -248,14 +260,16 @@ fn field(
         } else {
             app_theme.content().text_disabled()
         };
-        ui.add(
-            egui::Label::new(
-                RichText::new(props.label)
-                    .size(12.0)
-                    .color(label_color.into_cint()),
-            )
-            .selectable(false),
-        );
+        if !props.label.is_empty() {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(props.label)
+                        .size(12.0)
+                        .color(label_color.into_cint()),
+                )
+                .selectable(false),
+            );
+        }
 
         let fill = if !props.enabled {
             ui.visuals().widgets.noninteractive.bg_fill
@@ -267,17 +281,21 @@ fn field(
                 .unwrap_or_else(|| ui.visuals().extreme_bg_color)
         };
         let response = control(ui, fill);
-        let emphasized = response.has_focus() || props.message.is_some_and(Message::is_error);
-        let border = if props.message.is_some_and(Message::is_error) {
+        let is_error = props.message.is_some_and(Message::is_error);
+        let border = if is_error {
             app_theme.support().error()
         } else if response.has_focus() {
             app_theme.borders().interactive()
-        } else if props.enabled && !props.readonly {
+        } else if props.enabled && !props.readonly && (!props.subtle_border || response.hovered()) {
             app_theme.borders().strong()
         } else {
             app_theme.borders().subtle()
         };
-        let width = if emphasized { 2.0 } else { 1.0 };
+        let width = if response.has_focus() && !is_error {
+            2.0
+        } else {
+            1.0
+        };
         ui.painter().hline(
             response.rect.x_range(),
             response.rect.bottom() - width / 2.0,
@@ -319,6 +337,7 @@ fn number_control<N: Numeric>(
         ui.style_mut().drag_value_text_style = egui::TextStyle::Body;
         egui::Frame::new()
             .fill(fill)
+            .corner_radius(PANEL_RADIUS)
             .show(ui, |ui| {
                 ui.allocate_ui_with_layout(
                     egui::vec2(ui.available_width(), metrics.height),
@@ -430,21 +449,21 @@ struct Metrics {
 const fn metrics(size: Size) -> Metrics {
     match size {
         Size::Small => Metrics {
-            height: 40.0,
+            height: 32.0,
             horizontal_padding: 12,
-            vertical_padding: 10,
+            vertical_padding: 6,
             font_size: 14.0,
         },
         Size::Medium => Metrics {
-            height: 48.0,
+            height: 40.0,
             horizontal_padding: 16,
-            vertical_padding: 14,
+            vertical_padding: 10,
             font_size: 14.0,
         },
         Size::Large => Metrics {
-            height: 64.0,
+            height: 48.0,
             horizontal_padding: 16,
-            vertical_padding: 22,
+            vertical_padding: 14,
             font_size: 16.0,
         },
     }

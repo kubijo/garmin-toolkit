@@ -47,6 +47,21 @@ Garmin documents [`NewFiles`](https://support.garmin.com/en-MY/?faq=rzvP53Si4O3b
 Under [ADR 0012](../decisions/0012-manifest-driven-usb-capabilities.md), output permits copy, input only identifies a
 potential operation, and unlisted paths grant nothing.
 
+### Device-browser bookmark policy
+
+The file browser derives shortcuts from the catalog it already received; it never invents a directory or scans beyond
+that bounded snapshot. The conservative known-place set is `Garmin/Activity`, `Garmin/Courses`, `Garmin/Workouts`, and
+existing root or `Garmin`-nested Music, Podcasts, and Audiobooks directories. Activity, course, and workout locations
+come from the device manifest contract above. Garmin separately documents music, podcast, audiobook, and playlist
+content support, but not one universal watch directory layout, so media shortcuts are strictly existence-based:
+[Garmin audio file support](https://support.garmin.com/en-US/?faq=JyNEOTsZaR3KMXqej3oQp5).
+
+`GARMIN-TOOLKIT` remains visible because it is the toolkit's bounded, versioned recovery and transaction namespace. It
+is not a user-directory bookmark. The browser keeps it in the full storage tree and storage-root listing with a distinct
+toolbox icon. Its subtree is browse/download-only in this generic explorer: upload, new-folder, and remove affordances
+are suppressed. This protection is an application policy; it does not misrepresent a writable device volume as
+transport-level read-only.
+
 ## Device identity
 
 [ADR 0018](../decisions/0018-on-device-profile-marker.md) makes a root TOML marker the sole persisted association. It
@@ -58,12 +73,17 @@ Manifest, USB, MTP, and FIT IDs are diagnostic; none identifies an application p
 
 `garmin-device` owns attachments, consented discovery, capabilities, and I/O; apps see no backend handles or raw paths.
 
-| Candidate                                                                                                  | Treatment                                                                                                                                                                                                                                        |
-| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`nusb` 0.2.7](https://github.com/kevinmehall/nusb/commit/bdc148c123c102785cd1d506b77bfeeb794ffeb1)        | Primary hotplug and descriptor candidate. It is pure Rust, MIT/Apache-2.0, runtime-neutral, and supports Linux, macOS, and Windows.                                                                                                              |
-| [`mtp-rs` 0.32.0](https://github.com/vdavid/mtp-rs/commit/4069f1f4c424b38e471f44c99de8462a25ca13ba)        | Primary MTP candidate. It is runtime-neutral, MIT/Apache-2.0, uses `nusb` on Linux/macOS and Windows WPD behind one high-level API, and has mock and virtual-device tests. Upstream reports a Forerunner 955 and Venu 2/2S, but not the fēnix 8. |
-| [`libmtp`](https://github.com/libmtp/libmtp/commit/eb12290bdde39c59d709f824389837cbfb63ab15)               | Diagnostic and fallback reference only. Its C/FFI stack and LGPL-2.0-or-later obligations add packaging work; activate it only for an owned-device failure tied to a quirk `mtp-rs` cannot implement safely.                                     |
-| [`libmtp-rs` 0.7.7](https://github.com/quebin31/libmtp-rs/commit/002b8080dff2e95ce66ae331780fa32a38842dd3) | Reject. The MIT wrapper is stale alpha software, lacks partial transfers and events, and still requires system libmtp through `pkg-config`.                                                                                                      |
+- [`nusb` 0.2.7](https://github.com/kevinmehall/nusb/commit/bdc148c123c102785cd1d506b77bfeeb794ffeb1): Primary hotplug
+  and descriptor candidate. Pure Rust, MIT/Apache-2.0, runtime-neutral; supports Linux, macOS, and Windows.
+- [`mtp-rs` 0.32.0](https://github.com/vdavid/mtp-rs/commit/4069f1f4c424b38e471f44c99de8462a25ca13ba): Primary MTP
+  candidate. Runtime-neutral, MIT/Apache-2.0; uses `nusb` on Linux/macOS and Windows WPD behind one high-level API. Has
+  mock and virtual-device tests. Upstream reports a Forerunner 955 and Venu 2/2S, but not the fēnix 8.
+- [`libmtp`](https://github.com/libmtp/libmtp/commit/eb12290bdde39c59d709f824389837cbfb63ab15): Diagnostic and fallback
+  reference only. C/FFI and LGPL-2.0-or-later obligations add packaging work. Activate only for an owned-device failure
+  tied to a quirk `mtp-rs` cannot implement safely.
+- [`libmtp-rs` 0.7.7](https://github.com/quebin31/libmtp-rs/commit/002b8080dff2e95ce66ae331780fa32a38842dd3): Reject.
+  Stale MIT-licensed alpha wrapper; lacks partial transfers and events and still requires system libmtp through
+  `pkg-config`.
 
 `mtp-rs` recognizes Garmin's vendor interface and split transfers; failed uploads expose partial objects without
 deleting them. Its 0.32.0 split-header streaming branch sends every payload chunk with `send_bulk`, bypassing the USB
@@ -84,15 +104,15 @@ whole-device operation without adding libmtp. The adapter now uses that operatio
 only for the exact selected location in the known Garmin VID/PID set, waits quietly, and retries inspection once. It
 does not reset healthy sessions.
 
-This is an established recovery attempt, not a known universal fix. Capture `.tmp/fenix-raw-link-05` confirmed that the
-whole-device reset completed on the retained fēnix, followed by the quiet period, but the next `OpenSession` again
-received no response and timed out. The bounded transport sequence itself took about 25 seconds: one 10-second open,
-reset plus five seconds quiet, and one 10-second retry. A public Epix Pro report records the same outcome, and no public
-end-to-end resolution for the fēnix 8 Solar identity `091e:51b4` was found. The fēnix 8 manual exposes a separate Garmin
-USB mode. One fēnix 8 owner reports that selecting it restored Garmin Express connectivity on Windows after firmware
-20.19, but that demonstrates Garmin's proprietary host path rather than a raw-MTP fix. The research found no published
-or open implementation that uses Garmin mode for arbitrary map-file transfer; Wi-Fi Map Manager is likewise a
-device-side facility rather than a documented host transfer API.
+This is an established recovery attempt, not a known universal fix. A hardware check confirmed that the whole-device
+reset completed on the retained fēnix, followed by the quiet period, but the next `OpenSession` again received no
+response and timed out. The bounded transport sequence itself took about 25 seconds: one 10-second open, reset plus five
+seconds quiet, and one 10-second retry. A public Epix Pro report records the same outcome, and no public end-to-end
+resolution for the fēnix 8 Solar identity `091e:51b4` was found. The fēnix 8 manual exposes a separate Garmin USB mode.
+One fēnix 8 owner reports that selecting it restored Garmin Express connectivity on Windows after firmware 20.19, but
+that demonstrates Garmin's proprietary host path rather than a raw-MTP fix. The research found no published or open
+implementation that uses Garmin mode for arbitrary map-file transfer; Wi-Fi Map Manager is likewise a device-side
+facility rather than a documented host transfer API.
 
 Consequently, automatic reset is disabled for `091e:51b4`, and an unresponsive instance now fails after the bounded open
 with a physical-reconnect instruction. After a fresh connection, raw link benchmarking retains one caller-owned MTP

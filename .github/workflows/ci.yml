@@ -23,11 +23,11 @@ jobs:
             experimental-features = nix-command flakes
             keep-env-derivations = true
             keep-outputs = true
-      - uses: nix-community/cache-nix-action@v7
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
         with:
-          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/flake.lock', '**/Cargo.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
-          gc-max-store-size-linux: 6G
+          use-gha-cache: enabled
+          use-flakehub: disabled
+          diagnostic-endpoint: ""
       - name: Verify sandboxed source
         run: nix build -L .#checks.x86_64-linux.rust-source-closure --no-update-lock-file
       - name: Check flake

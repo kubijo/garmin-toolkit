@@ -7,9 +7,14 @@ use garmin_service_api::{
     DeviceCapability, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
 };
 
-use crate::icons;
+use crate::{Size, button, icons, text::format_bytes};
+
+#[cfg(test)]
+mod acceptance;
+mod inspection;
 
 const DEVICE_ICON_SIZE: f32 = 32.0;
+const CONTENT_MAX_WIDTH: f32 = 880.0;
 
 /// Display data for one attached device.
 pub struct Props<'a> {
@@ -19,6 +24,8 @@ pub struct Props<'a> {
     pub software: Option<&'a str>,
     pub status: &'a str,
     pub status_label: &'a str,
+    pub inspection_error: Option<&'a str>,
+    pub inspection_error_label: &'a str,
     pub identifier_label: &'a str,
     pub software_label: &'a str,
     pub transfers_label: &'a str,
@@ -39,6 +46,13 @@ pub enum CollectionState<'a> {
     Connecting(&'a str),
     Empty(&'a str),
     Error(&'a str),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Action {
+    BrowseFiles,
+    ManageMaps,
+    Refresh,
 }
 
 /// Renders collection-level feedback.
@@ -62,6 +76,7 @@ pub fn show_collection_state(ui: &mut Ui, state: CollectionState<'_>) {
 }
 
 pub fn show(ui: &mut Ui, props: &Props<'_>) {
+    ui.set_max_width(CONTENT_MAX_WIDTH.min(ui.available_width()));
     let palette = crate::theme::palette(ui);
     ui.horizontal(|ui| {
         icons::Props {
@@ -78,51 +93,86 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
             );
         });
     });
-    ui.add_space(20.0);
+    ui.add_space(8.0);
 
     egui::Frame::new()
         .fill(crate::theme::color32(
             palette.surfaces().layer(garmin_color::theme::Level::One),
         ))
+        .corner_radius(crate::theme::PANEL_RADIUS)
+        .stroke(egui::Stroke::new(
+            1.0,
+            crate::theme::color32(palette.borders().subtle()),
+        ))
         .inner_margin(16.0)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.vertical(|ui| {
-                metadata(ui, props.status_label, props.status);
-                if let Some(identifier) = props.identifier {
-                    metadata(ui, props.identifier_label, identifier);
-                }
-                if let Some(software) = props.software {
-                    metadata(ui, props.software_label, software);
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let summary = [
+                    Some((props.status_label, props.status)),
+                    props
+                        .identifier
+                        .map(|value| (props.identifier_label, value)),
+                    props.software.map(|value| (props.software_label, value)),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+                let transfers = props
+                    .transfers
+                    .iter()
+                    .map(|transfer| (transfer.data, transfer.directions))
+                    .collect::<Vec<_>>();
+                let table = crate::facts::Table::new(
+                    ui,
+                    summary.iter().chain(&transfers).map(|(label, _)| *label),
+                );
+                table.show(ui, "device-summary", &summary);
+                if let Some(error) = props.inspection_error {
+                    ui.add_space(8.0);
+                    inspection_error(ui, props.inspection_error_label, error);
                 }
                 if !props.transfers.is_empty() {
+                    ui.add_space(16.0);
                     ui.label(
                         RichText::new(props.transfers_label)
-                            .small()
                             .color(palette.content().text_secondary().into_cint()),
                     );
-                    for transfer in props.transfers {
-                        ui.horizontal(|ui| {
-                            ui.label(transfer.data);
-                            ui.label(
-                                RichText::new(transfer.directions)
-                                    .color(palette.content().text_secondary().into_cint()),
-                            );
-                        });
-                    }
+                    ui.add_space(8.0);
+                    table.show(ui, "device-transfers", &transfers);
                 }
             });
         });
 
     if !props.storages.is_empty() {
-        ui.add_space(16.0);
+        ui.add_space(8.0);
         for storage in props.storages {
             crate::capacity::show(ui, storage);
         }
     }
 }
 
-pub fn show_snapshot(ui: &mut Ui, intl: &Intl, snapshot: &DeviceSnapshot) {
+pub fn show_snapshot(
+    ui: &mut Ui,
+    intl: &Intl,
+    snapshot: &DeviceSnapshot,
+    browser_loading: bool,
+) -> Option<Action> {
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.spacing_mut().interact_size.y = ui.text_style_height(&TextStyle::Body);
+        snapshot_content(ui, intl, snapshot, browser_loading)
+    })
+    .inner
+}
+
+fn snapshot_content(
+    ui: &mut Ui,
+    intl: &Intl,
+    snapshot: &DeviceSnapshot,
+    browser_loading: bool,
+) -> Option<Action> {
     let view = SnapshotView::new(snapshot, intl);
     let transfers = view
         .transfers
@@ -150,6 +200,8 @@ pub fn show_snapshot(ui: &mut Ui, intl: &Intl, snapshot: &DeviceSnapshot) {
             software: view.software.as_deref(),
             status: &view.status,
             status_label: &view.status_label,
+            inspection_error: snapshot.inspection_error.as_deref(),
+            inspection_error_label: &view.inspection_error_label,
             identifier_label: &view.identifier_label,
             software_label: &view.software_label,
             transfers_label: &view.transfers_label,
@@ -158,14 +210,80 @@ pub fn show_snapshot(ui: &mut Ui, intl: &Intl, snapshot: &DeviceSnapshot) {
             icon: snapshot_icon(snapshot),
         },
     );
+    if let Some(report) = &snapshot.report {
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(16, 0))
+            .show(ui, |ui| inspection::show(ui, intl, report));
+    }
+    controls(ui, intl, snapshot, browser_loading)
+}
+
+fn controls(
+    ui: &mut Ui,
+    intl: &Intl,
+    snapshot: &DeviceSnapshot,
+    browser_loading: bool,
+) -> Option<Action> {
+    ui.horizontal_wrapped(|ui| {
+        let refresh = button::Props {
+            label: &format_message!(intl, default_message: "Refresh"),
+            icon: Some(icons::ARROWS_CLOCKWISE),
+            kind: button::Kind::Secondary,
+            size: Size::Medium,
+            width: button::Width::Fit,
+            enabled: snapshot.inspection != InspectionState::Running,
+        }
+        .show(ui);
+        crate::semantics::target(ui, &refresh, "device.refresh");
+        let mut action = refresh.clicked().then_some(Action::Refresh);
+        if !snapshot.storages.is_empty() {
+            let browse = if browser_loading {
+                format_message!(intl, default_message: "Reading files…")
+            } else {
+                format_message!(intl, default_message: "Browse files")
+            };
+            let response = button::Props {
+                label: &browse,
+                icon: Some(icons::FOLDER_OPEN),
+                kind: button::Kind::Secondary,
+                size: Size::Medium,
+                width: button::Width::Fit,
+                enabled: !browser_loading,
+            }
+            .show(ui);
+            crate::semantics::target(ui, &response, "device.files");
+            if response.clicked() {
+                action = Some(Action::BrowseFiles);
+            }
+            let response = button::Props {
+                label: &format_message!(intl, default_message: "Manage maps"),
+                icon: Some(icons::MAP_TRIFOLD),
+                kind: button::Kind::Secondary,
+                size: Size::Medium,
+                width: button::Width::Fit,
+                enabled: snapshot.inspection == InspectionState::Ready,
+            }
+            .show(ui);
+            crate::semantics::target(ui, &response, "device.maps");
+            if response.clicked() {
+                action = Some(Action::ManageMaps);
+            }
+        }
+        action
+    })
+    .inner
 }
 
 #[must_use]
 pub fn snapshot_icon(snapshot: &DeviceSnapshot) -> icons::Icon {
     let name = snapshot.name.to_lowercase();
-    if name.contains("edge") {
+    if name.contains("edge") || name.contains("bike") || name.contains("cycle") {
         icons::BICYCLE
-    } else if name.contains("fenix") || name.contains("fēnix") || name.contains("venu") {
+    } else if name.contains("fenix")
+        || name.contains("fēnix")
+        || name.contains("venu")
+        || name.contains("watch")
+    {
         icons::WATCH
     } else {
         icons::HARD_DRIVE
@@ -177,6 +295,7 @@ struct SnapshotView {
     software: Option<String>,
     status: String,
     status_label: String,
+    inspection_error_label: String,
     identifier_label: String,
     software_label: String,
     transfers_label: String,
@@ -192,15 +311,19 @@ impl SnapshotView {
                 .software_version
                 .map(|value| format!("{}.{:02}", value / 100, value % 100)),
             status: match snapshot.inspection {
+                InspectionState::Running if snapshot.report.is_some() => {
+                    format_message!(intl, default_message: "Refreshing…")
+                }
                 InspectionState::Running => {
                     format_message!(intl, default_message: "Inspecting…")
                 }
                 InspectionState::Ready => format_message!(intl, default_message: "Ready"),
                 InspectionState::Failed => {
-                    format_message!(intl, default_message: "Inspection failed")
+                    format_message!(intl, default_message: "Some device information is unavailable")
                 }
             },
             status_label: format_message!(intl, default_message: "Status"),
+            inspection_error_label: format_message!(intl, default_message: "Inspection error"),
             identifier_label: format_message!(intl, default_message: "Device ID"),
             software_label: format_message!(intl, default_message: "Software"),
             transfers_label: format_message!(intl, default_message: "Supported transfers"),
@@ -316,21 +439,16 @@ impl StorageView {
     }
 }
 
-fn format_bytes(bytes: u64) -> String {
-    format!(
-        "{:.2}",
-        byte_unit::Byte::from_u64(bytes).get_appropriate_unit(byte_unit::UnitType::Decimal)
-    )
-}
-
-fn metadata(ui: &mut Ui, label: &str, value: &str) {
+fn inspection_error(ui: &mut Ui, label: &str, value: &str) {
     let palette = crate::theme::palette(ui);
+    let color = palette.support().error().into_cint();
     ui.label(
         RichText::new(label)
             .small()
             .color(palette.content().text_secondary().into_cint()),
     );
-    ui.label(value);
+    let value = crate::text::balanced(ui, value, &TextStyle::Body, false);
+    ui.label(RichText::new(value).color(color));
     ui.add_space(8.0);
 }
 

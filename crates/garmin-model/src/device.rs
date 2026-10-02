@@ -56,6 +56,89 @@ pub struct DeviceStateSnapshot {
     pub storages: Vec<DeviceStorageState>,
 }
 
+/// Independent read results; absent optional state is not an error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InspectionSection<T> {
+    Missing,
+    Available(T),
+    Unavailable(InspectionFailure),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InspectionFailure {
+    pub kind: InspectionFailureKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InspectionFailureKind {
+    Unreadable,
+    Malformed,
+    TooLarge,
+    UnsupportedVersion,
+    IdentityMismatch,
+    Incomplete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestInspection {
+    pub identifier: u32,
+    pub model: String,
+    pub software_version: u16,
+    pub device_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdentityInspection {
+    pub device_id: uuid::Uuid,
+    pub device_digest: String,
+    pub paired_user_id: Option<uuid::Uuid>,
+    pub verified: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransactionInspection {
+    pub transaction_id: uuid::Uuid,
+    pub kind: TransactionKind,
+    pub completed: bool,
+    pub verified: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransactionKind {
+    Update,
+    Removal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageInspection {
+    pub storage_id: String,
+    pub namespace: InspectionSection<uuid::Uuid>,
+    pub identity: InspectionSection<IdentityInspection>,
+    pub transaction: InspectionSection<TransactionInspection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceInspection {
+    pub manifest: InspectionSection<ManifestInspection>,
+    pub storage: InspectionSection<DeviceStateSnapshot>,
+    pub toolkit: Vec<StorageInspection>,
+}
+
+impl DeviceInspection {
+    #[must_use]
+    pub fn has_errors(&self) -> bool {
+        matches!(self.manifest, InspectionSection::Unavailable(_))
+            || matches!(self.storage, InspectionSection::Unavailable(_))
+            || matches!(&self.storage, InspectionSection::Available(state) if state.storages.iter().any(|storage| storage.capacity.bytes().is_none()))
+            || self.toolkit.iter().any(|storage| {
+                matches!(storage.namespace, InspectionSection::Unavailable(_))
+                    || matches!(storage.identity, InspectionSection::Unavailable(_))
+                    || matches!(storage.transaction, InspectionSection::Unavailable(_))
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DeviceStateSnapshot, DeviceStorageState, StorageCapacity};

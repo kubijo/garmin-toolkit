@@ -12,8 +12,13 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+dirs.workspace = true
+garmin-color.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
+blake3.workspace = true
+fs2.workspace = true
+garmin-service-api.workspace = true
 garmin-capture.workspace = true
 garmin-device.workspace = true
 garmin-map-service.workspace = true
@@ -22,6 +27,7 @@ garmin-simulator.workspace = true
 garmin-update.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+remoc.workspace = true
 garmin-fit.workspace = true
 garmin-gpx.workspace = true
 garmin-importer.workspace = true
@@ -29,11 +35,15 @@ garmin-model.workspace = true
 garmin-route.workspace = true
 garmin-storage.workspace = true
 thiserror.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-tokio.workspace = true
+postcard.workspace = true
+image.workspace = true
 garmin-fixtures.workspace = true
 garmin-fit = { workspace = true, features = ["test-fixtures"] }
 futures-lite.workspace = true
-tempfile.workspace = true

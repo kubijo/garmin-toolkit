@@ -17,7 +17,7 @@ struct SceneProps {
 }
 
 #[scene(default)]
-fn number_playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+fn number_playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let mut props = SceneProps {
         value: ctx.slider("value", 50.0, -100.0, 100.0, 1.0),
         min: ctx.slider("min", -100.0, -500.0, 0.0, 1.0),
@@ -31,7 +31,7 @@ fn number_playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     };
     props.value = props.value.clamp(props.min, props.max);
 
-    stage!(ctx, ui, |ui| {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(props.width);
         input::show_number(
             ui,
@@ -50,8 +50,8 @@ fn number_playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 #[scene]
-fn number_states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    stage!(ctx, ui, |ui| {
+fn number_states(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(360.0);
         sample(
             ui,
@@ -80,8 +80,8 @@ fn number_states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 #[scene]
-fn number_sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    stage!(ctx, ui, |ui| {
+fn number_sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(360.0);
         for (label, size) in [
             ("Small", Size::Small),

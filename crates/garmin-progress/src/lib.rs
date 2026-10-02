@@ -8,6 +8,8 @@ use std::sync::mpsc::channel;
 use std::time::SystemTime;
 
 mod device_state;
+pub mod metrics;
+pub mod model;
 use device_state::DeviceStateTracker;
 pub use device_state::{DeviceStateUpdate, ProgressReceiver};
 

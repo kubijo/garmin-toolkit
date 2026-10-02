@@ -6,8 +6,21 @@ OKLab/OKLCH operations; `cint` is the lossless renderer boundary.
 Themes derive from Carbon Gray 100 and Gray 10. Components use semantic roles, never swatch grades. Auto follows the
 system and falls back to dark; an app-owned swatch supplies action states.
 
+The application-wide [visual language](visual-language.md) defines the original Carbon-derived composition, geometry,
+type, interaction, and verification rules. External applications are observational references only and are never copied.
+
 Profiles may store an accent and avatar. Import bounds content-detected PNG, JPEG, or WebP at 10 MiB and 4096 pixels per
 edge, retains the original, and derives a 256-pixel PNG thumbnail. These fields affect presentation only.
+
+Profile settings uses an egui-elegance color-picker popover with internal preset swatches, recent colors, a continuous
+selector, alpha slider, and hex entry. The profile circle previews the draft color immediately. Apply persists the
+chosen RGBA color; reset restores the default. Both clients preserve the profile's other settings. Avatar markers
+resolve the saved color against the current surface to maintain at least 3:1 contrast in both themes; text keeps
+semantic colors.
+
+Initials-only avatars blend the profile accent with the perceptual inverse of primary text for an opaque background. The
+blend starts evenly and moves toward that inverse as needed to maintain at least 4.5:1 contrast with the primary-text
+initials. Photo avatars retain their neutral backing.
 
 `garmin-ui` owns component geometry, semantic color use, typed props and actions, and a curated Phosphor/local icon
 catalog. Inputs inherit their surface layer. Modals may block the viewport or remain parent-contained; callers control
@@ -16,9 +29,18 @@ backdrop dismissal.
 The UI embeds hinted Noto Sans 2.015 Regular and SemiBold. Named egui families carry weight because egui lacks a
 font-weight field.
 
-The activity browser lazily loads details and renders each continuous coordinate sequence through a map-ready path
-preview. Online tiles remain separate work. Desktop runs application services on one worker thread and accepts native
-selection or file drops. Demo recreates an isolated database and seeds it through the production importer.
+Use `typography::body(ui, text)` for explanatory prose: regular 14 px type, 20 px line height, secondary text color, and
+balanced two-line wrapping when it fits. Longer paragraphs wrap naturally. The helper returns an egui response and keeps
+its style local. For composition inside another widget, `typography::body_text(text)` returns `RichText` with the same
+type metrics and inherits the widget's color. `typography::semibold(text)` selects the real semibold face for inline
+emphasis. Callers own the spacing between paragraphs, headings, and controls.
+
+The [activity workspace](activity-map.md) lazily loads recording details and links map, charts, laps, and playback
+through one sample cursor. Online vector tiles use a bounded preparation and rendering pipeline. Desktop runs
+application services on a worker thread and accepts native selection or file drops. Database jobs and results carry a
+deployment epoch; restore discards results from the old database. Demo seeds an isolated deployment once through the
+production importer and preserves it across restarts. The [device explorer](device-explorer.md) reuses the viewer for
+FIT previews.
 
 The borderless shell owns drag space and window controls; the compositor moves and resizes. Close and `Ctrl+Q` exit;
 `Ctrl+W` does nothing. Active work is named before aborting, and shutdown waits between atomic imports.
@@ -33,13 +55,37 @@ Captures cover states, sizes, layouts, flows, and the searchable icon catalog.
 Desktop and HASS use the same per-storage capacity component. The native HASS host serves an egui/WASM client and a
 streaming download loader; browser code receives owned models through the typed service boundary.
 
+Map management uses `garmin-service-api::maps` commands and snapshots. Desktop calls the host session locally; HASS
+serves that session through Remoc. `garmin-ui::maps` renders either snapshot and returns choices without owning jobs,
+planning downloads, or replaying progress events. The host registry owns one workflow per deployment epoch and device,
+shared across profiles. Leaving the page or disconnecting a client does not cancel an operation.
+
+`garmin-services::maps` shares catalog access, validated planning, payload preparation, execution, recovery receipts,
+and progress reduction with the CLI. The transaction engine remains in `garmin-update`. CLI arguments, JSON reports,
+terminal confirmations, and capture layouts remain presentation contracts; GUI jobs do not invoke the CLI.
+
+Control revisions change with choices and phase transitions, independently of progress. Request IDs retain their
+original replies for bounded retry deduplication. Approval tokens identify a prepared plan, device, backup policy, and
+execution mode. A mixed selection removes first, then prepares an update requiring its own approval. Verified backups
+are the default. Device browser operations and map jobs acquire the same host device gate.
+
+Restart inspects portable device transactions and retained host receipts before admitting mutations. Production hosts
+also discover the legacy CLI registry without relocating captures. Recovery, proven state clearing, and discarding an
+unprepared notice remain distinct actions. Simulation receipts reopen their retained copy and validate its source
+identity and plan before recovery. Restart never resumes writes automatically. Bounded outcomes persist independently of
+the connection; demo device trees preserve files and journals across restarts. First creation seeds the installed map
+files advertised by the loopback catalog. Reopening a device never recreates removed files or overwrites changed ones.
+
+The maintained `infra/gallery/captures/maps.capture.toml` recipe covers consent, catalog, review, progress, recovery,
+completion, failure, cancellation, and empty results, including both themes and Czech at a narrow width.
+
 [ADR 0038](../decisions/0038-validated-interface-previews.md) requires rendered and inspected preview evidence for every
 interface change, including prose wrapping and interaction. Scene compilation alone does not satisfy that gate.
 
 CLI progress separates stage totals from identity-keyed file events. Active files retain arrival order across stages;
 their capped panel scrolls independently of history. Diagnostic changes and completed work enter history without
-resetting its scroll position. `infra/gallery/progress.capture.toml` covers concurrency, overflow, and completion in
-both fonts at the supported terminal sizes.
+resetting its scroll position. `infra/gallery/captures/progress.capture.toml` covers concurrency, overflow, and
+completion in both fonts at the supported terminal sizes.
 
 Every blocking CLI read uses the production `LoadingScreen` component with a typed activity. Discovery, device metadata,
 recovery, storage, and map-component loading share its layout, continuously increasing elapsed clock, and cancellation
@@ -54,6 +100,25 @@ focus.
 Image baselines are deferred. Until capture coverage can merge into LLVM profiles, the numeric gate excludes `garmin-ui`
 and desktop views while their tests still run.
 
+The Web canvas intentionally owns secondary-click interaction instead of opening the browser's generic context menu.
+Application context menus expose only actions meaningful for the item or surface under the pointer and dispatch the same
+typed actions as the visible interface; right-click is never the sole route to an operation. Keyboard users can open the
+same menu with the platform context-menu key or `Shift+F10`. Native window-titlebar secondary-click behavior remains
+owned by the operating system where supported.
+
+File browsers and server file choosers hide dot-prefixed entries in both the tree and file list by default. The
+toolbar's Show/Hide hidden files toggle saves to the active profile and follows it across windows and restarts. It is a
+display preference, not an access restriction.
+
 `garmin-i18n` wraps FormatJS. English ICU messages live beside call sites as fallback; Czech source, translation, and
-context compile into a flat catalog. Checks reject stale, missing, empty, extra, malformed, or incompatible messages.
-That proves catalog completeness, not how much visible copy uses FormatJS. Gallery scenes expose both languages.
+context in `translations/cs.json` compile into a flat catalog in Cargo's `OUT_DIR` using the pinned FormatJS CLI during
+the crate build. Generated catalogs are not tracked. `just dev::i18n-sync` updates editable translation metadata; checks
+reject stale, missing, empty, extra, malformed, or incompatible messages. That proves catalog completeness, not how much
+visible copy uses FormatJS. Gallery scenes expose both languages.
+
+Preflight Grit checks keep messages outside other macro token trees, reject whitespace that FormatJS would collapse, and
+reject apostrophe-quoted ICU arguments. Deliberate message line breaks travel as interpolation values.
+
+Shared presentation takes wall-clock dates from the host; gallery fixtures supply fixed dates. Monotonic timers for
+animation and platform telemetry are allowed. Map adapters retain typed request failures until the shared presenter
+localizes them with the current client language; the original host diagnostic remains available under Details.

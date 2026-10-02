@@ -1,7 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 
 use gallery::prelude::*;
-use garmin_ui::notification;
+use garmin_ui::{notification, shell};
 
 scene_meta! { title: "Components / Feedback / Notifications" }
 
@@ -50,7 +50,7 @@ fn actionable(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
             ui,
             &notification::ActionableProps {
                 kind,
-                title: "Garmin Edge 1050 connected",
+                title: "Mock Cycle-o-Matic 9000 connected",
                 detail: detail.then_some("Inspecting…"),
                 action: action.then_some("View device"),
                 closable,
@@ -98,9 +98,64 @@ fn toast_stack(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     });
 }
 
+#[scene]
+fn toast_stack_narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+    stage!(ctx, ui, (360, 480), |ui| {
+        let (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 0.0, ui.visuals().panel_fill);
+
+        let mut state = seeded_toast_scene();
+        let _ = state.toasts.show_in(
+            ui.ctx(),
+            egui::Id::new("notification-gallery-narrow-stack"),
+            rect,
+            notification::StackMode::Expanded,
+        );
+    });
+}
+
 #[derive(Default)]
 struct ToastScene {
     toasts: notification::Toasts,
+}
+
+#[scene]
+fn desktop_toasts(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+    let expanded = ctx.toggle("expanded", false);
+    let height = ctx.slider("height", 300.0, 180.0, 600.0, 1.0);
+    stage!(ctx, ui, (400.0, height), |ui| {
+        let bounds = shell::overlay_bounds(ui.available_rect_before_wrap());
+        let _ = shell::show(
+            ui,
+            &shell::Props {
+                product_name: "Garmin Toolbox",
+                navigation_groups: &[],
+                active: None,
+                navigation: shell::Navigation::Rail,
+                profile_selector: None,
+                toggle_label: "",
+                profile_label: "",
+                window_controls: Some(&shell::WindowControls {
+                    maximized: false,
+                    minimize_label: "Minimize",
+                    maximize_label: "Maximize",
+                    restore_label: "Restore",
+                    close_label: "Close",
+                }),
+            },
+            |_| {},
+        );
+        let _ = seeded_toast_scene().toasts.show_in(
+            ui.ctx(),
+            egui::Id::new("desktop-toast-gallery"),
+            bounds,
+            if expanded {
+                notification::StackMode::Expanded
+            } else {
+                notification::StackMode::Collapsed
+            },
+        );
+    });
 }
 
 fn toast_scene() -> &'static Mutex<ToastScene> {
@@ -113,7 +168,7 @@ fn seeded_toast_scene() -> ToastScene {
     state.toasts.push(
         notification::Toast::new(
             notification::Kind::Information,
-            "Garmin Edge 1050 connected",
+            "Mock Cycle-o-Matic 9000 connected",
         )
         .detail("Inspecting…")
         .action("View device"),
@@ -135,7 +190,7 @@ fn toast(index: usize) -> Option<notification::Toast> {
         1 => Some(
             notification::Toast::new(
                 notification::Kind::Information,
-                "Garmin Edge 1050 connected",
+                "Mock Cycle-o-Matic 9000 connected",
             )
             .detail("Inspecting…")
             .action("View device"),

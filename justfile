@@ -17,3 +17,7 @@ mod desktop 'apps/garmin-desktop'
 
 # CLI application and its packages.
 mod cli 'apps/garmin-cli'
+
+update:
+    cargo update
+    nix flake update

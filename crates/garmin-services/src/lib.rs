@@ -1,6 +1,10 @@
 //! Target-neutral application services.
 
+pub mod deployment;
+pub mod devices;
 pub mod maps;
+pub mod paths;
+pub mod snapshots;
 
 use garmin_fit::{CreatorDiagnostics, NormalizedActivity};
 use garmin_importer::{
@@ -159,6 +163,24 @@ impl Application {
         Ok(stored)
     }
 
+    /// Replaces one profile's accent while preserving its preferences and avatar.
+    /// # Errors
+    /// [`enum@Error`] when the profile is missing or cannot be stored.
+    pub async fn update_profile_accent(
+        &self,
+        user: UserContext,
+        accent: Option<garmin_color::Color>,
+    ) -> Result<User, Error> {
+        let Some(mut stored) = self.storage.user(user.user_id()).await? else {
+            return Err(Error::ProfileNotFound(user.user_id()));
+        };
+        let mut replacement = stored.profile().clone();
+        replacement.replace_accent(accent);
+        stored.replace_profile(replacement);
+        self.storage.save_user(&stored).await?;
+        Ok(stored)
+    }
+
     /// Loads the selected profile image.
     /// # Errors
     /// [`enum@Error`] when persisted avatar data cannot be loaded.
@@ -236,6 +258,21 @@ impl Application {
             ))
             .await?;
         Ok(FitImportResult::from_outcome(outcome, disposition))
+    }
+
+    /// Reports whether a selected FIT acquisition was committed for this profile.
+    /// # Errors
+    /// [`enum@Error`] when persisted acquisition state cannot be loaded.
+    pub async fn fit_import_completed(
+        &self,
+        user: UserContext,
+        operation: AcquisitionOperationId,
+    ) -> Result<bool, Error> {
+        Ok(self
+            .storage
+            .acquisition_time(user.user_id(), operation)
+            .await?
+            .is_some())
     }
 
     /// Inspects GPX bytes without storing them.
@@ -637,6 +674,53 @@ mod tests {
             assert_eq!(member.role(), Role::Member);
             assert_ne!(owner.id(), member.id());
             assert_eq!(owner.profile(), member.profile());
+            application.close().await;
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn profile_accent_is_scoped_persistent_and_resettable() -> Result<(), Box<dyn Error>> {
+        block_on(async {
+            let root = tempdir()?;
+            let path = root.path().join("accent.sqlite3");
+            let application = Application::new(Storage::open(&path).await?);
+            let owner = application.create_profile("Rider".parse()?).await?;
+            let other = application.create_profile("Rider".parse()?).await?;
+            let preferences = ProfilePreferences::default()
+                .with_inline_file_windows(true)
+                .with_show_hidden_files(true);
+            application
+                .update_profile_preferences(UserContext::new(owner.id()), preferences)
+                .await?;
+            let accent = garmin_color::Color::from_rgba(200, 85, 168, 192);
+            let updated = application
+                .update_profile_accent(UserContext::new(owner.id()), Some(accent))
+                .await?;
+            assert_eq!(updated.profile().accent(), Some(accent));
+            assert_eq!(updated.profile().preferences(), preferences);
+            application.close().await;
+            let application = Application::new(Storage::open(&path).await?);
+            let profiles = application.profiles().await?;
+            assert_eq!(
+                profiles.iter().find(|user| user.id() == owner.id()),
+                Some(&updated)
+            );
+            assert_eq!(
+                profiles.iter().find(|user| user.id() == other.id()),
+                Some(&other)
+            );
+            let reset = application
+                .update_profile_accent(UserContext::new(owner.id()), None)
+                .await?;
+            assert_eq!(reset.profile().accent(), None);
+            assert_eq!(reset.profile().preferences(), preferences);
+            assert!(
+                application
+                    .update_profile_accent(UserContext::new(UserId::new_v4()), Some(accent))
+                    .await
+                    .is_err()
+            );
             application.close().await;
             Ok(())
         })

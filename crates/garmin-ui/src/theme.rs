@@ -4,6 +4,13 @@ use cint::ColorInterop;
 use egui::{Color32, CornerRadius, Stroke, Style, Ui, style::WidgetVisuals};
 use garmin_color::{Color, theme};
 
+/// Radius for buttons, fields, and compact selected rows.
+pub const CONTROL_RADIUS: CornerRadius = CornerRadius::ZERO;
+/// Radius for cards and permanent content surfaces.
+pub const PANEL_RADIUS: CornerRadius = CornerRadius::ZERO;
+/// Radius for dialogs, menus, and other floating surfaces.
+pub const FLOATING_RADIUS: CornerRadius = CornerRadius::ZERO;
+
 /// Applies the default dark application theme.
 pub fn apply(style: &mut Style) {
     apply_palette(style, &theme::GRAY_100);
@@ -14,11 +21,12 @@ pub fn apply_palette(style: &mut Style, palette: &theme::Theme) {
     crate::typography::apply(style);
     let surfaces = palette.surfaces();
     let content = palette.content();
-    let interaction = palette.interaction();
     let support = palette.support();
     let borders = palette.borders();
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
     style.spacing.button_padding = egui::vec2(12.0, 8.0);
+    style.spacing.interact_size = egui::vec2(40.0, 40.0);
+    style.spacing.menu_margin = egui::Margin::same(6);
     apply_layer_with(style, palette, theme::Level::One);
 
     let visuals = &mut style.visuals;
@@ -26,25 +34,19 @@ pub fn apply_palette(style: &mut Style, palette: &theme::Theme) {
     visuals.dark_mode = palette.is_dark();
     visuals.override_text_color = None;
     visuals.weak_text_color = Some(color32(content.text_secondary()));
-    visuals.widgets.active = widget(
-        interaction.brand(),
-        interaction.brand(),
-        interaction.focus(),
-        content.text_primary(),
-    );
-    visuals.widgets.open = visuals.widgets.active;
-    visuals.selection.bg_fill = color32(interaction.brand());
-    visuals.selection.stroke = Stroke::new(1.0, color32(interaction.focus()));
-    visuals.hyperlink_color = color32(interaction.link());
+    visuals.selection.bg_fill = color32(surfaces.layer(theme::Level::Two));
+    visuals.selection.stroke = Stroke::new(1.0, color32(content.text_primary()));
+    visuals.hyperlink_color = color32(palette.interaction().link());
     visuals.faint_bg_color = color32(surfaces.background_hover());
     visuals.warn_fg_color = color32(support.warning());
     visuals.error_fg_color = color32(support.error());
-    visuals.window_corner_radius = CornerRadius::ZERO;
+    visuals.window_corner_radius = FLOATING_RADIUS;
     visuals.window_fill = color32(surfaces.layer(theme::Level::One));
     visuals.window_stroke = Stroke::new(1.0, color32(borders.subtle()));
-    visuals.menu_corner_radius = CornerRadius::ZERO;
+    visuals.menu_corner_radius = PANEL_RADIUS;
     visuals.panel_fill = color32(surfaces.background());
     visuals.button_frame = true;
+    visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     visuals.collapsing_header_frame = false;
     visuals.indent_has_left_vline = false;
     visuals.striped = false;
@@ -57,6 +59,65 @@ pub fn palette(ui: &Ui) -> &'static theme::Theme {
     } else {
         &theme::GRAY_10
     }
+}
+
+/// Accent shared by selected-row and active-navigation markers.
+#[must_use]
+pub fn selection_accent(ui: &Ui) -> Color {
+    selection_accent_on(ui, palette(ui).surfaces().layer(theme::Level::One))
+}
+
+const PROFILE_ACCENT: &str = "garmin-profile-accent";
+
+pub(crate) fn profile_accent_info(accent: Color) -> egui::UiStackInfo {
+    egui::UiStackInfo::default().with_tag_value(PROFILE_ACCENT, accent)
+}
+
+/// Scope profile styling to this UI and its children, without changing the application theme.
+pub fn with_profile_accent<R>(ui: &mut Ui, accent: Color, show: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope_builder(
+        egui::UiBuilder::new().ui_stack_info(profile_accent_info(accent)),
+        show,
+    )
+    .inner
+}
+
+/// Resolve an opaque profile marker against the surface it will actually be painted on.
+#[must_use]
+pub fn selection_accent_on(ui: &Ui, surface: Color) -> Color {
+    profile_accent(ui).contrasting_marker(surface)
+}
+
+pub(crate) fn profile_accent(ui: &Ui) -> Color {
+    ui.stack()
+        .iter()
+        .find_map(|entry| entry.tags().get_downcast::<Color>(PROFILE_ACCENT).copied())
+        .unwrap_or_else(|| palette(ui).interaction().interactive())
+}
+
+/// Color radio dots and checkbox marks while retaining neutral labels and disabled states.
+pub fn selected_control<R>(ui: &mut Ui, selected: bool, show: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope(|ui| {
+        if selected && ui.is_enabled() {
+            let palette = palette(ui);
+            let foreground = color32(palette.content().text_primary());
+            let accent = profile_accent(ui);
+            let visuals = &mut ui.style_mut().visuals;
+            visuals.override_text_color = Some(foreground);
+            for widget in [
+                &mut visuals.widgets.inactive,
+                &mut visuals.widgets.hovered,
+                &mut visuals.widgets.active,
+                &mut visuals.widgets.open,
+            ] {
+                let background =
+                    Color::from_u32(u32::from_be_bytes(widget.bg_fill.to_srgba_unmultiplied()));
+                widget.fg_stroke.color = color32(accent.contrasting_marker(background));
+            }
+        }
+        show(ui)
+    })
+    .inner
 }
 
 /// Applies one semantic surface level to nested controls.
@@ -93,6 +154,13 @@ fn apply_layer_with(style: &mut Style, palette: &theme::Theme, level: theme::Lev
         borders.strong(),
         content.text_primary(),
     );
+    visuals.widgets.active = widget(
+        surfaces.field_hover(level),
+        surfaces.layer_hover(level),
+        borders.strong(),
+        content.text_primary(),
+    );
+    visuals.widgets.open = visuals.widgets.active;
     visuals.extreme_bg_color = color32(surfaces.field(level));
     visuals.text_edit_bg_color = Some(color32(surfaces.field(level)));
     visuals.code_bg_color = color32(surfaces.layer(level));
@@ -111,7 +179,7 @@ pub(crate) fn widget(fill: Color, weak: Color, border: Color, foreground: Color)
         bg_fill: color32(fill),
         weak_bg_fill: color32(weak),
         bg_stroke: Stroke::new(1.0, color32(border)),
-        corner_radius: CornerRadius::ZERO,
+        corner_radius: CONTROL_RADIUS,
         fg_stroke: Stroke::new(1.0, color32(foreground)),
         expansion: 0.0,
     }
@@ -122,7 +190,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn application_style_uses_gray_100_roles_and_square_widgets() {
+    fn application_style_uses_gray_100_roles_and_shared_geometry() {
         let mut style = Style::default();
 
         apply(&mut style);
@@ -133,17 +201,47 @@ mod tests {
         );
         assert_eq!(
             style.visuals.selection.bg_fill,
-            color32(theme::GRAY_100.interaction().brand())
+            color32(theme::GRAY_100.surfaces().layer(theme::Level::Two))
         );
         assert_eq!(
-            style.visuals.widgets.inactive.corner_radius,
-            CornerRadius::ZERO
+            style.visuals.selection.stroke.color,
+            color32(theme::GRAY_100.content().text_primary())
         );
+        assert_eq!(
+            style.visuals.widgets.open.bg_fill,
+            color32(theme::GRAY_100.surfaces().field_hover(theme::Level::One))
+        );
+        assert_eq!(style.visuals.widgets.inactive.corner_radius, CONTROL_RADIUS);
+        assert_eq!(style.visuals.window_corner_radius, FLOATING_RADIUS);
+        assert_eq!(style.visuals.menu_corner_radius, PANEL_RADIUS);
+        assert_eq!(CONTROL_RADIUS, CornerRadius::ZERO);
+        assert_eq!(PANEL_RADIUS, CornerRadius::ZERO);
+        assert_eq!(FLOATING_RADIUS, CornerRadius::ZERO);
 
         apply_layer_with(&mut style, &theme::GRAY_100, theme::Level::Two);
         assert_eq!(
             style.visuals.text_edit_bg_color,
             Some(color32(theme::GRAY_100.surfaces().field(theme::Level::Two)))
+        );
+    }
+
+    #[test]
+    fn light_selection_stays_neutral_and_readable() {
+        let mut style = Style::default();
+
+        apply_palette(&mut style, &theme::GRAY_10);
+
+        assert_eq!(
+            style.visuals.selection.bg_fill,
+            color32(theme::GRAY_10.surfaces().layer(theme::Level::Two))
+        );
+        assert_eq!(
+            style.visuals.selection.stroke.color,
+            color32(theme::GRAY_10.content().text_primary())
+        );
+        assert_ne!(
+            style.visuals.selection.bg_fill,
+            color32(theme::GRAY_10.buttons().primary().rest().background())
         );
     }
 }

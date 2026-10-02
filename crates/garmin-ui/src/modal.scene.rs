@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::{Size as ComponentSize, icons, input, modal};
 
-scene_meta! { title: "Components / Overlays / Modals" }
+scene_meta! { title: "Components / Modals" }
 
 #[derive(Clone, Copy)]
 struct SceneProps {
@@ -83,7 +83,7 @@ fn quit(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
                 description: Some("The following work is still in progress:"),
                 size: modal::Size::Small,
                 presentation: modal::Presentation::Contained,
-                cancel_label: "Keep working",
+                cancel_label: Some("Keep working"),
                 backdrop_closes: Some(false),
                 primary: modal::Primary {
                     label: "Abort and quit",
@@ -139,7 +139,7 @@ fn show_dialog(ui: &mut Ui, props: SceneProps, width: f32, height: f32) {
             }),
             size: props.size,
             presentation: modal::Presentation::Contained,
-            cancel_label: "Cancel",
+            cancel_label: Some("Cancel"),
             backdrop_closes: matches!(props.backdrop, Backdrop::Closes).then_some(true),
             primary: modal::Primary {
                 label: if props.danger { "Delete" } else { "Create" },

@@ -4,7 +4,9 @@
 import argparse
 import filecmp
 import json
+import shlex
 import subprocess
+import sys
 import tempfile
 from collections import deque
 from pathlib import Path
@@ -15,13 +17,17 @@ DEFAULT_OUTPUT = REPOSITORY / 'assets' / 'licenses'
 
 
 def run_json(arguments: list[str]) -> dict[str, Any]:
-    result = subprocess.run(
-        arguments,
-        cwd=REPOSITORY,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            arguments,
+            cwd=REPOSITORY,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        sys.stderr.write(error.stderr or '')
+        raise
     return json.loads(result.stdout)
 
 
@@ -146,8 +152,9 @@ def generate(config: dict[str, Any], output: Path) -> None:
 
     for target in config['targets']:
         linked: dict[tuple[str, str], bool] = {}
-        for triple in target['triples']:
-            linked.update(resolve_linked(cargo_metadata(triple), target['package']))
+        for component in [target, *target.get('bundled', [])]:
+            for triple in component['triples']:
+                linked.update(resolve_linked(cargo_metadata(triple), component['package']))
 
         external_missing = sorted(key for key, external in linked.items() if external and key not in cargo)
         if external_missing:
@@ -173,8 +180,31 @@ def check(config: dict[str, Any], output: Path) -> bool:
         stale |= {name for name in expected & present if not filecmp.cmp(output / name, fresh / name, shallow=False)}
         if stale:
             print(f'license bundles are stale: {", ".join(sorted(stale))}')
+            for name in sorted(stale & expected & present):
+                before = expanded_entries(output / name)
+                after = expanded_entries(fresh / name)
+                changed = sorted(key for key in before.keys() | after.keys() if before.get(key) != after.get(key))
+                print(f'  {name}: changed packages: {", ".join(changed) or "bundle encoding"}')
             return False
     return True
+
+
+def expanded_entries(path: Path) -> dict[str, Any]:
+    """Compare actual notices rather than shifted indices into the shared text table."""
+    bundle = json.loads(path.read_text())
+    return {
+        f'{entry["name"]} {entry["version"]}': {
+            **entry,
+            'notices': [
+                {
+                    'license': notice['license'],
+                    'text': bundle['license_texts'][notice['text_index']],
+                }
+                for notice in entry['notices']
+            ],
+        }
+        for entry in bundle['entries']
+    }
 
 
 def main() -> int:
@@ -184,9 +214,13 @@ def main() -> int:
     parser.add_argument('--output', type=Path, default=DEFAULT_OUTPUT)
     arguments = parser.parse_args()
     config = json.loads(arguments.config.read_text())
-    if arguments.check:
-        return 0 if check(config, arguments.output) else 1
-    generate(config, arguments.output)
+    try:
+        if arguments.check:
+            return 0 if check(config, arguments.output) else 1
+        generate(config, arguments.output)
+    except subprocess.CalledProcessError as error:
+        print(f'license generation failed: {shlex.join(error.cmd)} (exit {error.returncode})', file=sys.stderr)
+        return 1
     return 0
 
 

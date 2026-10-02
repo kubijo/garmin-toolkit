@@ -378,7 +378,7 @@ mod tests {
                 <Device xmlns="http://www.garmin.com/xmlschemas/GarminDevice/v2">
                   <Model>
                     <SoftwareVersion>100</SoftwareVersion>
-                    <Description>Test</Description>
+                    <Description>Mock Service-o-Matic 9000</Description>
                   </Model>
                   <Id>42</Id>
                   <MassStorageMode />

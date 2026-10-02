@@ -18,6 +18,7 @@
       lib.mkTarget =
         {
           brandAssets,
+          formatjsCli,
           nixCargoTargetDir,
           system,
           toolchain,
@@ -37,17 +38,20 @@
           };
           commonArgs = {
             inherit src;
+            nativeBuildInputs = [ formatjsCli ];
             CARGO_TARGET_DIR = "target";
             cargoLock = workspaceSrc + "/Cargo.lock";
             doCheck = false;
             strictDeps = true;
           };
           nativeArgs = commonArgs // {
-            buildInputs = [ pkgs.glib ];
-            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.glib ];
+            nativeBuildInputs =
+              commonArgs.nativeBuildInputs ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
           };
           cargoArtifacts = craneLib.buildDepsOnly (
             nativeArgs
+            // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
             // {
               cargoExtraArgs = "-p garmin-hass --all-features";
               pname = "garmin-hass-deps";
@@ -59,6 +63,7 @@
           };
           webCargoArtifacts = wasmCraneLib.buildDepsOnly (
             webArgs
+            // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
             // {
               pname = "garmin-hass-web-deps";
             }
@@ -70,9 +75,22 @@
               cargoArtifacts = webCargoArtifacts;
               trunkIndexPath = "apps/garmin-hass/web/index.html";
               wasm-bindgen-cli = pkgs.wasm-bindgen-cli_0_2_126;
+              nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
+                pkgs.nodejs
+                pkgs.esbuild
+              ];
+
               buildPhaseCargoCommand = ''
                 ( cd apps/garmin-hass/web && trunk build --release=true index.html )
               '';
+
+              postBuild = ''
+                export GARMIN_TEST_WEB_ROOT="$PWD/apps/garmin-hass/web/dist"
+                for test in infra/javascript/*.test.mjs; do
+                  ${lib.getExe pkgs.nodejs} "$test"
+                done
+              '';
+
               installPhaseCommand = ''
                 webRoot="$out/share/garmin-hass/web"
                 mkdir -p "$webRoot"
@@ -88,6 +106,19 @@
             { demo }:
             let
               cargoExtraArgs = "-p garmin-hass" + lib.optionalString demo " --features demo";
+              runtimeWrapperArgs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+                "--prefix"
+                "GIO_EXTRA_MODULES"
+                ":"
+                "${pkgs.gvfs}/lib/gio/modules"
+                "--prefix"
+                "LD_LIBRARY_PATH"
+                ":"
+                (lib.makeLibraryPath [
+                  pkgs.glib
+                  pkgs.gvfs
+                ])
+              ];
             in
             craneLib.buildPackage (
               nativeArgs
@@ -96,7 +127,7 @@
                 pname = "garmin-hass" + lib.optionalString demo "-demo";
                 meta.mainProgram = "garmin-hass";
                 inherit cargoArtifacts;
-                nativeBuildInputs = [
+                nativeBuildInputs = nativeArgs.nativeBuildInputs ++ [
                   pkgs.makeWrapper
                   pkgs.pkg-config
                 ];
@@ -109,13 +140,7 @@
                 postFixup = ''
                   wrapProgram "$out/bin/garmin-hass" \
                     --set-default GARMIN_TOOLKIT_HASS_WEB_ROOT "$out/share/garmin-hass/web" \
-                    --prefix GIO_EXTRA_MODULES : "${pkgs.gvfs}/lib/gio/modules" \
-                    --prefix LD_LIBRARY_PATH : "${
-                      lib.makeLibraryPath [
-                        pkgs.glib
-                        pkgs.gvfs
-                      ]
-                    }"
+                    ${lib.escapeShellArgs runtimeWrapperArgs}
                 '';
               }
             );
@@ -143,9 +168,16 @@
             find ${demoPackage}/share/garmin-hass/web -maxdepth 1 -name '*.wasm' -print -quit | grep -q .
             touch "$out"
           '';
-          devShell = craneLib.devShell {
+          devShell = wasmCraneLib.devShell {
             CARGO_TARGET_DIR = nixCargoTargetDir;
             checks = { inherit package; };
+            packages = [
+              pkgs.nodejs
+              pkgs.esbuild
+              pkgs.trunk
+              pkgs.wasm-bindgen-cli_0_2_126
+              pkgs.just
+            ];
           };
         };
     };

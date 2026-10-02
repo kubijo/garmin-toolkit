@@ -6,6 +6,8 @@ SELECT
     avatar_artifact_id,
     unit_system,
     language,
-    theme
+    theme,
+    show_hidden_files,
+    inline_file_windows
 FROM users
 WHERE id = ?;

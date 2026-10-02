@@ -1,4 +1,4 @@
-//! Validates and embeds the icon catalog.
+//! Embeds the icon catalog and locates shared test fixtures.
 
 mod icon_build;
 
@@ -17,6 +17,12 @@ macro_rules! icon_catalog {
 include!("src/icons/catalog.rs");
 
 fn main() {
+    let fixtures = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../infra/javascript/fixtures");
+    println!(
+        "cargo:rustc-env=GARMIN_MAP_FIXTURES_DIR={}",
+        fixtures.display()
+    );
     println!("cargo:rerun-if-changed=src/icons/catalog.rs");
     icon_build::write_catalog(ICONS).expect("the icon catalog must be valid");
 }

@@ -9,7 +9,9 @@ pub enum Page {
     #[default]
     Activities,
     ProfileSettings,
+    Backup,
     Device(String),
+    Maps(String),
 }
 
 impl Page {
@@ -18,7 +20,8 @@ impl Page {
         match self {
             Self::Activities => Some(0),
             Self::ProfileSettings => Some(1),
-            Self::Device(key) => devices
+            Self::Backup => None,
+            Self::Device(key) | Self::Maps(key) => devices
                 .iter()
                 .position(|device| &device.key == key)
                 .map(|index| index + 2),
@@ -31,7 +34,7 @@ impl Page {
             0 => Some(Self::Activities),
             1 => Some(Self::ProfileSettings),
             _ => devices
-                .get(index - 2)
+                .get(index.checked_sub(2)?)
                 .map(|device| Self::Device(device.key.clone())),
         }
     }
@@ -46,6 +49,7 @@ pub struct Props<'a> {
     pub page: &'a Page,
     pub navigation: shell::Navigation,
     pub devices: &'a [DeviceSnapshot],
+    pub backup_enabled: bool,
     pub window_controls: Option<&'a shell::WindowControls<'a>>,
 }
 
@@ -94,8 +98,17 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
         profiles: props.profiles,
         selected: Some(props.selected_profile),
         expanded: props.profile_menu_expanded,
+        backup_enabled: props.backup_enabled,
     };
-    let output = shell::show(
+    let show = if matches!(
+        props.page,
+        Page::Activities | Page::ProfileSettings | Page::Backup | Page::Maps(_)
+    ) {
+        shell::show_edge_to_edge
+    } else {
+        shell::show
+    };
+    let output = show(
         ui,
         &shell::Props {
             product_name: props.product_name,
@@ -127,6 +140,8 @@ mod tests {
             identifier: None,
             software_version: None,
             inspection: InspectionState::Ready,
+            inspection_error: None,
+            report: None,
             capabilities: Vec::new(),
             storages: Vec::new(),
         }
@@ -134,14 +149,18 @@ mod tests {
 
     #[test]
     fn page_indices_keep_primary_destinations_before_devices() {
-        let devices = [device("edge"), device("fenix")];
+        let devices = [device("mock-cycle"), device("mock-watch")];
 
         assert_eq!(Page::Activities.index(&devices), Some(0));
         assert_eq!(Page::ProfileSettings.index(&devices), Some(1));
-        assert_eq!(Page::Device("fenix".to_owned()).index(&devices), Some(3));
+        assert_eq!(
+            Page::Device("mock-watch".to_owned()).index(&devices),
+            Some(3)
+        );
         assert_eq!(
             Page::from_index(2, &devices),
-            Some(Page::Device("edge".to_owned()))
+            Some(Page::Device("mock-cycle".to_owned()))
         );
+        assert_eq!(Page::Backup.index(&devices), None);
     }
 }
