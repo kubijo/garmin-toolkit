@@ -23,8 +23,6 @@ normalization policy live under `manifest::garmin::v2`. Future v1, v3, or other-
 named parser and dispatch arm rather than model-name conditionals or changes to the v2 parser. Metadata-file discovery
 remains Garmin-specific until a real additional format establishes its own locations.
 
-This supersedes ADR 0012 where its former USB crate boundary conflicts with the consolidated device owner.
-
 ## Why
 
 The merged sources contained complementary read-only discovery and hardware-tested update stacks. Keeping both would

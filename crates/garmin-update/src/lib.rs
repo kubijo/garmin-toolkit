@@ -7,6 +7,7 @@ mod host;
 mod install;
 mod mounted_install;
 mod plan;
+mod profile_marker;
 mod removal;
 pub mod space;
 
@@ -32,6 +33,10 @@ pub use mounted_install::{
 };
 pub use plan::{
     BackupPolicy, DownloadSpec, UPDATE_PLAN_SCHEMA_VERSION, UpdatePlan, UpdatePlanError,
+};
+pub use profile_marker::{
+    PROFILE_MARKER_PATH, ProfileMarker, ProfileMarkerError, create_profile_marker,
+    read_profile_marker, reassign_profile_marker,
 };
 pub use removal::{
     ComponentDisposition, RemovalApplyReport, RemovalBackup, RemovalComponent,

@@ -89,9 +89,9 @@ The HASS portable snapshot acceptance test transfers an archive containing a det
 native file through upload, approval, and HTTP download, then reopens the resulting database and verifies its profiles
 and artifact digest. Native controller tests cover file publication, approval, cancellation, and restart separately.
 
-Snapshots remain plaintext pending the encryption decision. Restored deployments must reestablish device pairing and
-cloud authentication; open export is separate.
+Snapshots remain plaintext pending the encryption decision. Restore does not change device markers; a marker whose user
+UUID is absent from the restored profiles needs review. Cloud authentication must be reestablished; open export is
+separate.
 
-See [single SQLite storage](../decisions/0014-single-sqlite-storage.md),
-[relational reconciliation](../decisions/0019-relational-reconciliation.md), and
+See [relational reconciliation](../decisions/0019-relational-reconciliation.md) and
 [deferred security](../decisions/0023-deferred-security-hardening.md).

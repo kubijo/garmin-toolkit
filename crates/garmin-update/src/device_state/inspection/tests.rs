@@ -1,4 +1,5 @@
 use super::*;
+use crate::profile_marker::PROFILE_MARKER_PATH;
 use std::{collections::BTreeMap, sync::Mutex};
 
 /// Deliberately has no `DeviceWrite` implementation.
@@ -27,10 +28,42 @@ impl DeviceRead for Reader {
     }
     async fn inspect(
         &self,
-        _: &str,
-        _: &SafeRelativePath,
+        storage: &str,
+        path: &SafeRelativePath,
     ) -> Result<DevicePathStatus, DeviceIoError> {
-        panic!("unexpected probe")
+        assert_eq!(storage, "card");
+        assert_eq!(path.to_string(), NAMESPACE);
+        Ok(
+            if self
+                .files
+                .keys()
+                .any(|file| file.starts_with("GARMIN-TOOLKIT/"))
+            {
+                DevicePathStatus::Directory
+            } else {
+                DevicePathStatus::Missing
+            },
+        )
+    }
+    async fn list_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> Result<Vec<garmin_device::storage::DeviceDirectoryEntry>, DeviceIoError> {
+        assert_eq!(storage, "card");
+        assert_eq!(path.to_string(), NAMESPACE);
+        Ok(self
+            .files
+            .iter()
+            .filter_map(|(name, bytes)| {
+                let child = name.strip_prefix("GARMIN-TOOLKIT/")?;
+                (!child.contains('/')).then(|| garmin_device::storage::DeviceDirectoryEntry {
+                    name: child.to_owned(),
+                    state: garmin_device::DevicePathState::RegularFile,
+                    size: Some(bytes.len() as u64),
+                })
+            })
+            .collect())
     }
     async fn backup(
         &self,
@@ -84,13 +117,17 @@ fn reader() -> Reader {
 }
 
 #[tokio::test]
-async fn absent_state_reads_only_the_three_known_paths() {
+async fn absent_state_reads_only_the_four_known_paths() {
     let reader = Reader::default();
     let result = inspect(&reader, "card", None).await;
     assert_eq!(result.namespace, InspectionSection::Missing);
     assert_eq!(result.identity, InspectionSection::Missing);
+    assert_eq!(result.marker, InspectionSection::Missing);
     assert_eq!(result.transaction, InspectionSection::Missing);
-    assert_eq!(*reader.reads.lock().unwrap(), [MANIFEST, IDENTITY, ACTIVE]);
+    assert_eq!(
+        *reader.reads.lock().unwrap(),
+        [MANIFEST, IDENTITY, PROFILE_MARKER_PATH, ACTIVE]
+    );
 }
 
 #[tokio::test]
@@ -115,6 +152,43 @@ async fn corrupt_namespace_does_not_hide_valid_identity() {
             ..
         })
     ));
+}
+
+#[tokio::test]
+async fn malformed_profile_marker_does_not_hide_other_state() {
+    let mut reader = reader();
+    reader
+        .files
+        .insert(PROFILE_MARKER_PATH.to_owned(), b"invalid marker".to_vec());
+    let result = inspect(&reader, "card", Some(&"a".repeat(32))).await;
+    assert!(matches!(
+        result.marker,
+        InspectionSection::Unavailable(InspectionFailure {
+            kind: InspectionFailureKind::Malformed,
+            ..
+        })
+    ));
+    assert!(matches!(result.identity, InspectionSection::Available(_)));
+    assert!(matches!(result.namespace, InspectionSection::Available(_)));
+}
+
+#[tokio::test]
+async fn root_marker_is_reported_separately_from_toolkit_identity() {
+    let mut reader = reader();
+    let user_id = garmin_model::identity::UserId::new_v4();
+    let marker = crate::profile_marker::ProfileMarker::new(user_id, "Alex Rider").unwrap();
+    reader
+        .files
+        .insert(PROFILE_MARKER_PATH.to_owned(), marker.bytes().unwrap());
+    let result = inspect(&reader, "card", Some(&"a".repeat(32))).await;
+    assert!(matches!(
+        result.marker,
+        InspectionSection::Available(ProfileMarkerInspection {
+            user_id: found,
+            ..
+        }) if found == user_id
+    ));
+    assert!(matches!(result.identity, InspectionSection::Available(_)));
 }
 
 #[tokio::test]
@@ -215,7 +289,7 @@ async fn pending_and_completed_markers_are_reported_without_cleanup() {
             .lock()
             .unwrap()
             .iter()
-            .all(|path| before.contains_key(path))
+            .all(|path| before.contains_key(path) || path == PROFILE_MARKER_PATH)
     );
     let other = crate::device_state::tests::transaction();
     reader.files.insert(
@@ -256,7 +330,10 @@ async fn invalid_active_header_is_not_followed() {
             ..
         })
     ));
-    assert_eq!(*reader.reads.lock().unwrap(), [MANIFEST, IDENTITY, ACTIVE]);
+    assert_eq!(
+        *reader.reads.lock().unwrap(),
+        [MANIFEST, IDENTITY, PROFILE_MARKER_PATH, ACTIVE]
+    );
 }
 
 #[tokio::test]

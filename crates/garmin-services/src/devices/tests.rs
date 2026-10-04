@@ -43,10 +43,25 @@ impl DeviceRead for Volumes {
     }
     async fn inspect(
         &self,
-        _: &str,
-        _: &SafeRelativePath,
+        storage: &str,
+        path: &SafeRelativePath,
     ) -> Result<garmin_device::DevicePathStatus, DeviceIoError> {
-        panic!("unexpected probe")
+        match storage {
+            "internal" => self.internal.inspect(storage, path).await,
+            "card" => self.card.inspect(storage, path).await,
+            _ => panic!("unknown volume"),
+        }
+    }
+    async fn list_directory(
+        &self,
+        storage: &str,
+        path: &SafeRelativePath,
+    ) -> Result<Vec<garmin_device::storage::DeviceDirectoryEntry>, DeviceIoError> {
+        match storage {
+            "internal" => self.internal.list_directory(storage, path).await,
+            "card" => self.card.list_directory(storage, path).await,
+            _ => panic!("unknown volume"),
+        }
     }
     async fn backup(
         &self,

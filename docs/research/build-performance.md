@@ -81,8 +81,10 @@ Source review on 2026-09-28; no new candidate was integrated or benchmarked.
   reload supports shared-UI iteration; desktop reuse would need new integration. Retained generations consume memory and
   do not migrate changed state layouts.
 
-No reviewed replacement establishes transparent reload of the desktop. Another desktop trial must first address callback
-lifetime and `tracing` without dependency patches; see the [acceptance criteria](../plans/native-hot-reload.md).
+No reviewed replacement establishes transparent reload of the desktop. Another trial must first address callback
+lifetime and `tracing` without dependency patches, then prove UI edits and retained profile, map, scroll, worker, and
+window state across repeated reloads. Compile failures must leave the current UI usable; incompatible type edits require
+restart. Measure latency and memory on Linux and macOS before claiming desktop hot reload.
 
 ## Gallery reload measurement
 

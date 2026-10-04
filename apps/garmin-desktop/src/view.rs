@@ -322,6 +322,7 @@ impl Desktop {
                                 intl,
                                 snapshot,
                                 device_browser_loading == Some(key.as_str()),
+                                false,
                             )
                         });
                     PageOutput::Device {
@@ -379,6 +380,10 @@ impl Desktop {
             PageOutput::Maps { command: None, .. }
             | PageOutput::Settings(None)
             | PageOutput::Device { action: None, .. } => {}
+            PageOutput::Device {
+                action: Some(device::Action::Pair),
+                ..
+            } => unreachable!("desktop device pairing is not enabled"),
         }
     }
 

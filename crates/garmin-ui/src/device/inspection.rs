@@ -55,15 +55,11 @@ fn storage_summary(ui: &mut Ui, intl: &Intl, storage: &StorageInspection) {
         &storage.namespace,
         |_| format_message!(intl, default_message: "Present"),
     );
-    let pairing_status = status(intl, &storage.identity, |identity| {
-        if !identity.verified {
-            format_message!(intl, default_message: "Device identity not verified")
-        } else if identity.paired_user_id.is_some() {
-            format_message!(intl, default_message: "Paired user recorded")
-        } else {
-            format_message!(intl, default_message: "Not paired")
-        }
-    });
+    let pairing_status = status(
+        intl,
+        &storage.marker,
+        |_| format_message!(intl, default_message: "Present"),
+    );
     let transaction_status = status(intl, &storage.transaction, |transaction| {
         if transaction.completed {
             format_message!(intl, default_message: "Completed; cleanup pending")
@@ -82,7 +78,8 @@ fn storage_summary(ui: &mut Ui, intl: &Intl, storage: &StorageInspection) {
     );
     for (label, error) in [
         (&toolkit, unavailable(&storage.namespace)),
-        (&pairing, unavailable(&storage.identity)),
+        (&pairing, unavailable(&storage.marker)),
+        (&toolkit, unavailable(&storage.identity)),
         (&transaction, unavailable(&storage.transaction)),
     ] {
         if let Some(error) = error {
@@ -122,15 +119,23 @@ fn storage_details(ui: &mut Ui, intl: &Intl, storage: &StorageInspection) {
     }
     if let InspectionSection::Available(identity) = &storage.identity {
         rows.push((
-            format_message!(intl, default_message: "Device ID"),
+            format_message!(intl, default_message: "Transaction device ID"),
             identity.device_id.to_string(),
         ));
-        if let Some(id) = identity.paired_user_id {
-            rows.push((
-                format_message!(intl, default_message: "Recorded user ID"),
-                id.to_string(),
-            ));
-        }
+    }
+    if let InspectionSection::Available(marker) = &storage.marker {
+        rows.push((
+            format_message!(intl, default_message: "Profile name"),
+            marker.profile_name.clone(),
+        ));
+        rows.push((
+            format_message!(intl, default_message: "Pairing device ID"),
+            marker.device_id.to_string(),
+        ));
+        rows.push((
+            format_message!(intl, default_message: "Recorded user ID"),
+            marker.user_id.to_string(),
+        ));
     }
     if let InspectionSection::Available(transaction) = &storage.transaction {
         rows.push((

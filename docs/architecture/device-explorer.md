@@ -48,4 +48,6 @@ their picker lifecycle and local-filesystem UI would require invasive adaptation
 `egui-table-kit` 0.6 added unnecessary state for the bounded catalog; complete native file managers were observational
 references only. Versions describe that comparison, not an instruction to pin old dependencies.
 
-Maintained evidence and remaining hardware limits are in [interface validation](../research/interface-validation.md).
+Maintained capture sets live under [`infra/gallery/captures`](../../infra/gallery/captures/). Follow
+[interface validation](../development.md#interface-validation);
+[device capabilities](../research/device-capabilities.md) record the remaining hardware limits.

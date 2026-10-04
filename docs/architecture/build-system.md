@@ -4,6 +4,9 @@ The root flake pins toolchains, dependencies, checks, and filtered workspace sou
 re-exports `garmin-cli` (default), `desktop`, `desktop-demo`, `garmin-hass`, `garmin-hass-demo`, and `gallery`. Follow
 [development safeguards](../development.md). Just commands use `namespace::recipe`.
 
+CI builds the sandboxed source-closure check and runs `nix flake check -L --no-update-lock-file`. The lockfile is an
+explicit input, not an update side effect of the quality gate.
+
 ## Checks and outputs
 
 | Command                | Scope                                                                        |
@@ -15,10 +18,10 @@ re-exports `garmin-cli` (default), `desktop`, `desktop-demo`, `garmin-hass`, `ga
 | `just qa::check`       | Pure Nix checks and application builds                                       |
 | `just qa::trunk-cache` | Isolated real-WASM bindgen-cache acceptance                                  |
 
-Coverage has a 30% global floor; [integration work](../plans/toolkit-integration.md) owns per-owner floors. Generated
-licenses live in `assets/licenses`; `crates/garmin-brand/assets/icon.svg` is the sole app-icon source. AppImage/Flatpak
-exports use `dist/`. Cargo caches use `.tmp/cargo-target` for ambient builds and `.tmp/nix-cargo-target` for Nix-shell
-builds. Interactive gallery sessions own `.tmp/gallery-target`; captures, tests, checks, and profiling use
+Coverage has a 30% global floor; [release work](../plans/README.md) owns per-owner floors. Generated licenses live in
+`assets/licenses`; `crates/garmin-brand/assets/icon.svg` is the sole app-icon source. AppImage/Flatpak exports use
+`dist/`. Cargo caches use `.tmp/cargo-target` for ambient builds and `.tmp/nix-cargo-target` for Nix-shell builds.
+Interactive gallery sessions own `.tmp/gallery-target`; captures, tests, checks, and profiling use
 `.tmp/gallery-check-target`. Never direct another build into a live session's target directory: the gallery watches its
 scene library and loads replacements without checking compiler compatibility. Restart gallery after changing toolchains
 or dependency configuration.
@@ -96,3 +99,19 @@ Flatpak remain Linux-only. Development support does not establish hardware compa
 Gallery uses Metal on macOS and Vulkan on Linux; override with `WGPU_BACKEND`. For browser automation, control, capture,
 and diagnostics see [developer tools](developer-tools.md). Renderer selection and ownership live in
 [activity map](activity-map.md#rendering-boundary).
+
+## Desktop packaging
+
+AppImage and Flatpak target Linux `x86_64` and `aarch64`; only `x86_64` is hardware-tested. Production and demo have
+separate application IDs and platform data:
+
+| Mode       | Application ID                 | AppImage                                 |
+| ---------- | ------------------------------ | ---------------------------------------- |
+| Production | `io.kubijo.GarminToolkit`      | `dist/garmin-toolkit-ARCH.AppImage`      |
+| Demo       | `io.kubijo.GarminToolkit.Demo` | `dist/garmin-toolkit-demo-ARCH.AppImage` |
+
+Flatpak outputs use the application ID with a `.flatpak` suffix. Build with `just desktop::appimage production|demo` or
+`just desktop::flatpak production|demo`. Both formats consume generated launcher metadata and brand assets. AppImage
+uses a pinned compatibility toolchain and type-2 runtime. Flatpak builds offline from Nix-vendored Cargo sources on
+Freedesktop 25.08. Its current permissions are development inputs; release requires verifying the narrowest working USB
+and GVfs permissions.

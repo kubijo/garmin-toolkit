@@ -10,8 +10,7 @@ Serialized model values must round-trip through non-self-describing Postcard. Mo
 externally tagged representation. A different representation requires replacing the wire codec or proving equivalent
 native and WASM behavior before this decision is superseded.
 
-This narrows ADR 0024's “owned messages” to RPC envelopes, state, and errors. Domain values remain owned by
-`garmin-model`.
+RPC envelopes, state, and errors belong to `garmin-service-api`; domain values remain owned by `garmin-model`.
 
 ## Enforcement
 

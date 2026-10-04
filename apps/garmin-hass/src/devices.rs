@@ -1,5 +1,7 @@
+use garmin_device::storage::DeviceWrite;
 use garmin_model::{
     artifact::{AcquisitionOperationId, ArtifactDigest, SourceIdentity},
+    device::{InspectionSection, ProfileMarkerInspection},
     identity::{DisplayName, Source as ProfileSource, SourceId, UserId},
     observation::ObservationId,
     value::Timestamp,
@@ -39,6 +41,60 @@ const AVATAR_OPERATION_ID_DOMAIN_V1: &[u8] =
 const DEVICE_SOURCE_LABEL: &str = "Connected Garmin device";
 const DEVICE_SOURCE_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/device-files/source/v1";
 const MAX_FIT_PLANS: usize = 64;
+
+struct PairingTarget {
+    primary_storage: String,
+    existing: Option<(String, ProfileMarkerInspection)>,
+}
+
+async fn inspect_pairing_target(
+    device: &dyn DeviceWrite,
+    expected_digest: &str,
+) -> Result<PairingTarget, String> {
+    let primary_storage = device
+        .primary_storage_id()
+        .await
+        .map_err(|error| error.to_string())?;
+    let state = device.state().await.map_err(|error| error.to_string())?;
+    if !state
+        .storages
+        .iter()
+        .any(|volume| volume.id == primary_storage)
+    {
+        return Err("the primary storage is not in the inspected device state".to_owned());
+    }
+    let mut existing = None;
+    for volume in state.storages {
+        let inspection =
+            garmin_update::inspect_device_state(device, &volume.id, Some(expected_digest)).await;
+        if !matches!(
+            inspection.namespace,
+            InspectionSection::Missing | InspectionSection::Available(_)
+        ) || !matches!(
+            inspection.identity,
+            InspectionSection::Missing | InspectionSection::Available(_)
+        ) || !matches!(inspection.transaction, InspectionSection::Missing)
+        {
+            return Err("device state needs review before pairing".to_owned());
+        }
+        match inspection.marker {
+            InspectionSection::Missing => {}
+            InspectionSection::Available(marker) if existing.is_none() => {
+                existing = Some((volume.id, marker));
+            }
+            InspectionSection::Available(_) => {
+                return Err("multiple pairing markers need review".to_owned());
+            }
+            InspectionSection::Unavailable(_) => {
+                return Err("the pairing marker needs review".to_owned());
+            }
+        }
+    }
+    Ok(PairingTarget {
+        primary_storage,
+        existing,
+    })
+}
 
 struct FitPlans {
     epoch: Uuid,
@@ -113,11 +169,11 @@ impl Drop for FitImportLease {
 }
 
 pub(super) trait Source: Send {
-    fn map_connector(
+    fn device_connector(
         &mut self,
         _device_key: &str,
     ) -> Result<Arc<dyn garmin_services::maps::device::Connector>, String> {
-        Err("map management is unavailable for this source".to_owned())
+        Err("device access is unavailable for this source".to_owned())
     }
     fn refresh_device(&mut self, device_key: &str) -> Result<(), String>;
     fn snapshot(&mut self) -> Vec<DeviceSnapshot>;
@@ -272,7 +328,7 @@ impl ApplicationService for Host {
             source
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .map_connector(&key)
+                .device_connector(&key)
         })
         .await
         .map_err(|_| rtc::CallError::NotServed)?;
@@ -426,6 +482,94 @@ impl ApplicationService for Host {
         .await
         .map_err(|error| error.to_string())
         .and_then(std::convert::identity);
+        self.refresh().await;
+        Ok(result)
+    }
+
+    async fn pair_device(
+        &self,
+        user_id: UserId,
+        device_key: String,
+        expected_digest: String,
+        expected_marker: Option<ProfileMarkerInspection>,
+    ) -> Result<Result<ProfileMarkerInspection, String>, rtc::CallError> {
+        let application = self.application().await?;
+        let refresh_key = device_key.clone();
+        let result = async {
+            let user = application
+                .profiles()
+                .await
+                .map_err(|error| error.to_string())?
+                .into_iter()
+                .find(|user| user.id() == user_id)
+                .ok_or_else(|| "the selected profile no longer exists".to_owned())?;
+            let profile_name = user.profile().display_name().to_string();
+            let _guard = self
+                .maps
+                .mutations()
+                .acquire(&device_key)
+                .map_err(str::to_owned)?;
+            let source = Arc::clone(&self.source);
+            let connector = tokio::task::spawn_blocking(move || {
+                source
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .device_connector(&device_key)
+            })
+            .await
+            .map_err(|error| error.to_string())??;
+            let connection = connector
+                .connect()
+                .await
+                .map_err(|error| error.to_string())?;
+            if connection.manifest.identity_digest() != expected_digest {
+                return Err("the connected device changed since inspection".to_owned());
+            }
+            let target =
+                inspect_pairing_target(connection.device.as_ref(), &expected_digest).await?;
+            let marker = match (expected_marker.as_ref(), target.existing.as_ref()) {
+                (None, None) => {
+                    let marker = garmin_update::ProfileMarker::new(user_id, &profile_name)
+                        .map_err(|error| error.to_string())?;
+                    garmin_update::create_profile_marker(
+                        connection.device.as_ref(),
+                        &target.primary_storage,
+                        &marker,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                    marker
+                }
+                (Some(expected), Some((volume, current))) if expected == current => {
+                    garmin_update::reassign_profile_marker(
+                        connection.device.as_ref(),
+                        volume,
+                        expected.device_id,
+                        expected.revision,
+                        user_id,
+                        &profile_name,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?
+                }
+                _ => return Err("the pairing state changed since review".to_owned()),
+            };
+            Ok(ProfileMarkerInspection {
+                device_id: marker.device_id(),
+                user_id: marker.user_id(),
+                profile_name: marker.profile_name().to_owned(),
+                revision: marker.revision(),
+            })
+        }
+        .await;
+        let source = Arc::clone(&self.source);
+        let _refresh = tokio::task::spawn_blocking(move || {
+            source
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .refresh_device(&refresh_key)
+        })
+        .await;
         self.refresh().await;
         Ok(result)
     }
@@ -1471,6 +1615,97 @@ mod tests {
             .unwrap();
 
         assert_eq!(created.profile().display_name().as_str(), "Alex Rider");
+    }
+
+    #[tokio::test]
+    async fn pairing_and_reassociation_are_create_only_and_bound_to_reviewed_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let storage = crate::prepare_deployment(directory.path()).await.unwrap();
+        let host = Host::new(demo_source(&directory), storage);
+        let snapshots = host.watch_devices().await.unwrap();
+        let user = host
+            .create_profile("Alex Rider".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let path = directory
+            .path()
+            .join("device")
+            .join(garmin_update::PROFILE_MARKER_PATH);
+        let digest = garmin_fixtures::device::manifest().identity_digest();
+        assert!(
+            host.pair_device(
+                user.id(),
+                DEMO_DEVICE_KEY.to_owned(),
+                "wrong digest".to_owned(),
+                None
+            )
+            .await
+            .unwrap()
+            .is_err()
+        );
+        assert!(!path.exists());
+
+        let paired = host
+            .pair_device(user.id(), DEMO_DEVICE_KEY.to_owned(), digest.clone(), None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(paired.user_id, user.id());
+        assert_eq!(paired.profile_name, "Alex Rider");
+        assert_eq!(paired.revision, 0);
+        let original = std::fs::read(&path).unwrap();
+        let other = host
+            .create_profile("Sam Runner".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            host.pair_device(other.id(), DEMO_DEVICE_KEY.to_owned(), digest.clone(), None)
+                .await
+                .unwrap()
+                .is_err()
+        );
+        let reassigned = host
+            .pair_device(
+                other.id(),
+                DEMO_DEVICE_KEY.to_owned(),
+                digest.clone(),
+                Some(paired.clone()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reassigned.device_id, paired.device_id);
+        assert_eq!(reassigned.user_id, other.id());
+        assert_eq!(reassigned.revision, 1);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                host.refresh().await;
+                let current = snapshots.borrow().unwrap();
+                if current[0].report.as_ref().is_some_and(|report| {
+                    report.toolkit.iter().any(|volume| {
+                        matches!(
+                            &volume.marker,
+                            garmin_model::device::InspectionSection::Available(marker)
+                                if marker == &reassigned
+                        )
+                    })
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            host.pair_device(user.id(), DEMO_DEVICE_KEY.to_owned(), digest, Some(paired))
+                .await
+                .unwrap()
+                .is_err()
+        );
     }
 
     #[tokio::test]

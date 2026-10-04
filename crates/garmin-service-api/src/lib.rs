@@ -341,6 +341,13 @@ mod rpc {
             &self,
             device_key: String,
         ) -> Result<Result<(), String>, rtc::CallError>;
+        async fn pair_device(
+            &self,
+            user_id: garmin_model::identity::UserId,
+            device_key: String,
+            expected_digest: String,
+            expected_marker: Option<garmin_model::device::ProfileMarkerInspection>,
+        ) -> Result<Result<garmin_model::device::ProfileMarkerInspection, String>, rtc::CallError>;
 
         async fn watch_devices(
             &self,

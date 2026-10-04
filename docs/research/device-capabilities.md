@@ -31,7 +31,11 @@ All four devices are available and support Bluetooth and Wi-Fi. fēnix/Venu are 
 Venu tests watch portability; Edge 850 establishes bike support and Edge 1050 tests conformance. Record firmware and
 host for every run.
 
-Index S2 is available but deferred with other devices lacking USB data access under ADR 0016.
+Simultaneous Edge 1050 and Venu 3S attachment was observed, but it does not establish complete explorer or write
+acceptance for either device.
+
+Index S2 is available but deferred with other devices lacking USB data access. The initial device scope is USB watches
+and bike computers.
 
 Sources:
 [Edge 850 computer connection](https://www8.garmin.com/manuals/webhelp/GUID-5BA20A50-BFFF-4418-AE4E-CA719C39EB05/EN-US/GUID-B4663AC8-EEF9-4684-883E-3CA79B0351EB.html),

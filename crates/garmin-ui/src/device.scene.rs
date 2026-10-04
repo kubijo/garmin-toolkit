@@ -1,16 +1,20 @@
 use gallery::prelude::*;
-use garmin_ui::{device, icons};
+use garmin_ui::{device, icons, modal};
 
 scene_meta! { title: "Application / Devices" }
 
 #[scene]
 fn details(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
-    use garmin_model::device::{DeviceInspection, InspectionSection, StorageInspection};
+    use garmin_model::device::{
+        DeviceInspection, InspectionSection, ProfileMarkerInspection, StorageInspection,
+    };
     use garmin_service_api::{
         DeviceCapability, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
     };
     let width = ctx.slider("width", 720.0, 320.0, 880.0, 1.0);
     let state = ctx.buttons("state", &["ready", "inspecting", "failed"], 0);
+    let marker = ctx.buttons("marker", &["present", "missing"], 0);
+    let reassign = ctx.toggle("reassign", false);
     let snapshot = DeviceSnapshot {
         key: "mock-watch".to_owned(),
         name: "Mock Watch-o-Matic 9000".to_owned(),
@@ -52,6 +56,20 @@ fn details(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                         .expect("valid demo toolkit UUID"),
                 ),
                 identity: InspectionSection::Missing,
+                marker: if marker == 0 {
+                    InspectionSection::Available(ProfileMarkerInspection {
+                        device_id: "00000000-0000-4000-8000-000000000001"
+                            .parse()
+                            .expect("the synthetic marker UUID is valid"),
+                        user_id: "00000000-0000-4000-8000-000000000002"
+                            .parse()
+                            .expect("the synthetic profile UUID is valid"),
+                        profile_name: "Alex Rider".to_owned(),
+                        revision: 0,
+                    })
+                } else {
+                    InspectionSection::Missing
+                },
                 transaction: InspectionSection::Missing,
             }],
         }),
@@ -61,8 +79,32 @@ fn details(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             .fill(ui.visuals().panel_fill)
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
-                let _action = device::show_snapshot(ui, &globals.intl(), &snapshot, false);
+                let _action = device::show_snapshot(
+                    ui,
+                    &globals.intl(),
+                    &snapshot,
+                    false,
+                    marker == 1 || reassign,
+                );
             });
+    });
+}
+
+#[scene]
+fn pairing_confirmation(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let reassign = ctx.toggle("reassign", false);
+    stage!(ctx, ui, |ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(640.0, 420.0), egui::Sense::hover());
+        let mut parent = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        let _ = device::pairing_confirmation(
+            &mut parent,
+            &globals.intl(),
+            "Mock Watch-o-Matic 9000",
+            "Alex Rider",
+            reassign.then_some("Sam Runner"),
+            true,
+            modal::Presentation::Contained,
+        );
     });
 }
 
@@ -105,6 +147,7 @@ fn partial_inspection(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
                     paired_user_id: None,
                     verified: true,
                 }),
+                marker: InspectionSection::Missing,
                 transaction: InspectionSection::Unavailable(InspectionFailure {
                     kind: InspectionFailureKind::UnsupportedVersion,
                     message: "unsupported active-transaction device-state version 99".to_owned(),
@@ -117,7 +160,7 @@ fn partial_inspection(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
             .fill(ui.visuals().panel_fill)
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
-                let _action = device::show_snapshot(ui, &globals.intl(), &snapshot, false);
+                let _action = device::show_snapshot(ui, &globals.intl(), &snapshot, false, false);
             });
     });
 }

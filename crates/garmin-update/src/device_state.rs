@@ -17,7 +17,7 @@ pub mod inspection;
 
 pub const DEVICE_STATE_MAGIC: &str = "garmin-toolkit-device-state";
 pub const DEVICE_STATE_VERSION: u32 = 1;
-const NAMESPACE: &str = "GARMIN-TOOLKIT";
+pub(crate) const NAMESPACE: &str = "GARMIN-TOOLKIT";
 const TRANSACTIONS: &str = "GARMIN-TOOLKIT/transactions";
 const MANIFEST: &str = "GARMIN-TOOLKIT/manifest.toml";
 const IDENTITY: &str = "GARMIN-TOOLKIT/identity.toml";

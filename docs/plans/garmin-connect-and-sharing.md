@@ -7,7 +7,8 @@ Add optional Garmin Connect and multi-user sharing without weakening local opera
 1. Revalidate ADR 0008, authentication, terms, and limits before implementation.
 2. Build a replaceable opt-in adapter with conservative polling and actionable failures; outages cannot disable USB.
 3. Associate USB and Connect observations while retaining both sources, originals, and provenance.
-4. Resolve OQ-019. Sharing must be explicit, authorized, revocable, exportable, and snapshotted.
+4. Choose deployment-local ACLs, share bundles, peer sync, or an optional coordinator after resolving identity,
+   conflict, and threat boundaries. Sharing must be explicit, authorized, revocable, exportable, and snapshotted.
 5. Map external identities without using them as application primary keys.
 6. Threat-model credentials, sessions, user separation, restored snapshots, and shared data.
 

@@ -11,8 +11,8 @@ encryption. Use independently reviewed implementations; invent no cryptography o
 proven target custody before persisting credentials.
 
 Keep users independent of authentication, storage replaceable, and snapshots envelope-able. Until security hardening,
-secrets stay outside databases, snapshots, and exports. An evidenced design may supersede ADR 0014; plaintext output
-stays secret-free and passwordless operation remains supported.
+secrets stay outside databases, snapshots, and exports. An evidenced design may change the storage contract; plaintext
+output stays secret-free and passwordless operation remains supported.
 
 ## Why
 

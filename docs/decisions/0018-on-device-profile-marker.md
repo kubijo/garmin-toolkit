@@ -2,16 +2,22 @@
 
 ## Decision
 
-Persist user-device association in a versioned root TOML marker. First sync writes the selected user UUID, a random
-device UUID, and an informational profile snapshot; later attachments read it.
+Persist user-device association in `GARMIN-TOOLKIT/pairing.toml`. The first confirmed pairing writes the selected user
+UUID, a random device UUID, an informational profile name, and revision zero. Later attachments inspect this document
+and any create-only `pairing-000001.toml`, `pairing-000002.toml`, … revisions in the same directory. The format uses the
+same `garmin-toolkit-device-state` magic, `kind = "pairing"`, and version header as the other state files.
 
-The marker is neither secret nor authentication. UUIDs are immutable; display name and profile revision are refreshed
-context. Unknown users and missing or invalid markers require pairing. Garmin and transport IDs remain diagnostics.
+The marker is neither secret nor authentication. The device UUID stays fixed; a reassignment records a new user UUID and
+profile-name snapshot in the next revision. A valid marker can identify a known profile, but it does not bypass profile
+selection or grant access. Unknown users, missing markers, and invalid revision chains need explicit review. Garmin and
+transport IDs remain diagnostics.
 
 Use `toml_edit` to preserve comments, order, formatting, and unknown fields. Never regenerate text. Write, read, parse,
-and verify. Replace content only after proving safe device replacement; otherwise retain stale context.
+and verify. Reassignment requires separate consent and creates a new revision without replacing any prior file. Require
+a contiguous history of at most 64 revisions with matching device UUIDs; a malformed, missing, or conflicting revision
+fails closed.
 
-Start with `.nimrag.toml`; test `NIMRAG.TOML` only if owned hardware rejects dotfiles. This supersedes ADR 0017.
+Do not create a separate marker at the device root.
 
 ## Why
 
@@ -20,5 +26,6 @@ several devices owned by one profile.
 
 ## Consequences
 
-Creation requires confirmed device write. Deletion only forgets association. A database cache cannot recreate or
-override the marker. Test preservation, malformed/conflicting markers, reconnect, reassociation, and interruption.
+Creation requires confirmed device write. A database cache cannot recreate or override the pairing documents. Test
+preservation, malformed/conflicting documents, reconnect, reassociation, and interrupted writes. Generic device-browser
+file actions do not mutate this namespace.
