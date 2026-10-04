@@ -1,27 +1,29 @@
 # Home Assistant watch vertical slice
 
-Finish on-device profile association, route editing, and one confirmed FIT Course transfer on the packaged HASS host.
-[Shared workflows](shared-interface-workflows.md) owns desktop parity; [device inspection](device-state.md) owns
-canonical attachment/capacity state. Retain the native-host/WASM and
-[typed service](../decisions/0024-remoc-service-boundary.md) architecture; Bluetooth and HASS domain publication remain
-excluded. Selected FIT import, including a browser disconnect, has
-[demo acceptance](../research/fit-implementation.md#browser-import-acceptance).
+Finish route editing and one confirmed FIT Course transfer on the packaged HASS host, then verify the device pairing
+flow in the add-on and on physical media. [Shared workflows](shared-interface-workflows.md) owns desktop parity;
+physical inspection evidence belongs to [device expansion](device-expansion-and-publication.md). Retain the
+native-host/WASM and [typed service](../architecture/workspace.md) architecture; Bluetooth and HASS domain publication
+remain excluded. Selected FIT import has [demo acceptance](../research/fit-implementation.md#browser-import-acceptance),
+including a browser disconnect. Device reassociation has
+[demo acceptance](../research/usb-sync.md#demo-pairing-acceptance).
 
 ## Remaining work
 
-1. Implement the [on-device profile marker](../decisions/0018-on-device-profile-marker.md) and verify pairing and
-   reassociation in the packaged HASS host.
-2. Extend the map to [route-plan editing](../decisions/0028-user-owned-route-plans.md): GPX selection, freehand
+1. Extend the map to [route-plan editing](../decisions/0028-user-owned-route-plans.md): GPX selection, freehand
    geometry, revisions, reverse/trim/split/simplification. Expose opaque plan/job IDs through `garmin-service-api` and
-   `garmin-services`; reject caller-selected host paths/adapters. Resolve
-   [routing](open-questions.md#oq-022-route-plan-routing).
-3. Transfer one FIT Course after preflight and confirmation; record readback and firmware acceptance. Cleanup requires
+   `garmin-services`; reject caller-selected host paths/adapters. Resolve routing behind an owned interface. Select an
+   engine and cycling/running profiles from evidence before routing is offered; GPX selection, freehand editing,
+   transforms, FIT generation, and USB transfer do not depend on that choice.
+2. Transfer one FIT Course after preflight and confirmation; record readback and firmware acceptance. Cleanup requires
    separate consent. Verify disconnect/recovery without unintended mutation.
-4. Integrate Home Assistant host backups with the managed deployment and verify recovery of its selected storage
+3. Integrate Home Assistant host backups with the managed deployment and verify recovery of its selected storage
    generation. Portable application snapshots have a separate
    [storage contract](../architecture/storage.md#portable-snapshots).
-5. Build self-contained amd64/aarch64 add-ons with persistent `/data`; verify ingress-only mutation access, USB
-   permissions/ownership, disconnects, and workflow on Raspberry Pi 5. Do not assume desktop GIO mounts exist.
+4. Build self-contained amd64/aarch64 add-ons with persistent `/data`; verify ingress-only mutation access, USB
+   permissions/ownership, disconnects, and workflow on Raspberry Pi 5. Do not assume desktop GIO mounts exist. Verify
+   [profile marker](../decisions/0018-on-device-profile-marker.md) initial pairing and reassociation in the add-on and
+   on physical media; initial pairing has unit coverage but still needs live acceptance.
 
 ## Browser/process acceptance
 

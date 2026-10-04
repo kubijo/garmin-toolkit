@@ -198,6 +198,21 @@ struct App {
     device_fit_preview: Option<device_fit_preview::Preview>,
     device_fit_plan: Option<uuid::Uuid>,
     device_fit_job: Option<uuid::Uuid>,
+    pairing_confirmation: Option<PairingConfirmation>,
+}
+
+struct PairingConfirmation {
+    device_key: String,
+    device_name: String,
+    device_digest: String,
+    user_id: UserId,
+    profile_name: String,
+    expected_marker: Option<garmin_model::device::ProfileMarkerInspection>,
+}
+
+enum PairingExpectation {
+    Initial,
+    Reassign(garmin_model::device::ProfileMarkerInspection),
 }
 
 impl App {
@@ -254,6 +269,7 @@ impl App {
             device_fit_preview: None,
             device_fit_plan: None,
             device_fit_job: None,
+            pairing_confirmation: None,
         })
     }
 
@@ -513,6 +529,8 @@ impl App {
                                         &self.intl,
                                         snapshot,
                                         device_catalog_loading == Some(key.as_str()),
+                                        pairing_expectation(snapshot, current_profile.user.id())
+                                            .is_some(),
                                     )
                                 });
                         PageAction::Device {
@@ -623,6 +641,10 @@ impl App {
             } => self.open_file_window(key),
             PageAction::Device {
                 key,
+                action: Some(device::Action::Pair),
+            } => self.open_pairing_confirmation(key, profiles),
+            PageAction::Device {
+                key,
                 action: Some(device::Action::Refresh),
             } => {
                 let shared = Rc::clone(&self.shared);
@@ -649,6 +671,29 @@ impl App {
             | PageAction::Activities(None)
             | PageAction::Settings(None)
             | PageAction::Device { action: None, .. } => {}
+        }
+    }
+
+    fn open_pairing_confirmation(&mut self, key: String, profiles: &[ProfileSnapshot]) {
+        let profile = self.selected_profile.and_then(|index| profiles.get(index));
+        let snapshots = Rc::clone(&self.shared.borrow().snapshots);
+        let device = snapshots.iter().find(|device| device.key == key);
+        if let (Some(profile), Some(device)) = (profile, device)
+            && let Some(expectation) = pairing_expectation(device, profile.user.id())
+            && let Some(garmin_model::device::InspectionSection::Available(manifest)) =
+                device.report.as_ref().map(|report| &report.manifest)
+        {
+            self.pairing_confirmation = Some(PairingConfirmation {
+                device_key: key,
+                device_name: device.name.clone(),
+                device_digest: manifest.device_digest.clone(),
+                user_id: profile.user.id(),
+                profile_name: profile.user.profile().display_name().to_string(),
+                expected_marker: match expectation {
+                    PairingExpectation::Initial => None,
+                    PairingExpectation::Reassign(marker) => Some(marker),
+                },
+            });
         }
     }
 
@@ -883,6 +928,61 @@ impl App {
                     self.context.clone(),
                     name.into_string(),
                 );
+            }
+            None => {}
+        }
+    }
+
+    fn show_pairing_confirmation(&mut self, ui: &mut Ui) {
+        let Some(dialog) = &self.pairing_confirmation else {
+            return;
+        };
+        let action = device::pairing_confirmation(
+            ui,
+            &self.intl,
+            &dialog.device_name,
+            &dialog.profile_name,
+            dialog
+                .expected_marker
+                .as_ref()
+                .map(|marker| marker.profile_name.as_str()),
+            self.shared.borrow().client.is_some(),
+            modal::Presentation::Modal,
+        );
+        match action {
+            Some(modal::Action::Cancel) => self.pairing_confirmation = None,
+            Some(modal::Action::Primary) => {
+                let Some(dialog) = self.pairing_confirmation.take() else {
+                    return;
+                };
+                let shared = Rc::clone(&self.shared);
+                let context = self.context.clone();
+                let failure = format_message!(&self.intl, default_message: "Could not pair device");
+                let complete = if dialog.expected_marker.is_some() {
+                    format_message!(&self.intl, default_message: "Device reassigned to profile")
+                } else {
+                    format_message!(&self.intl, default_message: "Device paired with profile")
+                };
+                let client = shared.borrow().client.clone();
+                if let Some(client) = client {
+                    spawn_local(async move {
+                        let result = client
+                            .pair_device(
+                                dialog.user_id,
+                                dialog.device_key,
+                                dialog.device_digest,
+                                dialog.expected_marker,
+                            )
+                            .await
+                            .map_err(ConnectError::call)
+                            .and_then(|result| result.map_err(ConnectError::domain));
+                        shared.borrow_mut().notice = Some(match result {
+                            Ok(_) => Notice::success(complete),
+                            Err(error) => Notice::error(failure, error),
+                        });
+                        context.request_repaint();
+                    });
+                }
             }
             None => {}
         }
@@ -1307,6 +1407,7 @@ impl eframe::App for App {
             self.show_create_profile(ui);
             self.show_avatar_editor(ui);
             self.show_device_fit_preview(ui);
+            self.show_pairing_confirmation(ui);
         }
         if let Some(since) = disconnected_since.filter(|_| loaded) {
             self.show_offline(ui, since);
@@ -1329,6 +1430,41 @@ enum PageAction {
         key: String,
         action: Option<device::Action>,
     },
+}
+
+fn pairing_expectation(snapshot: &DeviceSnapshot, user_id: UserId) -> Option<PairingExpectation> {
+    let Some(report) = &snapshot.report else {
+        return None;
+    };
+    if !matches!(
+        &report.manifest,
+        garmin_model::device::InspectionSection::Available(_)
+    ) || report.toolkit.is_empty()
+        || report.has_errors()
+    {
+        return None;
+    }
+    let mut existing = None;
+    for storage in &report.toolkit {
+        if !matches!(
+            &storage.transaction,
+            garmin_model::device::InspectionSection::Missing
+        ) {
+            return None;
+        }
+        match &storage.marker {
+            garmin_model::device::InspectionSection::Missing => {}
+            garmin_model::device::InspectionSection::Available(marker) if existing.is_none() => {
+                existing = Some(marker.clone());
+            }
+            _ => return None,
+        }
+    }
+    match existing {
+        Some(marker) if marker.user_id == user_id => None,
+        Some(marker) => Some(PairingExpectation::Reassign(marker)),
+        None => Some(PairingExpectation::Initial),
+    }
 }
 
 fn show_activities(

@@ -79,10 +79,6 @@
     "source": "Could not read storage usage: {reason}",
     "translation": "Využití úložiště se nepodařilo načíst: {reason}"
   },
-  "0LgBBx3Tab": {
-    "source": "Not paired",
-    "translation": "Nespárováno"
-  },
   "0NwKARTe2S": {
     "source": "No Garmin device is currently visible",
     "translation": "Momentálně není viditelné žádné zařízení Garmin"
@@ -190,6 +186,10 @@
   "3H0J5pf+Y7": {
     "source": "Full activity",
     "translation": "Celá aktivita"
+  },
+  "3JCXZ2n9ch": {
+    "source": "Currently paired with {profile}",
+    "translation": "Aktuálně spárováno s profilem {profile}"
   },
   "3Q13J6QetV": {
     "source": "No activities in this FIT file",
@@ -335,9 +335,9 @@
     "source": "discard attempt",
     "translation": "zahodit pokus"
   },
-  "7eKU5LkJkS": {
-    "source": "Paired user recorded",
-    "translation": "Spárovaný uživatel je zaznamenán"
+  "7vGfzPy2DT": {
+    "source": "Could not pair device",
+    "translation": "Zařízení se nepodařilo spárovat"
   },
   "82UBO8iQE3": {
     "source": "Backup created (UTC)",
@@ -375,6 +375,10 @@
   "8qQk3ZHeVR": {
     "source": "The file will be permanently removed from the device.",
     "translation": "Soubor bude ze zařízení trvale odebrán."
+  },
+  "8sE/cNmINz": {
+    "source": "Device paired with profile",
+    "translation": "Zařízení bylo spárováno s profilem"
   },
   "8uIBg0TGg4": {
     "source": "Operation",
@@ -456,6 +460,10 @@
     "source": "Recovery complete. Target paths and sizes match.",
     "translation": "Obnova dokončena. Cílové cesty a velikosti odpovídají."
   },
+  "Ab0JvQQctX": {
+    "source": "Pair device with profile?",
+    "translation": "Spárovat zařízení s profilem?"
+  },
   "AcAA5xw1pw": {
     "source": "Components",
     "translation": "Součásti"
@@ -463,6 +471,10 @@
   "Amt/8bnG1H": {
     "source": "Minimum",
     "translation": "Minimum"
+  },
+  "AobV/+vkCc": {
+    "source": "Reassign device",
+    "translation": "Přiřadit zařízení"
   },
   "ApjkrELwZH": {
     "source": "Remove selected maps",
@@ -520,6 +532,10 @@
   "C5q3ggNG3s": {
     "source": "Map components",
     "translation": "Mapové komponenty"
+  },
+  "C6iYmP0U61": {
+    "source": "This changes the device's profile association. Previous marker revisions remain on the device.",
+    "translation": "Tím se změní přiřazení zařízení k profilu. Předchozí verze záznamu párování zůstanou na zařízení."
   },
   "C8rGezRtt/": {
     "source": "Restore this backup?",
@@ -709,6 +725,10 @@
   "HAlOn1ZsuY": {
     "source": "Name",
     "translation": "Název"
+  },
+  "Hq3HszheQ0": {
+    "source": "Reassign device to this profile?",
+    "translation": "Přiřadit zařízení k tomuto profilu?"
   },
   "HqyLUAjZLZ": {
     "source": "Update this device",
@@ -925,6 +945,10 @@
   "NXI/XLSYwc": {
     "source": "Auto",
     "translation": "Automaticky"
+  },
+  "Nb70KSIjJb": {
+    "source": "Reassign",
+    "translation": "Přiřadit znovu"
   },
   "Nc+TQCQuqm": {
     "source": "No recorded route",
@@ -1262,6 +1286,10 @@
     "source": "Could not save profile settings",
     "translation": "Nastavení profilu se nepodařilo uložit"
   },
+  "X3hecw/uyu": {
+    "source": "Pair",
+    "translation": "Spárovat"
+  },
   "XAEXJz69Uc": {
     "source": "Choose a picture",
     "translation": "Vybrat obrázek"
@@ -1410,6 +1438,10 @@
     "source": "Choose a profile before importing files",
     "translation": "Před importem souborů vyberte profil"
   },
+  "cYEQHlAwFm": {
+    "source": "Device reassigned to profile",
+    "translation": "Zařízení bylo přiřazeno k jinému profilu"
+  },
   "cYLNL9pJyy": {
     "source": "no data for {seconds}s",
     "translation": "žádná data po dobu {seconds} s"
@@ -1449,6 +1481,10 @@
   "dgqFvY9MdV": {
     "source": "Device operation interrupted",
     "translation": "Operace se zařízením přerušena"
+  },
+  "e21lIgqT5q": {
+    "source": "This writes a profile marker to the selected device. The marker is not a credential.",
+    "translation": "Tím se na vybrané zařízení zapíše záznam párování profilu. Záznam není přihlašovacím údajem."
   },
   "e5iRgzQaaC": {
     "source": "Resetting an unresponsive Garmin link…",
@@ -1618,6 +1654,10 @@
     "source": "This host retained an interrupted transaction. Recover it before making more changes.",
     "translation": "Tento počítač zachoval přerušenou transakci. Před dalšími změnami ji obnovte."
   },
+  "j+WuAp4KaQ": {
+    "source": "Pair {device} with {profile}",
+    "translation": "Spárovat {device} s profilem {profile}"
+  },
   "j+tl+1QxN9": {
     "source": "Enter, Esc, q, or mouse",
     "translation": "Enter, Esc, q nebo myš"
@@ -1673,6 +1713,10 @@
   "kAFbQQ+fb5": {
     "source": "Abort current work and quit?",
     "translation": "Přerušit aktuální práci a ukončit aplikaci?"
+  },
+  "kU27l6ZrVy": {
+    "source": "Pair device",
+    "translation": "Spárovat zařízení"
   },
   "kYBPW27JnX": {
     "source": "Diagnostics:",
@@ -1870,6 +1914,10 @@
   "ql960iDyNU": {
     "source": "The previous operation stopped before changing the device.",
     "translation": "Předchozí operace se zastavila před změnou zařízení."
+  },
+  "qoXbnZdc5H": {
+    "source": "Pairing device ID",
+    "translation": "ID spárovaného zařízení"
   },
   "qovGTtqrwH": {
     "source": "Inspect device again",
@@ -2175,5 +2223,9 @@
   "zQ65ULoVnY": {
     "source": "Backup restored. Choose a profile to continue.",
     "translation": "Záloha obnovena. Pro pokračování vyberte profil."
+  },
+  "zq9vTaCwpV": {
+    "source": "Transaction device ID",
+    "translation": "ID zařízení v transakci"
   }
 }

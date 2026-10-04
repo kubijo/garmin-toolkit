@@ -7,7 +7,9 @@ persisted, and no application-level confidentiality is claimed.
 ## Work
 
 1. Model shared access, host compromise, copied storage, snapshots, recovery, and unattended HASS startup.
-2. Resolve OQ-018 independently for passwords, credential custody, database protection, and snapshot envelopes.
+2. Choose reviewed implementations independently for passwords, target credential custody, database protection, and
+   snapshot envelopes. Decide key-store versus manual unlock, recovery, and unattended HASS startup; preserve
+   passwordless use.
 3. Use only established, independently reviewed cryptography; create no primitives or protocols.
 4. Define recovery, loss, password changes, passwordless users, and unattended operation before migration.
 5. Implement behind existing boundaries with downgrade and failure tests.

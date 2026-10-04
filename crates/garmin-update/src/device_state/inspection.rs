@@ -4,8 +4,10 @@ use super::*;
 use garmin_device::storage::DeviceRead;
 use garmin_model::device::{
     IdentityInspection, InspectionFailure, InspectionFailureKind, InspectionSection,
-    StorageInspection, TransactionInspection, TransactionKind,
+    ProfileMarkerInspection, StorageInspection, TransactionInspection, TransactionKind,
 };
+
+use crate::profile_marker::{ProfileMarkerError, read_profile_marker};
 
 /// Reads only known state documents on one volume. Each section fails independently.
 pub async fn inspect<D: DeviceRead + ?Sized>(
@@ -43,12 +45,42 @@ pub async fn inspect<D: DeviceRead + ?Sized>(
                     .transpose()
             }),
     );
+    let marker = marker_section(read_profile_marker(device, storage).await.map(|marker| {
+        marker.map(|marker| ProfileMarkerInspection {
+            device_id: marker.device_id(),
+            user_id: marker.user_id(),
+            profile_name: marker.profile_name().to_owned(),
+            revision: marker.revision(),
+        })
+    }));
     let transaction = section(transaction(device, storage, expected_digest).await);
     StorageInspection {
         storage_id: storage.to_owned(),
         namespace,
         identity,
+        marker,
         transaction,
+    }
+}
+
+fn marker_section<T>(result: Result<Option<T>, ProfileMarkerError>) -> InspectionSection<T> {
+    match result {
+        Ok(Some(value)) => InspectionSection::Available(value),
+        Ok(None) => InspectionSection::Missing,
+        Err(error) => InspectionSection::Unavailable(InspectionFailure {
+            kind: match &error {
+                ProfileMarkerError::UnsupportedVersion(_) => {
+                    InspectionFailureKind::UnsupportedVersion
+                }
+                ProfileMarkerError::TooLarge
+                | ProfileMarkerError::Device(DeviceIoError::LimitExceeded(_)) => {
+                    InspectionFailureKind::TooLarge
+                }
+                ProfileMarkerError::Device(_) => InspectionFailureKind::Unreadable,
+                _ => InspectionFailureKind::Malformed,
+            },
+            message: error.to_string(),
+        }),
     }
 }
 

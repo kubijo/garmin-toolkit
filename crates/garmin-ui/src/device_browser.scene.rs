@@ -134,7 +134,7 @@ fn show_window_scene(
                 window_controls: None,
             },
             |ui| {
-                let _ = device::show_snapshot(ui, &intl, &devices[0], false);
+                let _ = device::show_snapshot(ui, &intl, &devices[0], false, false);
             },
         );
         BROWSERS.with_scene(

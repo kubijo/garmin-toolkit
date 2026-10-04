@@ -2,11 +2,8 @@
 
 ## Ownership and execution
 
-- [Repository layout](repository.md)
-- [Rust workspace and service contracts](workspace.md)
-- [Application targets](targets.md)
-- [Build system](build-system.md)
-- [Desktop packaging](desktop-packaging.md)
+- [Repository, targets, and Rust workspace](workspace.md)
+- [Build system and desktop packaging](build-system.md)
 
 ## Data and devices
 

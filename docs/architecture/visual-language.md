@@ -79,7 +79,7 @@ below native window controls, including shadows and animation. Maintained set: `
 
 Inspect affected production scenes in both themes, narrow/full layouts, focus/hover/disabled/loading/error states, and
 long/translated content. Captures live under `.tmp/gallery/`; maintained sets live in `infra/gallery/captures/`. See
-[preview requirements](../decisions/0038-validated-interface-previews.md).
+[preview requirements](../development.md#interface-validation).
 
 ## References
 

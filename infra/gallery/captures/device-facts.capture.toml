@@ -15,6 +15,43 @@ scene = "device::Details"
 Theme = "Light"
 
 [[shot]]
+name = "pairable"
+scene = "device::Details"
+[shot.knobs]
+marker = "missing"
+
+[[shot]]
+name = "reassignable"
+scene = "device::Details"
+[shot.knobs]
+reassign = true
+
+[[shot]]
+name = "pairable-czech-narrow"
+scene = "device::Details"
+[shot.globals]
+Language = "Čeština"
+[shot.knobs]
+marker = "missing"
+width = 320
+
+[[shot]]
+name = "pairing-confirmation"
+scene = "device::PairingConfirmation"
+
+[[shot]]
+name = "pairing-confirmation-czech"
+scene = "device::PairingConfirmation"
+[shot.globals]
+Language = "Čeština"
+
+[[shot]]
+name = "reassignment-confirmation"
+scene = "device::PairingConfirmation"
+[shot.knobs]
+reassign = true
+
+[[shot]]
 name = "ready-czech-narrow"
 scene = "device::Details"
 [shot.globals]

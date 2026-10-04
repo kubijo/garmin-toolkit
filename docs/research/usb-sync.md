@@ -44,8 +44,8 @@ Garmin documents [`NewFiles`](https://support.garmin.com/en-MY/?faq=rzvP53Si4O3b
 [`Garmin/Activity`](https://support.garmin.com/en-CA/?faq=Ht3ZP52Kju075uKvqTqu99) as recorded output, and
 [FIT types](https://developer.garmin.com/fit/file-types) independently of folders.
 
-Under [ADR 0012](../decisions/0012-manifest-driven-usb-capabilities.md), output permits copy, input only identifies a
-potential operation, and unlisted paths grant nothing.
+Under [the device boundary](../decisions/0035-consolidated-device-boundary.md), output permits copy, input only
+identifies a potential operation, and unlisted paths grant nothing.
 
 ### Device-browser bookmark policy
 
@@ -64,10 +64,19 @@ transport-level read-only.
 
 ## Device identity
 
-[ADR 0018](../decisions/0018-on-device-profile-marker.md) makes a root TOML marker the sole persisted association. It
-contains immutable user/device UUIDs and mutable profile context while preserving comments and unknown fields.
+[ADR 0018](../decisions/0018-on-device-profile-marker.md) puts the association in `GARMIN-TOOLKIT/pairing.toml`. It
+starts with a device UUID, user UUID, and profile-name snapshot. Reassignment creates a numbered revision in that same
+directory, preserving the device UUID, comments, and unknown fields without overwriting an earlier file.
 
 Manifest, USB, MTP, and FIT IDs are diagnostic; none identifies an application profile.
+
+### Demo pairing acceptance
+
+On 2026-10-04, the Nix-packaged HASS demo reassigned the mock watch from Alex Rider to Sam Runner through the
+confirmation dialog, then back to Alex. The host created `pairing-000001.toml` and `pairing-000002.toml` with revisions
+one and two and the same device UUID. The original `pairing.toml` kept its SHA-256 hash, and the refreshed UI showed
+each effective profile while hiding the pairing action for that profile. The browser tab initially ran an older bundle;
+reloading it exposed the current pairing action. This verifies the demo flow, not the HASS add-on or physical media.
 
 ## Existing adapters
 
@@ -186,8 +195,9 @@ SHA-256 digest, and removed it in 0.79 seconds. This proves the desktop-mounted 
 the raw-MTP path or firmware acceptance of map content.
 
 At revision `e981670`, the retained fēnix `t03` transaction recovered without device-file read-back. It accepted all 18
-writes by path and size, completed the remaining 6 of 9 removals, and finished with 11.07 GB free. The 16.92 GB retained
-payload set verified in 43 seconds and device reconciliation took 30 seconds.
+writes by path and size, completed the remaining 6 of 9 removals, and finished with 11.07 GB free. The interrupted state
+had no commit marker; three removals were already absent. The 16.92 GB retained payload set verified in 43 seconds and
+device reconciliation took 30 seconds. Garmin content acceptance was checked only after disconnect and restart.
 
 Edge 1050 (`006-B4440-00`) then completed two guarded removal runs. The first removed 9 files from TopoActive Middle
 East & Central Asia, North Africa, and South Africa and reclaimed 8.42 GB. The second removed the 2.54 GB TopoActive

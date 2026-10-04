@@ -52,7 +52,7 @@ impl MountedSource {
 }
 
 impl Source for MountedSource {
-    fn map_connector(
+    fn device_connector(
         &mut self,
         key: &str,
     ) -> Result<std::sync::Arc<dyn garmin_services::maps::device::Connector>, String> {

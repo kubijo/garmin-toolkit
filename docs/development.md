@@ -1,8 +1,7 @@
 # Development workflow
 
 Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands and build ownership are described in
-[the build system](architecture/build-system.md); UI changes require
-[validated interface previews](decisions/0038-validated-interface-previews.md).
+[the build system](architecture/build-system.md). UI changes require rendered and inspected gallery previews.
 
 ## Execution safeguards
 
@@ -24,7 +23,7 @@ Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands an
 - Keep diagnostics and analysis in maintained tooling, not disposable scripts. Temporary outputs belong under the
   repository's ignored `.tmp/` directories; gallery captures belong under `.tmp/gallery/`.
 - Real-device manifest comparisons require a separately approved anonymization procedure. Never commit raw device
-  identifiers or private captures; follow the [fixture policy](research/fixture-policy.md).
+  identifiers or private captures; follow the fixture rules below.
 
 ## Tooling choices
 
@@ -40,12 +39,35 @@ for web work whose production code is already JavaScript.
 
 ## Documentation ownership
 
-Keep current contracts in architecture, accepted choices in decisions, reproducible results and uncertainty in research,
-and unresolved work in its owning plan. Do not create a second session checklist for an existing owner. After resolving
-a review, preserve its unique evidence, update incoming links, and remove the temporary review file. Keep session
-narratives, routine test counts, command logs, and resolved checklists out of persistent documentation. Explain current
-behavior and design constraints directly; keep open questions concrete and remove them when answered. Retain empirical
-measurements and reproduction methods when they inform unresolved work.
+Keep current contracts in architecture, consequential rationale in a small set of decisions, reproducible results and
+uncertainty in research, and unresolved work in its owning plan. Retire superseded decisions after moving unique current
+rules to their owners; Git retains the history. Do not create a second session checklist. After a review, preserve its
+unique evidence, update incoming links, and remove the temporary review file. Keep session narratives, routine test
+counts, command logs, and resolved checklists out of persistent documentation. Explain current behavior and design
+constraints directly; keep open questions concrete and remove them when answered. Retain empirical measurements and
+reproduction methods when they inform unresolved work.
 
 Cite tracked fixtures, maintained reproduction commands, or durable published artifacts. Do not cite ignored local files
 as evidence in committed documentation.
+
+## Interface validation
+
+Every TUI, GUI, or web UI change needs a gallery scene using production rendering and models. Compile the scene, capture
+it, and inspect the image; compilation alone does not establish usable layout. Cover relevant loading, empty, success,
+error, cancellation, and recovery states, supported viewport sizes and fonts, themes, languages, and long real-world
+content. Check wrapping, clipping, contrast, focus, controls, and interaction in the live preview. Record scene IDs,
+revision, viewport, font, locale, and capture results with the change. Reproducible capture recipes live in the repo;
+rendered captures belong in local or CI artifacts. Runtime tests cover behavior but do not replace visual inspection.
+
+## Fixtures
+
+Committed FIT fixtures are synthetic and project-owned. Garmin samples, private files, traces, responses, and uncertain
+material stay in ignored private storage. Third-party material needs an exact source/revision, license, hash, notices,
+and publication review; regenerate device cases synthetically instead of redacting private originals. Shared generated
+corpora belong under `infra/fixtures/<domain>/<case>/` with `fixture.toml` recording purpose, origin, generator,
+license, input hashes, hand-authored expectations, and approval. Commit deterministic recipes, not generated FIT bytes
+or databases. Small owner-local synthetic test vectors may stay beside their tests.
+
+Review raw and decoded fields for names, identifiers, serials, secrets, real times, and locations, including unknown FIT
+fields. Automation checks shape and secrets but does not replace semantic review. Demo artifacts use separate roots and
+seed through the production importer; production starts empty or continues existing user data.

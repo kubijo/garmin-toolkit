@@ -27,7 +27,10 @@ and directory-backed tests do not establish behavior for every mounted-MTP imple
 - Audit keyboard navigation, focus, modal trapping, translation, narrow layouts, and reconnect recovery.
 - Restore browser Ctrl+wheel zoom over the HASS canvas.
 
-The [visual refresh](visual-refresh.md) owns component styling and the deferred headless color-picker decision.
+Finish the [visual language](../architecture/visual-language.md) across shared controls, shells, device headers, and
+empty/offline/error states. Review Gray 100/10 layers, focus and keyboard activation, narrow layouts, Czech and long
+content. Decide whether the headless color picker needs separate state before changing its geometry. Inspect dark/light
+captures, including `infra/gallery/captures/activity-calendar.capture.toml`.
 
 ## Runtime acceptance
 
@@ -45,7 +48,10 @@ Use `just hass::control check` against a running demo. Remaining checks:
 - **Diagnostics:** file-export error recovery.
 
 Gallery captures cover layout and translation; they do not prove live tile-provider or device transport behavior.
-[Device inspection](device-state.md) owns hardware checks. Test macOS and Windows before claiming support beyond Linux.
+[Device expansion](device-expansion-and-publication.md) owns hardware inspection checks. Test macOS and Windows before
+claiming support beyond Linux. Measure translation adoption with the FormatJS `en-XA` pseudo-locale and deliberately
+untranslated/clipped copy; catalog parity alone is insufficient. Exercise native/gallery and browser surfaces, including
+egui canvas text and narrow overlays.
 
 ### Deferred Wayland activation work
 

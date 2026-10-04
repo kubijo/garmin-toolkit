@@ -33,6 +33,7 @@ garmin-model.workspace = true
 garmin-progress.workspace = true
 garmin-service-api.workspace = true
 garmin-services.workspace = true
+garmin-update.workspace = true
 garmin-storage.workspace = true
 http-security-headers = { workspace = true, features = ["nonce"] }
 nu-ansi-term.workspace = true

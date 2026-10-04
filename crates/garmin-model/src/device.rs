@@ -97,6 +97,14 @@ pub struct IdentityInspection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileMarkerInspection {
+    pub device_id: uuid::Uuid,
+    pub user_id: crate::identity::UserId,
+    pub profile_name: String,
+    pub revision: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransactionInspection {
     pub transaction_id: uuid::Uuid,
     pub kind: TransactionKind,
@@ -115,6 +123,7 @@ pub struct StorageInspection {
     pub storage_id: String,
     pub namespace: InspectionSection<uuid::Uuid>,
     pub identity: InspectionSection<IdentityInspection>,
+    pub marker: InspectionSection<ProfileMarkerInspection>,
     pub transaction: InspectionSection<TransactionInspection>,
 }
 
@@ -134,6 +143,7 @@ impl DeviceInspection {
             || self.toolkit.iter().any(|storage| {
                 matches!(storage.namespace, InspectionSection::Unavailable(_))
                     || matches!(storage.identity, InspectionSection::Unavailable(_))
+                    || matches!(storage.marker, InspectionSection::Unavailable(_))
                     || matches!(storage.transaction, InspectionSection::Unavailable(_))
             })
     }

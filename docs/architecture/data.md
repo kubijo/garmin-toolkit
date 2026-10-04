@@ -22,6 +22,9 @@ similar data requires user action. Activity fingerprints cover ordered semantics
 normalize negative zero. Association never crosses users. Golden vectors lock each fingerprint schema.
 
 Application UUIDs are authoritative; accounts, host users, devices, and FIT serials are connector or diagnostic data.
+Each deployment has an owner. Connectors belong to users, and services enforce actor and ownership context. Trusted
+passwordless profile selection is convenient but provides no privacy boundary between people who can access the app;
+HASS ingress authenticates transport, not an application user.
 
 Profiles carry display and presentation preferences. Avatar import detects bounded PNG, JPEG, or WebP, corrects
 orientation, retains the original, and derives an immutable 256-pixel PNG thumbnail. Atomic replacement retains prior
@@ -42,7 +45,5 @@ decoding verifies output behind the parser boundary.
 `garmin-route` records a confirmed straight-line interpretation as a new immutable revision. The application advances
 the plan head atomically; stale edits fail without partial writes.
 
-See [relational reconciliation](../decisions/0019-relational-reconciliation.md),
-[portable identities](../decisions/0015-portable-application-identities.md), and
-[route plans](../decisions/0028-user-owned-route-plans.md), and
-[backend-neutral color and icons](../decisions/0030-backend-neutral-color-and-icons.md).
+See [relational reconciliation](../decisions/0019-relational-reconciliation.md) and
+[route plans](../decisions/0028-user-owned-route-plans.md).

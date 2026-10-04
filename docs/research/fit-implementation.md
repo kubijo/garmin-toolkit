@@ -36,8 +36,6 @@ unsupported, and corrupt chains.
   source-disclosure terms, and benchmarking. Sources: [protocol](https://developer.garmin.com/fit/protocol/),
   [license](https://raw.githubusercontent.com/garmin/fit-sdk-tools/main/LICENSE.txt).
 
-See [the decision](../decisions/0006-fit-implementation-boundary.md).
-
 ## Browser import acceptance
 
 On 2026-10-03, the packaged HASS demo completed a selected FIT import after its browser WebSocket closed during the

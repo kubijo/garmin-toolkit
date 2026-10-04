@@ -79,8 +79,8 @@ files advertised by the loopback catalog. Reopening a device never recreates rem
 The maintained `infra/gallery/captures/maps.capture.toml` recipe covers consent, catalog, review, progress, recovery,
 completion, failure, cancellation, and empty results, including both themes and Czech at a narrow width.
 
-[ADR 0038](../decisions/0038-validated-interface-previews.md) requires rendered and inspected preview evidence for every
-interface change, including prose wrapping and interaction. Scene compilation alone does not satisfy that gate.
+[interface validation](../development.md#interface-validation) requires rendered and inspected preview evidence for
+every interface change, including prose wrapping and interaction. Scene compilation alone does not satisfy that gate.
 
 CLI progress separates stage totals from identity-keyed file events. Active files retain arrival order across stages;
 their capped panel scrolls independently of history. Diagnostic changes and completed work enter history without

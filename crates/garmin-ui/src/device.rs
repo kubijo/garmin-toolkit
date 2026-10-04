@@ -1,13 +1,13 @@
 //! Device collection and detail views.
 
 use cint::ColorInterop;
-use egui::{RichText, TextStyle, Ui};
+use egui::{Id, RichText, TextStyle, Ui};
 use garmin_i18n::{Intl, format_message};
 use garmin_service_api::{
     DeviceCapability, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
 };
 
-use crate::{Size, button, icons, text::format_bytes};
+use crate::{Size, button, icons, modal, text::format_bytes};
 
 #[cfg(test)]
 mod acceptance;
@@ -52,6 +52,7 @@ pub enum CollectionState<'a> {
 pub enum Action {
     BrowseFiles,
     ManageMaps,
+    Pair,
     Refresh,
 }
 
@@ -158,13 +159,89 @@ pub fn show_snapshot(
     intl: &Intl,
     snapshot: &DeviceSnapshot,
     browser_loading: bool,
+    pairing_available: bool,
 ) -> Option<Action> {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
         ui.spacing_mut().interact_size.y = ui.text_style_height(&TextStyle::Body);
-        snapshot_content(ui, intl, snapshot, browser_loading)
+        snapshot_content(ui, intl, snapshot, browser_loading, pairing_available)
     })
     .inner
+}
+
+/// Confirm an explicit write of the selected profile association to the device.
+pub fn pairing_confirmation(
+    ui: &mut Ui,
+    intl: &Intl,
+    device_name: &str,
+    profile_name: &str,
+    previous_profile: Option<&str>,
+    enabled: bool,
+    presentation: modal::Presentation,
+) -> Option<modal::Action> {
+    let title = if previous_profile.is_some() {
+        format_message!(intl, default_message: "Reassign device to this profile?")
+    } else {
+        format_message!(intl, default_message: "Pair device with profile?")
+    };
+    let description = if previous_profile.is_some() {
+        format_message!(intl, default_message: "This changes the device's profile association. Previous marker revisions remain on the device.")
+    } else {
+        format_message!(intl, default_message: "This writes a profile marker to the selected device. The marker is not a credential.")
+    };
+    let target = format_message!(
+        intl,
+        default_message: "Pair {device} with {profile}",
+        values: { device: device_name, profile: profile_name },
+    );
+    let cancel = format_message!(intl, default_message: "Cancel");
+    let confirm = if previous_profile.is_some() {
+        format_message!(intl, default_message: "Reassign device")
+    } else {
+        format_message!(intl, default_message: "Pair device")
+    };
+    let output = modal::show(
+        ui,
+        Id::new("confirm-device-pairing"),
+        &modal::Props {
+            title: &title,
+            description: Some(&description),
+            size: modal::Size::Small,
+            presentation,
+            cancel_label: Some(&cancel),
+            backdrop_closes: Some(false),
+            primary: modal::Primary {
+                label: &confirm,
+                icon: Some(if previous_profile.is_some() {
+                    icons::ARROWS_CLOCKWISE
+                } else {
+                    icons::PLUS
+                }),
+                kind: if previous_profile.is_some() {
+                    modal::PrimaryKind::Danger
+                } else {
+                    modal::PrimaryKind::Confirm
+                },
+                enabled,
+            },
+        },
+        |ui| {
+            if let Some(previous_profile) = previous_profile {
+                ui.label(format_message!(
+                    intl,
+                    default_message: "Currently paired with {profile}",
+                    values: { profile: previous_profile },
+                ));
+                ui.add_space(8.0);
+            }
+            ui.label(&target);
+        },
+    );
+    crate::semantics::target(ui, &output.primary, "device.pair.confirm");
+    if let Some(cancel) = &output.cancel {
+        crate::semantics::target(ui, cancel, "device.pair.cancel");
+    }
+    output.action
 }
 
 fn snapshot_content(
@@ -172,6 +249,7 @@ fn snapshot_content(
     intl: &Intl,
     snapshot: &DeviceSnapshot,
     browser_loading: bool,
+    pairing_available: bool,
 ) -> Option<Action> {
     let view = SnapshotView::new(snapshot, intl);
     let transfers = view
@@ -215,7 +293,7 @@ fn snapshot_content(
             .inner_margin(egui::Margin::symmetric(16, 0))
             .show(ui, |ui| inspection::show(ui, intl, report));
     }
-    controls(ui, intl, snapshot, browser_loading)
+    controls(ui, intl, snapshot, browser_loading, pairing_available)
 }
 
 fn controls(
@@ -223,6 +301,7 @@ fn controls(
     intl: &Intl,
     snapshot: &DeviceSnapshot,
     browser_loading: bool,
+    pairing_available: bool,
 ) -> Option<Action> {
     ui.horizontal_wrapped(|ui| {
         let refresh = button::Props {
@@ -236,6 +315,38 @@ fn controls(
         .show(ui);
         crate::semantics::target(ui, &refresh, "device.refresh");
         let mut action = refresh.clicked().then_some(Action::Refresh);
+        if pairing_available {
+            let reassigning = snapshot.report.as_ref().is_some_and(|report| {
+                report.toolkit.iter().any(|storage| {
+                    matches!(
+                        &storage.marker,
+                        garmin_model::device::InspectionSection::Available(_)
+                    )
+                })
+            });
+            let label = if reassigning {
+                format_message!(intl, default_message: "Reassign")
+            } else {
+                format_message!(intl, default_message: "Pair")
+            };
+            let response = button::Props {
+                label: &label,
+                icon: Some(if reassigning {
+                    icons::ARROWS_CLOCKWISE
+                } else {
+                    icons::PLUS
+                }),
+                kind: button::Kind::Secondary,
+                size: Size::Medium,
+                width: button::Width::Fit,
+                enabled: snapshot.inspection == InspectionState::Ready,
+            }
+            .show(ui);
+            crate::semantics::target(ui, &response, "device.pair");
+            if response.clicked() {
+                action = Some(Action::Pair);
+            }
+        }
         if !snapshot.storages.is_empty() {
             let browse = if browser_loading {
                 format_message!(intl, default_message: "Reading files…")

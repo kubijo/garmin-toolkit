@@ -20,5 +20,5 @@ current Rust candidates such as [routx](https://github.com/MKuranowski/routx) an
 interface for basic cycling and running requests, control points, geometry, cues, elevation, errors, and engine/data
 provenance.
 
-See [ADR 0028](../decisions/0028-user-owned-route-plans.md) and
-[OQ-022](../plans/open-questions.md#oq-022-route-plan-routing).
+See [ADR 0028](../decisions/0028-user-owned-route-plans.md) and the
+[HASS watch plan](../plans/hass-watch-vertical-slice.md#remaining-work) for the unresolved routing choice.

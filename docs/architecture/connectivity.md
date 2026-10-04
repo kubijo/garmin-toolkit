@@ -61,5 +61,10 @@ reads. Physical Linux evidence covers both GVFS and raw MTP reads.
 Adapters provide snapshots and events; applications own scheduling. Consent UI, pairing, reconnect recovery, imports,
 and writes sit above this boundary.
 
-See [manifest-driven USB capabilities](../decisions/0012-manifest-driven-usb-capabilities.md) and
+`GARMIN-TOOLKIT/pairing.toml` is inspected independently of the transaction `identity.toml`. The marker is a portable
+association hint, never authentication; profile choice remains explicit. Pairing is bounded, create-only, and verified
+by readback. Reassociation requires separate consent and adds a numbered, create-only revision in the same directory.
+Inspection rejects missing or malformed history instead of silently falling back to an older association.
+
+See [the consolidated device boundary](../decisions/0035-consolidated-device-boundary.md) and
 [USB synchronization evidence](../research/usb-sync.md).

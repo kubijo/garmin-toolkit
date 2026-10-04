@@ -130,5 +130,4 @@ Budget accounting tests avoid wall-clock assertions. Gallery covers both themes 
 missing metrics/GPS, loading/provider failures, and device previews.
 
 Routing, geocoding, heatmaps, free chart zoom, offline-region downloads, and Garmin device-map management are separate
-capabilities; the background map uses one owned style family under
-[ADR 0025](../decisions/0025-proxied-online-vector-maps.md).
+capabilities; the background map uses one owned style family.

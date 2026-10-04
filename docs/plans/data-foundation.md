@@ -5,7 +5,10 @@ in [storage architecture](../architecture/storage.md#portable-snapshots).
 
 ## Work
 
-Implement the [open export package](../decisions/0020-composed-open-exports.md) and standalone GPX sharing separately.
+Implement a Frictionless Data Package with schema-typed CSV relations, GPX tracks, provenance, and every associated
+original FIT artifact for a complete activity. Its descriptor records resources, relations, schemas, and provenance. FIT
+remains authoritative. Standalone GPX track sharing is separate; exports are not snapshots. Validate schemas, units,
+nulls, IDs, keys, order, and discontinuities against publishable fixtures.
 
 Keep users independent of host and connector identities; keep database handles behind storage; pass actor context
 through services; persist no credentials; keep snapshots opaque and exports plaintext. These are compatibility
