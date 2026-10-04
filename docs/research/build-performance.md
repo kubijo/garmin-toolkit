@@ -76,7 +76,7 @@ Source review on 2026-09-28; no new candidate was integrated or benchmarked.
 - [Dexterous](https://github.com/lee-orr/dexterous_developer) is archived.
   [dynamic_reload](https://github.com/emoon/dynamic_reload) and [Reloady](https://github.com/anirudhb/reloady) last
   received repository pushes in 2023 and 2021; neither establishes compatibility with our current stack.
-- Our pinned [gallery loader](https://github.com/kubijo/rs-gallery/blob/v0.13.0/src/hot.rs) retains old mappings because
+- Our pinned [gallery loader](https://github.com/kubijo/rs-gallery/blob/v0.13.1/src/hot.rs) retains old mappings because
   egui stores their vtables and drop code. Its API loads scene manifests, not desktop frame functions. Existing gallery
   reload supports shared-UI iteration; desktop reuse would need new integration. Retained generations consume memory and
   do not migrate changed state layouts.

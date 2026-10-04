@@ -37,3 +37,11 @@ unsupported, and corrupt chains.
   [license](https://raw.githubusercontent.com/garmin/fit-sdk-tools/main/LICENSE.txt).
 
 See [the decision](../decisions/0006-fit-implementation-boundary.md).
+
+## Browser import acceptance
+
+On 2026-10-03, the packaged HASS demo completed a selected FIT import after its browser WebSocket closed during the
+request. The replacement connection reported one imported Cycling activity in a previously empty profile. Retrying the
+same file reported it was already imported and left one activity. The host regression
+`fit_import_completes_after_caller_disconnects` covers completion when the original caller disappears. This is demo
+transport evidence, not physical-device acceptance.

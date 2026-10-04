@@ -10,6 +10,7 @@ Apply the [visual language](../architecture/visual-language.md) across shared co
   `infra/gallery/captures/activity-calendar.capture.toml`.
 - Review device headers, storage, and contextual actions.
 - Review offline/import/error states, Czech and long content, focus traversal, and keyboard activation.
+- Decide whether the headless color picker needs separate state and rendering before changing its geometry.
 - Inspect dark/light and narrow/full-screen captures for all affected production components; run full QA.
 
 [Validation coverage](../research/interface-validation.md) links maintained visual checks. Delete after remaining

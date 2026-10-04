@@ -311,6 +311,8 @@ let
         toolchain
       ]
       ''
+        mkdir -p .tmp/qa-tmp
+        export TMPDIR="$PWD/.tmp/qa-tmp"
         ${checkOutput "project lint"}
         run_step "Rust source shape" ${lib.getExe sourceShapeCheck}
         run_step "cargo workspace-inheritance-check" ${lib.getExe inheritanceCheck} --path .

@@ -479,7 +479,7 @@ impl super::App {
             chooser::close(&mut state.backup, &self.context);
             state.backup.recovery = recovery::Discovery::default();
         }
-        let pending_fit_import = self.shared.borrow().pending_fit_import;
+        let pending_fit_import = self.shared.borrow().pending_fit_import.clone();
         self.selected_profile = None;
         self.sync_file_window_owner();
         self.shared.borrow_mut().pending_fit_import = pending_fit_import;

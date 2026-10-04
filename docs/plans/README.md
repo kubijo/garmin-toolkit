@@ -5,20 +5,13 @@ Unfinished work only. On completion, move lasting contracts/evidence to their ow
 [interface validation](../decisions/0038-validated-interface-previews.md). Close each working slice before advancing;
 run full QA and audit, plus package evidence for deployment claims.
 
-Next acceptance slice:
-[review shared map workflows in rebuilt desktop and HASS](shared-interface-workflows.md#map-workflow-acceptance) before
-adding new export features. The outcome list below retains the broader dependency order.
+Current focus: [on-device profile association and the HASS watch workflow](hass-watch-vertical-slice.md). Shared map
+workflows have demo acceptance; packaged add-on and owned-hardware checks remain in the
+[shared workflow plan](shared-interface-workflows.md#map-workflow-acceptance).
 
-| Order | Outcome                                                                 |
-| ----- | ----------------------------------------------------------------------- |
-| 01    | [Read-only device inspection](device-state.md)                          |
-| 02    | [Portable data foundation](data-foundation.md)                          |
-| 03    | [HASS watch workflow](hass-watch-vertical-slice.md)                     |
-| 04    | [Shared interface workflows](shared-interface-workflows.md)             |
-| 05    | [Security hardening](security-hardening.md)                             |
-| 06    | [Garmin Connect and sharing](garmin-connect-and-sharing.md)             |
-| 07    | [Device expansion and publication](device-expansion-and-publication.md) |
-| 08    | [CLI distribution](distribution.md)                                     |
+Other active plans: [device inspection](device-state.md), [portable data](data-foundation.md),
+[security](security-hardening.md), [Garmin Connect and sharing](garmin-connect-and-sharing.md),
+[device expansion and publication](device-expansion-and-publication.md), and [CLI distribution](distribution.md).
 
 Cross-cutting: [integration gates](toolkit-integration.md), [visual refresh](visual-refresh.md),
 [native hot reload](native-hot-reload.md). [Open questions](open-questions.md) assigns unresolved choices to their
