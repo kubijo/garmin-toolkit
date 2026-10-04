@@ -2,9 +2,9 @@
 
 Audits used ignored shallow clones; no project touched a Garmin account or device.
 
-## Pinned treatments
+## Audited treatments
 
-Links pin the audited revisions:
+Links pin the audited revisions, not the project's current dependency versions:
 
 - [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge/commit/d5961f0e2bcde00aa201e34d11571ee005f58d86)
   0.93.0, AGPL-3.0. Direct-Garmin behavioral reference. Selective adaptation is legally compatible but prohibited while

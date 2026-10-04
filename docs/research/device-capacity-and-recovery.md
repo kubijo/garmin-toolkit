@@ -61,7 +61,7 @@ capture, and all evidence is checked again before mutation. The host reads the e
 with an approval manifest before removing them by checked size and invoking ordinary verified rollback. The recovered
 outcome retains the quarantine location. Back, refresh, stale approvals, cancellation, and changed evidence cannot
 bypass the review. Simulation recovery operates on the retained copy and preserves the source device. The
-[acceptance record](../plans/shared-interface-workflows.md#map-workflow-acceptance) retains the test details.
+[shared acceptance summary](../plans/shared-interface-workflows.md#map-workflow-acceptance) records the demo coverage.
 
 This does not prove every desktop-MTP implementation or recovery after a real cable disconnect. Current fēnix and Edge
 mounted-MTP update, firmware-restart acceptance, and process-interruption recovery evidence lives in

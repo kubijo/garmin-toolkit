@@ -21,7 +21,7 @@ path = "main.rs"
 [dependencies]
 ansi-to-tui = "=8.0.1"
 crossterm = "=0.29.0"
-gallery = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.13.0", features = ["extras-svg"] }
+gallery = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.13.1", features = ["extras-svg"] }
 garmin-cli-tui = { path = "../../apps/garmin-cli/tui", features = ["gallery"] }
 garmin-color = { path = "../../crates/garmin-color" }
 garmin-i18n = { path = "../../crates/garmin-i18n" }
@@ -39,7 +39,7 @@ ratatui = { version = "=0.30.2", features = ["unstable-rendered-line-info"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 
 [build-dependencies]
-gallery-build = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.13.0", package = "gallery-build" }
+gallery-build = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.13.1", package = "gallery-build" }
 
 [dev-dependencies]
 egui_kittest = { version = "=0.36.2", features = ["eframe"] }

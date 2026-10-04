@@ -95,6 +95,14 @@ struct FitImportLease {
     job: Uuid,
 }
 
+#[cfg(test)]
+#[derive(Default)]
+struct FitImportPause {
+    next: std::sync::atomic::AtomicBool,
+    started: tokio::sync::Notify,
+    resume: tokio::sync::Notify,
+}
+
 impl Drop for FitImportLease {
     fn drop(&mut self) {
         let mut plans = self.plans.lock().unwrap_or_else(PoisonError::into_inner);
@@ -157,6 +165,8 @@ pub(super) struct Host {
     operations: Arc<SnapshotOperations>,
     maps: Arc<garmin_services::maps::Operations>,
     fit_plans: Arc<Mutex<FitPlans>>,
+    #[cfg(test)]
+    fit_import_pause: Option<Arc<FitImportPause>>,
     snapshot_session:
         Arc<tokio::sync::Mutex<Option<Arc<garmin_services::snapshots::SnapshotSession>>>>,
     epoch: Uuid,
@@ -187,6 +197,8 @@ impl Host {
                     .with_simulation_write_rate(bytes_per_second),
             ),
             fit_plans: Arc::new(Mutex::new(FitPlans::new(epoch))),
+            #[cfg(test)]
+            fit_import_pause: None,
             source: Arc::new(Mutex::new(source)),
             snapshots: Arc::new(snapshots),
             downloads: crate::downloads::Downloads::default(),
@@ -556,6 +568,8 @@ impl ApplicationService for Host {
         }
         let deployment = Arc::clone(&self.deployment);
         let epoch = self.epoch;
+        #[cfg(test)]
+        let pause = self.fit_import_pause.clone();
         drop(lease);
         let result = tokio::spawn(async move {
             let _import_lease = import_lease;
@@ -563,6 +577,13 @@ impl ApplicationService for Host {
                 .application(epoch)
                 .await
                 .map_err(|error| error.to_string())?;
+            #[cfg(test)]
+            if let Some(pause) = pause
+                && pause.next.swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                pause.started.notify_one();
+                pause.resume.notified().await;
+            }
             import_device_fit(
                 &application,
                 user,
@@ -1246,7 +1267,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        DeviceBrowserFile, FitImportLease, Host, Source, SourceProvider,
+        DeviceBrowserFile, FitImportLease, FitImportPause, Host, Source, SourceProvider,
         demo::{
             DEVICE_KEY as DEMO_DEVICE_KEY, Provider as DemoProvider, STORAGE_ID as DEMO_STORAGE_ID,
         },
@@ -1254,11 +1275,14 @@ mod tests {
     use garmin_fit::fixture;
     use garmin_progress::ProgressReporter;
     use garmin_service_api::{
-        ApplicationService as _, AvatarCrop, AvatarUpload, DeviceBrowserRequest,
-        DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogEntryKind, DeviceCatalogSnapshot,
-        DeviceFitImportOutcome, DeviceFitImportStatus, DeviceSnapshot, InspectionState,
+        ApplicationService as _, ApplicationServiceClient, ApplicationServiceServerShared,
+        AvatarCrop, AvatarUpload, DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload,
+        DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceFitImportOutcome,
+        DeviceFitImportStatus, DeviceSnapshot, InspectionState,
     };
     use image::{DynamicImage, ImageFormat, RgbImage};
+    use remoc::ConnectExt as _;
+    use remoc::prelude::ServerShared as _;
     use uuid::Uuid;
 
     struct FitSource {
@@ -1866,6 +1890,110 @@ mod tests {
                 .unwrap(),
             DeviceFitImportStatus::Completed
         );
+    }
+
+    #[tokio::test]
+    async fn fit_import_completes_after_caller_disconnects() {
+        let directory = tempfile::tempdir().unwrap();
+        let deployment = crate::prepare_deployment(directory.path()).await.unwrap();
+        let bytes = Arc::new(Mutex::new(
+            fixture::activity(fixture::Sport::Cycling).unwrap(),
+        ));
+        let base = Host::new(Box::new(FitSource { bytes }), deployment);
+        let pause = Arc::new(FitImportPause::default());
+        pause.next.store(true, std::sync::atomic::Ordering::SeqCst);
+        let host = Arc::new(Host {
+            fit_import_pause: Some(Arc::clone(&pause)),
+            ..(*base).clone()
+        });
+        let user = host
+            .create_profile("Mock Rider".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let target = fit_target();
+        let preview = host
+            .device_fit_preview(user.id(), "device".to_owned(), target.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        let user_id = user.id();
+        let plan_id = preview.id;
+
+        let (service, local_client) =
+            ApplicationServiceServerShared::<_, remoc::codec::Default>::new(Arc::clone(&host));
+        let serving = tokio::spawn(service.serve());
+        let (left, right) = tokio::io::duplex(64 * 1024);
+        let (read, write) = tokio::io::split(left);
+        let providing = tokio::spawn(
+            remoc::Connect::io(garmin_service_api::control::transport_config(), read, write)
+                .provide(local_client),
+        );
+        let (read, write) = tokio::io::split(right);
+        let client: ApplicationServiceClient =
+            remoc::Connect::io(garmin_service_api::control::transport_config(), read, write)
+                .consume()
+                .await
+                .unwrap();
+
+        let disconnected_caller = tokio::spawn({
+            let client = client.clone();
+            let target = target.clone();
+            async move {
+                client
+                    .import_device_fit(user_id, "device".to_owned(), target, plan_id)
+                    .await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(5), pause.started.notified())
+            .await
+            .expect("the host import job started");
+        assert_eq!(
+            host.device_fit_import_status(user.id(), preview.job)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportStatus::Running
+        );
+
+        disconnected_caller.abort();
+        assert!(disconnected_caller.await.unwrap_err().is_cancelled());
+        drop(client);
+        providing.abort();
+        let _ = providing.await;
+        pause.resume.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match host
+                    .device_fit_import_status(user.id(), preview.job)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                {
+                    DeviceFitImportStatus::Completed => break,
+                    DeviceFitImportStatus::Running => {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    DeviceFitImportStatus::Stopped => panic!("the detached import stopped"),
+                }
+            }
+        })
+        .await
+        .expect("the detached import completed");
+        assert_eq!(
+            host.import_device_fit(user.id(), "device".to_owned(), target, preview.id)
+                .await
+                .unwrap()
+                .unwrap(),
+            DeviceFitImportOutcome::Duplicate
+        );
+        let profiles = host.profiles().await.unwrap().unwrap();
+        let imported = profiles
+            .iter()
+            .find(|profile| profile.user.id() == user.id())
+            .expect("the importing profile remains available");
+        assert_eq!(imported.activities.len(), 1);
+        serving.abort();
     }
 
     #[tokio::test]

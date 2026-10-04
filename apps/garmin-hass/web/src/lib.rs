@@ -1314,7 +1314,7 @@ impl eframe::App for App {
         automation::dispatch_menu(ui.ctx());
         self.developer.update(&self.intl);
         self.update_file_window();
-        reconcile_pending_fit_import(Rc::clone(&self.shared), self.context.clone(), &self.intl);
+        reconcile_pending_fit_import(Rc::clone(&self.shared), self.context.clone());
         self.update_server_chooser();
         developer::update_logs(ui.ctx(), self.shared.borrow().logs.clone());
     }
@@ -1440,9 +1440,12 @@ struct State {
     disconnected_since_milliseconds: Option<f64>,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 struct PendingFitImport {
     user_id: UserId,
+    device_key: String,
+    target: DeviceBrowserTarget,
+    approval: uuid::Uuid,
     job: uuid::Uuid,
 }
 
@@ -1966,20 +1969,23 @@ fn spawn_device_fit_import(
         return;
     };
     let (plan, job) = review;
-    shared.borrow_mut().pending_fit_import = Some(PendingFitImport { user_id, job });
+    shared.borrow_mut().pending_fit_import = Some(PendingFitImport {
+        user_id,
+        device_key: device_key.clone(),
+        target: target.clone(),
+        approval: plan,
+        job,
+    });
     spawn_local(async move {
         let result = match client
             .import_device_fit(user_id, device_key, target, plan)
             .await
         {
             Ok(result) => Some(result),
-            Err(error) => match wait_for_fit_import_settled(&client, user_id, job).await {
+            Err(_) => match wait_for_fit_import_settled(&client, user_id, job).await {
                 Ok(DeviceFitImportStatus::Completed) => Some(Ok(DeviceFitImportOutcome::Duplicate)),
-                Ok(DeviceFitImportStatus::Stopped) => {
-                    Some(Err(ConnectError::call(error).to_string()))
-                }
+                Ok(DeviceFitImportStatus::Stopped) | Err(_) => None,
                 Ok(DeviceFitImportStatus::Running) => unreachable!("settled status is terminal"),
-                Err(_) => None,
             },
         };
         let profiles = if matches!(result.as_ref(), Some(Ok(_))) {
@@ -2026,14 +2032,10 @@ async fn wait_for_fit_import_settled(
     }
 }
 
-fn reconcile_pending_fit_import(
-    shared: Rc<RefCell<State>>,
-    context: eframe::egui::Context,
-    intl: &Intl,
-) {
+fn reconcile_pending_fit_import(shared: Rc<RefCell<State>>, context: eframe::egui::Context) {
     let (pending, generation, client) = {
         let mut state = shared.borrow_mut();
-        let Some(pending) = state.pending_fit_import else {
+        let Some(pending) = state.pending_fit_import.clone() else {
             return;
         };
         let generation = state.connection_generation;
@@ -2048,33 +2050,53 @@ fn reconcile_pending_fit_import(
         state.reconciling_fit_import = Some(generation);
         (pending, generation, client)
     };
-    let stopped_message = format_message!(
-        intl,
-        default_message: "The FIT import stopped before it completed. Open the file again to retry.",
-    );
     spawn_local(async move {
-        let status = loop {
+        let result = loop {
             let status = wait_for_fit_import_settled(&client, pending.user_id, pending.job).await;
-            if let Ok(status) = status {
-                break status;
+            match status {
+                Ok(DeviceFitImportStatus::Completed) => {
+                    break Ok(DeviceFitImportOutcome::Duplicate);
+                }
+                Ok(DeviceFitImportStatus::Stopped) => {
+                    // The status query can overtake a request sent just before disconnect.
+                    // Replay the same approved plan; the host deduplicates by job ID.
+                    match client
+                        .import_device_fit(
+                            pending.user_id,
+                            pending.device_key.clone(),
+                            pending.target.clone(),
+                            pending.approval,
+                        )
+                        .await
+                    {
+                        Ok(Ok(outcome)) => break Ok(outcome),
+                        Ok(Err(error)) if error == "this FIT import is already running" => {}
+                        Ok(Err(error)) => break Err(error),
+                        Err(_) => {}
+                    }
+                }
+                Ok(DeviceFitImportStatus::Running) => unreachable!("settled status is terminal"),
+                Err(_) => {}
             }
             let still_pending = {
                 let state = shared.borrow();
                 state.connection_generation == generation
-                    && state.pending_fit_import == Some(pending)
+                    && state.pending_fit_import.as_ref() == Some(&pending)
             };
             if !still_pending {
                 return;
             }
             wait_milliseconds(1_000).await;
         };
-        let profiles = if status == DeviceFitImportStatus::Completed {
+        let profiles = if result.is_ok() {
             client.profiles().await.ok().and_then(Result::ok)
         } else {
             None
         };
         let mut state = shared.borrow_mut();
-        if state.connection_generation != generation || state.pending_fit_import != Some(pending) {
+        if state.connection_generation != generation
+            || state.pending_fit_import.as_ref() != Some(&pending)
+        {
             return;
         }
         state.pending_fit_import = None;
@@ -2082,11 +2104,7 @@ fn reconcile_pending_fit_import(
         if let Some(profiles) = profiles {
             state.profiles = Rc::new(profiles);
         }
-        state.device_fit_import = Some(match status {
-            DeviceFitImportStatus::Completed => Ok(DeviceFitImportOutcome::Duplicate),
-            DeviceFitImportStatus::Stopped => Err(stopped_message),
-            DeviceFitImportStatus::Running => unreachable!("settled status is terminal"),
-        });
+        state.device_fit_import = Some(result);
         drop(state);
         context.request_repaint();
     });
@@ -2245,7 +2263,7 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                             if state.epoch.as_ref() != Some(&epoch) {
                                 let backup = std::mem::take(&mut state.backup);
                                 let maps = std::mem::take(&mut state.maps);
-                                let pending_fit_import = state.pending_fit_import;
+                                let pending_fit_import = state.pending_fit_import.clone();
                                 let generation = state.connection_generation.wrapping_add(1);
                                 *state = State {
                                     backup,

@@ -68,8 +68,14 @@
       };
     };
 
-    # Keep nix-tools' pinned nixpkgs: its tools and configs are a matched set.
-    nix-tools.url = "github:kubijo/nix-tools";
+    nix-tools = {
+      url = "github:kubijo/nix-tools";
+      inputs = {
+        nixpkgs-pinned.follows = "nixpkgs";
+        pyproject-nix.follows = "pyproject-nix";
+        uv2nix.follows = "uv2nix";
+      };
+    };
   };
 
   outputs = inputs: import ./infra/nix/flake.nix inputs;
