@@ -29,6 +29,7 @@ use camera::{MapCamera, MapProjector, MapViewDemand};
 
 pub(super) use gpu_map::PreparedGpuTile;
 pub use gpu_map::{WgpuMapHandle, install as install_wgpu_map};
+pub(super) use tile_decode::DecodedTile;
 pub(in crate::activity) use tile_store::MapTileDecoder;
 pub use tile_store::prepare_tile_for_browser_worker;
 use tile_store::{MAX_VIEW_ZOOM, WALKERS_TILE_SIZE};

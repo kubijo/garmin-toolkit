@@ -53,7 +53,7 @@ impl RendererFactory for CapturingRenderer {
     fn prepare_tile(
         &self,
         id: walkers::TileId,
-        tile: walkers::Tile,
+        tile: crate::activity::map::DecodedTile,
     ) -> Result<PreparedTile, String> {
         SoftwareRenderer.prepare_tile(id, tile)
     }
@@ -164,7 +164,7 @@ fn first_gpu_scene_reports_label_work_before_painting() {
     let tile = renderer
         .prepare_tile(
             id,
-            walkers::Tile::Vector {
+            crate::activity::map::DecodedTile {
                 shapes: vec![Shape::rect_filled(
                     egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(512.0, 512.0)),
                     0.0,

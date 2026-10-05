@@ -98,29 +98,16 @@ fn style() -> Style {
 }
 
 fn assert_render_parity(bytes: &[u8], style: &Style, zoom: u8) {
-    let Tile::Vector {
-        shapes: expected,
+    let walkers::Tile::Vector {
+        drawables,
         texts: labels,
-    } = Tile::from_mvt(bytes, style, zoom, 512).unwrap()
+    } = walkers::Tile::from_mvt(bytes, style, zoom, 512).unwrap()
     else {
         panic!("vector")
     };
-    let Tile::Vector { shapes, texts } = decode(bytes, style, zoom, 512).unwrap() else {
-        panic!("vector")
-    };
-    assert!(!shapes.is_empty());
-    let (Shape::Mesh(background), Shape::Rect(expected_background)) = (&shapes[0], &expected[0])
-    else {
-        panic!("background must use an exact quad instead of a feathered rectangle")
-    };
-    assert_eq!(background.calc_bounds(), expected_background.rect);
-    assert!(
-        background
-            .vertices
-            .iter()
-            .all(|vertex| vertex.color == expected_background.fill)
-    );
-    assert_eq!(shapes[1..], expected[1..]);
+    let expected = walkers::to_shapes(&drawables);
+    let DecodedTile { shapes, texts } = decode(bytes, style, zoom, 512).unwrap();
+    assert_shape_parity(shapes, expected);
     assert_eq!(texts.len(), labels.len());
     for (text, label) in texts.iter().zip(labels) {
         assert_eq!(text.text, label.text);
@@ -132,6 +119,45 @@ fn assert_render_parity(bytes: &[u8], style: &Style, zoom: u8) {
         assert!((text.angle - label.angle).abs() < f32::EPSILON);
         assert!((text.halo_width - label.halo_width).abs() < f32::EPSILON);
     }
+}
+
+fn assert_shape_parity(mut shapes: Vec<Shape>, expected: Vec<Shape>) {
+    let (Shape::Mesh(background), Shape::Mesh(first_run)) = (&shapes[0], &expected[0]) else {
+        panic!("background must use an exact quad")
+    };
+    // Walkers batches the background with following fills. Isolate its first quad.
+    let expected_background = egui::Mesh {
+        vertices: first_run.vertices[..4].to_vec(),
+        indices: first_run.indices[..6].to_vec(),
+        ..Default::default()
+    };
+    assert!(expected_background.is_valid());
+    assert_eq!(background.vertices.len(), 4);
+    assert_eq!(background.indices.len(), 6);
+    assert_eq!(background.calc_bounds(), expected_background.calc_bounds());
+    assert!(
+        background
+            .vertices
+            .iter()
+            .all(|vertex| vertex.color == expected_background.vertices[0].color)
+    );
+    // The two quads use different diagonals. Compare coverage/color above, then all
+    // remaining geometry exactly, independent of how adjacent fill meshes are batched.
+    shapes[0] = Shape::mesh(expected_background);
+    assert_eq!(merge_fill_meshes(shapes), merge_fill_meshes(expected));
+}
+
+fn merge_fill_meshes(shapes: Vec<Shape>) -> Vec<Shape> {
+    let mut merged = Vec::new();
+    for shape in shapes {
+        match (merged.last_mut(), shape) {
+            (Some(Shape::Mesh(previous)), Shape::Mesh(mesh)) => {
+                std::sync::Arc::make_mut(previous).append_ref(&mesh);
+            }
+            (_, shape) => merged.push(shape),
+        }
+    }
+    merged
 }
 
 #[test]
@@ -155,6 +181,32 @@ fn browser_decoder_preserves_styled_points_lines_polygons_and_holes() {
         "Example 🚲",
     );
     assert_render_parity(&bytes, &style(), 14);
+}
+
+#[test]
+fn browser_decoder_preserves_dashed_translucent_lines() {
+    let bytes = tile(
+        vec![feature(
+            proto::GeomType::Linestring,
+            &[9, 0, 0, 18, 128, 0, 0, 128],
+        )],
+        "Dashed road",
+    );
+    let style: Style = serde_json::from_value(walkers::json!({"layers": [
+        {"type": "background", "paint": {"background-color": "#123456"}},
+        {"type": "line", "source-layer": "test", "paint": {
+            "line-color": "#112233", "line-width": 2,
+            "line-opacity": 0.5, "line-dasharray": [2, 1]
+        }}
+    ]}))
+    .unwrap();
+    assert_render_parity(&bytes, &style, 14);
+    let decoded = decode(&bytes, &style, 14, 512).unwrap();
+    assert!(
+        decoded.shapes.len() > 2,
+        "line must be split into separate dashes"
+    );
+    assert!(decoded.texts.is_empty());
 }
 
 #[test]
@@ -187,9 +239,7 @@ fn browser_decoder_bounds_shared_properties_without_expanding_unused_layers() {
     assert!(bytes.len() < 64 * 1024);
     let error = decode(&bytes, &style(), 14, 512).err().unwrap();
     assert!(error.contains("expanded property limit"), "{error}");
-    let Tile::Vector { shapes, texts } = decode(&bytes, &Style::default(), 14, 512).unwrap() else {
-        panic!("vector")
-    };
+    let DecodedTile { shapes, texts } = decode(&bytes, &Style::default(), 14, 512).unwrap();
     assert!(shapes.is_empty());
     assert!(texts.is_empty());
 }

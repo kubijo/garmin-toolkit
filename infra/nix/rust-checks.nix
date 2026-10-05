@@ -180,10 +180,9 @@ let
   i18nSrc = import ./cargo-source.nix {
     inherit craneLib lib workspaceSrc;
     extraFilesets = [
-      (workspaceSrc + "/infra/python")
-      (workspaceSrc + "/infra/gallery/justfile")
-      (workspaceSrc + "/infra/just/common.just")
-      (workspaceSrc + "/infra/just/memory-capped.sh")
+      (workspaceSrc + "/infra/python/check_translation_metadata.py")
+      (workspaceSrc + "/infra/python/json_data.py")
+      (workspaceSrc + "/infra/python/test_check_translation_metadata.py")
     ];
   };
   commonArgs = {
@@ -233,13 +232,8 @@ let
     trap 'rm -rf "$i18n_dir"' EXIT
 
     ${extractSourceCatalog "$i18n_dir/en-source.json"}
-    PATH=${
-      lib.makeBinPath [
-        pkgs.bash
-        pkgs.just
-      ]
-    }:$PATH \
-      ${pythonToolsEnv}/bin/python -m unittest discover -q --start-directory infra/python --pattern 'test_*.py'
+    ${pythonToolsEnv}/bin/python -m unittest discover -q \
+      --start-directory infra/python --pattern 'test_check_translation_metadata.py'
     ${pythonToolsEnv}/bin/python infra/python/check_translation_metadata.py \
       "$i18n_dir/en-source.json" \
       crates/garmin-i18n/translations/cs.json

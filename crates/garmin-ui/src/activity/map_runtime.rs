@@ -10,7 +10,7 @@ mod platform;
 use platform::{ResponseQueue, ResponseTarget, SceneSlot, Shared, SurfaceRuntime};
 
 use super::map::{
-    MapTileDecoder, MapTileResponse, PreparedTile, TileStore,
+    DecodedTile, MapTileDecoder, MapTileResponse, PreparedTile, TileStore,
     camera::{MapCamera, MapViewDemand},
 };
 
@@ -230,11 +230,7 @@ pub struct Renderer(Arc<dyn RendererFactory>);
 
 trait RendererFactory: Send + Sync {
     fn runtime(&self, metrics: MapMetrics) -> Box<dyn SceneRuntime>;
-    fn prepare_tile(
-        &self,
-        id: walkers::TileId,
-        tile: walkers::Tile,
-    ) -> Result<PreparedTile, String>;
+    fn prepare_tile(&self, id: walkers::TileId, tile: DecodedTile) -> Result<PreparedTile, String>;
     fn prepare_browser_tile(
         &self,
         packet: BrowserTilePacket,
@@ -258,7 +254,7 @@ impl Renderer {
     pub(super) fn prepare_tile(
         &self,
         id: walkers::TileId,
-        tile: walkers::Tile,
+        tile: DecodedTile,
     ) -> Result<PreparedTile, String> {
         self.0.prepare_tile(id, tile)
     }
@@ -278,17 +274,13 @@ impl RendererFactory for WgpuRenderer {
         Box::new(super::map::gpu_map::GpuMapRuntime::new(&self.0, metrics))
     }
 
-    fn prepare_tile(
-        &self,
-        id: walkers::TileId,
-        tile: walkers::Tile,
-    ) -> Result<PreparedTile, String> {
+    fn prepare_tile(&self, id: walkers::TileId, tile: DecodedTile) -> Result<PreparedTile, String> {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = id;
             let gpu = super::map::gpu_map::prepare_local_browser_tile(tile)?.into_prepared();
             Ok(PreparedTile {
-                tile: walkers::Tile::Vector {
+                tile: DecodedTile {
                     shapes: Vec::new(),
                     texts: Vec::new(),
                 },
@@ -320,7 +312,7 @@ impl RendererFactory for SoftwareRenderer {
     fn prepare_tile(
         &self,
         _id: walkers::TileId,
-        tile: walkers::Tile,
+        tile: DecodedTile,
     ) -> Result<PreparedTile, String> {
         Ok(PreparedTile { tile, gpu: None })
     }
@@ -413,9 +405,7 @@ impl ScenePainter for SoftwarePainter {
         let center = camera.center_normalized();
         let painter = ui.painter().with_clip_rect(viewport);
         for (id, prepared) in scene.renderable_tiles() {
-            let walkers::Tile::Vector { shapes, texts } = &prepared.tile else {
-                continue;
-            };
+            let DecodedTile { shapes, texts } = &prepared.tile;
             let placement =
                 super::map::camera::TilePlacement::new(*id, center, world_size, viewport);
             let scaling =
@@ -884,7 +874,7 @@ mod tests {
             fn prepare_tile(
                 &self,
                 _id: walkers::TileId,
-                tile: walkers::Tile,
+                tile: DecodedTile,
             ) -> Result<PreparedTile, String> {
                 self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 Ok(PreparedTile { tile, gpu: None })

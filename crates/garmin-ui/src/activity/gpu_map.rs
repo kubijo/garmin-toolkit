@@ -13,11 +13,11 @@ use arc_swap::ArcSwapOption;
 use bytemuck::{Pod, Zeroable};
 use egui::{Color32, Rect, Shape, pos2};
 use garmin_service_api::ActivitySampleSnapshot;
-use walkers::{Tile, TileId};
+use walkers::TileId;
 use web_time::Instant;
 use wgpu::util::DeviceExt as _;
 
-use super::{WALKERS_TILE_SIZE, mercator_y, speed_bounds};
+use super::{DecodedTile, WALKERS_TILE_SIZE, mercator_y, speed_bounds};
 use crate::activity::map_style;
 
 #[path = "gpu_map/egui_adapter.rs"]
@@ -587,10 +587,8 @@ struct BrowserTileGeometry {
     texts: Vec<walkers::Text>,
 }
 
-fn tessellate_browser_tile(tile: Tile) -> Result<BrowserTileGeometry, String> {
-    let Tile::Vector { shapes, texts } = tile else {
-        return Err("the vector map worker received a raster tile".to_owned());
-    };
+fn tessellate_browser_tile(tile: DecodedTile) -> Result<BrowserTileGeometry, String> {
+    let DecodedTile { shapes, texts } = tile;
     let mut budget = TileBudget::default();
     budget.shapes(&shapes)?;
     for text in &texts {
@@ -605,7 +603,9 @@ fn tessellate_browser_tile(tile: Tile) -> Result<BrowserTileGeometry, String> {
 }
 
 /// Tessellate a worker tile into independently transferable WGPU and text buffers.
-pub(in crate::activity) fn encode_browser_tile(tile: Tile) -> Result<BrowserTileTransfer, String> {
+pub(in crate::activity) fn encode_browser_tile(
+    tile: DecodedTile,
+) -> Result<BrowserTileTransfer, String> {
     let BrowserTileGeometry {
         vertices,
         indices,
@@ -641,7 +641,7 @@ pub(in crate::activity) fn encode_browser_tile(tile: Tile) -> Result<BrowserTile
 
 #[cfg(any(target_arch = "wasm32", test))]
 pub(in crate::activity) fn prepare_local_browser_tile(
-    tile: Tile,
+    tile: DecodedTile,
 ) -> Result<BrowserTilePacket, String> {
     let BrowserTileGeometry {
         vertices,
@@ -687,41 +687,36 @@ fn tessellate_tile<E>(
     Ok((vertices, mesh.indices))
 }
 
-/// Tessellate tile-local shapes once and retain only text in the walkers fallback tile.
+/// Tessellate tile-local shapes once for the shared WGPU renderer.
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::activity) fn prepare_tile(
     handle: &WgpuMapHandle,
     id: TileId,
-    tile: Tile,
-) -> (Tile, Option<Arc<PreparedGpuTile>>) {
-    match tile {
-        Tile::Vector { shapes, texts } => {
-            let (vertices, indices) =
-                tessellate_tile(shapes, |_| Ok::<_, std::convert::Infallible>(()))
-                    .unwrap_or_else(|never| match never {});
-            let prepared = (!indices.is_empty() || !texts.is_empty()).then(|| {
-                let mesh = Arc::new(CpuTileMesh {
-                    vertices: MeshBuffer::typed(vertices),
-                    indices: MeshBuffer::typed(indices),
-                    texts,
-                });
-                let gpu = (!mesh.indices.is_empty())
-                    .then(|| Arc::new(GpuTile::new(&handle.context, id, Arc::clone(&mesh))));
-                Arc::new(PreparedGpuTile {
-                    mesh,
-                    gpu: ArcSwapOption::from(gpu),
-                })
-            });
-            (
-                Tile::Vector {
-                    shapes: Vec::new(),
-                    texts: Vec::new(),
-                },
-                prepared,
-            )
-        }
-        raster @ Tile::Raster(_) => (raster, None),
-    }
+    tile: DecodedTile,
+) -> (DecodedTile, Option<Arc<PreparedGpuTile>>) {
+    let DecodedTile { shapes, texts } = tile;
+    let (vertices, indices) = tessellate_tile(shapes, |_| Ok::<_, std::convert::Infallible>(()))
+        .unwrap_or_else(|never| match never {});
+    let prepared = (!indices.is_empty() || !texts.is_empty()).then(|| {
+        let mesh = Arc::new(CpuTileMesh {
+            vertices: MeshBuffer::typed(vertices),
+            indices: MeshBuffer::typed(indices),
+            texts,
+        });
+        let gpu = (!mesh.indices.is_empty())
+            .then(|| Arc::new(GpuTile::new(&handle.context, id, Arc::clone(&mesh))));
+        Arc::new(PreparedGpuTile {
+            mesh,
+            gpu: ArcSwapOption::from(gpu),
+        })
+    });
+    (
+        DecodedTile {
+            shapes: Vec::new(),
+            texts: Vec::new(),
+        },
+        prepared,
+    )
 }
 
 pub(crate) struct PreparedGpuTile {
@@ -1772,7 +1767,7 @@ mod tests {
     use super::*;
 
     fn labelled_world_tile() -> Arc<PreparedGpuTile> {
-        prepare_local_browser_tile(Tile::Vector {
+        prepare_local_browser_tile(DecodedTile {
             shapes: vec![Shape::rect_filled(
                 Rect::from_min_max(pos2(0.0, 0.0), pos2(512.0, 512.0)),
                 0.0,
@@ -1951,7 +1946,7 @@ mod tests {
             color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
         })
         .collect();
-        let tile = Tile::Vector {
+        let tile = DecodedTile {
             shapes: vec![egui::Shape::mesh(egui::Mesh {
                 indices: vec![0, 1, 2],
                 vertices,
@@ -1987,7 +1982,7 @@ mod tests {
 
     #[test]
     fn browser_producer_rejects_complexity_and_text_before_encoding() {
-        let tile = |shapes, texts| Tile::Vector { shapes, texts };
+        let tile = |shapes, texts| DecodedTile { shapes, texts };
         assert!(
             encode_browser_tile(tile(
                 vec![
@@ -2019,7 +2014,7 @@ mod tests {
 
     #[test]
     fn browser_local_preparation_matches_worker_and_leaves_upload_pending() {
-        let tile = Tile::Vector {
+        let tile = DecodedTile {
             shapes: vec![Shape::rect_filled(
                 Rect::from_min_max(pos2(0.0, 0.0), pos2(10.0, 10.0)),
                 0.0,

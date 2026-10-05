@@ -389,24 +389,25 @@ mod tests {
                 platform::UploadController,
                 MapMetrics::default(),
             ));
-            let tile = super::super::prepare_local_browser_tile(walkers::Tile::Vector {
-                shapes: vec![
-                    Shape::rect_filled(
-                        Rect::from_min_max(pos2(0.0, 0.0), pos2(512.0, 512.0)),
-                        0.0,
-                        egui::Color32::GREEN,
-                    ),
-                    Shape::rect_filled(
-                        Rect::from_min_max(pos2(220.0, 210.0), pos2(280.0, 260.0)),
-                        0.0,
-                        egui::Color32::BLUE,
-                    ),
-                ],
-                texts: Vec::new(),
-            })
-            .unwrap()
-            .into_prepared()
-            .unwrap();
+            let tile =
+                super::super::prepare_local_browser_tile(crate::activity::map::DecodedTile {
+                    shapes: vec![
+                        Shape::rect_filled(
+                            Rect::from_min_max(pos2(0.0, 0.0), pos2(512.0, 512.0)),
+                            0.0,
+                            egui::Color32::GREEN,
+                        ),
+                        Shape::rect_filled(
+                            Rect::from_min_max(pos2(220.0, 210.0), pos2(280.0, 260.0)),
+                            0.0,
+                            egui::Color32::BLUE,
+                        ),
+                    ],
+                    texts: Vec::new(),
+                })
+                .unwrap()
+                .into_prepared()
+                .unwrap();
             let id = TileId {
                 zoom: 0,
                 x: 0,
