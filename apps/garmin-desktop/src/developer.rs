@@ -146,6 +146,14 @@ impl egui::plugin::Plugin for NativeTools {
     fn debug_name(&self) -> &'static str {
         "native developer tools"
     }
+
+    fn on_end_pass(&mut self, ui: &mut egui::Ui) {
+        // Deferred tools remain interactive when Wayland stops repainting the root.
+        // Immediate file windows still borrow app state, so keep their old dispatch path.
+        if ui.ctx().viewport_id() == egui::ViewportId::from_hash_of("developer-tools-window") {
+            self.update(ui.ctx());
+        }
+    }
 }
 
 impl NativeTools {
@@ -317,19 +325,15 @@ impl NativeTools {
                         .server = None;
                 }
                 Request::OpenFolder => {
+                    let Some(mut command) = crate::native::folder_command(context) else {
+                        continue;
+                    };
                     let path = self.store.directory().to_path_buf();
                     self.runtime
                         .as_ref()
                         .expect("native runtime is active")
                         .spawn_blocking(move || {
-                            let launcher = if cfg!(target_os = "macos") {
-                                "open"
-                            } else {
-                                "xdg-open"
-                            };
-                            if let Err(error) =
-                                std::process::Command::new(launcher).arg(path).spawn()
-                            {
+                            if let Err(error) = command.arg(path).spawn() {
                                 tracing::warn!(%error, "Could not open log folder");
                             }
                         });
@@ -355,14 +359,15 @@ impl NativeTools {
             .export
             .take();
         if let Some(export) = export {
+            let Some(dialog) = crate::native::file_dialog(context) else {
+                return;
+            };
             let context = context.clone();
             self.runtime
                 .as_ref()
                 .expect("native runtime is active")
                 .spawn_blocking(move || {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_file_name("garmin-logs.jsonl")
-                        .save_file()
+                    if let Some(path) = dialog.set_file_name("garmin-logs.jsonl").save_file()
                         && let Err(error) = std::fs::write(path, export)
                     {
                         state(&context)
@@ -467,8 +472,11 @@ async fn control(
         )
             .into_response();
     }
-    // Only the root update drains the command queue, even for child commands.
+    // Either the root or the independent tools viewport can drain the queue.
     bridge.context.request_repaint_of(egui::ViewportId::ROOT);
+    bridge
+        .context
+        .request_repaint_of(egui::ViewportId::from_hash_of("developer-tools-window"));
     match tokio::time::timeout(std::time::Duration::from_secs(5), receiver).await {
         Ok(Ok(Ok(Reply::Json(value)))) => {
             (StatusCode::OK, Json(json!({"value":value}))).into_response()
@@ -520,7 +528,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "demo")]
-    fn server_is_explicit_dynamic_and_stops_without_closing_the_application() {
+    fn tools_child_starts_and_stops_server_without_root_frames() {
         let directory = tempfile::tempdir().unwrap();
         let store = garmin_logging::Store::open(directory.path(), "test").unwrap();
         let context = egui::Context::default();
@@ -531,7 +539,7 @@ mod tests {
             .unwrap()
             .requests
             .push(Request::StartServer);
-        context.plugin::<NativeTools>().lock().update(&context);
+        tools_child_frame(&context);
         let url = state(&context).lock().unwrap().server.clone().unwrap();
         let address = url.strip_prefix("http://").unwrap();
         let mut stream = std::net::TcpStream::connect(address).unwrap();
@@ -552,12 +560,41 @@ mod tests {
             .unwrap()
             .requests
             .push(Request::StopServer);
-        context.plugin::<NativeTools>().lock().update(&context);
+        tools_child_frame(&context);
         assert!(state(&context).lock().unwrap().server.is_none());
         assert!(
             context
                 .plugin_opt::<garmin_ui::automation::Driver>()
                 .is_some()
         );
+    }
+
+    #[cfg(feature = "demo")]
+    fn tools_child_frame(context: &egui::Context) {
+        let child = egui::ViewportId::from_hash_of("developer-tools-window");
+        let input = egui::RawInput {
+            viewport_id: child,
+            viewports: [
+                (
+                    egui::ViewportId::ROOT,
+                    egui::ViewportInfo {
+                        occluded: Some(true),
+                        ..Default::default()
+                    },
+                ),
+                (
+                    child,
+                    egui::ViewportInfo {
+                        parent: Some(egui::ViewportId::ROOT),
+                        ..Default::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        let mut output = context.run_ui(input, |_| {});
+        output.textures_delta.clear();
     }
 }

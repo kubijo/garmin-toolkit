@@ -7,9 +7,16 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+default-run = "garmin-desktop"
 
 [features]
 demo = ["dep:garmin-fixtures", "garmin-ui/automation"]
+render-probe = ["demo", "dep:image"]
+
+[[bin]]
+name = "garmin-render-probe"
+path = "src/render_probe/main.rs"
+required-features = ["render-probe"]
 
 [lints]
 workspace = true
@@ -39,6 +46,7 @@ garmin-services.workspace = true
 garmin-storage.workspace = true
 garmin-ui.workspace = true
 jiff.workspace = true
+image = { workspace = true, optional = true }
 rfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true

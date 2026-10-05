@@ -8,8 +8,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.message import Message
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
+
+from json_data import is_object
 
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 
@@ -17,12 +20,20 @@ MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     """Keep control requests on the explicitly selected localhost endpoint."""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: Message,
+        newurl: str,
+    ) -> None:
         return None
 
 
 class Client:
-    def __init__(self, url: str):
+    def __init__(self, url: str) -> None:
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.query or parsed.fragment:
             raise ValueError('URL must be an HTTP(S) application base URL without query or fragment')
@@ -30,9 +41,15 @@ class Client:
             raise ValueError('Control URL must use localhost or a loopback IP address')
         self.url = url.rstrip('/') + '/'
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-        self.request_id = 0
+        self.request_id: int | None = 0
 
-    def request(self, path: str, body=None, *, headers=None) -> tuple[int, Any]:
+    def request(
+        self,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, Any]:
         outgoing = dict(headers or {})
         data = None
         if body is not None:
@@ -59,13 +76,20 @@ class Client:
             raw = raw_bytes.decode()
             try:
                 value = json.loads(raw)
-                if isinstance(value, dict) and 'request_id' in value:
+                if is_object(value) and 'request_id' in value:
                     self.request_id = value['request_id']
             except ValueError:
                 value = raw
             return response.code, value
 
-    def command(self, operation: str, argument=None, *, request_id=None, window=None) -> tuple[int, Any]:
+    def command(
+        self,
+        operation: str,
+        argument: object = None,
+        *,
+        request_id: int | None = None,
+        window: str | None = None,
+    ) -> tuple[int, Any]:
         return self.request(
             'api/control',
             {
@@ -77,7 +101,7 @@ class Client:
         )
 
 
-def validate_png(png: bytes, metadata: dict):
+def validate_png(png: bytes, metadata: dict[str, Any]) -> None:
     if len(png) < 24 or png[:8] != b'\x89PNG\r\n\x1a\n' or png[12:16] != b'IHDR':
         raise ValueError('Screenshot is not a PNG')
     width, height = int.from_bytes(png[16:20]), int.from_bytes(png[20:24])
@@ -85,7 +109,7 @@ def validate_png(png: bytes, metadata: dict):
         raise ValueError('Screenshot dimensions do not match its metadata')
 
 
-def screenshot(client: Client, output: Path, window=None):
+def screenshot(client: Client, output: Path, window: str | None = None) -> None:
     if output.suffix.lower() != '.png':
         raise ValueError('Screenshot output must use the .png extension')
     _, reply = expect(client.command('screenshot', window=window), 200)
@@ -101,7 +125,13 @@ def expect(reply: tuple[int, Any], status: int) -> tuple[int, Any]:
     return reply
 
 
-def finish(client: Client, output: Path, name: str, expected='passed', timeout=40):
+def finish(
+    client: Client,
+    output: Path,
+    name: str,
+    expected: str = 'passed',
+    timeout: float = 40,
+) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         _, reply = expect(client.command('result'), 200)
@@ -116,7 +146,7 @@ def finish(client: Client, output: Path, name: str, expected='passed', timeout=4
     raise TimeoutError(f'{name}: no terminal report within {timeout} seconds')
 
 
-def check(client: Client, output: Path):
+def check(client: Client, output: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
     _, reply = expect(client.command('status'), 200)
     if reply['value'] and reply['value']['state'] in ('running', 'paused'):

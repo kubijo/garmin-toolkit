@@ -10,9 +10,11 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import FrameType
 from typing import Any, Literal
 
 import tyro
@@ -51,8 +53,7 @@ def event(name: str, phase: str, **args: Any) -> None:
 
 def invoke(command: list[str], name: str, *, group: bool = False, **options: Any) -> int:
     event(name, 'B', command=command, cwd=str(options.get('cwd', Path.cwd())))
-    previous = {}
-    child = None
+    previous: dict[signal.Signals, Callable[[int, FrameType | None], Any] | int | None] = {}
     code = 1
     try:
         # Preserve the descriptors the caller marked inheritable, including Cargo's jobserver pipes.
@@ -60,12 +61,11 @@ def invoke(command: list[str], name: str, *, group: bool = False, **options: Any
         child = subprocess.Popen(command, close_fds=False, start_new_session=group, **options)
 
         def forward(signum: int, _frame: Any) -> None:
-            if child is not None:
-                with suppress(ProcessLookupError):
-                    if group:
-                        os.killpg(child.pid, signum)
-                    else:
-                        child.send_signal(signum)
+            with suppress(ProcessLookupError):
+                if group:
+                    os.killpg(child.pid, signum)
+                else:
+                    child.send_signal(signum)
 
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             previous[signum] = signal.signal(signum, forward)
@@ -98,7 +98,7 @@ def wrapper() -> int:
 
 def spans(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     pending: dict[int, list[dict[str, Any]]] = {}
-    result = []
+    result: list[dict[str, Any]] = []
     for item in sorted(events, key=lambda item: item['ts']):
         stack = pending.setdefault(item['tid'], [])
         if item['ph'] == 'B':
@@ -130,7 +130,7 @@ def setup_tools() -> tuple[Path, dict[str, str]]:
     # Stable paths avoid profiler-induced Cargo cache invalidation between reports.
     bin_dir = BASE / 'bin'
     bin_dir.mkdir(parents=True, exist_ok=True)
-    tools = {}
+    tools: dict[str, str] = {}
     for tool in ('cargo', 'wasm-bindgen', 'esbuild', 'node'):
         path = shutil.which(tool)
         if path:

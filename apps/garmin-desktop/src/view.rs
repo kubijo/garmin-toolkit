@@ -479,7 +479,10 @@ impl Desktop {
             }
             device_browser::Action::Download(selection) => {
                 let file_name = browser_download_name(selection);
-                let mut dialog = rfd::FileDialog::new().set_file_name(&file_name);
+                let Some(dialog) = crate::native::file_dialog(&self.context) else {
+                    return;
+                };
+                let mut dialog = dialog.set_file_name(&file_name);
                 if selection.kind == DeviceCatalogEntryKind::Directory {
                     dialog = dialog.add_filter("ZIP archive", &["zip"]);
                 }
@@ -492,7 +495,9 @@ impl Desktop {
                 storage_id,
                 directory,
             } => {
-                let Some(source) = rfd::FileDialog::new().pick_file() else {
+                let Some(source) =
+                    crate::native::file_dialog(&self.context).and_then(rfd::FileDialog::pick_file)
+                else {
                     return;
                 };
                 device_browser_upload_operation(storage_id, directory, source)
@@ -644,7 +649,10 @@ impl Desktop {
     }
 
     fn choose_profile_picture(&mut self, profile_index: usize) {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(dialog) = crate::native::file_dialog(&self.context) else {
+            return;
+        };
+        let Some(path) = dialog
             .add_filter("Profile picture", &["png", "jpg", "jpeg", "webp"])
             .pick_file()
         else {
@@ -852,7 +860,10 @@ impl Desktop {
     }
 
     fn open_import_dialog(&mut self, action: file_import::Action) {
-        let dialog = rfd::FileDialog::new().add_filter("FIT activity", &["fit"]);
+        let Some(dialog) = crate::native::file_dialog(&self.context) else {
+            return;
+        };
+        let dialog = dialog.add_filter("FIT activity", &["fit"]);
         let paths = match action {
             file_import::Action::Files => dialog.pick_files(),
             file_import::Action::Folder => dialog.pick_folder().map(|path| vec![path]),
@@ -1449,8 +1460,7 @@ impl Desktop {
 
 impl eframe::App for Desktop {
     fn clear_color(&self, _visuals: &eframe::egui::Visuals) -> [f32; 4] {
-        // Child viewports clear to transparent; keep the main window opaque.
-        eframe::egui::Color32::from_rgb(12, 12, 12).to_normalized_gamma_f32()
+        crate::window::clear_color(&self.context)
     }
 
     fn on_exit(&mut self) {

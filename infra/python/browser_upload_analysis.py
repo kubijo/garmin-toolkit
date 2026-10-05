@@ -5,6 +5,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, TypeGuard
 
+from json_data import is_object
+
 MARK = 'garmin.map.upload'
 PHASES = {'queued', 'hidden', 'visible', 'first_work', 'progress', 'published', 'first_draw', 'released'}
 
@@ -111,15 +113,15 @@ class _Pending:
 def decode_mark_detail(event: dict[str, Any]) -> dict[str, Any]:
     """Decode Chrome's representation of JSON detail from the shared browser timing bridge."""
     args = event.get('args', {})
-    if not isinstance(args, dict):
+    if not is_object(args):
         raise ValueError('invalid mark arguments')
     data = args.get('data')
-    value = args.get('detail', data.get('detail') if isinstance(data, dict) else None)
+    value = args.get('detail', data.get('detail') if is_object(data) else None)
     # Chrome may JSON-encode the string supplied to PerformanceMark.detail.
     for _ in range(2):
         if isinstance(value, str):
             value = json.loads(value)
-    if not isinstance(value, dict):
+    if not is_object(value):
         raise ValueError('invalid upload detail')
     return value
 
@@ -157,7 +159,7 @@ def analyze_uploads(events: list[dict[str, Any]]) -> UploadAnalysis:
     """Input is already restricted to the selected renderer's main thread."""
     result = UploadAnalysis()
     active: dict[int, _Pending] = {}
-    validated = []
+    validated: list[tuple[float, dict[str, Any]]] = []
     damaged_ids: set[int] = set()
     unidentified_gap = False
     for event in (item for item in events if item.get('name') == MARK):

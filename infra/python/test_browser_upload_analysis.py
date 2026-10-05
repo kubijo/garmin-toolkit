@@ -1,11 +1,21 @@
 import json
 import unittest
+from typing import Any
 
 from browser_upload_analysis import analyze_uploads
 
 
-def mark(phase, elapsed, *, identity=1, timestamp=None, work=0, size=0, encoding=0):
-    detail = {
+def mark(
+    phase: str,
+    elapsed: float,
+    *,
+    identity: int = 1,
+    timestamp: float | None = None,
+    work: float = 0,
+    size: int = 0,
+    encoding: int = 0,
+) -> dict[str, Any]:
+    detail: dict[str, Any] | str = {
         'version': 1,
         'upload_id': identity,
         'zoom': 3,

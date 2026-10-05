@@ -49,6 +49,8 @@ fn panel(size: [f32; 2], dark: bool) -> Harness<'static, Preview> {
 #[test]
 fn action_rows_stay_compact_when_the_window_gets_taller() {
     let mut harness = panel([620.0, 800.0], true);
+    harness.get_by_label("Logs").click();
+    harness.run();
     let before = harness.get_by_label("stationary-arrival").rect();
     let toolbar_before = harness.get_by_label("Pause stream").rect();
     let description = harness
@@ -67,7 +69,9 @@ fn action_rows_stay_compact_when_the_window_gets_taller() {
 #[test]
 fn narrow_panels_stack_actions_without_widening_the_window() {
     for dark in [true, false] {
-        let harness = panel([380.0, 1600.0], dark);
+        let mut harness = panel([380.0, 1600.0], dark);
+        harness.get_by_label("Logs").click();
+        harness.run();
         assert!(harness.state().bounds.right() <= 380.0);
         let mut bottom = 0.0;
         for label in garmin_ui::automation::SCENARIOS {
@@ -275,7 +279,14 @@ fn capture_expanded_log_details() -> Result<(), Box<dyn std::error::Error>> {
     for width in [380.0, 620.0] {
         for dark in [true, false] {
             let mut harness = panel([width, 660.0], dark);
+            let theme = if dark { "dark" } else { "light" };
+            assert!(harness.query_by_label("Pause stream").is_none());
+            harness
+                .render()?
+                .save(out.join(format!("collapsed-{width}-{theme}.png")))?;
             harness.get_by_label("Automation").click();
+            harness.run();
+            harness.get_by_label("Logs").click();
             harness.run();
             harness
                 .get_by_label("Info · app · Application started")
@@ -288,7 +299,6 @@ fn capture_expanded_log_details() -> Result<(), Box<dyn std::error::Error>> {
             harness.get_by_label("Copy record as JSON").scroll_to_me();
             harness.run();
             assert!(harness.state().bounds.right() <= width);
-            let theme = if dark { "dark" } else { "light" };
             harness
                 .render()?
                 .save(out.join(format!("details-{width}-{theme}.png")))?;

@@ -6,7 +6,7 @@ use super::{Request, State, panel};
 use crate::{Size, button, input, select};
 
 pub(super) fn show(ui: &mut Ui, state: &mut State) {
-    panel::section(ui, "logs", "Logs", true, |ui| {
+    panel::section(ui, "logs", "Logs", false, |ui| {
         let before = state.filter.clone();
         let was_paused = state.paused;
         filters(ui, &mut state.filter);
@@ -24,13 +24,17 @@ pub(super) fn show(ui: &mut Ui, state: &mut State) {
             {
                 state.paused = !state.paused;
             }
-            if panel::action(ui, "Export logs", button::Kind::Secondary).clicked() {
+            let export = panel::action(ui, "Export logs", button::Kind::Secondary);
+            crate::semantics::target(ui, &export, "developer.logs.export");
+            if export.clicked() {
                 state.requests.push(Request::Export(state.filter.clone()));
             }
-            if state.native
-                && panel::action(ui, "Open log folder", button::Kind::Secondary).clicked()
-            {
-                state.requests.push(Request::OpenFolder);
+            if state.native {
+                let open = panel::action(ui, "Open log folder", button::Kind::Secondary);
+                crate::semantics::target(ui, &open, "developer.logs.open-folder");
+                if open.clicked() {
+                    state.requests.push(Request::OpenFolder);
+                }
             }
         });
         if before != state.filter || was_paused != state.paused {

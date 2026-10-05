@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from generate import bundle_document, expanded_entries, generate, main, resolve_linked
@@ -57,7 +58,7 @@ run_json([sys.executable, '-c', 'import sys; print("Cargo diagnostic", file=sys.
             self.package('build', 'registry', ['lib']),
             self.package('macro', 'registry', ['proc-macro']),
         ]
-        metadata = {
+        metadata: dict[str, Any] = {
             'packages': packages,
             'resolve': {
                 'nodes': [
@@ -125,7 +126,7 @@ run_json([sys.executable, '-c', 'import sys; print("Cargo diagnostic", file=sys.
         with (
             tempfile.TemporaryDirectory() as directory,
             patch('generate.harvested_entries', return_value=cargo),
-            patch('generate.cargo_metadata', side_effect=lambda triple: triple),
+            patch('generate.cargo_metadata', side_effect=str),
             patch(
                 'generate.resolve_linked', side_effect=[{('server-dep', '1'): True}, {('picker', '1'): True}]
             ) as resolve,
@@ -148,7 +149,7 @@ run_json([sys.executable, '-c', 'import sys; print("Cargo diagnostic", file=sys.
         }
 
     def test_notice_diagnostics_compare_text_not_table_indices(self) -> None:
-        entry = {
+        entry: dict[str, Any] = {
             'name': 'example',
             'version': '1',
             'license': 'MIT',

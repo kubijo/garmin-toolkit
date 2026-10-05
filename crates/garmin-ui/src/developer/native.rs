@@ -10,6 +10,9 @@ type Command = super::AutomationRequest;
 type Command = ();
 type Host = Arc<Mutex<NativeWindow<Command, ()>>>;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn show(context: &Context, intl: &garmin_i18n::Intl) {
     let host = context.data_mut(|data| {
         data.get_temp_mut_or_default::<Host>(egui::Id::new("developer-window-host"))
@@ -31,10 +34,6 @@ pub(super) fn show(context: &Context, intl: &garmin_i18n::Intl) {
             host.close(context);
             return;
         }
-        #[cfg(any(test, feature = "automation"))]
-        {
-            state.remote_automation = Some(super::automation::snapshot(context));
-        }
         std::mem::take(&mut state.focus_requested)
     };
     if !host.is_open() || focus_requested {
@@ -49,14 +48,17 @@ pub(super) fn show(context: &Context, intl: &garmin_i18n::Intl) {
             },
         );
     }
-    let events = host.present(
+    host.present_deferred(
         context,
         intl,
-        || (),
-        |ui| {
+        move |ui| {
             let mut state = handle
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
+            #[cfg(any(test, feature = "automation"))]
+            {
+                state.remote_automation = Some(super::automation::snapshot(ui.ctx()));
+            }
             super::contents(ui, &mut state);
             #[cfg(any(test, feature = "automation"))]
             {
@@ -70,11 +72,9 @@ pub(super) fn show(context: &Context, intl: &garmin_i18n::Intl) {
                 None
             }
         },
-    );
-    for event in events {
-        match event {
+        |context, event| match event {
             Event::Closed => {
-                handle
+                state(context)
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .open = false;
@@ -85,7 +85,6 @@ pub(super) fn show(context: &Context, intl: &garmin_i18n::Intl) {
                 #[cfg(not(any(test, feature = "automation")))]
                 let () = command;
             }
-        }
-        context.request_repaint();
-    }
+        },
+    );
 }

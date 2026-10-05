@@ -22,7 +22,10 @@ mod backup;
 mod device_backend;
 mod map_worker;
 mod mode;
+mod native;
 mod profiling;
+#[cfg(feature = "render-probe")]
+pub mod render_probe;
 mod view;
 mod window;
 mod worker;
@@ -84,6 +87,7 @@ pub fn run_with_options(options: Options) -> Result<(), Error> {
         },
         Box::new(move |creation| {
             garmin_ui::install(&creation.egui_ctx);
+            window::install(&creation.egui_ctx);
             developer::install(&creation.egui_ctx, options, logs)?;
             garmin_ui::developer::state(&creation.egui_ctx)
                 .lock()

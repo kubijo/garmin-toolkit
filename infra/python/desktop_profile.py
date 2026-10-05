@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import tyro
+from json_data import is_array, is_object
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 REPORTS_ROOT = REPOSITORY_ROOT / '.tmp' / 'profiles'
@@ -125,7 +126,7 @@ class ReportSlot:
                 manifest = json.loads(manifest_path.read_text())
             except json.JSONDecodeError as error:
                 raise ProfileError(f'{manifest_path} is not valid JSON') from error
-            if isinstance(manifest, dict):
+            if is_object(manifest):
                 legacy_pre_capture = manifest.get('schema_version') == 1 and manifest.get('status') == 'building'
                 terminal_without_evidence = manifest.get('schema_version') == 2 and manifest.get('status') in {
                     'canceled',
@@ -445,7 +446,7 @@ def load_metrics(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         if not line.strip():
             continue
         row = json.loads(line)
-        if not isinstance(row, dict):
+        if not is_object(row):
             raise ProfileError(f'{path}:{line_number}: expected a JSON object')
         rows.append(row)
 
@@ -509,17 +510,17 @@ def profile_thread(profile: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """Choose the sampled UI thread which owns the injected map counters."""
     threads = profile.get('threads')
 
-    if not isinstance(threads, list) or not threads:
+    if not is_array(threads) or not threads:
         raise ProfileError('Samply profile contains no threads')
 
     candidates = [
         (index, thread)
         for index, thread in enumerate(threads)
-        if isinstance(thread, dict) and thread.get('name') in {'main', 'garmin-desktop'}
+        if is_object(thread) and thread.get('name') in {'main', 'garmin-desktop'}
     ]
 
     if not candidates:
-        candidates = [(index, thread) for index, thread in enumerate(threads) if isinstance(thread, dict)]
+        candidates = [(index, thread) for index, thread in enumerate(threads) if is_object(thread)]
 
     return max(candidates, key=lambda item: int(item[1].get('samples', {}).get('length', 0)))
 
@@ -571,7 +572,7 @@ def enrich_profile(profile: dict[str, Any], header: dict[str, Any], samples: lis
 
     meta = profile.get('meta')
 
-    if not isinstance(meta, dict):
+    if not is_object(meta):
         raise ProfileError('Samply profile has no metadata')
 
     profile_start = numeric(meta, 'startTime')
@@ -581,7 +582,7 @@ def enrich_profile(profile: dict[str, Any], header: dict[str, Any], samples: lis
     process_id = thread.get('pid')
     counters = profile.setdefault('counters', [])
 
-    if not isinstance(counters, list):
+    if not is_array(counters):
         raise ProfileError('Samply profile counters have an unexpected shape')
 
     added = 0
@@ -628,7 +629,7 @@ def finalize(report_dir: Path) -> int:
     with gzip.open(profile_path, 'rt') as source:
         profile = json.load(source)
 
-    if not isinstance(profile, dict):
+    if not is_object(profile):
         raise ProfileError(f'{profile_path} has an unexpected root value')
 
     header, samples = load_metrics(metrics_path)

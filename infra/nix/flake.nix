@@ -236,7 +236,7 @@ let
                       pkgs.esbuild
                       pkgs.pkg-config
                       pkgs.samply
-                      pkgs.ty
+                      pkgs.basedpyright
                       pkgs.uv
                       devTrunk
                       pkgs.wasm-bindgen-cli_0_2_126

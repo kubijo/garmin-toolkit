@@ -15,7 +15,14 @@ Extend operation-specific device evidence, then publish only supported artifacts
    sensitivity; retain no field without adapter and hardware evidence.
 4. Run the local Connect IQ probe after HASS HTTPS exists.
 5. Choose release channels, signing and attestations for HASS and desktop from one reproducible build. Evaluate GitHub
-   Releases/GHCR or mirrors, and reuse applicable [CLI distribution evidence](distribution.md).
+   Releases/GHCR or mirrors, and reuse applicable [CLI distribution evidence](distribution.md). Track the host
+   AMD-to-NVIDIA presentation failure, also reproduced with independent `vkcube`, separately from packaging acceptance.
+   Extend the [NVIDIA and software-Mesa smoke evidence](../architecture/build-system.md#desktop-packaging) to other
+   non-Nix hosts and aarch64. Keep driver integration independent of the build host's GPU and driver version. Validate
+   user-namespace availability, file dialogs, production USB/GVfs access, and launcher metadata on supported hosts; a
+   successful bundle build alone is not portability evidence. On additional supported hosts, verify Developer tools
+   remains interactive with the main window fully covered, including cursor changes, text selection, scrolling, clicks,
+   folder opening, and closing/reopening the tools window.
 6. Audit configuration, fixtures, identities, URLs, images, notices, and provenance.
 7. Publish the support matrix and adaptation guide. Mobile requires a separate decision.
 

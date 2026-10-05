@@ -19,7 +19,10 @@ impl Desktop {
                         .user
                         .id(),
                 );
-                let dialog = rfd::FileDialog::new().add_filter("Garmin backup", &["zst"]);
+                let Some(dialog) = crate::native::file_dialog(&self.context) else {
+                    return;
+                };
+                let dialog = dialog.add_filter("Garmin backup", &["zst"]);
                 let job = if action == Some(Action::Backup) {
                     dialog
                         .set_file_name("garmin-backup.tar.zst")

@@ -3,8 +3,10 @@ import json
 import unittest
 from contextlib import redirect_stdout
 from dataclasses import asdict
+from typing import Any
 
 from browser_trace_analysis import (
+    BrowserTraceSummary,
     TraceError,
     analyze_trace,
     automation_report,
@@ -15,8 +17,17 @@ from browser_trace_analysis import (
 from test_browser_upload_analysis import mark
 
 
-def event(name, pid, tid, *, duration=None, timestamp=0, args=None, phase='X'):
-    value = {'name': name, 'pid': pid, 'tid': tid, 'ph': phase, 'ts': timestamp, 'args': args or {}}
+def event(
+    name: str,
+    pid: int,
+    tid: int,
+    *,
+    duration: float | None = None,
+    timestamp: float = 0,
+    args: dict[str, Any] | None = None,
+    phase: str = 'X',
+) -> dict[str, Any]:
+    value: dict[str, Any] = {'name': name, 'pid': pid, 'tid': tid, 'ph': phase, 'ts': timestamp, 'args': args or {}}
     if duration is not None:
         value['dur'] = duration
     return value
@@ -106,7 +117,7 @@ class BrowserTraceAnalysisTest(unittest.TestCase):
 
     def test_paused_runs_are_functional_evidence_only(self):
         start = event('garmin.automation.start', 30, 7, args={'detail': {'name': 'stationary-arrival'}})
-        report = {
+        report: dict[str, Any] = {
             'version': 2,
             'scenario': 'stationary-arrival',
             'state': 'passed',
@@ -431,7 +442,11 @@ class BrowserTraceAnalysisTest(unittest.TestCase):
         self.assertEqual(summary.user_timings['garmin.map.tile-allocation'].maximum, 2.5)
         self.assertFalse(any('allocation cost is unverified' in message for message in summary.diagnostics))
 
-    def interaction_summary(self, frames, inputs):
+    def interaction_summary(
+        self,
+        frames: list[float],
+        inputs: list[tuple[str, float, float]],
+    ) -> BrowserTraceSummary:
         events = self.events[:3]
         events += [event('BeginMainThreadFrame', 30, 7, timestamp=time * 1_000) for time in frames]
         events += [
@@ -444,6 +459,7 @@ class BrowserTraceAnalysisTest(unittest.TestCase):
 
     def test_keeps_intervals_crossing_both_gesture_boundaries(self):
         summary = self.interaction_summary([-16, 200, 216, 250], [('pointerdown', 0, 200), ('pointerup', 225, 0)])
+        assert summary.interaction_frame_intervals is not None
         self.assertEqual(summary.interaction_frame_intervals.maximum, 216)
         self.assertEqual(summary.interaction_frame_intervals.count, 3)
         self.assertEqual(summary.interaction_frame_stalls, 2)
@@ -453,18 +469,30 @@ class BrowserTraceAnalysisTest(unittest.TestCase):
             list(range(0, 1_101, 10)),
             [('pointerdown', 15, 0), ('pointerup', 25, 0), ('pointerdown', 1_015, 0), ('pointerup', 1_025, 0)],
         )
+        assert summary.interaction_frame_intervals is not None
         self.assertEqual(summary.interaction_frame_intervals.count, 4)
 
     def test_single_wheel_event_includes_response_and_tail(self):
         summary = self.interaction_summary([-16, 100, 216, 232], [('wheel', 0, 0)])
+        assert summary.interaction_frame_intervals is not None
         self.assertEqual(summary.interaction_frame_intervals.count, 2)
         self.assertEqual(summary.interaction_frame_intervals.maximum, 116)
 
     def test_overlapping_gestures_do_not_duplicate_intervals(self):
         summary = self.interaction_summary([0, 16, 32], [('wheel', 1, 0), ('wheel', 2, 0)])
+        assert summary.interaction_frame_intervals is not None
         self.assertEqual(summary.interaction_frame_intervals.count, 2)
 
-    def resource(self, name, identity, timestamp, *, pid=30, tid=8, **data):
+    def resource(
+        self,
+        name: str,
+        identity: str,
+        timestamp: float,
+        *,
+        pid: int = 30,
+        tid: int = 8,
+        **data: object,
+    ) -> dict[str, Any]:
         return event(name, pid, tid, phase='I', timestamp=timestamp, args={'data': {'requestId': identity, **data}})
 
     def test_loading_matches_requests_across_threads_and_ignores_other_renderers(self):
