@@ -44,6 +44,11 @@ deduplicated requests, scheduling, and retry state belong to that runtime. Hosts
 callback, returning encoded bytes or a browser-prepared packet. The runtime owns the shared decoder and surface
 publication; replies for a retired surface are discarded before decoding.
 
+The decoder returns an owned `DecodedTile` containing bounded egui shapes and labels. Walkers' drawables are converted
+at this boundary; the native, browser, and software paths share the resulting geometry. Upgrading Walkers does not
+install its map widget or GPU callbacks into the application's renderer. Parity tests cover real tiles in both themes,
+polygon holes, dashed translucent lines, and labels; GPU readback checks tile seams and clipped composition.
+
 ## Rendering boundary
 
 - `MapCamera` alone owns projection, bounded pointer-anchored zoom, panning, inertia, and dateline wrapping. Tile

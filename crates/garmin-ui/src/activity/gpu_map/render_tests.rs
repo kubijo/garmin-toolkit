@@ -217,7 +217,7 @@ fn world_copies_render_across_the_viewport_and_honor_nonzero_first_instances() {
 }
 
 pub(super) fn solid_tile(fill: Color32) -> Arc<PreparedGpuTile> {
-    prepare_local_browser_tile(Tile::Vector {
+    prepare_local_browser_tile(DecodedTile {
         shapes: vec![Shape::rect_filled(
             Rect::from_min_max(pos2(0.0, 0.0), pos2(512.0, 512.0)),
             0.0,

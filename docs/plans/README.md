@@ -13,10 +13,8 @@ Other active plans: [shared interfaces](shared-interface-workflows.md), [portabl
 [device expansion and publication](device-expansion-and-publication.md), and [CLI distribution](distribution.md).
 
 Cross-cutting release work: verify production/demo IDs, data roots, populated-database startup, and HASS environment
-precedence; replace the global coverage floor with per-owner behavioral floors; audit crate boundaries after transaction
-work; and resolve the Walkers → Bincode [unmaintained advisory](https://rustsec.org/advisories/RUSTSEC-2025-0141.html)
-without suppression. After a cache-stack upgrade, recheck root and gallery locks, RustSec, native/WASM builds, and
-focused map tests. Close release claims with packaged artifacts, audit results, and behavioral evidence.
+precedence; replace the global coverage floor with per-owner behavioral floors; and audit crate boundaries after
+transaction work. Close release claims with packaged artifacts, audit results, and behavioral evidence.
 
 [Build-performance evidence](../research/build-performance.md) records the deferred native hot-reload trial; desktop
 restart and gallery scene reload remain the working tools.

@@ -6,8 +6,10 @@ use std::{
     time::Duration,
 };
 
-use walkers::{Tile, TileId, sources::Attribution};
+use walkers::{TileId, sources::Attribution};
 use web_time::Instant;
+
+use super::DecodedTile;
 
 use crate::activity::{
     map::camera::MapViewDemand,
@@ -36,12 +38,12 @@ pub(super) enum MapTilePayload {
 }
 
 pub(in crate::activity) struct PreparedTile {
-    pub(in crate::activity) tile: Tile,
+    pub(in crate::activity) tile: DecodedTile,
     pub(in crate::activity) gpu: Option<std::sync::Arc<gpu_map::PreparedGpuTile>>,
 }
 
 impl PreparedTile {
-    fn new(renderer: &Renderer, id: TileId, tile: Tile) -> Result<Self, String> {
+    fn new(renderer: &Renderer, id: TileId, tile: DecodedTile) -> Result<Self, String> {
         renderer.prepare_tile(id, tile)
     }
 }
@@ -58,7 +60,7 @@ impl MapTileResponse {
             renderer.prepare_browser_tile(packet).map(|gpu| {
                 gpu.map_or(MapTilePayload::Empty, |gpu| {
                     MapTilePayload::Decoded(PreparedTile {
-                        tile: Tile::Vector {
+                        tile: DecodedTile {
                             shapes: Vec::new(),
                             texts: Vec::new(),
                         },
@@ -133,7 +135,7 @@ pub fn prepare_tile_for_browser_worker(
     bytes: &[u8],
 ) -> Result<BrowserTileTransfer, String> {
     if bytes.is_empty() {
-        return gpu_map::encode_browser_tile(Tile::Vector {
+        return gpu_map::encode_browser_tile(DecodedTile {
             shapes: Vec::new(),
             texts: Vec::new(),
         });

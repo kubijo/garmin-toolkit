@@ -6,13 +6,20 @@ use egui::{Color32, Rect, Shape, pos2, vec2};
 use fast_mvt::MvtValueRef;
 use geo::{CoordsIter as _, MapCoords as _};
 use geo_types::{Coord, Geometry};
-use walkers::{Context, Layer, Paint, Style, Tile};
+use walkers::{Context, Layer, Paint, Style};
 
 use super::gpu_map::{BrowserTileLimits, TileBudget, TileDecodeBudget};
 
 #[cfg(test)]
 #[path = "tile_decode_tests.rs"]
 mod tests;
+
+/// Bounded tile geometry shared by our native, browser, and software renderers.
+#[derive(Clone)]
+pub(in crate::activity) struct DecodedTile {
+    pub shapes: Vec<Shape>,
+    pub texts: Vec<walkers::Text>,
+}
 
 struct Feature {
     geometry: Geometry<f32>,
@@ -24,10 +31,15 @@ struct Source {
     features: Vec<Feature>,
 }
 
-pub(super) fn decode(bytes: &[u8], style: &Style, zoom: u8, size: u32) -> Result<Tile, String> {
+pub(super) fn decode(
+    bytes: &[u8],
+    style: &Style,
+    zoom: u8,
+    size: u32,
+) -> Result<DecodedTile, String> {
     let reader = BrowserTileLimits::read(bytes)?;
     if bytes.is_empty() {
-        return Ok(Tile::Vector {
+        return Ok(DecodedTile {
             shapes: Vec::new(),
             texts: Vec::new(),
         });
@@ -115,7 +127,7 @@ fn source(layer: &Layer) -> Option<(&walkers::SourceLayer, Option<&walkers::Filt
 }
 
 #[expect(clippy::cast_precision_loss, reason = "tile size is 512 pixels")]
-fn render(sources: &[Source], style: &Style, zoom: u8, size: u32) -> Result<Tile, String> {
+fn render(sources: &[Source], style: &Style, zoom: u8, size: u32) -> Result<DecodedTile, String> {
     let mut shapes = Vec::new();
     let mut texts = Vec::new();
     let mut budget = TileBudget::default();
@@ -152,8 +164,15 @@ fn render(sources: &[Source], style: &Style, zoom: u8, size: u32) -> Result<Tile
             match rule {
                 Layer::Fill { paint, .. } => fill(feature, paint, &mut shapes)?,
                 Layer::Line { paint, .. } => {
-                    walkers::render_line(&feature.geometry, &feature.context, &mut shapes, paint)
-                        .map_err(|e| e.to_string())?;
+                    let mut drawables = Vec::new();
+                    walkers::render_line(
+                        &feature.geometry,
+                        &feature.context,
+                        paint,
+                        &mut drawables,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    shapes.extend(walkers::to_shapes(&drawables));
                 }
                 Layer::Symbol { layout, paint, .. } => {
                     if let Some(text) = layout.text(&feature.context) {
@@ -173,7 +192,7 @@ fn render(sources: &[Source], style: &Style, zoom: u8, size: u32) -> Result<Tile
             budget.shapes(&shapes[start..])?;
         }
     }
-    Ok(Tile::Vector { shapes, texts })
+    Ok(DecodedTile { shapes, texts })
 }
 
 fn label_count(geometry: &Geometry<f32>) -> usize {
@@ -211,7 +230,7 @@ fn fill(feature: &Feature, paint: &Paint, shapes: &mut Vec<Shape>) -> Result<(),
         let interiors = polygon.interiors().iter().map(points).collect::<Vec<_>>();
         let mesh =
             walkers::tessellate_polygon(&exterior, &interiors, color).map_err(|e| e.to_string())?;
-        shapes.push(Shape::mesh(mesh));
+        shapes.extend(walkers::to_shapes(&[walkers::Drawable::Fill(mesh)]));
     }
     Ok(())
 }
