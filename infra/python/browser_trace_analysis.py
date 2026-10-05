@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 import tyro
 from browser_upload_analysis import UploadAnalysis, analyze_uploads, decode_mark_detail, finite_number
+from json_data import is_array, is_object
 
 DEFAULT_URL_PREFIX = 'http://127.0.0.1:8099/'
 FRAME_TARGET_MILLISECONDS = 1_000.0 / 60.0
@@ -158,13 +159,14 @@ def tile_loading(events: list[dict[str, Any]], main_tid: int) -> TileLoading:
             elif name == 'ResourceFinish':
                 requests[identity]['finish'] = event
     origin = min((item['start']['ts'] for item in requests.values()), default=0)
-    rows = []
+    rows: list[TileRequest] = []
     for identity, item in requests.items():
         start, response, finish = item['start'], item['response'], item['finish']
+        url: str = start['args']['data']['url']
         rows.append(
             TileRequest(
                 request_id=identity,
-                path=urlsplit(start['args']['data']['url']).path,
+                path=urlsplit(url).path,
                 thread=start['tid'],
                 started_ms=(start['ts'] - origin) / 1_000,
                 finished_ms=(finish['ts'] - origin) / 1_000 if finish else None,
@@ -184,7 +186,7 @@ def tile_loading(events: list[dict[str, Any]], main_tid: int) -> TileLoading:
         window(row.started_ms).requests += 1
         if row.finished_ms is not None:
             window(row.finished_ms).finishes += 1
-    tasks = []
+    tasks: list[float] = []
     intervals: dict[int, list[tuple[float, float]]] = defaultdict(list)
     for event in events:
         timestamp = event.get('ts')
@@ -192,7 +194,7 @@ def tile_loading(events: list[dict[str, Any]], main_tid: int) -> TileLoading:
             continue
         start = (timestamp - origin) / 1_000
         name, phase, tid = event.get('name'), event.get('ph'), event.get('tid')
-        if tid in workers:
+        if isinstance(tid, int) and tid in workers:
             duration = duration_milliseconds(event)
             if name == 'RunTask' and duration is not None and duration >= 0:
                 tasks.append(duration)
@@ -242,10 +244,10 @@ def load_trace(path: Path) -> list[dict[str, Any]]:
     opener = gzip.open if path.suffix == '.gz' else open
     with opener(path, 'rt') as source:
         document = json.load(source)
-    events = document.get('traceEvents') if isinstance(document, dict) else None
-    if not isinstance(events, list):
+    events = document.get('traceEvents') if is_object(document) else None
+    if not is_array(events):
         raise TraceError('Chrome trace contains no traceEvents array')
-    return [event for event in events if isinstance(event, dict)]
+    return [event for event in events if is_object(event)]
 
 
 def renderer_for_url(events: list[dict[str, Any]], url_prefix: str) -> tuple[int, str]:
@@ -258,10 +260,10 @@ def renderer_for_url(events: list[dict[str, Any]], url_prefix: str) -> tuple[int
             frames = [data]
         else:
             continue
-        if not isinstance(frames, list):
+        if not is_array(frames):
             continue
         for frame in frames:
-            if not isinstance(frame, dict):
+            if not is_object(frame):
                 continue
             url = frame.get('url')
             pid = frame.get('processId')
@@ -338,8 +340,8 @@ def gesture_windows(events: list[dict[str, Any]]) -> list[tuple[float, float]]:
         (event for event in events if isinstance(event.get('ts'), int | float) and not isinstance(event['ts'], bool)),
         key=lambda event: event['ts'],
     )
-    windows = []
-    pointers = {}
+    windows: list[tuple[float, float]] = []
+    pointers: dict[int, float] = {}
     trace_end = 0.0
     for event in timed:
         start = float(event['ts'])
@@ -418,22 +420,22 @@ def automation_report(events: list[dict[str, Any]]) -> dict[str, Any] | None:
                 or not 0 < total <= 128
                 or type(report.get('completed')) is not int
                 or report['completed'] != total
-                or not isinstance(actions, list)
+                or not is_array(actions)
                 or len(actions) != total
             ):
                 raise ValueError('passing report has incomplete workload')
             for action in actions:
-                if not isinstance(action, dict) or any(
+                if not is_object(action) or any(
                     not finite_number(action.get(key)) or action[key] < 0
                     for key in ['scheduled_seconds', 'actual_seconds', 'lateness_seconds']
                 ):
                     raise ValueError('invalid action timing')
         if report.get('version') == 2:
             pauses = report.get('pauses')
-            if not isinstance(pauses, list) or type(report.get('performance_eligible')) is not bool:
+            if not is_array(pauses) or type(report.get('performance_eligible')) is not bool:
                 raise ValueError('invalid pause evidence')
             for pause in pauses:
-                if not isinstance(pause, dict) or any(
+                if not is_object(pause) or any(
                     not finite_number(pause.get(key)) or pause[key] < 0
                     for key in ['started_seconds', 'duration_seconds']
                 ):
@@ -463,7 +465,8 @@ def thread_work(events: list[dict[str, Any]], label: str, start: float, end: flo
         ),
         key=lambda span: (span[0], -span[1]),
     )
-    durations, cpu = [], []
+    durations: list[float] = []
+    cpu: list[float] = []
     busy = 0.0
     previous_end = -math.inf
     missing = boundary = 0
@@ -510,11 +513,12 @@ def workload_summary(events: list[dict[str, Any]], main_tid: int) -> WorkloadSum
     for event in events:
         if event.get('name') == 'TracingSessionIdForWorker':
             data = event.get('args', {}).get('data', {})
-            path = urlsplit(data.get('url', '')).path
+            url: str = data.get('url', '')
+            path = urlsplit(url).path
             tid = data.get('workerThreadId')
             if path.startswith(('/map-render-worker-', '/map-worker-')) and type(tid) is int:
                 labels[tid] = path.rsplit('/', 1)[-1]
-    threads = {}
+    threads: dict[int, ThreadWork] = {}
     for tid, label in labels.items():
         work = thread_work([event for event in events if event.get('tid') == tid], label, start, end)
         if tid == main_tid or work.busy_wall_ms:
@@ -548,7 +552,7 @@ def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PR
     frame_intervals = [(right - left) / 1_000.0 for left, right in zip(frame_times, frame_times[1:], strict=False)]
     windows = iter(gesture_windows(main))
     window = next(windows, None)
-    interaction_frame_intervals = []
+    interaction_frame_intervals: list[float] = []
     for left, right in zip(frame_times, frame_times[1:], strict=False):
         while window is not None and window[1] < left:
             window = next(windows, None)
@@ -583,7 +587,7 @@ def analyze_trace(events: list[dict[str, Any]], url_prefix: str = DEFAULT_URL_PR
                 else:
                     worker_tile_requests += 1
 
-    diagnostics = []
+    diagnostics: list[str] = []
     if automation is not None:
         diagnostics.append('Scripted egui input bypasses DOM events; DOM interaction-frame statistics do not cover it.')
         if automation.get('performance_eligible') is False:

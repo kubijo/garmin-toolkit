@@ -18,6 +18,10 @@ run mode *options:
 profile +args:
     @just in-shell uv run --frozen --project infra/python python infra/python/desktop_profile.py "$@"
 
+# Run the demo offscreen on hardware Vulkan, with bounded optional frame recording.
+render-probe +args:
+    @just in-shell cargo run --locked -p garmin-desktop --features render-probe --bin garmin-render-probe -- "$@"
+
 # Write the selected AppImage to dist.
 appimage mode:
     #!/usr/bin/env bash

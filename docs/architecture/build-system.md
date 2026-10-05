@@ -102,8 +102,9 @@ and diagnostics see [developer tools](developer-tools.md). Renderer selection an
 
 ## Desktop packaging
 
-AppImage and Flatpak target Linux `x86_64` and `aarch64`; only `x86_64` is hardware-tested. Production and demo have
-separate application IDs and platform data:
+AppImage and Flatpak target Linux `x86_64` and `aarch64`. The x86_64 demo AppImage has passed a packaged NVIDIA/Vulkan
+smoke run; neither format has completed release validation. Production and demo have separate application IDs and
+platform data:
 
 | Mode       | Application ID                 | AppImage                                 |
 | ---------- | ------------------------------ | ---------------------------------------- |
@@ -112,6 +113,51 @@ separate application IDs and platform data:
 
 Flatpak outputs use the application ID with a `.flatpak` suffix. Build with `just desktop::appimage production|demo` or
 `just desktop::flatpak production|demo`. Both formats consume generated launcher metadata and brand assets. AppImage
-uses a pinned compatibility toolchain and type-2 runtime. Flatpak builds offline from Nix-vendored Cargo sources on
-Freedesktop 25.08. Its current permissions are development inputs; release requires verifying the narrowest working USB
-and GVfs permissions.
+uses the pinned [nix-appimage builder](https://github.com/ralismark/nix-appimage) with the normal desktop package. The
+builder preserves the complete Nix runtime closure, including libc, libraries, helper programs, and resources. Both
+modes use the same builder and the project's nixpkgs pin. Runtime library and GIO module paths belong to the desktop
+package wrapper so they remain available outside the development shell and are included in the closure.
+
+Both AppImage modes use the reusable [host graphics launcher](../../infra/nix/host-graphics/default.nix). It places
+bundled libc and the application's runtime closure library directories before inherited and host directories in
+`LD_LIBRARY_PATH`. The bundled `ldconfig` reads the host's `/etc/ld.so.cache` without modifying it, discovering vendor
+and multiarch library directories at launch. Standard directories and NixOS's `/run/opengl-driver/lib` provide
+fallbacks. The wrapper preserves launcher metadata and forwards arguments, signals, and the application's exit status.
+It snapshots the incoming library, GIO-module, and XDG-data search paths before the application wrapper modifies them.
+Host folder launches restore those values, including the distinction between unset and empty, so host executables do not
+inherit bundled libc or GIO modules. New native process launches must use the same environment boundary.
+
+The AppImage launcher requires unprivileged user namespaces. Bundling the closure does not establish compatibility with
+host graphics drivers or desktop services: release validation must cover WGPU rendering, file dialogs, and USB/GVfs
+access on non-Nix systems. See [publication work](../plans/device-expansion-and-publication.md).
+
+Host graphics integration is explicitly outside
+[nix-appimage's scope](https://github.com/ralismark/nix-appimage#caveats). On 2026-10-05, the x86_64 demo AppImage using
+the automatic wrapper reported Vulkan on an NVIDIA GeForce RTX 4090. Process mappings confirmed bundled libc and Vulkan
+loader with the host NVIDIA 595.91.07 driver. The packaged `activity-smoke` scenario passed all 55 actions in 20.65
+seconds, covering map interaction, playback, laps, scrubbing, and activity replacement/restoration. On the same Ubuntu
+26.04 host, Mesa 26.0.3 llvmpipe Vulkan passed all 60 actions with two worker threads and functional/background timing;
+the normal timing run failed an interaction deadline. This is software-renderer functionality evidence, not performance
+evidence. Forcing the AMD GPU failed: Wayland rejected imported DMA buffers and XWayland reported an invalid surface.
+AMD hardware presentation remains unresolved. The connected display is on NVIDIA; all AMD display outputs are
+disconnected. The forced-AMD test therefore exercises cross-GPU presentation. Mutter emits the observed Wayland error
+when importing the client buffer fails; egui's surface-configuration panic follows that rejection. Adapter selection
+already requests a compatible surface. Running the same host-graphics-wrapped executable outside the AppImage reproduced
+the Wayland buffer-import rejection and surface-loss panic (exit 101). AppImage mounting and namespace isolation are
+therefore not required to reproduce it; the same DMA-buffer import error also occurred with Homebrew's
+`vkcube --wsi wayland`, forced to the host Radeon ICD. That reproduction selected the AMD integrated GPU without our
+application or its Nix/AppImage libraries, establishing a host cross-GPU presentation failure independently of this
+package. It does not establish a failure on systems where AMD drives the display or prove the package's library
+compatibility on other hosts. On the same host, the locally built
+[headless probe](../development.md#headless-hardware-rendering-probe) selected the AMD integrated GPU through RADV/Mesa
+26.0.3 with 4x MSAA. Activity and responsive-layout scenarios passed, and captured wide/narrow frames showed maps,
+routes, charts, text, and controls. This verifies those rendering paths without presentation; it does not validate the
+AppImage library mix or the AMD-to-NVIDIA buffer transfer. The rebuilt demo also passed manual backup saving and
+file-dialog cancellation on this host. Opening the log folder launched the host file manager. Developer tools now uses
+an independent deferred viewport to remain interactive when the main window is covered; the user reported the fix
+working on this host. Regression tests cover child-only cursor updates, section toggling, scrolling, close/reopen, and
+control-server lifecycle with the root marked occluded. Library discovery cannot guarantee ABI compatibility with every
+host driver; other hosts, aarch64, and production USB/GVfs remain unverified.
+
+Flatpak builds offline from Nix-vendored Cargo sources on Freedesktop 25.08. Its current permissions are development
+inputs; release requires verifying the narrowest working USB and GVfs permissions.

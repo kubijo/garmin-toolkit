@@ -36,6 +36,10 @@ impl Registration {
     pub(super) fn live(&self) -> bool {
         self.live.load(Ordering::Acquire)
     }
+
+    pub(super) fn liveness(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.live)
+    }
 }
 
 impl Drop for Registration {

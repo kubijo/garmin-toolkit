@@ -20,7 +20,8 @@ and directory-backed tests do not establish behavior for every mounted-MTP imple
 
 ## Shared work
 
-- Finish route/Course and asset entry points on both clients, with review and separate approval for mutations.
+- Expose GPX import, Course preview, and asset entry points on both clients, with review and separate approval for
+  mutations.
 - Limit drag and drop to visible, enabled targets with accept/reject feedback; report mutations through persistent
   notifications.
 - Verify offline import, visualization, export, and confirmed transfer on both clients.

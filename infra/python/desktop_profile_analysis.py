@@ -5,6 +5,7 @@ import json
 import math
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from desktop_profile import (
     file_digest,
     load_metrics,
 )
+from json_data import is_array, is_object
 
 INTERACTION_FRAME_TARGET_MILLISECONDS = 1_000.0 / 60.0
 INTERACTION_STALL_LIMIT_MILLISECONDS = 33.0
@@ -103,29 +105,24 @@ class SymbolResolver:
             return
         strings = sidecar.get('string_table')
         images = sidecar.get('data')
-        if not isinstance(strings, list) or not isinstance(images, list):
+        if not is_array(strings) or not is_array(images):
             raise ProfileError('Samply symbol sidecar has an unexpected shape')
         for image in images:
             code_id = image.get('code_id')
             symbols = image.get('symbol_table')
             known = image.get('known_addresses')
-            if (
-                not isinstance(code_id, str)
-                or not code_id
-                or not isinstance(symbols, list)
-                or not isinstance(known, list)
-            ):
+            if not isinstance(code_id, str) or not code_id or not is_array(symbols) or not is_array(known):
                 continue
             resolved: dict[int, tuple[str, ...]] = {}
             for entry in known:
-                if not isinstance(entry, list) or len(entry) != 2 or not all(isinstance(value, int) for value in entry):
+                if not is_array(entry) or len(entry) != 2 or not all(isinstance(value, int) for value in entry):
                     raise ProfileError('Samply symbol sidecar contains an invalid known address')
                 address, symbol_index = entry
                 if not 0 <= symbol_index < len(symbols):
                     raise ProfileError('Samply symbol sidecar contains an invalid symbol index')
                 symbol = symbols[symbol_index]
-                frames = symbol.get('frames') or []
-                names = []
+                frames: list[dict[str, Any]] = symbol.get('frames') or []
+                names: list[str] = []
                 for frame in frames:
                     name_index = frame.get('function')
                     if isinstance(name_index, int) and 0 <= name_index < len(strings):
@@ -162,7 +159,7 @@ class SymbolResolver:
 
 def load_json(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text())
-    if not isinstance(value, dict):
+    if not is_object(value):
         raise ProfileError(f'{path} has an unexpected root value')
     return value
 
@@ -172,7 +169,7 @@ def load_profile(path: Path) -> dict[str, Any]:
         raise ProfileError(f'profile is missing: {path}')
     with gzip.open(path, 'rt') as source:
         value = json.load(source)
-    if not isinstance(value, dict):
+    if not is_object(value):
         raise ProfileError(f'{path} has an unexpected root value')
     return value
 
@@ -227,20 +224,16 @@ def runtime_summary(report: Path) -> RuntimeSummary:
 
 def main_thread(profile: dict[str, Any]) -> dict[str, Any]:
     threads = profile.get('threads')
-    if not isinstance(threads, list):
+    if not is_array(threads):
         raise ProfileError('Samply profile contains no thread table')
     candidates = [
         thread
         for thread in threads
-        if isinstance(thread, dict)
-        and thread.get('isMainThread') is True
-        and thread.get('processName') == 'garmin-desktop'
+        if is_object(thread) and thread.get('isMainThread') is True and thread.get('processName') == 'garmin-desktop'
     ]
     if not candidates:
         candidates = [
-            thread
-            for thread in threads
-            if isinstance(thread, dict) and thread.get('name') in {'main', 'garmin-desktop'}
+            thread for thread in threads if is_object(thread) and thread.get('name') in {'main', 'garmin-desktop'}
         ]
     if not candidates:
         raise ProfileError('Samply profile contains no desktop UI thread')
@@ -260,7 +253,7 @@ def extract_crate(symbol: str) -> str:
 
 def stack_summary(thread: dict[str, Any], resolver: SymbolResolver) -> tuple[Counter[str], Counter[str], Counter[str]]:
     """Compute self and inclusive sample counts, deduplicated per stack."""
-    stack_counts = Counter(thread['samples']['stack'])
+    stack_counts: Counter[int | None] = Counter(thread['samples']['stack'])
     stacks = thread['stackTable']
     exclusive: Counter[str] = Counter()
     inclusive: Counter[str] = Counter()
@@ -315,14 +308,14 @@ def verify_artifacts(report: Path, manifest: dict[str, Any]) -> None:
     if manifest.get('schema_version') != MANIFEST_SCHEMA_VERSION:
         raise ProfileError(f'{report} uses an unsupported profiling manifest schema')
     artifacts = manifest.get('artifacts')
-    if not isinstance(artifacts, dict):
+    if not is_object(artifacts):
         raise ProfileError(f'{report} has no profiling artifact ledger')
     required = {COMBINED_NAME, METRICS_NAME}
     if not required.issubset(artifacts):
         missing = ', '.join(sorted(required.difference(artifacts)))
         raise ProfileError(f'{report} does not account for required artifacts: {missing}')
     for name, expected in artifacts.items():
-        if not isinstance(name, str) or Path(name).name != name or not isinstance(expected, dict):
+        if Path(name).name != name or not is_object(expected):
             raise ProfileError(f'{report} contains an invalid artifact ledger entry')
         path = report / name
         if not path.is_file() or path.is_symlink():
@@ -435,7 +428,7 @@ def comparison_cell(value: float | None, previous: float | None, unit: str) -> s
     if value is None:
         return '—'
     rendered = f'{value:.3f}{unit}'
-    if previous in {None, 0.0}:
+    if previous is None or previous == 0.0:
         return rendered
     return f'{rendered} ({(value - previous) * 100.0 / previous:+.1f}%)'
 
@@ -443,7 +436,7 @@ def comparison_cell(value: float | None, previous: float | None, unit: str) -> s
 def record_signature(manifest: dict[str, Any]) -> tuple[str, ...]:
     """Remove report-specific destinations while retaining profiler behavior and app arguments."""
     command = manifest.get('record_command')
-    if not isinstance(command, list) or not all(isinstance(argument, str) for argument in command):
+    if not is_array(command) or not all(isinstance(argument, str) for argument in command):
         raise ProfileError('profiling manifest has no valid record command')
     try:
         separator = command.index('--')
@@ -465,7 +458,7 @@ def record_signature(manifest: dict[str, Any]) -> tuple[str, ...]:
 def comparison_mismatches(analyses: list[ReportAnalysis]) -> list[str]:
     """Return environment differences which invalidate percentage comparisons."""
     baseline = analyses[0]
-    checks = (
+    checks: tuple[tuple[str, Callable[[dict[str, Any]], object]], ...] = (
         ('mode', lambda manifest: manifest.get('mode')),
         ('host platform', lambda manifest: manifest.get('host', {}).get('platform')),
         ('host machine', lambda manifest: manifest.get('host', {}).get('machine')),
@@ -476,7 +469,7 @@ def comparison_mismatches(analyses: list[ReportAnalysis]) -> list[str]:
         ('build environment', lambda manifest: manifest.get('build', {}).get('environment')),
         ('record options', record_signature),
     )
-    mismatches = []
+    mismatches: list[str] = []
     for analysis in analyses[1:]:
         for label, value in checks:
             if value(analysis.manifest) != value(baseline.manifest):

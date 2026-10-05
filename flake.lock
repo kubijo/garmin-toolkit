@@ -15,40 +15,16 @@
         "type": "github"
       }
     },
-    "crane-portable": {
-      "inputs": {
-        "nixpkgs": [
-          "desktop",
-          "nixpkgs-portable"
-        ]
-      },
-      "locked": {
-        "lastModified": 1714842444,
-        "narHash": "sha256-z4HeSYtEdYxKurrbxCMb8v/I1LYDHR/aFrZtGtgUgHw=",
-        "owner": "ipetkov",
-        "repo": "crane",
-        "rev": "c5ee4371eea1728ef04bb09c79577c84d5e67a48",
-        "type": "github"
-      },
-      "original": {
-        "owner": "ipetkov",
-        "ref": "v0.16.6",
-        "repo": "crane",
-        "type": "github"
-      }
-    },
     "desktop": {
       "inputs": {
         "crane": [
           "crane"
         ],
-        "crane-portable": "crane-portable",
+        "nix-appimage": [
+          "nix-appimage"
+        ],
         "nixpkgs": [
           "nixpkgs"
-        ],
-        "nixpkgs-portable": "nixpkgs-portable",
-        "rust-overlay": [
-          "rust-overlay"
         ]
       },
       "locked": {
@@ -79,6 +55,22 @@
       "original": {
         "owner": "nix-community",
         "repo": "fenix",
+        "type": "github"
+      }
+    },
+    "flake-compat": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1733328505,
+        "narHash": "sha256-NeCCThCEP3eCl2l/+27kNNK7QrwZB1IJCrXfrbv5oqU=",
+        "owner": "edolstra",
+        "repo": "flake-compat",
+        "rev": "ff81ac966bb2cae68946d5ed5fc4994f96d0ffec",
+        "type": "github"
+      },
+      "original": {
+        "owner": "edolstra",
+        "repo": "flake-compat",
         "type": "github"
       }
     },
@@ -161,6 +153,30 @@
       },
       "parent": []
     },
+    "nix-appimage": {
+      "inputs": {
+        "flake-compat": "flake-compat",
+        "flake-utils": [
+          "flake-utils"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1757920913,
+        "narHash": "sha256-jd0QwCVz4O1sHHkeaZILD/7D6oyalceEJ4EFnWCgm0k=",
+        "owner": "ralismark",
+        "repo": "nix-appimage",
+        "rev": "7946addbc0d97e358a6d7aefe5e82310f0fe6b18",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ralismark",
+        "repo": "nix-appimage",
+        "type": "github"
+      }
+    },
     "nix-gritql": {
       "inputs": {
         "gritql-src": "gritql-src",
@@ -227,22 +243,6 @@
       "original": {
         "owner": "NixOS",
         "ref": "nixos-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
-    "nixpkgs-portable": {
-      "locked": {
-        "lastModified": 1720535198,
-        "narHash": "sha256-zwVvxrdIzralnSbcpghA92tWu2DV2lwv89xZc8MTrbg=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "205fd4226592cc83fd4c0885a3e4c9c400efabb5",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "ref": "release-23.11",
         "repo": "nixpkgs",
         "type": "github"
       }
@@ -330,6 +330,7 @@
         "flake-utils": "flake-utils",
         "gallery": "gallery",
         "hass": "hass",
+        "nix-appimage": "nix-appimage",
         "nix-tools": "nix-tools",
         "nixpkgs": "nixpkgs",
         "pyproject-build-systems": "pyproject-build-systems",

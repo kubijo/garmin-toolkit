@@ -125,10 +125,9 @@ let
             --pattern 'test_*.py'
         '';
         python-types.command = pkgs.writeShellScript "python-types" ''
-          exec ${lib.getExe pkgs.ty} check \
+          exec ${lib.getExe pkgs.basedpyright} \
             --project infra/python \
-            --python ${pythonToolsEnv} \
-            infra/python
+            --pythonpath ${pythonToolsEnv}/bin/python
         '';
       };
       shell = true;

@@ -6,13 +6,14 @@ closing, delivery, and acknowledgements. They do not own automation, device oper
 
 There are two implementations:
 
-- `NativeWindow<C, S>` renders through egui's immediate secondary viewport API. This lets the consumer borrow its
-  existing controller state and receive actions in the same frame. Snapshots are unused. Window close and action events
-  return to the owning controller. Reopening an existing logical ID focuses it without resetting its size or content.
-  Native child windows disable platform decorations and reuse the application's title-bar controls, drag behavior, and
-  resize edges. A theme-aware border and a shadow on a transparent surround separate overlapping windows; maximizing
-  removes the shadow surround. Content is clipped inside the border. Close returns to the child controller; it does not
-  close the main app. Embedded fallback views keep egui's own window frame.
+- `NativeWindow<C, S>` supports immediate secondary viewports for borrowed controller state and deferred viewports for
+  shared, owned state. Developer tools uses deferred rendering so pointer, keyboard, scrolling, and closing do not
+  require main-window redraws. Device files still borrows its controller through an immediate viewport. Snapshots are
+  unused. Window close and action events return to the owning controller. Reopening an existing logical ID focuses it
+  without resetting its size or content. Native child windows disable platform decorations and reuse the application's
+  title-bar controls, drag behavior, and resize edges. A theme-aware border and a shadow on a transparent surround
+  separate overlapping windows; maximizing removes the shadow surround. Content is clipped inside the border. Close
+  returns to the child controller; it does not close the main app. Embedded fallback views keep egui's own window frame.
 - HASS `BrowserWindow<C, S>` opens an independent Rust/egui runner through `web-sys`. The same application URL,
   including an ingress prefix, carries `app-window=<random-session>&window-kind=<kind>`. The startup router selects the
   consumer before normal map/app initialization. Repeated opening focuses the same browser window; reopening a closed
@@ -52,7 +53,9 @@ Upstreaming and an explicit-token alternative are tracked in the
 
 ## Consumers
 
-Developer tools renders the same panel on both platforms. Native commands go to the root automation driver; browser
+Developer tools renders the same panel on both platforms. Its native log, folder, and server requests are serviced on
+the tools viewport's own passes, even when the main window is covered. Root automation still requires main-window
+frames; the separate tools window does not synthesize them. Native commands go to the root automation driver; browser
 commands go to the originating app tab. Logs use the existing log service directly from the tools runner. Automation
 continues when tools is closed, and only the root viewport contributes semantic targets to its driver.
 

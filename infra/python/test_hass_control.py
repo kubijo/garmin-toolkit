@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from email.message import Message
 from pathlib import Path
+from typing import cast
 from unittest.mock import Mock, patch
 
 from hass_control import Client, main, screenshot
@@ -14,7 +15,7 @@ from hass_control import Client, main, screenshot
 class Response(io.BytesIO):
     code = 200
 
-    def __init__(self, content):
+    def __init__(self, content: bytes) -> None:
         super().__init__(content)
         self.headers = Message()
 
@@ -51,7 +52,7 @@ class BackgroundRunTests(unittest.TestCase):
 
 
 class CaptureTests(unittest.TestCase):
-    def response(self, request_id='1', width=2):
+    def response(self, request_id: str = '1', width: int = 2) -> Response:
         png = b'\x89PNG\r\n\x1a\n\0\0\0\rIHDR' + (2).to_bytes(4) + (3).to_bytes(4)
         reply = Response(png)
         reply.headers['Content-Type'] = 'image/png'
@@ -59,7 +60,7 @@ class CaptureTests(unittest.TestCase):
         reply.headers['x-garmin-capture'] = json.dumps({'width': width, 'height': 3})
         return reply
 
-    def client(self, response):
+    def client(self, response: Response) -> Client:
         client = Client('http://localhost/prefix/')
         client.opener = Mock()
         client.opener.open.return_value = response
@@ -72,7 +73,7 @@ class CaptureTests(unittest.TestCase):
             screenshot(client, output)
             self.assertEqual(output.read_bytes()[:8], b'\x89PNG\r\n\x1a\n')
             self.assertEqual(json.loads(output.with_suffix('.json').read_text())['width'], 2)
-        request = client.opener.open.call_args.args[0]
+        request = cast(Mock, client.opener).open.call_args.args[0]
         self.assertEqual(request.full_url, 'http://localhost/prefix/api/control')
         self.assertIsNone(request.get_header('Authorization'))
         self.assertEqual(json.loads(request.data)['operation'], 'screenshot')
@@ -81,15 +82,15 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(client.request_id, 1)
 
     def test_rejects_wrong_request_and_dimensions(self):
-        for fields in ({'request_id': '2'}, {'width': 8}):
-            with self.subTest(fields=fields), self.assertRaises(ValueError):
-                self.client(self.response(**fields)).command('screenshot', request_id=1)
+        for request_id, width in [('2', 2), ('1', 8)]:
+            with self.subTest(request_id=request_id, width=width), self.assertRaises(ValueError):
+                self.client(self.response(request_id=request_id, width=width)).command('screenshot', request_id=1)
 
     def test_child_capture_keeps_the_explicit_window_handle(self):
         client = self.client(self.response())
         with tempfile.TemporaryDirectory() as directory:
             screenshot(client, Path(directory) / 'child.png', 'files:12')
-        request = client.opener.open.call_args.args[0]
+        request = cast(Mock, client.opener).open.call_args.args[0]
         self.assertEqual(json.loads(request.data)['window'], 'files:12')
 
     def test_native_capture_without_broker_request_id(self):

@@ -2549,6 +2549,7 @@ dependencies = [
  "garmin-services",
  "garmin-storage",
  "garmin-ui",
+ "image",
  "jiff",
  "quick-xml 0.42.0",
  "rfd",

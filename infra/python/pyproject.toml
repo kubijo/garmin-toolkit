@@ -10,9 +10,16 @@ dependencies = [
 [tool.uv]
 package = false
 
-[tool.ty.environment]
-python-version = "3.14"
-root = ["."]
+[tool.basedpyright]
+include = [".."]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+failOnWarnings = true
+executionEnvironments = [
+    { root = "../licenses" },
+    { root = "." },
+    { root = "../fixtures" },
+]
 
 [tool.ruff]
 line-length = 120

@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from json_data import is_object
+
 
 def metadata_errors(source_catalog: dict[str, Any], translation_catalog: dict[str, Any]) -> list[str]:
     """Return source or description mismatches for shared catalog keys."""
@@ -12,7 +14,7 @@ def metadata_errors(source_catalog: dict[str, Any], translation_catalog: dict[st
     for key in sorted(source_catalog.keys() & translation_catalog.keys()):
         source = source_catalog[key]
         translation = translation_catalog[key]
-        if not isinstance(source, dict) or not isinstance(translation, dict):
+        if not is_object(source) or not is_object(translation):
             errors.append(f'{key}: catalog entry is not an object')
             continue
 
@@ -35,7 +37,7 @@ def metadata_errors(source_catalog: dict[str, Any], translation_catalog: dict[st
 def read_catalog(path: Path) -> dict[str, Any]:
     """Read one JSON object catalog."""
     value = json.loads(path.read_text(encoding='utf-8'))
-    if not isinstance(value, dict):
+    if not is_object(value):
         raise TypeError(f'{path}: catalog root is not an object')
     return value
 

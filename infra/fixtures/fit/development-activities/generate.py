@@ -221,7 +221,7 @@ def add_derived_distance_and_speed(samples: list[Sample]) -> None:
 
 
 def haversine(start: Sample, end: Sample) -> float:
-    if None in (start.latitude, start.longitude, end.latitude, end.longitude):
+    if start.latitude is None or start.longitude is None or end.latitude is None or end.longitude is None:
         return 0.0
     latitude_1 = math.radians(start.latitude)
     latitude_2 = math.radians(end.latitude)

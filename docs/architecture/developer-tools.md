@@ -51,7 +51,7 @@ just hass::control screenshot --window HANDLE --output .tmp/files.png
 
 Section targets: `developer.section.{automation,control,logs,debug,log-time}`, plus
 `developer.section.record.<sequence>`; values are `open`/`closed`. Stop IDs: `automation.stop`,
-`developer.automation.stop`.
+`developer.automation.stop`. Log actions expose `developer.logs.export` and `developer.logs.open-folder` (native only).
 
 ### Screenshots
 
@@ -104,7 +104,9 @@ overall run timeouts remain enforced. These runs have `performance_eligible: fal
 comparisons.
 
 Native desktop automation still requires a visible window: on Wayland, fully covered windows can stop processing control
-commands before a run is admitted. The browser fallback does not bypass the native redraw gate.
+commands before a run is admitted. An open, visible Developer tools window can service control requests and its own
+interactions independently; running root actions still requires root frames. The browser fallback does not bypass the
+native redraw gate.
 
 The runner removes AccessKit's root pixel-scale transform before ordinary egui input injection. Assertions read fresh
 layout after delivery. Deadlines, renderer errors, and readiness failures fail runs. Reports retain target bounds,
