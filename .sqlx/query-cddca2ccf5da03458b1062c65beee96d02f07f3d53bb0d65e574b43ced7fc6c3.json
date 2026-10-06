@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT course_generation_deletions.owner_id FROM course_generation_deletions\nINNER JOIN course_generation_operations\n    ON\n        course_generation_deletions.id\n        = course_generation_operations.generation_id\nWHERE course_generation_operations.operation_id = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "owner_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generation_deletions",
+            "name": "owner_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cddca2ccf5da03458b1062c65beee96d02f07f3d53bb0d65e574b43ced7fc6c3"
+}

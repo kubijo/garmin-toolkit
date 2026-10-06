@@ -34,6 +34,38 @@ pub(super) struct Prepared {
 }
 
 impl Prepared {
+    pub fn from_route(
+        download: garmin_services::routes::operations::delivery::RouteDownload,
+    ) -> Self {
+        let file_name = download.file_name().to_owned();
+        let size = download.size();
+        let media_type = download.media_type();
+        let stream = futures_util::stream::once(async move {
+            download
+                .begin()
+                .await
+                .map_err(|error| io::Error::other(error.message))
+        })
+        .map(|result| match result {
+            Ok(delivery) => futures_util::stream::try_unfold(delivery, |mut delivery| async move {
+                Ok::<_, io::Error>(
+                    delivery
+                        .next_chunk()
+                        .map(Bytes::copy_from_slice)
+                        .map(|bytes| (bytes, delivery)),
+                )
+            })
+            .boxed(),
+            Err(error) => futures_util::stream::once(async move { Err(error) }).boxed(),
+        })
+        .flatten()
+        .boxed();
+        Self {
+            staged_bytes: size,
+            ..Self::new(file_name, size, media_type, stream)
+        }
+    }
+
     pub fn new(
         file_name: String,
         size: u64,

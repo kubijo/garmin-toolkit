@@ -220,6 +220,7 @@ pub(super) struct Host {
     deployment: Arc<Deployment>,
     operations: Arc<SnapshotOperations>,
     maps: Arc<garmin_services::maps::Operations>,
+    routes: Result<Arc<garmin_services::routes::operations::RouteOperations>, String>,
     fit_plans: Arc<Mutex<FitPlans>>,
     #[cfg(test)]
     fit_import_pause: Option<Arc<FitImportPause>>,
@@ -248,6 +249,10 @@ impl Host {
         .expect("built-in snapshot limits are valid");
         let epoch = deployment.epoch();
         Arc::new(Self {
+            routes: garmin_services::routes::operations::RouteOperations::beside_host(Arc::clone(
+                &deployment,
+            ))
+            .map_err(|error| error.message),
             maps: Arc::new(
                 garmin_services::maps::Operations::new(Arc::clone(&deployment))
                     .with_simulation_write_rate(bytes_per_second),
@@ -317,6 +322,58 @@ impl Host {
 }
 
 impl ApplicationService for Host {
+    async fn routes(
+        &self,
+        user_id: garmin_model::identity::UserId,
+    ) -> Result<Result<garmin_service_api::routes::RouteServiceClient, String>, rtc::CallError>
+    {
+        if self.epoch != self.deployment.epoch() {
+            return Err(rtc::CallError::NotServed);
+        }
+        let operations = match &self.routes {
+            Ok(operations) => operations,
+            Err(error) => return Ok(Err(error.clone())),
+        };
+        let session = match operations
+            .connect_at(UserContext::new(user_id), self.epoch)
+            .await
+        {
+            Ok(session) => session,
+            Err(error) => return Ok(Err(error.message)),
+        };
+        let (server, client) = garmin_service_api::routes::RouteServiceServerShared::<
+            _,
+            remoc::codec::Default,
+        >::new(Arc::new(session));
+        tokio::spawn(server.serve());
+        Ok(Ok(client))
+    }
+
+    async fn route_download(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        artifact: garmin_model::artifact::ArtifactId,
+    ) -> Result<Result<DownloadTicket, String>, rtc::CallError> {
+        if self.epoch != self.deployment.epoch() {
+            return Err(rtc::CallError::NotServed);
+        }
+        let result = async {
+            let operations = self.routes.as_ref().map_err(Clone::clone)?;
+            let session = operations
+                .connect_at(UserContext::new(user_id), self.epoch)
+                .await
+                .map_err(|error| error.message)?;
+            let download = session
+                .download(artifact)
+                .await
+                .map_err(|error| error.message)?;
+            self.downloads
+                .insert(crate::downloads::Prepared::from_route(download))
+        }
+        .await;
+        Ok(result)
+    }
+
     async fn maps(
         &self,
         device_key: String,

@@ -83,7 +83,7 @@
             commonArgs
             // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
             // {
-              cargoExtraArgs = "-p garmin-desktop --all-features";
+              cargoExtraArgs = "-p garmin-desktop -p garmin-gpx-worker --all-features";
               pname = "garmin-desktop-deps";
             }
           );
@@ -139,7 +139,9 @@
           mkPackage =
             { launcher, demo }:
             let
-              cargoExtraArgs = "-p garmin-desktop" + lib.optionalString demo " --features demo";
+              cargoExtraArgs =
+                "-p garmin-desktop -p garmin-gpx-worker"
+                + lib.optionalString demo " --features garmin-desktop/demo";
             in
             craneLib.buildPackage (
               commonArgs
@@ -214,6 +216,8 @@
               pkgs.runCommandLocal "check-garmin-toolkit-desktop" { } ''
                 test -x ${package}/bin/garmin-desktop
                 test -x ${demoPackage}/bin/garmin-desktop
+                test -x ${package}/bin/garmin-gpx-worker
+                test -x ${demoPackage}/bin/garmin-gpx-worker
                 test -e ${launcherCheck}
                 test -x ${distribution.appImage}
                 test -x ${distribution.demoAppImage}

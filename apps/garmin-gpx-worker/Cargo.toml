@@ -1,0 +1,24 @@
+[package]
+name = "garmin-gpx-worker"
+description = "Resource-contained GPX parser helper for native hosts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+garmin-gpx = { workspace = true, features = ["worker"] }
+
+[dev-dependencies]
+garmin-model.workspace = true
+garmin-service-api.workspace = true
+garmin-services.workspace = true
+garmin-storage.workspace = true
+garmin-fit.workspace = true
+tempfile.workspace = true
+tokio.workspace = true

@@ -84,6 +84,8 @@ enum CanonicalSport {
     Running,
     Cycling,
     Swimming,
+    Walking,
+    Hiking,
 }
 
 impl From<ActivitySport> for CanonicalSport {
@@ -92,6 +94,8 @@ impl From<ActivitySport> for CanonicalSport {
             ActivitySport::Running => Self::Running,
             ActivitySport::Cycling => Self::Cycling,
             ActivitySport::Swimming => Self::Swimming,
+            ActivitySport::Walking => Self::Walking,
+            ActivitySport::Hiking => Self::Hiking,
         }
     }
 }

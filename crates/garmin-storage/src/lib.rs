@@ -19,6 +19,7 @@ use thiserror::Error;
 
 mod activity;
 mod avatar;
+mod course;
 mod ingestion;
 mod route;
 pub mod snapshot;
@@ -27,8 +28,30 @@ pub use activity::{
     ActivityProjection, ActivityProjectionError, StoredActivity, StoredActivitySummary,
 };
 pub use avatar::{AvatarPersistenceError, ProfileAvatar, StoredProfileAvatar};
+pub use course::{
+    CourseGenerationStart, CoursePersistenceError, GeneratedCourse, PendingCourseGeneration,
+};
 pub use ingestion::{Ingestion, IngestionError};
+pub use route::imports::StoredRouteImport;
+pub use route::source::RouteSource;
 pub use route::{RouteImport, RoutePersistenceError, StoredRoutePlan, StoredRoutePlanSummary};
+
+async fn persist_source(
+    connection: &mut sqlx::SqliteConnection,
+    source: &Source,
+) -> Result<(), Error> {
+    let id = source.id().to_string();
+    let owner_id = source.owner_id().to_string();
+    let label = source.label().as_str();
+    let device_id = source.device_id().map(|id| id.to_string());
+    let stored = sqlx::query_file!("queries/save-source.sql", id, owner_id, label, device_id,)
+        .fetch_optional(connection)
+        .await?;
+    if stored.is_none() {
+        return Err(Error::SourceOwnerConflict);
+    }
+    Ok(())
+}
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
@@ -123,17 +146,7 @@ impl Storage {
     /// # Errors
     /// [`enum@Error`] for database failures or an attempted ownership change.
     pub async fn save_source(&self, source: &Source) -> Result<(), Error> {
-        let id = source.id().to_string();
-        let owner_id = source.owner_id().to_string();
-        let label = source.label().as_str();
-        let device_id = source.device_id().map(|id| id.to_string());
-        let stored = sqlx::query_file!("queries/save-source.sql", id, owner_id, label, device_id,)
-            .fetch_optional(&self.pool)
-            .await?;
-        if stored.is_none() {
-            return Err(Error::SourceOwnerConflict);
-        }
-        Ok(())
+        persist_source(&mut *self.pool.acquire().await?, source).await
     }
 
     /// Loads one user by its portable application ID.
@@ -348,6 +361,8 @@ pub enum Error {
     Avatar(#[from] AvatarPersistenceError),
     #[error(transparent)]
     Route(#[from] RoutePersistenceError),
+    #[error(transparent)]
+    Course(#[from] CoursePersistenceError),
     #[error("database integrity check failed: {0:?}")]
     Integrity(Vec<String>),
     #[error("persisted user role is invalid: {0}")]

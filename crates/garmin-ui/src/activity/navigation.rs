@@ -225,6 +225,8 @@ impl Navigation {
             Some(ActivitySport::Cycling),
             Some(ActivitySport::Running),
             Some(ActivitySport::Swimming),
+            Some(ActivitySport::Walking),
+            Some(ActivitySport::Hiking),
         ];
         let labels = sports.map(|sport| {
             sport.map_or_else(

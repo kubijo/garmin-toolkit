@@ -1,6 +1,7 @@
 //! Publishable data for mock deployments and tests.
 
 pub mod device;
+mod routes;
 
 use std::{
     ffi::{OsStr, OsString},
@@ -80,6 +81,7 @@ impl SeededActivity {
 pub struct SeededCorpus {
     users: Vec<User>,
     activities: Vec<SeededActivity>,
+    routes: Vec<garmin_importer::RouteImportReceipt>,
 }
 
 impl SeededCorpus {
@@ -93,6 +95,12 @@ impl SeededCorpus {
         &self.activities
     }
 
+    /// Saved routes owned by Alex, exported from the recorded demo activities.
+    #[must_use]
+    pub fn routes(&self) -> &[garmin_importer::RouteImportReceipt] {
+        &self.routes
+    }
+
     /// All produced observation IDs.
     pub fn observation_ids(&self) -> impl Iterator<Item = ObservationId> + '_ {
         self.activities
@@ -101,7 +109,7 @@ impl SeededCorpus {
     }
 }
 
-/// Seeds a database through the production FIT importer.
+/// Seeds recorded activities and saved routes through the production importers.
 ///
 /// Stable IDs make repeated calls idempotent. The normalized source recordings are
 /// redistributable and documented in the fixture manifest and third-party notices.
@@ -147,7 +155,13 @@ pub async fn seed(storage: &Storage) -> Result<SeededCorpus, SeedError> {
         users.push(definition.user);
     }
 
-    Ok(SeededCorpus { users, activities })
+    let mut corpus = SeededCorpus {
+        users,
+        activities,
+        routes: Vec::new(),
+    };
+    corpus.routes = routes::seed(storage, &corpus).await?;
+    Ok(corpus)
 }
 
 struct Definition {
@@ -173,7 +187,11 @@ fn definitions() -> Result<[Definition; 3], SeedError> {
             "Sam Runner",
             "Mock Running Watch-o-Matic 9000",
             "Demo running watch",
-            &[ActivityCase::ForestRun, ActivityCase::CoastalRun],
+            &[
+                ActivityCase::ForestRun,
+                ActivityCase::CoastalRun,
+                ActivityCase::NeighborhoodWalk,
+            ],
         )?,
         definition(
             3,
@@ -181,7 +199,11 @@ fn definitions() -> Result<[Definition; 3], SeedError> {
             "Taylor Multisport",
             "Mock Multisport-o-Matic 9000",
             "Demo multisport watch",
-            &[ActivityCase::CityRun, ActivityCase::OpenWaterSwim],
+            &[
+                ActivityCase::CityRun,
+                ActivityCase::OpenWaterSwim,
+                ActivityCase::MountainHike,
+            ],
         )?,
     ])
 }
@@ -225,6 +247,8 @@ const fn operation_id(case: ActivityCase) -> AcquisitionOperationId {
         ActivityCase::CityRide => 4,
         ActivityCase::OpenWaterSwim => 5,
         ActivityCase::IndoorPowerRide => 6,
+        ActivityCase::NeighborhoodWalk => 7,
+        ActivityCase::MountainHike => 8,
     };
     AcquisitionOperationId::from_u128(0x4000_0000_0000_4000_8000_0000_0000_0000 + ordinal)
 }
@@ -268,6 +292,8 @@ pub enum SeedError {
     #[error(transparent)]
     Import(#[from] garmin_importer::ImportError),
     #[error(transparent)]
+    RouteImport(#[from] garmin_importer::RouteImportError),
+    #[error(transparent)]
     Storage(#[from] garmin_storage::Error),
 }
 
@@ -277,6 +303,7 @@ mod tests {
 
     use futures_lite::future::block_on;
     use garmin_model::activity::ActivitySport;
+    use garmin_storage::snapshot::{Limits, PreparedRestore};
     use tempfile::tempdir;
 
     use super::*;
@@ -345,9 +372,53 @@ mod tests {
             for count in activity_counts {
                 counts.push(count.await?);
             }
-            assert_eq!(counts, [2, 2, 2]);
+            assert_eq!(counts, [2, 3, 3]);
 
             storage.close().await;
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn recorded_corpus_survives_snapshot_restore() -> Result<(), Box<dyn Error>> {
+        block_on(async {
+            let root = tempdir()?;
+            let mut storage = Storage::open(root.path().join("corpus.sqlite3")).await?;
+            let corpus = seed(&storage).await?;
+            let mut expected = Vec::new();
+            for activity in corpus.activities() {
+                let [id] = activity.receipt().observation_ids() else {
+                    return Err("recording did not produce one activity".into());
+                };
+                let stored = storage
+                    .activity(activity.owner_id(), *id)
+                    .await?
+                    .ok_or("recorded activity was missing")?;
+                expected.push((activity, *id, stored));
+            }
+            let archive = root.path().join("snapshot.tar.zst");
+            storage.snapshot(&archive, Limits::default()).await?;
+            storage.close().await;
+            let prepared =
+                PreparedRestore::read(fs::File::open(archive)?, root.path(), Limits::default())
+                    .await?;
+            let restored_path = root.path().join("restored.sqlite3");
+            prepared.publish(&restored_path)?;
+            let restored = Storage::open(&restored_path).await?;
+            for (activity, id, original) in expected {
+                let stored = restored
+                    .activity(activity.owner_id(), id)
+                    .await?
+                    .ok_or("restored activity was missing")?;
+                assert_eq!(stored.normalized(), original.normalized());
+                assert_eq!(
+                    restored
+                        .artifact_bytes(activity.receipt().artifact_id())
+                        .await?,
+                    Some(activity.case().encode()?)
+                );
+            }
+            restored.close().await;
             Ok(())
         })
     }
@@ -385,6 +456,8 @@ mod tests {
             ActivityCase::CityRide => (ActivitySport::Cycling, 67_917_190),
             ActivityCase::OpenWaterSwim => (ActivitySport::Swimming, 1_620_540),
             ActivityCase::IndoorPowerRide => (ActivitySport::Cycling, 50_000_600),
+            ActivityCase::NeighborhoodWalk => (ActivitySport::Walking, 3_842_570),
+            ActivityCase::MountainHike => (ActivitySport::Hiking, 12_571_480),
         }
     }
 }

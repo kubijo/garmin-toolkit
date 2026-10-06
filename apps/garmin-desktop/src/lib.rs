@@ -26,6 +26,7 @@ mod native;
 mod profiling;
 #[cfg(feature = "render-probe")]
 pub mod render_probe;
+mod routes;
 mod view;
 mod window;
 mod worker;

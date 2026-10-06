@@ -11,6 +11,11 @@ revision, and approval identities; host captures, transport handles, payloads, a
 `DeviceFitImportPlan` carries opaque review/job IDs and the existing owned FIT preview; device bytes stay server-side.
 `DeviceFitImportStatus` carries only a fixed lifecycle state; the host retains the running job and stored acquisition.
 
+Route contracts contain owned metadata, canonical coordinates and sports, opaque operation/artifact IDs, and bounded
+upload or geometry chunks. Sessions bind the profile and database epoch; requests carry no filesystem paths, parser
+selection, or replacement geometry. Import and generation receipts identify immutable saved results. Downloads use the
+existing single-use ticket contract after route ownership and stored-byte integrity checks.
+
 ```grit
 language rust
 
@@ -22,6 +27,18 @@ or {
   $item <: contains visibility_modifier(),
   $name <: not or {
     `Action`,
+    `RouteSummary`,
+    `RouteSource`,
+    `CourseVersion`,
+    `GpxCandidate`,
+    `GpxRejected`,
+    `GpxUploadPhase`,
+    `GpxUpload`,
+    `RouteSelection`,
+    `RouteRequest`,
+    `RouteReply`,
+    `RouteFailureKind`,
+    `RouteFailure`,
     `Phase`,
     `Choice`,
     `CatalogService`,

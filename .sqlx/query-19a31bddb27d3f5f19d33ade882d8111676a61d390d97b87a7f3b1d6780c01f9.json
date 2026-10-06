@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    route_plan_points.latitude_degrees,\n    route_plan_points.longitude_degrees,\n    route_plan_points.elevation_m\nFROM route_plan_points\nINNER JOIN route_plan_revisions\n    ON route_plan_points.revision_id = route_plan_revisions.id\nINNER JOIN route_plans ON route_plan_revisions.plan_id = route_plans.id\nWHERE\n    route_plans.owner_id = ? AND route_plan_points.revision_id = ?\n    AND route_plan_points.position >= ?\nORDER BY route_plan_points.position\nLIMIT ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "latitude_degrees",
+        "ordinal": 0,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "route_plan_points",
+            "name": "latitude_degrees"
+          }
+        }
+      },
+      {
+        "name": "longitude_degrees",
+        "ordinal": 1,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "route_plan_points",
+            "name": "longitude_degrees"
+          }
+        }
+      },
+      {
+        "name": "elevation_m",
+        "ordinal": 2,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "route_plan_points",
+            "name": "elevation_m"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "19a31bddb27d3f5f19d33ade882d8111676a61d390d97b87a7f3b1d6780c01f9"
+}

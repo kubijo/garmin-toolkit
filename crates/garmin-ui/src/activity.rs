@@ -16,7 +16,7 @@ use crate::{
 };
 
 mod calendar;
-mod map;
+pub(crate) mod map;
 pub mod map_composition;
 pub mod map_diagnostics;
 pub mod map_runtime;
@@ -228,6 +228,8 @@ const fn sport_icon(sport: ActivitySport) -> icons::Icon {
         ActivitySport::Running => icons::PERSON_SIMPLE_RUN,
         ActivitySport::Cycling => icons::BICYCLE,
         ActivitySport::Swimming => icons::PERSON_SIMPLE_SWIM,
+        ActivitySport::Walking => icons::PERSON_SIMPLE_WALK,
+        ActivitySport::Hiking => icons::PERSON_SIMPLE_HIKE,
     }
 }
 
@@ -236,6 +238,8 @@ fn sport_title(sport: ActivitySport, intl: &Intl) -> String {
         ActivitySport::Running => format_message!(intl, default_message: "Running"),
         ActivitySport::Cycling => format_message!(intl, default_message: "Cycling"),
         ActivitySport::Swimming => format_message!(intl, default_message: "Swimming"),
+        ActivitySport::Walking => format_message!(intl, default_message: "Walking"),
+        ActivitySport::Hiking => format_message!(intl, default_message: "Hiking"),
     }
 }
 

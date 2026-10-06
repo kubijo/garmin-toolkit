@@ -255,6 +255,8 @@ pub enum ActivitySport {
     Running,
     Cycling,
     Swimming,
+    Walking,
+    Hiking,
 }
 
 impl fmt::Display for ActivitySport {
@@ -263,6 +265,8 @@ impl fmt::Display for ActivitySport {
             Self::Running => formatter.write_str("running"),
             Self::Cycling => formatter.write_str("cycling"),
             Self::Swimming => formatter.write_str("swimming"),
+            Self::Walking => formatter.write_str("walking"),
+            Self::Hiking => formatter.write_str("hiking"),
         }
     }
 }

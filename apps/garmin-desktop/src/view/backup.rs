@@ -1,6 +1,30 @@
 use super::*;
 use garmin_ui::backup::{Action, State};
 
+pub(super) fn show_page(
+    ui: &mut Ui,
+    intl: &Intl,
+    controller: &crate::backup::Controller,
+    enabled: bool,
+) -> Option<Action> {
+    ScrollArea::vertical()
+        .id_salt("backup-page")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            garmin_ui::backup::show(
+                ui,
+                &garmin_ui::backup::Props {
+                    server_files: false,
+                    intl,
+                    state: &controller.state,
+                    file: controller.file.as_ref(),
+                    enabled,
+                },
+            )
+        })
+        .inner
+}
+
 impl Desktop {
     pub(super) fn backup_enabled(&self) -> bool {
         self.selected_profile
@@ -46,6 +70,7 @@ impl Desktop {
             return;
         }
         self.epoch = epoch;
+        self.routes.invalidate();
         self.worker.set_epoch(epoch);
         self.profiles.clear();
         self.selected_profile = None;

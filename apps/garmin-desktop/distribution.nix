@@ -77,8 +77,9 @@ let
     }:
     let
       cargoCommand =
-        "cargo --offline build --locked --release -p garmin-desktop"
-        + lib.optionalString demo " --features demo";
+        "cargo --offline build --locked --release -p garmin-desktop -p garmin-gpx-worker"
+        + lib.optionalString demo " --features garmin-desktop/demo";
+
       manifest = yamlFormat.generate "${identity.id}.yml" {
         app-id = identity.id;
         runtime = "org.freedesktop.Platform";
@@ -95,24 +96,29 @@ let
           "--socket=wayland"
           "--talk-name=org.gtk.vfs.*"
         ];
+
         modules = [
           {
             name = "garmin-desktop";
             buildsystem = "simple";
             build-options = {
               append-path = "/usr/lib/sdk/rust-stable/bin";
+
               env = {
                 CARGO_HOME = "${buildDir}/cargo";
                 CARGO_TARGET_DIR = "target";
                 SQLX_OFFLINE = "true";
               };
             };
+
             build-commands = [
               "mkdir -p cargo && cp vendor/config.toml cargo/config.toml"
               cargoCommand
               "install -Dm755 target/release/garmin-desktop /app/bin/garmin-desktop"
+              "install -Dm755 target/release/garmin-gpx-worker /app/bin/garmin-gpx-worker"
               "mkdir -p /app/share && cp -r launcher/share/. /app/share/"
             ];
+
             sources = [
               {
                 type = "dir";

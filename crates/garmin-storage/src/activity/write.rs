@@ -325,6 +325,8 @@ const fn encode_sport(sport: ActivitySport) -> &'static str {
         ActivitySport::Running => "running",
         ActivitySport::Cycling => "cycling",
         ActivitySport::Swimming => "swimming",
+        ActivitySport::Walking => "walking",
+        ActivitySport::Hiking => "hiking",
     }
 }
 

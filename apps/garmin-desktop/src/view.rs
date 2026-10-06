@@ -74,6 +74,7 @@ pub struct Desktop {
     notify_on_inspection: HashSet<String>,
     worker: Worker,
     map_runtime: activity::map_runtime::MapRuntimeHandle,
+    routes: crate::routes::Controller,
     profiling: profiling::RuntimeMetricsRecorder,
 }
 
@@ -108,6 +109,7 @@ impl Desktop {
         )
         .with_metrics(profiling.clone());
         let activity_workspace = activity::Workspace::new(&map_runtime);
+        let routes = crate::routes::Controller::new(Arc::clone(&deployment), &map_runtime)?;
         Ok(Self {
             deployment,
             epoch,
@@ -124,6 +126,7 @@ impl Desktop {
             selected_activity: 0,
             activity_detail: None,
             activity_workspace,
+            routes,
             navigation: shell::Navigation::Expanded,
             load: LoadState::Loading,
             create_profile: None,
@@ -284,27 +287,20 @@ impl Desktop {
                 ui.add_space(12.0);
             }
             match page {
+                Page::Routes => {
+                    self.routes
+                        .show(ui, intl, self.profiles[profile_index].user.id());
+                    PageOutput::Routes
+                }
                 Page::Activities => {
                     PageOutput::Activities(activities_page.show(ui, activity_workspace))
                 }
-                Page::Backup => PageOutput::Backup(
-                    ScrollArea::vertical()
-                        .id_salt("backup-page")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            garmin_ui::backup::show(
-                                ui,
-                                &garmin_ui::backup::Props {
-                                    server_files: false,
-                                    intl,
-                                    state: &self.backup.state,
-                                    file: self.backup.file.as_ref(),
-                                    enabled: !matches!(self.load, LoadState::Unavailable(_)),
-                                },
-                            )
-                        })
-                        .inner,
-                ),
+                Page::Backup => PageOutput::Backup(backup::show_page(
+                    ui,
+                    intl,
+                    &self.backup,
+                    !matches!(self.load, LoadState::Unavailable(_)),
+                )),
                 Page::ProfileSettings => {
                     PageOutput::Settings(profile_settings::show(ui, &settings_props))
                 }
@@ -377,7 +373,8 @@ impl Desktop {
                     self.notify_on_inspection.insert(key);
                 }
             }
-            PageOutput::Maps { command: None, .. }
+            PageOutput::Routes
+            | PageOutput::Maps { command: None, .. }
             | PageOutput::Settings(None)
             | PageOutput::Device { action: None, .. } => {}
             PageOutput::Device {
@@ -701,6 +698,7 @@ impl Desktop {
                 self.profile_menu_expanded = false;
             }
             Some(shell::Action::Profile(profile::Action::Logout)) => {
+                self.routes.invalidate();
                 self.selected_profile = None;
                 self.page = Page::Activities;
                 self.profile_menu_expanded = false;
@@ -735,6 +733,7 @@ impl Desktop {
 
     fn work_in_progress(&self) -> bool {
         self.backup.state.busy()
+            || self.routes.busy()
             || matches!(self.load, LoadState::Loading)
             || self.import.busy()
             || self.preferences_saving
@@ -816,6 +815,7 @@ impl Desktop {
     }
 
     fn select_profile(&mut self, index: usize) {
+        self.routes.invalidate();
         self.selected_profile = Some(index);
         if matches!(self.page, Page::Backup) && !self.backup_enabled() {
             self.page = Page::Activities;
@@ -1470,6 +1470,7 @@ impl eframe::App for Desktop {
         let started = Instant::now();
         let toast_bounds = shell::overlay_bounds(ui.available_rect_before_wrap());
         self.process_backup();
+        self.routes.poll();
         self.process_events();
         self.process_devices(ui.ctx());
         self.handle_quit_input(ui.ctx());
@@ -1701,6 +1702,7 @@ fn device_catalog_snapshot(
 }
 
 enum PageOutput {
+    Routes,
     Maps {
         key: String,
         command: Option<(Uuid, garmin_service_api::maps::Command)>,

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO route_import_receipts (\n    acquisition_id, artifact_id, owner_id, plan_id, revision_id,\n    candidate_kind, candidate_index, segment_index, parser_name, parser_version\n)\nVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "d15da4e3d3dd3bbb053b7f867a18879b71c7f74289be97cdbc7537a164dbee65"
+}

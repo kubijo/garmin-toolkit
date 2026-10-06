@@ -21,3 +21,6 @@ geographiclib-rs.workspace = true
 garmin-model.workspace = true
 rustyfit.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true

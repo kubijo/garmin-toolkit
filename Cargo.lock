@@ -2628,6 +2628,7 @@ dependencies = [
  "garmin-importer",
  "garmin-model",
  "garmin-storage",
+ "gpx",
  "tempfile",
  "thiserror 2.0.20",
 ]
@@ -2636,10 +2637,30 @@ dependencies = [
 name = "garmin-gpx"
 version = "0.1.0"
 dependencies = [
+ "garmin-macros",
  "garmin-model",
  "geo-types",
  "gpx",
+ "postcard",
+ "rustix 1.1.5",
+ "serde",
+ "tempfile",
  "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
+name = "garmin-gpx-worker"
+version = "0.1.0"
+dependencies = [
+ "garmin-fit",
+ "garmin-gpx",
+ "garmin-model",
+ "garmin-service-api",
+ "garmin-services",
+ "garmin-storage",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -2854,6 +2875,7 @@ dependencies = [
  "garmin-color",
  "garmin-macros",
  "garmin-model",
+ "postcard",
  "remoc",
  "serde",
  "serde_json",

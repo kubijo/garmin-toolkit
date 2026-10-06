@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 garmin-fit.workspace = true
-garmin-gpx.workspace = true
+garmin-gpx = { workspace = true, features = ["worker"] }
 image.workspace = true
 garmin-model.workspace = true
 newtype-uuid.workspace = true

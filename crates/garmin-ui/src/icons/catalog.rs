@@ -42,6 +42,8 @@ icon_catalog! {
         PENCIL => phosphor_svgs::style::regular::PENCIL,
         PERSON_SIMPLE_RUN => phosphor_svgs::style::regular::PERSON_SIMPLE_RUN,
         PERSON_SIMPLE_SWIM => phosphor_svgs::style::regular::PERSON_SIMPLE_SWIM,
+        PERSON_SIMPLE_WALK => phosphor_svgs::style::regular::PERSON_SIMPLE_WALK,
+        PERSON_SIMPLE_HIKE => phosphor_svgs::style::regular::PERSON_SIMPLE_HIKE,
         PLAY => phosphor_svgs::style::regular::PLAY,
         PLUS => phosphor_svgs::style::bold::PLUS,
         POWER => phosphor_svgs::style::regular::POWER,

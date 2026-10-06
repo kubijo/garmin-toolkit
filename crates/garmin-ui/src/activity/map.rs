@@ -5,7 +5,8 @@ use std::{collections::VecDeque, time::Duration};
 use cint::ColorInterop;
 use egui::{Align2, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2};
 use garmin_model::route::Coordinate;
-use garmin_service_api::{ActivityRecordingSnapshot, ActivitySampleSnapshot};
+pub(crate) mod samples;
+use samples::Samples;
 use walkers::{lon_lat, sources::Attribution};
 use web_time::Instant;
 
@@ -43,9 +44,9 @@ const DEFAULT_ZOOM_SPEED: f64 = 2.0;
 const ROUTE_POINT_SPACING: f32 = 1.5;
 const ENDPOINT_PAIR_DISTANCE: f32 = 16.0;
 
-pub(super) struct Props<'a> {
+pub(crate) struct Props<'a> {
     pub label: &'a str,
-    pub recording: &'a ActivityRecordingSnapshot,
+    pub samples: Samples<'a>,
     pub selected_coordinate: Option<(f64, f64)>,
     pub sample_range: std::ops::RangeInclusive<usize>,
     pub highlighted_range: Option<std::ops::RangeInclusive<usize>>,
@@ -56,7 +57,7 @@ pub(super) struct Props<'a> {
     pub height: f32,
 }
 
-pub(super) struct ActivityMap {
+pub(crate) struct ActivityMap {
     surface: MapSurfaceHandle,
     camera: MapCamera,
     fit: FitState,
@@ -78,8 +79,7 @@ impl ActivityMap {
         let ui_started = Instant::now();
         let _span = tracing::trace_span!("activity_map_ui").entered();
         let size = Vec2::new(ui.available_width(), props.height);
-        let (sample_offset, samples) =
-            ranged_samples(&props.recording.samples, props.sample_range.clone());
+        let (sample_offset, samples) = ranged_samples(props.samples, props.sample_range.clone());
         let Some(_) = center(samples) else {
             self.surface.poll(ui.ctx(), ui.visuals().dark_mode);
             return empty_map(ui, size, props.empty);
@@ -159,17 +159,12 @@ impl ActivityMap {
         }
     }
 
-    fn fit_if_needed(&mut self, samples: &[ActivitySampleSnapshot], fit_key: &str, size: Vec2) {
+    fn fit_if_needed(&mut self, samples: Samples<'_>, fit_key: &str, size: Vec2) {
         self.fit
             .apply_if_needed(&mut self.camera, samples, fit_key, size);
     }
 
-    fn index_route_if_needed(
-        &mut self,
-        samples: &[ActivitySampleSnapshot],
-        sample_offset: usize,
-        fit_key: &str,
-    ) {
+    fn index_route_if_needed(&mut self, samples: Samples<'_>, sample_offset: usize, fit_key: &str) {
         self.route_index.resolve(samples, sample_offset, fit_key);
     }
 
@@ -333,7 +328,7 @@ impl FitState {
     fn apply_if_needed(
         &mut self,
         camera: &mut MapCamera,
-        samples: &[ActivitySampleSnapshot],
+        samples: Samples<'_>,
         key: &str,
         size: Vec2,
     ) {
@@ -376,7 +371,7 @@ struct CachedRouteIndex {
 }
 
 impl RouteIndexCache {
-    fn resolve(&mut self, samples: &[ActivitySampleSnapshot], sample_offset: usize, key: &str) {
+    fn resolve(&mut self, samples: Samples<'_>, sample_offset: usize, key: &str) {
         if self.entry.as_ref().is_some_and(|entry| entry.key == key) {
             return;
         }
@@ -919,7 +914,7 @@ fn paint_visible_segment(ui: &Ui, points: Vec<egui::Pos2>, stroke: Stroke) {
     }
 }
 
-fn speed_bounds(samples: &[ActivitySampleSnapshot]) -> Option<(f64, f64)> {
+fn speed_bounds(samples: Samples<'_>) -> Option<(f64, f64)> {
     let mut speeds = samples.iter().filter_map(|sample| {
         sample
             .speed
@@ -933,7 +928,7 @@ fn speed_bounds(samples: &[ActivitySampleSnapshot]) -> Option<(f64, f64)> {
     (maximum - minimum > f64::EPSILON).then_some((minimum, maximum))
 }
 
-fn route_endpoints(samples: &[ActivitySampleSnapshot]) -> Option<(Coordinate, Coordinate)> {
+fn route_endpoints(samples: Samples<'_>) -> Option<(Coordinate, Coordinate)> {
     let start = samples.iter().find_map(|sample| sample.coordinate)?;
     let end = samples.iter().rev().find_map(|sample| sample.coordinate)?;
     Some((start, end))
@@ -1148,7 +1143,7 @@ fn closest_endpoint_on_segment(
     (index, pointer.distance_sq(projected))
 }
 
-pub(super) struct Output {
+pub(crate) struct Output {
     pub hovered: Option<usize>,
     pub clicked: Option<usize>,
     pub empty_clicked: bool,
@@ -1162,15 +1157,15 @@ struct RouteInteraction {
 }
 
 fn ranged_samples(
-    samples: &[ActivitySampleSnapshot],
+    samples: Samples<'_>,
     range: std::ops::RangeInclusive<usize>,
-) -> (usize, &[ActivitySampleSnapshot]) {
+) -> (usize, Samples<'_>) {
     let start = (*range.start()).min(samples.len());
     let end = range.end().saturating_add(1).min(samples.len()).max(start);
-    (start, &samples[start..end])
+    (start, samples.slice(start..end))
 }
 
-fn center(samples: &[ActivitySampleSnapshot]) -> Option<walkers::Position> {
+fn center(samples: Samples<'_>) -> Option<walkers::Position> {
     let sample = samples.iter().find(|sample| sample.coordinate.is_some())?;
     let coordinate = sample.coordinate?;
     Some(lon_lat(
@@ -1179,7 +1174,7 @@ fn center(samples: &[ActivitySampleSnapshot]) -> Option<walkers::Position> {
     ))
 }
 
-fn fit(camera: &mut MapCamera, samples: &[ActivitySampleSnapshot], size: Vec2) {
+fn fit(camera: &mut MapCamera, samples: Samples<'_>, size: Vec2) {
     let mut points = samples.iter().filter_map(|sample| sample.coordinate);
     let Some(first) = points.next() else {
         return;
@@ -1267,6 +1262,7 @@ fn empty_map(ui: &mut Ui, size: Vec2, message: &str) -> Output {
 mod tests {
     use std::time::{Duration, Instant};
 
+    use super::samples::Samples;
     use egui::{Event, MouseWheelUnit, RawInput, Rect, TouchPhase, pos2, vec2};
     use garmin_model::{
         route::{Coordinate, Latitude, Longitude},
@@ -1450,16 +1446,41 @@ mod tests {
         let mut camera = MapCamera::default();
         let mut state = FitState::default();
 
-        state.apply_if_needed(&mut camera, &samples, "activity", vec2(400.0, 300.0));
+        state.apply_if_needed(
+            &mut camera,
+            Samples::Activity(&samples),
+            "activity",
+            vec2(400.0, 300.0),
+        );
         assert_eq!(state.applications, 1);
-        state.apply_if_needed(&mut camera, &samples, "activity", vec2(440.0, 340.0));
+        state.apply_if_needed(
+            &mut camera,
+            Samples::Activity(&samples),
+            "activity",
+            vec2(440.0, 340.0),
+        );
         assert_eq!(state.applications, 1);
-        state.apply_if_needed(&mut camera, &samples, "activity", vec2(480.0, 380.0));
+        state.apply_if_needed(
+            &mut camera,
+            Samples::Activity(&samples),
+            "activity",
+            vec2(480.0, 380.0),
+        );
         assert_eq!(state.applications, 2);
         state.request();
-        state.apply_if_needed(&mut camera, &samples, "activity", vec2(480.0, 380.0));
+        state.apply_if_needed(
+            &mut camera,
+            Samples::Activity(&samples),
+            "activity",
+            vec2(480.0, 380.0),
+        );
         assert_eq!(state.applications, 3);
-        state.apply_if_needed(&mut camera, &samples, "other", vec2(480.0, 380.0));
+        state.apply_if_needed(
+            &mut camera,
+            Samples::Activity(&samples),
+            "other",
+            vec2(480.0, 380.0),
+        );
         assert_eq!(state.applications, 4);
     }
 
@@ -1468,9 +1489,19 @@ mod tests {
         let samples = [sample(Some((-80.0, -80.0))), sample(Some((80.0, 80.0)))];
         let mut camera = MapCamera::default();
         let mut state = FitState::default();
-        state.apply_if_needed(&mut camera, &samples, "global", vec2(1024.0, 512.0));
+        state.apply_if_needed(
+            &mut camera,
+            Samples::Activity(&samples),
+            "global",
+            vec2(1024.0, 512.0),
+        );
         assert!((camera::world_size(camera.zoom()) - 1024.0).abs() < 1.0e-9);
-        state.apply_if_needed(&mut camera, &samples, "global", vec2(1056.0, 512.0));
+        state.apply_if_needed(
+            &mut camera,
+            Samples::Activity(&samples),
+            "global",
+            vec2(1056.0, 512.0),
+        );
         assert_eq!(state.applications, 1);
         assert!((camera::world_size(camera.zoom()) - 1056.0).abs() < 1.0e-9);
     }
@@ -1480,12 +1511,12 @@ mod tests {
         let samples = [sample(Some((60.0, 24.0))), sample(Some((60.1, 24.2)))];
         let mut cache = RouteIndexCache::default();
 
-        cache.resolve(&samples, 0, "activity:all");
+        cache.resolve(Samples::Activity(&samples), 0, "activity:all");
         assert_eq!(cache.builds, 1);
         let _current = cache.current();
-        cache.resolve(&samples, 0, "activity:all");
+        cache.resolve(Samples::Activity(&samples), 0, "activity:all");
         assert_eq!(cache.builds, 1);
-        cache.resolve(&samples, 4, "activity:lap-2");
+        cache.resolve(Samples::Activity(&samples), 4, "activity:lap-2");
         assert_eq!(cache.builds, 2);
     }
 
@@ -1685,7 +1716,7 @@ mod tests {
     #[test]
     fn route_fit_uses_the_short_dateline_span() {
         let samples = vec![sample(Some((60.0, 179.0))), sample(Some((60.1, -179.0)))];
-        let (_, samples) = ranged_samples(&samples, 0..=1);
+        let (_, samples) = ranged_samples(Samples::Activity(&samples), 0..=1);
         let mut camera = MapCamera::default();
 
         fit(&mut camera, samples, egui::vec2(640.0, 320.0));
@@ -1698,7 +1729,7 @@ mod tests {
     #[test]
     fn recordings_without_coordinates_do_not_create_a_map_center() {
         let samples = vec![sample(None), sample(None)];
-        let (_, samples) = ranged_samples(&samples, 0..=1);
+        let (_, samples) = ranged_samples(Samples::Activity(&samples), 0..=1);
         let mut camera = MapCamera::default();
         let before = (camera.center(), camera.zoom());
 

@@ -9,10 +9,10 @@
 
 use std::{marker::PhantomData, num::NonZeroU64, sync::Arc};
 
+use super::samples::Samples;
 use arc_swap::ArcSwapOption;
 use bytemuck::{Pod, Zeroable};
 use egui::{Color32, Rect, Shape, pos2};
-use garmin_service_api::ActivitySampleSnapshot;
 use walkers::TileId;
 use web_time::Instant;
 use wgpu::util::DeviceExt as _;
@@ -926,7 +926,7 @@ struct UploadStats {
 #[derive(Clone)]
 pub(in crate::activity) struct RouteScene<'a> {
     pub key: &'a str,
-    pub samples: &'a [ActivitySampleSnapshot],
+    pub samples: Samples<'a>,
     pub sample_offset: usize,
     pub highlighted_range: Option<std::ops::RangeInclusive<usize>>,
     pub color: Color32,

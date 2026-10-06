@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalize the pinned trackeR sample activities into publishable demo inputs."""
+"""Normalize pinned recorded activities into publishable demo inputs."""
 
 import csv
 import gzip
@@ -63,6 +63,11 @@ SOURCES = (
         '9ea6c6f76920df585a6a6bdfb39e77baf89bf00d0bd8bc22652b54a5bb5122cf',
         'json',
     ),
+)
+
+RECORDED_GPX = (
+    ('neighborhood-walk.csv.gz', '160bd0ee4a57ed115aa0e43da30065d0f0f42007cafbbcacd07edbaf8b9847cd'),
+    ('mountain-hike.csv.gz', '4370a44b9612cca7ed067819689b397e64192e91d7f65888715736b85e81921e'),
 )
 
 
@@ -304,8 +309,18 @@ def write_output(path: Path, samples: list[Sample]) -> None:
 
 
 def main() -> None:
+    if len(sys.argv) == 4 and sys.argv[1] == '--walking-hiking':
+        output_directory = Path(__file__).resolve().parent / 'recordings'
+        for path, (output, expected_digest) in zip(sys.argv[2:], RECORDED_GPX, strict=True):
+            source_bytes = Path(path).read_bytes()
+            if digest(source_bytes) != expected_digest:
+                raise SystemExit(f'SHA-256 mismatch for {path}')
+            samples = downsample(parse_gpx(gzip.compress(source_bytes, mtime=0)))
+            write_output(output_directory / output, samples)
+            print(f'{output}: {len(samples)} samples, {samples[-1].elapsed_seconds} s')
+        return
     if len(sys.argv) != 2:
-        raise SystemExit(f'usage: {sys.argv[0]} trackeR_1.6.1.tar.gz')
+        raise SystemExit(f'usage: {sys.argv[0]} trackeR_1.6.1.tar.gz | --walking-hiking walk.gpx hike.gpx')
     archive_path = Path(sys.argv[1])
     archive_bytes = archive_path.read_bytes()
     if digest(archive_bytes) != ARCHIVE_SHA256:

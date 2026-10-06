@@ -49,5 +49,16 @@
 - Integrity: exact source-member and normalized-output hashes are recorded in
   `infra/fixtures/fit/development-activities/fixture.toml`.
 
+## Walking and hiking demo recordings
+
+- Walking: Sam Swift's [DogWalkGPS](https://github.com/swiftsam/DogWalkGPS), revision
+  `262a52868259d8351538144d97fc2876ad2a73a7`, April 1, 2012 walk. Copyright (c) 2014 Sam Swift; MIT license, retained in
+  `infra/fixtures/fit/development-activities/LICENSE-DogWalkGPS`.
+- Hiking: [HikeAlong](https://hikealongtours.com/data/), September 20, 2026 Stone Mountain Cherokee watch recording;
+  [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/).
+- Modified: normalized and downsampled through the same GPX pipeline as the trackeR recordings above, with derived
+  distances, speeds, four lap boundaries, shifted dates, and fake FIT device metadata. No missing sensor data is filled
+  in. Source and normalized hashes are recorded in `infra/fixtures/fit/development-activities/fixture.toml`.
+
 Cargo dependency and asset license texts are harvested into the generated [desktop](assets/licenses/bundle-desktop.json)
 and [HASS](assets/licenses/bundle-hass.json) bundles.
