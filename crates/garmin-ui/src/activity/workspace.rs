@@ -782,7 +782,7 @@ impl Viewer {
             ui,
             &map::Props {
                 label: &map_label,
-                recording,
+                samples: map::samples::Samples::Activity(&recording.samples),
                 selected_coordinate,
                 sample_range: range,
                 highlighted_range,

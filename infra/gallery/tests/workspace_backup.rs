@@ -64,10 +64,23 @@ fn backup_is_an_owner_only_secondary_action() {
             None,
         );
         view.run();
-        let device = view.get(By::new().predicate(|node| node.author_id() == Some("navigation.2")));
-        assert_eq!(
-            device.accesskit_node().label().as_deref(),
-            Some("Mock Cycle")
+        let device = view.get_by_label("Mock Cycle");
+        assert!(
+            device
+                .accesskit_node()
+                .author_id()
+                .is_some_and(|id| id.starts_with("navigation."))
+        );
+        assert!(
+            view.query(By::new().predicate(|node| {
+                node.author_id()
+                    .is_some_and(|id| id.starts_with("navigation."))
+                    && node
+                        .label()
+                        .as_deref()
+                        .is_some_and(|label| label.contains("Backup"))
+            }))
+            .is_none()
         );
         let backup =
             view.query(By::new().predicate(|node| node.author_id() == Some("profile.backup")));

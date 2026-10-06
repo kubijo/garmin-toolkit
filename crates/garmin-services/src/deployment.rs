@@ -11,7 +11,7 @@ use garmin_storage::{
     snapshot::{Limits, Manifest, PreparedRestore},
 };
 use thiserror::Error;
-use tokio::sync::{RwLock, RwLockReadGuard};
+use tokio::sync::{OwnedRwLockReadGuard, RwLock, RwLockReadGuard};
 use uuid::Uuid;
 
 use crate::{Application, UserContext};
@@ -32,11 +32,22 @@ struct Live {
 /// Hosts acquire application leases for every job; leases cannot outlive restore quiescence.
 pub struct Deployment {
     root: PathBuf,
-    live: RwLock<Live>,
+    live: Arc<RwLock<Live>>,
     epoch: tokio::sync::watch::Sender<Uuid>,
     _lock: File,
     #[cfg(test)]
     hook: std::sync::Mutex<Option<TestHook>>,
+}
+
+/// An owned application lease retained until an artifact delivery finishes or is dropped.
+pub struct ApplicationLease(OwnedRwLockReadGuard<Live, Application>);
+
+impl std::ops::Deref for ApplicationLease {
+    type Target = Application;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 #[cfg(test)]
@@ -102,11 +113,11 @@ impl Deployment {
         let epoch = Uuid::new_v4();
         Ok(Arc::new(Self {
             root,
-            live: RwLock::new(Live {
+            live: Arc::new(RwLock::new(Live {
                 application: Some(application),
                 epoch,
                 selection,
-            }),
+            })),
             _lock: lock,
             epoch: tokio::sync::watch::channel(epoch).0,
             #[cfg(test)]
@@ -118,6 +129,10 @@ impl Deployment {
     #[must_use]
     pub fn epoch(&self) -> Uuid {
         *self.epoch.borrow()
+    }
+
+    pub(crate) fn watch_epoch(&self) -> tokio::sync::watch::Receiver<Uuid> {
+        self.epoch.subscribe()
     }
 
     /// Leases the application only if the queued job belongs to the current database.
@@ -137,6 +152,19 @@ impl Deployment {
 
     pub(super) fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Acquires a lease that can move into a response stream.
+    /// # Errors
+    /// Rejects stale epochs and deployments requiring recovery.
+    pub async fn application_owned(&self, epoch: Uuid) -> Result<ApplicationLease, Error> {
+        let guard = Arc::clone(&self.live).read_owned().await;
+        if guard.epoch != epoch {
+            return Err(Error::Stale);
+        }
+        OwnedRwLockReadGuard::try_map(guard, |live| live.application.as_ref())
+            .map(ApplicationLease)
+            .map_err(|_| Error::Unavailable)
     }
 
     pub(super) async fn backup(

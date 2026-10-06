@@ -28,11 +28,12 @@ publication needs a concrete automation use case and reviewed public contract.
 
 ## Crate ownership
 
-| Application           | Responsibility                                  |
-| --------------------- | ----------------------------------------------- |
-| `apps/garmin-cli`     | Device and map-maintenance command line and TUI |
-| `apps/garmin-desktop` | Native activity, route, and device application  |
-| `apps/garmin-hass`    | Home Assistant native-process host              |
+| Application              | Responsibility                                  |
+| ------------------------ | ----------------------------------------------- |
+| `apps/garmin-cli`        | Device and map-maintenance command line and TUI |
+| `apps/garmin-desktop`    | Native activity, route, and device application  |
+| `apps/garmin-hass`       | Home Assistant native-process host              |
+| `apps/garmin-gpx-worker` | Resource-limited native GPX parser helper       |
 
 | Crate                | Responsibility                                                  |
 | -------------------- | --------------------------------------------------------------- |

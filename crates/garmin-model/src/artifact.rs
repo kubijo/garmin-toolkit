@@ -78,6 +78,19 @@ impl fmt::Display for MediaType {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ArtifactDigest(blake3::Hash);
 
+impl serde::Serialize for ArtifactDigest {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(self.0.as_bytes(), serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ArtifactDigest {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let bytes = <[u8; 32] as serde::Deserialize>::deserialize(deserializer)?;
+        Ok(Self(blake3::Hash::from_bytes(bytes)))
+    }
+}
+
 impl ArtifactDigest {
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Self {
@@ -115,7 +128,7 @@ impl fmt::Display for ArtifactDigest {
 }
 
 /// A non-negative byte count.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[garmin_macros::portable(copy, ord, hash)]
 pub struct ByteCount(u64);
 
 impl ByteCount {

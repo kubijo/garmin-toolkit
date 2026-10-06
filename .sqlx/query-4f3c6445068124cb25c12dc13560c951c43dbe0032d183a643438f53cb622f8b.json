@@ -1,0 +1,47 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    last_serial AS serial,\n    (SELECT count(*) FROM artifact_blobs) AS blobs,\n    (SELECT count(*) FROM artifacts) AS artifacts,\n    (SELECT count(*) FROM course_generations) AS generations\nFROM course_serial_counter\nWHERE singleton = 1;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "serial",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "course_serial_counter",
+            "name": "last_serial"
+          }
+        }
+      },
+      {
+        "name": "blobs",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "artifacts",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "generations",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4f3c6445068124cb25c12dc13560c951c43dbe0032d183a643438f53cb622f8b"
+}

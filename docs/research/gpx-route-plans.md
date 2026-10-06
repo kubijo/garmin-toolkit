@@ -8,6 +8,25 @@
 Preserve original GPX bytes because parsing does not retain every extension. Synthetic fixtures cover both GPX versions,
 tracks, segments, routes, optional fields, malformed XML, and invalid geometry.
 
+## Native parser containment
+
+The library constructs a whole document without configurable allocation limits. Native upload workflows use the packaged
+`garmin-gpx-worker`, with the same GPX library inside a separate process. On Linux it installs a 512 MiB address-space
+limit, five seconds of CPU time, and disabled core dumps before reading input. The parent permits one parser at a time,
+applies a ten-second wall deadline, caps input at 16 MiB and output at 32 MiB, and kills/reaps failed or timed-out
+workers. Other platforms currently reject contained parsing rather than falling back to an unlimited host parse. These
+are resource limits, not a filesystem or network sandbox.
+
+The private versioned protocol validates input digest, parser version, candidate uniqueness, geometry, coordinates, and
+elevations. It allows at most 128 candidates, 4096-byte suggested names, and one million route points. `PreparedGpx`
+retains the original bytes and validated document; `Application::import_prepared_route` checks that input binding and
+commits the selected candidate without reparsing. The direct parser/import APIs remain for trusted native callers and
+fixtures; upload adapters must use the contained path.
+
+Tests run the real helper, inspect its installed process limits, exercise rejection and timeout cleanup, reject invalid
+protocol replies, and confirm a contained preview through persisted import and FIT Course generation. Packaging recipes
+include the helper beside both native hosts; rebuilt package acceptance remains pending.
+
 ## Planned-route exports
 
 As of 2026-10-04, [Mapy.com's route-planning help](https://help.mapy.com/route-planning/tools/) documents GPX export.

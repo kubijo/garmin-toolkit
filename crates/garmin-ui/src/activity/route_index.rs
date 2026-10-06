@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use garmin_service_api::ActivitySampleSnapshot;
+use super::map::samples::Samples;
 
 const LEAF_SEGMENTS: usize = 12;
 const MAX_MERCATOR_LATITUDE: f64 = 85.051_128_78;
@@ -15,7 +15,7 @@ pub(super) struct RouteIndex {
 }
 
 impl RouteIndex {
-    pub(super) fn new(samples: &[ActivitySampleSnapshot], sample_offset: usize) -> Self {
+    pub(super) fn new(samples: Samples<'_>, sample_offset: usize) -> Self {
         let mut points = Vec::with_capacity(samples.len());
         let mut previous_longitude: Option<f64> = None;
         let mut unwrapped_longitude = 0.0;

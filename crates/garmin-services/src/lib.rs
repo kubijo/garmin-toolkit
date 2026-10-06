@@ -4,6 +4,7 @@ pub mod deployment;
 pub mod devices;
 pub mod maps;
 pub mod paths;
+pub mod routes;
 pub mod snapshots;
 
 use garmin_fit::{CreatorDiagnostics, NormalizedActivity};
@@ -17,7 +18,7 @@ use garmin_model::{
     artifact::{AcquisitionOperationId, ArtifactId, NormalizationFailure, SourceIdentity},
     identity::{DisplayName, Profile, ProfilePreferences, Role, Source, User, UserId},
     observation::ObservationId,
-    route::{RouteName, RoutePlanId, RouteSport},
+    route::{RouteName, RoutePlanId, RoutePlanRevision, RoutePlanRevisionId, RouteSport},
     value::Timestamp,
 };
 use garmin_storage::{
@@ -292,7 +293,6 @@ impl Application {
         if request.user.user_id() != request.source.owner_id() {
             return Err(garmin_importer::RouteImportError::ActorCannotUseSource.into());
         }
-        self.storage.save_source(request.source).await?;
         Ok(RouteImporter::new(&self.storage)
             .import(ImporterRouteRequest::from_parts(
                 request.user.user_id(),
@@ -327,6 +327,20 @@ impl Application {
         plan_id: RoutePlanId,
     ) -> Result<Option<StoredRoutePlan>, Error> {
         Ok(self.storage.route_plan(user.user_id(), plan_id).await?)
+    }
+
+    /// Loads an exact immutable route revision within the user's scope.
+    /// # Errors
+    /// [`enum@Error`] when persisted route data cannot be loaded.
+    pub async fn route_revision(
+        &self,
+        user: UserContext,
+        revision_id: RoutePlanRevisionId,
+    ) -> Result<Option<RoutePlanRevision>, Error> {
+        Ok(self
+            .storage
+            .route_revision(user.user_id(), revision_id)
+            .await?)
     }
 
     /// Confirms direct lines between an unresolved route's control points.
@@ -594,6 +608,8 @@ pub enum Error {
     RoutePlanNotFound(RoutePlanId),
     #[error(transparent)]
     RouteTransformation(#[from] garmin_route::Error),
+    #[error(transparent)]
+    CourseEncoding(#[from] garmin_fit::course::Error),
 }
 
 #[cfg(test)]

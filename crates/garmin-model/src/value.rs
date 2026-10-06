@@ -107,6 +107,19 @@ pub struct ComponentVersion {
     version: Version,
 }
 
+impl Serialize for ComponentVersion {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (self.name(), self.version().to_string()).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ComponentVersion {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (name, version) = <(String, String)>::deserialize(deserializer)?;
+        Self::from_parts(name, version.parse().map_err(D::Error::custom)?).map_err(D::Error::custom)
+    }
+}
+
 impl ComponentVersion {
     /// Creates a versioned component identity.
     /// # Errors

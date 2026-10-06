@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE course_serial_counter\nSET last_serial = last_serial + 1\nWHERE singleton = 1 AND last_serial < 4294967295\nRETURNING last_serial;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "last_serial",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "course_serial_counter",
+            "name": "last_serial"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4364a509e8f39545c933c049c739cab73b78898ba8d8d6bc2ac6b9fc179a935d"
+}

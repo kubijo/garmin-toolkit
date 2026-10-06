@@ -38,15 +38,29 @@ Real device files stay ignored. They extend support only through a synthetic reg
 
 ## Development corpus
 
-`garmin-fixtures` seeds three fake profiles and six generated run, ride, and swim files through the production importer
-and storage APIs. Four outdoor activities contain real route geometry and varied chart data; a sensor-rich indoor ride
-contains speed, cadence, and power. Stable IDs make the seed idempotent.
+`garmin-fixtures` seeds three fake profiles and eight FIT files from recorded runs, rides, a swim, a walk, and a hike
+through the production importer and storage APIs. Outdoor activities contain real route geometry; a sensor-rich indoor
+ride contains speed, cadence, and power. Stable IDs make the seed idempotent.
 
-The compact normalized recordings are derived from the GPL-3-licensed real-data examples in `trackeR` 1.6.1. Source
-timestamps, athlete identity, and device identity are discarded; the generated FIT files use deterministic 2026 dates
-and fake device metadata. [`fixture.toml`](../../infra/fixtures/fit/development-activities/fixture.toml) pins the CRAN
-archive, every selected member, generator, transformation, committed-input hash, and expected output case. Generated FIT
-files and databases remain build products rather than committed binaries.
+Alex also starts with three saved routes: City ride, Neighborhood walk, and Mountain hike. The seed exports geometry and
+elevation from those same normalized recordings to GPX using the `gpx` writer, then saves them through the production
+route importer. These are identified as demo recording exports, not original upstream GPX files. Repeated seeding
+preserves their import receipts and any later route edits. Sam and Taylor retain empty route libraries for empty-state
+coverage; the recorded activity assignments are unchanged.
+
+The compact normalized recordings come from the GPL-3-licensed real-data examples in `trackeR` 1.6.1, Sam Swift's
+MIT-licensed DogWalkGPS recordings, and HikeAlong's CC-BY-4.0 watch recordings. Source timestamps, athlete identity, and
+device identity are discarded; the generated FIT files use deterministic 2026 dates and fake device metadata.
+[`fixture.toml`](../../infra/fixtures/fit/development-activities/fixture.toml) pins the CRAN archive, every selected
+member, generator, transformation, committed-input hash, and expected output case. Generated FIT files and databases
+remain build products rather than committed binaries. Additional source URLs, revisions, licenses, and hashes are in the
+same manifest; attribution is in `THIRD_PARTY_NOTICES.md`.
+
+Regenerate the additional recordings from the exact hash-verified downloads listed in the manifest:
+
+```sh
+python3 infra/fixtures/fit/development-activities/generate.py --walking-hiking walk.gpx hike.gpx
+```
 
 Community files help select missing cases. A case becomes durable only after it is recreated synthetically or cleared
 for redistribution with its provenance intact.

@@ -17,6 +17,7 @@ garmin-fit = { workspace = true, features = ["test-fixtures"] }
 garmin-importer.workspace = true
 garmin-model.workspace = true
 garmin-storage.workspace = true
+gpx-format.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

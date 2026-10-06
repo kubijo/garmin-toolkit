@@ -838,6 +838,8 @@ const fn sport(value: typedef::Sport) -> Result<ActivitySport, ActivityError> {
         typedef::Sport::RUNNING => Ok(ActivitySport::Running),
         typedef::Sport::CYCLING => Ok(ActivitySport::Cycling),
         typedef::Sport::SWIMMING => Ok(ActivitySport::Swimming),
+        typedef::Sport::WALKING => Ok(ActivitySport::Walking),
+        typedef::Sport::HIKING => Ok(ActivitySport::Hiking),
         _ => Err(ActivityError::UnsupportedSport(value.0)),
     }
 }

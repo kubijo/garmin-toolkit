@@ -186,26 +186,27 @@ fn invalid(case: ActivityCase, reason: impl std::fmt::Display) -> EncodingError 
     EncodingError(format!("{}: {reason}", case.file_name()))
 }
 
+macro_rules! recording {
+    ($name:literal) => {
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../infra/fixtures/fit/development-activities/recordings/",
+            $name,
+            ".csv.gz"
+        ))
+    };
+}
+
 const fn bytes(case: ActivityCase) -> &'static [u8] {
     match case {
-        ActivityCase::ForestRun => include_bytes!(
-            "../../../../infra/fixtures/fit/development-activities/recordings/forest-run.csv.gz"
-        ),
-        ActivityCase::CoastalRun => include_bytes!(
-            "../../../../infra/fixtures/fit/development-activities/recordings/coastal-run.csv.gz"
-        ),
-        ActivityCase::CityRun => include_bytes!(
-            "../../../../infra/fixtures/fit/development-activities/recordings/city-run.csv.gz"
-        ),
-        ActivityCase::CityRide => include_bytes!(
-            "../../../../infra/fixtures/fit/development-activities/recordings/city-ride.csv.gz"
-        ),
-        ActivityCase::OpenWaterSwim => include_bytes!(
-            "../../../../infra/fixtures/fit/development-activities/recordings/open-water-swim.csv.gz"
-        ),
-        ActivityCase::IndoorPowerRide => include_bytes!(
-            "../../../../infra/fixtures/fit/development-activities/recordings/indoor-power-ride.csv.gz"
-        ),
+        ActivityCase::ForestRun => recording!("forest-run"),
+        ActivityCase::CoastalRun => recording!("coastal-run"),
+        ActivityCase::CityRun => recording!("city-run"),
+        ActivityCase::CityRide => recording!("city-ride"),
+        ActivityCase::OpenWaterSwim => recording!("open-water-swim"),
+        ActivityCase::IndoorPowerRide => recording!("indoor-power-ride"),
+        ActivityCase::NeighborhoodWalk => recording!("neighborhood-walk"),
+        ActivityCase::MountainHike => recording!("mountain-hike"),
     }
 }
 
@@ -216,6 +217,8 @@ mod tests {
     #[test]
     fn every_approved_recording_is_ordered_and_complete() -> Result<(), EncodingError> {
         let expectations = [
+            (ActivityCase::NeighborhoodWalk, 370, 3_107, 3_842.57),
+            (ActivityCase::MountainHike, 2_271, 11_374, 12_571.48),
             (ActivityCase::ForestRun, 781, 3_931, 14_134.31),
             (ActivityCase::CoastalRun, 241, 1_185, 5_048.28),
             (ActivityCase::CityRun, 1_025, 5_234, 14_793.04),

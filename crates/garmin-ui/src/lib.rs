@@ -36,6 +36,7 @@ pub mod profile;
 pub mod profile_settings;
 pub mod progress;
 pub mod radio;
+pub mod routes;
 pub mod select;
 pub mod semantics;
 pub mod shell;

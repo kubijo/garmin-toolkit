@@ -109,7 +109,9 @@ fn activity_map_captures_current_camera_on_first_frame_and_after_refit() {
                     ui,
                     &Props {
                         label: "Activity map",
-                        recording: &recording,
+                        samples: crate::activity::map::samples::Samples::Activity(
+                            &recording.samples,
+                        ),
                         selected_coordinate: None,
                         sample_range: 0..=0,
                         highlighted_range: None,
@@ -189,7 +191,7 @@ fn first_gpu_scene_reports_label_work_before_painting() {
     let viewport = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(320.0, 240.0));
     let route = super::super::map::gpu_map::RouteScene {
         key: "empty",
-        samples: &[],
+        samples: crate::activity::map::samples::Samples::Projected(&[]),
         sample_offset: 0,
         highlighted_range: None,
         color: Color32::GREEN,

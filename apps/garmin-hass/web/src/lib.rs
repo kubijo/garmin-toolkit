@@ -9,6 +9,7 @@ mod files;
 mod map_composition;
 mod map_worker;
 mod maps;
+mod routes;
 mod window;
 mod window_channel;
 mod window_client;
@@ -191,6 +192,7 @@ struct App {
     activity_presentations: Vec<activity::Presentation>,
     activity_detail: Option<Rc<ActivityDetailSnapshot>>,
     activity_workspace: activity::Workspace,
+    route_workspace: garmin_ui::routes::Workspace,
     map_runtime: activity::map_runtime::MapRuntimeHandle,
     applied_preferences: Option<(UserId, ProfilePreferences)>,
     avatar_editor: Option<AvatarEditor>,
@@ -241,6 +243,7 @@ impl App {
             upload_events: map_upload_telemetry,
         });
         let activity_workspace = activity::Workspace::new(&map_runtime);
+        let route_workspace = garmin_ui::routes::Workspace::new(&map_runtime);
         Ok(Self {
             _map_session: map_session,
             developer: developer::Host::new(context.clone()),
@@ -262,6 +265,7 @@ impl App {
             activity_presentations: Vec::new(),
             activity_detail: None,
             activity_workspace,
+            route_workspace,
             map_runtime,
             applied_preferences: None,
             avatar_editor: None,
@@ -409,10 +413,7 @@ impl App {
                     );
                     return None;
                 }
-                if let Some(notice) = notice {
-                    notification::show(ui, &notice.props());
-                    ui.add_space(12.0);
-                }
+                show_notice(ui, notice);
                 profile::chooser(
                     ui,
                     &profile::ChooserProps {
@@ -485,11 +486,18 @@ impl App {
                 window_controls: None,
             },
             |ui| {
-                if let Some(notice) = notice {
-                    notification::show(ui, &notice.props());
-                    ui.add_space(12.0);
-                }
+                show_notice(ui, notice);
                 match &self.page {
+                    Page::Routes => {
+                        routes::show(
+                            ui,
+                            &self.intl,
+                            &self.shared,
+                            &mut self.route_workspace,
+                            current_profile.user.id(),
+                        );
+                        PageAction::Routes
+                    }
                     Page::Activities => PageAction::Activities(show_activities(
                         ui,
                         &self.intl,
@@ -666,7 +674,8 @@ impl App {
                     });
                 }
             }
-            PageAction::Maps(None)
+            PageAction::Routes
+            | PageAction::Maps(None)
             | PageAction::Backup(None)
             | PageAction::Activities(None)
             | PageAction::Settings(None)
@@ -806,6 +815,7 @@ impl App {
                 self.profile_menu_expanded = false;
             }
             Some(shell::Action::Profile(profile::Action::Logout)) => {
+                self.shared.borrow_mut().routes.invalidate();
                 self.selected_profile = None;
                 self.page = Page::Activities;
                 self.profile_menu_expanded = false;
@@ -815,6 +825,7 @@ impl App {
     }
 
     fn select_profile(&mut self, index: usize, profiles: &[ProfileSnapshot]) {
+        self.shared.borrow_mut().routes.invalidate();
         let Some(profile) = profiles.get(index) else {
             return;
         };
@@ -1422,6 +1433,7 @@ impl eframe::App for App {
 }
 
 enum PageAction {
+    Routes,
     Maps(Option<(uuid::Uuid, garmin_service_api::maps::Command)>),
     Backup(Option<garmin_ui::backup::Action>),
     Activities(Option<activity::Action>),
@@ -1430,6 +1442,13 @@ enum PageAction {
         key: String,
         action: Option<device::Action>,
     },
+}
+
+fn show_notice(ui: &mut Ui, notice: Option<&Notice>) {
+    if let Some(notice) = notice {
+        notification::show(ui, &notice.props());
+        ui.add_space(16.0);
+    }
 }
 
 fn pairing_expectation(snapshot: &DeviceSnapshot, user_id: UserId) -> Option<PairingExpectation> {
@@ -1537,6 +1556,7 @@ fn set_profile_preferences(snapshot: &mut ProfileSnapshot, preferences: ProfileP
     reason = "profile readiness and three independent asynchronous operations may overlap"
 )]
 struct State {
+    routes: routes::Controller,
     epoch: Option<String>,
     backup: backup::Controller,
     maps: maps::Controller,
@@ -2481,6 +2501,7 @@ async fn next_connection_event(
 fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     let mut state = shared.borrow_mut();
     state.client = None;
+    state.routes.disconnect();
     state.logs = None;
     state.interrupt_device_browser_operation();
     state.device_catalog_request.invalidate();

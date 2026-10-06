@@ -33,17 +33,21 @@ pub enum ActivityCase {
     CityRide,
     OpenWaterSwim,
     IndoorPowerRide,
+    NeighborhoodWalk,
+    MountainHike,
 }
 
 impl ActivityCase {
     /// Complete public demo corpus.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::ForestRun,
         Self::CoastalRun,
         Self::CityRun,
         Self::CityRide,
         Self::OpenWaterSwim,
         Self::IndoorPowerRide,
+        Self::NeighborhoodWalk,
+        Self::MountainHike,
     ];
 
     #[must_use]
@@ -55,6 +59,8 @@ impl ActivityCase {
             Self::CityRide => "2026-09-12-city-ride.fit",
             Self::OpenWaterSwim => "2026-09-14-open-water-swim.fit",
             Self::IndoorPowerRide => "2026-09-09-indoor-power-ride.fit",
+            Self::NeighborhoodWalk => "2026-09-15-neighborhood-walk.fit",
+            Self::MountainHike => "2026-09-16-mountain-hike.fit",
         }
     }
 
@@ -67,6 +73,8 @@ impl ActivityCase {
             Self::CityRide => 1_789_226_100,
             Self::OpenWaterSwim => 1_789_396_200,
             Self::IndoorPowerRide => 1_788_948_000,
+            Self::NeighborhoodWalk => 1_789_452_000,
+            Self::MountainHike => 1_789_538_400,
         }
     }
 
@@ -87,6 +95,8 @@ impl ActivityCase {
             Self::ForestRun | Self::CoastalRun | Self::CityRun => typedef::Sport::RUNNING,
             Self::CityRide | Self::IndoorPowerRide => typedef::Sport::CYCLING,
             Self::OpenWaterSwim => typedef::Sport::SWIMMING,
+            Self::NeighborhoodWalk => typedef::Sport::WALKING,
+            Self::MountainHike => typedef::Sport::HIKING,
         }
     }
 
@@ -98,6 +108,8 @@ impl ActivityCase {
             Self::CityRide => 11_963,
             Self::OpenWaterSwim => 2_085,
             Self::IndoorPowerRide => 3_600,
+            Self::NeighborhoodWalk => 3_107,
+            Self::MountainHike => 11_374,
         }
     }
 }

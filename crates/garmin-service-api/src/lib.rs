@@ -4,6 +4,7 @@ pub mod control;
 pub mod files;
 pub mod logging;
 pub mod maps;
+pub mod routes;
 pub mod snapshots;
 
 use camino::Utf8PathBuf;
@@ -310,6 +311,15 @@ mod rpc {
 
     #[rtc::remote]
     pub trait ApplicationService {
+        async fn routes(
+            &self,
+            user_id: UserId,
+        ) -> Result<Result<crate::routes::RouteServiceClient, String>, rtc::CallError>;
+        async fn route_download(
+            &self,
+            user_id: UserId,
+            artifact: garmin_model::artifact::ArtifactId,
+        ) -> Result<Result<DownloadTicket, String>, rtc::CallError>;
         async fn maps(
             &self,
             device_key: String,

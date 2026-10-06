@@ -10,6 +10,10 @@ use crate::{
     value::{Timestamp, Transformation},
 };
 
+mod import;
+
+pub use import::{RouteCandidateSource, RouteImportIdentity, RouteImportReceipt};
+
 define_id!(
     RoutePlanIdKind,
     RoutePlanId,
@@ -30,6 +34,21 @@ text_value!(
     Error,
     Error::EmptyRouteName,
     "A route-plan revision name."
+);
+
+define_id!(
+    CourseGenerationIdKind,
+    CourseGenerationId,
+    "course-generation",
+    "Type marker for generated Course IDs.",
+    "One immutable generated Course version."
+);
+define_id!(
+    CourseGenerationOperationIdKind,
+    CourseGenerationOperationId,
+    "course-generation-operation",
+    "Type marker for Course generation operation IDs.",
+    "A host-issued identity shared by retries of one Course generation."
 );
 text_value!(
     CueText,
@@ -123,8 +142,15 @@ impl fmt::Display for Longitude {
 }
 
 /// Elevation in canonical meters.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[garmin_macros::portable(copy, custom_deserialize)]
 pub struct Elevation(f64);
+
+impl<'de> serde::Deserialize<'de> for Elevation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let meters = <f64 as serde::Deserialize>::deserialize(deserializer)?;
+        Self::from_meters(meters).map_err(serde::de::Error::custom)
+    }
+}
 
 impl Elevation {
     /// Validates a finite meter value.
@@ -211,7 +237,7 @@ impl fmt::Display for Coordinate {
 }
 
 /// One point in route geometry or an unresolved control-point sequence.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[garmin_macros::portable(copy)]
 pub struct RoutePoint {
     coordinate: Coordinate,
     elevation: Option<Elevation>,
@@ -284,10 +310,12 @@ impl RouteShape {
 }
 
 /// Supported route-planning sport.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[garmin_macros::portable(copy, hash)]
 pub enum RouteSport {
     Cycling,
     Running,
+    Walking,
+    Hiking,
 }
 
 /// A zero-based route-point index.
@@ -537,7 +565,8 @@ impl RoutePlan {
 }
 
 /// Invalid route-plan data.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+#[garmin_macros::portable(copy, eq)]
+#[derive(Error)]
 pub enum Error {
     #[error("route name cannot be blank")]
     EmptyRouteName,

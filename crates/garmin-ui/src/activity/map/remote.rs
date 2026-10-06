@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
+use super::samples::{MapSample, Samples};
 use egui::{Rect, Ui};
-use garmin_service_api::ActivitySampleSnapshot;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -14,7 +14,7 @@ use crate::activity::map_runtime::MapRuntimeHandle;
 
 const MAX_ROUTE_BYTES: usize =
     crate::activity::map_runtime::BrowserWorkerTaskKind::Route.result_byte_limit();
-const MAX_ROUTE_SAMPLES: usize = MAX_ROUTE_BYTES / std::mem::size_of::<ActivitySampleSnapshot>();
+const MAX_ROUTE_SAMPLES: usize = MAX_ROUTE_BYTES / std::mem::size_of::<MapSample>();
 const MAX_VIEW_BYTES: usize = 1536;
 
 /// Main-thread integration. Browser objects must remain outside this typed plugin.
@@ -60,7 +60,7 @@ impl RemoteMapPlugin {
     ) {
         let source = (
             route.key.to_owned(),
-            route.samples.as_ptr() as usize,
+            route.samples.identity(),
             route.samples.len(),
             route.sample_offset,
         );
@@ -74,7 +74,7 @@ impl RemoteMapPlugin {
                 self.host.fail("remote route revision exhausted");
                 return;
             };
-            let bytes = match postcard::to_allocvec(route.samples) {
+            let bytes = match postcard::to_allocvec(&route.samples.iter().collect::<Vec<_>>()) {
                 Ok(bytes) if bytes.len() <= MAX_ROUTE_BYTES => bytes,
                 _ => {
                     self.host.fail("remote route exceeded its transfer limit");
@@ -171,7 +171,7 @@ impl View {
 pub struct MapSurface {
     readiness: String,
     surface: MapSurfaceHandle,
-    samples: Vec<ActivitySampleSnapshot>,
+    samples: Vec<MapSample>,
     revision: u32,
     key: String,
     view: Option<View>,
@@ -206,8 +206,7 @@ impl MapSurface {
                 return Err("remote route exceeded its sample retention limit".to_owned());
             }
             let (samples, trailing) =
-                postcard::take_from_bytes::<Vec<ActivitySampleSnapshot>>(bytes)
-                    .map_err(|e| e.to_string())?;
+                postcard::take_from_bytes::<Vec<MapSample>>(bytes).map_err(|e| e.to_string())?;
             if !trailing.is_empty() {
                 return Err("remote route has trailing data".to_owned());
             }
@@ -249,7 +248,7 @@ impl MapSurface {
         let colors = MapColors::new(ui);
         let route = gpu_map::RouteScene {
             key: &self.key,
-            samples: &self.samples,
+            samples: Samples::Projected(&self.samples),
             sample_offset: view.offset,
             highlighted_range: view.highlighted.map(|[a, b]| a..=b),
             color: colors.route,
@@ -311,7 +310,7 @@ mod tests {
         let runtime = MapRuntimeHandle::new(NoTiles, Renderer::software());
         let mut surface = MapSurface::new(&runtime);
         assert!(surface.update(&view(1), None).is_err());
-        let empty = postcard::to_allocvec(&Vec::<ActivitySampleSnapshot>::new()).unwrap();
+        let empty = postcard::to_allocvec(&Vec::<MapSample>::new()).unwrap();
         surface.update(&view(1), Some(&empty)).unwrap();
         surface.update(&view(1), None).unwrap();
         assert!(surface.update(&view(1), Some(&empty)).is_err());

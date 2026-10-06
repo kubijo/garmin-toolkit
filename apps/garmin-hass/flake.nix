@@ -53,7 +53,7 @@
             nativeArgs
             // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
             // {
-              cargoExtraArgs = "-p garmin-hass --all-features";
+              cargoExtraArgs = "-p garmin-hass -p garmin-gpx-worker --all-features";
               pname = "garmin-hass-deps";
             }
           );
@@ -105,7 +105,8 @@
           mkPackage =
             { demo }:
             let
-              cargoExtraArgs = "-p garmin-hass" + lib.optionalString demo " --features demo";
+              cargoExtraArgs =
+                "-p garmin-hass -p garmin-gpx-worker" + lib.optionalString demo " --features garmin-hass/demo";
               runtimeWrapperArgs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [
                 "--prefix"
                 "GIO_EXTRA_MODULES"
@@ -157,6 +158,8 @@
           check = pkgs.runCommandLocal "check-garmin-toolkit-hass" { } ''
             test -x ${package}/bin/garmin-hass
             test -x ${demoPackage}/bin/garmin-hass
+            test -x ${package}/bin/garmin-gpx-worker
+            test -x ${demoPackage}/bin/garmin-gpx-worker
             test -f ${package}/share/garmin-hass/icon.png
             test -f ${package}/share/garmin-hass/logo.png
             test -f ${demoPackage}/share/garmin-hass/icon.png
