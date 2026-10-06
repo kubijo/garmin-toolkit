@@ -16,7 +16,7 @@ async fn timeout_kills_and_reaps_the_worker_and_releases_capacity() -> TestResul
     std::fs::write(
         &executable,
         format!(
-            "#!/bin/sh\necho $$ > '{}'\nexec /bin/sleep 30\n",
+            "#!/bin/sh\necho $$ > '{}'\nexec sleep 30\n",
             pid_file.display()
         ),
     )?;
@@ -25,10 +25,8 @@ async fn timeout_kills_and_reaps_the_worker_and_releases_capacity() -> TestResul
         executable,
         timeout: Duration::from_millis(100),
     };
-    assert!(matches!(
-        parser.parse(Arc::from([])).await,
-        Err(Error::Timeout)
-    ));
+    let result = parser.parse(Arc::from([])).await;
+    assert!(matches!(result, Err(Error::Timeout)), "{result:?}");
     let pid: u32 = std::fs::read_to_string(pid_file)?.trim().parse()?;
     assert!(!Path::new(&format!("/proc/{pid}")).exists());
     assert_eq!(PARSER_SLOT.available_permits(), 1);
