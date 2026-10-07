@@ -157,6 +157,7 @@ mod tests {
         let window = Arc::new(WindowRequests {
             closed: AtomicBool::new(false),
             redraw_requested: AtomicBool::new(false),
+            redraw_without_callback: AtomicBool::new(false),
         });
         let target = Arc::downgrade(&window);
         let now = Instant::now();

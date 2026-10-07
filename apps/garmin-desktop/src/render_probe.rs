@@ -78,6 +78,7 @@ pub fn run() -> Result<()> {
             control_server: true,
         },
         logs.clone(),
+        None,
     )?;
     let adapter = renderer.state.adapter.get_info();
     let description = format!(

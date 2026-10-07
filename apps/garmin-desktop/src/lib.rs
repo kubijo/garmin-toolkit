@@ -89,7 +89,7 @@ pub fn run_with_options(options: Options) -> Result<(), Error> {
         Box::new(move |creation| {
             garmin_ui::install(&creation.egui_ctx);
             window::install(&creation.egui_ctx);
-            developer::install(&creation.egui_ctx, options, logs)?;
+            developer::install(&creation.egui_ctx, options, logs, creation.winit_window())?;
             garmin_ui::developer::state(&creation.egui_ctx)
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)

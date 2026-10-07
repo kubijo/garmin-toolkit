@@ -30,3 +30,11 @@ vendored crate's own unit tests.
 Both workspace and gallery manifests patch winit to this directory. Nix includes the complete directory
 in build and license sources. Remove the patch when an upstream release provides equivalent activation
 from recent input on another application window.
+
+## Bounded redraw override for covered windows
+
+`WindowExtWayland::request_redraw_without_frame_callback` grants one coalesced redraw past the compositor callback gate,
+preserving outstanding callbacks and ordinary redraw throttling. It wakes the event loop without focusing the window;
+callers must pace requests. X11 is a no-op. The desktop adapter's lifetime and verification limits are documented in
+`docs/architecture/developer-tools.md` at the repository root. The `redraw_tests` unit test runs separately from workspace
+QA.

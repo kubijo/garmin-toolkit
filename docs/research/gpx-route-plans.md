@@ -25,7 +25,11 @@ fixtures; upload adapters must use the contained path.
 
 Tests run the real helper, inspect its installed process limits, exercise rejection and timeout cleanup, reject invalid
 protocol replies, and confirm a contained preview through persisted import and FIT Course generation. Packaging recipes
-include the helper beside both native hosts; rebuilt package acceptance remains pending.
+include the helper beside both native hosts; HASS acceptance remains in the watch plan.
+
+Demo AppImage acceptance on 2026-10-06 passed GPX import/preview, byte-exact GPX/FIT exports, deletion/cancellation,
+versioned regeneration, and persistence across restart. Fresh-demo seeding and device transfer were not covered.
+Automation verification limits are recorded in [developer tools](../architecture/developer-tools.md).
 
 ## Planned-route exports
 
