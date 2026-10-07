@@ -29,10 +29,10 @@ or dependency configuration.
 Gallery recipes add pinned FormatJS to the executable path, including hot-reload child builds. They retain the caller's
 Rust toolchain and graphics runtime; entering the full Nix development shell remains explicit.
 
-Root and gallery apply the same `vendor/` patches: bounded MVT decoding in `fast-mvt`, Wayland activation in `winit`.
-Each has `PATCHES.md`. Nix sources, license checks, and dependency-cache builds retain full patched sources/manifests.
-Headless Linux GPU checks use pinned Mesa software Vulkan and fail if no adapter exists. Tests use pinned timezone data
-through `TZDIR`, including sandboxed tests and coverage.
+Root and gallery apply the same `vendor/` patches: bounded MVT decoding in `fast-mvt`, Wayland activation and a bounded
+control-request redraw override in `winit`. Each has `PATCHES.md`. Nix sources, license checks, and dependency-cache
+builds retain full patched sources/manifests. Headless Linux GPU checks use pinned Mesa software Vulkan and fail if no
+adapter exists. Tests use pinned timezone data through `TZDIR`, including sandboxed tests and coverage.
 
 CI uses [Magic Nix Cache](https://github.com/DeterminateSystems/magic-nix-cache-action) to cache individual Nix store
 paths in GitHub Actions storage. Completed builds can be saved even when later checks fail; unfinished derivations

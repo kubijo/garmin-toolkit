@@ -1002,10 +1002,12 @@ fn cancelled_background_drag_keeps_frames_until_input_is_released() {
     let report = command(&context, "status", &serde_json::Value::Null).unwrap();
     assert_eq!(report["state"], "cancelled");
     assert_eq!(report["needs_background_frames"], true);
+    assert!(needs_background_frames(&context));
     let _ = frame(&context, 11.0, vec![], "ready");
     assert!(context.plugin::<Driver>().lock().held.is_none());
     let report = command(&context, "status", &serde_json::Value::Null).unwrap();
     assert_eq!(report["needs_background_frames"], false);
+    assert!(!needs_background_frames(&context));
 }
 
 #[test]

@@ -11,6 +11,14 @@ struct RunRequest {
     run_in_background: bool,
 }
 
+/// Whether an explicitly opted-in root run still needs frames, including input release.
+#[must_use]
+pub fn needs_background_frames(context: &Context) -> bool {
+    context
+        .plugin_opt::<Driver>()
+        .is_some_and(|driver| driver.lock().needs_background_frames())
+}
+
 /// Keep eframe UI passes running for explicitly enabled background automation.
 /// Call from the host's raw-input hook, before eframe checks viewport visibility.
 pub fn prepare_background_input(context: &Context, input: &mut egui::RawInput) {

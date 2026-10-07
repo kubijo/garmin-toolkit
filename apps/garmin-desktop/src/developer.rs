@@ -12,6 +12,8 @@ use garmin_ui::developer::{Request, state};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
+mod wake;
+
 #[derive(Clone, Copy, Debug, Default, clap::Parser)]
 pub struct Options {
     /// Enable semantic automation (demo builds only).
@@ -55,6 +57,7 @@ struct PendingCapture {
 struct Bridge {
     sender: mpsc::Sender<Pending>,
     context: egui::Context,
+    wake: wake::Wake,
 }
 
 struct NativeTools {
@@ -65,6 +68,7 @@ struct NativeTools {
     server: Option<tokio::task::JoinHandle<()>>,
     diagnostics: Option<garmin_diagnostics::Diagnostics>,
     observer: Option<garmin_ui::diagnostics::Observer>,
+    wake: wake::Wake,
     #[cfg(feature = "demo")]
     capture: Option<PendingCapture>,
 }
@@ -84,6 +88,7 @@ impl NativeTools {
     }
 
     fn stop_server(&mut self) {
+        self.wake.background(false);
         if let Some(observer) = self.observer.take() {
             observer.stop();
         }
@@ -110,6 +115,7 @@ pub fn install(
     context: &egui::Context,
     options: Options,
     store: garmin_logging::Store,
+    window: Option<&std::sync::Arc<winit::window::Window>>,
 ) -> std::io::Result<()> {
     let runtime = Some(
         tokio::runtime::Builder::new_multi_thread()
@@ -118,6 +124,14 @@ pub fn install(
             .build()?,
     );
     let (sender, receiver) = mpsc::channel(16);
+    let wake = wake::Wake::new(
+        runtime
+            .as_ref()
+            .expect("native runtime is active")
+            .handle()
+            .clone(),
+        window,
+    );
     let mut tools = NativeTools {
         runtime,
         store,
@@ -126,6 +140,7 @@ pub fn install(
         server: None,
         diagnostics: None,
         observer: None,
+        wake,
         #[cfg(feature = "demo")]
         capture: None,
     };
@@ -252,6 +267,7 @@ impl NativeTools {
                     .with_state(Bridge {
                         sender: self.sender.clone(),
                         context: context.clone(),
+                        wake: self.wake.clone(),
                     })
                     .merge(diagnostics.routes());
                 self.diagnostics = Some(diagnostics);
@@ -313,6 +329,15 @@ impl NativeTools {
                 Err("automation requires a demo build".into())
             };
             let _ = pending.response.send(result.map(Reply::Json));
+        }
+        #[cfg(feature = "demo")]
+        {
+            let background =
+                self.server.is_some() && garmin_ui::automation::needs_background_frames(context);
+            // Child-window frames must not extend a stalled root's wake lease.
+            if !background || context.viewport_id() == egui::ViewportId::ROOT {
+                self.wake.background(background);
+            }
         }
         for request in garmin_ui::developer::take_requests(context) {
             match request {
@@ -473,6 +498,7 @@ async fn control(
             .into_response();
     }
     // Either the root or the independent tools viewport can drain the queue.
+    let _wake = bridge.wake.request();
     bridge.context.request_repaint_of(egui::ViewportId::ROOT);
     bridge
         .context
@@ -532,7 +558,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let store = garmin_logging::Store::open(directory.path(), "test").unwrap();
         let context = egui::Context::default();
-        install(&context, Options::default(), store).unwrap();
+        install(&context, Options::default(), store, None).unwrap();
         assert!(state(&context).lock().unwrap().server.is_none());
         state(&context)
             .lock()

@@ -142,36 +142,48 @@ fn section_sequence_waits_for_headers_to_stop_moving() {
 }
 
 #[test]
-fn both_stop_controls_have_unique_targets_and_capture_mouse_and_touch() {
+fn both_stop_controls_capture_mouse_and_touch_while_running_or_paused() {
     for target in ["automation.stop", "developer.automation.stop"] {
-        for touch in [false, true] {
+        for (paused, touch) in [(false, false), (false, true), (true, false), (true, true)] {
             let context = context();
             start(&context);
             for tick in 0..4 {
                 render(&context, tick, vec![], false);
             }
+            if paused {
+                command(&context, "pause", &serde_json::json!(4.0 / 60.0)).unwrap();
+                // Let any input release finish before testing cancellation of a settled pause.
+                for tick in 4..6 {
+                    render(&context, tick, vec![], false);
+                }
+            }
             let point = {
                 let plugin = context.plugin::<Driver>();
                 let driver = plugin.lock();
-                assert!(driver.running(), "{:?}", driver.report().unwrap().failure);
+                assert_eq!(
+                    driver.report().unwrap().state,
+                    if paused { "paused" } else { "running" }
+                );
+                assert!(!driver.release);
                 lookup(driver.tree.as_ref(), target, Rect::EVERYTHING)
                     .unwrap()
                     .unwrap()
                     .0
                     .center()
             };
-            let event = if touch {
-                Event::Touch {
+            let mut events = Vec::new();
+            if touch {
+                events.push(Event::Touch {
                     device_id: egui::TouchDeviceId(0),
                     id: egui::TouchId(0),
                     phase: egui::TouchPhase::Start,
                     pos: point,
                     force: None,
-                }
+                });
             } else {
-                pointer_button(point, true)
-            };
-            render(&context, 4, vec![event], false);
+                events.push(pointer_button(point, true));
+            }
+            render(&context, 6, events, false);
             assert_eq!(
                 context.plugin::<Driver>().lock().report().unwrap().state,
                 "cancelled"
@@ -179,8 +191,105 @@ fn both_stop_controls_have_unique_targets_and_capture_mouse_and_touch() {
             assert!(
                 !context.input(|input| input.pointer.primary_down() || input.pointer.any_click())
             );
+            assert!(context.input(|input| {
+                input.raw.events.iter().all(|event| {
+                    !matches!(event, Event::PointerButton { .. } | Event::Touch { .. })
+                })
+            }));
+            let mut events = Vec::new();
+            if touch {
+                events.push(Event::Touch {
+                    device_id: egui::TouchDeviceId(0),
+                    id: egui::TouchId(0),
+                    phase: egui::TouchPhase::End,
+                    pos: point,
+                    force: None,
+                });
+            } else {
+                events.push(pointer_button(point, false));
+            }
+            render(&context, 7, events, false);
+            assert!(!context.input(|input| input.pointer.any_click()));
         }
     }
+}
+
+#[test]
+fn escape_cancels_a_settled_pause() {
+    let context = context();
+    start(&context);
+    for tick in 0..4 {
+        render(&context, tick, vec![], false);
+    }
+    command(&context, "pause", &serde_json::json!(4.0 / 60.0)).unwrap();
+    render(&context, 4, vec![], false);
+    assert!(!context.plugin::<Driver>().lock().release);
+    render(
+        &context,
+        5,
+        vec![Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }],
+        false,
+    );
+    assert_eq!(
+        context.plugin::<Driver>().lock().report().unwrap().state,
+        "cancelled"
+    );
+    assert!(!context.input(|input| input.key_pressed(egui::Key::Escape)));
+}
+
+#[test]
+fn automated_click_reaches_a_button_under_the_running_status_overlay() {
+    let context = context();
+    let mut clicks = 0;
+    start(&context);
+    for tick in 0..40_u32 {
+        context
+            .run_ui(
+                RawInput {
+                    time: Some(f64::from(tick) / 60.0),
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1100.0, 900.0))),
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    let response = ui.put(
+                        Rect::from_min_size(egui::pos2(1000.0, 64.0), egui::vec2(80.0, 40.0)),
+                        egui::Button::new("Import"),
+                    );
+                    crate::semantics::target(ui, &response, "test.import");
+                    clicks += usize::from(response.clicked());
+                    show_status(ui.ctx());
+                },
+            )
+            .drop_without_applying_deltas();
+        if tick == 3 {
+            let overlay = context
+                .memory(|memory| memory.area_rect(egui::Id::new("automation-status")))
+                .expect("running status overlay");
+            assert!(overlay.contains(egui::pos2(1040.0, 84.0)));
+            context
+                .plugin::<Driver>()
+                .lock()
+                .cancel("overlay positioned");
+            command(
+                &context,
+                "action",
+                &serde_json::json!({"kind": "click", "target": "test.import"}),
+            )
+            .expect("click under overlay");
+        }
+    }
+    assert_eq!(clicks, 1, "the app must receive the reported click");
+    let plugin = context.plugin::<Driver>();
+    let driver = plugin.lock();
+    let report = driver.report().expect("click report");
+    assert_eq!(report.state, "passed", "{:?}", report.failure);
 }
 
 #[test]

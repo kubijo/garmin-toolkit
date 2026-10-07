@@ -58,6 +58,7 @@ walkdir.workspace = true
 winit.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 garmin-fit = { workspace = true, features = ["test-fixtures"] }
 quick-xml.workspace = true
 serde.workspace = true

@@ -81,9 +81,28 @@ impl<T> EventLoopBuilderExtWayland for EventLoopBuilder<T> {
 pub trait WindowExtWayland {
     /// Returns `xdg_toplevel` of the window or [`None`] if the window is X11 window.
     fn xdg_toplevel(&self) -> Option<NonNull<c_void>>;
+
+    /// Request one redraw without waiting for the compositor's frame callback.
+    ///
+    /// Multiple pending requests coalesce. Ordinary redraws continue to wait for frame
+    /// callbacks. Callers must pace repeated requests. Does not focus the window.
+    /// Returns false on X11, where this is a no-op.
+    fn request_redraw_without_frame_callback(&self) -> bool;
 }
 
 impl WindowExtWayland for Window {
+    fn request_redraw_without_frame_callback(&self) -> bool {
+        match &self.window {
+            #[cfg(x11_platform)]
+            crate::platform_impl::Window::X(_) => false,
+            #[cfg(wayland_platform)]
+            crate::platform_impl::Window::Wayland(window) => {
+                window.request_redraw_without_frame_callback();
+                true
+            },
+        }
+    }
+
     #[inline]
     fn xdg_toplevel(&self) -> Option<NonNull<c_void>> {
         #[allow(clippy::single_match)]

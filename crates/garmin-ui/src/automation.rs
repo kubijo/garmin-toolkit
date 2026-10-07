@@ -99,7 +99,7 @@ mod actions;
 mod control;
 mod resize;
 mod scenarios;
-pub use control::{command, prepare_background_input};
+pub use control::{command, needs_background_frames, prepare_background_input};
 pub use resize::{ResizeCommand, ResizeHandler, ResizeRequest};
 #[cfg(test)]
 mod tests;
@@ -922,7 +922,7 @@ impl egui::plugin::Plugin for Driver {
         self.resume_clock(input);
         let started = web_time::Instant::now();
         let was_running = self.running();
-        if was_running || self.release {
+        if was_running || self.paused_at.is_some() || self.release {
             match self.capture_user_input(ctx, input) {
                 Ok(Some(reason)) => self.cancel(reason),
                 Ok(None) => {}
@@ -1027,7 +1027,8 @@ pub fn show_status(context: &Context) {
         .movable(false)
         .resizable(false)
         .collapsible(false)
-        .interactable(running)
+        // Pass synthetic clicks through; the driver captures user Stop/Esc input.
+        .interactable(false)
         .frame(egui::Frame::window(&context.global_style()).multiply_with_opacity(opacity))
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::RIGHT_TOP, [-12.0, 48.0])

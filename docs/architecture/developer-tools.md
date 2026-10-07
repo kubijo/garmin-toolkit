@@ -103,16 +103,19 @@ timer throttling still applies, so the two-second frame/action timing checks are
 overall run timeouts remain enforced. These runs have `performance_eligible: false` and must not be used for performance
 comparisons.
 
-Native desktop automation still requires a visible window: on Wayland, fully covered windows can stop processing control
-commands before a run is admitted. An open, visible Developer tools window can service control requests and its own
-interactions independently; running root actions still requires root frames. The browser fallback does not bypass the
-native redraw gate.
+On Wayland, pending control requests and opted-in background runs can redraw a covered root window without focusing it,
+at up to 30 requests per second. Background permission expires after five seconds without a root frame. Cancellation can
+leave one redraw queued. Minimized windows and hidden child windows are not covered by this guarantee.
+
+Debug-desktop and AppImage acceptance passed covered navigation without polling, cancellation, capture, and Import GPX
+through the status overlay. At 720×480, `stationary-arrival` fails because `map.fit` is clipped.
 
 The runner removes AccessKit's root pixel-scale transform before ordinary egui input injection. Assertions read fresh
 layout after delivery. Deadlines, renderer errors, and readiness failures fail runs. Reports retain target bounds,
 pointer position, viewport/DPR, renderer, readiness, pauses and input/tree CPU. The target/crosshair overlay has no
-input region. CPU excludes AccessKit generation/status/overlay. Browser phase marks poll at 100 ms; Rust timestamps are
-authoritative.
+input region. The status overlay also passes pointer input through; Stop/Esc is captured separately during running and
+paused runs, before synthetic input injection. CPU excludes AccessKit generation/status/overlay. Browser phase marks
+poll at 100 ms; Rust timestamps are authoritative.
 
 ### Scenario runs and profiling
 

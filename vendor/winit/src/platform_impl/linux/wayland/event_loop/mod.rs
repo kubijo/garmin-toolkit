@@ -483,15 +483,20 @@ impl<T: 'static> EventLoop<T> {
                 let mut window =
                     state.windows.get_mut().get_mut(window_id).unwrap().lock().unwrap();
 
-                if window.frame_callback_state() == FrameCallbackState::Requested {
+                let callback_pending =
+                    window.frame_callback_state() == FrameCallbackState::Requested;
+                let Some(mut redraw_requested) = window_requests
+                    .get(window_id)
+                    .unwrap()
+                    .take_redraw_requested(callback_pending)
+                else {
                     return None;
+                };
+
+                // Preserve pending callbacks so pre_present_notify cannot accumulate more.
+                if !callback_pending {
+                    window.frame_callback_reset();
                 }
-
-                // Reset the frame callbacks state.
-                window.frame_callback_reset();
-                let mut redraw_requested =
-                    window_requests.get(window_id).unwrap().take_redraw_requested();
-
                 // Redraw the frame while at it.
                 redraw_requested |= window.refresh_frame();
 

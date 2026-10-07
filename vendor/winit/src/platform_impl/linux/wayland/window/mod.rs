@@ -194,6 +194,7 @@ impl Window {
         let window_requests = WindowRequests {
             redraw_requested: AtomicBool::new(true),
             closed: AtomicBool::new(false),
+            redraw_without_callback: AtomicBool::new(false),
         };
         let window_requests = Arc::new(window_requests);
         state.window_requests.get_mut().insert(window_id, window_requests.clone());
@@ -305,6 +306,12 @@ impl Window {
     #[inline]
     pub fn pre_present_notify(&self) {
         self.window_state.lock().unwrap().request_frame_callback();
+    }
+
+    pub fn request_redraw_without_frame_callback(&self) {
+        self.window_requests.redraw_without_callback.store(true, Ordering::Relaxed);
+        // A normal redraw may already be queued behind a withheld callback.
+        self.event_loop_awakener.ping();
     }
 
     #[inline]
@@ -759,6 +766,9 @@ pub struct WindowRequests {
 
     /// Redraw Requested.
     pub redraw_requested: AtomicBool,
+
+    /// One coalesced redraw permitted without a compositor frame callback.
+    pub redraw_without_callback: AtomicBool,
 }
 
 impl WindowRequests {
@@ -766,8 +776,39 @@ impl WindowRequests {
         self.closed.swap(false, Ordering::Relaxed)
     }
 
-    pub fn take_redraw_requested(&self) -> bool {
-        self.redraw_requested.swap(false, Ordering::Relaxed)
+    pub fn take_redraw_requested(&self, callback_pending: bool) -> Option<bool> {
+        let forced = self.redraw_without_callback.swap(false, Ordering::Relaxed);
+        if callback_pending && !forced {
+            return None;
+        }
+        Some(self.redraw_requested.swap(false, Ordering::Relaxed) | forced)
+    }
+}
+
+#[cfg(test)]
+mod redraw_tests {
+    use super::*;
+
+    #[test]
+    fn one_shot_wake_coalesces_and_then_restores_the_callback_gate() {
+        let requests = WindowRequests {
+            closed: AtomicBool::new(false),
+            redraw_requested: AtomicBool::new(true),
+            redraw_without_callback: AtomicBool::new(false),
+        };
+        assert_eq!(requests.take_redraw_requested(true), None);
+        assert!(requests.redraw_requested.load(Ordering::Relaxed));
+        requests.redraw_without_callback.store(true, Ordering::Relaxed);
+        requests.redraw_without_callback.store(true, Ordering::Relaxed);
+        assert_eq!(requests.take_redraw_requested(true), Some(true));
+        requests.redraw_requested.store(true, Ordering::Relaxed);
+        assert_eq!(requests.take_redraw_requested(true), None);
+        assert!(requests.redraw_requested.load(Ordering::Relaxed));
+        assert_eq!(requests.take_redraw_requested(false), Some(true));
+        assert_eq!(requests.take_redraw_requested(false), Some(false));
+        requests.redraw_without_callback.store(true, Ordering::Relaxed);
+        assert_eq!(requests.take_redraw_requested(true), Some(true));
+        assert_eq!(requests.take_redraw_requested(true), None);
     }
 }
 
