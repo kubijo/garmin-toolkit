@@ -37,10 +37,34 @@ Tooling uses typed CLI definitions (Tyro for Python) and template engines for ge
 string concatenation or interpolation as a templating mechanism. JavaScript is a last-choice tooling language, reserved
 for web work whose production code is already JavaScript.
 
-Python uses Nix-pinned basedpyright in strict mode, with warnings failing the check. The shared configuration in
-`infra/python/pyproject.toml` covers all Python tooling under `infra`, including tests and generators; the root
-`pyrightconfig.json` exposes the same settings to editors. `just qa::preflight` and `just qa::full` check against the
-pinned Python 3.14 environment. Ruff owns Python formatting and linting.
+Python command runners use `infra/python/cli_output.py` for Rich panels, syntax highlighting, and traceback handling.
+Force child-process colors and retain their original output in logs. Display colors only when the terminal supports them
+and no agent environment is detected, or when explicitly forced with `FORCE_COLOR` or `CLICOLOR_FORCE`; strip ANSI
+otherwise. Explicit forcing wins over automatic detection and `NO_COLOR`. Catch expected failures, report them in a
+panel, and preserve subprocess exit codes (124 for timeout, 126/127 for permission/missing executable, 128 + signal for
+interruption). Unexpected failures use Rich tracebacks. Use a known language lexer when displaying code or structured
+data.
+
+Python uses nix-tools' basedpyright and deptry project checks. The basedpyright configuration in
+`infra/python/pyproject.toml` covers Python tooling under `infra`, including tests and generators, in strict mode with
+warnings failing the check. The root `pyrightconfig.json` exposes the same settings to editors. `just qa::preflight` and
+`just qa::full` check types against the pinned Python 3.14 environment and audit declared Python dependencies. Root
+`ruff.toml` configures Python formatting and linting for both editors and QA.
+
+`just dev::outdated` reports Nix inputs, the Python tooling project, and CI actions online. The native Cargo provider
+cannot inspect the patched `vendor/fast-mvt` dependency through cargo-outdated's temporary copy, and the gallery has
+path dependencies outside its own project root, so neither Rust workspace is included in that report. Local Nix inputs
+and UV packages without a reported latest version remain visible as unresolved findings.
+
+For editor import resolution, populate `infra/python/.venv` from the locked tooling dependencies:
+
+```bash
+uv sync --frozen --project infra/python
+```
+
+The root type-checker configuration selects this environment; `infra/python/pyrightconfig.json` inherits it for editors
+that start the language server at the nested Python project. In Zed, select its Python interpreter through
+`toolchain: select` to use the same environment for editor tasks.
 
 ## Documentation ownership
 

@@ -218,15 +218,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1791058745,
-        "narHash": "sha256-XWjvSewc7Vk9NrhO45jZ4leYx9Se3/DXBgeZq6tQqyE=",
+        "lastModified": 1791386606,
+        "narHash": "sha256-AtKsP6qvRWyftXRVeazqwjWWeZ9j704KyP5VNe8xVqY=",
         "owner": "kubijo",
         "repo": "nix-tools",
-        "rev": "0dfac45783879c9ab1cb13740083fe1c903c8964",
+        "rev": "39cc764792894d45242e89827adba8bdac9a3ce9",
         "type": "github"
       },
       "original": {
         "owner": "kubijo",
+        "ref": "v0.9.0",
         "repo": "nix-tools",
         "type": "github"
       }

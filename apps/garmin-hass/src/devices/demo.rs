@@ -89,6 +89,11 @@ impl Source for DemoSource {
         self.inspections.refresh(key)
     }
 
+    fn invalidate_device(&mut self, key: &str) -> Result<(), String> {
+        self.inspections.invalidate(key);
+        Ok(())
+    }
+
     fn snapshot(&mut self) -> Vec<DeviceSnapshot> {
         let _events = self.inspections.poll();
         self.inspections
@@ -188,9 +193,95 @@ fn ensure_device(device_key: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use garmin_service_api::InspectionState;
+    use std::{sync::Mutex, time::Duration};
 
-    use super::{DemoSource, Source};
+    use garmin_device::attachments::Candidate as _;
+    use garmin_model::device::InspectionSection;
+    use garmin_service_api::{ApplicationService as _, InspectionState};
+
+    use super::{DemoSource, Source, attachments, fixture};
+
+    #[tokio::test]
+    async fn pairing_during_inspection_publishes_the_reassigned_marker() {
+        let directory = tempfile::tempdir().unwrap();
+        let storage = crate::prepare_deployment(directory.path()).await.unwrap();
+        let runtime = tokio::runtime::Handle::current();
+        let mut source = DemoSource::new(directory.path().join("device"), runtime.clone()).unwrap();
+        let (started, first_read) = tokio::sync::oneshot::channel();
+        let (release, resume) = std::sync::mpsc::channel();
+        let gate = Mutex::new(Some((started, resume)));
+        source.inspections =
+            attachments::Manager::with_inspector(source.device.clone(), move |candidate| {
+                let metadata = runtime.block_on(garmin_services::devices::inspect_attachment(
+                    &candidate.transport(),
+                    candidate.name(),
+                    candidate.inspect(),
+                ));
+                if let Some((started, resume)) = gate.lock().unwrap().take() {
+                    let _sent = started.send(());
+                    resume
+                        .recv_timeout(Duration::from_secs(5))
+                        .map_err(|error| error.to_string())?;
+                }
+                Ok(metadata)
+            });
+        let host = super::super::Host::new(Box::new(source), storage);
+        let snapshots = host.watch_devices().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), first_read)
+            .await
+            .unwrap()
+            .unwrap();
+        let owner = host
+            .create_profile("Alex Rider".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let other = host
+            .create_profile("Sam Runner".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let digest = fixture::manifest().identity_digest();
+        let paired = host
+            .pair_device(owner.id(), fixture::KEY.to_owned(), digest.clone(), None)
+            .await
+            .unwrap()
+            .unwrap();
+        let reassigned = host
+            .pair_device(other.id(), fixture::KEY.to_owned(), digest, Some(paired))
+            .await
+            .unwrap()
+            .unwrap();
+        release.send(()).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                host.refresh().await;
+                let ready = {
+                    let current = snapshots.borrow().unwrap();
+                    if current[0].inspection == InspectionState::Ready {
+                        let report = current[0].report.as_ref().unwrap();
+                        assert!(
+                            report.toolkit.iter().any(|volume| {
+                                matches!(&volume.marker, InspectionSection::Available(marker)
+                                if marker == &reassigned)
+                            }),
+                            "an inspection started before pairing must not publish stale state"
+                        );
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if ready {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("pairing must schedule an inspection after the in-flight read finishes");
+    }
 
     #[tokio::test]
     async fn snapshot_tracks_detach_and_reconnect_of_the_backing_device() {

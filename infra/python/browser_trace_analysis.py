@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 import tyro
+
 from browser_upload_analysis import UploadAnalysis, analyze_uploads, decode_mark_detail, finite_number
 from json_data import is_array, is_object
 

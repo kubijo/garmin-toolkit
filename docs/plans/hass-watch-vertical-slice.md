@@ -9,9 +9,11 @@ browser disconnect. Device reassociation has [demo acceptance](../research/usb-s
 
 ## Remaining work
 
-1. Finish acceptance of the shared **Routes** workflow: GPX upload, exact candidate preview, explicit name/sport, saved
-   route, versioned FIT Course generation, and original/Course downloads. The implementation uses the
-   [route client contract](../architecture/storage.md#route-client-workflow); package and live acceptance remain open.
+1. Complete live restore coverage for active Course encoding and streaming downloads. Packaged HASS import/download,
+   upload interruption, profile switching during upload, lost-response retries, restore with queued confirmation,
+   generation or download, and host restart/reseeding have
+   [asserted VM coverage](../../infra/integration/hass/README.md). Retain the
+   [route client contract](../architecture/storage.md#route-client-workflow).
 2. Transfer one selected Course artifact after preflight and confirmation; record readback and firmware acceptance.
    Cleanup requires separate consent. Verify disconnect/recovery without unintended mutation.
 3. Integrate Home Assistant host backups with the managed deployment and verify recovery of its selected storage

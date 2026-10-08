@@ -1,6 +1,7 @@
 {
   lib,
   nix-tools,
+  nodejs,
   pkgs,
   pythonToolsEnv,
   system,
@@ -8,7 +9,7 @@
   workspaceSrc,
 }:
 let
-  pythonConfig = ../python/pyproject.toml;
+  pythonConfig = ../../ruff.toml;
   sqlFluffConfig = ../sqlfluff/pyproject.toml;
   allFormatters = {
     # The pinned formatter set has no WGSL formatter; Naga validates this shader when WGPU builds it.
@@ -58,8 +59,26 @@ let
       "vendor/**"
     ];
     format = allFormatters;
-    inherit (pkgs) nodejs;
+    inherit nodejs;
+    outdated = {
+      uv.projects.tooling.root = "infra/python";
+      githubActions = true;
+    };
     lint = {
+      basedpyright.projects.tooling = {
+        configFile = "infra/python/pyproject.toml";
+        python = pythonToolsEnv;
+        reporter = "rich";
+      };
+      deptry.projects.tooling = {
+        root = ".";
+        configFile = "infra/python/pyproject.toml";
+        sourceRoots = [
+          "infra/python"
+          "infra/licenses"
+          "infra/fixtures/fit/development-activities"
+        ];
+      };
       grit.profiles = {
         extractable-messages = {
           patterns = ../grit/extractable-messages;
@@ -99,15 +118,18 @@ let
       nix = true;
       python.configFile = pythonConfig;
       extraProjectCheckers = {
+        integration-harness-tests.command = pkgs.writeShellScript "integration-harness-tests" ''
+          exec ${lib.getExe nodejs} infra/integration/hass/faults.test.mjs
+        '';
         map-worker-tests.command = pkgs.writeShellScript "map-worker-tests" ''
-          ${lib.getExe pkgs.nodejs} infra/javascript/test-directory.test.mjs || exit $?
-          ESBUILD=${lib.getExe pkgs.esbuild} ${lib.getExe pkgs.nodejs} infra/javascript/fingerprint-web.test.mjs || exit $?
-          ${lib.getExe pkgs.nodejs} infra/javascript/map-worker.test.mjs || exit $?
-          ${lib.getExe pkgs.nodejs} infra/javascript/map-composition.test.mjs || exit $?
-          ${lib.getExe pkgs.nodejs} infra/javascript/ui-automation.test.mjs || exit $?
-          ${lib.getExe pkgs.nodejs} infra/javascript/diagnostics-view.test.mjs || exit $?
-          ${lib.getExe pkgs.nodejs} infra/javascript/logging.test.mjs || exit $?
-          exec ${lib.getExe pkgs.nodejs} infra/javascript/initializer.test.mjs
+          ${lib.getExe nodejs} infra/javascript/test-directory.test.mjs || exit $?
+          ESBUILD=${lib.getExe pkgs.esbuild} ${lib.getExe nodejs} infra/javascript/fingerprint-web.test.mjs || exit $?
+          ${lib.getExe nodejs} infra/javascript/map-worker.test.mjs || exit $?
+          ${lib.getExe nodejs} infra/javascript/map-composition.test.mjs || exit $?
+          ${lib.getExe nodejs} infra/javascript/ui-automation.test.mjs || exit $?
+          ${lib.getExe nodejs} infra/javascript/diagnostics-view.test.mjs || exit $?
+          ${lib.getExe nodejs} infra/javascript/logging.test.mjs || exit $?
+          exec ${lib.getExe nodejs} infra/javascript/initializer.test.mjs
         '';
         python-lock.command = pkgs.writeShellScript "python-lock-check" ''
           exec ${lib.getExe pkgs.uv} lock --check --offline \
@@ -124,11 +146,6 @@ let
           exec ${pythonToolsEnv}/bin/python -m unittest discover -q \
             --start-directory infra/python \
             --pattern 'test_*.py'
-        '';
-        python-types.command = pkgs.writeShellScript "python-types" ''
-          exec ${lib.getExe pkgs.basedpyright} \
-            --project infra/python \
-            --pythonpath ${pythonToolsEnv}/bin/python
         '';
       };
       shell = true;

@@ -16,7 +16,7 @@ compiler-profile target label *options:
 docs *args:
     @just in-shell nix run {{ flake }}#docs -- "$@"
 
-# Report outdated direct Rust dependencies without changing manifests.
+# Report outdated Nix inputs, Python dependencies, and CI actions.
 outdated *args:
     @just in-shell nix run {{ flake }}#outdated -- "$@"
 

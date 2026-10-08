@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import tyro
+
 from json_data import is_array, is_object
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
