@@ -9,7 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-demo = ["dep:garmin-fixtures"]
+demo = ["dep:garmin-fixtures", "garmin-services/integration-hooks"]
 
 [lints]
 workspace = true

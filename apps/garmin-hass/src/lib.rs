@@ -112,6 +112,16 @@ pub async fn run(browser: BrowserOptions) -> Result<(), Error> {
         Arc::clone(&deployment),
         browser.simulation_write_bytes_per_second,
     );
+    #[cfg(feature = "demo")]
+    if browser.ui_automation
+        && let Some(root) = env::var_os("GARMIN_E2E_GATE_ROOT")
+    {
+        let gate = Arc::new(garmin_services::integration_gate::IntegrationGate::new(
+            root.into(),
+        ));
+        deployment.set_integration_gate(Arc::clone(&gate)).await;
+        devices.set_integration_gate(gate);
+    }
     let map_tiles = garmin_map_tiles::Service::new(data_root.join("cache/activity-map"))?;
     devices.start();
     let result = server::serve(devices, map_tiles, browser).await;

@@ -14,6 +14,28 @@ use garmin_model::{
 const FIXTURE: &[u8] = include_bytes!("fixtures/candidates.gpx");
 
 #[test]
+fn gpx_10_track_is_parsed() -> Result<(), Box<dyn Error>> {
+    let bytes = br#"<gpx xmlns="http://www.topografix.com/GPX/1/0" version="1.0" creator="test">
+        <trk><name>Older walk</name><trkseg>
+            <trkpt lat="50.0755" lon="14.4378"><ele>205.5</ele></trkpt>
+            <trkpt lat="50.0810" lon="14.4510"/>
+        </trkseg></trk>
+    </gpx>"#;
+    let document = parse(bytes)?;
+
+    assert_eq!(document.candidates().len(), 1);
+    assert_eq!(
+        document.candidates()[0]
+            .suggested_name()
+            .map(RouteName::as_str),
+        Some("Older walk")
+    );
+    assert!(document.candidates()[0].shape().is_geometry());
+    assert!(document.rejected().is_empty());
+    Ok(())
+}
+
+#[test]
 fn tracks_remain_separate_and_routes_remain_unresolved() -> Result<(), Box<dyn Error>> {
     let document = parse(FIXTURE)?;
 

@@ -31,6 +31,8 @@ pub(super) struct Prepared {
     operation: Option<Uuid>,
     staged_bytes: u64,
     cleanup: Option<BoxFuture<'static, ()>>,
+    #[cfg(feature = "demo")]
+    integration_gate: Option<Arc<garmin_services::integration_gate::IntegrationGate>>,
 }
 
 impl Prepared {
@@ -80,7 +82,18 @@ impl Prepared {
             operation: None,
             staged_bytes: 0,
             cleanup: None,
+            #[cfg(feature = "demo")]
+            integration_gate: None,
         }
+    }
+
+    #[cfg(feature = "demo")]
+    pub fn with_integration_gate(
+        mut self,
+        gate: Arc<garmin_services::integration_gate::IntegrationGate>,
+    ) -> Self {
+        self.integration_gate = Some(gate);
+        self
     }
 
     pub fn from_file(
@@ -179,6 +192,8 @@ impl Downloads {
                 download: Download {
                     prepared,
                     remaining,
+                    #[cfg(feature = "demo")]
+                    pending_bytes: Bytes::new(),
                     lease: Some(Lease {
                         token,
                         reservations: Arc::clone(&self.reservations),
@@ -235,12 +250,28 @@ impl Drop for Lease {
 pub(super) struct Download {
     prepared: Prepared,
     remaining: u64,
+    #[cfg(feature = "demo")]
+    pending_bytes: Bytes,
     lease: Option<Lease>,
 }
 
 impl Download {
     async fn next(&mut self) -> io::Result<Option<Bytes>> {
-        let Some(bytes) = self.prepared.stream.next().await.transpose()? else {
+        #[cfg(feature = "demo")]
+        if self.remaining < self.prepared.size
+            && let Some(gate) = self.prepared.integration_gate.clone()
+        {
+            gate.checkpoint("course-download-after-first-chunk").await?;
+        }
+        #[cfg(feature = "demo")]
+        let bytes = if self.pending_bytes.is_empty() {
+            self.prepared.stream.next().await.transpose()?
+        } else {
+            Some(std::mem::take(&mut self.pending_bytes))
+        };
+        #[cfg(not(feature = "demo"))]
+        let bytes = self.prepared.stream.next().await.transpose()?;
+        let Some(bytes) = bytes else {
             if self.remaining != 0 {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
@@ -249,13 +280,27 @@ impl Download {
             }
             return Ok(None);
         };
+        #[cfg(feature = "demo")]
+        let bytes = {
+            let mut bytes = bytes;
+            if self.prepared.integration_gate.is_some() && bytes.len() > 4 * 1024 {
+                self.pending_bytes = bytes.split_off(4 * 1024);
+            }
+            bytes
+        };
         if bytes.is_empty() || bytes.len() > CHUNK_BYTES {
             return Err(io::Error::other("invalid download chunk length"));
         }
+        #[cfg(feature = "demo")]
+        let first_chunk = self.remaining == self.prepared.size;
         self.remaining = self
             .remaining
             .checked_sub(bytes.len() as u64)
             .ok_or_else(|| io::Error::other("download exceeded its declared length"))?;
+        #[cfg(feature = "demo")]
+        if first_chunk && let Some(gate) = self.prepared.integration_gate.clone() {
+            gate.checkpoint("course-download").await?;
+        }
         Ok(Some(bytes))
     }
 

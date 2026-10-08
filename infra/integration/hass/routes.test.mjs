@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
     click,
     courseVisible,
@@ -38,6 +39,64 @@ async function generate(f, name) {
     const [course] = f.storage.courses(name);
     await courseVisible(f.page, course);
     return course;
+}
+
+async function prepareRestore(f) {
+    const page = await f.newPage();
+    await run(page, [
+        wait('profile.0'),
+        click('profile.0'),
+        wait('profile.toggle'),
+        click('profile.toggle'),
+        wait('profile.backup'),
+        click('profile.backup'),
+        wait('backup.save'),
+    ]);
+    const archive = await download(page, 'backup.save', f.work);
+    await run(page, [wait('backup.clear'), click('backup.clear'), wait('backup.open')]);
+    await upload(page, archive, 'backup.open');
+    await run(page, [wait('backup.approve')]);
+    return page;
+}
+
+async function assertRestorePending(f, restoring, originalPath) {
+    let settled = false;
+    void restoring.then(
+        () => {
+            settled = true;
+        },
+        () => {
+            settled = true;
+        },
+    );
+    for (let sample = 0; sample < 10; sample++) {
+        await delay(50);
+        assert.equal(settled, false, 'restore completed while the controlled operation was paused');
+        assert.equal(f.storage.path(), originalPath, 'restore switched while the controlled operation was paused');
+    }
+}
+
+async function captureDownloadUrl(page, target) {
+    await page.evaluate(() => {
+        const original = HTMLAnchorElement.prototype.click;
+        HTMLAnchorElement.prototype.click = function () {
+            if (this.pathname.startsWith('/download/')) {
+                window.integrationDownloadUrl = this.href;
+                return;
+            }
+            return original.call(this);
+        };
+        window.restoreAnchorClick = () => {
+            HTMLAnchorElement.prototype.click = original;
+        };
+    });
+    try {
+        await run(page, [click(target)]);
+        await page.waitForFunction(() => !!window.integrationDownloadUrl, null, { polling: 50 });
+        return await page.evaluate(() => window.integrationDownloadUrl);
+    } finally {
+        await page.evaluate(() => window.restoreAnchorClick());
+    }
 }
 
 test('seeded routes, reviewed import, byte-exact exports and versioned deletion', options, async t => {
@@ -297,6 +356,120 @@ for (const pending of ['confirmation', 'generation', 'download']) {
         assert.deepEqual(f.storage.snapshot(), baseline);
     });
 }
+
+test('restore waits for active Course generation and selects only backup data', options, async t => {
+    const f = await fixture(t);
+    const name = 'Neighborhood walk';
+    const baseline = f.storage.snapshot();
+    const backupPage = await prepareRestore(f);
+    await openRoute(f.page, name);
+    await prepareGeneration(f.page);
+    await f.armGate('course-generation');
+    await f.armGate('course-encoded');
+    await f.armGate('restore-blocked');
+    const generating = run(f.page, [click('routes.generate')]).then(
+        () => null,
+        error => error,
+    );
+    await f.waitGate('course-generation');
+    assert.equal(f.storage.courses(name).length, 0);
+    const originalPath = f.storage.path();
+    const restoring = run(backupPage, [click('backup.approve'), wait('backup.restore.acknowledge')]);
+    await f.waitGate('restore-blocked');
+    await assertRestorePending(f, restoring, originalPath);
+    await f.releaseGate('course-generation');
+    await f.waitGate('course-encoded');
+    await assertRestorePending(f, restoring, originalPath);
+    await f.releaseGate('course-encoded');
+    assert.equal(await generating, null);
+    await restoring;
+    assert.notEqual(f.storage.path(), originalPath);
+    assert.deepEqual(f.storage.snapshot(), baseline);
+    await selectProfile(f.page);
+    await openRoute(f.page, name);
+    await prepareGeneration(f.page);
+    await f.armGate('course-generation');
+    const freshGenerating = run(f.page, [click('routes.generate')]);
+    await f.waitGate('course-generation');
+    assert.equal(f.storage.courses(name).length, 0);
+    await f.releaseGate('course-generation');
+    await freshGenerating;
+    await eventually(() => f.storage.courses(name).length === 1, 'Course on restored storage');
+    const [fresh] = f.storage.courses(name);
+    assert.equal(fresh.version, 1, 'generation on restored data starts at the first version');
+});
+
+test('restore waits after the first Course HTTP chunk and delivers exact bytes', options, async t => {
+    const f = await fixture(t);
+    const name = 'Mountain hike';
+    await openRoute(f.page, name);
+    const course = await generate(f, name);
+    const originalBytes = f.storage.artifact(course.artifact_id);
+    assert(originalBytes.length > 4 * 1024, 'Course must span multiple gated HTTP chunks');
+    const baseline = f.storage.snapshot();
+    const backupPage = await prepareRestore(f);
+    await f.armGate('course-download-after-first-chunk');
+    await f.armGate('restore-blocked');
+    const url = await captureDownloadUrl(f.page, `routes.download.${course.id}`);
+    const response = await fetch(url);
+    assert.equal(response.status, 200);
+    const reader = response.body?.getReader();
+    assert(reader, 'Course response has a streaming body');
+    const first = await reader.read();
+    assert.equal(first.done, false);
+    assert(first.value.length > 0, 'the client received the first chunk');
+    await f.waitGate('course-download-after-first-chunk');
+    const originalPath = f.storage.path();
+    const restoring = run(backupPage, [click('backup.approve'), wait('backup.restore.acknowledge')]);
+    await f.waitGate('restore-blocked');
+    try {
+        await assertRestorePending(f, restoring, originalPath);
+    } finally {
+        await f.releaseGate('course-download-after-first-chunk');
+    }
+    const chunks = [Buffer.from(first.value)];
+    for (;;) {
+        const part = await reader.read();
+        if (part.done) break;
+        chunks.push(Buffer.from(part.value));
+    }
+    assert.deepEqual(Buffer.concat(chunks), originalBytes);
+    await restoring;
+    assert.notEqual(f.storage.path(), originalPath);
+    assert.deepEqual(f.storage.snapshot(), baseline);
+    await selectProfile(f.page);
+    await openRoute(f.page, name);
+    await courseVisible(f.page, course);
+});
+
+test('cancelled Course HTTP body releases restore without a gate release', options, async t => {
+    const f = await fixture(t);
+    const name = 'Neighborhood walk';
+    await openRoute(f.page, name);
+    const course = await generate(f, name);
+    const baseline = f.storage.snapshot();
+    const backupPage = await prepareRestore(f);
+    await f.armGate('course-download');
+    await f.armGate('restore-blocked');
+    const target = `routes.download.${course.id}`;
+    const itemReady = f.page.waitForEvent('download');
+    await run(f.page, [click(target)]);
+    const item = await itemReady;
+    await f.waitGate('course-download');
+    const originalPath = f.storage.path();
+    const restoring = run(backupPage, [click('backup.approve'), wait('backup.restore.acknowledge')]);
+    await f.waitGate('restore-blocked');
+    await assertRestorePending(f, restoring, originalPath);
+    try {
+        await item.cancel();
+        await eventually(() => f.storage.path() !== originalPath, 'restore after download cancellation', 10000);
+    } finally {
+        await f.releaseGate('course-download');
+    }
+    await restoring;
+    assert.equal(await item.failure(), 'canceled');
+    assert.deepEqual(f.storage.snapshot(), baseline);
+});
 
 test('abrupt host exit preserves committed data and does not reseed duplicates', options, async t => {
     const f = await fixture(t);

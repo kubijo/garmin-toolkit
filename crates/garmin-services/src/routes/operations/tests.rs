@@ -16,24 +16,7 @@ async fn downloads_are_owned_and_restore_drains_active_but_revokes_pending_deliv
         .download(receipt.artifact_id())
         .await
         .map_err(|error| error.message)?;
-    let archive = fixture.root.path().join("backup.tar.zst");
-    fixture
-        .operations
-        .deployment
-        .backup(
-            fixture.session.epoch,
-            fixture.session.actor,
-            &archive,
-            garmin_storage::snapshot::Limits::default(),
-            &garmin_progress::CancellationToken::default(),
-        )
-        .await?;
-    let prepared = garmin_storage::snapshot::PreparedRestore::read(
-        std::fs::File::open(archive)?,
-        fixture.root.path(),
-        garmin_storage::snapshot::Limits::default(),
-    )
-    .await?;
+    let prepared = prepared_restore(&fixture).await?;
     let active = fixture
         .session
         .download(receipt.artifact_id())
@@ -65,11 +48,109 @@ async fn downloads_are_owned_and_restore_drains_active_but_revokes_pending_deliv
     Ok(())
 }
 
+#[tokio::test]
+async fn restore_waits_for_active_course_encoding_then_selects_only_the_backup() -> TestResult {
+    let fixture = fixture().await?;
+    let imported = import_walk(&fixture).await?;
+    let revision = imported.revision_id();
+    let RouteReply::GenerationReady(operation) = request(
+        &fixture.session,
+        RouteRequest::PrepareGeneration { revision },
+    )
+    .await?
+    else {
+        return Err("expected generation intent".into());
+    };
+    let prepared = prepared_restore(&fixture).await?;
+    let gate = Arc::new(crate::CourseGenerationGate::default());
+    let deployment = Arc::clone(&fixture.operations.deployment);
+    let app = deployment.application(fixture.session.epoch).await?;
+    *app.course_generation_gate
+        .lock()
+        .expect("course generation gate") = Some(Arc::clone(&gate));
+    drop(app);
+
+    let session = fixture.session.clone();
+    let generating = tokio::spawn(async move {
+        session
+            .request(RouteRequest::Generate {
+                operation,
+                revision,
+            })
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), gate.started.notified()).await?;
+    let epoch = fixture.session.epoch;
+    let actor = fixture.session.actor;
+    let mut restoring =
+        tokio::spawn(async move { deployment.restore(epoch, actor, prepared).await });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(30), &mut restoring)
+            .await
+            .is_err()
+    );
+    gate.resume.notify_one();
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(5), generating)
+            .await??
+            .map_err(|error| error.message)?,
+        RouteReply::Generated(_)
+    ));
+    tokio::time::timeout(Duration::from_secs(5), restoring).await???;
+    assert!(
+        fixture
+            .session
+            .request(RouteRequest::Versions {
+                revision,
+                offset: 0
+            })
+            .await
+            .is_err()
+    );
+    let app = fixture
+        .operations
+        .deployment
+        .application(fixture.operations.deployment.epoch())
+        .await?;
+    assert!(
+        app.storage
+            .course_generation(actor.user_id(), operation)
+            .await?
+            .is_none()
+    );
+    drop(app);
+    fixture.operations.deployment.close().await;
+    Ok(())
+}
+
 struct Fixture {
     root: TempDir,
     operations: Arc<RouteOperations>,
     session: RouteSession,
     other: RouteSession,
+}
+
+async fn prepared_restore(
+    fixture: &Fixture,
+) -> TestResult<garmin_storage::snapshot::PreparedRestore> {
+    let archive = fixture.root.path().join("backup.tar.zst");
+    fixture
+        .operations
+        .deployment
+        .backup(
+            fixture.session.epoch,
+            fixture.session.actor,
+            &archive,
+            garmin_storage::snapshot::Limits::default(),
+            &garmin_progress::CancellationToken::default(),
+        )
+        .await?;
+    Ok(garmin_storage::snapshot::PreparedRestore::read(
+        std::fs::File::open(archive)?,
+        fixture.root.path(),
+        garmin_storage::snapshot::Limits::default(),
+    )
+    .await?)
 }
 
 async fn fixture() -> TestResult<Fixture> {

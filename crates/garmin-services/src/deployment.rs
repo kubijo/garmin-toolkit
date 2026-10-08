@@ -35,6 +35,8 @@ pub struct Deployment {
     live: Arc<RwLock<Live>>,
     epoch: tokio::sync::watch::Sender<Uuid>,
     _lock: File,
+    #[cfg(feature = "integration-hooks")]
+    integration_gate: std::sync::Mutex<Option<Arc<crate::integration_gate::IntegrationGate>>>,
     #[cfg(test)]
     hook: std::sync::Mutex<Option<TestHook>>,
 }
@@ -119,6 +121,8 @@ impl Deployment {
                 selection,
             })),
             _lock: lock,
+            #[cfg(feature = "integration-hooks")]
+            integration_gate: std::sync::Mutex::new(None),
             epoch: tokio::sync::watch::channel(epoch).0,
             #[cfg(test)]
             hook: std::sync::Mutex::new(None),
@@ -129,6 +133,32 @@ impl Deployment {
     #[must_use]
     pub fn epoch(&self) -> Uuid {
         *self.epoch.borrow()
+    }
+
+    #[cfg(feature = "integration-hooks")]
+    pub async fn set_integration_gate(&self, gate: Arc<crate::integration_gate::IntegrationGate>) {
+        let live = self.live.read().await;
+        *self
+            .integration_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::clone(&gate));
+        if let Some(application) = &live.application {
+            application.set_integration_gate(gate);
+        }
+    }
+
+    fn application_for_selected(&self, storage: Storage) -> Application {
+        let application = Application::new(storage);
+        #[cfg(feature = "integration-hooks")]
+        if let Some(gate) = self
+            .integration_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        {
+            application.set_integration_gate(gate);
+        }
+        application
     }
 
     pub(crate) fn watch_epoch(&self) -> tokio::sync::watch::Receiver<Uuid> {
@@ -213,6 +243,18 @@ impl Deployment {
         actor: UserContext,
         prepared: PreparedRestore,
     ) -> Result<Uuid, Error> {
+        #[cfg(feature = "integration-hooks")]
+        let gate = self
+            .integration_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        #[cfg(feature = "integration-hooks")]
+        if let Some(gate) = gate
+            && self.live.try_write().is_err()
+        {
+            gate.signal("restore-blocked").await?;
+        }
         let mut live = self.live.write().await;
         if live.epoch != epoch {
             return Err(Error::Stale);
@@ -239,9 +281,10 @@ impl Deployment {
             }
             files::recover(&self.root)?;
             let selected = files::read_selection(&self.root)?;
-            live.application = Some(Application::new(
-                Storage::open(selected.active.path(&self.root)).await?,
-            ));
+            live.application =
+                Some(self.application_for_selected(
+                    Storage::open(selected.active.path(&self.root)).await?,
+                ));
             live.selection = selected;
             return Err(error);
         }
@@ -268,7 +311,7 @@ impl Deployment {
             storage.close().await;
             return Err(error.into());
         }
-        live.application = Some(Application::new(storage));
+        live.application = Some(self.application_for_selected(storage));
         #[cfg(test)]
         self.checkpoint(Checkpoint::Opened)?;
         files::finish(&self.root)?;
