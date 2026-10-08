@@ -176,6 +176,7 @@ pub(super) trait Source: Send {
         Err("device access is unavailable for this source".to_owned())
     }
     fn refresh_device(&mut self, device_key: &str) -> Result<(), String>;
+    fn invalidate_device(&mut self, device_key: &str) -> Result<(), String>;
     fn snapshot(&mut self) -> Vec<DeviceSnapshot>;
     fn catalog(
         &mut self,
@@ -620,13 +621,19 @@ impl ApplicationService for Host {
         }
         .await;
         let source = Arc::clone(&self.source);
-        let _refresh = tokio::task::spawn_blocking(move || {
+        let refresh = tokio::task::spawn_blocking(move || {
             source
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .refresh_device(&refresh_key)
+                .invalidate_device(&refresh_key)
         })
         .await;
+        if !matches!(refresh, Ok(Ok(()))) {
+            tracing::warn!(
+                ?refresh,
+                "could not invalidate device inspection after pairing"
+            );
+        }
         self.refresh().await;
         Ok(result)
     }
@@ -1565,6 +1572,9 @@ mod tests {
 
     impl Source for FitSource {
         fn refresh_device(&mut self, _key: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn invalidate_device(&mut self, _key: &str) -> Result<(), String> {
             Ok(())
         }
         fn snapshot(&mut self) -> Vec<DeviceSnapshot> {

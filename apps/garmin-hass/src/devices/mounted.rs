@@ -86,6 +86,20 @@ impl Source for MountedSource {
             .map_err(|error| error.to_string())?
     }
 
+    fn invalidate_device(&mut self, key: &str) -> Result<(), String> {
+        let requests = self
+            .requests
+            .as_ref()
+            .ok_or_else(|| "device discovery is unavailable".to_owned())?;
+        let (reply, response) = mpsc::channel();
+        requests
+            .send(MountedRequest::Invalidate(key.to_owned(), reply))
+            .map_err(|error| error.to_string())?;
+        response
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|error| error.to_string())
+    }
+
     fn snapshot(&mut self) -> Vec<DeviceSnapshot> {
         let Some(requests) = &self.requests else {
             return Vec::new();
@@ -196,6 +210,7 @@ enum MountedRequest {
     Maps(String, mpsc::Sender<Result<String, String>>),
     Snapshot(mpsc::Sender<Vec<DeviceSnapshot>>),
     Refresh(String, mpsc::Sender<Result<(), String>>),
+    Invalidate(String, mpsc::Sender<()>),
     Catalog(
         String,
         ProgressReporter,
@@ -254,6 +269,11 @@ fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
                 let result = manager.refresh(&key);
                 log_device_events(manager.poll());
                 let _ignored = reply.send(result);
+            }
+            Ok(MountedRequest::Invalidate(key, reply)) => {
+                manager.invalidate(&key);
+                log_device_events(manager.poll());
+                let _ignored = reply.send(());
             }
             Ok(MountedRequest::Maps(key, reply)) => {
                 log_device_events(manager.poll());

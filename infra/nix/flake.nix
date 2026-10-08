@@ -14,6 +14,8 @@
   ...
 }:
 let
+  inherit (builtins) filter;
+
   systems =
     flake-utils.lib.eachSystem
       [
@@ -26,6 +28,7 @@ let
         let
           pkgs = import nixpkgs { inherit system; };
           inherit (pkgs) lib;
+          nodejs = pkgs.nodejs_26;
           # Match the ambient Just entrypoints. Target-scoped flags never reach WASM or Darwin.
           linuxLinkFlags = "-C link-arg=-fuse-ld=mold";
           withDevLinker =
@@ -82,6 +85,7 @@ let
             inherit
               lib
               nix-tools
+              nodejs
               pkgs
               pythonToolsEnv
               system
@@ -117,6 +121,7 @@ let
             inherit
               brandAssets
               formatjsCli
+              nodejs
               system
               toolchain
               wasmToolchain
@@ -124,6 +129,17 @@ let
             nixCargoTargetDir = ".tmp/nix-cargo-target";
             inherit workspaceSrc;
           };
+          mkHassIntegration =
+            options:
+            import ../integration/hass (
+              {
+                inherit nodejs pkgs;
+                package = hassTarget.demoPackage;
+              }
+              // options
+            );
+          hassIntegration = mkHassIntegration { };
+          hassReconnect = mkHassIntegration { testFile = "reconnect.test.mjs"; };
           formatjsCli = pkgs.callPackage ./formatjs-cli.nix { };
           licenseAutomation = import ./licenses.nix {
             inherit
@@ -162,6 +178,9 @@ let
             gallery = galleryTarget.package;
             formatjs-cli = formatjsCli;
             default = build.garminCli;
+          }
+          // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            hass-reconnect-driver = hassReconnect.driver;
           };
 
           apps =
@@ -210,6 +229,9 @@ let
               gallery = galleryTarget.check;
               hass = hassTarget.check;
               license-bundles = licenseAutomation.check;
+            }
+            // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              hass-integration = hassIntegration;
             };
           inherit (tooling) formatter;
 
@@ -229,10 +251,9 @@ let
                       pkgs.cargo-llvm-cov
                       pkgs.cargo-machete
                       pkgs.cargo-nextest
-                      pkgs.cargo-outdated
                       pkgs.gitleaks
                       pkgs.just
-                      pkgs.nodejs
+                      nodejs
                       pkgs.esbuild
                       pkgs.pkg-config
                       pkgs.samply
@@ -258,7 +279,7 @@ let
             );
             desktop = withDevLinker desktopTarget.devShell;
             compiler-profile = self.devShells.${system}.default.overrideAttrs (old: {
-              nativeBuildInputs = builtins.filter (package: package != wasmToolchain) old.nativeBuildInputs ++ [
+              nativeBuildInputs = filter (package: package != wasmToolchain) old.nativeBuildInputs ++ [
                 diagnosticToolchain
                 pkgs.measureme
               ];
@@ -266,7 +287,7 @@ let
             gallery = withDevLinker galleryTarget.devShell;
             hass = withDevLinker (
               hassTarget.devShell.overrideAttrs (old: {
-                nativeBuildInputs = builtins.filter (package: package != pkgs.trunk) old.nativeBuildInputs ++ [
+                nativeBuildInputs = filter (package: package != pkgs.trunk) old.nativeBuildInputs ++ [
                   devTrunk
                 ];
               })

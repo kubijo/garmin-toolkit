@@ -474,20 +474,6 @@ in
 
     i18n-sync = i18nSync;
 
-    outdated =
-      mkApp "outdated"
-        [
-          pkgs.cargo-outdated
-          toolchain
-        ]
-        ''
-          ${cargoCommand [
-            "outdated"
-            "--workspace"
-            "--root-deps-only"
-          ]}
-        '';
-
     sqlx-prepare = sqlxPrepare;
 
     sqlx-check = sqlxCheck;

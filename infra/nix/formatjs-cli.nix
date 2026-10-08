@@ -5,6 +5,8 @@
 }:
 
 let
+  inherit (builtins) attrNames;
+
   version = "1.6.0";
   assets = {
     aarch64-darwin = {
@@ -43,6 +45,6 @@ stdenvNoCC.mkDerivation {
     homepage = "https://formatjs.io/";
     license = lib.licenses.mit;
     mainProgram = "formatjs";
-    platforms = builtins.attrNames assets;
+    platforms = attrNames assets;
   };
 }

@@ -36,7 +36,7 @@ use std::{cell::RefCell, fmt, io, io::Cursor, rc::Rc, time::Duration};
 use tokio_wasm_io::io::AsyncWriteExt as _;
 use wasm_bindgen::{JsCast as _, prelude::*};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
-use websocket_web::{Msg, WebSocket};
+use websocket_web::{Interface, Msg, WebSocketBuilder};
 
 const CANVAS_ID: &str = "garmin-toolkit";
 const HEARTBEAT_INTERVAL_MILLISECONDS: i32 = 3_000;
@@ -2763,9 +2763,10 @@ async fn connect() -> Result<
 }
 
 async fn connect_client() -> Result<ApplicationServiceClient, ConnectError> {
-    let websocket = WebSocket::connect(&websocket_url()?)
-        .await
-        .map_err(ConnectError::transport)?;
+    let mut builder = WebSocketBuilder::new(websocket_url()?);
+    // Chromium's stream interface can crash the tab during reconnect; see the VM reconnect suite.
+    builder.set_interface(Interface::Standard);
+    let websocket = builder.connect().await.map_err(ConnectError::transport)?;
     let (websocket_tx, websocket_rx) = websocket.into_split();
     let transport_tx = websocket_tx
         .with(|packet: Bytes| future::ready(Ok::<_, io::Error>(Msg::Binary(packet.into()))));

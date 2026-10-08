@@ -17,12 +17,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Enable KVM for disposable integration tests
+        run: |
+          test -c /dev/kvm
+          sudo chmod a+rw /dev/kvm
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
             keep-env-derivations = true
             keep-outputs = true
+            system-features = nixos-test benchmark big-parallel kvm
       - uses: DeterminateSystems/magic-nix-cache-action@v15
         with:
           use-gha-cache: enabled
@@ -31,4 +36,4 @@ jobs:
       - name: Verify sandboxed source
         run: nix build -L .#checks.x86_64-linux.rust-source-closure --no-update-lock-file
       - name: Check flake
-        run: nix flake check -L --no-update-lock-file
+        run: nix flake check -L --max-jobs 1 --cores 2 --no-update-lock-file

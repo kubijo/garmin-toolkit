@@ -14,8 +14,8 @@ wasm:
     just in-shell nix run {{ flake }}#wasm-lint
 
 # Evaluate and build every pure Nix flake check.
-check:
-    just in-shell nix flake check {{ flake }}
+check *args:
+    @just in-shell nix flake check {{ flake }} --max-jobs 1 --cores 2 --no-update-lock-file "$@"
 
 # Check dependency advisories and Git secrets.
 audit *args:

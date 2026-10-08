@@ -20,6 +20,7 @@
           brandAssets,
           formatjsCli,
           nixCargoTargetDir,
+          nodejs,
           system,
           toolchain,
           wasmToolchain,
@@ -76,7 +77,7 @@
               trunkIndexPath = "apps/garmin-hass/web/index.html";
               wasm-bindgen-cli = pkgs.wasm-bindgen-cli_0_2_126;
               nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
-                pkgs.nodejs
+                nodejs
                 pkgs.esbuild
               ];
 
@@ -87,7 +88,7 @@
               postBuild = ''
                 export GARMIN_TEST_WEB_ROOT="$PWD/apps/garmin-hass/web/dist"
                 for test in infra/javascript/*.test.mjs; do
-                  ${lib.getExe pkgs.nodejs} "$test"
+                  ${lib.getExe nodejs} "$test"
                 done
               '';
 
@@ -175,7 +176,7 @@
             CARGO_TARGET_DIR = nixCargoTargetDir;
             checks = { inherit package; };
             packages = [
-              pkgs.nodejs
+              nodejs
               pkgs.esbuild
               pkgs.trunk
               pkgs.wasm-bindgen-cli_0_2_126
