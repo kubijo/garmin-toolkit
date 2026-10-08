@@ -225,6 +225,8 @@ pub(super) struct Host {
     fit_plans: Arc<Mutex<FitPlans>>,
     #[cfg(test)]
     fit_import_pause: Option<Arc<FitImportPause>>,
+    #[cfg(feature = "demo")]
+    integration_gate: Arc<Mutex<Option<Arc<garmin_services::integration_gate::IntegrationGate>>>>,
     snapshot_session:
         Arc<tokio::sync::Mutex<Option<Arc<garmin_services::snapshots::SnapshotSession>>>>,
     epoch: Uuid,
@@ -261,6 +263,8 @@ impl Host {
             fit_plans: Arc::new(Mutex::new(FitPlans::new(epoch))),
             #[cfg(test)]
             fit_import_pause: None,
+            #[cfg(feature = "demo")]
+            integration_gate: Arc::new(Mutex::new(None)),
             source: Arc::new(Mutex::new(source)),
             snapshots: Arc::new(snapshots),
             downloads: crate::downloads::Downloads::default(),
@@ -271,6 +275,17 @@ impl Host {
             snapshot_session: Arc::default(),
             control: None,
         })
+    }
+
+    #[cfg(feature = "demo")]
+    pub(super) fn set_integration_gate(
+        &self,
+        gate: Arc<garmin_services::integration_gate::IntegrationGate>,
+    ) {
+        *self
+            .integration_gate
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(gate);
     }
 
     pub(super) fn start(self: &Arc<Self>) {
@@ -368,8 +383,19 @@ impl ApplicationService for Host {
                 .download(artifact)
                 .await
                 .map_err(|error| error.message)?;
-            self.downloads
-                .insert(crate::downloads::Prepared::from_route(download))
+            let prepared = crate::downloads::Prepared::from_route(download);
+            #[cfg(feature = "demo")]
+            let gate = self
+                .integration_gate
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            #[cfg(feature = "demo")]
+            let prepared = match gate {
+                Some(gate) => prepared.with_integration_gate(gate),
+                None => prepared,
+            };
+            self.downloads.insert(prepared)
         }
         .await;
         Ok(result)

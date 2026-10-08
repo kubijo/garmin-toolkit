@@ -82,7 +82,32 @@ impl Application {
         {
             CourseGenerationStart::Existing(record) => Ok(*record),
             CourseGenerationStart::Pending(pending) => {
+                #[cfg(feature = "integration-hooks")]
+                let integration_gate = self
+                    .integration_gate
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
+                #[cfg(feature = "integration-hooks")]
+                if let Some(gate) = &integration_gate {
+                    gate.checkpoint("course-generation").await?;
+                }
+                #[cfg(test)]
+                let gate = self
+                    .course_generation_gate
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
+                #[cfg(test)]
+                if let Some(gate) = gate {
+                    gate.started.notify_one();
+                    gate.resume.notified().await;
+                }
                 let bytes = garmin_fit::course::encode(pending.revision(), pending.serial())?;
+                #[cfg(feature = "integration-hooks")]
+                if let Some(gate) = &integration_gate {
+                    gate.checkpoint("course-encoded").await?;
+                }
                 Ok(pending.commit(&bytes).await?)
             }
         }

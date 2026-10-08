@@ -206,7 +206,11 @@ export class Fixture {
         const log = openSync(join(this.output, 'host.log'), 'a');
         try {
             this.host = spawn(process.env.GARMIN_HASS_BINARY, ['--ui-automation', '--control-server'], {
-                env: { ...process.env, GARMIN_TOOLKIT_HASS_DATA_BASE: this.work },
+                env: {
+                    ...process.env,
+                    GARMIN_TOOLKIT_HASS_DATA_BASE: this.work,
+                    GARMIN_E2E_GATE_ROOT: join(this.work, 'gates'),
+                },
                 stdio: ['ignore', log, log],
                 detached: true,
             });
@@ -226,6 +230,34 @@ export class Fixture {
             'host startup',
             30000,
         );
+    }
+
+    async armGate(name) {
+        const root = join(this.work, 'gates');
+        await mkdir(root, { recursive: true });
+        await rm(join(root, `${name}.ready`), { force: true });
+        await rm(join(root, `${name}.release`), { force: true });
+        await writeFile(join(root, `${name}.arm`), 'armed');
+    }
+
+    async waitGate(name) {
+        await eventually(
+            async () => {
+                try {
+                    await readFile(join(this.work, 'gates', `${name}.ready`));
+                    return true;
+                } catch (error) {
+                    if (error.code === 'ENOENT') return false;
+                    throw error;
+                }
+            },
+            `${name} checkpoint`,
+            30000,
+        );
+    }
+
+    async releaseGate(name) {
+        await writeFile(join(this.work, 'gates', `${name}.release`), 'released');
     }
 
     async stopHost(signal = 'SIGTERM') {

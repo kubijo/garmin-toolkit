@@ -52,17 +52,24 @@ The suite asserts:
 - Profile isolation and upload interruption at an observed file-read boundary.
 - Lost responses after independently observed database commits, with duplicate-free import and Course retries.
 - Restore from a second client while old confirmation, generation, or download requests are queued.
+- Restore from a second client across FIT encoding and after a client has received the first chunk of a multi-chunk
+  Course download. The generation test holds a gate before and after the synchronous encoder call, with the same restore
+  attempt pending at both boundaries. The tests check restored storage and exact FIT bytes. Cancelling a body before its
+  first chunk must release restore without a test-side gate release.
 - Graceful and abrupt host restarts, selected restored storage, and duplicate-free seeding.
 
 Faults are installed only in cases that need them. They gate both WebSocket APIs and file reads; assertions establish
 the pending boundary before switching profiles, disconnecting, or restoring. The storage oracle opens the selected
 database read-only. Routes used for upload are downloaded from the real seeded recording through the product UI.
 
-Queued requests across restore are distinct from restore racing an actively executing encoder or an HTTP download
-stream. Those live races remain open in the watch plan; do not describe the queued-request cases as covering them.
+The checkpoints are enabled only in the automation demo host and are armed by files under each case's disposable data
+root. Restore signals only after a nonblocking attempt finds the exclusive deployment lock held. The tests then assert
+that restore remains pending and storage remains selected while the controlled operation is paused. Only gated demo
+downloads split the recorded Course into 4 KiB HTTP chunks; normal downloads keep their usual chunking. The production
+host has no checkpoints.
 
 TAP output, host/browser logs, screenshots, and Playwright traces are retained under the check output's `artifacts`
 directory, or the local recipe's printed `.tmp/hass-integration.*/results` directory. For failed Nix builds, pass
 `--keep-failed` to retain the build directory and inspect `nix log`; its driver output contains the collected artifacts.
-State is disposable; diagnostics are retained. On 2026-10-07 the packaged route suite passed all ten cases and the
+State is disposable; diagnostics are retained. On 2026-10-08 the packaged route suite passed all 13 cases and the
 intentional-failure cleanup probe with standard WebSocket selected by the application.

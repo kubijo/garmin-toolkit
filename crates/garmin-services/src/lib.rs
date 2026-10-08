@@ -26,6 +26,63 @@ use garmin_storage::{
 };
 use thiserror::Error;
 
+#[cfg(feature = "integration-hooks")]
+pub mod integration_gate {
+    use std::{io, path::PathBuf, time::Duration};
+
+    #[derive(Debug)]
+    pub struct IntegrationGate {
+        root: PathBuf,
+    }
+
+    impl IntegrationGate {
+        #[must_use]
+        pub fn new(root: PathBuf) -> Self {
+            Self { root }
+        }
+
+        /// # Errors
+        /// Fails if the armed checkpoint cannot be signalled.
+        pub async fn signal(&self, name: &'static str) -> io::Result<bool> {
+            if !tokio::fs::try_exists(self.root.join(format!("{name}.arm"))).await? {
+                return Ok(false);
+            }
+            tokio::fs::write(self.root.join(format!("{name}.ready")), b"ready").await?;
+            Ok(true)
+        }
+
+        /// Waits only when the disposable VM suite has armed this checkpoint.
+        /// # Errors
+        /// Fails if the gate files cannot be accessed or the test does not release the checkpoint.
+        pub async fn checkpoint(&self, name: &'static str) -> io::Result<()> {
+            let arm = self.root.join(format!("{name}.arm"));
+            if !tokio::fs::try_exists(&arm).await? {
+                return Ok(());
+            }
+            let release = self.root.join(format!("{name}.release"));
+            self.signal(name).await?;
+            let result = tokio::time::timeout(Duration::from_secs(30), async {
+                loop {
+                    if tokio::fs::try_exists(&release).await? {
+                        return Ok(());
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| {
+                Err(io::Error::other(format!(
+                    "integration checkpoint {name} timed out"
+                )))
+            });
+            let _ = tokio::fs::remove_file(arm).await;
+            let _ = tokio::fs::remove_file(self.root.join(format!("{name}.ready"))).await;
+            let _ = tokio::fs::remove_file(release).await;
+            result
+        }
+    }
+}
+
 /// The user whose data an operation may access.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UserContext(UserId);
@@ -111,12 +168,37 @@ impl From<StoredActivity> for ActivityDetails {
 /// Shared in-process application service.
 pub struct Application {
     storage: Storage,
+    #[cfg(test)]
+    course_generation_gate: std::sync::Mutex<Option<std::sync::Arc<CourseGenerationGate>>>,
+    #[cfg(feature = "integration-hooks")]
+    integration_gate: std::sync::Mutex<Option<std::sync::Arc<integration_gate::IntegrationGate>>>,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct CourseGenerationGate {
+    pub(crate) started: tokio::sync::Notify,
+    pub(crate) resume: tokio::sync::Notify,
 }
 
 impl Application {
     #[must_use]
     pub const fn new(storage: Storage) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            #[cfg(test)]
+            course_generation_gate: std::sync::Mutex::new(None),
+            #[cfg(feature = "integration-hooks")]
+            integration_gate: std::sync::Mutex::new(None),
+        }
+    }
+
+    #[cfg(feature = "integration-hooks")]
+    pub fn set_integration_gate(&self, gate: std::sync::Arc<integration_gate::IntegrationGate>) {
+        *self
+            .integration_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(gate);
     }
 
     /// Lists profiles in stable display order.
@@ -610,6 +692,9 @@ pub enum Error {
     RouteTransformation(#[from] garmin_route::Error),
     #[error(transparent)]
     CourseEncoding(#[from] garmin_fit::course::Error),
+    #[cfg(feature = "integration-hooks")]
+    #[error("integration checkpoint failed: {0}")]
+    Integration(#[from] std::io::Error),
 }
 
 #[cfg(test)]
