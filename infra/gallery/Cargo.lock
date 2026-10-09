@@ -2716,6 +2716,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "usvg 0.45.1",
+ "uuid",
  "walkers",
  "web-time",
  "wgpu 30.0.0",

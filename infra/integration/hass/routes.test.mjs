@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -20,6 +20,7 @@ import {
     upload,
     wait,
 } from './fixture.mjs';
+import { readOrMissing } from './read-or-missing.mts';
 
 const options = { timeout: 180000 };
 
@@ -99,6 +100,19 @@ async function captureDownloadUrl(page, target) {
     }
 }
 
+async function existingEntries(directory) {
+    return readOrMissing(() => readdir(directory), []);
+}
+
+async function existingFile(path) {
+    return readOrMissing(() => readFile(path), null);
+}
+
+async function transferStatusText(page) {
+    const status = (await targets(page)).find(target => target.id === 'routes.transfer.status');
+    return status?.value ?? status?.label ?? '';
+}
+
 test('seeded routes, reviewed import, byte-exact exports and versioned deletion', options, async t => {
     const f = await fixture(t);
     const p = f.page;
@@ -151,6 +165,44 @@ test('seeded routes, reviewed import, byte-exact exports and versioned deletion'
     const duplicates = f.storage.routes('Imported walk');
     assert.equal(duplicates.length, 2, 'Explicit duplicate names remain separate routes');
     assert.notEqual(duplicates[0].plan_id, duplicates[1].plan_id);
+});
+
+test('reviewed Course transfer reaches the mock watch without pairing', options, async t => {
+    const f = await fixture(t);
+    const p = f.page;
+    await openRoute(p, 'Neighborhood walk');
+    const course = await generate(f, 'Neighborhood walk');
+    const device = 'routes.transfer.device.demo:watch-o-matic-9000';
+    const storage = 'routes.transfer.storage.internal';
+    await run(p, [click(`routes.send.${course.id}`), wait(device), click(device), wait(storage), click(storage)]);
+    await run(p, [wait('routes.transfer.approve')]);
+    const deviceRoot = join(f.work, 'demo', 'device');
+    const directory = join(deviceRoot, 'Garmin', 'Courses');
+    const marker = join(deviceRoot, 'GARMIN-TOOLKIT', 'pairing.toml');
+    const before = await existingEntries(directory);
+    const markerBefore = await existingFile(marker);
+    await run(p, [click('routes.transfer.approve')]);
+    await eventually(
+        async () => (await existingEntries(directory)).length === before.length + 1,
+        'Course on mock watch',
+    );
+    await eventually(async () => {
+        await run(p, [click('routes.transfer.check')]);
+        return (await transferStatusText(p)).includes('Verified on device');
+    }, 'readback-verified Course');
+    const [fileName] = (await readdir(directory)).filter(name => !before.includes(name));
+    assert.deepEqual(await readFile(join(directory, fileName)), f.storage.artifact(course.artifact_id));
+    assert.deepEqual(await existingFile(marker), markerBefore, 'sending a Course must not change pairing');
+    await run(p, [click('routes.transfer.accept')]);
+    assert((await transferStatusText(p)).includes('Confirmed on device'));
+    await f.stopHost();
+    await f.startHost();
+    await selectProfile(p);
+    await openRoute(p, 'Neighborhood walk');
+    await courseVisible(p, course);
+    await run(p, [click(`routes.send.${course.id}`), wait(device), click(device), wait(storage), click(storage)]);
+    await run(p, [wait('routes.transfer.status')]);
+    assert.equal((await readdir(directory)).length, before.length + 1, 'repeat send must not create another file');
 });
 
 test('narrow import labels and controls stay inside the viewport', options, async t => {

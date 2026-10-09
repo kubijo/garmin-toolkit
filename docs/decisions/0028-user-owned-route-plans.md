@@ -23,6 +23,10 @@ Deployments record the Course artifact, revision, target, and capability evidenc
 overwrite. Readback proves transfer; rediscovery or user confirmation separately proves acceptance. Never delete
 automatically; cleanup requires an exact project-created partial upload and confirmation.
 
+Sending a Course is a one-time file operation on the selected device. It does not pair the device, assign it to the
+sending profile, or change an existing profile marker. Pairing remains a separate, voluntary action for automatic
+profile opening and device sync; a Course can be sent to someone else's device.
+
 ## Why
 
 Activities are immutable source assertions; imported routes are user-selected plans. Treating both as observations would

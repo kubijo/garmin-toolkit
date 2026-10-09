@@ -20,11 +20,10 @@ and directory-backed tests do not establish behavior for every mounted-MTP imple
 
 ## Shared work
 
-- Expose GPX import, Course preview, and asset entry points on both clients, with review and separate approval for
-  mutations.
+- Verify GPX import, Course preview, export, and reviewed transfer on the desktop client. The shared route UI and
+  packaged HASS demo already exercise these paths; owned-device acceptance remains separate.
 - Limit drag and drop to visible, enabled targets with accept/reject feedback; report mutations through persistent
   notifications.
-- Verify offline import, visualization, export, and confirmed transfer on both clients.
 - Audit keyboard navigation, focus, modal trapping, translation, narrow layouts, and reconnect recovery.
 - Restore browser Ctrl+wheel zoom over the HASS canvas.
 

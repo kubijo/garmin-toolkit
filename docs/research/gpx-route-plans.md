@@ -31,16 +31,17 @@ Demo AppImage acceptance on 2026-10-06 passed GPX import/preview, byte-exact GPX
 versioned regeneration, and persistence across restart. Fresh-demo seeding and device transfer were not covered.
 Automation verification limits are recorded in [developer tools](../architecture/developer-tools.md).
 
-Packaged HASS VM acceptance on 2026-10-07 passed all ten [route/recovery cases](../../infra/integration/hass/README.md):
+Packaged HASS VM acceptance on 2026-10-08 passed all 14 [route/recovery cases](../../infra/integration/hass/README.md):
 seeded recorded activities/routes, reviewed import, rejected siblings and unresolved controls, byte-exact GPX/FIT
 exports, versioned deletion/regeneration, profile isolation, narrow layouts, interrupted uploads, lost-response retries,
-queued requests across restore, and graceful/abrupt restarts. Assertions compare persisted artifacts and selected
-storage, including duplicate-free seeding. An intentional-failure probe also verified process and state cleanup; the VM
-shut down after collecting diagnostics.
+queued requests across restore, and graceful/abrupt restarts. Reviewed FIT Course transfer asserted exact device bytes,
+unchanged pairing, explicit user acceptance, restart reconciliation, and duplicate-free repeat send. Assertions compare
+persisted artifacts and selected storage, including duplicate-free seeding. An intentional-failure probe also verified
+process and state cleanup; the VM shut down after collecting diagnostics.
 
 Earlier headed-browser acceptance additionally checked the seeded walking/hiking activity maps and charts. The VM uses
-software rendering without external map tiles. Live restore during active Course encoding or streaming download, and
-device transfer, remain unverified.
+software rendering without external map tiles. Owned-device transfer, mounted-MTP disconnects, and firmware discovery
+remain unverified.
 
 ## Planned-route exports
 

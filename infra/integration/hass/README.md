@@ -48,6 +48,8 @@ The suite asserts:
 
 - Demo seeds, reviewed GPX import, byte-exact source/Course downloads, deletion/cancellation, and versioned
   regeneration.
+- Reviewed FIT Course transfer to the demo watch, exact device bytes, unchanged pairing marker, separate user
+  acceptance, host restart reconciliation, and duplicate-free repeat send.
 - Separate candidates, rejected siblings, unresolved controls, malformed input, and subsequent valid import.
 - Profile isolation and upload interruption at an observed file-read boundary.
 - Lost responses after independently observed database commits, with duplicate-free import and Course retries.
@@ -71,5 +73,5 @@ host has no checkpoints.
 TAP output, host/browser logs, screenshots, and Playwright traces are retained under the check output's `artifacts`
 directory, or the local recipe's printed `.tmp/hass-integration.*/results` directory. For failed Nix builds, pass
 `--keep-failed` to retain the build directory and inspect `nix log`; its driver output contains the collected artifacts.
-State is disposable; diagnostics are retained. On 2026-10-08 the packaged route suite passed all 13 cases and the
+State is disposable; diagnostics are retained. On 2026-10-08 the packaged route suite passed all 14 cases and the
 intentional-failure cleanup probe with standard WebSocket selected by the application.

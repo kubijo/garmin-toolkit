@@ -26,6 +26,7 @@ pub struct Workspace {
     map: ActivityMap,
     viewport_height: f32,
     deleting: Option<garmin_service_api::routes::CourseVersion>,
+    scroll_to_transfer: bool,
 }
 
 impl Workspace {
@@ -35,6 +36,7 @@ impl Workspace {
             map: ActivityMap::new(runtime),
             viewport_height: 640.0,
             deleting: None,
+            scroll_to_transfer: false,
         }
     }
 
@@ -66,7 +68,20 @@ impl Workspace {
         if action.is_some() {
             self.deleting = None;
         }
-        action.or_else(|| self.delete_confirmation(ui, intl, state))
+        let action = action.or_else(|| self.delete_confirmation(ui, intl, state));
+        match action {
+            Some(Action::BeginTransfer(generation)) => {
+                state.transfer = Some(state::TransferState::new(generation));
+                self.scroll_to_transfer = true;
+                None
+            }
+            Some(Action::DismissTransfer) => {
+                state.transfer = None;
+                self.scroll_to_transfer = false;
+                None
+            }
+            action => action,
+        }
     }
 
     fn preview(&mut self, ui: &mut Ui, intl: &Intl, state: &State, geometry: bool, key: &str) {

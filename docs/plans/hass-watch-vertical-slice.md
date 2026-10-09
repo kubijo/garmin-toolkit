@@ -1,15 +1,15 @@
 # Home Assistant watch vertical slice
 
-Finish one confirmed FIT Course transfer on the packaged HASS host, then verify the device pairing flow in the add-on
-and on physical media. [Shared workflows](shared-interface-workflows.md) owns desktop parity; physical inspection
-evidence belongs to [device expansion](device-expansion-and-publication.md). Retain the native-host/WASM and
+Verify the Course transfer and separate device pairing flows in the packaged add-on and on physical media.
+[Shared workflows](shared-interface-workflows.md) owns desktop parity; physical inspection evidence belongs to
+[device expansion](device-expansion-and-publication.md). Retain the native-host/WASM and
 [typed service](../architecture/workspace.md) architecture; Bluetooth and HASS domain publication remain excluded.
 Device reassociation has [demo acceptance](../research/usb-sync.md#demo-pairing-acceptance).
 
 ## Remaining work
 
-1. Transfer one selected Course artifact after preflight and confirmation; record readback and firmware acceptance.
-   Cleanup requires separate consent. Verify disconnect/recovery without unintended mutation.
+1. Repeat the reviewed Course transfer on owned hardware. Check mounted-MTP disconnect/recovery and firmware acceptance;
+   the demo confirms byte readback and explicit user acceptance, not firmware behavior.
 2. Integrate Home Assistant host backups with the managed deployment and verify recovery of its selected storage
    generation. Portable application snapshots have a separate
    [storage contract](../architecture/storage.md#portable-snapshots).
@@ -19,8 +19,9 @@ Device reassociation has [demo acceptance](../research/usb-sync.md#demo-pairing-
    on physical media; initial pairing has unit coverage but still needs live acceptance.
 
 The packaged HASS demo has [asserted VM coverage](../../infra/integration/hass/README.md) for reviewed GPX import,
-Course versions and downloads, restore at the stated boundaries, and duplicate-free demo seeding. Desktop parity and
-offline/device-free acceptance remain in [shared workflows](shared-interface-workflows.md). Keep the
+Course versions and downloads, reviewed transfer with exact device bytes and unchanged pairing, restart reconciliation,
+restore at the stated boundaries, and duplicate-free demo seeding. Desktop parity and offline/device-free acceptance
+remain in [shared workflows](shared-interface-workflows.md). Keep the
 [route client contract](../architecture/storage.md#route-client-workflow) and
 [ADR 0028](../decisions/0028-user-owned-route-plans.md) as the durable owners.
 
@@ -28,23 +29,23 @@ Keep focused validation for GPX 1.0/1.1, multiple segments, malformed and oversi
 original bytes, and distinct walking/hiking/running/cycling through FIT and snapshot restore. The HASS VM exercises only
 the fixture paths named in its README; it does not replace the parser and storage test matrix.
 
-## Device transfer and acceptance
+## Device transfer contract
 
 Transfer a selected persisted Course artifact. Reuse device inspection, capability evidence, write exclusion,
-cancellation, and recovery from shared device workflows. Preflight binds the profile, artifact digest/version, device
-identity, target storage, and create-only filename. Confirmation must be invalidated by a changed target or artifact. Do
-not expose a generic write-path RPC.
+cancellation, and recovery from shared device workflows. The one-time approval is scoped to the requesting profile's
+artifact digest/version, the selected device identity and storage, and a create-only filename. Confirmation must be
+invalidated by a changed target or artifact. Do not expose a generic write-path RPC. Manual transfer does not pair the
+selected device or alter an existing pairing marker; pairing only enables automatic profile opening and device sync.
 
 Persist transfer intent before mutation and reconcile interrupted writes using the exact recorded destination and
 digest. Readback records transfer verification; firmware rediscovery or explicit user confirmation records acceptance
 separately. Cleanup remains a separately approved operation restricted to this transfer's partial upload. Test with the
 demo device first; an owned-device trial needs explicit authorization and capability evidence.
 
-### Validation before closing transfer
+### Hardware acceptance still needed
 
-- Assert preflight and approval bind the selected artifact version, digest, device identity, and target path.
-- Exercise cancellation, disconnect, partial write recovery, and readback without unintended mutation.
-- Record firmware acceptance separately from verified transfer, then repeat on owned hardware.
+- Exercise cancellation, disconnect, partial write recovery, and readback on owned hardware without unintended mutation.
+- Observe firmware discovery separately from verified bytes and record the result.
 
 Use the shared UI for desktop parity; the browser never acquires filesystem or device access. Keep the implementation
 source-neutral and add no Mapy.com account/API dependency.
