@@ -3,7 +3,7 @@ use garmin_i18n::{Intl, format_message};
 use garmin_service_api::course_transfer::CourseTransferPhase;
 use garmin_service_api::routes::{CourseVersion, RouteRequest};
 
-use super::{Action, State, Workspace, action_button, action_row, sport_label, widgets};
+use super::{Action, State, Workspace, action_button, action_row, error, sport_label, widgets};
 use crate::{button, icons, modal, typography};
 
 impl Workspace {
@@ -20,6 +20,7 @@ impl Workspace {
                 self.scroll_to_transfer = false;
             }
         }
+        let retry = error(ui, intl, state);
         ui.add_space(16.0);
         self.preview(ui, intl, state, route.geometry, &route.revision.to_string());
         ui.add_space(24.0);
@@ -53,7 +54,7 @@ impl Workspace {
             );
             crate::semantics::target(ui, &response.header_response, "routes.history");
         }
-        action
+        action.or(retry)
     }
 
     pub(super) fn delete_confirmation(

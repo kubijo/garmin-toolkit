@@ -73,7 +73,9 @@ async fn prepare_selection(
                 GpxUploadPhase::Review { digest, .. } => {
                     return Ok::<_, Box<dyn std::error::Error>>(digest);
                 }
-                GpxUploadPhase::Failed(error) => return Err(error.into()),
+                GpxUploadPhase::InvalidFile(error) | GpxUploadPhase::Failed(error) => {
+                    return Err(error.into());
+                }
                 GpxUploadPhase::Uploading | GpxUploadPhase::Parsing => {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
@@ -299,6 +301,72 @@ async fn contained_preview_confirms_and_generates_saved_course_bytes() -> TestRe
     assert_eq!(decoded.sport(), RouteSport::Walking);
     assert_eq!(decoded.points().len(), candidate.shape().points().len());
     app.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn malformed_upload_is_reported_as_an_invalid_file() -> TestResult {
+    let _test = TEST_LOCK.lock().await;
+    let root = tempfile::tempdir()?;
+    let deployment = Deployment::open(root.path()).await?;
+    let app = deployment.application(deployment.epoch()).await?;
+    let actor = UserContext::new(app.create_profile("Walker".parse()?).await?.id());
+    drop(app);
+    let operations = RouteOperations::new(Arc::clone(&deployment), Parser::new(WORKER)?);
+    let session = operations
+        .connect(actor)
+        .await
+        .map_err(|error| error.message)?;
+    let bytes = b"<gpx><trk /></gpx>";
+    let RouteReply::Upload(upload) = execute(
+        &session,
+        RouteRequest::StartUpload {
+            file_name: "malformed.gpx".into(),
+            size: garmin_model::artifact::ByteCount::from_u64(bytes.len() as u64),
+        },
+    )
+    .await?
+    else {
+        return Err("missing upload".into());
+    };
+    let operation = upload.operation;
+    execute(
+        &session,
+        RouteRequest::Append {
+            operation,
+            offset: 0,
+            bytes: bytes.to_vec(),
+        },
+    )
+    .await?;
+    execute(&session, RouteRequest::Inspect { operation }).await?;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let RouteReply::Upload(upload) =
+                execute(&session, RouteRequest::UploadStatus { operation }).await?
+            else {
+                return Err("missing upload status".into());
+            };
+            match upload.phase {
+                GpxUploadPhase::InvalidFile(message) => {
+                    assert!(message.contains("GPX could not be parsed"));
+                    return Ok::<_, Box<dyn std::error::Error>>(());
+                }
+                GpxUploadPhase::Uploading | GpxUploadPhase::Parsing => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                other => return Err(format!("unexpected upload phase: {other:?}").into()),
+            }
+        }
+    })
+    .await??;
+    assert!(matches!(
+        execute(&session, RouteRequest::Cancel { operation }).await?,
+        RouteReply::Cancelled
+    ));
+    drop(session);
+    drop(operations);
+    deployment.close().await;
     Ok(())
 }
 

@@ -22,6 +22,13 @@ pub fn show(ui: &mut Ui, props: &Props<'_>, content: impl FnOnce(&mut Ui)) {
     let response = ui
         .scope(|ui| {
             ui.spacing_mut().button_padding = egui::vec2(f32::from(props.inline_padding), 8.0);
+            let widgets = &mut ui.style_mut().visuals.widgets;
+            widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+            widgets.inactive.bg_stroke = egui::Stroke::NONE;
+            widgets.hovered.bg_stroke = egui::Stroke::NONE;
+            widgets.hovered.expansion = 0.0;
+            widgets.active.bg_stroke = egui::Stroke::NONE;
+            widgets.active.expansion = 0.0;
             let icon = if state.is_open() {
                 icons::CARET_DOWN
             } else {
@@ -36,7 +43,6 @@ pub fn show(ui: &mut Ui, props: &Props<'_>, content: impl FnOnce(&mut Ui)) {
                     ))
                     .gap(16.0)
                     .image_tint_follows_text_color(false)
-                    .frame_when_inactive(false)
                     .corner_radius(0)
                     .wrap()
                     .min_size(egui::vec2(ui.available_width(), 40.0)),

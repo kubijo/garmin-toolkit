@@ -594,24 +594,15 @@ fn paint_route_markers(overlay: &mut Ui, projector: &MapProjector, input: Overla
     if let Some((start, end)) = route_endpoints(input.route.samples) {
         let start = project_coordinate(projector, start, input.projection_center_longitude);
         let end = project_coordinate(projector, end, input.projection_center_longitude);
-        if endpoints_share_marker(start, end) {
-            paint_combined_endpoint_marker(overlay, start.lerp(end, 0.5), input.colors);
-        } else {
-            paint_endpoint_marker(
-                overlay,
-                start,
-                Endpoint::Start,
-                input.colors.start,
-                input.colors.marker_fill,
-            );
-            paint_endpoint_marker(
-                overlay,
-                end,
-                Endpoint::End,
-                input.colors.end,
-                input.colors.marker_fill,
-            );
-        }
+        paint_route_endpoints(
+            overlay,
+            start,
+            end,
+            input.colors.start,
+            input.colors.end,
+            input.colors.marker_fill,
+            1.0,
+        );
     }
     if let Some((longitude, latitude)) = input.selected_coordinate {
         let position = projector.project(lon_lat(
@@ -940,44 +931,76 @@ enum Endpoint {
     End,
 }
 
+pub(crate) fn paint_route_endpoints(
+    ui: &Ui,
+    start: egui::Pos2,
+    end: egui::Pos2,
+    start_color: egui::Color32,
+    end_color: egui::Color32,
+    background: egui::Color32,
+    scale: f32,
+) {
+    if endpoints_share_marker(start, end) {
+        paint_combined_endpoint_marker(
+            ui,
+            start.lerp(end, 0.5),
+            start_color,
+            end_color,
+            background,
+            scale,
+        );
+    } else {
+        paint_endpoint_marker(ui, start, Endpoint::Start, start_color, background, scale);
+        paint_endpoint_marker(ui, end, Endpoint::End, end_color, background, scale);
+    }
+}
+
 fn paint_endpoint_marker(
     ui: &Ui,
     position: egui::Pos2,
     endpoint: Endpoint,
     color: egui::Color32,
     symbol: egui::Color32,
+    scale: f32,
 ) {
-    ui.painter().circle_filled(position, 8.0, symbol);
-    ui.painter().circle_filled(position, 6.5, color);
-    paint_endpoint_symbol(ui, position, endpoint);
+    ui.painter().circle_filled(position, 8.0 * scale, symbol);
+    ui.painter().circle_filled(position, 6.5 * scale, color);
+    paint_endpoint_symbol(ui, position, endpoint, scale);
 }
 
 fn endpoints_share_marker(start: egui::Pos2, end: egui::Pos2) -> bool {
     start.distance_sq(end) <= ENDPOINT_PAIR_DISTANCE.powi(2)
 }
 
-fn paint_combined_endpoint_marker(ui: &Ui, position: egui::Pos2, colors: MapColors) {
-    let background = Rect::from_center_size(position, egui::vec2(34.0, 18.0));
+fn paint_combined_endpoint_marker(
+    ui: &Ui,
+    position: egui::Pos2,
+    start_color: egui::Color32,
+    end_color: egui::Color32,
+    marker_fill: egui::Color32,
+    scale: f32,
+) {
+    let background = Rect::from_center_size(position, egui::vec2(34.0, 18.0) * scale);
     ui.painter()
-        .rect_filled(background, 9.0, colors.marker_fill);
+        .rect_filled(background, 9.0 * scale, marker_fill);
     for (offset, endpoint, color) in [
-        (-8.0, Endpoint::Start, colors.start),
-        (8.0, Endpoint::End, colors.end),
+        (-8.0, Endpoint::Start, start_color),
+        (8.0, Endpoint::End, end_color),
     ] {
-        let center = position + egui::vec2(offset, 0.0);
-        ui.painter().circle_filled(center, 6.5, color);
-        paint_endpoint_symbol(ui, center, endpoint);
+        let center = position + egui::vec2(offset * scale, 0.0);
+        ui.painter().circle_filled(center, 6.5 * scale, color);
+        paint_endpoint_symbol(ui, center, endpoint, scale);
     }
 }
 
-fn paint_endpoint_symbol(ui: &Ui, position: egui::Pos2, endpoint: Endpoint) {
+fn paint_endpoint_symbol(ui: &Ui, position: egui::Pos2, endpoint: Endpoint, scale: f32) {
     match endpoint {
         Endpoint::Start => {
             ui.painter().add(Shape::convex_polygon(
                 vec![
-                    position + egui::vec2(-1.5, -3.0),
-                    position + egui::vec2(3.0, 0.0),
-                    position + egui::vec2(-1.5, 3.0),
+                    position + egui::vec2(-1.5, -3.0) * scale,
+                    position + egui::vec2(3.0, 0.0) * scale,
+                    position + egui::vec2(-1.5, 3.0) * scale,
                 ],
                 egui::Color32::WHITE,
                 Stroke::NONE,
@@ -985,8 +1008,8 @@ fn paint_endpoint_symbol(ui: &Ui, position: egui::Pos2, endpoint: Endpoint) {
         }
         Endpoint::End => {
             ui.painter().rect_filled(
-                Rect::from_center_size(position, Vec2::splat(5.0)),
-                0.5,
+                Rect::from_center_size(position, Vec2::splat(5.0 * scale)),
+                0.5 * scale,
                 egui::Color32::WHITE,
             );
         }

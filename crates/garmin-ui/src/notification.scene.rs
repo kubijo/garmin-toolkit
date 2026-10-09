@@ -30,9 +30,16 @@ fn states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
                 title: "Import failed",
                 detail: Some("The selected directory could not be read."),
             },
+            notification::Props {
+                kind: notification::Kind::Error,
+                title: "GPX import stopped",
+                detail: Some(
+                    "Upload completed, but the GPX worker executable was missing.\nNo route was saved. Rebuild or reinstall Garmin Toolkit, then retry.",
+                ),
+            },
         ] {
             notification::show(ui, &props);
-            ui.add_space(12.0);
+            ui.add_space(16.0);
         }
     });
 }

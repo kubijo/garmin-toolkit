@@ -2,7 +2,7 @@
 
 use garmin_model::route::CourseGenerationOperationId;
 use garmin_model::{
-    artifact::ArtifactId,
+    artifact::{AcquisitionOperationId, ArtifactId},
     route::{RouteCandidateSource, RoutePoint, RouteSport},
 };
 use garmin_service_api::routes::{
@@ -41,12 +41,15 @@ pub struct State {
     pub points_ready: bool,
     pub busy: bool,
     pub error: Option<String>,
+    pub invalid_file_notice: bool,
     pub retry: Option<RouteRequest>,
     pub pending: Option<RouteRequest>,
 }
 
 pub enum Action {
-    Import,
+    Import {
+        replace: Option<AcquisitionOperationId>,
+    },
     Request(RouteRequest),
     Download(ArtifactId),
     BeginTransfer(CourseGenerationOperationId),
@@ -114,6 +117,7 @@ impl TransferState {
 impl State {
     pub fn queue(&mut self, request: RouteRequest) {
         self.error = None;
+        self.invalid_file_notice = false;
         self.retry = None;
         self.pending = Some(request);
     }
@@ -131,7 +135,15 @@ impl State {
     pub fn fail(&mut self, message: String) {
         self.busy = false;
         self.pending = None;
+        self.invalid_file_notice = false;
         self.error = Some(message);
+    }
+
+    pub fn begin_upload(&mut self, upload: GpxUpload) {
+        self.error = None;
+        self.invalid_file_notice = false;
+        self.retry = None;
+        self.accept_upload(upload);
     }
 
     pub fn select_candidate(&mut self, source: RouteCandidateSource) {
@@ -183,6 +195,7 @@ impl State {
         self.busy = false;
         self.retry = None;
         self.error = None;
+        self.invalid_file_notice = false;
         match reply {
             RouteReply::Routes { items, next } => {
                 self.accept_routes(items, append_routes);
@@ -228,25 +241,13 @@ impl State {
                 }
             }
             RouteReply::Imported(receipt) => {
-                self.sport = None;
-                self.name.clear();
-                self.upload = None;
-                self.candidate = None;
-                self.candidates.clear();
-                self.rejected.clear();
-                self.points.clear();
+                self.clear_import();
                 self.pending = Some(RouteRequest::Detail {
                     plan: receipt.plan_id(),
                 });
             }
             RouteReply::Cancelled => {
-                self.sport = None;
-                self.name.clear();
-                self.upload = None;
-                self.candidate = None;
-                self.candidates.clear();
-                self.rejected.clear();
-                self.points.clear();
+                self.clear_import();
                 self.pending = Some(RouteRequest::List { offset: 0 });
             }
             RouteReply::GenerationReady(operation) => {
@@ -354,6 +355,13 @@ impl State {
     }
 
     fn accept_upload(&mut self, upload: GpxUpload) {
+        if self
+            .upload
+            .as_ref()
+            .is_some_and(|current| current.operation != upload.operation)
+        {
+            self.clear_import();
+        }
         match &upload.phase {
             GpxUploadPhase::Parsing => {
                 self.pending = Some(RouteRequest::UploadStatus {
@@ -368,6 +376,11 @@ impl State {
                     offset: 0,
                 });
             }
+            GpxUploadPhase::InvalidFile(error) => {
+                self.error = Some(error.clone());
+                self.invalid_file_notice = true;
+                self.retry = None;
+            }
             GpxUploadPhase::Failed(error) => {
                 self.error = Some(error.clone());
                 self.retry = Some(RouteRequest::Inspect {
@@ -377,6 +390,17 @@ impl State {
             GpxUploadPhase::Uploading | GpxUploadPhase::Review { .. } => {}
         }
         self.upload = Some(upload);
+    }
+
+    fn clear_import(&mut self) {
+        self.sport = None;
+        self.name.clear();
+        self.upload = None;
+        self.candidate = None;
+        self.candidates.clear();
+        self.rejected.clear();
+        self.points.clear();
+        self.points_ready = false;
     }
 
     fn accept_points(&mut self, offset: u32, points: Vec<RoutePoint>, end: bool) {

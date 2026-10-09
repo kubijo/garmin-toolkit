@@ -195,6 +195,10 @@
     "source": "Restore a backup",
     "translation": "Obnovit ze zálohy"
   },
+  "2aTe7zTapA": {
+    "source": "{count, plural, one {# point} other {# points}} · FIT Course available",
+    "translation": "{count, plural, one {# bod} few {# body} other {# bodů}} · lze vytvořit trasu FIT Course"
+  },
   "2nRbMDmfKx": {
     "source": "Interrupted preparation",
     "translation": "Přerušená příprava"
@@ -1206,6 +1210,10 @@
     "source": "Authorize",
     "translation": "Autorizace"
   },
+  "R5+lDmV9Vt": {
+    "source": "Choose a path",
+    "translation": "Vyberte trasu"
+  },
   "R85gsW8HY9": {
     "source": "Courses",
     "translation": "Trasy"
@@ -1233,6 +1241,10 @@
   "RXpxPUwfNq": {
     "source": "Forward",
     "translation": "Vpřed"
+  },
+  "RagBhnuhGj": {
+    "source": "Route action failed",
+    "translation": "Operace s trasou se nezdařila"
   },
   "Rl5++Udrl5": {
     "source": "Elevation",
@@ -1454,6 +1466,10 @@
     "source": "Run simulation",
     "translation": "Spustit simulaci"
   },
+  "Xi8QNc/nnF": {
+    "source": "Loading routes…",
+    "translation": "Načítání tras…"
+  },
   "Xs5erpuz9K": {
     "source": "Less than a second",
     "translation": "Méně než sekunda"
@@ -1489,6 +1505,10 @@
   "YbZcecsnwr": {
     "source": "Plan ID",
     "translation": "ID plánu"
+  },
+  "Yj5wokp6vO": {
+    "source": "Import failed",
+    "translation": "Import se nezdařil"
   },
   "YjjTU9NztP": {
     "source": "Choose a folder",
@@ -1670,10 +1690,6 @@
     "source": "Keep running",
     "translation": "Pokračovat"
   },
-  "exEtSIvCP9": {
-    "source": "Choose a route",
-    "translation": "Vyberte trasu"
-  },
   "eyx5ByCxF3": {
     "source": "Routes",
     "translation": "Trasy"
@@ -1790,6 +1806,10 @@
     "source": "Manage maps",
     "translation": "Správa map"
   },
+  "iBjdF+pMzX": {
+    "source": "{count, plural, one {# control point} other {# control points}} · FIT Course unavailable",
+    "translation": "{count, plural, one {# průjezdní bod} few {# průjezdní body} other {# průjezdních bodů}} · trasu FIT Course nelze vytvořit"
+  },
   "iCajAfRudg": {
     "source": "focus",
     "translation": "výběr"
@@ -1898,6 +1918,10 @@
     "source": "Diagnostics:",
     "translation": "Diagnostika:"
   },
+  "kw7rKDLZG8": {
+    "source": "File size: {size}",
+    "translation": "Velikost souboru: {size}"
+  },
   "kwlRcAzmUC": {
     "source": "Request cancellation at the next safe checkpoint?",
     "translation": "Požádat o přerušení v nejbližším bezpečném bodě?"
@@ -1954,10 +1978,6 @@
     "source": "Review partial cleanup",
     "translation": "Zkontrolovat odstranění neúplného souboru"
   },
-  "mVlofW7pDD": {
-    "source": "The route operation could not be completed.",
-    "translation": "Operaci s trasou nelze dokončit."
-  },
   "mePIopRwmA": {
     "source": "Backup download",
     "translation": "Stažení zálohy"
@@ -1981,10 +2001,6 @@
   "nSuQlM3yTx": {
     "source": "{reason} Retrying…",
     "translation": "{reason} Probíhá další pokus…"
-  },
-  "nXYvI/qtzl": {
-    "source": "Unnamed route",
-    "translation": "Trasa bez názvu"
   },
   "nZ9QXAjOmF": {
     "source": "Map update installed.",
@@ -2018,6 +2034,10 @@
   "o5yKEpubE5": {
     "source": "Download to this device",
     "translation": "Stáhnout do tohoto zařízení"
+  },
+  "oIjWl8JFFv": {
+    "source": "Loading route…",
+    "translation": "Načítání trasy…"
   },
   "oK0S4lS6/u": {
     "source": "Transaction ID",
@@ -2090,6 +2110,10 @@
   "q/uwLTb3Zf": {
     "source": "Stop",
     "translation": "Zastavit"
+  },
+  "q41evKDxb/": {
+    "source": "Available paths: {count}",
+    "translation": "Dostupné trasy: {count}"
   },
   "q5Xl0MIdUj": {
     "source": "Verify",
@@ -2304,6 +2328,10 @@
     "translation": "Kontrola zařízení {device}",
     "description": "Active operation shown while reading a connected device manifest"
   },
+  "uuRps8vJvp": {
+    "source": "The selected file is not a valid GPX file. Choose another GPX file and try again.",
+    "translation": "Vybraný soubor není platný soubor GPX. Vyberte jiný soubor GPX a zkuste to znovu."
+  },
   "uxOZANskJB": {
     "source": "Save backup",
     "translation": "Uložit zálohu"
@@ -2432,6 +2460,10 @@
     "source": "The device reported invalid storage totals",
     "translation": "Zařízení nahlásilo neplatné údaje o kapacitě úložiště"
   },
+  "yn5Y7+xW28": {
+    "source": "A GPX file can contain multiple tracks, segments, or routes. Choose one path to preview and save.",
+    "translation": "Soubor GPX může obsahovat více stop, úseků nebo tras. Vyberte jednu k náhledu a uložení."
+  },
   "ytTg3fPLLu": {
     "source": "Could not refresh device",
     "translation": "Zařízení se nepodařilo obnovit"
@@ -2459,5 +2491,9 @@
   "zq9vTaCwpV": {
     "source": "Transaction device ID",
     "translation": "ID zařízení v transakci"
+  },
+  "zrmOoAZXGn": {
+    "source": "Unnamed path",
+    "translation": "Nepojmenovaná trasa"
   }
 }

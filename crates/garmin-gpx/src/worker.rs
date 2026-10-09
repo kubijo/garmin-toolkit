@@ -104,7 +104,14 @@ impl Parser {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true)
-            .spawn()?;
+            .spawn()
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound && !self.executable.exists() {
+                    Error::WorkerMissing(error)
+                } else {
+                    Error::WorkerStart(error)
+                }
+            })?;
         let mut stdin = child.stdin.take().ok_or(Error::Protocol)?;
         let stdout = child.stdout.take().ok_or(Error::Protocol)?;
         let exchange = async {
@@ -188,6 +195,12 @@ pub enum Error {
     Protocol,
     #[error("GPX worker requires an absolute executable path")]
     InvalidExecutable,
+    #[error(
+        "GPX import stopped after upload because the required garmin-gpx-worker executable was not found beside the application. The file was not inspected or saved. Rebuild or reinstall Garmin Toolkit, then retry."
+    )]
+    WorkerMissing(#[source] std::io::Error),
+    #[error("The GPX parser could not start: {0}")]
+    WorkerStart(#[source] std::io::Error),
     #[error("GPX could not be parsed: {0}")]
     Rejected(String),
     #[error(transparent)]
