@@ -29,6 +29,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt as _;
 use uuid::Uuid;
 
+mod course_transfer;
 #[cfg(any(feature = "demo", test))]
 pub(super) mod demo;
 #[cfg(not(feature = "demo"))]
@@ -221,6 +222,7 @@ pub(super) struct Host {
     deployment: Arc<Deployment>,
     operations: Arc<SnapshotOperations>,
     maps: Arc<garmin_services::maps::Operations>,
+    course_transfers: Arc<garmin_services::course_transfer::CourseTransfers>,
     routes: Result<Arc<garmin_services::routes::operations::RouteOperations>, String>,
     fit_plans: Arc<Mutex<FitPlans>>,
     #[cfg(test)]
@@ -251,15 +253,20 @@ impl Host {
         )
         .expect("built-in snapshot limits are valid");
         let epoch = deployment.epoch();
+        let maps = Arc::new(
+            garmin_services::maps::Operations::new(Arc::clone(&deployment))
+                .with_simulation_write_rate(bytes_per_second),
+        );
         Arc::new(Self {
             routes: garmin_services::routes::operations::RouteOperations::beside_host(Arc::clone(
                 &deployment,
             ))
             .map_err(|error| error.message),
-            maps: Arc::new(
-                garmin_services::maps::Operations::new(Arc::clone(&deployment))
-                    .with_simulation_write_rate(bytes_per_second),
+            course_transfers: garmin_services::course_transfer::CourseTransfers::new(
+                Arc::clone(&deployment),
+                maps.mutations(),
             ),
+            maps,
             fit_plans: Arc::new(Mutex::new(FitPlans::new(epoch))),
             #[cfg(test)]
             fit_import_pause: None,
@@ -338,6 +345,44 @@ impl Host {
 }
 
 impl ApplicationService for Host {
+    async fn course_transfers(
+        &self,
+        user_id: UserId,
+        device_key: String,
+    ) -> Result<
+        Result<garmin_service_api::course_transfer::CourseTransferServiceClient, String>,
+        rtc::CallError,
+    > {
+        let _lease = self.application().await?;
+        let source = Arc::clone(&self.source);
+        let key = device_key.clone();
+        let connector = tokio::task::spawn_blocking(move || {
+            source
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .device_connector(&key)
+        })
+        .await
+        .map_err(|_| rtc::CallError::NotServed)?;
+        let connector = match connector {
+            Ok(connector) => connector,
+            Err(error) => return Ok(Err(error)),
+        };
+        let session = course_transfer::Session {
+            actor: user_id,
+            device_key,
+            connector,
+            operations: Arc::clone(&self.course_transfers),
+        };
+        let (server, client) =
+            garmin_service_api::course_transfer::CourseTransferServiceServerShared::<
+                _,
+                remoc::codec::Default,
+            >::new(Arc::new(session));
+        tokio::spawn(server.serve());
+        Ok(Ok(client))
+    }
+
     async fn routes(
         &self,
         user_id: garmin_model::identity::UserId,

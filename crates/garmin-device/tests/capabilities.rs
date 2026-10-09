@@ -166,6 +166,23 @@ fn exposes_declared_transfer_directions() -> Result<(), Box<dyn Error>> {
         parsed.capabilities()[1].direction(),
         TransferDirection::InputOutput
     );
+    assert!(
+        parsed.capabilities()[0]
+            .course_destination("gt-123.fit")
+            .is_none()
+    );
+    assert_eq!(
+        parsed.capabilities()[1]
+            .course_destination("gt-123.fit")
+            .expect("Course input destination")
+            .to_string(),
+        "GARMIN/COURSES/gt-123.fit"
+    );
+    assert!(
+        parsed.capabilities()[1]
+            .course_destination("../other.fit")
+            .is_none()
+    );
     Ok(())
 }
 

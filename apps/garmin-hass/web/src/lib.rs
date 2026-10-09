@@ -495,6 +495,7 @@ impl App {
                             &self.shared,
                             &mut self.route_workspace,
                             current_profile.user.id(),
+                            devices,
                         );
                         PageAction::Routes
                     }

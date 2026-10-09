@@ -6,9 +6,17 @@ use garmin_model::{
     identity::UserId,
 };
 use garmin_service_api::routes::{MAX_UPLOAD_CHUNK, RouteReply, RouteRequest};
+use garmin_service_api::{
+    DeviceSnapshot,
+    course_transfer::{
+        CourseCleanupReview, CourseTarget, CourseTransferPreparation, CourseTransferStatus,
+    },
+};
 use garmin_services::{
     UserContext,
+    course_transfer::CourseTransfers,
     deployment::Deployment,
+    maps::{MutationLocks, device::Connector},
     routes::operations::{RouteOperations, RouteSession},
 };
 use garmin_ui::routes::{Action, State, Workspace};
@@ -22,6 +30,10 @@ use uuid::Uuid;
 
 enum Event {
     Reply(RouteReply),
+    TransferTargets(String, Vec<CourseTarget>, Vec<CourseTransferStatus>),
+    TransferPrepared(CourseTransferPreparation),
+    TransferStatus(CourseTransferStatus),
+    CleanupReview(CourseCleanupReview),
     Failed(String),
     Finished,
 }
@@ -30,6 +42,7 @@ pub struct Controller {
     runtime: tokio::runtime::Runtime,
     operations: Result<Arc<RouteOperations>, String>,
     deployment: Arc<Deployment>,
+    transfers: Arc<CourseTransfers>,
     scope: Option<(UserId, Uuid)>,
     state: State,
     workspace: Workspace,
@@ -56,6 +69,7 @@ impl Controller {
     pub fn new(
         deployment: Arc<Deployment>,
         map: &garmin_ui::activity::map_runtime::MapRuntimeHandle,
+        mutations: Arc<MutationLocks>,
     ) -> std::io::Result<Self> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
@@ -66,10 +80,12 @@ impl Controller {
             RouteOperations::beside_host(Arc::clone(&deployment)).map_err(|error| error.message)
         };
         let (sender, events) = mpsc::channel();
+        let transfers = CourseTransfers::new(Arc::clone(&deployment), mutations);
         Ok(Self {
             runtime,
             operations,
             deployment,
+            transfers,
             scope: None,
             state: State::default(),
             workspace: Workspace::new(map),
@@ -87,13 +103,25 @@ impl Controller {
             }
             match event {
                 Event::Reply(reply) => self.state.accept(reply),
+                Event::TransferTargets(key, targets, receipts) => {
+                    self.state.transfer_targets(key, targets, receipts);
+                }
+                Event::TransferPrepared(result) => self.state.transfer_prepared(result),
+                Event::TransferStatus(status) => self.state.transfer_status(status),
+                Event::CleanupReview(review) => self.state.transfer_cleanup(review),
                 Event::Failed(error) => self.state.fail(error),
                 Event::Finished => self.state.busy = false,
             }
         }
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, intl: &garmin_i18n::Intl, actor: UserId) {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        intl: &garmin_i18n::Intl,
+        actor: UserId,
+        devices: &[(DeviceSnapshot, Arc<dyn Connector>)],
+    ) {
         let scope = (actor, self.deployment.epoch());
         if self.scope != Some(scope) {
             if let Some(task) = self.task.take() {
@@ -105,21 +133,31 @@ impl Controller {
             self.state.queue(RouteRequest::List { offset: 0 });
         }
         self.poll();
+        self.state.devices = devices
+            .iter()
+            .map(|(snapshot, _)| snapshot.clone())
+            .collect();
         if let Some(action) = self.workspace.show(ui, intl, &mut self.state) {
             match action {
                 Action::Request(request) => self.state.queue(request),
-                action => self.start(ui.ctx(), actor, action),
+                action => self.start(ui.ctx(), actor, action, devices),
             }
         }
         if let Some(request) = self.state.take_request() {
-            self.start(ui.ctx(), actor, Action::Request(request));
+            self.start(ui.ctx(), actor, Action::Request(request), devices);
         }
         if self.state.busy || self.state.pending.is_some() {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
     }
 
-    fn start(&mut self, context: &egui::Context, actor: UserId, action: Action) {
+    fn start(
+        &mut self,
+        context: &egui::Context,
+        actor: UserId,
+        action: Action,
+        devices: &[(DeviceSnapshot, Arc<dyn Connector>)],
+    ) {
         let operations = match &self.operations {
             Ok(value) => Arc::clone(value),
             Err(error) => {
@@ -130,38 +168,158 @@ impl Controller {
         self.state.busy = true;
         let epoch = self.deployment.epoch();
         let deployment = Arc::clone(&self.deployment);
+        let transfers = Arc::clone(&self.transfers);
+        let selected = selected_device_key(&action);
+        let connector = selected.and_then(|key| {
+            devices
+                .iter()
+                .find(|(device, _)| device.key == key)
+                .map(|(_, connector)| Arc::clone(connector))
+        });
         let context = context.clone();
         let sender = self.sender.clone();
         let token = self.token;
         self.task = Some(self.runtime.spawn(async move {
-            let result = async {
-                if epoch != deployment.epoch() {
-                    return Err("database changed; reopen routes".to_owned());
-                }
-                let session = operations
-                    .connect_at(UserContext::new(actor), epoch)
-                    .await
-                    .map_err(|error| error.message)?;
-                match action {
-                    Action::Request(request) => {
-                        if matches!(request, RouteRequest::UploadStatus { .. }) {
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                        }
-                        Ok(Event::Reply(
-                            session
-                                .request(request)
-                                .await
-                                .map_err(|error| error.message)?,
-                        ))
-                    }
-                    Action::Import => upload(&session).await,
-                    Action::Download(artifact) => download(&session, artifact).await,
-                }
-            }
+            let result = execute_action(
+                operations, transfers, connector, deployment, epoch, actor, action,
+            )
             .await;
             let _ = sender.send((token, result.unwrap_or_else(Event::Failed)));
             context.request_repaint();
         }));
+    }
+}
+
+fn selected_device_key(action: &Action) -> Option<&str> {
+    match action {
+        Action::ChooseTransferDevice { device_key, .. }
+        | Action::PrepareTransfer { device_key, .. }
+        | Action::ApproveTransfer { device_key, .. }
+        | Action::PollTransfer { device_key, .. }
+        | Action::CancelTransfer { device_key, .. }
+        | Action::AcceptTransfer { device_key, .. }
+        | Action::PrepareTransferCleanup { device_key, .. }
+        | Action::ApproveTransferCleanup { device_key, .. } => Some(device_key),
+        _ => None,
+    }
+}
+
+async fn execute_action(
+    operations: Arc<RouteOperations>,
+    transfers: Arc<CourseTransfers>,
+    connector: Option<Arc<dyn Connector>>,
+    deployment: Arc<Deployment>,
+    epoch: Uuid,
+    actor: UserId,
+    action: Action,
+) -> Result<Event, String> {
+    if epoch != deployment.epoch() {
+        return Err("database changed; reopen routes".into());
+    }
+    let session = operations
+        .connect_at(UserContext::new(actor), epoch)
+        .await
+        .map_err(|error| error.message)?;
+    match action {
+        Action::Request(request) => {
+            if matches!(request, RouteRequest::UploadStatus { .. }) {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            session
+                .request(request)
+                .await
+                .map(Event::Reply)
+                .map_err(|error| error.message)
+        }
+        Action::Import => upload(&session).await,
+        Action::Download(artifact) => download(&session, artifact).await,
+        other => execute_transfer(transfers, connector, actor, other).await,
+    }
+}
+
+async fn execute_transfer(
+    transfers: Arc<CourseTransfers>,
+    connector: Option<Arc<dyn Connector>>,
+    actor: UserId,
+    action: Action,
+) -> Result<Event, String> {
+    let user = UserContext::new(actor);
+    match action {
+        Action::ChooseTransferDevice {
+            generation,
+            device_key,
+        } => {
+            let connector = connector.ok_or("selected device is disconnected")?;
+            let targets = transfers
+                .targets(user, generation, &device_key, connector.as_ref())
+                .await
+                .map_err(|error| format!("{error:#}"))?;
+            let receipts = transfers
+                .list(user, generation, &device_key)
+                .await
+                .map_err(|error| format!("{error:#}"))?;
+            Ok(Event::TransferTargets(device_key, targets, receipts))
+        }
+        Action::PrepareTransfer {
+            generation,
+            device_key,
+            storage_id,
+        } => {
+            let connector = connector.ok_or("selected device is disconnected")?;
+            transfers
+                .prepare(user, generation, device_key, &storage_id, connector)
+                .await
+                .map(Event::TransferPrepared)
+                .map_err(|error| format!("{error:#}"))
+        }
+        Action::ApproveTransfer { approval, .. } => transfers
+            .approve(user, approval)
+            .await
+            .map(Event::TransferStatus)
+            .map_err(|error| format!("{error:#}")),
+        Action::PollTransfer { transfer, .. } => {
+            let connector = connector.ok_or("selected device is disconnected")?;
+            transfers
+                .status(user, transfer, connector.as_ref())
+                .await
+                .map(Event::TransferStatus)
+                .map_err(|error| format!("{error:#}"))
+        }
+        Action::CancelTransfer { transfer, .. } => {
+            transfers
+                .cancel(user, transfer)
+                .map_err(|error| format!("{error:#}"))?;
+            Ok(Event::Finished)
+        }
+        Action::AcceptTransfer { transfer, .. } => {
+            let connector = connector.ok_or("selected device is disconnected")?;
+            transfers
+                .accept(user, transfer, connector.as_ref())
+                .await
+                .map(Event::TransferStatus)
+                .map_err(|error| format!("{error:#}"))
+        }
+        Action::PrepareTransferCleanup { transfer, .. } => {
+            let connector = connector.ok_or("selected device is disconnected")?;
+            transfers
+                .prepare_cleanup(user, transfer, connector.as_ref())
+                .await
+                .map(Event::CleanupReview)
+                .map_err(|error| format!("{error:#}"))
+        }
+        Action::ApproveTransferCleanup { approval, .. } => {
+            let connector = connector.ok_or("selected device is disconnected")?;
+            transfers
+                .approve_cleanup(user, approval, connector.as_ref())
+                .await
+                .map(Event::TransferStatus)
+                .map_err(|error| format!("{error:#}"))
+        }
+        Action::BeginTransfer(_)
+        | Action::DismissTransfer
+        | Action::Request(_)
+        | Action::Import
+        | Action::Download(_) => Ok(Event::Finished),
     }
 }
 

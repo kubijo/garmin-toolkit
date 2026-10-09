@@ -26,6 +26,7 @@ let
     ];
     html = true;
     javascript = true;
+    typescript = true;
     json = true;
     justfile = true;
     markdown = true;
@@ -117,7 +118,11 @@ let
       };
       nix = true;
       python.configFile = pythonConfig;
+      typescript = true;
       extraProjectCheckers = {
+        hass-types.command = pkgs.writeShellScript "hass-types" ''
+          exec ${pkgs.typescript}/bin/tsc --project infra/integration/hass/tsconfig.json
+        '';
         integration-harness-tests.command = pkgs.writeShellScript "integration-harness-tests" ''
           exec ${lib.getExe nodejs} infra/integration/hass/faults.test.mjs
         '';

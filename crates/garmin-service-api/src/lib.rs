@@ -1,6 +1,7 @@
 //! Typed contracts shared by native hosts and isolated clients.
 
 pub mod control;
+pub mod course_transfer;
 pub mod files;
 pub mod logging;
 pub mod maps;
@@ -315,6 +316,14 @@ mod rpc {
             &self,
             user_id: UserId,
         ) -> Result<Result<crate::routes::RouteServiceClient, String>, rtc::CallError>;
+        async fn course_transfers(
+            &self,
+            user_id: UserId,
+            device_key: String,
+        ) -> Result<
+            Result<crate::course_transfer::CourseTransferServiceClient, String>,
+            rtc::CallError,
+        >;
         async fn route_download(
             &self,
             user_id: UserId,

@@ -1,5 +1,6 @@
 //! Client view state; host-issued identities survive retries and UI redraws.
 
+use garmin_model::route::CourseGenerationOperationId;
 use garmin_model::{
     artifact::ArtifactId,
     route::{RouteCandidateSource, RoutePoint, RouteSport},
@@ -8,6 +9,14 @@ use garmin_service_api::routes::{
     CourseVersion, GpxCandidate, GpxRejected, GpxUpload, GpxUploadPhase, MAX_GEOMETRY_CHUNK,
     RouteReply, RouteRequest, RouteSelection, RouteSource, RouteSummary,
 };
+use garmin_service_api::{
+    DeviceSnapshot,
+    course_transfer::{
+        CourseCleanupReview, CourseTarget, CourseTransferPreparation, CourseTransferReview,
+        CourseTransferStatus,
+    },
+};
+use uuid::Uuid;
 
 #[cfg(test)]
 mod tests;
@@ -25,6 +34,8 @@ pub struct State {
     pub detail: Option<RouteSummary>,
     pub source: Option<RouteSource>,
     pub versions: Vec<CourseVersion>,
+    pub devices: Vec<DeviceSnapshot>,
+    pub transfer: Option<TransferState>,
     pub next_versions: Option<u32>,
     pub points: Vec<RoutePoint>,
     pub points_ready: bool,
@@ -38,6 +49,66 @@ pub enum Action {
     Import,
     Request(RouteRequest),
     Download(ArtifactId),
+    BeginTransfer(CourseGenerationOperationId),
+    DismissTransfer,
+    ChooseTransferDevice {
+        generation: CourseGenerationOperationId,
+        device_key: String,
+    },
+    PrepareTransfer {
+        generation: CourseGenerationOperationId,
+        device_key: String,
+        storage_id: String,
+    },
+    ApproveTransfer {
+        device_key: String,
+        approval: Uuid,
+    },
+    PollTransfer {
+        device_key: String,
+        transfer: Uuid,
+    },
+    CancelTransfer {
+        device_key: String,
+        transfer: Uuid,
+    },
+    AcceptTransfer {
+        device_key: String,
+        transfer: Uuid,
+    },
+    PrepareTransferCleanup {
+        device_key: String,
+        transfer: Uuid,
+    },
+    ApproveTransferCleanup {
+        device_key: String,
+        approval: Uuid,
+    },
+}
+
+pub struct TransferState {
+    pub generation: CourseGenerationOperationId,
+    pub device_key: Option<String>,
+    pub targets: Vec<CourseTarget>,
+    pub review: Option<CourseTransferReview>,
+    pub status: Option<CourseTransferStatus>,
+    pub receipts: Vec<CourseTransferStatus>,
+    pub cleanup: Option<CourseCleanupReview>,
+}
+
+impl TransferState {
+    #[must_use]
+    pub fn new(generation: CourseGenerationOperationId) -> Self {
+        Self {
+            generation,
+            device_key: None,
+            targets: Vec::new(),
+            review: None,
+            status: None,
+            receipts: Vec::new(),
+            cleanup: None,
+        }
+    }
 }
 
 impl State {
@@ -125,6 +196,7 @@ impl State {
                 self.points.clear();
                 self.points_ready = false;
                 self.versions.clear();
+                self.transfer = None;
                 self.pending = Some(RouteRequest::RevisionPoints {
                     revision,
                     offset: 0,
@@ -194,6 +266,7 @@ impl State {
             }
             RouteReply::CourseDeleted { revision } => {
                 self.versions.clear();
+                self.transfer = None;
                 self.pending = Some(RouteRequest::Versions {
                     revision,
                     offset: 0,
@@ -203,6 +276,59 @@ impl State {
         if self.error.is_none() {
             self.pending = queued.or(self.pending.take());
         }
+    }
+
+    pub fn transfer_targets(
+        &mut self,
+        device_key: String,
+        targets: Vec<CourseTarget>,
+        receipts: Vec<CourseTransferStatus>,
+    ) {
+        if let Some(transfer) = &mut self.transfer {
+            transfer.device_key = Some(device_key);
+            transfer.targets = targets;
+            transfer.receipts = receipts;
+            transfer.review = None;
+            transfer.status = None;
+            transfer.cleanup = None;
+        }
+        self.busy = false;
+        self.error = None;
+    }
+
+    pub fn transfer_prepared(&mut self, result: CourseTransferPreparation) {
+        if let Some(transfer) = &mut self.transfer {
+            match result {
+                CourseTransferPreparation::Review(review) => transfer.review = Some(review),
+                CourseTransferPreparation::AlreadyOnDevice(status) => {
+                    transfer.status = Some(status);
+                }
+            }
+        }
+        self.busy = false;
+        self.error = None;
+    }
+
+    pub fn transfer_status(&mut self, status: CourseTransferStatus) {
+        if let Some(transfer) = &mut self.transfer {
+            transfer.review = None;
+            transfer.cleanup = None;
+            transfer
+                .receipts
+                .retain(|receipt| receipt.transfer != status.transfer);
+            transfer.receipts.push(status.clone());
+            transfer.status = Some(status);
+        }
+        self.busy = false;
+        self.error = None;
+    }
+
+    pub fn transfer_cleanup(&mut self, review: CourseCleanupReview) {
+        if let Some(transfer) = &mut self.transfer {
+            transfer.cleanup = Some(review);
+        }
+        self.busy = false;
+        self.error = None;
     }
 
     fn accept_routes(&mut self, items: Vec<RouteSummary>, append: bool) {

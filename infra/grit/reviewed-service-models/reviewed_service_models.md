@@ -16,6 +16,11 @@ upload or geometry chunks. Sessions bind the profile and database epoch; request
 selection, or replacement geometry. Import and generation receipts identify immutable saved results. Downloads use the
 existing single-use ticket contract after route ownership and stored-byte integrity checks.
 
+Course transfer contracts expose an owned Course version, manifest-declared device destination, opaque one-use approval,
+and readback status. The host retains transport, payload, journal, and mutation lock. A profile authorizes its Course
+bytes; choosing a device does not pair or reassign that device. Cleanup has a separate approval bound to proven partial
+bytes and the exact retained path.
+
 ```grit
 language rust
 
@@ -30,6 +35,12 @@ or {
     `RouteSummary`,
     `RouteSource`,
     `CourseVersion`,
+    `CourseTarget`,
+    `CourseTransferReview`,
+    `CourseTransferPhase`,
+    `CourseTransferStatus`,
+    `CourseTransferPreparation`,
+    `CourseCleanupReview`,
     `GpxCandidate`,
     `GpxRejected`,
     `GpxUploadPhase`,

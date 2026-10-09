@@ -2,6 +2,8 @@ use std::{fmt, path::Path};
 
 use camino::Utf8PathBuf;
 
+use crate::SafeRelativePath;
+
 use garmin_model::map::InstalledMapFile;
 
 /// The detected device-metadata document format.
@@ -243,6 +245,22 @@ impl FileCapability {
     #[must_use]
     pub fn accepts(&self, path: &Path) -> bool {
         self.handle.matches(path)
+    }
+
+    /// Resolve a host-generated FIT Course filename only through a declared input location.
+    #[must_use]
+    pub fn course_destination(&self, file_name: &str) -> Option<SafeRelativePath> {
+        if self.data_type != DataType::Course
+            || !matches!(
+                self.direction,
+                TransferDirection::InputToUnit | TransferDirection::InputOutput
+            )
+        {
+            return None;
+        }
+        let path = self.handle.directory.join(file_name);
+        let path = SafeRelativePath::parse(path.as_std_path()).ok()?;
+        self.accepts(path.as_path()).then_some(path)
     }
 }
 

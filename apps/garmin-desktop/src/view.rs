@@ -109,7 +109,11 @@ impl Desktop {
         )
         .with_metrics(profiling.clone());
         let activity_workspace = activity::Workspace::new(&map_runtime);
-        let routes = crate::routes::Controller::new(Arc::clone(&deployment), &map_runtime)?;
+        let routes = crate::routes::Controller::new(
+            Arc::clone(&deployment),
+            &map_runtime,
+            maps.operations.mutations(),
+        )?;
         Ok(Self {
             deployment,
             epoch,
@@ -281,6 +285,7 @@ impl Desktop {
             backup_enabled: self.profiles[profile_index].user.role()
                 == garmin_model::identity::Role::Owner,
         };
+        let route_devices = route_device_connectors(&self.devices, &device_snapshots);
         let output = workspace::show(ui, &props, |ui| {
             if let Some(notice) = notice {
                 notification::show(ui, &notice.props());
@@ -288,8 +293,12 @@ impl Desktop {
             }
             match page {
                 Page::Routes => {
-                    self.routes
-                        .show(ui, intl, self.profiles[profile_index].user.id());
+                    self.routes.show(
+                        ui,
+                        intl,
+                        self.profiles[profile_index].user.id(),
+                        &route_devices,
+                    );
                     PageOutput::Routes
                 }
                 Page::Activities => {
@@ -1619,6 +1628,23 @@ impl AvatarEditor {
             submitting: false,
         })
     }
+}
+
+fn route_device_connectors(
+    manager: &devices::Manager<device_backend::Platform>,
+    snapshots: &[DeviceSnapshot],
+) -> Vec<(
+    DeviceSnapshot,
+    Arc<dyn garmin_services::maps::device::Connector>,
+)> {
+    snapshots
+        .iter()
+        .filter_map(|device| {
+            manager
+                .candidate(&device.key)
+                .map(|candidate| (device.clone(), device_backend::map_connector(&candidate)))
+        })
+        .collect()
 }
 
 fn device_snapshot(presentation: devices::Presentation) -> DeviceSnapshot {

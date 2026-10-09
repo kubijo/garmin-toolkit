@@ -179,6 +179,10 @@
     "source": "Open backup on server",
     "translation": "Otevřít zálohu na serveru"
   },
+  "2QgpAlYBqJ": {
+    "source": "Choose a connected device for this transfer.",
+    "translation": "Vyberte připojené zařízení pro tento přenos."
+  },
   "2S/lb0w/Om": {
     "source": "Discard attempt",
     "translation": "Zahodit pokus"
@@ -254,6 +258,10 @@
   "4MQ9zggf0W": {
     "source": "Saved {file}",
     "translation": "Uloženo: {file}"
+  },
+  "4l4Q1XZEPn": {
+    "source": "Delete this partial Course upload?",
+    "translation": "Smazat tento neúplný přenos trasy?"
   },
   "4pFMl6Ug+w": {
     "source": "panel",
@@ -384,9 +392,9 @@
     "translation": "Kadence"
   },
   "8PBYrouiJt": {
-    "description": "Notification title after device inspection failed",
     "source": "Could not inspect {device}",
-    "translation": "Zařízení {device} se nepodařilo zkontrolovat"
+    "translation": "Zařízení {device} se nepodařilo zkontrolovat",
+    "description": "Notification title after device inspection failed"
   },
   "8QBEXy+S0W": {
     "source": "Review empty uploads",
@@ -525,9 +533,9 @@
     "translation": "Nedokončená transakce"
   },
   "BQVAnsVPgA": {
-    "description": "Notification title after device metadata was read",
     "source": "{device} inspected",
-    "translation": "Zařízení {device} zkontrolováno"
+    "translation": "Zařízení {device} zkontrolováno",
+    "description": "Notification title after device metadata was read"
   },
   "BR+3apWqOn": {
     "source": "Restore source",
@@ -658,9 +666,9 @@
     "translation": "{completed}/{total} {total, plural, one {soubor ověřen} few {soubory ověřeny} other {souborů ověřeno}}"
   },
   "E/tWlnBAWb": {
-    "description": "Notification title for a newly attached device",
     "source": "{device} connected",
-    "translation": "Připojeno: {device}"
+    "translation": "Připojeno: {device}",
+    "description": "Notification title for a newly attached device"
   },
   "EAG99Y+EPN": {
     "source": "This action is unavailable in the current map state.",
@@ -677,6 +685,10 @@
   "EYIw2MRv0g": {
     "source": "Clear selection",
     "translation": "Zrušit výběr"
+  },
+  "Eq4rXxtXxb": {
+    "source": "Confirmed on device",
+    "translation": "Potvrzeno na zařízení"
   },
   "Er645/5Wcp": {
     "source": "Device inspection",
@@ -782,6 +794,10 @@
     "source": "Name",
     "translation": "Název"
   },
+  "HbB+7XhI6d": {
+    "source": "Send FIT to device",
+    "translation": "Odeslat FIT do zařízení"
+  },
   "Hq3HszheQ0": {
     "source": "Reassign device to this profile?",
     "translation": "Přiřadit zařízení k tomuto profilu?"
@@ -809,6 +825,10 @@
   "IADK+TMMIi": {
     "source": "Save backup on server",
     "translation": "Uložit zálohu na serveru"
+  },
+  "IMaFFovBVj": {
+    "source": "Delete partial upload",
+    "translation": "Smazat neúplný přenos"
   },
   "IP/I5ADZz/": {
     "source": "Loading files…",
@@ -857,6 +877,10 @@
   "J4SQjQZlH8": {
     "source": "select",
     "translation": "vybrat"
+  },
+  "JLaG9yEeUl": {
+    "source": "Course file is missing",
+    "translation": "Soubor trasy chybí"
   },
   "JLwGDxma/f": {
     "source": "current file progress shown below",
@@ -938,6 +962,10 @@
     "source": "Recover now",
     "translation": "Obnovit nyní"
   },
+  "KlT20f0QmK": {
+    "source": "No writable FIT Course location was found.",
+    "translation": "Nebylo nalezeno zapisovatelné umístění pro trasu FIT."
+  },
   "Knc/iJqLjl": {
     "source": "Device transfer",
     "translation": "Přenos do zařízení"
@@ -986,9 +1014,17 @@
     "source": "{count, plural, one {# more storage} other {# more storages}}",
     "translation": "{count, plural, one {# další úložiště} few {# další úložiště} other {# dalších úložišť}}"
   },
+  "MYh8EMgPMj": {
+    "source": "Connect a device to send this Course.",
+    "translation": "Pro odeslání této trasy připojte zařízení."
+  },
   "MchMxikYDL": {
     "source": "Release to import these files",
     "translation": "Uvolněním soubory importujete"
+  },
+  "Mo0DpJSDdV": {
+    "source": "Transfer needs review",
+    "translation": "Přenos vyžaduje kontrolu"
   },
   "Mzg9qCOIW/": {
     "source": "No route geometry",
@@ -1069,6 +1105,10 @@
   "OluyIIBMLd": {
     "source": "recover/clear",
     "translation": "obnovit/vymazat"
+  },
+  "Om2VEQ1Hmq": {
+    "source": "Check device",
+    "translation": "Zkontrolovat zařízení"
   },
   "OnM1xpU1Dm": {
     "source": "{used} used · {free} free · {total} total",
@@ -1402,6 +1442,10 @@
     "source": "Heart rate",
     "translation": "Tepová frekvence"
   },
+  "XIANe1uyqA": {
+    "source": "Confirm transfer",
+    "translation": "Potvrdit přenos"
+  },
   "XLME9GQD8G": {
     "source": "Refreshing…",
     "translation": "Obnovování…"
@@ -1465,6 +1509,10 @@
   "ZFiARsGk5n": {
     "source": "Connecting to the device host…",
     "translation": "Připojování ke službě zařízení…"
+  },
+  "ZdPAiDp21Y": {
+    "source": "Confirm visible on device",
+    "translation": "Potvrdit zobrazení v zařízení"
   },
   "ZsWBTFFfZ3": {
     "source": "Previous outcomes",
@@ -1578,6 +1626,10 @@
     "source": "Loading profiles",
     "translation": "Načítání profilů"
   },
+  "dZ3pB/NMf/": {
+    "source": "Verified on device",
+    "translation": "Ověřeno v zařízení"
+  },
   "dgqFvY9MdV": {
     "source": "Device operation interrupted",
     "translation": "Operace se zařízením přerušena"
@@ -1653,6 +1705,10 @@
   "fYYTRhrK0s": {
     "source": "Map operation failed",
     "translation": "Operace s mapami selhala"
+  },
+  "fZrETTBc5Q": {
+    "source": "Send FIT Course",
+    "translation": "Odeslat trasu FIT"
   },
   "fbazPKUzqq": {
     "source": "Ready to review. Resuming does not replace any data.",
@@ -1858,6 +1914,10 @@
     "source": "Average {rate}/s",
     "translation": "Průměrně {rate}/s"
   },
+  "lJ7zCIX208": {
+    "source": "Check previous transfer",
+    "translation": "Zkontrolovat předchozí přenos"
+  },
   "lR/7o8npaT": {
     "source": "Folder name",
     "translation": "Název složky"
@@ -1889,6 +1949,10 @@
   "mCjAld2nwy": {
     "source": "Files on {device}",
     "translation": "Soubory v zařízení {device}"
+  },
+  "mSVZY9IBnl": {
+    "source": "Review partial cleanup",
+    "translation": "Zkontrolovat odstranění neúplného souboru"
   },
   "mVlofW7pDD": {
     "source": "The route operation could not be completed.",
@@ -1939,9 +2003,9 @@
     "translation": "Zahodit"
   },
   "nqX6jB2HAe": {
-    "description": "FormatJS plural validation fixture",
     "source": "{count, plural, one {# activity} other {# activities}}",
-    "translation": "{count, plural, one {# aktivita} few {# aktivity} other {# aktivit}}"
+    "translation": "{count, plural, one {# aktivita} few {# aktivity} other {# aktivit}}",
+    "description": "FormatJS plural validation fixture"
   },
   "nr7h1mEE6E": {
     "source": "Esc or Ctrl-C",
@@ -1974,6 +2038,10 @@
   "oemX8+WbsL": {
     "source": "Current directory contents",
     "translation": "Obsah aktuální složky"
+  },
+  "oetC4Le5uw": {
+    "source": "Cancel transfer",
+    "translation": "Zrušit přenos"
   },
   "opOSGtt5Ew": {
     "source": "Without a verified backup, automatic rollback is unavailable.",
@@ -2050,6 +2118,10 @@
   "qj71j1QRTA": {
     "source": "Query",
     "translation": "Dotaz"
+  },
+  "qjTrihy7h6": {
+    "source": "Choose device storage",
+    "translation": "Vyberte úložiště zařízení"
   },
   "ql960iDyNU": {
     "source": "The previous operation stopped before changing the device.",
@@ -2187,6 +2259,10 @@
     "source": "Importing…",
     "translation": "Importování…"
   },
+  "uELfQkYS0y": {
+    "source": "Review sending Course version {version}",
+    "translation": "Zkontrolovat odeslání trasy verze {version}"
+  },
   "uTim4o4gsV": {
     "source": "{space} free space required",
     "translation": "vyžadováno {space} volného místa"
@@ -2224,9 +2300,9 @@
     "translation": "Zadejte název"
   },
   "uuI2//1pSe": {
-    "description": "Active operation shown while reading a connected device manifest",
     "source": "Inspecting {device}",
-    "translation": "Kontrola zařízení {device}"
+    "translation": "Kontrola zařízení {device}",
+    "description": "Active operation shown while reading a connected device manifest"
   },
   "uxOZANskJB": {
     "source": "Save backup",
@@ -2276,6 +2352,10 @@
     "source": "Refresh catalog",
     "translation": "Obnovit katalog"
   },
+  "wbbd3PXkhD": {
+    "source": "This transfer does not pair the device or change its existing pairing.",
+    "translation": "Tento přenos zařízení nespáruje ani nezmění jeho stávající spárování."
+  },
   "x/yXKSn1p9": {
     "source": "At cursor",
     "translation": "Na pozici kurzoru"
@@ -2303,6 +2383,10 @@
   "xlro5dKHMo": {
     "source": "Files to write",
     "translation": "Soubory k zápisu"
+  },
+  "y/KVNxG3mF": {
+    "source": "Transfer in progress",
+    "translation": "Probíhá přenos"
   },
   "y1Z3orIe9Z": {
     "source": "Language",

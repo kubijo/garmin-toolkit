@@ -15,6 +15,7 @@ workspace = true
 automation = ["dep:kittest"]
 
 [dependencies]
+uuid.workspace = true
 arc-swap.workspace = true
 bytemuck.workspace = true
 buffa.workspace = true
