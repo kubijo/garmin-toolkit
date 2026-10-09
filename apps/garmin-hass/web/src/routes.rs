@@ -1,6 +1,9 @@
 //! Browser adapter for profile-bound route sessions and bounded File slices.
 
-use garmin_model::{artifact::ByteCount, identity::UserId};
+use garmin_model::{
+    artifact::{AcquisitionOperationId, ByteCount},
+    identity::UserId,
+};
 use garmin_service_api::{
     ApplicationService as _, ApplicationServiceClient, DeviceSnapshot,
     course_transfer::{
@@ -118,7 +121,16 @@ fn start(
     let shared = Rc::clone(shared);
     let context = context.clone();
     spawn_local(async move {
-        let result = execute(&application, client, &shared, actor, action, token).await;
+        let result = execute(
+            &application,
+            client,
+            &shared,
+            actor,
+            action,
+            token,
+            &context,
+        )
+        .await;
         let mut state = shared.borrow_mut();
         if state.routes.token == token {
             match result {
@@ -149,6 +161,7 @@ async fn execute(
     actor: UserId,
     action: Action,
     token: uuid::Uuid,
+    context: &eframe::egui::Context,
 ) -> Result<Option<Completion>, String> {
     let client = match client {
         Some(client) => client,
@@ -166,7 +179,7 @@ async fn execute(
             .await
             .map(Completion::Route)
             .map(Some),
-        Action::Import => upload(&client, shared, token)
+        Action::Import { replace } => upload(&client, shared, token, replace, context)
             .await
             .map(|reply| reply.map(Completion::Route)),
         Action::Download(artifact) => {
@@ -198,7 +211,7 @@ async fn execute_transfer(
         | Action::PrepareTransferCleanup { device_key, .. }
         | Action::ApproveTransferCleanup { device_key, .. } => device_key,
         Action::BeginTransfer(_) | Action::DismissTransfer => return Ok(None),
-        Action::Request(_) | Action::Import | Action::Download(_) => {
+        Action::Request(_) | Action::Import { .. } | Action::Download(_) => {
             return Err("unexpected route action".into());
         }
     };
@@ -274,7 +287,7 @@ async fn execute_transfer(
         Action::BeginTransfer(_)
         | Action::DismissTransfer
         | Action::Request(_)
-        | Action::Import
+        | Action::Import { .. }
         | Action::Download(_) => Err("unexpected transfer action".into()),
     }
 }
@@ -302,6 +315,8 @@ async fn upload(
     client: &RouteServiceClient,
     shared: &Rc<RefCell<super::State>>,
     token: uuid::Uuid,
+    replace: Option<AcquisitionOperationId>,
+    context: &eframe::egui::Context,
 ) -> Result<Option<RouteReply>, String> {
     let Some(file) = rfd::AsyncFileDialog::new()
         .add_filter("GPX", &["gpx"])
@@ -324,6 +339,9 @@ async fn upload(
         reason = "File.size is a nonnegative integer, checked above against the 16 MiB cap"
     )]
     let size = size as u32;
+    if let Some(operation) = replace {
+        let _ = call(client, RouteRequest::Cancel { operation }).await;
+    }
     let RouteReply::Upload(upload) = call(
         client,
         RouteRequest::StartUpload {
@@ -336,6 +354,12 @@ async fn upload(
         return Err("unexpected upload response".into());
     };
     let operation = upload.operation;
+    if shared.borrow().routes.token != token {
+        let _ = call(client, RouteRequest::Cancel { operation }).await;
+        return Ok(None);
+    }
+    shared.borrow_mut().routes.view.begin_upload(upload);
+    context.request_repaint();
     let result = async {
         let mut offset = 0;
         while offset < size {
@@ -352,7 +376,7 @@ async fn upload(
                 .await
                 .map_err(|error| format!("{error:?}"))?;
             let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
-            call(
+            let RouteReply::Upload(progress) = call(
                 client,
                 RouteRequest::Append {
                     operation,
@@ -360,7 +384,14 @@ async fn upload(
                     bytes,
                 },
             )
-            .await?;
+            .await?
+            else {
+                return Err("unexpected upload response".into());
+            };
+            if shared.borrow().routes.token == token {
+                shared.borrow_mut().routes.view.begin_upload(progress);
+                context.request_repaint();
+            }
             offset = end;
         }
         call(client, RouteRequest::Inspect { operation })

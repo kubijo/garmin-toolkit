@@ -192,7 +192,10 @@ test('reviewed Course transfer reaches the mock watch without pairing', options,
     assert.deepEqual(await readFile(join(directory, fileName)), f.storage.artifact(course.artifact_id));
     assert.deepEqual(await existingFile(marker), markerBefore, 'sending a Course must not change pairing');
     await run(p, [click('routes.transfer.accept')]);
-    assert((await transferStatusText(p)).includes('Confirmed on device'));
+    await eventually(
+        async () => (await transferStatusText(p)).includes('Confirmed on device'),
+        'user-confirmed Course on device',
+    );
     await f.stopHost();
     await f.startHost();
     await selectProfile(p);
@@ -271,7 +274,8 @@ test('invalid GPX siblings, unresolved controls and malformed upload recovery', 
     await writeFile(malformed, '<gpx><trk></gpx>');
     const before = f.storage.snapshot();
     await upload(p, malformed);
-    await run(p, [wait('routes.retry'), click('routes.cancel'), wait('routes.import')]);
+    await run(p, [wait('routes.error'), wait('routes.import')]);
+    assert(!(await targets(p)).some(t => ['routes.retry', 'routes.cancel'].includes(t.id)));
     assert.deepEqual(f.storage.snapshot(), before);
     const source = await f.source();
     await review(p, source, 'After rejection');

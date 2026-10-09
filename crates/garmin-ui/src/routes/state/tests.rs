@@ -28,6 +28,7 @@ fn review() -> State {
         suggested_name: Some("Walk".parse().unwrap()),
         geometry: true,
         point_count: 2,
+        outline: vec![],
     });
     state
 }
@@ -168,4 +169,62 @@ fn finishing_an_import_requires_a_new_sport_choice_for_the_next_file() {
     state.accept(RouteReply::Cancelled);
     assert!(state.sport.is_none());
     assert!(state.upload.is_none());
+}
+
+#[test]
+fn replacing_an_upload_clears_the_previous_candidate_before_inspection() {
+    let mut state = review();
+    let previous = state.upload.as_ref().unwrap().clone();
+    state.candidate = Some(state.candidates[0].source);
+    state.name = "Previous route".into();
+    state.sport = Some(RouteSport::Hiking);
+    state.points_ready = true;
+    state.busy = true;
+    let next = GpxUpload {
+        operation: AcquisitionOperationId::new_v4(),
+        file_name: "replacement.gpx".into(),
+        received: ByteCount::from_u64(0),
+        total: ByteCount::from_u64(1024),
+        phase: GpxUploadPhase::Uploading,
+    };
+
+    state.begin_upload(next.clone());
+    assert!(state.busy);
+    assert_eq!(state.upload, Some(next.clone()));
+    assert!(state.candidates.is_empty());
+    assert!(state.rejected.is_empty());
+    assert!(state.candidate.is_none());
+    assert!(state.name.is_empty());
+    assert!(state.sport.is_none());
+    assert!(!state.points_ready);
+
+    let mut progress = next.clone();
+    progress.received = ByteCount::from_u64(512);
+    state.begin_upload(progress.clone());
+    assert_eq!(state.upload, Some(progress));
+
+    let mut reviewed = next;
+    reviewed.phase = previous.phase;
+    state.accept(RouteReply::Upload(reviewed));
+    assert!(matches!(
+        state.pending,
+        Some(RouteRequest::Candidates { operation, offset: 0 }) if operation == state.upload.as_ref().unwrap().operation
+    ));
+}
+
+#[test]
+fn replacement_review_reply_discards_stale_candidate_even_without_start_snapshot() {
+    let mut state = review();
+    state.candidate = Some(state.candidates[0].source);
+    let mut new_upload = state.upload.as_ref().unwrap().clone();
+    new_upload.operation = AcquisitionOperationId::new_v4();
+    new_upload.file_name = "other.gpx".into();
+
+    state.accept(RouteReply::Upload(new_upload));
+    assert!(state.candidates.is_empty());
+    assert!(state.candidate.is_none());
+    assert!(matches!(
+        state.pending,
+        Some(RouteRequest::Candidates { .. })
+    ));
 }

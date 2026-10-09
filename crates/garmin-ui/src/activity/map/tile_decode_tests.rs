@@ -272,7 +272,7 @@ fn browser_decoder_enforces_metadata_budget_inside_codec() {
 
 #[test]
 fn browser_decoder_retains_feature_and_property_reference_limits() {
-    let bytes = tile(vec![proto::Feature::default(); 8193], "");
+    let bytes = tile(vec![proto::Feature::default(); 16_385], "");
     let error = BrowserTileLimits::read(&bytes).unwrap_err();
     assert!(error.contains("layer or feature limit"), "{error}");
 
@@ -286,6 +286,54 @@ fn browser_decoder_retains_feature_and_property_reference_limits() {
         } else {
             let error = result.err().unwrap();
             assert!(error.contains("expanded property limit"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn dense_city_tile_keeps_styled_background_under_feature_limit() {
+    let bytes = proto::Tile {
+        layers: vec![
+            proto::Layer {
+                name: "poi".to_owned(),
+                version: 2,
+                extent: Some(4096),
+                features: vec![proto::Feature::default(); 12_002],
+                ..Default::default()
+            },
+            proto::Layer {
+                name: "test".to_owned(),
+                version: 2,
+                extent: Some(4096),
+                features: vec![feature(proto::GeomType::Point, &[9, 0, 0])],
+                keys: vec!["name".to_owned()],
+                values: vec![proto::Value {
+                    string_value: Some("Landmark".to_owned()),
+                    ..Default::default()
+                }],
+            },
+        ],
+    }
+    .encode_to_vec();
+    let reader = BrowserTileLimits::read(&bytes).unwrap();
+    assert_eq!(
+        reader
+            .layers()
+            .map(fast_mvt::MvtLayerRef::feature_count)
+            .sum::<usize>(),
+        12_003
+    );
+    let decoded = decode(&bytes, &style(), 14, 512).unwrap();
+    assert!(!decoded.shapes.is_empty());
+    assert_eq!(decoded.texts.len(), 1);
+    super::super::gpu_map::encode_browser_tile(decoded).unwrap();
+
+    if let Some(path) = std::env::var_os("GARMIN_TEST_MAP_TILE") {
+        let bytes = std::fs::read(path).unwrap();
+        for dark in [false, true] {
+            let style = super::super::tile_store::map_style(dark);
+            let decoded = decode(&bytes, &style, 14, 512).unwrap();
+            super::super::gpu_map::encode_browser_tile(decoded).unwrap();
         }
     }
 }

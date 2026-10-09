@@ -65,6 +65,13 @@ pub struct GpxCandidate {
     pub suggested_name: Option<RouteName>,
     pub geometry: bool,
     pub point_count: u32,
+    pub outline: Vec<OutlinePoint>,
+}
+
+#[garmin_macros::portable(copy)]
+pub struct OutlinePoint {
+    pub x: u8,
+    pub y: u8,
 }
 
 #[garmin_macros::portable(eq)]
@@ -83,6 +90,7 @@ pub enum GpxUploadPhase {
         rejected: u32,
     },
     Failed(String),
+    InvalidFile(String),
 }
 
 #[garmin_macros::portable(eq)]

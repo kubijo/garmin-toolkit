@@ -77,16 +77,91 @@ pub enum Action {
 
 /// Renders an inline notification.
 pub fn show(ui: &mut Ui, props: &Props<'_>) {
-    let _ = surface(
-        ui,
-        &ActionableProps {
-            kind: props.kind,
-            title: props.title,
-            detail: props.detail,
-            action: None,
-            closable: false,
-        },
+    let _ = render_inline(ui, props);
+}
+
+fn render_inline(ui: &mut Ui, props: &Props<'_>) -> Response {
+    let palette = crate::theme::palette(ui);
+    let accent = props.kind.color(ui);
+    let output = egui::Frame::NONE
+        .fill(widget_theme::color32(
+            palette.surfaces().layer(theme::Level::Two),
+        ))
+        .inner_margin(egui::Margin::symmetric(16, 8))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            let stacked = props.detail.is_some_and(|detail| {
+                if detail.contains('\n') {
+                    return true;
+                }
+                let title_width = ui
+                    .painter()
+                    .layout_no_wrap(
+                        props.title.to_owned(),
+                        crate::typography::font(14.0, crate::typography::Weight::SemiBold),
+                        egui::Color32::WHITE,
+                    )
+                    .size()
+                    .x;
+                let detail_width = ui
+                    .painter()
+                    .layout_no_wrap(
+                        detail.to_owned(),
+                        crate::typography::font(12.0, crate::typography::Weight::Regular),
+                        egui::Color32::WHITE,
+                    )
+                    .size()
+                    .x;
+                title_width + detail_width + 18.0 + 24.0 > ui.available_width()
+            });
+            let icon = icons::Props {
+                icon: props.kind.icon(),
+                size: 18.0,
+                color: accent,
+            };
+            let show_text = |ui: &mut Ui| {
+                ui.add(
+                    egui::Label::new(
+                        crate::typography::semibold(props.title)
+                            .color(palette.content().text_primary().into_cint()),
+                    )
+                    .selectable(false),
+                );
+                if let Some(detail) = props.detail {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(detail)
+                                .size(12.0)
+                                .color(palette.content().text_secondary().into_cint()),
+                        )
+                        .selectable(false)
+                        .wrap(),
+                    );
+                }
+            };
+            if stacked {
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
+                    ui.vertical(|ui| {
+                        ui.add_space(4.0);
+                        icon.show(ui);
+                    });
+                    ui.vertical(show_text);
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    icon.show(ui);
+                    ui.horizontal(show_text);
+                });
+            }
+        });
+    ui.painter().rect_filled(
+        severity_rail_rect(output.response.rect),
+        SEVERITY_RAIL_RADIUS,
+        accent.into_cint(),
     );
+    output.response
 }
 
 #[must_use]
@@ -619,6 +694,85 @@ fn close_button(ui: &mut Ui, color: Color) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_error_stays_in_the_page_and_wraps_at_narrow_widths() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        context.enable_accesskit();
+        for (width, detail, stacked) in [
+            (560.0, "The selected file could not be opened.", false),
+            (
+                560.0,
+                "Upload completed, but the GPX worker executable was missing.\nNo route was saved. Rebuild or reinstall Garmin Toolkit, then retry.",
+                true,
+            ),
+            (
+                320.0,
+                "The GPX worker executable was not found beside the application. Rebuild or reinstall, then retry.",
+                true,
+            ),
+        ] {
+            let mut rect = Rect::NOTHING;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, 400.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(width);
+                    rect = render_inline(
+                        ui,
+                        &Props {
+                            kind: Kind::Error,
+                            title: "Import failed",
+                            detail: Some(detail),
+                        },
+                    )
+                    .rect;
+                },
+            );
+            let nodes = &output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("accessibility tree")
+                .nodes;
+            let node = |value| {
+                nodes
+                    .iter()
+                    .find(|(_, node)| node.value() == Some(value))
+                    .map(|(_, node)| node)
+                    .expect("notification text node")
+            };
+            let title_bounds = node("Import failed").bounds().expect("title bounds");
+            let detail_node = node(detail);
+            let detail_bounds = detail_node.bounds().expect("detail bounds");
+            let detail_preserved = detail_node.value() == Some(detail);
+            output.drop_without_applying_deltas();
+            assert!(rect.width() <= width, "inline error overflowed: {rect:?}");
+            assert!(detail_preserved, "the caller's line breaks were changed");
+            if width > 320.0 {
+                if stacked {
+                    assert!(
+                        detail_bounds.y0 >= title_bounds.y1,
+                        "detail did not move below title"
+                    );
+                } else {
+                    assert!(
+                        rect.height() <= 64.0,
+                        "inline error was not compact: {rect:?}"
+                    );
+                    assert!(
+                        title_bounds.y0 < detail_bounds.y1 && detail_bounds.y0 < title_bounds.y1
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn toast_paint_stays_below_header_during_animation_expansion_and_resize() {

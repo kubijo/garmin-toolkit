@@ -147,10 +147,17 @@ impl RouteSession {
             };
             entry.stage = match result {
                 Ok(prepared) => Stage::Review(prepared),
-                Err(error) => Stage::Failed {
-                    bytes: Arc::clone(bytes),
-                    message: error.to_string(),
-                },
+                Err(error) => {
+                    let invalid_file = matches!(error, garmin_gpx::worker::Error::Rejected(_));
+                    if !invalid_file {
+                        tracing::warn!(error = ?error, "GPX parser failed");
+                    }
+                    Stage::Failed {
+                        bytes: Arc::clone(bytes),
+                        message: error.to_string(),
+                        invalid_file,
+                    }
+                }
             };
         });
         entry.stage = Stage::Parsing {
@@ -183,6 +190,7 @@ impl RouteSession {
                     geometry: candidate.shape().is_geometry(),
                     point_count: u32::try_from(candidate.shape().points().len())
                         .map_err(internal)?,
+                    outline: super::outline::sample(candidate.shape().points()),
                 })
             })
             .collect::<Result<Vec<_>>>()?;

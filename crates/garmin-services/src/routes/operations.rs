@@ -1,6 +1,7 @@
 //! Bounded host-owned uploads and retained GPX previews.
 
 pub mod delivery;
+mod outline;
 mod reads;
 mod uploads;
 
@@ -36,9 +37,16 @@ const TTL: Duration = Duration::from_mins(15);
 
 enum Stage {
     Uploading(Vec<u8>),
-    Parsing { bytes: Arc<[u8]>, task: AbortHandle },
+    Parsing {
+        bytes: Arc<[u8]>,
+        task: AbortHandle,
+    },
     Review(PreparedGpx),
-    Failed { bytes: Arc<[u8]>, message: String },
+    Failed {
+        bytes: Arc<[u8]>,
+        message: String,
+        invalid_file: bool,
+    },
 }
 
 struct Upload {
@@ -289,9 +297,18 @@ impl Upload {
                         .unwrap_or(u32::MAX),
                 },
             ),
-            Stage::Failed { bytes, message } => {
-                (bytes.len(), GpxUploadPhase::Failed(message.clone()))
-            }
+            Stage::Failed {
+                bytes,
+                message,
+                invalid_file,
+            } => (
+                bytes.len(),
+                if *invalid_file {
+                    GpxUploadPhase::InvalidFile(message.clone())
+                } else {
+                    GpxUploadPhase::Failed(message.clone())
+                },
+            ),
         };
         GpxUpload {
             operation,

@@ -12,6 +12,7 @@ run mode *options:
     esac
 
     shift
+    just in-shell cargo build --locked -p garmin-gpx-worker
     exec just in-shell cargo run --locked -p garmin-desktop "${features[@]}" -- "$@"
 
 # Build, record, load, analyze, compare, or finalize a native profile.

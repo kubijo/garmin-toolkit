@@ -11,7 +11,7 @@ pub use state::{Action, State};
 use egui::Ui;
 use garmin_i18n::{Intl, format_message};
 use garmin_model::route::RouteSport;
-use garmin_service_api::routes::RouteRequest;
+use garmin_service_api::routes::{GpxUploadPhase, RouteRequest};
 
 use crate::{
     activity::{
@@ -52,15 +52,16 @@ impl Workspace {
                     .show(ui, |ui| {
                         ui.set_max_width(ui.available_width().min(1120.0));
                         ui.set_min_width(ui.available_width());
-                        let retry = error(ui, intl, state);
-                        let action = if state.upload.is_some() {
+                        let invalid_file = state.upload.as_ref().is_some_and(|upload| {
+                            matches!(upload.phase, GpxUploadPhase::InvalidFile(_))
+                        });
+                        if state.upload.is_some() && !invalid_file {
                             self.review(ui, intl, state)
                         } else if state.detail.is_some() {
                             self.detail(ui, intl, state)
                         } else {
                             library(ui, intl, state)
-                        };
-                        action.or(retry)
+                        }
                     })
                     .inner
             })
@@ -124,26 +125,38 @@ fn preview_height(width: f32, viewport_height: f32) -> f32 {
 
 fn error(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
     let error = state.error.as_ref()?;
-    typography::body(
-        ui,
-        &format_message!(intl, default_message: "The route operation could not be completed."),
-    );
-    crate::accordion::show(
-        ui,
-        &crate::accordion::Props {
-            id: "routes.error",
-            label: &format_message!(intl, default_message: "Details"),
-            default_open: false,
-            inline_padding: 0,
-        },
-        |ui| {
-            typography::body(ui, error);
-        },
-    );
-    let retry = state
+    ui.add_space(16.0);
+    let invalid_file = state.invalid_file_notice;
+    let import_error = state
+        .upload
+        .as_ref()
+        .is_some_and(|upload| !matches!(upload.phase, GpxUploadPhase::InvalidFile(_)));
+    let title = if invalid_file || import_error {
+        format_message!(intl, default_message: "Import failed")
+    } else {
+        format_message!(intl, default_message: "Route action failed")
+    };
+    let detail = invalid_file.then(|| {
+        format_message!(intl, default_message: "The selected file is not a valid GPX file. Choose another GPX file and try again.")
+    });
+    let notice = ui
+        .scope(|ui| {
+            crate::notification::show(
+                ui,
+                &crate::notification::Props {
+                    kind: crate::notification::Kind::Error,
+                    title: &title,
+                    detail: Some(detail.as_deref().unwrap_or(error)),
+                },
+            );
+        })
+        .response;
+    crate::semantics::target(ui, &notice, "routes.error");
+    state
         .retry
         .as_ref()
         .filter(|_| {
+            ui.add_space(8.0);
             action_button(
                 ui,
                 "routes.retry",
@@ -153,34 +166,38 @@ fn error(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
             )
         })
         .cloned()
-        .map(Action::Request);
-    ui.add_space(16.0);
-    retry
+        .map(Action::Request)
 }
 
 fn library(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
     let enabled = !state.busy && state.pending.is_none();
-    let mut action = None;
-    ui.horizontal(|ui| {
-        ui.heading(format_message!(intl, default_message: "Routes"));
-        widgets::busy(ui, state);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let label = format_message!(intl, default_message: "Import GPX");
-            let mut import = widgets::button(&label, button::Kind::Primary, enabled);
-            import.icon = Some(icons::UPLOAD_SIMPLE);
-            let response = import.show(ui);
-            crate::semantics::target(ui, &response, "routes.import");
-            if response.clicked() {
-                action = Some(Action::Import);
-            }
-        });
-    });
+    let mut action = route_header(ui, intl, state, enabled);
+    let retry = error(ui, intl, state);
+    if state.error.is_some() {
+        ui.add_space(16.0);
+    }
     typography::body(
         ui,
         &format_message!(intl, default_message: "Import a GPX file to preview a route and create a FIT Course."),
     );
     ui.add_space(16.0);
-    if state.routes.is_empty() && enabled {
+    let loading = state.busy || state.pending.is_some();
+    let loading_message = loading.then(|| {
+        let listing = matches!(
+            state.retry.as_ref().or(state.pending.as_ref()),
+            Some(RouteRequest::List { .. })
+        );
+        if listing {
+            format_message!(intl, default_message: "Loading routes…")
+        } else {
+            format_message!(intl, default_message: "Loading route…")
+        }
+    });
+    let list_top = ui.available_rect_before_wrap().min;
+    let list_width = ui.available_width();
+    if state.routes.is_empty() && loading {
+        widgets::route_placeholders(ui);
+    } else if state.routes.is_empty() {
         typography::body(
             ui,
             &format_message!(intl, default_message: "No saved routes yet."),
@@ -192,6 +209,8 @@ fn library(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
             let response = Row {
                 title: route.name.as_str(),
                 subtitle: &sport_label(intl, route.sport),
+                detail: None,
+                outline: None,
                 icon: sport_icon(route.sport),
                 selected: false,
                 enabled,
@@ -214,6 +233,33 @@ fn library(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
     {
         action = Some(Action::Request(RouteRequest::List { offset }));
     }
+    if let Some(message) = loading_message {
+        widgets::loading_overlay(
+            ui,
+            egui::Rect::from_min_size(list_top, egui::vec2(list_width, 72.0)),
+            &message,
+        );
+    }
+    action.or(retry)
+}
+
+fn route_header(ui: &mut Ui, intl: &Intl, state: &State, enabled: bool) -> Option<Action> {
+    let mut action = None;
+    ui.horizontal(|ui| {
+        ui.heading(format_message!(intl, default_message: "Routes"));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let label = format_message!(intl, default_message: "Import GPX");
+            let mut import = widgets::button(&label, button::Kind::Primary, enabled);
+            import.icon = Some(icons::UPLOAD_SIMPLE);
+            let response = import.show(ui);
+            crate::semantics::target(ui, &response, "routes.import");
+            if response.clicked() {
+                action = Some(Action::Import {
+                    replace: state.upload.as_ref().map(|upload| upload.operation),
+                });
+            }
+        });
+    });
     action
 }
 

@@ -330,6 +330,7 @@ fn import_form_and_course_versions_fit_narrow_windows() {
                     suggested_name: Some(route.name.clone()),
                     geometry: true,
                     point_count: 2,
+                    outline: vec![],
                 }],
                 candidate: Some(candidate),
                 name: route.name.to_string(),
@@ -366,6 +367,337 @@ fn import_form_and_course_versions_fit_narrow_windows() {
             let (output, _) = frame(&ctx, &intl, &mut view, &mut state, width, vec![]);
             output.drop_without_applying_deltas();
         }
+    }
+}
+
+#[test]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "AccessKit exposes egui f32 coordinates as f64"
+)]
+fn invalid_gpx_returns_to_routes_and_can_choose_a_replacement() {
+    use garmin_model::artifact::AcquisitionOperationId;
+    use garmin_service_api::routes::{GpxUpload, GpxUploadPhase, RouteReply};
+
+    let ctx = egui::Context::default();
+    crate::install(&ctx);
+    ctx.enable_accesskit();
+    let intl = Translations::bundled()
+        .unwrap()
+        .formatter(Language::English)
+        .unwrap();
+    let runtime =
+        MapRuntimeHandle::new(NoTiles, crate::activity::map_runtime::Renderer::software());
+    let mut view = Workspace::new(&runtime);
+    let operation = AcquisitionOperationId::new_v4();
+    let raw = "GPX could not be parsed: invalid GPX: missing version attribute";
+    let mut state = State::default();
+    state.accept(RouteReply::Upload(GpxUpload {
+        operation,
+        file_name: "malformed.gpx".into(),
+        received: ByteCount::from_u64(17),
+        total: ByteCount::from_u64(17),
+        phase: GpxUploadPhase::InvalidFile(raw.into()),
+    }));
+    assert!(state.retry.is_none());
+    let (output, _) = frame(&ctx, &intl, &mut view, &mut state, 480.0, vec![]);
+    let _ = bounds(&output, "routes.error");
+    let nodes = &output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes;
+    assert!(nodes.iter().any(|(_, node)| {
+        node.value()
+            == Some(
+                "The selected file is not a valid GPX file. Choose another GPX file and try again.",
+            )
+    }));
+    assert!(!nodes.iter().any(|(_, node)| {
+        matches!(node.author_id(), Some("routes.cancel" | "routes.retry"))
+            || node.value() == Some(raw)
+    }));
+    let rect = bounds(&output, "routes.import");
+    let pos = pos2(
+        rect.x0.midpoint(rect.x1) as f32,
+        rect.y0.midpoint(rect.y1) as f32,
+    );
+    output.drop_without_applying_deltas();
+    for pressed in [true, false] {
+        let (output, action) = frame(
+            &ctx,
+            &intl,
+            &mut view,
+            &mut state,
+            480.0,
+            vec![
+                Event::PointerMoved(pos),
+                Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        if pressed {
+            assert!(action.is_none());
+        } else {
+            assert!(matches!(
+                action,
+                Some(Action::Import { replace: Some(previous) }) if previous == operation
+            ));
+        }
+        output.drop_without_applying_deltas();
+    }
+    state.fail("route details unavailable".into());
+    let (output, _) = frame(&ctx, &intl, &mut view, &mut state, 480.0, vec![]);
+    let nodes = &output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes;
+    assert!(
+        nodes
+            .iter()
+            .any(|(_, node)| node.value() == Some("route details unavailable"))
+    );
+    assert!(!nodes.iter().any(|(_, node)| {
+        node.value()
+            == Some(
+                "The selected file is not a valid GPX file. Choose another GPX file and try again.",
+            )
+    }));
+    output.drop_without_applying_deltas();
+}
+
+#[test]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "AccessKit exposes egui f32 coordinates as f64"
+)]
+fn review_keeps_import_button_in_place_and_can_replace_file() {
+    use garmin_model::artifact::AcquisitionOperationId;
+    use garmin_service_api::routes::{GpxUpload, GpxUploadPhase};
+
+    let intl = Translations::bundled()
+        .unwrap()
+        .formatter(Language::English)
+        .unwrap();
+    for width in [480.0, 800.0] {
+        let ctx = egui::Context::default();
+        crate::install(&ctx);
+        ctx.enable_accesskit();
+        let runtime =
+            MapRuntimeHandle::new(NoTiles, crate::activity::map_runtime::Renderer::software());
+        let mut view = Workspace::new(&runtime);
+        let mut state = State::default();
+        let (output, _) = frame(&ctx, &intl, &mut view, &mut state, width, vec![]);
+        let library = bounds(&output, "routes.import");
+        output.drop_without_applying_deltas();
+
+        let operation = AcquisitionOperationId::new_v4();
+        state.upload = Some(GpxUpload {
+            operation,
+            file_name: "another-route.gpx".into(),
+            received: ByteCount::from_u64(128),
+            total: ByteCount::from_u64(128),
+            phase: GpxUploadPhase::Review {
+                digest: ArtifactDigest::from_bytes(b"fixture"),
+                candidates: 0,
+                rejected: 0,
+            },
+        });
+        let (output, _) = frame(&ctx, &intl, &mut view, &mut state, width, vec![]);
+        let review = bounds(&output, "routes.import");
+        assert!((library.x0 - review.x0).abs() <= 1.0);
+        assert!((library.y0 - review.y0).abs() <= 1.0);
+        let pos = pos2(
+            review.x0.midpoint(review.x1) as f32,
+            review.y0.midpoint(review.y1) as f32,
+        );
+        output.drop_without_applying_deltas();
+        for pressed in [true, false] {
+            let (output, action) = frame(
+                &ctx,
+                &intl,
+                &mut view,
+                &mut state,
+                width,
+                vec![
+                    Event::PointerMoved(pos),
+                    Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            if !pressed {
+                assert!(
+                    matches!(action, Some(Action::Import { replace: Some(previous) }) if previous == operation)
+                );
+            }
+            output.drop_without_applying_deltas();
+        }
+    }
+}
+
+#[test]
+fn opening_another_file_does_not_shift_or_keep_the_previous_choices() {
+    use garmin_model::{artifact::AcquisitionOperationId, route::RouteCandidateSource};
+    use garmin_service_api::routes::{GpxCandidate, GpxUpload, GpxUploadPhase};
+
+    let ctx = egui::Context::default();
+    crate::install(&ctx);
+    ctx.enable_accesskit();
+    let intl = Translations::bundled()
+        .unwrap()
+        .formatter(Language::English)
+        .unwrap();
+    let runtime =
+        MapRuntimeHandle::new(NoTiles, crate::activity::map_runtime::Renderer::software());
+    let mut view = Workspace::new(&runtime);
+    let source = RouteCandidateSource::TrackSegment {
+        track: 0,
+        segment: 0,
+    };
+    let mut state = State {
+        upload: Some(GpxUpload {
+            operation: AcquisitionOperationId::new_v4(),
+            file_name: "candidates.gpx".into(),
+            received: ByteCount::from_u64(761),
+            total: ByteCount::from_u64(761),
+            phase: GpxUploadPhase::Review {
+                digest: ArtifactDigest::from_bytes(b"previous"),
+                candidates: 1,
+                rejected: 0,
+            },
+        }),
+        candidates: vec![GpxCandidate {
+            source,
+            suggested_name: Some("Morning loop".parse().unwrap()),
+            geometry: true,
+            point_count: 2,
+            outline: vec![],
+        }],
+        ..State::default()
+    };
+    let target = format!("routes.candidate.{source:?}");
+    let (output, _) = frame(&ctx, &intl, &mut view, &mut state, 800.0, vec![]);
+    let before = bounds(&output, &target);
+    output.drop_without_applying_deltas();
+
+    state.busy = true;
+    let (output, _) = frame(&ctx, &intl, &mut view, &mut state, 800.0, vec![]);
+    let picking = bounds(&output, &target);
+    assert!((before.y0 - picking.y0).abs() <= 1.0);
+    assert!((before.y1 - picking.y1).abs() <= 1.0);
+    output.drop_without_applying_deltas();
+
+    state.begin_upload(GpxUpload {
+        operation: AcquisitionOperationId::new_v4(),
+        file_name: "replacement.gpx".into(),
+        received: ByteCount::from_u64(0),
+        total: ByteCount::from_u64(1024),
+        phase: GpxUploadPhase::Uploading,
+    });
+    let (output, _) = frame(&ctx, &intl, &mut view, &mut state, 800.0, vec![]);
+    let nodes = &output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes;
+    assert!(
+        !nodes
+            .iter()
+            .any(|(_, node)| node.author_id() == Some(target.as_str()))
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|(_, node)| node.value() == Some("replacement.gpx"))
+    );
+    output.drop_without_applying_deltas();
+}
+
+#[test]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "AccessKit exposes egui f32 coordinates as f64"
+)]
+fn failed_import_shows_the_cause_and_keeps_retry_available() {
+    use garmin_model::artifact::AcquisitionOperationId;
+    use garmin_service_api::routes::{GpxUpload, GpxUploadPhase};
+
+    let ctx = egui::Context::default();
+    crate::install(&ctx);
+    ctx.enable_accesskit();
+    let intl = Translations::bundled()
+        .unwrap()
+        .formatter(Language::English)
+        .unwrap();
+    let runtime =
+        MapRuntimeHandle::new(NoTiles, crate::activity::map_runtime::Renderer::software());
+    let mut view = Workspace::new(&runtime);
+    let operation = AcquisitionOperationId::new_v4();
+    let message = "GPX import stopped after upload because the required garmin-gpx-worker executable was not found beside the application.";
+    let mut state = State {
+        upload: Some(GpxUpload {
+            operation,
+            file_name: "demo-walk.gpx".into(),
+            received: ByteCount::from_u64(56_824),
+            total: ByteCount::from_u64(56_824),
+            phase: GpxUploadPhase::Failed(message.into()),
+        }),
+        error: Some(message.into()),
+        retry: Some(RouteRequest::Inspect { operation }),
+        ..State::default()
+    };
+    let (output, _) = frame(&ctx, &intl, &mut view, &mut state, 480.0, vec![]);
+    let nodes = &output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes;
+    assert!(nodes.iter().any(|(_, node)| node.value() == Some(message)));
+    let _ = bounds(&output, "routes.error");
+    let rect = bounds(&output, "routes.retry");
+    let pos = pos2(
+        rect.x0.midpoint(rect.x1) as f32,
+        rect.y0.midpoint(rect.y1) as f32,
+    );
+    output.drop_without_applying_deltas();
+    for pressed in [true, false] {
+        let (output, action) = frame(
+            &ctx,
+            &intl,
+            &mut view,
+            &mut state,
+            480.0,
+            vec![
+                Event::PointerMoved(pos),
+                Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        if pressed {
+            assert!(action.is_none());
+        } else {
+            assert!(
+                matches!(action, Some(Action::Request(RouteRequest::Inspect { operation: requested })) if requested == operation)
+            );
+        }
+        output.drop_without_applying_deltas();
     }
 }
 

@@ -30,7 +30,8 @@ impl BrowserTileLimits {
         points: 131_072,
         path_points: 4_096,
         polygon_points: 8_192,
-        features: 8_192,
+        // A valid Prague city tile contains 12,003 features, mostly POIs and house numbers.
+        features: 16_384,
         layers: 64,
         // Low-zoom multilingual dictionaries need ~4 MiB of borrowed protobuf structs.
         // This bounds codec element storage, not encoded strings or styled output.

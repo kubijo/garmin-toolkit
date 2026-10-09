@@ -2,10 +2,10 @@
 
 use eframe::egui;
 use garmin_model::{
-    artifact::{ArtifactId, ByteCount},
+    artifact::{AcquisitionOperationId, ArtifactId, ByteCount},
     identity::UserId,
 };
-use garmin_service_api::routes::{MAX_UPLOAD_CHUNK, RouteReply, RouteRequest};
+use garmin_service_api::routes::{GpxUpload, MAX_UPLOAD_CHUNK, RouteReply, RouteRequest};
 use garmin_service_api::{
     DeviceSnapshot,
     course_transfer::{
@@ -30,12 +30,22 @@ use uuid::Uuid;
 
 enum Event {
     Reply(RouteReply),
+    UploadStarted(GpxUpload),
     TransferTargets(String, Vec<CourseTarget>, Vec<CourseTransferStatus>),
     TransferPrepared(CourseTransferPreparation),
     TransferStatus(CourseTransferStatus),
     CleanupReview(CourseCleanupReview),
     Failed(String),
     Finished,
+}
+
+struct ActionContext {
+    operations: Arc<RouteOperations>,
+    transfers: Arc<CourseTransfers>,
+    connector: Option<Arc<dyn Connector>>,
+    deployment: Arc<Deployment>,
+    epoch: Uuid,
+    actor: UserId,
 }
 
 pub struct Controller {
@@ -103,6 +113,7 @@ impl Controller {
             }
             match event {
                 Event::Reply(reply) => self.state.accept(reply),
+                Event::UploadStarted(upload) => self.state.begin_upload(upload),
                 Event::TransferTargets(key, targets, receipts) => {
                     self.state.transfer_targets(key, targets, receipts);
                 }
@@ -180,8 +191,21 @@ impl Controller {
         let sender = self.sender.clone();
         let token = self.token;
         self.task = Some(self.runtime.spawn(async move {
+            let report_upload = |upload| {
+                let _ = sender.send((token, Event::UploadStarted(upload)));
+                context.request_repaint();
+            };
             let result = execute_action(
-                operations, transfers, connector, deployment, epoch, actor, action,
+                ActionContext {
+                    operations,
+                    transfers,
+                    connector,
+                    deployment,
+                    epoch,
+                    actor,
+                },
+                action,
+                &report_upload,
             )
             .await;
             let _ = sender.send((token, result.unwrap_or_else(Event::Failed)));
@@ -205,14 +229,18 @@ fn selected_device_key(action: &Action) -> Option<&str> {
 }
 
 async fn execute_action(
-    operations: Arc<RouteOperations>,
-    transfers: Arc<CourseTransfers>,
-    connector: Option<Arc<dyn Connector>>,
-    deployment: Arc<Deployment>,
-    epoch: Uuid,
-    actor: UserId,
+    context: ActionContext,
     action: Action,
+    report_upload: &(dyn Fn(GpxUpload) + Send + Sync),
 ) -> Result<Event, String> {
+    let ActionContext {
+        operations,
+        transfers,
+        connector,
+        deployment,
+        epoch,
+        actor,
+    } = context;
     if epoch != deployment.epoch() {
         return Err("database changed; reopen routes".into());
     }
@@ -231,7 +259,7 @@ async fn execute_action(
                 .map(Event::Reply)
                 .map_err(|error| error.message)
         }
-        Action::Import => upload(&session).await,
+        Action::Import { replace } => upload(&session, replace, report_upload).await,
         Action::Download(artifact) => download(&session, artifact).await,
         other => execute_transfer(transfers, connector, actor, other).await,
     }
@@ -318,7 +346,7 @@ async fn execute_transfer(
         Action::BeginTransfer(_)
         | Action::DismissTransfer
         | Action::Request(_)
-        | Action::Import
+        | Action::Import { .. }
         | Action::Download(_) => Ok(Event::Finished),
     }
 }
@@ -331,7 +359,11 @@ impl Drop for Controller {
     }
 }
 
-async fn upload(session: &RouteSession) -> Result<Event, String> {
+async fn upload(
+    session: &RouteSession,
+    replace: Option<AcquisitionOperationId>,
+    report_upload: &(dyn Fn(GpxUpload) + Send + Sync),
+) -> Result<Event, String> {
     let Some(file) = rfd::AsyncFileDialog::new()
         .add_filter("GPX", &["gpx"])
         .pick_file()
@@ -347,6 +379,9 @@ async fn upload(session: &RouteSession) -> Result<Event, String> {
         .await
         .map_err(|error| error.to_string())?
         .len();
+    if let Some(operation) = replace {
+        let _ = session.request(RouteRequest::Cancel { operation }).await;
+    }
     let RouteReply::Upload(upload) = session
         .request(RouteRequest::StartUpload {
             file_name: file.file_name(),
@@ -358,6 +393,7 @@ async fn upload(session: &RouteSession) -> Result<Event, String> {
         return Err("unexpected upload response".into());
     };
     let operation = upload.operation;
+    report_upload(upload);
     let result = async {
         let mut offset = 0;
         loop {
@@ -370,14 +406,18 @@ async fn upload(session: &RouteSession) -> Result<Event, String> {
                 break;
             }
             bytes.truncate(read);
-            session
+            let RouteReply::Upload(progress) = session
                 .request(RouteRequest::Append {
                     operation,
                     offset,
                     bytes,
                 })
                 .await
-                .map_err(|error| error.message)?;
+                .map_err(|error| error.message)?
+            else {
+                return Err("unexpected upload response".into());
+            };
+            report_upload(progress);
             offset += read as u64;
         }
         session

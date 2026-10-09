@@ -71,8 +71,20 @@ fn disclosure_preserves_pointer_and_keyboard_access_to_its_content() {
     assert!(harness.query_by_label("Retained plan evidence").is_none());
     let header = harness.get(By::new().predicate(|node| node.author_id() == Some("details")));
     assert_eq!(header.accesskit_node().data().is_expanded(), Some(false));
+    let rest = header
+        .accesskit_node()
+        .data()
+        .bounds()
+        .expect("header bounds");
     header.hover();
     harness.run();
+    let hover = harness
+        .get(By::new().predicate(|node| node.author_id() == Some("details")))
+        .accesskit_node()
+        .data()
+        .bounds()
+        .expect("hovered header bounds");
+    assert_eq!(rest, hover, "hover must not move disclosure content");
     assert_eq!(
         harness.output().platform_output.cursor_icon,
         egui::CursorIcon::PointingHand

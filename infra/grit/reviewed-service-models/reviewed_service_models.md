@@ -14,7 +14,8 @@ revision, and approval identities; host captures, transport handles, payloads, a
 Route contracts contain owned metadata, canonical coordinates and sports, opaque operation/artifact IDs, and bounded
 upload or geometry chunks. Sessions bind the profile and database epoch; requests carry no filesystem paths, parser
 selection, or replacement geometry. Import and generation receipts identify immutable saved results. Downloads use the
-existing single-use ticket contract after route ownership and stored-byte integrity checks.
+existing single-use ticket contract after route ownership and stored-byte integrity checks. Candidate outlines contain
+at most 64 normalized two-byte points; full geometry is fetched in bounded chunks after selection.
 
 Course transfer contracts expose an owned Course version, manifest-declared device destination, opaque one-use approval,
 and readback status. The host retains transport, payload, journal, and mutation lock. A profile authorizes its Course
@@ -42,6 +43,7 @@ or {
     `CourseTransferPreparation`,
     `CourseCleanupReview`,
     `GpxCandidate`,
+    `OutlinePoint`,
     `GpxRejected`,
     `GpxUploadPhase`,
     `GpxUpload`,

@@ -46,6 +46,27 @@ async fn busy_capacity_rejects_work_before_starting_a_process() -> TestResult {
 }
 
 #[tokio::test]
+async fn missing_worker_explains_the_failed_import_and_retains_the_io_cause() -> TestResult {
+    let _test = TEST_LOCK.lock().await;
+    let root = tempdir()?;
+    let parser = Parser::new(root.path().join("garmin-gpx-worker"))?;
+    let error = parser
+        .parse(Arc::from([]))
+        .await
+        .expect_err("worker is absent");
+    assert!(
+        error
+            .to_string()
+            .contains("garmin-gpx-worker executable was not found")
+    );
+    assert!(
+        matches!(error, Error::WorkerMissing(ref source) if source.kind() == std::io::ErrorKind::NotFound)
+    );
+    assert_eq!(PARSER_SLOT.available_permits(), 1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn oversized_output_is_rejected_and_the_worker_is_reaped() -> TestResult {
     let _test = TEST_LOCK.lock().await;
     let root = tempdir()?;

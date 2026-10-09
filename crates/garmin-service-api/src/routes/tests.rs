@@ -57,6 +57,33 @@ fn route_geometry_and_candidate_identity_survive_postcard() {
 }
 
 #[test]
+fn invalid_gpx_upload_phase_survives_postcard() {
+    assert_eq!(
+        postcard::to_stdvec(&GpxUploadPhase::Failed("worker".into()))
+            .expect("encode legacy failure")
+            .first()
+            .copied(),
+        Some(3),
+    );
+    let reply = RouteReply::Upload(GpxUpload {
+        operation: AcquisitionOperationId::new_v4(),
+        file_name: "malformed.gpx".into(),
+        received: ByteCount::from_u64(17),
+        total: ByteCount::from_u64(17),
+        phase: GpxUploadPhase::InvalidFile("missing GPX version".into()),
+    });
+    let bytes = postcard::to_stdvec(&reply).expect("encode upload status");
+    let decoded: RouteReply = postcard::from_bytes(&bytes).expect("decode upload status");
+    let RouteReply::Upload(upload) = decoded else {
+        panic!("wrong reply");
+    };
+    assert!(matches!(
+        upload.phase,
+        GpxUploadPhase::InvalidFile(reason) if reason == "missing GPX version"
+    ));
+}
+
+#[test]
 fn route_wire_values_reject_nonfinite_elevation_and_empty_encoder_name() {
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert!(postcard::from_bytes::<Elevation>(&postcard::to_stdvec(&value).unwrap()).is_err());

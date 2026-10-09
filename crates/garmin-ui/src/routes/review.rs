@@ -1,37 +1,44 @@
 use egui::Ui;
 use garmin_i18n::{Intl, format_message};
 use garmin_model::route::{RouteCandidateSource, RouteSport};
-use garmin_service_api::routes::{GpxUploadPhase, RouteRequest};
+use garmin_service_api::routes::{GpxUpload, GpxUploadPhase, RouteRequest};
 
-use super::{Action, Row, State, Workspace, widgets};
+use super::{Action, Row, State, Workspace, error, route_header, widgets};
 use crate::{Size, button, icons, input, typography};
 
 impl Workspace {
     pub(super) fn review(&mut self, ui: &mut Ui, intl: &Intl, state: &mut State) -> Option<Action> {
         let upload = state.upload.as_ref()?.clone();
         let enabled = !state.busy && state.pending.is_none();
+        let importing = route_header(ui, intl, state, enabled);
+        let retry = error(ui, intl, state);
+        ui.add_space(16.0);
         let cancelled = header(
             ui,
             intl,
             state,
-            &upload.file_name,
+            &upload,
             enabled || matches!(upload.phase, GpxUploadPhase::Parsing),
         );
-        if !matches!(upload.phase, GpxUploadPhase::Review { .. }) {
-            typography::body(
-                ui,
-                &format_message!(intl, default_message: "{received} of {total}", values: { received: crate::text::format_bytes(upload.received.as_u64()), total: crate::text::format_bytes(upload.total.as_u64()) }),
-            );
-        }
+        ui.add_space(16.0);
         if matches!(upload.phase, GpxUploadPhase::Review { .. }) {
-            ui.add_space(16.0);
             if state.candidates.is_empty() && enabled {
                 typography::body(
                     ui,
                     &format_message!(intl, default_message: "No usable routes found. This file has no importable tracks or routes."),
                 );
             } else if !state.candidates.is_empty() {
-                ui.label(format_message!(intl, default_message: "Choose a route"));
+                ui.label(typography::semibold(
+                    format_message!(intl, default_message: "Choose a path"),
+                ));
+                typography::body(
+                    ui,
+                    &format_message!(intl, default_message: "A GPX file can contain multiple tracks, segments, or routes. Choose one path to preview and save."),
+                );
+                if let GpxUploadPhase::Review { candidates, .. } = &upload.phase {
+                    ui.label(format_message!(intl, default_message: "Available paths: {count}", values: { count: u64::from(*candidates) }));
+                }
+                ui.add_space(8.0);
             }
             candidates(ui, intl, state, enabled);
             if let Some(candidate) = state.candidate {
@@ -70,37 +77,69 @@ impl Workspace {
                 return confirm.map(Action::Request);
             }
         }
-        None
+        importing.or(retry)
     }
 }
 
-fn header(ui: &mut Ui, intl: &Intl, state: &State, file_name: &str, can_cancel: bool) -> bool {
+fn header(ui: &mut Ui, intl: &Intl, state: &State, upload: &GpxUpload, can_cancel: bool) -> bool {
     let mut cancelled = false;
-    ui.horizontal(|ui| {
-        let text_width = (ui.available_width() - 48.0).max(0.0);
-        ui.allocate_ui_with_layout(
-            egui::vec2(text_width, 40.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.set_min_width(text_width);
-                ui.heading(format_message!(intl, default_message: "Import GPX"));
-                let color =
-                    crate::theme::color32(crate::theme::palette(ui).content().text_secondary());
-                ui.add(egui::Label::new(egui::RichText::new(file_name).color(color)).truncate())
-                    .on_hover_text(file_name);
-            },
-        );
-        cancelled = widgets::icon_button(
-            ui,
-            "routes.cancel",
-            &format_message!(intl, default_message: "Cancel import"),
-            icons::X,
-            can_cancel,
-        );
-    });
-    if state.busy || state.pending.is_some() {
-        widgets::busy(ui, state);
-    }
+    let palette = crate::theme::palette(ui);
+    egui::Frame::NONE
+        .fill(crate::theme::color32(
+            palette.surfaces().layer(garmin_color::theme::Level::One),
+        ))
+        .inner_margin(16)
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let text_width = (ui.available_width() - 80.0).max(0.0);
+                let has_progress = !matches!(upload.phase, GpxUploadPhase::Review { .. });
+                ui.allocate_ui_with_layout(
+                    egui::vec2(text_width, 48.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_min_width(text_width);
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&upload.file_name).strong().size(16.0),
+                            )
+                            .truncate(),
+                        )
+                        .on_hover_text(&upload.file_name);
+                        if has_progress {
+                            typography::body(
+                                ui,
+                                &format_message!(intl, default_message: "{received} of {total}", values: { received: crate::text::format_bytes(upload.received.as_u64()), total: crate::text::format_bytes(upload.total.as_u64()) }),
+                            );
+                        } else {
+                            typography::body(ui, &format_message!(intl, default_message: "File size: {size}", values: { size: crate::text::format_bytes(upload.total.as_u64()) }));
+                        }
+                    },
+                );
+                ui.allocate_ui_with_layout(
+                    egui::vec2(24.0, 48.0),
+                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                    |ui| {
+                        if (state.busy || state.pending.is_some())
+                            && matches!(
+                                upload.phase,
+                                GpxUploadPhase::Uploading | GpxUploadPhase::Parsing
+                            )
+                        {
+                            ui.add(egui::Spinner::new().size(16.0));
+                        }
+                    },
+                );
+                cancelled = widgets::icon_button(
+                    ui,
+                    "routes.cancel",
+                    &format_message!(intl, default_message: "Cancel import"),
+                    icons::X,
+                    can_cancel,
+                );
+            });
+        });
     cancelled
 }
 
@@ -149,13 +188,23 @@ fn candidates(ui: &mut Ui, intl: &Intl, state: &mut State, enabled: bool) {
         ui.spacing_mut().item_spacing.y = 2.0;
         for candidate in &state.candidates {
             let label = candidate.suggested_name.as_ref().map_or_else(
-                || format_message!(intl, default_message: "Unnamed route"),
+                || format_message!(intl, default_message: "Unnamed path"),
                 ToString::to_string,
             );
+            let detail = if candidate.geometry {
+                format_message!(intl, default_message: "{count, plural, one {# point} other {# points}} · FIT Course available", values: { count: u64::from(candidate.point_count) })
+            } else {
+                format_message!(intl, default_message: "{count, plural, one {# control point} other {# control points}} · FIT Course unavailable", values: { count: u64::from(candidate.point_count) })
+            };
             if (Row {
                 title: &label,
                 subtitle: &candidate_label(intl, candidate.source),
-                icon: icons::PATH,
+                detail: Some(&detail),
+                outline: Some((&candidate.outline, candidate.geometry)),
+                icon: match candidate.source {
+                    RouteCandidateSource::TrackSegment { .. } => icons::PATH,
+                    RouteCandidateSource::Route { .. } => icons::ROUTE,
+                },
                 selected: state.candidate == Some(candidate.source),
                 enabled,
                 target: &format!("routes.candidate.{:?}", candidate.source),
