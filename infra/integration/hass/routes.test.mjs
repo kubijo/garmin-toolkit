@@ -45,16 +45,14 @@ async function generate(f, name) {
 async function prepareRestore(f) {
     const page = await f.newPage();
     await run(page, [
-        wait('profile.0'),
         click('profile.0'),
-        wait('profile.toggle'),
+        wait('navigation.1'),
         click('profile.toggle'),
-        wait('profile.backup'),
         click('profile.backup'),
         wait('backup.save'),
     ]);
     const archive = await download(page, 'backup.save', f.work);
-    await run(page, [wait('backup.clear'), click('backup.clear'), wait('backup.open')]);
+    await run(page, [click('backup.clear'), wait('backup.open')]);
     await upload(page, archive, 'backup.open');
     await run(page, [wait('backup.approve')]);
     return page;
@@ -357,20 +355,7 @@ for (const pending of ['confirmation', 'generation', 'download']) {
         await save(f, 'Snapshot course');
         const course = await generate(f, 'Snapshot course');
         const baseline = f.storage.snapshot();
-        const backupPage = await f.newPage();
-        await run(backupPage, [
-            wait('profile.0'),
-            click('profile.0'),
-            wait('profile.toggle'),
-            click('profile.toggle'),
-            wait('profile.backup'),
-            click('profile.backup'),
-            wait('backup.save'),
-        ]);
-        const archive = await download(backupPage, 'backup.save', f.work);
-        await run(backupPage, [wait('backup.clear'), click('backup.clear'), wait('backup.open')]);
-        await upload(backupPage, archive, 'backup.open');
-        await run(backupPage, [wait('backup.approve')]);
+        const backupPage = await prepareRestore(f);
         await p.bringToFront();
         let action;
         if (pending === 'confirmation') {

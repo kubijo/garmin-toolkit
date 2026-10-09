@@ -310,6 +310,20 @@ impl Run {
         true
     }
 
+    fn should_wait_for_target(&self, step: &Step, elapsed: f64) -> bool {
+        let missing_for = elapsed - self.waiting_since;
+        if self.recovering_layout || matches!(step.action, Action::Wait | Action::Ready) {
+            return missing_for <= 30.0;
+        }
+        step.action.uses_pointer()
+            && self.gesture.is_none()
+            && missing_for <= 1.0
+            && self.report.completed.checked_sub(1).is_some_and(|index| {
+                let previous = &self.steps[index];
+                previous.target == step.target && matches!(previous.action, Action::Wait)
+            })
+    }
+
     fn map_ready(&mut self, value: Option<&str>, elapsed: f64) -> Result<bool, String> {
         if let Some(failure) = value.filter(|value| value.starts_with("failed:")) {
             return Err(failure.into());
@@ -652,9 +666,7 @@ impl Driver {
             Action::Wait | Action::Ready | Action::Observe(_)
         );
         let Some((rect, value)) = bounds else {
-            if (run.recovering_layout || matches!(step.action, Action::Wait | Action::Ready))
-                && elapsed - run.waiting_since <= 30.0
-            {
+            if run.should_wait_for_target(&step, elapsed) {
                 return Ok(());
             }
             return Err(format!(

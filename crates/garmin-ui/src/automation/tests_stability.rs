@@ -55,6 +55,70 @@ fn assertions_after_clicks_observe_the_updated_widget_state() {
 }
 
 #[test]
+fn click_survives_a_target_missing_between_wait_and_pointer_input() {
+    let context = Context::default();
+    context.add_plugin(Driver::default());
+    let mut hide_next = false;
+    let mut hidden = false;
+    let mut checked_gap = false;
+    let mut clicks = 0;
+    for tick in 0..90_u32 {
+        let hide = hide_next;
+        hide_next = false;
+        context
+            .run_ui(
+                RawInput {
+                    time: Some(f64::from(tick) / 60.0),
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    if !hide {
+                        let response = ui.button("Backup");
+                        crate::semantics::target(ui, &response, "profile.backup");
+                        clicks += usize::from(response.clicked());
+                    }
+                },
+            )
+            .drop_without_applying_deltas();
+        if tick == 0 {
+            command(
+                &context,
+                "sequence",
+                &serde_json::json!([
+                    {"kind":"wait", "target":"profile.backup"},
+                    {"kind":"click", "target":"profile.backup"},
+                ]),
+            )
+            .expect("wait and click sequence");
+        }
+        let plugin = context.plugin::<Driver>();
+        let driver = plugin.lock();
+        if hide {
+            hidden = true;
+        } else if hidden && !checked_gap {
+            assert!(
+                driver.running(),
+                "one missing frame must not fail the click"
+            );
+            checked_gap = true;
+        }
+        if driver.report().is_some_and(|report| report.completed == 1) && !hidden {
+            hide_next = true;
+        }
+        if !driver.running() && tick > 0 {
+            break;
+        }
+    }
+    let plugin = context.plugin::<Driver>();
+    let driver = plugin.lock();
+    let report = driver.report().expect("sequence report");
+    assert!(checked_gap, "test must observe the missing target");
+    assert_eq!(report.state, "passed", "{:?}", report.failure);
+    assert_eq!(clicks, 1);
+}
+
+#[test]
 fn pointer_actions_wait_for_moving_targets() {
     for action in [
         serde_json::json!({"kind":"click", "target":"moving"}),
