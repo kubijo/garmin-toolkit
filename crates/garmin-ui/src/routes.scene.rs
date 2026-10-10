@@ -1,21 +1,27 @@
 use crate::SceneStateKey as _;
 use gallery::prelude::*;
 use garmin_model::{
-    artifact::{AcquisitionOperationId, ArtifactDigest, ByteCount},
+    artifact::{AcquisitionOperationId, ArtifactDigest, ArtifactId, ByteCount},
     route::{
-        Coordinate, Latitude, Longitude, RouteCandidateSource, RoutePlanId, RoutePlanRevisionId,
-        RoutePoint, RouteSport,
+        Coordinate, CourseGenerationId, CourseGenerationOperationId, Latitude, Longitude,
+        RouteCandidateSource, RoutePlanId, RoutePlanRevisionId, RoutePoint, RouteSport,
     },
+    value::ComponentVersion,
+};
+use garmin_service_api::course_transfer::{
+    CourseTarget, CourseTransferPhase, CourseTransferProgress, CourseTransferReview,
+    CourseTransferStatus,
 };
 use garmin_service_api::routes::{
-    GpxCandidate, GpxUpload, GpxUploadPhase, OutlinePoint, RouteSummary,
+    CourseVersion, GpxCandidate, GpxUpload, GpxUploadPhase, OutlinePoint, RouteSummary,
 };
+use garmin_service_api::{DeviceSnapshot, InspectionState};
 use garmin_ui::{activity::map_runtime, routes};
 
 scene_meta! { title: "Application / Routes" }
 
 thread_local! {
-    static ROUTES: crate::SceneState<(routes::Workspace, routes::State), 11> = const { crate::SceneState::empty() };
+    static ROUTES: crate::SceneState<(routes::Workspace, routes::State), 17> = const { crate::SceneState::empty() };
 }
 
 struct NoTiles;
@@ -42,6 +48,12 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             "invalid",
             "picker",
             "uploading",
+            "course",
+            "transfer",
+            "transfer review",
+            "transfer running",
+            "transfer verified",
+            "transfer accepted",
         ],
         3,
     );
@@ -129,6 +141,12 @@ fn review(mode: usize) -> routes::State {
         5 => show_worker_failure(&mut state),
         7 | 9 | 10 => show_path_chooser(&mut state),
         8 => show_invalid_file(&mut state),
+        11 => show_course_version(&mut state),
+        12 => show_transfer_dialog(&mut state),
+        13 => show_transfer_review(&mut state),
+        14 => show_transfer_running(&mut state),
+        15 => show_transfer_verified(&mut state),
+        16 => show_transfer_accepted(&mut state),
         _ => {}
     }
     if mode == 9 {
@@ -219,4 +237,108 @@ fn show_saved_route(state: &mut routes::State, detail: bool) {
     if detail {
         state.detail = Some(route);
     }
+}
+
+fn show_course_version(state: &mut routes::State) {
+    show_saved_route(state, true);
+    let route = state.detail.as_ref().expect("gallery route detail exists");
+    state.versions = vec![CourseVersion {
+        id: CourseGenerationId::new_v4(),
+        operation: CourseGenerationOperationId::new_v4(),
+        revision: route.revision,
+        artifact: ArtifactId::new_v4(),
+        version: 1.try_into().expect("fixture version is positive"),
+        serial: 1.try_into().expect("fixture serial is positive"),
+        encoder: ComponentVersion::from_parts(
+            "gallery",
+            "1.0.0".parse().expect("fixture semver is valid"),
+        )
+        .expect("fixture encoder is valid"),
+        current_encoder: true,
+        generated_at: route.created_at,
+        byte_count: ByteCount::from_u64(9_380),
+        digest: ArtifactDigest::from_bytes(b"gallery course"),
+    }];
+}
+
+fn show_transfer_dialog(state: &mut routes::State) {
+    show_course_version(state);
+    state.transfer = Some(routes::TransferState::new(state.versions[0].operation));
+    state.devices = vec![DeviceSnapshot {
+        key: "edge-1050".into(),
+        name: "Edge 1050".into(),
+        identifier: None,
+        software_version: None,
+        inspection: InspectionState::Ready,
+        inspection_error: None,
+        report: None,
+        capabilities: Vec::new(),
+        storages: Vec::new(),
+    }];
+}
+
+fn show_transfer_review(state: &mut routes::State) {
+    show_transfer_dialog(state);
+    let version = &state.versions[0];
+    let transfer = state.transfer.as_mut().expect("gallery transfer exists");
+    transfer.device_key = Some("edge-1050".into());
+    transfer.review = Some(CourseTransferReview {
+        approval: uuid::Uuid::default(),
+        transfer: uuid::Uuid::default(),
+        generation: version.id,
+        generation_operation: version.operation,
+        artifact: version.artifact,
+        version: 1,
+        digest: version.digest,
+        byte_count: version.byte_count,
+        target: CourseTarget {
+            device_key: "edge-1050".into(),
+            device_name: "Edge 1050".into(),
+            device_digest: "gallery-device".into(),
+            storage_id: "internal".into(),
+            storage_label: "Internal Storage".into(),
+            directory: "/Garmin/NewFiles".into(),
+            free_bytes: Some(1_000_000),
+        },
+        file_name: "gf-fe04fceb-0928-4b15-8e93-61075289222b.fit".into(),
+    });
+}
+
+fn show_transfer_running(state: &mut routes::State) {
+    show_transfer_review(state);
+    let transfer = state.transfer.as_mut().expect("gallery transfer exists");
+    let review = transfer.review.take().expect("gallery review exists");
+    transfer.status = Some(CourseTransferStatus {
+        transfer: review.transfer,
+        generation: review.generation,
+        target: review.target,
+        file_name: review.file_name,
+        phase: CourseTransferPhase::Running,
+        progress: Some(CourseTransferProgress {
+            bytes_sent: 4_690,
+            total_bytes: 9_380,
+            finishing: false,
+        }),
+    });
+}
+
+fn show_transfer_verified(state: &mut routes::State) {
+    show_transfer_running(state);
+    let status = state
+        .transfer
+        .as_mut()
+        .and_then(|transfer| transfer.status.as_mut())
+        .expect("gallery status exists");
+    status.phase = CourseTransferPhase::Verified;
+    status.progress = None;
+}
+
+fn show_transfer_accepted(state: &mut routes::State) {
+    show_transfer_verified(state);
+    let status = state
+        .transfer
+        .as_mut()
+        .and_then(|transfer| transfer.status.as_mut())
+        .expect("gallery status exists");
+    status.phase = CourseTransferPhase::Accepted;
 }

@@ -56,6 +56,7 @@ icon_catalog! {
         TEXT_OUTDENT => phosphor_svgs::style::regular::TEXT_OUTDENT,
         TOOLBOX => phosphor_svgs::style::regular::TOOLBOX,
         TRASH => phosphor_svgs::style::regular::TRASH,
+        TRASH_FILLED => phosphor_svgs::style::fill::TRASH,
         TRANSLATE => phosphor_svgs::style::regular::TRANSLATE,
         UPLOAD_SIMPLE => phosphor_svgs::style::regular::UPLOAD_SIMPLE,
         USER_CIRCLE => phosphor_svgs::style::regular::USER_CIRCLE,
@@ -67,5 +68,7 @@ icon_catalog! {
         WINDOW_RESTORE => phosphor_svgs::style::bold::COPY_SIMPLE,
         X => phosphor_svgs::style::regular::X,
     }
-    local {}
+    local {
+        SEND_TO_DEVICE => include_str!("../../assets/images/send-to-device.svg"),
+    }
 }

@@ -1322,13 +1322,14 @@ impl Desktop {
                 size: modal::Size::Medium,
                 presentation: modal::Presentation::Modal,
                 cancel_label: Some(&cancel),
+                cancel_disabled: None,
                 backdrop_closes: Some(!editor.submitting),
-                primary: modal::Primary {
+                primary: Some(modal::Primary {
                     label: &save,
                     icon: Some(icons::CHECK),
                     kind: modal::PrimaryKind::Confirm,
                     enabled: !editor.submitting,
-                },
+                }),
             },
             |ui| {
                 ui.vertical_centered(|ui| {
@@ -1407,13 +1408,14 @@ impl Desktop {
                 size: modal::Size::Small,
                 presentation: modal::Presentation::Modal,
                 cancel_label: Some(&cancel),
+                cancel_disabled: None,
                 backdrop_closes: Some(false),
-                primary: modal::Primary {
+                primary: Some(modal::Primary {
                     label: &quit,
                     icon: Some(icons::POWER),
                     kind: modal::PrimaryKind::Danger,
                     enabled: true,
-                },
+                }),
             },
             |ui| {
                 for operation in &operations {

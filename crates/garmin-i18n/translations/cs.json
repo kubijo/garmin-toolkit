@@ -19,6 +19,10 @@
     "source": "change all",
     "translation": "změnit vše"
   },
+  "+RoE7gjfG9": {
+    "source": "To device",
+    "translation": "Do zařízení"
+  },
   "+TYpDCZs6N": {
     "source": "{storage} · read-only",
     "translation": "{storage} · pouze pro čtení"
@@ -235,6 +239,10 @@
     "source": "Light",
     "translation": "Světlý"
   },
+  "3lYUarFbNp": {
+    "source": "Review this partial Course upload before deleting it.",
+    "translation": "Před smazáním zkontrolujte tento neúplný přenos trasy."
+  },
   "3tcF7fTYLQ": {
     "source": "Files to remove",
     "translation": "Soubory k odstranění"
@@ -262,10 +270,6 @@
   "4MQ9zggf0W": {
     "source": "Saved {file}",
     "translation": "Uloženo: {file}"
-  },
-  "4l4Q1XZEPn": {
-    "source": "Delete this partial Course upload?",
-    "translation": "Smazat tento neúplný přenos trasy?"
   },
   "4pFMl6Ug+w": {
     "source": "panel",
@@ -407,6 +411,10 @@
   "8a5Q/l4DQE": {
     "source": "Verifying backup",
     "translation": "Ověřování zálohy"
+  },
+  "8kH02BBZ9L": {
+    "source": "Sending this Course will not pair the device or change its existing pairing.",
+    "translation": "Odesláním této trasy se zařízení nespáruje ani se nezmění jeho stávající spárování."
   },
   "8mRNBDIXEf": {
     "source": "Previous month",
@@ -573,6 +581,10 @@
     "source": "Active operation:",
     "translation": "Aktivní operace:"
   },
+  "BsgPifIivC": {
+    "source": "Sent {sent} of {total}",
+    "translation": "Odesláno {sent} z {total}"
+  },
   "ByQwVA1h99": {
     "source": "Select a file or folder to see its details",
     "translation": "Výběrem souboru nebo složky zobrazíte podrobnosti"
@@ -592,6 +604,10 @@
   "CCO9dTMlqW": {
     "source": "{received} of {total}",
     "translation": "{received} z {total}"
+  },
+  "CEVsFbYHlU": {
+    "source": "The FIT file matches the copy on your device. Disconnect it before checking whether the course appears in its menus.",
+    "translation": "Soubor FIT odpovídá kopii v zařízení. Odpojte zařízení a teprve potom zkontrolujte, zda se trasa zobrazuje v jeho nabídce."
   },
   "CKKmh+kHoK": {
     "source": "Use default color",
@@ -690,9 +706,9 @@
     "source": "Clear selection",
     "translation": "Zrušit výběr"
   },
-  "Eq4rXxtXxb": {
-    "source": "Confirmed on device",
-    "translation": "Potvrzeno na zařízení"
+  "Er+nt9lZA3": {
+    "source": "FIT Course file",
+    "translation": "Soubor trasy FIT Course"
   },
   "Er645/5Wcp": {
     "source": "Device inspection",
@@ -1378,6 +1394,10 @@
     "source": "More routes",
     "translation": "Další trasy"
   },
+  "V8XvHPLZXL": {
+    "source": "Sending the FIT file to your device.",
+    "translation": "Odesílání souboru FIT do zařízení."
+  },
   "VCHJaddq7Y": {
     "source": "New folder",
     "translation": "Nová složka"
@@ -1409,6 +1429,10 @@
   "WDLY6mFN6/": {
     "source": "Reading storage totals without scanning files.",
     "translation": "Načítání kapacity úložiště bez procházení souborů."
+  },
+  "WFE3INEsjc": {
+    "source": "Finishing on device",
+    "translation": "Dokončování přenosu do zařízení"
   },
   "WNJfbmGlLZ": {
     "source": "Download size",
@@ -1530,10 +1554,6 @@
     "source": "Connecting to the device host…",
     "translation": "Připojování ke službě zařízení…"
   },
-  "ZdPAiDp21Y": {
-    "source": "Confirm visible on device",
-    "translation": "Potvrdit zobrazení v zařízení"
-  },
   "ZsWBTFFfZ3": {
     "source": "Previous outcomes",
     "translation": "Předchozí výsledky"
@@ -1618,6 +1638,10 @@
     "source": "cancel",
     "translation": "zrušit"
   },
+  "cr9nJBKiBG": {
+    "source": "FIT file verified",
+    "translation": "Soubor FIT ověřen"
+  },
   "cyR7KhiuaU": {
     "source": "Back",
     "translation": "Zpět"
@@ -1645,10 +1669,6 @@
   "dLVFc+8uRc": {
     "source": "Loading profiles",
     "translation": "Načítání profilů"
-  },
-  "dZ3pB/NMf/": {
-    "source": "Verified on device",
-    "translation": "Ověřeno v zařízení"
   },
   "dgqFvY9MdV": {
     "source": "Device operation interrupted",
@@ -1734,6 +1754,10 @@
     "source": "Read",
     "translation": "Čtení"
   },
+  "flNUWyJUcu": {
+    "source": "Choose device storage for this Course.",
+    "translation": "Vyberte úložiště zařízení pro tuto trasu."
+  },
   "fz0z4cb6fQ": {
     "source": "Plan",
     "translation": "Plán"
@@ -1781,6 +1805,14 @@
   "hRcDjG7HM7": {
     "source": "Back to device",
     "translation": "Zpět na zařízení"
+  },
+  "hUdItEKZ0+": {
+    "source": "The transfer could not be verified. Review the status below.",
+    "translation": "Přenos se nepodařilo ověřit. Zkontrolujte stav níže."
+  },
+  "hVJvyTNGcb": {
+    "source": "Upload complete. Finalizing and checking the file on your device.",
+    "translation": "Odesílání dokončeno. Dokončuje se přenos a ověřuje soubor v zařízení."
   },
   "hW7szF6DsI": {
     "source": "Review blocked files",
@@ -2059,10 +2091,6 @@
     "source": "Current directory contents",
     "translation": "Obsah aktuální složky"
   },
-  "oetC4Le5uw": {
-    "source": "Cancel transfer",
-    "translation": "Zrušit přenos"
-  },
   "opOSGtt5Ew": {
     "source": "Without a verified backup, automatic rollback is unavailable.",
     "translation": "Bez ověřené zálohy není automatický návrat dostupný."
@@ -2142,10 +2170,6 @@
   "qj71j1QRTA": {
     "source": "Query",
     "translation": "Dotaz"
-  },
-  "qjTrihy7h6": {
-    "source": "Choose device storage",
-    "translation": "Vyberte úložiště zařízení"
   },
   "ql960iDyNU": {
     "source": "The previous operation stopped before changing the device.",
@@ -2379,10 +2403,6 @@
   "wbVfKm8x4q": {
     "source": "Refresh catalog",
     "translation": "Obnovit katalog"
-  },
-  "wbbd3PXkhD": {
-    "source": "This transfer does not pair the device or change its existing pairing.",
-    "translation": "Tento přenos zařízení nespáruje ani nezmění jeho stávající spárování."
   },
   "x/yXKSn1p9": {
     "source": "At cursor",

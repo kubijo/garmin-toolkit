@@ -350,13 +350,14 @@ fn show_restore_acknowledgement(ui: &mut Ui, props: &Props<'_>) -> Option<Action
             size: modal::Size::Small,
             presentation: modal::Presentation::Modal,
             cancel_label: None,
+            cancel_disabled: None,
             backdrop_closes: Some(false),
-            primary: modal::Primary {
+            primary: Some(modal::Primary {
                 label: &continue_label,
                 icon: Some(icons::CHECK),
                 kind: modal::PrimaryKind::Confirm,
                 enabled: true,
-            },
+            }),
         },
         |ui| {
             ui.style_mut().interaction.selectable_labels = false;
@@ -367,7 +368,9 @@ fn show_restore_acknowledgement(ui: &mut Ui, props: &Props<'_>) -> Option<Action
             show_restore_summary(ui, props.intl, summary);
         },
     );
-    crate::semantics::target(ui, &output.primary, "backup.restore.acknowledge");
+    if let Some(primary) = &output.primary {
+        crate::semantics::target(ui, primary, "backup.restore.acknowledge");
+    }
     (output.action == Some(modal::Action::Primary)).then_some(Action::Clear)
 }
 

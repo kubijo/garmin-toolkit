@@ -136,6 +136,7 @@ fn header(ui: &mut Ui, intl: &Intl, state: &State, upload: &GpxUpload, can_cance
                     "routes.cancel",
                     &format_message!(intl, default_message: "Cancel import"),
                     icons::X,
+                    button::Kind::Tertiary,
                     can_cancel,
                 );
             });

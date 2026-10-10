@@ -20,7 +20,8 @@ at most 64 normalized two-byte points; full geometry is fetched in bounded chunk
 Course transfer contracts expose an owned Course version, manifest-declared device destination, opaque one-use approval,
 and readback status. The host retains transport, payload, journal, and mutation lock. A profile authorizes its Course
 bytes; choosing a device does not pair or reassign that device. Cleanup has a separate approval bound to proven partial
-bytes and the exact retained path.
+bytes and the exact retained path. `CourseTransferProgress` exposes only bounded byte counts and a finalizing flag for
+the active transfer; raw device events and paths remain on the host.
 
 ```grit
 language rust
@@ -39,6 +40,7 @@ or {
     `CourseTarget`,
     `CourseTransferReview`,
     `CourseTransferPhase`,
+    `CourseTransferProgress`,
     `CourseTransferStatus`,
     `CourseTransferPreparation`,
     `CourseCleanupReview`,

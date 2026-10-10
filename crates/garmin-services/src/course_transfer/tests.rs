@@ -223,9 +223,17 @@ async fn sends_owned_course_without_pairing_and_recovers_exact_copy() -> TestRes
     assert!(transfers.approve(partner, review.approval).await.is_err());
     let started = transfers.approve(owner, review.approval).await?;
     assert!(matches!(started.phase, CourseTransferPhase::Running));
+    assert_eq!(
+        started
+            .progress
+            .as_ref()
+            .map(|progress| progress.total_bytes),
+        Some(review.byte_count.as_u64())
+    );
     assert!(transfers.approve(owner, review.approval).await.is_err());
     let verified = settled_transfer(&transfers, owner, review.transfer, connector.as_ref()).await?;
     assert!(matches!(verified.phase, CourseTransferPhase::Verified));
+    assert!(verified.progress.is_none());
     let duplicate = transfers.approve(owner, second_review.approval).await?;
     assert_eq!(duplicate.transfer, review.transfer);
     assert!(matches!(duplicate.phase, CourseTransferPhase::Verified));

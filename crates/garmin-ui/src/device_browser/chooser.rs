@@ -402,17 +402,20 @@ impl Chooser {
                 size: modal::Size::Medium,
                 presentation: modal::Presentation::Modal,
                 cancel_label: Some(&cancel),
+                cancel_disabled: None,
                 backdrop_closes: Some(false),
-                primary: modal::Primary {
+                primary: Some(modal::Primary {
                     label: &replace,
                     icon: Some(icons::FLOPPY_DISK),
                     kind: modal::PrimaryKind::Danger,
                     enabled: true,
-                },
+                }),
             },
             |_| (),
         );
-        crate::semantics::target(ui, &output.primary, "files.chooser.replace");
+        if let Some(primary) = &output.primary {
+            crate::semantics::target(ui, primary, "files.chooser.replace");
+        }
         if let Some(cancel) = &output.cancel {
             crate::semantics::target(ui, cancel, "files.chooser.keep");
         }

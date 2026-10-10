@@ -8,8 +8,9 @@ Device reassociation has [demo acceptance](../research/usb-sync.md#demo-pairing-
 
 ## Remaining work
 
-1. Repeat the reviewed Course transfer on owned hardware. Check mounted-MTP disconnect/recovery and firmware acceptance;
-   the demo confirms byte readback and explicit user acceptance, not firmware behavior.
+1. Finish owned-hardware Course transfer acceptance. One successful transfer appeared as "Last Course Added" on an
+   Edge 1050 after disconnect; cancellation, interrupted writes, and disconnect/recovery still need inspection. The
+   demo confirms byte readback, not firmware behavior.
 2. Integrate Home Assistant host backups with the managed deployment and verify recovery of its selected storage
    generation. Portable application snapshots have a separate
    [storage contract](../architecture/storage.md#portable-snapshots).
@@ -38,14 +39,15 @@ invalidated by a changed target or artifact. Do not expose a generic write-path 
 selected device or alter an existing pairing marker; pairing only enables automatic profile opening and device sync.
 
 Persist transfer intent before mutation and reconcile interrupted writes using the exact recorded destination and
-digest. Readback records transfer verification; firmware rediscovery or explicit user confirmation records acceptance
-separately. Cleanup remains a separately approved operation restricted to this transfer's partial upload. Test with the
-demo device first; an owned-device trial needs explicit authorization and capability evidence.
+digest. Readback records transfer verification. Firmware discovery is a separate observation after MTP disconnect; the
+mounted UI cannot confirm it. Cleanup remains a separately approved operation restricted to this transfer's partial
+upload. Test with the demo device first; an owned-device trial needs explicit authorization and capability evidence.
 
 ### Hardware acceptance still needed
 
 - Exercise cancellation, disconnect, partial write recovery, and readback on owned hardware without unintended mutation.
-- Observe firmware discovery separately from verified bytes and record the result.
+- Repeat firmware discovery after recovery scenarios; the successful "Last Course Added: demo walk" observation on the
+  Edge 1050 covers only the happy path.
 
 Use the shared UI for desktop parity; the browser never acquires filesystem or device access. Keep the implementation
 source-neutral and add no Mapy.com account/API dependency.

@@ -16,10 +16,10 @@ use garmin_device::{DevicePathStatus, SafeRelativePath, StorageCapacity, storage
 use garmin_model::{
     artifact::ArtifactDigest, identity::UserId, route::CourseGenerationOperationId,
 };
-use garmin_progress::CancellationToken;
+use garmin_progress::{CancellationToken, OperationStage, ProgressUnit};
 use garmin_service_api::course_transfer::{
     CourseCleanupReview, CourseTarget, CourseTransferPhase, CourseTransferPreparation,
-    CourseTransferReview, CourseTransferStatus,
+    CourseTransferProgress, CourseTransferReview, CourseTransferStatus,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -71,6 +71,20 @@ struct Outcome {
     phase: CourseTransferPhase,
 }
 
+struct ActiveTransfer {
+    cancellation: CancellationToken,
+    progress: Mutex<CourseTransferProgress>,
+}
+
+impl ActiveTransfer {
+    fn progress(&self) -> CourseTransferProgress {
+        self.progress
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
 /// One host's Course transfer approvals and durable, device-specific receipts.
 pub struct CourseTransfers {
     deployment: Arc<Deployment>,
@@ -78,7 +92,7 @@ pub struct CourseTransfers {
     root: PathBuf,
     prepared: Mutex<HashMap<Uuid, Prepared>>,
     cleanup: Mutex<HashMap<Uuid, PreparedCleanup>>,
-    active: Mutex<HashMap<Uuid, CancellationToken>>,
+    active: Mutex<HashMap<Uuid, Arc<ActiveTransfer>>>,
     outcome_write: Mutex<()>,
 }
 
@@ -283,32 +297,50 @@ impl CourseTransfers {
         };
         let directory = self.root.join(review.transfer.to_string());
         persist_intent(&directory, &intent, &bytes)?;
-        let status = status(&intent, CourseTransferPhase::Running);
         drop(lease);
-        let cancellation = CancellationToken::default();
+        Ok(self.start_upload(intent, target, connection, directory, mutation))
+    }
+
+    fn start_upload(
+        self: &Arc<Self>,
+        intent: Intent,
+        target: CourseTarget,
+        connection: crate::maps::device::Connection,
+        directory: PathBuf,
+        mutation: tokio::sync::OwnedMutexGuard<()>,
+    ) -> CourseTransferStatus {
+        let active = Arc::new(ActiveTransfer {
+            cancellation: CancellationToken::default(),
+            progress: Mutex::new(CourseTransferProgress {
+                bytes_sent: 0,
+                total_bytes: intent.review.byte_count.as_u64(),
+                finishing: false,
+            }),
+        });
+        let mut status = status(&intent, CourseTransferPhase::Running);
+        status.progress = Some(active.progress());
         self.active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(review.transfer, cancellation.clone());
+            .insert(intent.review.transfer, Arc::clone(&active));
         let owner = Arc::clone(self);
         tokio::spawn(async move {
-            let result =
-                upload_and_verify(&connection, &target, &intent, &directory, cancellation).await;
+            let result = upload_and_verify(&connection, &target, &intent, &directory, active).await;
             let phase = match result {
                 Ok(()) => CourseTransferPhase::Verified,
                 Err(error) => CourseTransferPhase::NeedsReview(error.to_string()),
             };
             if let Err(error) = owner.record_phase(&directory, phase) {
-                tracing::error!(%error, transfer = %review.transfer, "Course transfer outcome could not be persisted");
+                tracing::error!(%error, transfer = %intent.review.transfer, "Course transfer outcome could not be persisted");
             }
             owner
                 .active
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .remove(&review.transfer);
+                .remove(&intent.review.transfer);
             drop(mutation);
         });
-        Ok(status)
+        status
     }
 
     /// Read or reconcile one transfer without starting another write.
@@ -326,13 +358,16 @@ impl CourseTransfers {
             intent.actor == actor.user_id(),
             "transfer belongs to another profile"
         );
-        if self
+        if let Some(active) = self
             .active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .contains_key(&transfer)
+            .get(&transfer)
+            .cloned()
         {
-            return Ok(status(&intent, CourseTransferPhase::Running));
+            let mut status = status(&intent, CourseTransferPhase::Running);
+            status.progress = Some(active.progress());
+            return Ok(status);
         }
         let accepted = read_outcome(&directory)?
             .is_some_and(|outcome| matches!(outcome.phase, CourseTransferPhase::Accepted));
@@ -435,18 +470,19 @@ impl CourseTransfers {
             intent.actor == actor.user_id(),
             "transfer belongs to another profile"
         );
-        if let Some(token) = self
+        if let Some(active) = self
             .active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(&transfer)
         {
-            token.cancel();
+            active.cancellation.cancel();
         }
         Ok(())
     }
 
-    /// Record user-observed firmware acceptance separately from byte verification.
+    /// Record an explicit acknowledgement of a byte-verified transfer.
+    /// This does not establish firmware import while the device is mounted in MTP mode.
     /// # Errors
     /// Device readback does not match the transfer intent.
     pub async fn accept(
@@ -793,8 +829,29 @@ async fn upload_and_verify(
     target: &CourseTarget,
     intent: &Intent,
     directory: &Path,
-    cancellation: CancellationToken,
+    active: Arc<ActiveTransfer>,
 ) -> Result<()> {
+    let progress = Arc::clone(&active);
+    let reporter = garmin_progress::ProgressReporter::default()
+        .with_cancellation(active.cancellation.clone())
+        .observe(move |event| {
+            if event.stage == OperationStage::Commit && event.unit == ProgressUnit::Bytes {
+                let mut value = progress
+                    .progress
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                value.bytes_sent = value.bytes_sent.max(event.completed.min(value.total_bytes));
+            } else if matches!(
+                event.stage,
+                OperationStage::DeviceFinalize | OperationStage::DeviceVerify
+            ) {
+                progress
+                    .progress
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .finishing = true;
+            }
+        });
     connection
         .device
         .upload(
@@ -804,13 +861,20 @@ async fn upload_and_verify(
             intent.review.byte_count.as_u64(),
             &intent.sha256,
             garmin_device::MountedMtpUploadProgress {
-                reporter: garmin_progress::ProgressReporter::default()
-                    .with_cancellation(cancellation),
+                reporter,
                 completed_before: 0,
                 total: intent.review.byte_count.as_u64(),
             },
         )
         .await?;
+    {
+        let mut progress = active
+            .progress
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        progress.bytes_sent = progress.total_bytes;
+        progress.finishing = true;
+    }
     connection
         .device
         .verify(
@@ -848,6 +912,7 @@ fn status(intent: &Intent, phase: CourseTransferPhase) -> CourseTransferStatus {
         target: intent.review.target.clone(),
         file_name: intent.review.file_name.clone(),
         phase,
+        progress: None,
     }
 }
 

@@ -121,13 +121,14 @@ pub fn create_dialog(ui: &mut Ui, intl: &Intl, state: &mut CreateState) -> Optio
             size: modal::Size::Medium,
             presentation: modal::Presentation::Modal,
             cancel_label: Some(&cancel),
+            cancel_disabled: None,
             backdrop_closes: Some(!state.submitting),
-            primary: modal::Primary {
+            primary: Some(modal::Primary {
                 label: &create,
                 icon: Some(icons::PLUS),
                 kind: modal::PrimaryKind::Confirm,
                 enabled: parsed.is_ok() && !state.submitting,
-            },
+            }),
         },
         |ui| {
             let response = input::show(
@@ -145,7 +146,9 @@ pub fn create_dialog(ui: &mut Ui, intl: &Intl, state: &mut CreateState) -> Optio
             response
         },
     );
-    crate::semantics::target(ui, &output.primary, "profile.create.submit");
+    if let Some(primary) = &output.primary {
+        crate::semantics::target(ui, primary, "profile.create.submit");
+    }
     if let Some(cancel) = &output.cancel {
         crate::semantics::target(ui, cancel, "profile.create.cancel");
     }

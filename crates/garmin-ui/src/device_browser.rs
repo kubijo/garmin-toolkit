@@ -1013,13 +1013,14 @@ impl Browser {
                 size: modal::Size::Small,
                 presentation: modal::Presentation::Modal,
                 cancel_label: Some(&cancel),
+                cancel_disabled: None,
                 backdrop_closes: Some(false),
-                primary: modal::Primary {
+                primary: Some(modal::Primary {
                     label: &remove,
                     icon: Some(icons::TRASH),
                     kind: modal::PrimaryKind::Danger,
                     enabled: true,
-                },
+                }),
             },
             |ui| {
                 ui.strong(selection.display_name());
@@ -1073,13 +1074,14 @@ impl Browser {
                 size: modal::Size::Small,
                 presentation: modal::Presentation::Modal,
                 cancel_label: Some(&cancel),
+                cancel_disabled: None,
                 backdrop_closes: Some(false),
-                primary: modal::Primary {
+                primary: Some(modal::Primary {
                     label: &create,
                     icon: Some(icons::FOLDER_PLUS),
                     kind: modal::PrimaryKind::Confirm,
                     enabled: validation.is_none() && !dialog.name.trim().is_empty(),
-                },
+                }),
             },
             |ui| {
                 let props = input::Props::new(&name_label)

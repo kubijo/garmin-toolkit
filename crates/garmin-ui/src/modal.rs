@@ -16,8 +16,8 @@ const BODY_MARGIN: egui::Margin = egui::Margin {
     top: 24,
     bottom: 24,
 };
-const FOOTER_MARGIN: egui::Margin = egui::Margin::ZERO;
 const ACTION_GAP: f32 = 2.0;
+const FOOTER_HEIGHT: f32 = 40.0;
 const VIEWPORT_MARGIN: f32 = 32.0;
 const BACKDROP_ALPHA: u8 = 0xA0;
 
@@ -86,8 +86,11 @@ pub struct Props<'a> {
     pub presentation: Presentation,
     /// Omit for a one-action acknowledgement dialog.
     pub cancel_label: Option<&'a str>,
+    /// Defaults to enabled when omitted.
+    pub cancel_disabled: Option<bool>,
     pub backdrop_closes: Option<bool>,
-    pub primary: Primary<'a>,
+    /// Omit when the body itself contains the selection controls.
+    pub primary: Option<Primary<'a>>,
 }
 
 /// Dialog interaction.
@@ -101,7 +104,7 @@ pub enum Action {
 pub struct Output<R> {
     pub action: Option<Action>,
     pub inner: R,
-    pub primary: Response,
+    pub primary: Option<Response>,
     pub cancel: Option<Response>,
 }
 
@@ -133,6 +136,7 @@ pub fn show<R>(
                     .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
             if output.action.is_none()
                 && props.cancel_label.is_some()
+                && !props.cancel_disabled.unwrap_or(false)
                 && (close_requested || escaped)
             {
                 output.action = Some(Action::Cancel);
@@ -244,51 +248,57 @@ fn header(ui: &mut Ui, props: &Props<'_>) {
     ui.add_space(24.0);
 }
 
-fn footer(ui: &mut Ui, props: &Props<'_>) -> (Option<Action>, Response, Option<Response>) {
+fn footer(ui: &mut Ui, props: &Props<'_>) -> (Option<Action>, Option<Response>, Option<Response>) {
     let actions = crate::theme::palette(ui).modal_actions();
-    egui::Frame::new()
-        .inner_margin(FOOTER_MARGIN)
-        .show(ui, |ui| {
+    let width = ui.available_width();
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, FOOTER_HEIGHT),
+        Layout::right_to_left(Align::Center),
+        |ui| {
             ui.spacing_mut().item_spacing.x = ACTION_GAP;
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let primary = button::Props {
-                    label: props.primary.label,
-                    icon: props.primary.icon,
-                    kind: props.primary.kind.button_kind(),
+            let primary = props.primary.map(|primary| {
+                button::Props {
+                    label: primary.label,
+                    icon: primary.icon,
+                    kind: primary.kind.button_kind(),
                     size: ComponentSize::Medium,
                     width: button::Width::Fit,
-                    enabled: props.primary.enabled,
+                    enabled: primary.enabled,
                 }
                 .show_with_states(
                     ui,
-                    match props.primary.kind {
+                    match primary.kind {
                         PrimaryKind::Confirm => actions.confirm(),
                         PrimaryKind::Danger => actions.danger(),
                     },
-                );
-                let cancel = props.cancel_label.map(|label| {
-                    button::Props {
-                        label,
-                        icon: None,
-                        kind: button::Kind::Secondary,
-                        size: ComponentSize::Medium,
-                        width: button::Width::Fit,
-                        enabled: true,
-                    }
-                    .show_with_states(ui, actions.cancel())
-                });
-                let action = if primary_activated(props.primary.kind, &primary) {
-                    Some(Action::Primary)
-                } else if cancel.as_ref().is_some_and(Response::clicked) {
-                    Some(Action::Cancel)
-                } else {
-                    None
-                };
-                (action, primary, cancel)
-            })
-            .inner
-        })
-        .inner
+                )
+            });
+            let cancel = props.cancel_label.map(|label| {
+                button::Props {
+                    label,
+                    icon: None,
+                    kind: button::Kind::Secondary,
+                    size: ComponentSize::Medium,
+                    width: button::Width::Fit,
+                    enabled: !props.cancel_disabled.unwrap_or(false),
+                }
+                .show_with_states(ui, actions.cancel())
+            });
+            let action = if props
+                .primary
+                .zip(primary.as_ref())
+                .is_some_and(|(props, response)| primary_activated(props.kind, response))
+            {
+                Some(Action::Primary)
+            } else if cancel.as_ref().is_some_and(Response::clicked) {
+                Some(Action::Cancel)
+            } else {
+                None
+            };
+            (action, primary, cancel)
+        },
+    )
+    .inner
 }
 
 fn primary_activated(_kind: PrimaryKind, response: &Response) -> bool {
@@ -337,5 +347,67 @@ mod tests {
             "Enter produces a synthetic button click"
         );
         assert!(primary_activated(PrimaryKind::Danger, &response));
+    }
+
+    #[test]
+    fn footer_stays_at_bottom_when_dialog_body_shrinks() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        let id = egui::Id::new("shrinking-modal");
+        let render = |tall| {
+            let mut button = None;
+            context
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(800.0, 600.0),
+                        )),
+                        ..egui::RawInput::default()
+                    },
+                    |ui| {
+                        let output = show(
+                            ui,
+                            id,
+                            &Props {
+                                title: "Transfer",
+                                description: None,
+                                size: Size::Medium,
+                                presentation: Presentation::Modal,
+                                cancel_label: Some("Cancel"),
+                                cancel_disabled: None,
+                                backdrop_closes: Some(false),
+                                primary: Some(Primary {
+                                    label: "Close",
+                                    icon: None,
+                                    kind: PrimaryKind::Confirm,
+                                    enabled: true,
+                                }),
+                            },
+                            |ui| {
+                                ui.label("Status");
+                                if tall {
+                                    ui.add_space(160.0);
+                                }
+                            },
+                        );
+                        button = output.primary.map(|response| response.rect);
+                    },
+                )
+                .drop_without_applying_deltas();
+            (
+                context
+                    .memory(|memory| memory.area_rect(id))
+                    .expect("modal area is recorded"),
+                button.expect("modal footer button is shown"),
+            )
+        };
+
+        render(true);
+        let (tall, _) = render(true);
+        render(false);
+        let (short, button) = render(false);
+        assert!(tall.height() - short.height() > 80.0);
+        assert!(short.bottom() - button.bottom() <= 4.0);
     }
 }

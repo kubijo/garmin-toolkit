@@ -2600,6 +2600,7 @@ dependencies = [
  "pollster 0.4.0",
  "ratatui",
  "serde",
+ "uuid",
 ]
 
 [[package]]
