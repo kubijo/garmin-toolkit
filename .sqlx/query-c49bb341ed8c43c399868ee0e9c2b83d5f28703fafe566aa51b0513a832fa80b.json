@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    artifacts.id,\n    artifacts.digest,\n    artifact_blobs.byte_count,\n    acquisitions.source_identity\nFROM route_plan_revisions\nINNER JOIN route_plans ON route_plan_revisions.plan_id = route_plans.id\nINNER JOIN artifacts ON route_plan_revisions.source_artifact_id = artifacts.id\nINNER JOIN artifact_blobs ON artifacts.digest = artifact_blobs.digest\nINNER JOIN acquisitions\n    ON\n        artifacts.id = acquisitions.artifact_id\n        AND route_plans.owner_id = acquisitions.owner_id\nWHERE\n    route_plans.owner_id = ? AND route_plans.id = ?\n    AND route_plan_revisions.previous_revision_id IS NULL;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "artifacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "digest",
+        "ordinal": 1,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "name": "byte_count",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "artifact_blobs",
+            "name": "byte_count"
+          }
+        }
+      },
+      {
+        "name": "source_identity",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "source_identity"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c49bb341ed8c43c399868ee0e9c2b83d5f28703fafe566aa51b0513a832fa80b"
+}

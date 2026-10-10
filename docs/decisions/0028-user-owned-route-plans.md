@@ -3,30 +3,38 @@
 ## Decision
 
 A `RoutePlan` is a user-owned aggregate with a stable UUID and immutable revisions, not an observation. Revisions hold
-sport, exact geometry or unresolved controls, optional elevation, cues, and provenance.
+sport, exact geometry or unresolved controls, optional elevation, cues, and provenance. The current user workflow
+imports GPX planned elsewhere, previews a selected candidate, and converts exact track geometry to a FIT Course. It does
+not include an in-app route planner or routing engine.
 
-GPX, freehand drawing, and routing produce the same revision type. Original GPX uses generic artifact storage, never
-activity tables. Generated FIT Course files are deployment artifacts.
+Original GPX uses generic artifact storage, never activity tables. Each generated FIT Course is a separate, immutable
+artifact with its own identity and digest, linked to the exact route revision and encoder version. A Course can be
+downloaded or sent to a device without changing the route revision. Regeneration creates a new artifact.
 
 Each non-empty GPX track segment is a candidate; never concatenate. Routes become unresolved controls and need routing
 or confirmed straight lines before deployment. Metadata may suggest but not choose name or sport. Preserve unsupported
 content only in the original; never infer cues from waypoints or names.
 
-Reverse and trim create revisions; split creates linked plans. Geographic simplification needs preview and confirmation.
-Never join, snap, repair elevation, or alter geometry automatically.
+Any future geometry change must create a revision rather than overwrite the imported route. Do not join, snap, repair
+elevation, or alter geometry automatically. Freehand drawing, routing, reverse, trim, split, and simplification are
+outside the current workflow.
 
-Deployments record revision, FIT bytes, target, and capability evidence under a unique filename without overwrite.
-Readback proves transfer; rediscovery or user confirmation separately proves acceptance. Never delete automatically;
-cleanup requires an exact project-created partial upload and confirmation.
+Deployments record the Course artifact, revision, target, and capability evidence under a unique filename without
+overwrite. Readback proves transfer; rediscovery or user confirmation separately proves acceptance. Never delete
+automatically; cleanup requires an exact project-created partial upload and confirmation.
+
+Sending a Course is a one-time file operation on the selected device. It does not pair the device, assign it to the
+sending profile, or change an existing profile marker. Pairing remains a separate, voluntary action for automatic
+profile opening and device sync; a Course can be sent to someone else's device.
 
 ## Why
 
-Activities are immutable source assertions; routes are editable work. Treating both as observations would entangle
-editing, reconciliation, and deployment history.
+Activities are immutable source assertions; imported routes are user-selected plans. Treating both as observations would
+entangle activity reconciliation with route provenance and deployment history.
 
 ## Consequences
 
-GPX, routing, FIT, and devices remain separate adapters around shared route services. FIT Course terms stay at device
-and artifact boundaries.
+GPX, FIT, and devices remain separate adapters around shared route services. FIT Course terms stay at device and
+artifact boundaries. GPX import is source-neutral; one route-planning website is not an application dependency.
 
 See [GPX route-plan research](../research/gpx-route-plans.md).

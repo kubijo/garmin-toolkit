@@ -1,10 +1,11 @@
 //! Device identity, inventory, transport, and path-safety types.
 
-use crate::capabilities::Manifest as DeviceCapabilities;
+use crate::manifest::{ManifestFormat, ManifestQuirk, ParsedManifest};
+use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::fmt;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 /// How a Garmin device is reachable.
@@ -105,12 +106,12 @@ pub struct DeviceSummary {
 #[derive(Debug, Clone)]
 pub struct DeviceManifest {
     pub summary: DeviceSummary,
-    capabilities: DeviceCapabilities,
+    capabilities: ParsedManifest,
 }
 
 impl DeviceManifest {
     #[must_use]
-    pub fn new(summary: DeviceSummary, capabilities: DeviceCapabilities) -> Self {
+    pub(crate) fn new(summary: DeviceSummary, capabilities: ParsedManifest) -> Self {
         Self {
             summary,
             capabilities,
@@ -119,12 +120,22 @@ impl DeviceManifest {
 
     #[must_use]
     pub fn raw_xml(&self) -> &str {
-        self.capabilities.raw_xml()
+        self.capabilities.raw_document()
     }
 
     #[must_use]
-    pub const fn capabilities(&self) -> &DeviceCapabilities {
+    pub const fn capabilities(&self) -> &ParsedManifest {
         &self.capabilities
+    }
+
+    #[must_use]
+    pub const fn format(&self) -> ManifestFormat {
+        self.capabilities.format()
+    }
+
+    #[must_use]
+    pub fn quirks(&self) -> &[ManifestQuirk] {
+        self.capabilities.quirks()
     }
 
     #[must_use]
@@ -136,18 +147,14 @@ impl DeviceManifest {
 }
 /// A relative destination proven not to escape a selected device root.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SafeRelativePath(PathBuf);
+pub struct SafeRelativePath(Utf8PathBuf);
 
 impl Serialize for SafeRelativePath {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        serializer.serialize_str(
-            self.0
-                .to_str()
-                .expect("safe relative paths are validated as Unicode"),
-        )
+        serializer.serialize_str(self.0.as_str())
     }
 }
 
@@ -163,7 +170,7 @@ impl<'de> Deserialize<'de> for SafeRelativePath {
 
 impl fmt::Display for SafeRelativePath {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.display().fmt(formatter)
+        fmt::Display::fmt(&self.0, formatter)
     }
 }
 
@@ -173,24 +180,34 @@ impl SafeRelativePath {
     /// [`PathSafetyError`] for empty, absolute, or non-normal paths.
     pub fn parse(value: impl AsRef<Path>) -> Result<Self, PathSafetyError> {
         let value = value.as_ref();
-        if value.as_os_str().is_empty()
-            || value.is_absolute()
-            || value.to_str().is_none_or(|value| value.contains('\0'))
+        let utf8 =
+            Utf8PathBuf::from_path_buf(value.to_path_buf()).map_err(PathSafetyError::Unsafe)?;
+        let text = utf8.as_str();
+        if utf8.is_absolute()
+            || text.is_empty()
+            || text.contains(['\\', ':', '\0'])
+            || text
+                .split('/')
+                .any(|component| component.is_empty() || matches!(component, "." | ".."))
         {
-            return Err(PathSafetyError::Unsafe(value.to_path_buf()));
+            return Err(PathSafetyError::Unsafe(utf8.into_std_path_buf()));
         }
-        if value
-            .components()
-            .any(|part| !matches!(part, Component::Normal(_)))
-        {
-            return Err(PathSafetyError::Unsafe(value.to_path_buf()));
-        }
-        Ok(Self(value.to_path_buf()))
+        Ok(Self(utf8))
     }
 
     #[must_use]
     pub fn as_path(&self) -> &Path {
+        self.0.as_std_path()
+    }
+
+    #[must_use]
+    pub fn as_utf8_path(&self) -> &Utf8Path {
         &self.0
+    }
+
+    #[must_use]
+    pub fn into_utf8_path_buf(self) -> Utf8PathBuf {
+        self.0
     }
 
     #[must_use]
@@ -239,6 +256,22 @@ mod tests {
     fn accepts_normal_device_path() {
         let path = SafeRelativePath::parse("Garmin/gmapprom.img").unwrap();
         assert_eq!(path.as_path(), Path::new("Garmin/gmapprom.img"));
+        assert_eq!(path.as_utf8_path(), Utf8Path::new("Garmin/gmapprom.img"));
+    }
+
+    #[test]
+    fn rejects_non_portable_separator() {
+        assert!(SafeRelativePath::parse(r"Garmin\Activity\ride.fit").is_err());
+        assert!(SafeRelativePath::parse("C:/Garmin/Activity/ride.fit").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_non_utf8_device_path() {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
+
+        let path = PathBuf::from(OsStr::from_bytes(b"Garmin/\xff.fit"));
+        assert!(SafeRelativePath::parse(path).is_err());
     }
 
     #[test]

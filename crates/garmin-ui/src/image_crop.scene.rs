@@ -1,7 +1,7 @@
 use gallery::prelude::*;
 use garmin_ui::image_crop;
 
-scene_meta! { title: "Components / Media / Image crop" }
+scene_meta! { title: "Components / Image crop" }
 
 #[scene(default)]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
@@ -39,14 +39,15 @@ fn dialog(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
                 description: Some("Drag to reposition. Scroll or use the slider to zoom."),
                 size: garmin_ui::modal::Size::Medium,
                 presentation: garmin_ui::modal::Presentation::Contained,
-                cancel_label: "Cancel",
+                cancel_label: Some("Cancel"),
+                cancel_disabled: None,
                 backdrop_closes: Some(true),
-                primary: garmin_ui::modal::Primary {
+                primary: Some(garmin_ui::modal::Primary {
                     label: "Save picture",
                     icon: Some(garmin_ui::icons::CHECK),
                     kind: garmin_ui::modal::PrimaryKind::Confirm,
                     enabled: true,
-                },
+                }),
             },
             |ui| {
                 ui.vertical_centered(|ui| {

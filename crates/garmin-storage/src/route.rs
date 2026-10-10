@@ -5,16 +5,19 @@ use garmin_model::{
     identity::UserId,
     route::{
         CueText, Elevation, Latitude, Longitude, NavigationCue, RevisionProvenance, RevisionSource,
-        RouteName, RoutePlan, RoutePlanId, RoutePlanRevision, RoutePoint, RoutePointIndex,
-        RouteShape, RouteSport,
+        RouteName, RoutePlan, RoutePlanId, RoutePlanRevision, RoutePlanRevisionId, RoutePoint,
+        RoutePointIndex, RouteShape, RouteSport,
     },
     value::{ComponentVersion, Timestamp, Transformation},
 };
 use semver::Version;
-use sqlx::{Sqlite, Transaction};
+use sqlx::{Sqlite, SqliteConnection, Transaction};
 use thiserror::Error;
 
 use crate::{Storage, ingestion};
+
+pub(crate) mod imports;
+pub mod source;
 
 /// One initial route-plan revision imported from immutable source bytes.
 pub struct RouteImport<'a> {
@@ -134,17 +137,90 @@ impl StoredRoutePlan {
 }
 
 impl Storage {
+    /// Reads one owned current-head summary without allocating its geometry.
+    /// # Errors
+    /// [`enum@crate::Error`] for database failures or invalid metadata.
+    pub async fn route_plan_summary(
+        &self,
+        owner: UserId,
+        plan: RoutePlanId,
+    ) -> Result<Option<StoredRoutePlanSummary>, crate::Error> {
+        let owner = owner.to_string();
+        let plan = plan.to_string();
+        sqlx::query_file_as!(
+            RouteSummaryRow,
+            "queries/route-plan-summary.sql",
+            owner,
+            plan
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .map(decode_summary)
+        .transpose()
+    }
+
+    /// Reads a bounded page of owned current-head summaries.
+    /// # Errors
+    /// [`enum@crate::Error`] for database failures or invalid metadata.
+    pub async fn route_plans_page(
+        &self,
+        owner: UserId,
+        offset: u32,
+        count: u32,
+    ) -> Result<Vec<StoredRoutePlanSummary>, crate::Error> {
+        let owner = owner.to_string();
+        let offset = i64::from(offset);
+        let count = i64::from(count);
+        sqlx::query_file_as!(
+            RouteSummaryRow,
+            "queries/route-plans-page.sql",
+            owner,
+            count,
+            offset
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(decode_summary)
+        .collect()
+    }
+
+    /// Reads a bounded slice of an owned immutable revision without loading its full geometry.
+    /// Absent and foreign revisions both return no points.
+    /// # Errors
+    /// [`enum@crate::Error`] for database failures or invalid persisted coordinates.
+    pub async fn route_points_page(
+        &self,
+        owner: UserId,
+        revision: RoutePlanRevisionId,
+        offset: u32,
+        count: u32,
+    ) -> Result<Vec<RoutePoint>, crate::Error> {
+        let owner = owner.to_string();
+        let revision = revision.to_string();
+        let offset = i64::from(offset);
+        let count = i64::from(count);
+        sqlx::query_file_as!(
+            PointRow,
+            "queries/route-points-page.sql",
+            owner,
+            revision,
+            offset,
+            count
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(decode_point)
+        .collect()
+    }
+
     /// Atomically stores source bytes, acquisition provenance, and one initial route revision.
     /// # Errors
     /// [`enum@crate::Error`] for database failures or immutable conflicts.
     pub async fn save_route_import(&self, import: RouteImport<'_>) -> Result<(), crate::Error> {
         let mut transaction = self.pool.begin().await?;
-        ingestion::persist_blob(&mut transaction, import.artifact, import.bytes).await?;
-        ingestion::persist_artifact(&mut transaction, import.artifact).await?;
-        ingestion::persist_acquisition(&mut transaction, import.acquisition).await?;
-        persist_plan(&mut transaction, import.plan).await?;
-        persist_revision(&mut transaction, import.revision).await?;
-        persist_head(&mut transaction, import.plan).await?;
+        persist_import(&mut transaction, &import).await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -224,28 +300,86 @@ impl Storage {
     ) -> Result<Option<StoredRoutePlan>, crate::Error> {
         let owner_id = owner_id.to_string();
         let plan_id = plan_id.to_string();
+        let mut transaction = self.pool.begin().await?;
         let Some(row) = sqlx::query_file_as!(RouteRow, "queries/route-plan.sql", owner_id, plan_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut *transaction)
             .await?
         else {
             return Ok(None);
         };
-        let revision_id = row.revision_id.clone();
-        let points = sqlx::query_file_as!(PointRow, "queries/route-plan-points.sql", revision_id)
-            .fetch_all(&self.pool)
-            .await?;
-        let cues = sqlx::query_file_as!(CueRow, "queries/route-plan-cues.sql", revision_id)
-            .fetch_all(&self.pool)
-            .await?;
-        let transformations = sqlx::query_file_as!(
-            TransformationRow,
-            "queries/route-plan-transformations.sql",
-            revision_id
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        decode_route(row, points, cues, transformations).map(Some)
+        let route = read_route(&mut transaction, row).await?;
+        transaction.commit().await?;
+        Ok(Some(route))
     }
+
+    /// Loads one immutable revision, including revisions behind the current head.
+    /// # Errors
+    /// [`enum@crate::Error`] for database failures or invalid persisted values.
+    pub async fn route_revision(
+        &self,
+        owner_id: UserId,
+        revision_id: RoutePlanRevisionId,
+    ) -> Result<Option<RoutePlanRevision>, crate::Error> {
+        let mut transaction = self.pool.begin().await?;
+        let revision = read_revision(&mut transaction, owner_id, revision_id).await?;
+        transaction.commit().await?;
+        Ok(revision)
+    }
+}
+
+pub(crate) async fn read_revision(
+    connection: &mut SqliteConnection,
+    owner_id: UserId,
+    revision_id: RoutePlanRevisionId,
+) -> Result<Option<RoutePlanRevision>, crate::Error> {
+    let owner_id = owner_id.to_string();
+    let revision_id = revision_id.to_string();
+    let Some(row) = sqlx::query_file_as!(
+        RouteRow,
+        "queries/route-revision.sql",
+        owner_id,
+        revision_id,
+    )
+    .fetch_optional(&mut *connection)
+    .await?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(read_route(connection, row).await?.revision))
+}
+
+async fn read_route(
+    connection: &mut SqliteConnection,
+    row: RouteRow,
+) -> Result<StoredRoutePlan, crate::Error> {
+    let revision_id = row.revision_id.clone();
+    let points = sqlx::query_file_as!(PointRow, "queries/route-plan-points.sql", revision_id)
+        .fetch_all(&mut *connection)
+        .await?;
+    let cues = sqlx::query_file_as!(CueRow, "queries/route-plan-cues.sql", revision_id)
+        .fetch_all(&mut *connection)
+        .await?;
+    let transformations = sqlx::query_file_as!(
+        TransformationRow,
+        "queries/route-plan-transformations.sql",
+        revision_id
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+    decode_route(row, points, cues, transformations)
+}
+
+async fn persist_import(
+    transaction: &mut Transaction<'_, Sqlite>,
+    import: &RouteImport<'_>,
+) -> Result<(), crate::Error> {
+    ingestion::persist_blob(transaction, import.artifact, import.bytes).await?;
+    ingestion::persist_artifact(transaction, import.artifact).await?;
+    ingestion::persist_acquisition(transaction, import.acquisition).await?;
+    persist_plan(transaction, import.plan).await?;
+    persist_revision(transaction, import.revision).await?;
+    persist_head(transaction, import.plan).await?;
+    Ok(())
 }
 
 async fn persist_plan(
@@ -473,20 +607,7 @@ fn decode_route(
 fn decode_shape(kind: &str, points: Vec<PointRow>) -> Result<RouteShape, crate::Error> {
     let points = points
         .into_iter()
-        .map(|point| {
-            let coordinate = garmin_model::route::Coordinate::from_parts(
-                Latitude::from_degrees(point.latitude_degrees)
-                    .map_err(|error| invalid("route latitude", error))?,
-                Longitude::from_degrees(point.longitude_degrees)
-                    .map_err(|error| invalid("route longitude", error))?,
-            );
-            let elevation = point
-                .elevation_m
-                .map(Elevation::from_meters)
-                .transpose()
-                .map_err(|error| invalid("route elevation", error))?;
-            Ok(RoutePoint::from_parts(coordinate, elevation))
-        })
+        .map(decode_point)
         .collect::<Result<Vec<_>, crate::Error>>()?;
     match kind {
         "geometry" => RouteShape::from_geometry(points),
@@ -494,6 +615,21 @@ fn decode_shape(kind: &str, points: Vec<PointRow>) -> Result<RouteShape, crate::
         _ => return Err(invalid("route shape", kind)),
     }
     .map_err(|error| invalid("route shape", error))
+}
+
+fn decode_point(point: PointRow) -> Result<RoutePoint, crate::Error> {
+    let coordinate = garmin_model::route::Coordinate::from_parts(
+        Latitude::from_degrees(point.latitude_degrees)
+            .map_err(|error| invalid("route latitude", error))?,
+        Longitude::from_degrees(point.longitude_degrees)
+            .map_err(|error| invalid("route longitude", error))?,
+    );
+    let elevation = point
+        .elevation_m
+        .map(Elevation::from_meters)
+        .transpose()
+        .map_err(|error| invalid("route elevation", error))?;
+    Ok(RoutePoint::from_parts(coordinate, elevation))
 }
 
 fn decode_source(row: &RouteRow) -> Result<RevisionSource, crate::Error> {
@@ -527,6 +663,8 @@ const fn encode_sport(sport: RouteSport) -> &'static str {
     match sport {
         RouteSport::Cycling => "cycling",
         RouteSport::Running => "running",
+        RouteSport::Walking => "walking",
+        RouteSport::Hiking => "hiking",
     }
 }
 
@@ -534,6 +672,8 @@ fn decode_sport(value: &str) -> Result<RouteSport, crate::Error> {
     match value {
         "cycling" => Ok(RouteSport::Cycling),
         "running" => Ok(RouteSport::Running),
+        "walking" => Ok(RouteSport::Walking),
+        "hiking" => Ok(RouteSport::Hiking),
         _ => Err(invalid("route sport", value)),
     }
 }
@@ -600,6 +740,7 @@ struct RouteRow {
     source_revision_id: Option<String>,
 }
 
+#[derive(Clone, Copy)]
 struct PointRow {
     latitude_degrees: f64,
     longitude_degrees: f64,
@@ -619,6 +760,10 @@ struct TransformationRow {
 /// Invalid route persistence data or an immutable conflict.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 pub enum RoutePersistenceError {
+    #[error("route import operation was already committed with different arguments")]
+    ImportOperationConflict,
+    #[error("route import identity disagrees with its source or revision")]
+    ImportIdentityMismatch,
     #[error("route artifact metadata does not match its bytes")]
     ArtifactBytesMismatch,
     #[error("route acquisition and artifact IDs differ")]
@@ -656,13 +801,92 @@ mod tests {
     use futures_lite::future::block_on;
     use garmin_model::{
         identity::{Profile, Role, User},
-        route::{Coordinate, Latitude, Longitude, RoutePlanRevisionId},
+        route::{Coordinate, Latitude, Longitude},
     };
     use tempfile::tempdir;
 
     use super::*;
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+    #[test]
+    fn sport_migration_preserves_linked_revisions_and_the_current_head() -> TestResult {
+        block_on(async {
+            let root = tempdir()?;
+            let path = root.path().join("legacy-routes.sqlite3");
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(
+                    sqlx::sqlite::SqliteConnectOptions::new()
+                        .filename(&path)
+                        .create_if_missing(true)
+                        .foreign_keys(true),
+                )
+                .await?;
+            crate::MIGRATOR.run_to(3, &pool).await?;
+            let storage = Storage { pool };
+            let owner = User::from_parts(
+                UserId::new_v4(),
+                Role::Owner,
+                Profile::from_display_name("Walker".parse()?),
+            );
+            storage.save_user(&owner).await?;
+            let initial = revision(RoutePlanId::new_v4(), None, RevisionSource::Freehand)?;
+            let plan = RoutePlan::from_parts(initial.plan_id(), owner.id(), initial.id());
+            let mut transaction = storage.pool.begin().await?;
+            persist_plan(&mut transaction, &plan).await?;
+            persist_revision(&mut transaction, &initial).await?;
+            persist_head(&mut transaction, &plan).await?;
+            transaction.commit().await?;
+            let next = revision(
+                plan.id(),
+                Some(initial.id()),
+                RevisionSource::Revision(initial.id()),
+            )?;
+            let expected = storage.save_route_revision(owner.id(), plan, &next).await?;
+            storage.close().await;
+
+            let storage = Storage::open(&path).await?;
+            assert_eq!(
+                storage.route_plan(owner.id(), plan.id()).await?,
+                Some(expected)
+            );
+            assert_eq!(
+                storage.route_revision(owner.id(), initial.id()).await?,
+                Some(initial)
+            );
+            assert_eq!(
+                storage.route_revision(UserId::new_v4(), next.id()).await?,
+                None
+            );
+            assert_eq!(
+                storage
+                    .route_revision(owner.id(), RoutePlanRevisionId::new_v4())
+                    .await?,
+                None
+            );
+            assert_eq!(
+                storage.route_revision(owner.id(), next.id()).await?,
+                Some(next.clone())
+            );
+            let mut current = RoutePlan::from_parts(plan.id(), owner.id(), next.id());
+            for sport in [RouteSport::Walking, RouteSport::Hiking] {
+                let updated = revision_with_sport(
+                    plan.id(),
+                    Some(current.current_revision_id()),
+                    RevisionSource::Revision(current.current_revision_id()),
+                    sport,
+                )?;
+                let saved = storage
+                    .save_route_revision(owner.id(), current, &updated)
+                    .await?;
+                assert_eq!(saved.revision().sport(), sport);
+                current = saved.plan();
+            }
+            storage.close().await;
+            Ok(())
+        })
+    }
 
     #[test]
     fn revision_update_is_owner_scoped_and_compares_the_expected_head() -> TestResult {
@@ -733,6 +957,15 @@ mod tests {
         previous_id: Option<RoutePlanRevisionId>,
         source: RevisionSource,
     ) -> Result<RoutePlanRevision, Box<dyn std::error::Error>> {
+        revision_with_sport(plan_id, previous_id, source, RouteSport::Cycling)
+    }
+
+    fn revision_with_sport(
+        plan_id: RoutePlanId,
+        previous_id: Option<RoutePlanRevisionId>,
+        source: RevisionSource,
+        sport: RouteSport,
+    ) -> Result<RoutePlanRevision, Box<dyn std::error::Error>> {
         let points = vec![point(50.0755, 14.4378), point(50.0810, 14.4510)];
         let transformations = previous_id
             .map(|_| {
@@ -748,9 +981,12 @@ mod tests {
             previous_id,
             Timestamp::from_unix_seconds(1_780_000_000)?,
             RouteName::from_string("Test route".to_owned())?,
-            RouteSport::Cycling,
+            sport,
             RouteShape::from_geometry(points)?,
-            Vec::new(),
+            vec![NavigationCue::from_parts(
+                RoutePointIndex::from_usize(1),
+                CueText::from_string("Turn left".to_owned())?,
+            )],
             RevisionProvenance::from_parts(source, transformations),
         )?)
     }

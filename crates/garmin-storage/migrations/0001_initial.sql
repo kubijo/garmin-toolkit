@@ -144,7 +144,7 @@ CREATE TABLE activity_projections (
     observation_kind TEXT NOT NULL DEFAULT 'activity'
     CHECK (observation_kind = 'activity'),
     sequence_position INTEGER NOT NULL CHECK (sequence_position >= 0),
-    sport TEXT NOT NULL CHECK (sport IN ('running', 'cycling')),
+    sport TEXT NOT NULL CHECK (sport IN ('running', 'cycling', 'swimming')),
     start_ms INTEGER NOT NULL,
     end_ms INTEGER NOT NULL CHECK (end_ms >= start_ms),
     elapsed_ms INTEGER NOT NULL CHECK (elapsed_ms >= 0),

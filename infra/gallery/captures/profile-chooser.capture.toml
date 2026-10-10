@@ -1,0 +1,98 @@
+out = "../../../.tmp/gallery/profile-chooser"
+size = "1920x900"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "wide"
+scene = "profile::Chooser"
+[shot.knobs]
+width = 1808
+height = 720
+
+[[shot]]
+name = "restored"
+scene = "profile::Chooser"
+[shot.knobs]
+width = 1808
+height = 720
+restored = true
+
+[[shot]]
+name = "narrow"
+scene = "profile::Chooser"
+[shot.knobs]
+width = 360
+
+[[shot]]
+name = "light-empty"
+scene = "profile::Chooser"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+profiles = "empty"
+
+[[shot]]
+name = "light-profiles"
+scene = "profile::Chooser"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "header-dark"
+scene = "profile::Header Buttons"
+
+[[shot]]
+name = "header-light"
+scene = "profile::Header Buttons"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "header-compact-dark"
+scene = "profile::Header Buttons"
+[shot.knobs]
+compact = true
+
+[[shot]]
+name = "header-compact-light"
+scene = "profile::Header Buttons"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+compact = true
+
+[[shot]]
+name = "avatars-dark"
+scene = "profile::Avatars"
+
+[[shot]]
+name = "avatars-light"
+scene = "profile::Avatars"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "initials-contrast-dark"
+scene = "profile::Initials Contrast"
+
+[[shot]]
+name = "initials-contrast-light"
+scene = "profile::Initials Contrast"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "initials-small-dark"
+scene = "profile::Initials Contrast"
+[shot.knobs]
+size = 20
+
+[[shot]]
+name = "initials-small-light"
+scene = "profile::Initials Contrast"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+size = 20

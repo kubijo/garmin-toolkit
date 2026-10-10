@@ -1,0 +1,89 @@
+out = "../../../.tmp/gallery/routes"
+size = "960x720"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "chooser-wide"
+scene = "routes::Playground"
+[shot.knobs]
+state = "chooser"
+width = 640
+
+[[shot]]
+name = "detail-no-course"
+scene = "routes::Playground"
+[shot.knobs]
+state = "detail"
+width = 640
+
+[[shot]]
+name = "course-version"
+scene = "routes::Playground"
+[shot.knobs]
+state = "course"
+width = 640
+
+[[shot]]
+name = "transfer-dialog"
+scene = "routes::Playground"
+[shot.knobs]
+state = "transfer"
+width = 960
+
+[[shot]]
+name = "transfer-review"
+scene = "routes::Playground"
+[shot.knobs]
+state = "transfer review"
+width = 960
+
+[[shot]]
+name = "transfer-running"
+scene = "routes::Playground"
+[shot.knobs]
+state = "transfer running"
+width = 960
+
+[[shot]]
+name = "transfer-verified"
+scene = "routes::Playground"
+[shot.knobs]
+state = "transfer verified"
+width = 960
+
+[[shot]]
+name = "transfer-accepted"
+scene = "routes::Playground"
+[shot.knobs]
+state = "transfer accepted"
+width = 960
+
+[[shot]]
+name = "chooser-narrow"
+scene = "routes::Playground"
+[shot.knobs]
+state = "chooser"
+width = 400
+
+[[shot]]
+name = "invalid-file"
+scene = "routes::Playground"
+[shot.knobs]
+state = "invalid"
+width = 640
+
+[[shot]]
+name = "picker-open"
+scene = "routes::Playground"
+[shot.knobs]
+state = "picker"
+width = 640
+
+[[shot]]
+name = "uploading-replacement"
+scene = "routes::Playground"
+[shot.knobs]
+state = "uploading"
+width = 640

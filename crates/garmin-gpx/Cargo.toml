@@ -8,11 +8,28 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[package.metadata.cargo-machete]
+# The portable macro generates serde derives for the worker protocol.
+ignored = ["serde"]
+
 [lints]
 workspace = true
+
+[features]
+worker = ["dep:postcard", "dep:rustix", "dep:tokio"]
 
 [dependencies]
 geo-types.workspace = true
 gpx-format.workspace = true
 garmin-model.workspace = true
 thiserror.workspace = true
+serde.workspace = true
+garmin-macros.workspace = true
+postcard = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["process"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true

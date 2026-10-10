@@ -8,8 +8,11 @@ use crate::{device, icons, profile, shell};
 pub enum Page {
     #[default]
     Activities,
+    Routes,
     ProfileSettings,
+    Backup,
     Device(String),
+    Maps(String),
 }
 
 impl Page {
@@ -17,11 +20,13 @@ impl Page {
     pub fn index(&self, devices: &[DeviceSnapshot]) -> Option<usize> {
         match self {
             Self::Activities => Some(0),
-            Self::ProfileSettings => Some(1),
-            Self::Device(key) => devices
+            Self::Routes => Some(1),
+            Self::ProfileSettings => Some(2),
+            Self::Backup => None,
+            Self::Device(key) | Self::Maps(key) => devices
                 .iter()
                 .position(|device| &device.key == key)
-                .map(|index| index + 2),
+                .map(|index| index + 3),
         }
     }
 
@@ -29,9 +34,10 @@ impl Page {
     pub fn from_index(index: usize, devices: &[DeviceSnapshot]) -> Option<Self> {
         match index {
             0 => Some(Self::Activities),
-            1 => Some(Self::ProfileSettings),
+            1 => Some(Self::Routes),
+            2 => Some(Self::ProfileSettings),
             _ => devices
-                .get(index - 2)
+                .get(index.checked_sub(3)?)
                 .map(|device| Self::Device(device.key.clone())),
         }
     }
@@ -46,6 +52,7 @@ pub struct Props<'a> {
     pub page: &'a Page,
     pub navigation: shell::Navigation,
     pub devices: &'a [DeviceSnapshot],
+    pub backup_enabled: bool,
     pub window_controls: Option<&'a shell::WindowControls<'a>>,
 }
 
@@ -58,10 +65,15 @@ pub struct Output<R> {
 pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) -> Output<R> {
     let activities = format_message!(props.intl, default_message: "Activities");
     let settings = format_message!(props.intl, default_message: "Profile settings");
+    let routes = format_message!(props.intl, default_message: "Routes");
     let primary_destinations = [
         shell::Destination {
             label: &activities,
             icon: icons::ACTIVITY,
+        },
+        shell::Destination {
+            label: &routes,
+            icon: icons::MAP_TRIFOLD,
         },
         shell::Destination {
             label: &settings,
@@ -94,8 +106,17 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
         profiles: props.profiles,
         selected: Some(props.selected_profile),
         expanded: props.profile_menu_expanded,
+        backup_enabled: props.backup_enabled,
     };
-    let output = shell::show(
+    let show = if matches!(
+        props.page,
+        Page::Activities | Page::Routes | Page::ProfileSettings | Page::Backup | Page::Maps(_)
+    ) {
+        shell::show_edge_to_edge
+    } else {
+        shell::show
+    };
+    let output = show(
         ui,
         &shell::Props {
             product_name: props.product_name,
@@ -127,6 +148,8 @@ mod tests {
             identifier: None,
             software_version: None,
             inspection: InspectionState::Ready,
+            inspection_error: None,
+            report: None,
             capabilities: Vec::new(),
             storages: Vec::new(),
         }
@@ -134,14 +157,19 @@ mod tests {
 
     #[test]
     fn page_indices_keep_primary_destinations_before_devices() {
-        let devices = [device("edge"), device("fenix")];
+        let devices = [device("mock-cycle"), device("mock-watch")];
 
         assert_eq!(Page::Activities.index(&devices), Some(0));
-        assert_eq!(Page::ProfileSettings.index(&devices), Some(1));
-        assert_eq!(Page::Device("fenix".to_owned()).index(&devices), Some(3));
+        assert_eq!(Page::Routes.index(&devices), Some(1));
+        assert_eq!(Page::ProfileSettings.index(&devices), Some(2));
         assert_eq!(
-            Page::from_index(2, &devices),
-            Some(Page::Device("edge".to_owned()))
+            Page::Device("mock-watch".to_owned()).index(&devices),
+            Some(4)
         );
+        assert_eq!(
+            Page::from_index(3, &devices),
+            Some(Page::Device("mock-cycle".to_owned()))
+        );
+        assert_eq!(Page::Backup.index(&devices), None);
     }
 }

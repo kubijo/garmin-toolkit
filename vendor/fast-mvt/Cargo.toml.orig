@@ -1,0 +1,87 @@
+[package]
+name = "fast-mvt"
+version = "0.6.2"
+description = "Fast Mapbox Vector Tile (MVT) reader and writer"
+authors = ["Yuri Astrakhan <YuriAstrakhan@gmail.com>"]
+repository = "https://github.com/nyurik/fast-mvt"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+keywords = ["tile", "mvt", "map"]
+categories = ["science::geo"]
+exclude = [".github/**", ".gitignore", "fixtures/**", "fuzz/**", "justfile"]
+rust-version = "1.87"
+
+[[bin]]
+name = "mvt"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[[example]]
+name = "profile_decoder"
+required-features = ["reader"]
+
+[[bench]]
+name = "decoder"
+harness = false
+required-features = ["reader", "writer"]
+
+[[bench]]
+name = "encoder"
+harness = false
+required-features = ["reader", "writer"]
+
+[features]
+default = ["reader", "writer", "json"]
+reader = []
+writer = ["dep:dup-indexer"]
+json = ["dep:serde", "dep:serde_json", "buffa/json"]
+codegen = ["dep:buffa-build"]
+arbitrary = ["dep:arbitrary", "buffa/arbitrary"]
+cli = ["reader", "dep:clap"]
+
+[dependencies]
+arbitrary = { version = "1.4", features = ["derive"], optional = true }
+buffa = "0.9.0"
+clap = { version = "4", features = ["derive"], optional = true }
+dup-indexer = { version = "0.5.0", optional = true }
+geo-types = "0.7.19"
+serde = { version = "1.0.228", features = ["derive"], optional = true }
+serde_json = { version = "1.0.150", optional = true }
+thiserror = "2.0.11"
+usize_cast = "1.1.0"
+
+[build-dependencies]
+buffa-build = { version = "0.9.0", optional = true }
+
+[dev-dependencies]
+anyhow = "1"
+criterion = { version = "0.8", features = ["html_reports"] }
+insta = "1.43"
+mvt = "0.14.0"
+mvt-reader = "2.3.0"
+prost = "0.14.3"
+tempfile = "3.27.0"
+test_each_file = "0.3.5"
+tinymvt = "0.3.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+unused_qualifications = "warn"
+
+[lints.clippy]
+# Restrictions
+# `deny`, not `forbid`: clap's derive macros emit `#[allow(clippy::style)]`, and
+# `disallowed_methods` is a `style` lint, so `forbid` would break compilation
+disallowed_methods = "deny"
+panic_in_result_fn = "warn"
+todo = "warn"
+unwrap_used = "warn"
+# Pedantics without being too noisy
+cargo = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+multiple_crate_versions = "allow"
+too_many_lines = "allow"
+unimplemented = "warn"
+use_self = "warn"

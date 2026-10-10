@@ -1,0 +1,206 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    acquisitions.id AS acquisition_id,\n    acquisitions.artifact_id,\n    acquisitions.owner_id,\n    acquisitions.source_id,\n    acquisitions.source_identity,\n    acquisitions.acquired_at,\n    artifacts.digest,\n    route_import_receipts.plan_id,\n    route_import_receipts.revision_id,\n    route_import_receipts.candidate_kind,\n    route_import_receipts.candidate_index,\n    route_import_receipts.segment_index,\n    route_import_receipts.parser_name,\n    route_import_receipts.parser_version,\n    route_plan_revisions.name,\n    route_plan_revisions.sport\nFROM route_import_receipts\nINNER JOIN acquisitions\n    ON route_import_receipts.acquisition_id = acquisitions.id\nINNER JOIN artifacts ON acquisitions.artifact_id = artifacts.id\nINNER JOIN route_plan_revisions\n    ON route_import_receipts.revision_id = route_plan_revisions.id\nWHERE acquisitions.owner_id = ? AND acquisitions.operation_id = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "acquisition_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "artifact_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "artifact_id"
+          }
+        }
+      },
+      {
+        "name": "owner_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "name": "source_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "source_id"
+          }
+        }
+      },
+      {
+        "name": "source_identity",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "source_identity"
+          }
+        }
+      },
+      {
+        "name": "acquired_at",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "acquired_at"
+          }
+        }
+      },
+      {
+        "name": "digest",
+        "ordinal": 6,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "artifacts",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "name": "plan_id",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_import_receipts",
+            "name": "plan_id"
+          }
+        }
+      },
+      {
+        "name": "revision_id",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_import_receipts",
+            "name": "revision_id"
+          }
+        }
+      },
+      {
+        "name": "candidate_kind",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_import_receipts",
+            "name": "candidate_kind"
+          }
+        }
+      },
+      {
+        "name": "candidate_index",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "route_import_receipts",
+            "name": "candidate_index"
+          }
+        }
+      },
+      {
+        "name": "segment_index",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "route_import_receipts",
+            "name": "segment_index"
+          }
+        }
+      },
+      {
+        "name": "parser_name",
+        "ordinal": 12,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_import_receipts",
+            "name": "parser_name"
+          }
+        }
+      },
+      {
+        "name": "parser_version",
+        "ordinal": 13,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_import_receipts",
+            "name": "parser_version"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 14,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "sport",
+        "ordinal": 15,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_plan_revisions",
+            "name": "sport"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2a80146cc82be8070a39fdae781f9e525de6c09566c00866cceb31b5d8e9a783"
+}

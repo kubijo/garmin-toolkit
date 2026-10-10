@@ -18,12 +18,12 @@ use mtp_rs::{
 };
 use thiserror::Error;
 
-use crate::capabilities::{
-    DataType, Error as ManifestError, Manifest, TransferDirection, parse, paths_equal,
+use crate::manifest::{
+    DataType, ManifestError, ParsedManifest as Manifest, TransferDirection, is_device_manifest,
+    parse_document,
 };
 use crate::mtp::{GARMIN_USB_VENDOR_ID, KNOWN_GARMIN_MTP};
 
-const GARMIN_DEVICE_MANIFEST: &str = "GARMIN/GarminDevice.xml";
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 
 /// An attached Garmin MTP candidate.
@@ -393,7 +393,7 @@ async fn scan_storage(storage: Storage) -> Result<Option<Catalog>, Error> {
             object.is_file()
                 && paths
                     .get(&object.handle)
-                    .is_some_and(|path| paths_equal(path, Path::new(GARMIN_DEVICE_MANIFEST)))
+                    .is_some_and(|path| is_device_manifest(path))
         })
         .collect::<Vec<_>>();
     let manifest_object = match manifests.as_slice() {
@@ -402,7 +402,7 @@ async fn scan_storage(storage: Storage) -> Result<Option<Catalog>, Error> {
         _ => return Err(Error::AmbiguousManifest),
     };
     let manifest_bytes = read_manifest(&storage, manifest_object).await?;
-    let manifest = parse(std::str::from_utf8(&manifest_bytes)?)?;
+    let manifest = parse_document(std::str::from_utf8(&manifest_bytes)?)?;
     let storage = Arc::new(storage);
     let mut files = Vec::new();
     let mut seen = HashSet::new();
@@ -591,7 +591,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{Device, Error, connection_error, object_path};
-    use crate::{capabilities::DataType, test_support};
+    use crate::{DataType, test_support};
 
     const NAMESPACE: &str = "http://www.garmin.com/xmlschemas/GarminDevice/v2";
 
@@ -644,7 +644,10 @@ mod tests {
                 return Err("expected one manifest-bearing storage".into());
             };
             assert_eq!(catalog.manifest().id().as_u32(), 123_456);
-            assert_eq!(catalog.manifest().model().description(), "Synthetic Garmin");
+            assert_eq!(
+                catalog.manifest().model().description(),
+                "Mock Storage-o-Matic 9000"
+            );
             assert_eq!(catalog.files().len(), 2);
             assert!(
                 catalog

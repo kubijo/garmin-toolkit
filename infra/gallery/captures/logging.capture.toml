@@ -1,0 +1,31 @@
+out = "../../../.tmp/gallery/logging"
+size = "1920x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "jetbrains-80"
+scene = "console::All variants"
+knobs = { font = "JetBrains Mono Nerd Font", columns = "80" }
+
+[[shot]]
+name = "departure-80"
+scene = "console::All variants"
+knobs = { font = "Departure Mono", columns = "80" }
+
+[[shot]]
+name = "jetbrains-100"
+scene = "console::All variants"
+knobs = { font = "JetBrains Mono Nerd Font", columns = "100" }
+
+[[shot]]
+name = "departure-100"
+scene = "console::All variants"
+knobs = { font = "Departure Mono", columns = "100" }
+
+[[shot]]
+name = "compact"
+scene = "console::All variants"
+size = "1280x900"
+knobs = { font = "JetBrains Mono Nerd Font", columns = "80" }

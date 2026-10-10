@@ -6,7 +6,9 @@ INSERT INTO users (
     avatar_artifact_id,
     unit_system,
     language,
-    theme
+    theme,
+    show_hidden_files,
+    inline_file_windows
 )
 SELECT
     ? AS id,
@@ -16,7 +18,9 @@ SELECT
     ? AS avatar_artifact_id,
     ? AS unit_system,
     ? AS language,
-    ? AS theme
+    ? AS theme,
+    ? AS show_hidden_files,
+    ? AS inline_file_windows
 WHERE
     ? IS NULL OR EXISTS (
         SELECT 1
@@ -32,5 +36,7 @@ ON CONFLICT (id) DO UPDATE SET
     avatar_artifact_id = excluded.avatar_artifact_id,
     unit_system = excluded.unit_system,
     language = excluded.language,
-    theme = excluded.theme
+    theme = excluded.theme,
+    show_hidden_files = excluded.show_hidden_files,
+    inline_file_windows = excluded.inline_file_windows
 RETURNING id;

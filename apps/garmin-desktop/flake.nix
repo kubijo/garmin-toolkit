@@ -3,28 +3,25 @@
 
   inputs = {
     crane.url = "github:ipetkov/crane";
-    crane-portable = {
-      url = "github:ipetkov/crane/v0.16.6";
-      inputs.nixpkgs.follows = "nixpkgs-portable";
+    nix-appimage = {
+      url = "github:ralismark/nix-appimage";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
     nixpkgs.url = "github:NixOS/nixpkgs";
-    nixpkgs-portable.url = "github:NixOS/nixpkgs/release-23.11";
-    rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
   outputs =
     {
       crane,
-      crane-portable,
+      nix-appimage,
       nixpkgs,
-      nixpkgs-portable,
-      rust-overlay,
       ...
     }:
     {
       lib.mkTarget =
         {
           brandAssets,
+          formatjsCli,
           nixCargoTargetDir,
           system,
           toolchain,
@@ -33,16 +30,9 @@
         let
           pkgs = import nixpkgs {
             inherit system;
-            overlays = [ rust-overlay.overlays.default ];
           };
           inherit (pkgs) lib;
           craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
-          pkgsPortable = import nixpkgs-portable {
-            inherit system;
-            overlays = [ rust-overlay.overlays.default ];
-          };
-          portableToolchain = pkgsPortable.rust-bin.stable."1.98.0".default;
-          craneLibPortable = (crane-portable.mkLib pkgsPortable).overrideToolchain portableToolchain;
           productionIdentity = {
             id = "io.kubijo.GarminToolkit";
             name = "Garmin Toolkit";
@@ -67,6 +57,10 @@
             wayland
           ];
           runtimeLibraries = lib.optionals pkgs.stdenv.hostPlatform.isLinux linuxLibraries;
+          linuxRuntimeEnvironment = {
+            GIO_EXTRA_MODULES = "${pkgs.gvfs}/lib/gio/modules";
+            LD_LIBRARY_PATH = lib.makeLibraryPath linuxLibraries;
+          };
           src = import (workspaceSrc + "/infra/nix/cargo-source.nix") {
             inherit craneLib lib workspaceSrc;
           };
@@ -76,7 +70,10 @@
             buildInputs = runtimeLibraries;
             cargoLock = workspaceSrc + "/Cargo.lock";
             doCheck = false;
-            nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            nativeBuildInputs = [
+              formatjsCli
+            ]
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               pkgs.pkg-config
               pkgs.wrapGAppsNoGuiHook
             ];
@@ -84,8 +81,9 @@
           };
           cargoArtifacts = craneLib.buildDepsOnly (
             commonArgs
+            // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
             // {
-              cargoExtraArgs = "-p garmin-desktop --all-features";
+              cargoExtraArgs = "-p garmin-desktop -p garmin-gpx-worker --all-features";
               pname = "garmin-desktop-deps";
             }
           );
@@ -141,7 +139,9 @@
           mkPackage =
             { launcher, demo }:
             let
-              cargoExtraArgs = "-p garmin-desktop" + lib.optionalString demo " --features demo";
+              cargoExtraArgs =
+                "-p garmin-desktop -p garmin-gpx-worker"
+                + lib.optionalString demo " --features garmin-desktop/demo";
             in
             craneLib.buildPackage (
               commonArgs
@@ -150,6 +150,14 @@
                 pname = "garmin-desktop" + lib.optionalString demo "-demo";
                 meta.mainProgram = "garmin-desktop";
                 inherit cargoArtifacts;
+                # Keep dynamically loaded libraries and GIO modules in the
+                # application's runtime closure, including outside the dev shell.
+                preFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+                  gappsWrapperArgs+=(
+                    --prefix LD_LIBRARY_PATH : ${lib.escapeShellArg linuxRuntimeEnvironment.LD_LIBRARY_PATH}
+                    --prefix GIO_EXTRA_MODULES : ${lib.escapeShellArg linuxRuntimeEnvironment.GIO_EXTRA_MODULES}
+                  )
+                '';
                 postInstall = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
                   cp -r --no-preserve=mode ${launcher}/share "$out/"
                 '';
@@ -166,17 +174,18 @@
           distribution = import ./distribution.nix {
             inherit
               craneLib
-              craneLibPortable
               lib
               demoIdentity
               demoLauncher
+              demoPackage
+              package
               pkgs
-              pkgsPortable
               productionIdentity
               launcher
               src
-              workspaceSrc
               ;
+            mkAppImage = nix-appimage.lib.${system}.mkAppImage;
+            withHostGraphics = import (workspaceSrc + "/infra/nix/host-graphics") { inherit pkgs; };
           };
           launcherCheck =
             pkgs.runCommandLocal "check-garmin-toolkit-desktop-launcher"
@@ -207,6 +216,8 @@
               pkgs.runCommandLocal "check-garmin-toolkit-desktop" { } ''
                 test -x ${package}/bin/garmin-desktop
                 test -x ${demoPackage}/bin/garmin-desktop
+                test -x ${package}/bin/garmin-gpx-worker
+                test -x ${demoPackage}/bin/garmin-gpx-worker
                 test -e ${launcherCheck}
                 test -x ${distribution.appImage}
                 test -x ${distribution.demoAppImage}
@@ -221,10 +232,7 @@
               CARGO_TARGET_DIR = nixCargoTargetDir;
               checks = { inherit package; };
             }
-            // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-              GIO_EXTRA_MODULES = "${pkgs.gvfs}/lib/gio/modules";
-              LD_LIBRARY_PATH = lib.makeLibraryPath linuxLibraries;
-            }
+            // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux linuxRuntimeEnvironment
           );
         };
     };

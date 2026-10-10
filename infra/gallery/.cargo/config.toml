@@ -1,2 +1,2 @@
 [build]
-target-dir = "../../target/gallery"
+target-dir = "../../.tmp/gallery-check-target"

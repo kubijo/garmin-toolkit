@@ -19,17 +19,23 @@ protocol split.
 
 ## Validation hardware
 
-| Role              | Exact device         | Family        | Availability | Documented local paths                          |
-| ----------------- | -------------------- | ------------- | ------------ | ----------------------------------------------- |
-| Baseline          | fēnix 8 Solar, 47 mm | Watch         | Available    | Bluetooth, Wi-Fi, MTP/Garmin USB mode           |
-| Watch conformance | Venu 3S              | Watch         | Available    | Bluetooth and Wi-Fi; verify USB mode physically |
-| Second family     | Edge 850             | Bike computer | Available    | Bluetooth, Wi-Fi, MTP file transfer             |
-| Bike conformance  | Edge 1050            | Bike computer | Available    | Bluetooth, Wi-Fi, MTP file transfer             |
+All four devices are available and support Bluetooth and Wi-Fi. fēnix/Venu are watches; Edge models are bike computers.
+
+| Role              | Exact device         | Documented USB path    |
+| ----------------- | -------------------- | ---------------------- |
+| Baseline          | fēnix 8 Solar, 47 mm | MTP/Garmin USB mode    |
+| Watch conformance | Venu 3S              | Verify mode physically |
+| Second family     | Edge 850             | MTP file transfer      |
+| Bike conformance  | Edge 1050            | MTP file transfer      |
 
 Venu tests watch portability; Edge 850 establishes bike support and Edge 1050 tests conformance. Record firmware and
 host for every run.
 
-Index S2 is available but deferred with other devices lacking USB data access under ADR 0016.
+Simultaneous Edge 1050 and Venu 3S attachment was observed, but it does not establish complete explorer or write
+acceptance for either device.
+
+Index S2 is available but deferred with other devices lacking USB data access. The initial device scope is USB watches
+and bike computers.
 
 Sources:
 [Edge 850 computer connection](https://www8.garmin.com/manuals/webhelp/GUID-5BA20A50-BFFF-4418-AE4E-CA719C39EB05/EN-US/GUID-B4663AC8-EEF9-4684-883E-3CA79B0351EB.html),
@@ -39,12 +45,19 @@ and [Index S2 specifications](https://www.garmin.com/en-GB/p/679362/pn/010-02294
 
 ## Operations
 
-| Passive discovery                      | Pairing/coexistence        | Metadata | FIT download | Resume | Course/workout upload |
-| -------------------------------------- | -------------------------- | -------- | ------------ | ------ | --------------------- |
-| Garmin ID appears when phone is absent | Unsafe; active proof gated | Gated    | Gated        | Gated  | Gated                 |
+| Operation                                             | Evidence                               |
+| ----------------------------------------------------- | -------------------------------------- |
+| Passive discovery                                     | Garmin ID appears when phone is absent |
+| Pairing/coexistence                                   | Unsafe; active proof gated             |
+| Metadata, FIT download, resume, course/workout upload | Gated                                  |
 
 ## USB operations
 
-| Hotplug             | Pairing marker | MTP enumerate                         | FIT import                                 | Reconnect/deduplicate | Course/workout write          |
-| ------------------- | -------------- | ------------------------------------- | ------------------------------------------ | --------------------- | ----------------------------- |
-| Attached state only | Unknown        | Raw and GVFS; 366-entry GVFS snapshot | Complete read/decode only; no import proof | Unknown               | Generic probe only; FIT gated |
+| Operation             | Evidence                                   |
+| --------------------- | ------------------------------------------ |
+| Hotplug               | Attached state only                        |
+| Pairing marker        | Unknown                                    |
+| MTP enumerate         | Raw and GVFS; 366-entry GVFS snapshot      |
+| FIT import            | Complete read/decode only; no import proof |
+| Reconnect/deduplicate | Unknown                                    |
+| Course/workout write  | Generic probe only; FIT gated              |

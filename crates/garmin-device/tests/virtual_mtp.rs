@@ -6,10 +6,9 @@ use std::{error::Error, fs, io, time::Duration};
 
 use bytes::Bytes;
 use futures_lite::{future::block_on, stream};
-use garmin_device::capabilities::parse;
 use garmin_device::{
     DevicePathState, RawMtpLink, RawMtpSession, SafeRelativePath, TransportKind, UploadCompletion,
-    inventory_mtp,
+    inventory_mtp, parse_manifest,
     storage::{DeviceLink, DeviceProbeRequest},
 };
 use garmin_progress::{OperationStage, ProgressReporter, ProgressState};
@@ -65,10 +64,11 @@ fn reads_and_parses_manifest_through_virtual_mtp() -> Result<(), Box<dyn Error>>
             .ok_or_else(|| io::Error::other("virtual device exposed no manifest"))?;
         let bytes = storage.download_to_vec(manifest.handle).await?;
         let xml = String::from_utf8(bytes)?;
-        let parsed = parse(&xml)?;
+        let manifest = parse_manifest(&xml, TransportKind::Mtp, "virtual-mtp-test".to_owned())?;
+        let parsed = manifest.capabilities();
 
         assert_eq!(parsed.id().as_u32(), 123_456);
-        assert_eq!(parsed.model().description(), "Synthetic Garmin");
+        assert_eq!(parsed.model().description(), "Mock Storage-o-Matic 9000");
         assert_eq!(parsed.capabilities().len(), 1);
         Ok(())
     })
@@ -232,7 +232,7 @@ async fn one_raw_session_covers_manifest_capacity_and_probe() -> Result<(), Box<
     let progress = ProgressReporter::default();
 
     let (session, manifest) = RawMtpSession::open(fixture.location_id).await?;
-    assert_eq!(manifest.summary.model, "Synthetic Garmin");
+    assert_eq!(manifest.summary.model, "Mock Storage-o-Matic 9000");
     assert_eq!(session.capacity().await?.state.storages.len(), 1);
     let report = session
         .probe(

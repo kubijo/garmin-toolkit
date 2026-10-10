@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM course_generations\nWHERE id = ? AND owner_id = ? AND revision_id = ?\nRETURNING operation_id, version, artifact_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "operation_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "operation_id"
+          }
+        }
+      },
+      {
+        "name": "version",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "name": "artifact_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "artifact_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4e97960b0dddda18672f4ceb12bc156023e5c3bbbfd2b12db41e7bebd40454f0"
+}

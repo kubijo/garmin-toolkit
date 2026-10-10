@@ -2,7 +2,7 @@ use gallery::prelude::*;
 use garmin_ui::button::{GroupChoice, GroupProps, IconProps, Kind, Props, Width};
 use garmin_ui::{Size, button, icons};
 
-scene_meta! { title: "Components / Actions / Buttons" }
+scene_meta! { title: "Components / Buttons" }
 
 const KINDS: &[&str] = &["primary", "secondary", "tertiary", "ghost", "danger"];
 const SIZES: &[&str] = &["small", "medium", "large"];
@@ -117,7 +117,9 @@ fn group(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
             &choices,
             GroupProps {
                 size: Size::Medium,
+                width: Width::Fit,
                 enabled: true,
+                style: button::GroupStyle::Subtle,
             },
         );
     });

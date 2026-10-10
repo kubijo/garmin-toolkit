@@ -1,0 +1,5 @@
+{
+  "extends": "infra/python/pyproject.toml",
+  "venvPath": "infra/python",
+  "venv": ".venv"
+}

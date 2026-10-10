@@ -14,12 +14,58 @@ struct ChooserSceneProps {
 }
 
 #[scene]
+fn header_buttons(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let compact = ctx.toggle("compact", false);
+    let intl = globals.intl();
+    let profiles = [
+        profile::ProfileProps {
+            display_name: "Alex Rider",
+            accent: swatch::cyan::G40,
+            avatar: None,
+        },
+        profile::ProfileProps {
+            display_name: "Sam Runner",
+            accent: swatch::magenta::G40,
+            avatar: None,
+        },
+        profile::ProfileProps {
+            display_name: "Taylor Cyclist",
+            accent: swatch::green::G40,
+            avatar: None,
+        },
+    ];
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
+        for (index, profile) in profiles.iter().enumerate() {
+            ui.push_id(index, |ui| {
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(if compact { 48.0 } else { 180.0 }, 32.0),
+                    egui::Sense::hover(),
+                );
+                let _ = profile::header(
+                    ui,
+                    rect,
+                    &profile::SelectorProps {
+                        intl: &intl,
+                        profiles: &profiles,
+                        selected: Some(index),
+                        expanded: false,
+                        backup_enabled: true,
+                    },
+                    profile.display_name,
+                );
+            });
+        }
+    });
+}
+
+#[scene]
 fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let props = ChooserSceneProps {
         dataset: ctx.buttons("profiles", &["household", "single", "empty"], 0),
-        width: ctx.slider("width", 720.0, 320.0, 960.0, 1.0),
+        width: ctx.slider("width", 720.0, 320.0, 1920.0, 1.0),
         height: ctx.slider("height", 520.0, 400.0, 720.0, 1.0),
     };
+    let restored = ctx.toggle("restored", false);
     let texture = avatar_texture(ui);
     let image = profile::AvatarImage::texture(egui::load::SizedTexture::from_handle(&texture));
     let profiles = [
@@ -45,22 +91,44 @@ fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         _ => &profiles[..],
     };
     let intl = globals.intl();
-
-    stage!(ctx, ui, |ui| {
+    let restored_file =
+        garmin_ui::backup::SelectedFile::RestoreSource("garmin-backup.tar.zst".to_owned());
+    let restored_state = garmin_ui::backup::State::Restored(garmin_ui::backup::RestoreSummary {
+        elapsed: Some(std::time::Duration::from_secs(18)),
+        archive_bytes: Some(1_200_000),
+        database_bytes: Some(8_000_000),
+        created_at: Some(1_790_640_000),
+    });
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(props.width);
         ui.set_height(props.height);
+        let _ = garmin_ui::backup::show_operation(
+            ui,
+            &garmin_ui::backup::Props {
+                intl: &intl,
+                state: if restored {
+                    &restored_state
+                } else {
+                    &garmin_ui::backup::State::Idle
+                },
+                file: restored.then_some(&restored_file),
+                enabled: false,
+                server_files: true,
+            },
+        );
         let _ = profile::chooser(
             ui,
             &profile::ChooserProps {
                 intl: &intl,
                 profiles,
+                owner_index: (props.dataset != 2).then_some(0),
             },
         );
     });
 }
 
 #[scene]
-fn avatars(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+fn avatars(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let size = ctx.slider("size", 48.0, 24.0, 96.0, 1.0);
     let texture = avatar_texture(ui);
     let image = profile::AvatarImage::texture(egui::load::SizedTexture::from_handle(&texture));
@@ -70,17 +138,34 @@ fn avatars(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         ("Taylor Cyclist", swatch::green::G40, None),
         (
             "",
-            garmin_ui::theme::palette(ui)
-                .interaction()
-                .interactive(),
+            garmin_ui::theme::palette(ui).interaction().interactive(),
             None,
         ),
     ];
 
-    stage!(ctx, ui, |ui| {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.horizontal(|ui| {
             for (name, accent, image) in samples {
                 avatar_sample(ui, name, accent, image, size);
+            }
+        });
+    });
+}
+
+#[scene]
+fn initials_contrast(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let size = ctx.slider("size", 48.0, 20.0, 96.0, 1.0);
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
+        ui.horizontal(|ui| {
+            for (name, accent) in [
+                ("Black", swatch::BLACK),
+                ("White", swatch::WHITE),
+                ("Yellow", swatch::yellow::G30),
+                ("Pink", Color::from_rgb(238, 83, 150)),
+                ("Blue", swatch::ACTION),
+                ("Transparent", Color::from_rgba(0, 255, 0, 0)),
+            ] {
+                avatar_sample(ui, name, accent, None, size);
             }
         });
     });

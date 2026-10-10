@@ -11,11 +11,11 @@ use std::{
 use thiserror::Error;
 use walkdir::WalkDir;
 
-use crate::capabilities::{
-    DataType, Error as ManifestError, Manifest, TransferDirection, parse, paths_equal,
+use crate::manifest::{
+    DataType, ManifestError, ParsedManifest as Manifest, TransferDirection, is_device_manifest,
+    parse_document,
 };
 
-const GARMIN_DEVICE_MANIFEST: &str = "GARMIN/GarminDevice.xml";
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 
 /// A consented, already-mounted device root.
@@ -40,9 +40,7 @@ impl Device {
         let entries = entries(&self.root)?;
         let manifests = entries
             .iter()
-            .filter(|entry| {
-                entry.is_file && paths_equal(&entry.relative, Path::new(GARMIN_DEVICE_MANIFEST))
-            })
+            .filter(|entry| entry.is_file && is_device_manifest(&entry.relative))
             .collect::<Vec<_>>();
         let manifest_entry = match manifests.as_slice() {
             [] => return Err(Error::ManifestMissing),
@@ -50,7 +48,7 @@ impl Device {
             _ => return Err(Error::AmbiguousManifest),
         };
         let manifest = read_manifest(&manifest_entry.absolute)?;
-        let manifest = parse(std::str::from_utf8(&manifest)?)?;
+        let manifest = parse_document(std::str::from_utf8(&manifest)?)?;
         let mut files = Vec::new();
         let mut seen = HashSet::new();
 
@@ -292,7 +290,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{Device, Error};
-    use crate::{capabilities::DataType, test_support};
+    use crate::{DataType, test_support};
 
     const NAMESPACE: &str = "http://www.garmin.com/xmlschemas/GarminDevice/v2";
 
@@ -314,7 +312,10 @@ mod tests {
 
         let catalog = Device::open(mount.path()).scan()?;
         assert_eq!(catalog.manifest().id().as_u32(), 123_456);
-        assert_eq!(catalog.manifest().model().description(), "Synthetic Garmin");
+        assert_eq!(
+            catalog.manifest().model().description(),
+            "Mock Storage-o-Matic 9000"
+        );
         let [file] = catalog.files() else {
             return Err("expected one readable file".into());
         };

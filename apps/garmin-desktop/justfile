@@ -1,7 +1,7 @@
 import '../../infra/just/common.just'
 
 # Run production data or an isolated, deterministic demo corpus.
-run mode:
+run mode *options:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -11,12 +11,27 @@ run mode:
         *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
     esac
 
-    exec just in-shell cargo run --locked -p garmin-desktop "${features[@]}"
+    shift
+    just in-shell cargo build --locked -p garmin-gpx-worker
+    exec just in-shell cargo run --locked -p garmin-desktop "${features[@]}" -- "$@"
+
+# Build, record, load, analyze, compare, or finalize a native profile.
+profile +args:
+    @just in-shell uv run --frozen --project infra/python python infra/python/desktop_profile.py "$@"
+
+# Run the demo offscreen on hardware Vulkan, with bounded optional frame recording.
+render-probe +args:
+    @just in-shell cargo run --locked -p garmin-desktop --features render-probe --bin garmin-render-probe -- "$@"
 
 # Write the selected AppImage to dist.
 appimage mode:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    if [[ $(uname -s) != Linux ]]; then
+        printf 'AppImage packaging requires Linux.\n' >&2
+        exit 64
+    fi
 
     case {{ quote(mode) }} in
         production) app=desktop-appimage ;;
@@ -30,6 +45,11 @@ appimage mode:
 flatpak mode:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    if [[ $(uname -s) != Linux ]]; then
+        printf 'Flatpak packaging requires Linux.\n' >&2
+        exit 64
+    fi
 
     case {{ quote(mode) }} in
         production) app=desktop-flatpak ;;

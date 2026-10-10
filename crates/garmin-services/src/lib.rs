@@ -1,6 +1,12 @@
 //! Target-neutral application services.
 
+pub mod course_transfer;
+pub mod deployment;
+pub mod devices;
 pub mod maps;
+pub mod paths;
+pub mod routes;
+pub mod snapshots;
 
 use garmin_fit::{CreatorDiagnostics, NormalizedActivity};
 use garmin_importer::{
@@ -13,13 +19,70 @@ use garmin_model::{
     artifact::{AcquisitionOperationId, ArtifactId, NormalizationFailure, SourceIdentity},
     identity::{DisplayName, Profile, ProfilePreferences, Role, Source, User, UserId},
     observation::ObservationId,
-    route::{RouteName, RoutePlanId, RouteSport},
+    route::{RouteName, RoutePlanId, RoutePlanRevision, RoutePlanRevisionId, RouteSport},
     value::Timestamp,
 };
 use garmin_storage::{
     Storage, StoredActivity, StoredActivitySummary, StoredRoutePlan, StoredRoutePlanSummary,
 };
 use thiserror::Error;
+
+#[cfg(feature = "integration-hooks")]
+pub mod integration_gate {
+    use std::{io, path::PathBuf, time::Duration};
+
+    #[derive(Debug)]
+    pub struct IntegrationGate {
+        root: PathBuf,
+    }
+
+    impl IntegrationGate {
+        #[must_use]
+        pub fn new(root: PathBuf) -> Self {
+            Self { root }
+        }
+
+        /// # Errors
+        /// Fails if the armed checkpoint cannot be signalled.
+        pub async fn signal(&self, name: &'static str) -> io::Result<bool> {
+            if !tokio::fs::try_exists(self.root.join(format!("{name}.arm"))).await? {
+                return Ok(false);
+            }
+            tokio::fs::write(self.root.join(format!("{name}.ready")), b"ready").await?;
+            Ok(true)
+        }
+
+        /// Waits only when the disposable VM suite has armed this checkpoint.
+        /// # Errors
+        /// Fails if the gate files cannot be accessed or the test does not release the checkpoint.
+        pub async fn checkpoint(&self, name: &'static str) -> io::Result<()> {
+            let arm = self.root.join(format!("{name}.arm"));
+            if !tokio::fs::try_exists(&arm).await? {
+                return Ok(());
+            }
+            let release = self.root.join(format!("{name}.release"));
+            self.signal(name).await?;
+            let result = tokio::time::timeout(Duration::from_secs(30), async {
+                loop {
+                    if tokio::fs::try_exists(&release).await? {
+                        return Ok(());
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| {
+                Err(io::Error::other(format!(
+                    "integration checkpoint {name} timed out"
+                )))
+            });
+            let _ = tokio::fs::remove_file(arm).await;
+            let _ = tokio::fs::remove_file(self.root.join(format!("{name}.ready"))).await;
+            let _ = tokio::fs::remove_file(release).await;
+            result
+        }
+    }
+}
 
 /// The user whose data an operation may access.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -106,12 +169,37 @@ impl From<StoredActivity> for ActivityDetails {
 /// Shared in-process application service.
 pub struct Application {
     storage: Storage,
+    #[cfg(test)]
+    course_generation_gate: std::sync::Mutex<Option<std::sync::Arc<CourseGenerationGate>>>,
+    #[cfg(feature = "integration-hooks")]
+    integration_gate: std::sync::Mutex<Option<std::sync::Arc<integration_gate::IntegrationGate>>>,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct CourseGenerationGate {
+    pub(crate) started: tokio::sync::Notify,
+    pub(crate) resume: tokio::sync::Notify,
 }
 
 impl Application {
     #[must_use]
     pub const fn new(storage: Storage) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            #[cfg(test)]
+            course_generation_gate: std::sync::Mutex::new(None),
+            #[cfg(feature = "integration-hooks")]
+            integration_gate: std::sync::Mutex::new(None),
+        }
+    }
+
+    #[cfg(feature = "integration-hooks")]
+    pub fn set_integration_gate(&self, gate: std::sync::Arc<integration_gate::IntegrationGate>) {
+        *self
+            .integration_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(gate);
     }
 
     /// Lists profiles in stable display order.
@@ -154,6 +242,24 @@ impl Application {
         };
         let mut replacement = stored.profile().clone();
         replacement.replace_preferences(preferences);
+        stored.replace_profile(replacement);
+        self.storage.save_user(&stored).await?;
+        Ok(stored)
+    }
+
+    /// Replaces one profile's accent while preserving its preferences and avatar.
+    /// # Errors
+    /// [`enum@Error`] when the profile is missing or cannot be stored.
+    pub async fn update_profile_accent(
+        &self,
+        user: UserContext,
+        accent: Option<garmin_color::Color>,
+    ) -> Result<User, Error> {
+        let Some(mut stored) = self.storage.user(user.user_id()).await? else {
+            return Err(Error::ProfileNotFound(user.user_id()));
+        };
+        let mut replacement = stored.profile().clone();
+        replacement.replace_accent(accent);
         stored.replace_profile(replacement);
         self.storage.save_user(&stored).await?;
         Ok(stored)
@@ -238,6 +344,21 @@ impl Application {
         Ok(FitImportResult::from_outcome(outcome, disposition))
     }
 
+    /// Reports whether a selected FIT acquisition was committed for this profile.
+    /// # Errors
+    /// [`enum@Error`] when persisted acquisition state cannot be loaded.
+    pub async fn fit_import_completed(
+        &self,
+        user: UserContext,
+        operation: AcquisitionOperationId,
+    ) -> Result<bool, Error> {
+        Ok(self
+            .storage
+            .acquisition_time(user.user_id(), operation)
+            .await?
+            .is_some())
+    }
+
     /// Inspects GPX bytes without storing them.
     /// # Errors
     /// [`enum@Error`] when the GPX document cannot be parsed.
@@ -255,7 +376,6 @@ impl Application {
         if request.user.user_id() != request.source.owner_id() {
             return Err(garmin_importer::RouteImportError::ActorCannotUseSource.into());
         }
-        self.storage.save_source(request.source).await?;
         Ok(RouteImporter::new(&self.storage)
             .import(ImporterRouteRequest::from_parts(
                 request.user.user_id(),
@@ -290,6 +410,20 @@ impl Application {
         plan_id: RoutePlanId,
     ) -> Result<Option<StoredRoutePlan>, Error> {
         Ok(self.storage.route_plan(user.user_id(), plan_id).await?)
+    }
+
+    /// Loads an exact immutable route revision within the user's scope.
+    /// # Errors
+    /// [`enum@Error`] when persisted route data cannot be loaded.
+    pub async fn route_revision(
+        &self,
+        user: UserContext,
+        revision_id: RoutePlanRevisionId,
+    ) -> Result<Option<RoutePlanRevision>, Error> {
+        Ok(self
+            .storage
+            .route_revision(user.user_id(), revision_id)
+            .await?)
     }
 
     /// Confirms direct lines between an unresolved route's control points.
@@ -557,6 +691,11 @@ pub enum Error {
     RoutePlanNotFound(RoutePlanId),
     #[error(transparent)]
     RouteTransformation(#[from] garmin_route::Error),
+    #[error(transparent)]
+    CourseEncoding(#[from] garmin_fit::course::Error),
+    #[cfg(feature = "integration-hooks")]
+    #[error("integration checkpoint failed: {0}")]
+    Integration(#[from] std::io::Error),
 }
 
 #[cfg(test)]
@@ -637,6 +776,53 @@ mod tests {
             assert_eq!(member.role(), Role::Member);
             assert_ne!(owner.id(), member.id());
             assert_eq!(owner.profile(), member.profile());
+            application.close().await;
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn profile_accent_is_scoped_persistent_and_resettable() -> Result<(), Box<dyn Error>> {
+        block_on(async {
+            let root = tempdir()?;
+            let path = root.path().join("accent.sqlite3");
+            let application = Application::new(Storage::open(&path).await?);
+            let owner = application.create_profile("Rider".parse()?).await?;
+            let other = application.create_profile("Rider".parse()?).await?;
+            let preferences = ProfilePreferences::default()
+                .with_inline_file_windows(true)
+                .with_show_hidden_files(true);
+            application
+                .update_profile_preferences(UserContext::new(owner.id()), preferences)
+                .await?;
+            let accent = garmin_color::Color::from_rgba(200, 85, 168, 192);
+            let updated = application
+                .update_profile_accent(UserContext::new(owner.id()), Some(accent))
+                .await?;
+            assert_eq!(updated.profile().accent(), Some(accent));
+            assert_eq!(updated.profile().preferences(), preferences);
+            application.close().await;
+            let application = Application::new(Storage::open(&path).await?);
+            let profiles = application.profiles().await?;
+            assert_eq!(
+                profiles.iter().find(|user| user.id() == owner.id()),
+                Some(&updated)
+            );
+            assert_eq!(
+                profiles.iter().find(|user| user.id() == other.id()),
+                Some(&other)
+            );
+            let reset = application
+                .update_profile_accent(UserContext::new(owner.id()), None)
+                .await?;
+            assert_eq!(reset.profile().accent(), None);
+            assert_eq!(reset.profile().preferences(), preferences);
+            assert!(
+                application
+                    .update_profile_accent(UserContext::new(UserId::new_v4()), Some(accent))
+                    .await
+                    .is_err()
+            );
             application.close().await;
             Ok(())
         })

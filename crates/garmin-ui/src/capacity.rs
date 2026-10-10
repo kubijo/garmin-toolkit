@@ -13,6 +13,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
     let label = crate::text::balanced(ui, props.label, &TextStyle::Body, true);
     ui.label(RichText::new(label).strong());
     if let Some((used, total)) = props.bytes.filter(|(used, total)| used <= total) {
+        let palette = crate::theme::palette(ui);
         // Scale before conversion; byte counts must remain valid on WASM32.
         let fraction = if total == 0 {
             0
@@ -21,9 +22,12 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
         };
         let fraction = u16::try_from(fraction).unwrap_or(10_000);
         ui.add(
-            egui::ProgressBar::new(f32::from(fraction) / 10_000.0)
-                .desired_width(ui.available_width())
-                .desired_height(6.0),
+            crate::theme::progress_bar(
+                f32::from(fraction) / 10_000.0,
+                palette.interaction().interactive(),
+            )
+            .desired_width(ui.available_width())
+            .desired_height(6.0),
         );
     }
     let detail = crate::text::balanced(ui, props.detail, &TextStyle::Small, false);

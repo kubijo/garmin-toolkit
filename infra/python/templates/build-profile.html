@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>Build timeline</title>
+        <style>
+            body { font: 14px system-ui; background: #171717; color: #eee; margin: 24px; }
+            table { width: 100%; border-collapse: collapse; }
+            td { padding: 4px 8px; border-bottom: 1px solid #333; white-space: nowrap; }
+            .track { position: relative; width: 70%; min-width: 400px;
+                background: repeating-linear-gradient(90deg, transparent 0, transparent 9.9%, #333 10%); }
+            .bar { position: absolute; top: 4px; bottom: 4px; background: #38a6be; min-width: 1px; }
+            pre { white-space: pre-wrap; color: #bbb; }
+        </style>
+    </head>
+    <body>
+        <h1>Build timeline · {{ '%.3f' | format(duration / 1000000) }} s</h1>
+        <p>Wall times overlap: do not add parent and child durations. Hover bars for commands.
+            Open trace.json in Perfetto to zoom and inspect the trace. Cargo's report separates code generation.</p>
+        {% if metadata.get('compiler_profile_recorded') %}
+        <p>Compiler internals: open <a href="compiler/chrome_profiler.json">the compiler trace</a> in Perfetto.
+            Text and JSON summaries are alongside it in the compiler directory. The viewer omits events shorter than
+            50 microseconds; raw profiles retain all recorded events. This diagnostic run uses nightly
+            and includes instrumentation overhead; compare improvements using ordinary stable builds.</p>
+        {% endif %}
+        <pre>{{ metadata | tojson(indent=2) }}</pre>
+        <table>
+            {% for item in measured %}
+            <tr>
+                <td>{{ item.name }}</td>
+                <td>{{ '%.3f' | format(item.dur / 1000000) }} s</td>
+                <td class="track" title="{{ item.args | tojson | forceescape }}">
+                    <span class="bar" style="left: {{ item.ts / duration * 100 }}%; width: {{ item.dur / duration * 100 }}%"></span>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </body>
+</html>

@@ -14,8 +14,8 @@ transport-specific primitives without duplicating workflow policy.
 OS/build selection stays at factories and composition roots. Unsupported capabilities fail explicitly. The global
 indicator identifies demo or dry-run; operation results describe what actually happened.
 
-This supersedes ADR 0034's allowance for mode-specific workflow branches. ADR 0035 retains device ownership. Existing
-duplicated paths are implementation debt, not exceptions.
+The [consolidated device boundary](0035-consolidated-device-boundary.md) retains device ownership. Existing duplicated
+paths are implementation debt, not exceptions.
 
 ## Enforcement
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "-- SQLFluff lacks VACUUM INTO; SQLx checks this statement against SQLite.\nVACUUM INTO ?; -- noqa: PRS\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "756494eb3f065a97fe8b948bbc85ad302348fcbfd33c42ed1651f0f6ff8238e1"
+}

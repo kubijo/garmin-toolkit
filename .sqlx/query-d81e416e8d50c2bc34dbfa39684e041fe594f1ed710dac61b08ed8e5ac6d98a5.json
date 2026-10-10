@@ -1,0 +1,170 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    course_generations.id,\n    course_generations.operation_id,\n    course_generations.owner_id,\n    course_generations.plan_id,\n    course_generations.revision_id,\n    course_generations.artifact_id,\n    course_generations.version,\n    course_generations.serial,\n    course_generations.encoder_name,\n    course_generations.encoder_version,\n    course_generations.generated_at,\n    artifact_blobs.byte_count,\n    artifacts.digest\nFROM course_generations\nINNER JOIN route_plans ON course_generations.plan_id = route_plans.id\nINNER JOIN artifacts ON course_generations.artifact_id = artifacts.id\nINNER JOIN artifact_blobs ON artifacts.digest = artifact_blobs.digest\nWHERE route_plans.owner_id = ? AND course_generations.revision_id = ?\nORDER BY course_generations.version DESC;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "operation_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "operation_id"
+          }
+        }
+      },
+      {
+        "name": "owner_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "name": "plan_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "plan_id"
+          }
+        }
+      },
+      {
+        "name": "revision_id",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "revision_id"
+          }
+        }
+      },
+      {
+        "name": "artifact_id",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "artifact_id"
+          }
+        }
+      },
+      {
+        "name": "version",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "name": "serial",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "serial"
+          }
+        }
+      },
+      {
+        "name": "encoder_name",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "encoder_name"
+          }
+        }
+      },
+      {
+        "name": "encoder_version",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "encoder_version"
+          }
+        }
+      },
+      {
+        "name": "generated_at",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "course_generations",
+            "name": "generated_at"
+          }
+        }
+      },
+      {
+        "name": "byte_count",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "artifact_blobs",
+            "name": "byte_count"
+          }
+        }
+      },
+      {
+        "name": "digest",
+        "ordinal": 12,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "artifacts",
+            "name": "digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d81e416e8d50c2bc34dbfa39684e041fe594f1ed710dac61b08ed8e5ac6d98a5"
+}

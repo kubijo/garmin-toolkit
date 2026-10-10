@@ -16,7 +16,6 @@ safety.
 
 ## Consequences
 
-If approved, ADR 0010 defines the split. Until disposable-device evidence exists, defer its crates, proxies, and macOS
-work; use fakes and publishable fixtures.
-
-See [Bluetooth adapter research](../research/bluetooth-adapters.md).
+Until disposable-device evidence exists, defer Bluetooth crates, proxies, and macOS work; use fakes and publishable
+fixtures. [Adapter research](../research/bluetooth-adapters.md) informs a future design but grants no permission to
+connect or write.

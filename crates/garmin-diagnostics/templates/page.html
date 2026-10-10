@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{{ title }}</title>
+        <style>
+            body { font: 14px system-ui; margin: 24px; color: #ddd; background: #171717; }
+            pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+            #status { color: #aaa; }
+        </style>
+    </head>
+    <body data-cursor="{{ cursor }}">
+        <h1>{{ title }}</h1>
+        <p id="connection">{% if live %}Connecting…{% else %}Loaded{% endif %}</p>
+        <p id="status">{{ content.status }}</p>
+        {% if let Some(rows) = content.state %}
+        <h2>Current state</h2>
+        <div id="state">{% for row in rows %}<pre>{{ row }}</pre>{% endfor %}</div>
+        {% endif %}
+        <h2>History</h2>
+        <div id="history">{% for row in content.records %}<pre>{{ row }}</pre>{% endfor %}</div>
+        {% if live %}<script src="?format=script" defer></script>{% endif %}
+    </body>
+</html>

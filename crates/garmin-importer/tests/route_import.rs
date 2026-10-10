@@ -35,7 +35,6 @@ fn selected_candidates_stay_separate_and_share_the_original() -> TestResult {
             None,
         );
         storage.save_user(&user).await?;
-        storage.save_source(&source).await?;
         let operation = AcquisitionOperationId::from_u128(7);
         let importer = RouteImporter::new(&storage);
 
@@ -67,7 +66,7 @@ fn selected_candidates_stay_separate_and_share_the_original() -> TestResult {
             .import(request(
                 &user,
                 &source,
-                operation,
+                AcquisitionOperationId::from_u128(8),
                 CandidateSource::TrackSegment {
                     track: 0,
                     segment: 1,
@@ -77,8 +76,8 @@ fn selected_candidates_stay_separate_and_share_the_original() -> TestResult {
             .await?;
 
         assert_eq!(first, retry);
-        assert_eq!(first.artifact_id(), second.artifact_id());
-        assert_eq!(first.acquisition_id(), second.acquisition_id());
+        assert_ne!(first.artifact_id(), second.artifact_id());
+        assert_ne!(first.acquisition_id(), second.acquisition_id());
         assert_ne!(first.plan_id(), second.plan_id());
         assert_eq!(
             storage.artifact_bytes(first.artifact_id()).await?,

@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT coalesce(max(version), 0) + 1 AS version\nFROM (\n    SELECT version FROM course_generations\n    WHERE revision_id = ?1\n    UNION ALL\n    SELECT version FROM course_generation_deletions\n    WHERE revision_id = ?1\n) AS versions;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "version",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f8e13360f5ae3e3cd74648690cb673870954fc98e6e7a9ff5cdef7358daa56b5"
+}

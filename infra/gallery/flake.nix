@@ -17,6 +17,7 @@
     {
       lib.mkTool =
         {
+          formatjsCli,
           nixCargoTargetDir,
           system,
           toolchain,
@@ -59,6 +60,7 @@
             buildInputs = runtimeLibraries;
             inherit cargoLock;
             nativeBuildInputs = [
+              formatjsCli
               pkgs.cmake
             ]
             ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
@@ -81,6 +83,7 @@
             };
           cargoArtifacts = craneLib.buildDepsOnly (
             commonArgs
+            // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
             // {
               cargoExtraArgs = manifestArgs;
               doCheck = false;
@@ -105,6 +108,7 @@
             commonArgs
             // {
               inherit cargoArtifacts;
+              TZDIR = "${pkgs.tzdata}/share/zoneinfo";
               cargoExtraArgs = "${manifestArgs} --no-tests pass";
               doCheck = true;
             }
@@ -141,8 +145,23 @@
           devShell = craneLib.devShell (
             {
               CARGO_TARGET_DIR = nixCargoTargetDir;
-              checks = { inherit check; };
+              # A linkFarm does not carry the native inputs needed by mkShell.
+              checks = {
+                inherit
+                  clippy
+                  docs
+                  package
+                  tests
+                  ;
+              };
               packages = [ pkgs.cargo-watch ];
+              # The launcher builds its scenes from a different working directory.
+              shellHook = ''
+                case "$CARGO_TARGET_DIR" in
+                  /*) ;;
+                  *) export CARGO_TARGET_DIR="$PWD/$CARGO_TARGET_DIR" ;;
+                esac
+              '';
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               LD_LIBRARY_PATH = lib.makeLibraryPath linuxLibraries;

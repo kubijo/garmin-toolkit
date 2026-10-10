@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    artifact_blobs.bytes,\n    artifact_blobs.byte_count,\n    artifacts.digest\nFROM artifacts\nINNER JOIN artifact_blobs ON artifacts.digest = artifact_blobs.digest\nWHERE\n    artifacts.id = ?\n    AND EXISTS (\n        SELECT 1\n        FROM route_plan_revisions\n        INNER JOIN route_plans ON route_plan_revisions.plan_id = route_plans.id\n        WHERE\n            route_plans.owner_id = ?\n            AND route_plan_revisions.source_artifact_id = artifacts.id\n    );\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "bytes",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "artifact_blobs",
+            "name": "bytes"
+          }
+        }
+      },
+      {
+        "name": "byte_count",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "artifact_blobs",
+            "name": "byte_count"
+          }
+        }
+      },
+      {
+        "name": "digest",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "artifacts",
+            "name": "digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2aeeeec4d6503fc933ad86f8f0629347e34cd65fb8b3806a93ef7805160a33ad"
+}

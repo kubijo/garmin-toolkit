@@ -49,12 +49,14 @@ fn show(ctx: &mut SceneCtx<'_>, ui: &mut Ui, unavailable: bool, long: bool) {
             device::show(
                 ui,
                 &device::Props {
-                    name: "Garmin fēnix 8",
+                    name: "Mock Watch-o-Matic 9000",
                     connection: "USB/MTP",
                     identifier: Some("1234567890"),
                     software: Some("9.12"),
                     status: "Ready",
                     status_label: "Status",
+                    inspection_error: None,
+                    inspection_error_label: "Inspection error",
                     identifier_label: "Device ID",
                     software_label: "Software",
                     transfers_label: "Supported transfers",

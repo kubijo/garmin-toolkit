@@ -12,8 +12,6 @@ State the project's provenance directly. Its Garmin map-service interoperability
 distributed Garmin Express binaries, traffic from developer-owned devices, and cited public material. The repository
 must not contain Garmin binaries, decompiler output, private captures, credentials, or map files.
 
-This supersedes ADR 0003's project identity and license choice and ADR 0029's `nr-*` package namespace.
-
 ## Why
 
 The repository now combines device maintenance with activity, route, desktop, and Home Assistant capabilities. A toolkit
@@ -23,5 +21,5 @@ conservative common license for the combined source.
 ## Consequences
 
 Public artifacts use Garmin Toolkit branding. `garmin-cli` remains the command name because it accurately names that
-application. Release checks retain provenance and license evidence. Before the first release, persisted identifiers use
-only the current Garmin Toolkit domains; no compatibility names are retained for development artifacts.
+application. Release checks retain provenance and license evidence. New persisted identifiers use current project
+domains. Existing importer UUIDv5 domains remain stable until an explicit data migration changes them.

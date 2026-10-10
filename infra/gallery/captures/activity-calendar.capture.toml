@@ -1,0 +1,95 @@
+out = "../../../.tmp/gallery/activity-calendar"
+size = "1440x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = false
+
+[[shot]]
+name = "application-dark"
+scene = "activity::Application"
+frames = 256
+
+[[shot]]
+name = "application-light"
+scene = "activity::Application"
+frames = 256
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "application-narrow-czech"
+scene = "activity::Narrow Application"
+frames = 256
+[shot.globals]
+Language = "Čeština"
+
+[[shot]]
+name = "wide-dark"
+scene = "activity::Workspace"
+frames = 256
+
+[[shot]]
+name = "wide-light-czech"
+scene = "activity::Workspace"
+frames = 256
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+
+[[shot]]
+name = "narrow-dark"
+scene = "activity::Compact Workspace"
+frames = 256
+
+[[shot]]
+name = "narrow-light-czech"
+scene = "activity::Compact Workspace"
+frames = 256
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+
+[[shot]]
+name = "six-weeks-czech"
+scene = "activity::Calendar Boundaries"
+frames = 256
+[shot.globals]
+Language = "Čeština"
+
+[[shot]]
+name = "regional-calendar"
+scene = "activity::Regional Calendar"
+frames = 256
+
+[[shot]]
+name = "hebrew-calendar"
+scene = "activity::Hebrew Calendar"
+frames = 256
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "empty"
+scene = "activity::Empty Workspace"
+
+[[shot]]
+name = "archive-dark"
+scene = "activity::Archive"
+frames = 256
+
+[[shot]]
+name = "archive-light-czech"
+scene = "activity::Archive"
+frames = 256
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+
+[[shot]]
+name = "loading"
+scene = "activity::Loading"
+
+[[shot]]
+name = "provider-failure"
+scene = "activity::Provider Failure"
+frames = 256

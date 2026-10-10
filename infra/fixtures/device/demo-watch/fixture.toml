@@ -1,0 +1,16 @@
+id = "device-demo-watch-v1"
+purpose = "Shared read-only device inspection and disposable demo device"
+origin = "synthetic, project-owned"
+generator = "hand-authored GarminDevice XML"
+generator_revision = 1
+license = "AGPL-3.0-or-later"
+publication_approved = true
+committed_inputs = [
+    "GarminDevice.xml sha256:ed46fad719b8b25365e1d4931e1c4a613e9df5bb48c584b311fcd212c65c440b",
+]
+expected_model = "Mock Watch-o-Matic 9000"
+expected_identifier = 42530200
+expected_software_version = 1870
+expected_activity_directory = "Garmin/Activity"
+expected_workout_directory = "Garmin/Workouts"
+expected_course_directory = "Garmin/Courses"

@@ -9,21 +9,31 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-demo = ["dep:garmin-fixtures"]
+demo = ["dep:garmin-fixtures", "garmin-services/integration-hooks"]
 
 [lints]
 workspace = true
 
 [dependencies]
+garmin-color.workspace = true
+garmin-diagnostics.workspace = true
+garmin-logging.workspace = true
 anyhow.workspace = true
 axum = { workspace = true, features = ["ws"] }
+blake3.workspace = true
+clap.workspace = true
 futures-lite.workspace = true
 futures-util.workspace = true
 garmin-device.workspace = true
+garmin-fit.workspace = true
 garmin-fixtures = { workspace = true, optional = true }
+garmin-importer.workspace = true
+garmin-map-tiles.workspace = true
 garmin-model.workspace = true
+garmin-progress.workspace = true
 garmin-service-api.workspace = true
 garmin-services.workspace = true
+garmin-update.workspace = true
 garmin-storage.workspace = true
 http-security-headers = { workspace = true, features = ["nonce"] }
 nu-ansi-term.workspace = true
@@ -31,12 +41,16 @@ remoc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 tower-http = { workspace = true, features = ["fs"] }
 tracing.workspace = true
-tracing-logfmt.workspace = true
 tracing-subscriber.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
+garmin-fit = { workspace = true, features = ["test-fixtures"] }
+garmin-fixtures.workspace = true
+image.workspace = true
+reqwest.workspace = true
 tokio-tungstenite.workspace = true

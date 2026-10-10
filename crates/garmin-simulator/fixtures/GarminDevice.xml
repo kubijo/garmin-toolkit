@@ -3,7 +3,7 @@
   <Model>
     <PartNumber>006-BMOCK-00</PartNumber>
     <SoftwareVersion>100</SoftwareVersion>
-    <Description>Garmin CLI Mock Device</Description>
+    <Description>Mock Storage-o-Matic 9000</Description>
   </Model>
   <Id>42</Id>
   <MassStorageMode>

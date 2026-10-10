@@ -44,26 +44,55 @@ Garmin documents [`NewFiles`](https://support.garmin.com/en-MY/?faq=rzvP53Si4O3b
 [`Garmin/Activity`](https://support.garmin.com/en-CA/?faq=Ht3ZP52Kju075uKvqTqu99) as recorded output, and
 [FIT types](https://developer.garmin.com/fit/file-types) independently of folders.
 
-Under [ADR 0012](../decisions/0012-manifest-driven-usb-capabilities.md), output permits copy, input only identifies a
-potential operation, and unlisted paths grant nothing.
+Under [the device boundary](../decisions/0035-consolidated-device-boundary.md), output permits copy, input only
+identifies a potential operation, and unlisted paths grant nothing.
+
+### Device-browser bookmark policy
+
+The file browser derives shortcuts from the catalog it already received; it never invents a directory or scans beyond
+that bounded snapshot. The conservative known-place set is `Garmin/Activity`, `Garmin/Courses`, `Garmin/Workouts`, and
+existing root or `Garmin`-nested Music, Podcasts, and Audiobooks directories. Activity, course, and workout locations
+come from the device manifest contract above. Garmin separately documents music, podcast, audiobook, and playlist
+content support, but not one universal watch directory layout, so media shortcuts are strictly existence-based:
+[Garmin audio file support](https://support.garmin.com/en-US/?faq=JyNEOTsZaR3KMXqej3oQp5).
+
+`GARMIN-TOOLKIT` remains visible because it is the toolkit's bounded, versioned recovery and transaction namespace. It
+is not a user-directory bookmark. The browser keeps it in the full storage tree and storage-root listing with a distinct
+toolbox icon. Its subtree is browse/download-only in this generic explorer: upload, new-folder, and remove affordances
+are suppressed. This protection is an application policy; it does not misrepresent a writable device volume as
+transport-level read-only.
 
 ## Device identity
 
-[ADR 0018](../decisions/0018-on-device-profile-marker.md) makes a root TOML marker the sole persisted association. It
-contains immutable user/device UUIDs and mutable profile context while preserving comments and unknown fields.
+[ADR 0018](../decisions/0018-on-device-profile-marker.md) puts the association in `GARMIN-TOOLKIT/pairing.toml`. It
+starts with a device UUID, user UUID, and profile-name snapshot. Reassignment creates a numbered revision in that same
+directory, preserving the device UUID, comments, and unknown fields without overwriting an earlier file.
 
 Manifest, USB, MTP, and FIT IDs are diagnostic; none identifies an application profile.
+
+### Demo pairing acceptance
+
+On 2026-10-04, the Nix-packaged HASS demo reassigned the mock watch from Alex Rider to Sam Runner through the
+confirmation dialog, then back to Alex. The host created `pairing-000001.toml` and `pairing-000002.toml` with revisions
+one and two and the same device UUID. The original `pairing.toml` kept its SHA-256 hash, and the refreshed UI showed
+each effective profile while hiding the pairing action for that profile. The browser tab initially ran an older bundle;
+reloading it exposed the current pairing action. This verifies the demo flow, not the HASS add-on or physical media.
 
 ## Existing adapters
 
 `garmin-device` owns attachments, consented discovery, capabilities, and I/O; apps see no backend handles or raw paths.
 
-| Candidate                                                                                                  | Treatment                                                                                                                                                                                                                                        |
-| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`nusb` 0.2.7](https://github.com/kevinmehall/nusb/commit/bdc148c123c102785cd1d506b77bfeeb794ffeb1)        | Primary hotplug and descriptor candidate. It is pure Rust, MIT/Apache-2.0, runtime-neutral, and supports Linux, macOS, and Windows.                                                                                                              |
-| [`mtp-rs` 0.32.0](https://github.com/vdavid/mtp-rs/commit/4069f1f4c424b38e471f44c99de8462a25ca13ba)        | Primary MTP candidate. It is runtime-neutral, MIT/Apache-2.0, uses `nusb` on Linux/macOS and Windows WPD behind one high-level API, and has mock and virtual-device tests. Upstream reports a Forerunner 955 and Venu 2/2S, but not the fēnix 8. |
-| [`libmtp`](https://github.com/libmtp/libmtp/commit/eb12290bdde39c59d709f824389837cbfb63ab15)               | Diagnostic and fallback reference only. Its C/FFI stack and LGPL-2.0-or-later obligations add packaging work; activate it only for an owned-device failure tied to a quirk `mtp-rs` cannot implement safely.                                     |
-| [`libmtp-rs` 0.7.7](https://github.com/quebin31/libmtp-rs/commit/002b8080dff2e95ce66ae331780fa32a38842dd3) | Reject. The MIT wrapper is stale alpha software, lacks partial transfers and events, and still requires system libmtp through `pkg-config`.                                                                                                      |
+- [`nusb` 0.2.7](https://github.com/kevinmehall/nusb/commit/bdc148c123c102785cd1d506b77bfeeb794ffeb1): Primary hotplug
+  and descriptor candidate. Pure Rust, MIT/Apache-2.0, runtime-neutral; supports Linux, macOS, and Windows.
+- [`mtp-rs` 0.32.0](https://github.com/vdavid/mtp-rs/commit/4069f1f4c424b38e471f44c99de8462a25ca13ba): Primary MTP
+  candidate. Runtime-neutral, MIT/Apache-2.0; uses `nusb` on Linux/macOS and Windows WPD behind one high-level API. Has
+  mock and virtual-device tests. Upstream reports a Forerunner 955 and Venu 2/2S, but not the fēnix 8.
+- [`libmtp`](https://github.com/libmtp/libmtp/commit/eb12290bdde39c59d709f824389837cbfb63ab15): Diagnostic and fallback
+  reference only. C/FFI and LGPL-2.0-or-later obligations add packaging work. Activate only for an owned-device failure
+  tied to a quirk `mtp-rs` cannot implement safely.
+- [`libmtp-rs` 0.7.7](https://github.com/quebin31/libmtp-rs/commit/002b8080dff2e95ce66ae331780fa32a38842dd3): Reject.
+  Stale MIT-licensed alpha wrapper; lacks partial transfers and events and still requires system libmtp through
+  `pkg-config`.
 
 `mtp-rs` recognizes Garmin's vendor interface and split transfers; failed uploads expose partial objects without
 deleting them. Its 0.32.0 split-header streaming branch sends every payload chunk with `send_bulk`, bypassing the USB
@@ -84,15 +113,15 @@ whole-device operation without adding libmtp. The adapter now uses that operatio
 only for the exact selected location in the known Garmin VID/PID set, waits quietly, and retries inspection once. It
 does not reset healthy sessions.
 
-This is an established recovery attempt, not a known universal fix. Capture `.tmp/fenix-raw-link-05` confirmed that the
-whole-device reset completed on the retained fēnix, followed by the quiet period, but the next `OpenSession` again
-received no response and timed out. The bounded transport sequence itself took about 25 seconds: one 10-second open,
-reset plus five seconds quiet, and one 10-second retry. A public Epix Pro report records the same outcome, and no public
-end-to-end resolution for the fēnix 8 Solar identity `091e:51b4` was found. The fēnix 8 manual exposes a separate Garmin
-USB mode. One fēnix 8 owner reports that selecting it restored Garmin Express connectivity on Windows after firmware
-20.19, but that demonstrates Garmin's proprietary host path rather than a raw-MTP fix. The research found no published
-or open implementation that uses Garmin mode for arbitrary map-file transfer; Wi-Fi Map Manager is likewise a
-device-side facility rather than a documented host transfer API.
+This is an established recovery attempt, not a known universal fix. A hardware check confirmed that the whole-device
+reset completed on the retained fēnix, followed by the quiet period, but the next `OpenSession` again received no
+response and timed out. The bounded transport sequence itself took about 25 seconds: one 10-second open, reset plus five
+seconds quiet, and one 10-second retry. A public Epix Pro report records the same outcome, and no public end-to-end
+resolution for the fēnix 8 Solar identity `091e:51b4` was found. The fēnix 8 manual exposes a separate Garmin USB mode.
+One fēnix 8 owner reports that selecting it restored Garmin Express connectivity on Windows after firmware 20.19, but
+that demonstrates Garmin's proprietary host path rather than a raw-MTP fix. The research found no published or open
+implementation that uses Garmin mode for arbitrary map-file transfer; Wi-Fi Map Manager is likewise a device-side
+facility rather than a documented host transfer API.
 
 Consequently, automatic reset is disabled for `091e:51b4`, and an unresponsive instance now fails after the bounded open
 with a physical-reconnect instruction. After a fresh connection, raw link benchmarking retains one caller-owned MTP
@@ -166,8 +195,9 @@ SHA-256 digest, and removed it in 0.79 seconds. This proves the desktop-mounted 
 the raw-MTP path or firmware acceptance of map content.
 
 At revision `e981670`, the retained fēnix `t03` transaction recovered without device-file read-back. It accepted all 18
-writes by path and size, completed the remaining 6 of 9 removals, and finished with 11.07 GB free. The 16.92 GB retained
-payload set verified in 43 seconds and device reconciliation took 30 seconds.
+writes by path and size, completed the remaining 6 of 9 removals, and finished with 11.07 GB free. The interrupted state
+had no commit marker; three removals were already absent. The 16.92 GB retained payload set verified in 43 seconds and
+device reconciliation took 30 seconds. Garmin content acceptance was checked only after disconnect and restart.
 
 Edge 1050 (`006-B4440-00`) then completed two guarded removal runs. The first removed 9 files from TopoActive Middle
 East & Central Asia, North Africa, and South Africa and reclaimed 8.42 GB. The second removed the 2.54 GB TopoActive

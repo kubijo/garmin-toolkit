@@ -4,11 +4,22 @@ use cint::ColorInterop;
 use egui::{Align, Align2, Id, Layout, Order, Response, RichText, Ui};
 use garmin_color::theme;
 
-use crate::{Size as ComponentSize, button, icons::Icon, theme::color32};
+use crate::{
+    Size as ComponentSize, button,
+    icons::Icon,
+    theme::{FLOATING_RADIUS, color32},
+};
 
-const BODY_PADDING: i8 = 24;
-const FOOTER_HEIGHT: f32 = 56.0;
+const BODY_MARGIN: egui::Margin = egui::Margin {
+    left: 24,
+    right: 24,
+    top: 24,
+    bottom: 24,
+};
+const ACTION_GAP: f32 = 2.0;
+const FOOTER_HEIGHT: f32 = 40.0;
 const VIEWPORT_MARGIN: f32 = 32.0;
+const BACKDROP_ALPHA: u8 = 0xA0;
 
 /// Dialog placement and input scope.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -45,6 +56,7 @@ pub enum PrimaryKind {
     /// Normal confirmation.
     #[default]
     Confirm,
+    /// Destructive confirmation.
     Danger,
 }
 
@@ -72,9 +84,13 @@ pub struct Props<'a> {
     pub description: Option<&'a str>,
     pub size: Size,
     pub presentation: Presentation,
-    pub cancel_label: &'a str,
+    /// Omit for a one-action acknowledgement dialog.
+    pub cancel_label: Option<&'a str>,
+    /// Defaults to enabled when omitted.
+    pub cancel_disabled: Option<bool>,
     pub backdrop_closes: Option<bool>,
-    pub primary: Primary<'a>,
+    /// Omit when the body itself contains the selection controls.
+    pub primary: Option<Primary<'a>>,
 }
 
 /// Dialog interaction.
@@ -88,6 +104,8 @@ pub enum Action {
 pub struct Output<R> {
     pub action: Option<Action>,
     pub inner: R,
+    pub primary: Option<Response>,
+    pub cancel: Option<Response>,
 }
 
 /// Shows a dialog in its configured presentation.
@@ -104,10 +122,9 @@ pub fn show<R>(
         Presentation::Modal => {
             let ctx = ui.ctx().clone();
             let viewport = ctx.content_rect().size();
-            let palette = crate::theme::palette(ui);
             let response = egui::Modal::new(id)
                 .frame(egui::Frame::new())
-                .backdrop_color(color32(palette.overlay()))
+                .backdrop_color(egui::Color32::from_black_alpha(BACKDROP_ALPHA))
                 .show(&ctx, |ui| render_surface(ui, props, viewport, body));
             let mut output = response.inner;
             let close_requested = response.response.should_close()
@@ -117,7 +134,11 @@ pub fn show<R>(
                 && !response.any_popup_open
                 && ctx
                     .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-            if output.action.is_none() && (close_requested || escaped) {
+            if output.action.is_none()
+                && props.cancel_label.is_some()
+                && !props.cancel_disabled.unwrap_or(false)
+                && (close_requested || escaped)
+            {
                 output.action = Some(Action::Cancel);
             }
             output
@@ -156,13 +177,11 @@ fn render_surface<R>(
         .min((bounds.x - VIEWPORT_MARGIN).max(0.0));
     let max_body_height = bounds.y.mul_add(0.8, -180.0).max(96.0);
 
-    let palette = crate::theme::palette(ui);
-    egui::Frame::new()
-        .fill(color32(palette.surfaces().layer(theme::Level::One)))
+    surface_frame(ui)
         .show(ui, |ui| {
             ui.set_width(width);
             let inner = egui::Frame::new()
-                .inner_margin(BODY_PADDING)
+                .inner_margin(BODY_MARGIN)
                 .show(ui, |ui| {
                     crate::theme::layer(ui, theme::Level::Two, |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
@@ -174,15 +193,34 @@ fn render_surface<R>(
                     })
                 })
                 .inner;
-            let action = footer(ui, props);
-            Output { action, inner }
+            let (action, primary, cancel) = footer(ui, props);
+            Output {
+                action,
+                inner,
+                primary,
+                cancel,
+            }
         })
         .inner
 }
 
+pub(crate) fn surface_frame(ui: &Ui) -> egui::Frame {
+    let palette = crate::theme::palette(ui);
+    egui::Frame::new()
+        .fill(color32(palette.surfaces().layer(theme::Level::One)))
+        .corner_radius(FLOATING_RADIUS)
+        .stroke(egui::Stroke::new(1.0, color32(palette.borders().subtle())))
+        .shadow(egui::Shadow {
+            offset: [0, 12],
+            blur: 32,
+            spread: 0,
+            color: egui::Color32::from_black_alpha(128),
+        })
+}
+
 fn contained_backdrop(ui: &Ui, id: Id, bounds: egui::Rect) -> Response {
     ui.painter()
-        .rect_filled(bounds, 0.0, color32(crate::theme::palette(ui).overlay()));
+        .rect_filled(bounds, 0.0, egui::Color32::from_black_alpha(BACKDROP_ALPHA));
     ui.interact(bounds, id, egui::Sense::click_and_drag())
 }
 
@@ -210,62 +248,166 @@ fn header(ui: &mut Ui, props: &Props<'_>) {
     ui.add_space(24.0);
 }
 
-fn footer(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
+fn footer(ui: &mut Ui, props: &Props<'_>) -> (Option<Action>, Option<Response>, Option<Response>) {
     let actions = crate::theme::palette(ui).modal_actions();
-    let cell_width = ui.available_width() / 2.0;
-    let mut action = None;
-    ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.horizontal(|ui| {
-            let cancel = footer_button(
-                ui,
-                cell_width,
+    let width = ui.available_width();
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, FOOTER_HEIGHT),
+        Layout::right_to_left(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = ACTION_GAP;
+            let primary = props.primary.map(|primary| {
                 button::Props {
-                    label: props.cancel_label,
+                    label: primary.label,
+                    icon: primary.icon,
+                    kind: primary.kind.button_kind(),
+                    size: ComponentSize::Medium,
+                    width: button::Width::Fit,
+                    enabled: primary.enabled,
+                }
+                .show_with_states(
+                    ui,
+                    match primary.kind {
+                        PrimaryKind::Confirm => actions.confirm(),
+                        PrimaryKind::Danger => actions.danger(),
+                    },
+                )
+            });
+            let cancel = props.cancel_label.map(|label| {
+                button::Props {
+                    label,
                     icon: None,
                     kind: button::Kind::Secondary,
                     size: ComponentSize::Medium,
-                    width: button::Width::Fill,
-                    enabled: true,
-                },
-                actions.cancel(),
-            );
-            let primary = footer_button(
-                ui,
-                cell_width,
-                button::Props {
-                    label: props.primary.label,
-                    icon: props.primary.icon,
-                    kind: props.primary.kind.button_kind(),
-                    size: ComponentSize::Medium,
-                    width: button::Width::Fill,
-                    enabled: props.primary.enabled,
-                },
-                match props.primary.kind {
-                    PrimaryKind::Confirm => actions.confirm(),
-                    PrimaryKind::Danger => actions.danger(),
-                },
-            );
-            if cancel.clicked() {
-                action = Some(Action::Cancel);
-            } else if primary.clicked() {
-                action = Some(Action::Primary);
-            }
-        });
-    });
-    action
-}
-
-fn footer_button(
-    ui: &mut Ui,
-    width: f32,
-    props: button::Props<'_>,
-    states: &theme::ButtonStates,
-) -> Response {
-    ui.allocate_ui_with_layout(
-        egui::vec2(width, FOOTER_HEIGHT),
-        Layout::top_down(Align::Min),
-        |ui| props.show_with_states_at_height(ui, states, FOOTER_HEIGHT),
+                    width: button::Width::Fit,
+                    enabled: !props.cancel_disabled.unwrap_or(false),
+                }
+                .show_with_states(ui, actions.cancel())
+            });
+            let action = if props
+                .primary
+                .zip(primary.as_ref())
+                .is_some_and(|(props, response)| primary_activated(props.kind, response))
+            {
+                Some(Action::Primary)
+            } else if cancel.as_ref().is_some_and(Response::clicked) {
+                Some(Action::Cancel)
+            } else {
+                None
+            };
+            (action, primary, cancel)
+        },
     )
     .inner
+}
+
+fn primary_activated(_kind: PrimaryKind, response: &Response) -> bool {
+    response.clicked()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn danger_primary_accepts_keyboard_activation() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        context
+            .run_ui(egui::RawInput::default(), |ui| {
+                ui.button("Remove").request_focus();
+            })
+            .drop_without_applying_deltas();
+
+        let mut danger_response = None;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(320.0, 200.0),
+            )),
+            events: vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..egui::RawInput::default()
+        };
+        context
+            .run_ui(input, |ui| {
+                let response = ui.button("Remove");
+                danger_response = Some(response);
+            })
+            .drop_without_applying_deltas();
+
+        let response = danger_response.expect("the button was shown");
+        assert!(
+            response.clicked(),
+            "Enter produces a synthetic button click"
+        );
+        assert!(primary_activated(PrimaryKind::Danger, &response));
+    }
+
+    #[test]
+    fn footer_stays_at_bottom_when_dialog_body_shrinks() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        let id = egui::Id::new("shrinking-modal");
+        let render = |tall| {
+            let mut button = None;
+            context
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(800.0, 600.0),
+                        )),
+                        ..egui::RawInput::default()
+                    },
+                    |ui| {
+                        let output = show(
+                            ui,
+                            id,
+                            &Props {
+                                title: "Transfer",
+                                description: None,
+                                size: Size::Medium,
+                                presentation: Presentation::Modal,
+                                cancel_label: Some("Cancel"),
+                                cancel_disabled: None,
+                                backdrop_closes: Some(false),
+                                primary: Some(Primary {
+                                    label: "Close",
+                                    icon: None,
+                                    kind: PrimaryKind::Confirm,
+                                    enabled: true,
+                                }),
+                            },
+                            |ui| {
+                                ui.label("Status");
+                                if tall {
+                                    ui.add_space(160.0);
+                                }
+                            },
+                        );
+                        button = output.primary.map(|response| response.rect);
+                    },
+                )
+                .drop_without_applying_deltas();
+            (
+                context
+                    .memory(|memory| memory.area_rect(id))
+                    .expect("modal area is recorded"),
+                button.expect("modal footer button is shown"),
+            )
+        };
+
+        render(true);
+        let (tall, _) = render(true);
+        render(false);
+        let (short, button) = render(false);
+        assert!(tall.height() - short.height() > 80.0);
+        assert!(short.bottom() - button.bottom() <= 4.0);
+    }
 }

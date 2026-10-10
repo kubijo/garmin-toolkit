@@ -1,54 +1,64 @@
 # Home Assistant watch vertical slice
 
-Import preserved FIT from the recorded watch, render it in egui/WASM, create route plans, and deploy one FIT Course.
-Attaching or mounting a recognizable Garmin authorizes bounded local inspection. File transfer and writing require
-separate confirmation. Bluetooth is excluded. The native HASS process owns storage, devices, sync, API, and assets;
-ingress serves WASM without credentials or host-device access.
+Verify the Course transfer and separate device pairing flows in the packaged add-on and on physical media.
+[Shared workflows](shared-interface-workflows.md) owns desktop parity; physical inspection evidence belongs to
+[device expansion](device-expansion-and-publication.md). Retain the native-host/WASM and
+[typed service](../architecture/workspace.md) architecture; Bluetooth and HASS domain publication remain excluded.
+Device reassociation has [demo acceptance](../research/usb-sync.md#demo-pairing-acceptance).
 
-[Shared interface workflows](shared-interface-workflows.md) owns user-visible parity with desktop. This plan owns the
-HASS host, typed browser boundary, packaging, deployment, and hardware proof.
+## Remaining work
 
-## Shared host foundation
+1. Finish owned-hardware Course transfer acceptance. One successful transfer appeared as "Last Course Added" on an
+   Edge 1050 after disconnect; cancellation, interrupted writes, and disconnect/recovery still need inspection. The
+   demo confirms byte readback, not firmware behavior.
+2. Integrate Home Assistant host backups with the managed deployment and verify recovery of its selected storage
+   generation. Portable application snapshots have a separate
+   [storage contract](../architecture/storage.md#portable-snapshots).
+3. Build self-contained amd64/aarch64 add-ons with persistent `/data`; verify ingress-only mutation access, USB
+   permissions/ownership, disconnects, and workflow on Raspberry Pi 5. Do not assume desktop GIO mounts exist. Verify
+   [profile marker](../decisions/0018-on-device-profile-marker.md) initial pairing and reassociation in the add-on and
+   on physical media; initial pairing has unit coverage but still needs live acceptance.
 
-Use the Hyundai rewrite's native-server/WASM deployment pattern, not its vehicle API. Reference points are
-`crates/bin/server`, `crates/targets/web`, and `nix/hass.nix` in that project. Keep Garmin's
-[typed service boundary](../decisions/0024-remoc-service-boundary.md); JSON polling is not a replacement decision.
+The packaged HASS demo has [asserted VM coverage](../../infra/integration/hass/README.md) for reviewed GPX import,
+Course versions and downloads, reviewed transfer with exact device bytes and unchanged pairing, restart reconciliation,
+restore at the stated boundaries, and duplicate-free demo seeding. Desktop parity and offline/device-free acceptance
+remain in [shared workflows](shared-interface-workflows.md). Keep the
+[route client contract](../architecture/storage.md#route-client-workflow) and
+[ADR 0028](../decisions/0028-user-owned-route-plans.md) as the durable owners.
 
-Continue from the [validated device-capacity foundation](../research/device-capacity-and-recovery.md):
+Keep focused validation for GPX 1.0/1.1, multiple segments, malformed and oversized input, optional elevation, retained
+original bytes, and distinct walking/hiking/running/cycling through FIT and snapshot restore. The HASS VM exercises only
+the fixture paths named in its README; it does not replace the parser and storage test matrix.
 
-1. Extend `garmin-service-api` with opaque plan and job IDs. Local and remote clients must call `garmin-services`; never
-   accept caller-selected host paths or adapters.
-2. Wire catalog loading, selection, exact-plan approval, progress, cancellation, and recovery through the existing map
-   service. Retain completed history across browser reconnects. Neither reconnect nor stale approval may replay a write.
-   Use the same flow with physical or virtual device adapters.
-3. Test the loader under slow, cached, unknown-size, failed, and stale-bundle responses. Capture the actual DOM loader;
-   shared GUI gallery scenes do not prove browser or ingress behavior. Add precompressed assets only after the host
-   selects encodings correctly and retains redeploy-safe cache handling.
-4. Build self-contained amd64 and aarch64 add-on bundles with persistent `/data`. Keep the API ingress-only and verify
-   its trust boundary before enabling mutations. Compose host device access through existing traits; do not assume
-   desktop GIO mounts exist inside the add-on. Prove permissions, ownership, and disconnects on the Raspberry Pi 5.
+## Device transfer contract
 
-Do not copy the vehicle poller, bundled telemetry service, credential defaults, or exposed telemetry port. The first
-slice is device capacity and map management; the watch workflow below builds on the same host and client boundary.
+Transfer a selected persisted Course artifact. Reuse device inspection, capability evidence, write exclusion,
+cancellation, and recovery from shared device workflows. The one-time approval is scoped to the requesting profile's
+artifact digest/version, the selected device identity and storage, and a create-only filename. Confirmation must be
+invalidated by a changed target or artifact. Do not expose a generic write-path RPC. Manual transfer does not pair the
+selected device or alter an existing pairing marker; pairing only enables automatic profile opening and device sync.
 
-## Ordered proof
+Persist transfer intent before mutation and reconcile interrupted writes using the exact recorded destination and
+digest. Readback records transfer verification. Firmware discovery is a separate observation after MTP disconnect; the
+mounted UI cannot confirm it. Cleanup remains a separately approved operation restricted to this transfer's partial
+upload. Test with the demo device first; an owned-device trial needs explicit authorization and capability evidence.
 
-01. Detect attachments and automatically inspect manifest and storage metadata.
-02. Pair a profile through the on-device marker; prove verified creation, updates, reconnect, and reassociation.
-03. Import selected FIT read-only with interruption recovery and idempotent retries.
-04. Extend the shared service boundary to watch import and route operations.
-05. Add [proxied vector maps](../decisions/0025-proxied-online-vector-maps.md) with activity and route overlays.
-06. Complete [route planning](../decisions/0028-user-owned-route-plans.md): GPX selection, freehand geometry, revisions,
-    reverse, trim, split, and geographic simplification.
-07. Prove preflight and recovery, then transfer one FIT Course with confirmation, readback, acceptance status, and
-    separately consented cleanup.
-08. Resolve OQ-022 behind the route interface.
-09. Integrate host backup and [portable snapshots](data-foundation.md).
-10. Validate the watch workflow on the [HASS targets](../decisions/0026-hass-architecture-and-bluetooth-scope.md).
+### Hardware acceptance still needed
 
-Ingress authenticates transport, not application users. The native adapter supplies actor context; browser code cannot
-reach storage or devices. Persist no credentials and publish no domain data to HASS under ADR 0027.
+- Exercise cancellation, disconnect, partial write recovery, and readback on owned hardware without unintended mutation.
+- Repeat firmware discovery after recovery scenarios; the successful "Last Course Added: demo walk" observation on the
+  Edge 1050 covers only the happy path.
 
-Delete this plan after the watch workflow survives disconnect and resume without unintended mutation; route revisions
-reproduce previews and FIT output; one transfer has byte and device-acceptance evidence; snapshots and failure paths are
-tested; the Raspberry Pi 5 run passes; and both claimed artifacts build.
+Use the shared UI for desktop parity; the browser never acquires filesystem or device access. Keep the implementation
+source-neutral and add no Mapy.com account/API dependency.
+
+## Browser/process acceptance
+
+- Inspect the actual DOM loader under slow/cached/unknown-size/failed/stale-bundle responses and nested ingress.
+- Verify normal reload receives current entrypoint/favicon across a redeploy and resolve preload warnings.
+  Precompression requires correct encoding negotiation and redeploy-safe caching.
+- Verify `just hass::run` shuts down cleanly on SIGINT/SIGTERM without Just's interrupted error.
+
+Ingress authenticates transport; the native adapter supplies actor context. Browser code has no storage/device access.
+Persist no credentials. Close after the packaged add-on, hardware workflow, host snapshots, disconnects, and recovery
+pass.

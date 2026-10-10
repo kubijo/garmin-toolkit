@@ -12,11 +12,15 @@ publish.workspace = true
 workspace = true
 
 [features]
-test-fixtures = []
+test-fixtures = ["dep:flate2"]
 
 [dependencies]
 embedded-io-adapters.workspace = true
+flate2 = { workspace = true, optional = true }
 geographiclib-rs.workspace = true
 garmin-model.workspace = true
 rustyfit.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true

@@ -76,6 +76,11 @@ impl MountedMtpError {
         false
     }
 
+    pub(crate) const fn is_verification_failure(&self) -> bool {
+        let Self::Unsupported = self;
+        false
+    }
+
     #[must_use]
     pub const fn probe_failure(&self) -> Option<crate::system::MountedMtpProbeFailure> {
         let Self::Unsupported = self;
@@ -167,6 +172,15 @@ pub async fn ensure_mounted_mtp_directory(
     unsupported().await
 }
 
+pub async fn ensure_mounted_mtp_directory_with_progress(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+    _progress: &ProgressReporter,
+) -> Result<(), MountedMtpError> {
+    unsupported().await
+}
+
 pub async fn create_verified_mounted_mtp_file(
     _mount_id: &str,
     _storage_id: &str,
@@ -180,6 +194,15 @@ pub async fn remove_empty_mounted_mtp_directory(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
+) -> Result<(), MountedMtpError> {
+    unsupported().await
+}
+
+pub async fn remove_empty_mounted_mtp_directory_with_progress(
+    _mount_id: &str,
+    _storage_id: &str,
+    _path: &SafeRelativePath,
+    _progress: &ProgressReporter,
 ) -> Result<(), MountedMtpError> {
     unsupported().await
 }

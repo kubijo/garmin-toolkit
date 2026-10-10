@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM artifact_blobs\nWHERE digest = ? AND NOT EXISTS (\n    SELECT 1 FROM artifacts\n    WHERE artifacts.digest = artifact_blobs.digest\n);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "a865ae6029d4920ff33d21b43c579f9bdd889a06bcb5985728a9edd6b7e1e1c3"
+}
