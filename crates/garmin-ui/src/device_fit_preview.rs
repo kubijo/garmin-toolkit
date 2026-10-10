@@ -102,13 +102,14 @@ impl Preview {
                 size: modal::Size::Large,
                 presentation: modal::Presentation::Modal,
                 cancel_label: Some(&close),
+                cancel_disabled: None,
                 backdrop_closes: Some(!busy),
-                primary: modal::Primary {
+                primary: Some(modal::Primary {
                     label: &import,
                     icon: Some(icons::UPLOAD_SIMPLE),
                     kind: modal::PrimaryKind::Confirm,
                     enabled: !busy,
-                },
+                }),
             },
             |ui| {
                 self.workspace.show(

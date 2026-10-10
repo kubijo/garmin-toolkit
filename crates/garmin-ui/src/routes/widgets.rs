@@ -286,12 +286,13 @@ pub(super) fn icon_button(
     id: &str,
     label: &str,
     icon: icons::Icon,
+    kind: button::Kind,
     enabled: bool,
 ) -> bool {
     let response = button::IconProps {
         label,
         icon,
-        kind: button::Kind::Tertiary,
+        kind,
         size: Size::Medium,
         enabled,
     }

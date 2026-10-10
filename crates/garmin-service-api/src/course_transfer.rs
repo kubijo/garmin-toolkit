@@ -46,12 +46,20 @@ pub enum CourseTransferPhase {
 }
 
 #[garmin_macros::portable(eq)]
+pub struct CourseTransferProgress {
+    pub bytes_sent: u64,
+    pub total_bytes: u64,
+    pub finishing: bool,
+}
+
+#[garmin_macros::portable(eq)]
 pub struct CourseTransferStatus {
     pub transfer: uuid::Uuid,
     pub generation: CourseGenerationId,
     pub target: CourseTarget,
     pub file_name: String,
     pub phase: CourseTransferPhase,
+    pub progress: Option<CourseTransferProgress>,
 }
 
 #[garmin_macros::portable(eq)]

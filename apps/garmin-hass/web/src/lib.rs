@@ -1025,13 +1025,14 @@ impl App {
                 size: modal::Size::Medium,
                 presentation: modal::Presentation::Modal,
                 cancel_label: Some(&cancel),
+                cancel_disabled: None,
                 backdrop_closes: Some(!editor.submitting),
-                primary: modal::Primary {
+                primary: Some(modal::Primary {
                     label: &save,
                     icon: Some(icons::CHECK),
                     kind: modal::PrimaryKind::Confirm,
                     enabled: !editor.submitting,
-                },
+                }),
             },
             |ui| {
                 ui.vertical_centered(|ui| {

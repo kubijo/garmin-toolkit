@@ -209,8 +209,9 @@ pub fn pairing_confirmation(
             size: modal::Size::Small,
             presentation,
             cancel_label: Some(&cancel),
+            cancel_disabled: None,
             backdrop_closes: Some(false),
-            primary: modal::Primary {
+            primary: Some(modal::Primary {
                 label: &confirm,
                 icon: Some(if previous_profile.is_some() {
                     icons::ARROWS_CLOCKWISE
@@ -223,7 +224,7 @@ pub fn pairing_confirmation(
                     modal::PrimaryKind::Confirm
                 },
                 enabled,
-            },
+            }),
         },
         |ui| {
             if let Some(previous_profile) = previous_profile {
@@ -237,7 +238,9 @@ pub fn pairing_confirmation(
             ui.label(&target);
         },
     );
-    crate::semantics::target(ui, &output.primary, "device.pair.confirm");
+    if let Some(primary) = &output.primary {
+        crate::semantics::target(ui, primary, "device.pair.confirm");
+    }
     if let Some(cancel) = &output.cancel {
         crate::semantics::target(ui, cancel, "device.pair.cancel");
     }

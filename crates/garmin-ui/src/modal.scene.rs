@@ -84,13 +84,14 @@ fn quit(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
                 size: modal::Size::Small,
                 presentation: modal::Presentation::Contained,
                 cancel_label: Some("Keep working"),
+                cancel_disabled: None,
                 backdrop_closes: Some(false),
-                primary: modal::Primary {
+                primary: Some(modal::Primary {
                     label: "Abort and quit",
                     icon: Some(icons::POWER),
                     kind: modal::PrimaryKind::Danger,
                     enabled: true,
-                },
+                }),
             },
             |ui| {
                 ui.label("• Importing FIT activities");
@@ -140,8 +141,9 @@ fn show_dialog(ui: &mut Ui, props: SceneProps, width: f32, height: f32) {
             size: props.size,
             presentation: modal::Presentation::Contained,
             cancel_label: Some("Cancel"),
+            cancel_disabled: None,
             backdrop_closes: matches!(props.backdrop, Backdrop::Closes).then_some(true),
-            primary: modal::Primary {
+            primary: Some(modal::Primary {
                 label: if props.danger { "Delete" } else { "Create" },
                 icon: Some(if props.danger {
                     icons::TRASH
@@ -154,7 +156,7 @@ fn show_dialog(ui: &mut Ui, props: SceneProps, width: f32, height: f32) {
                     modal::PrimaryKind::Confirm
                 },
                 enabled: props.enabled,
-            },
+            }),
         },
         |ui| {
             if props.danger {

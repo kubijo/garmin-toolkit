@@ -75,10 +75,6 @@ pub enum Action {
         device_key: String,
         transfer: Uuid,
     },
-    AcceptTransfer {
-        device_key: String,
-        transfer: Uuid,
-    },
     PrepareTransferCleanup {
         device_key: String,
         transfer: Uuid,

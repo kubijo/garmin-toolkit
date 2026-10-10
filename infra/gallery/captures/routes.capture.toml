@@ -12,6 +12,55 @@ state = "chooser"
 width = 640
 
 [[shot]]
+name = "detail-no-course"
+scene = "routes::Playground"
+[shot.knobs]
+state = "detail"
+width = 640
+
+[[shot]]
+name = "course-version"
+scene = "routes::Playground"
+[shot.knobs]
+state = "course"
+width = 640
+
+[[shot]]
+name = "transfer-dialog"
+scene = "routes::Playground"
+[shot.knobs]
+state = "transfer"
+width = 960
+
+[[shot]]
+name = "transfer-review"
+scene = "routes::Playground"
+[shot.knobs]
+state = "transfer review"
+width = 960
+
+[[shot]]
+name = "transfer-running"
+scene = "routes::Playground"
+[shot.knobs]
+state = "transfer running"
+width = 960
+
+[[shot]]
+name = "transfer-verified"
+scene = "routes::Playground"
+[shot.knobs]
+state = "transfer verified"
+width = 960
+
+[[shot]]
+name = "transfer-accepted"
+scene = "routes::Playground"
+[shot.knobs]
+state = "transfer accepted"
+width = 960
+
+[[shot]]
 name = "chooser-narrow"
 scene = "routes::Playground"
 [shot.knobs]

@@ -7,8 +7,8 @@ use garmin_model::{
 use garmin_service_api::{
     ApplicationService as _, ApplicationServiceClient, DeviceSnapshot,
     course_transfer::{
-        CourseCleanupReview, CourseTarget, CourseTransferPreparation, CourseTransferService as _,
-        CourseTransferServiceClient, CourseTransferStatus,
+        CourseCleanupReview, CourseTarget, CourseTransferPhase, CourseTransferPreparation,
+        CourseTransferService as _, CourseTransferServiceClient, CourseTransferStatus,
     },
     routes::{MAX_UPLOAD_CHUNK, RouteReply, RouteRequest, RouteService as _, RouteServiceClient},
 };
@@ -31,6 +31,7 @@ pub(super) struct Controller {
     token: uuid::Uuid,
     client: Option<RouteServiceClient>,
     polled: Option<web_time::Instant>,
+    transfer_polled: Option<web_time::Instant>,
 }
 
 impl Controller {
@@ -96,6 +97,40 @@ pub(super) fn show(
     };
     if let Some(request) = request {
         start(shared, ui.ctx(), actor, Action::Request(request));
+    }
+    let transfer_poll = {
+        let mut state = shared.borrow_mut();
+        let routes = &mut state.routes;
+        let running = routes.view.transfer.as_ref().and_then(|transfer| {
+            let status = transfer.status.as_ref()?;
+            if matches!(status.phase, CourseTransferPhase::Running) {
+                Some((transfer.device_key.clone()?, status.transfer))
+            } else {
+                None
+            }
+        });
+        if let Some((device_key, transfer)) = running {
+            ui.ctx().request_repaint_after(Duration::from_secs(2));
+            if !routes.view.busy
+                && routes
+                    .transfer_polled
+                    .is_none_or(|time| time.elapsed() >= Duration::from_secs(2))
+            {
+                routes.transfer_polled = Some(web_time::Instant::now());
+                Some(Action::PollTransfer {
+                    device_key,
+                    transfer,
+                })
+            } else {
+                None
+            }
+        } else {
+            routes.transfer_polled = None;
+            None
+        }
+    };
+    if let Some(action) = transfer_poll {
+        start(shared, ui.ctx(), actor, action);
     }
     let state = shared.borrow();
     if state.routes.view.busy || state.routes.view.pending.is_some() {
@@ -207,7 +242,6 @@ async fn execute_transfer(
         | Action::ApproveTransfer { device_key, .. }
         | Action::PollTransfer { device_key, .. }
         | Action::CancelTransfer { device_key, .. }
-        | Action::AcceptTransfer { device_key, .. }
         | Action::PrepareTransferCleanup { device_key, .. }
         | Action::ApproveTransferCleanup { device_key, .. } => device_key,
         Action::BeginTransfer(_) | Action::DismissTransfer => return Ok(None),
@@ -262,13 +296,6 @@ async fn execute_transfer(
                 .await
                 .map_err(|error| error.to_string())??;
             Ok(None)
-        }
-        Action::AcceptTransfer { transfer, .. } => {
-            let status = service
-                .accept(transfer)
-                .await
-                .map_err(|error| error.to_string())??;
-            Ok(Some(Completion::Status(status)))
         }
         Action::PrepareTransferCleanup { transfer, .. } => {
             let review = service

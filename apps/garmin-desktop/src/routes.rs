@@ -9,7 +9,8 @@ use garmin_service_api::routes::{GpxUpload, MAX_UPLOAD_CHUNK, RouteReply, RouteR
 use garmin_service_api::{
     DeviceSnapshot,
     course_transfer::{
-        CourseCleanupReview, CourseTarget, CourseTransferPreparation, CourseTransferStatus,
+        CourseCleanupReview, CourseTarget, CourseTransferPhase, CourseTransferPreparation,
+        CourseTransferStatus,
     },
 };
 use garmin_services::{
@@ -23,7 +24,7 @@ use garmin_ui::routes::{Action, State, Workspace};
 use std::{
     io::Write as _,
     sync::{Arc, mpsc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::io::AsyncReadExt as _;
 use uuid::Uuid;
@@ -60,6 +61,7 @@ pub struct Controller {
     sender: mpsc::Sender<(Uuid, Event)>,
     token: Uuid,
     task: Option<tokio::task::JoinHandle<()>>,
+    transfer_polled: Option<Instant>,
 }
 
 impl Controller {
@@ -70,6 +72,7 @@ impl Controller {
         self.token = Uuid::new_v4();
         self.scope = None;
         self.state = State::default();
+        self.transfer_polled = None;
     }
 
     pub fn busy(&self) -> bool {
@@ -103,6 +106,7 @@ impl Controller {
             sender,
             token: Uuid::new_v4(),
             task: None,
+            transfer_polled: None,
         })
     }
 
@@ -141,6 +145,7 @@ impl Controller {
             self.scope = Some(scope);
             self.token = Uuid::new_v4();
             self.state = State::default();
+            self.transfer_polled = None;
             self.state.queue(RouteRequest::List { offset: 0 });
         }
         self.poll();
@@ -156,6 +161,35 @@ impl Controller {
         }
         if let Some(request) = self.state.take_request() {
             self.start(ui.ctx(), actor, Action::Request(request), devices);
+        }
+        let running = self.state.transfer.as_ref().and_then(|transfer| {
+            let status = transfer.status.as_ref()?;
+            if matches!(status.phase, CourseTransferPhase::Running) {
+                Some((transfer.device_key.clone()?, status.transfer))
+            } else {
+                None
+            }
+        });
+        if let Some((device_key, transfer)) = running {
+            ui.ctx().request_repaint_after(Duration::from_secs(2));
+            if !self.state.busy
+                && self
+                    .transfer_polled
+                    .is_none_or(|time| time.elapsed() >= Duration::from_secs(2))
+            {
+                self.transfer_polled = Some(Instant::now());
+                self.start(
+                    ui.ctx(),
+                    actor,
+                    Action::PollTransfer {
+                        device_key,
+                        transfer,
+                    },
+                    devices,
+                );
+            }
+        } else {
+            self.transfer_polled = None;
         }
         if self.state.busy || self.state.pending.is_some() {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
@@ -221,7 +255,6 @@ fn selected_device_key(action: &Action) -> Option<&str> {
         | Action::ApproveTransfer { device_key, .. }
         | Action::PollTransfer { device_key, .. }
         | Action::CancelTransfer { device_key, .. }
-        | Action::AcceptTransfer { device_key, .. }
         | Action::PrepareTransferCleanup { device_key, .. }
         | Action::ApproveTransferCleanup { device_key, .. } => Some(device_key),
         _ => None,
@@ -318,14 +351,6 @@ async fn execute_transfer(
                 .cancel(user, transfer)
                 .map_err(|error| format!("{error:#}"))?;
             Ok(Event::Finished)
-        }
-        Action::AcceptTransfer { transfer, .. } => {
-            let connector = connector.ok_or("selected device is disconnected")?;
-            transfers
-                .accept(user, transfer, connector.as_ref())
-                .await
-                .map(Event::TransferStatus)
-                .map_err(|error| format!("{error:#}"))
         }
         Action::PrepareTransferCleanup { transfer, .. } => {
             let connector = connector.ok_or("selected device is disconnected")?;
