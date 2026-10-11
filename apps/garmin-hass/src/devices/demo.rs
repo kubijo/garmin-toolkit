@@ -76,12 +76,16 @@ impl Source for DemoSource {
         {
             return Err("the selected device is no longer connected".to_owned());
         }
+        let delays = self.device.transfer_delays();
         Ok(std::sync::Arc::new(
             garmin_services::maps::device::DirectoryConnector {
                 root: self.device.root().to_owned(),
                 storage_id: fixture::STORAGE_ID.to_owned(),
                 storage_label: fixture::STORAGE_LABEL.to_owned(),
-            },
+            }
+            .with_transfer_delays(delays.0, delays.1)
+            .with_missing_uploaded_file_on_verify(self.device.remove_uploaded_before_verify())
+            .with_partial_uploaded_file_on_verify(self.device.truncate_uploaded_before_verify()),
         ))
     }
 

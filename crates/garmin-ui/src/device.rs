@@ -185,15 +185,31 @@ pub fn pairing_confirmation(
         format_message!(intl, default_message: "Pair device with profile?")
     };
     let description = if previous_profile.is_some() {
-        format_message!(intl, default_message: "This changes the device's profile association. Previous marker revisions remain on the device.")
+        format_message!(
+            intl,
+            id: "device.pair.reassign_description",
+            default_message: "This updates the device's pairing record to link it to this profile."
+        )
     } else {
-        format_message!(intl, default_message: "This writes a profile marker to the selected device. The marker is not a credential.")
+        format_message!(
+            intl,
+            id: "device.pair.description",
+            default_message: "This saves a pairing record on the device that links it to this profile."
+        )
     };
-    let target = format_message!(
-        intl,
-        default_message: "Pair {device} with {profile}",
-        values: { device: device_name, profile: profile_name },
-    );
+    let device_label = format_message!(intl, default_message: "Device");
+    let profile_label = if previous_profile.is_some() {
+        format_message!(intl, id: "device.pair.new_profile", default_message: "New profile")
+    } else {
+        format_message!(intl, id: "device.pair.profile", default_message: "Profile")
+    };
+    let current_profile_label = previous_profile.map(|_| {
+        format_message!(
+            intl,
+            id: "device.pair.current_profile",
+            default_message: "Current profile"
+        )
+    });
     let cancel = format_message!(intl, default_message: "Cancel");
     let confirm = if previous_profile.is_some() {
         format_message!(intl, default_message: "Reassign device")
@@ -227,15 +243,14 @@ pub fn pairing_confirmation(
             }),
         },
         |ui| {
-            if let Some(previous_profile) = previous_profile {
-                ui.label(format_message!(
-                    intl,
-                    default_message: "Currently paired with {profile}",
-                    values: { profile: previous_profile },
-                ));
-                ui.add_space(8.0);
+            let mut rows = vec![(device_label.as_str(), device_name)];
+            if let (Some(label), Some(previous)) =
+                (current_profile_label.as_deref(), previous_profile)
+            {
+                rows.push((label, previous));
             }
-            ui.label(&target);
+            rows.push((profile_label.as_str(), profile_name));
+            crate::facts::show(ui, "pairing-target", &rows);
         },
     );
     if let Some(primary) = &output.primary {

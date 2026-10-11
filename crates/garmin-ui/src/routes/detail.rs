@@ -319,7 +319,7 @@ fn version_row(
                 }
                 let response = button::IconProps {
                     label: &delete,
-                    icon: icons::TRASH_FILLED,
+                    icon: icons::TRASH,
                     kind: button::Kind::Danger,
                     size: crate::Size::Medium,
                     enabled,
@@ -350,6 +350,7 @@ fn transfer_dialog(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
     };
     let description = transfer_description(intl, transfer);
     let primary = transfer_primary(intl, transfer);
+    let back_label = format_message!(intl, default_message: "Back");
     // Each step has different intrinsic height. A fresh area ID prevents egui from
     // retaining a taller dialog's size after the transfer changes state.
     let phase = if transfer.review.is_some() {
@@ -369,7 +370,7 @@ fn transfer_dialog(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
     } else {
         "device"
     };
-    let output = modal::show(
+    let output = modal::show_with_footer(
         ui,
         egui::Id::new(("routes-transfer", phase)),
         &modal::Props {
@@ -380,17 +381,30 @@ fn transfer_dialog(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
             cancel_label: Some(&cancel_label),
             cancel_disabled: status_open.then_some(!running || state.busy),
             backdrop_closes: Some(false),
-            primary: primary.as_ref().map(|(label, kind, _, _)| modal::Primary {
-                label,
-                icon: None,
-                kind: *kind,
-                enabled: !(state.busy || status_open && running),
+            primary: primary
+                .as_ref()
+                .map(|(label, icon, kind, _, _)| modal::Primary {
+                    label,
+                    icon: Some(*icon),
+                    kind: *kind,
+                    enabled: !(state.busy || status_open && running),
+                }),
+        },
+        modal::FooterOptions {
+            back: transfer.can_go_back().then_some(modal::Back {
+                label: &back_label,
+                icon: icons::CARET_LEFT,
+                enabled: !state.busy,
             }),
+            cancel_icon: Some(icons::X),
         },
         |ui| transfer_body(ui, intl, state, transfer),
     );
-    if let (Some(response), Some((_, _, _, id))) = (&output.primary, &primary) {
+    if let (Some(response), Some((_, _, _, _, id))) = (&output.primary, &primary) {
         crate::semantics::target(ui, response, *id);
+    }
+    if let Some(response) = &output.back {
+        crate::semantics::target(ui, response, "routes.transfer.back");
     }
     if let Some(response) = &output.cancel {
         crate::semantics::target(
@@ -403,6 +417,9 @@ fn transfer_dialog(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
             },
         );
     }
+    if output.back.as_ref().is_some_and(egui::Response::clicked) {
+        return Some(Action::BackTransfer);
+    }
     match output.action {
         Some(modal::Action::Cancel)
             if status_open && output.cancel.as_ref().is_some_and(egui::Response::clicked) =>
@@ -414,7 +431,7 @@ fn transfer_dialog(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
         }
         Some(modal::Action::Cancel) if status_open => None,
         Some(modal::Action::Cancel) => Some(Action::DismissTransfer),
-        Some(modal::Action::Primary) => primary.map(|(_, _, action, _)| action),
+        Some(modal::Action::Primary) => primary.map(|(_, _, _, action, _)| action),
         None => output.inner,
     }
 }
@@ -432,9 +449,20 @@ fn transfer_description(intl: &Intl, transfer: &super::state::TransferState) -> 
                 format_message!(intl, default_message: "Sending the FIT file to your device.")
             }
             CourseTransferPhase::Verified | CourseTransferPhase::Accepted => {
-                format_message!(intl, default_message: "The FIT file matches the copy on your device. Disconnect it before checking whether the course appears in its menus.")
+                format_message!(
+                    intl,
+                    id: "routes.transfer.verified_description",
+                    default_message: "Disconnect the device to check its Courses menu."
+                )
             }
-            CourseTransferPhase::Missing | CourseTransferPhase::NeedsReview(_) => {
+            CourseTransferPhase::Missing => {
+                format_message!(
+                    intl,
+                    id: "routes.transfer.file_missing_description",
+                    default_message: "We checked the device's upload folder."
+                )
+            }
+            CourseTransferPhase::NeedsReview(_) => {
                 format_message!(intl, default_message: "The transfer could not be verified. Review the status below.")
             }
         }
@@ -446,11 +474,18 @@ fn transfer_description(intl: &Intl, transfer: &super::state::TransferState) -> 
 fn transfer_primary(
     intl: &Intl,
     transfer: &super::state::TransferState,
-) -> Option<(String, modal::PrimaryKind, Action, &'static str)> {
+) -> Option<(
+    String,
+    icons::Icon,
+    modal::PrimaryKind,
+    Action,
+    &'static str,
+)> {
     let device_key = transfer.device_key.as_ref()?.clone();
     if let Some(review) = &transfer.review {
         return Some((
             format_message!(intl, default_message: "Confirm transfer"),
+            icons::SEND_TO_DEVICE,
             modal::PrimaryKind::Confirm,
             Action::ApproveTransfer {
                 device_key,
@@ -462,6 +497,7 @@ fn transfer_primary(
     if let Some(cleanup) = &transfer.cleanup {
         return Some((
             format_message!(intl, default_message: "Delete partial upload"),
+            icons::TRASH,
             modal::PrimaryKind::Danger,
             Action::ApproveTransferCleanup {
                 device_key,
@@ -473,6 +509,7 @@ fn transfer_primary(
     transfer.status.as_ref()?;
     Some((
         format_message!(intl, default_message: "Close"),
+        icons::X,
         modal::PrimaryKind::Confirm,
         Action::DismissTransfer,
         "routes.transfer.close",
@@ -499,32 +536,11 @@ fn transfer_body(
         transfer_cleanup(ui, cleanup);
         return None;
     }
-    let mut action = if let Some(status) = &transfer.status {
+    if let Some(status) = &transfer.status {
         transfer_status(ui, intl, status, device_key, enabled)
     } else {
         transfer_storage(ui, intl, transfer, device_key, enabled)
-    };
-    for receipt in &transfer.receipts {
-        if transfer
-            .status
-            .as_ref()
-            .is_some_and(|current| current.transfer == receipt.transfer)
-        {
-            continue;
-        }
-        if transfer_button(
-            ui,
-            &format_message!(intl, default_message: "Check previous transfer"),
-            &format!("routes.transfer.previous.{}", receipt.transfer),
-            enabled,
-        ) {
-            action = Some(Action::PollTransfer {
-                device_key: device_key.clone(),
-                transfer: receipt.transfer,
-            });
-        }
     }
-    action
 }
 
 fn transfer_devices(
@@ -537,9 +553,72 @@ fn transfer_devices(
         ui.label(format_message!(intl, default_message: "Connect a device to send this Course."));
     }
     for device in &state.devices {
-        let mut button = widgets::button(&device.name, button::Kind::Secondary, !state.busy);
-        button.width = button::Width::Fill;
-        let response = button.show(ui);
+        let details = transfer_device_details(intl, device);
+        let enabled = !state.busy && ui.is_enabled();
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), 56.0),
+            if enabled {
+                egui::Sense::click()
+            } else {
+                egui::Sense::hover()
+            },
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                enabled,
+                format!("{} · {details}", device.name),
+            )
+        });
+        let palette = crate::theme::palette(ui);
+        let states = palette.buttons().secondary();
+        let colors = if !enabled {
+            states.disabled()
+        } else if response.is_pointer_button_down_on() {
+            states.active()
+        } else if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            states.hover()
+        } else {
+            states.rest()
+        };
+        ui.painter().rect_filled(
+            rect,
+            crate::theme::CONTROL_RADIUS,
+            crate::theme::color32(colors.background()),
+        );
+        let content_rect = rect.shrink2(egui::vec2(16.0, 8.0));
+        let mut content = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(content_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        content.set_clip_rect(content_rect);
+        content.spacing_mut().item_spacing.y = 4.0;
+        let foreground = crate::theme::color32(colors.foreground());
+        let detail_color = if enabled {
+            crate::theme::color32(colors.foreground().with_alpha(0xd0))
+        } else {
+            foreground
+        };
+        content.add(
+            egui::Label::new(
+                egui::RichText::new(device.name.as_str())
+                    .color(foreground)
+                    .strong(),
+            )
+            .truncate()
+            .selectable(false),
+        );
+        content.add(
+            egui::Label::new(
+                egui::RichText::new(details.as_str())
+                    .size(12.0)
+                    .color(detail_color),
+            )
+            .truncate()
+            .selectable(false),
+        );
         crate::semantics::target(
             ui,
             &response,
@@ -553,6 +632,39 @@ fn transfer_devices(
         }
     }
     None
+}
+
+fn transfer_device_details(intl: &Intl, device: &garmin_service_api::DeviceSnapshot) -> String {
+    let identifier_label = format_message!(intl, default_message: "Device ID");
+    let software_label = format_message!(intl, default_message: "Software");
+    let identifier = device
+        .identifier
+        .map(|value| format!("{identifier_label}: {value}"));
+    let software = device
+        .software_version
+        .map(|value| format!("{software_label}: {}.{:02}", value / 100, value % 100));
+    let missing_detail = identifier.is_none() || software.is_none();
+    let mut details = [identifier, software]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    if missing_detail {
+        details.push(match device.inspection {
+            garmin_service_api::InspectionState::Running if device.report.is_some() => {
+                format_message!(intl, default_message: "Refreshing…")
+            }
+            garmin_service_api::InspectionState::Running => {
+                format_message!(intl, default_message: "Inspecting…")
+            }
+            garmin_service_api::InspectionState::Ready => {
+                format_message!(intl, default_message: "Ready")
+            }
+            garmin_service_api::InspectionState::Failed => {
+                format_message!(intl, default_message: "Some device information is unavailable")
+            }
+        });
+    }
+    details.join(" · ")
 }
 
 fn transfer_review(
@@ -627,7 +739,81 @@ fn transfer_status(
     device_key: &str,
     enabled: bool,
 ) -> Option<Action> {
-    let phase = match &status.phase {
+    let phase = transfer_phase_label(intl, status);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
+        let phase_label = ui.label(typography::semibold(phase));
+        crate::semantics::target(ui, &phase_label, "routes.transfer.status");
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(&status.file_name).color(crate::theme::color32(
+                    crate::theme::palette(ui).content().text_secondary(),
+                )),
+            )
+            .wrap(),
+        );
+    });
+    if matches!(status.phase, CourseTransferPhase::Running) {
+        ui.add_space(8.0);
+        crate::progress::indeterminate(ui, 8.0);
+        if status
+            .progress
+            .as_ref()
+            .is_some_and(|progress| progress.finishing)
+        {
+            ui.label(format_message!(intl, default_message: "Upload complete. Finalizing and checking the file on your device."));
+        }
+    }
+    if let CourseTransferPhase::NeedsReview(reason) = &status.phase {
+        ui.label(reason);
+    }
+    if matches!(status.phase, CourseTransferPhase::Missing) {
+        ui.add_space(8.0);
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.add(
+                egui::Label::new(format_message!(
+                    intl,
+                    id: "routes.transfer.file_missing_explanation",
+                    default_message: "Import status is unknown."
+                ))
+                .wrap()
+                .selectable(false),
+            );
+            ui.add(
+                egui::Label::new(format_message!(
+                    intl,
+                    id: "routes.transfer.file_missing_next_step",
+                    default_message: "Disconnect the device and check its Courses menu."
+                ))
+                .wrap()
+                .selectable(false),
+            );
+        });
+        return None;
+    }
+    let (label, id, action) = match status.phase {
+        CourseTransferPhase::NeedsReview(_) => (
+            format_message!(intl, default_message: "Review partial cleanup"),
+            "routes.transfer.cleanup.review",
+            Action::PrepareTransferCleanup {
+                device_key: device_key.to_owned(),
+                transfer: status.transfer,
+            },
+        ),
+        CourseTransferPhase::Missing
+        | CourseTransferPhase::Running
+        | CourseTransferPhase::Verified
+        | CourseTransferPhase::Accepted => return None,
+    };
+    transfer_button(ui, &label, id, enabled).then_some(action)
+}
+
+fn transfer_phase_label(
+    intl: &Intl,
+    status: &garmin_service_api::course_transfer::CourseTransferStatus,
+) -> String {
+    match &status.phase {
         CourseTransferPhase::Running => {
             if status
                 .progress
@@ -643,73 +829,16 @@ fn transfer_status(
             format_message!(intl, default_message: "FIT file verified")
         }
         CourseTransferPhase::Missing => {
-            format_message!(intl, default_message: "Course file is missing")
+            format_message!(
+                intl,
+                id: "routes.transfer.file_missing_status",
+                default_message: "FIT file not found"
+            )
         }
         CourseTransferPhase::NeedsReview(_) => {
             format_message!(intl, default_message: "Transfer needs review")
         }
-    };
-    let phase_label = ui.label(typography::semibold(phase));
-    crate::semantics::target(ui, &phase_label, "routes.transfer.status");
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(&status.file_name).color(crate::theme::color32(
-                crate::theme::palette(ui).content().text_secondary(),
-            )),
-        )
-        .wrap(),
-    );
-    if matches!(status.phase, CourseTransferPhase::Running) {
-        ui.add_space(8.0);
-        if let Some(progress) = &status.progress {
-            let percent = if progress.total_bytes == 0 {
-                0
-            } else {
-                let numerator = u128::from(progress.bytes_sent.min(progress.total_bytes)) * 100;
-                u8::try_from(numerator / u128::from(progress.total_bytes))
-                    .expect("percentage cannot exceed 100")
-            };
-            ui.add(
-                egui::ProgressBar::new(f32::from(percent) / 100.0)
-                    .show_percentage()
-                    .desired_width(ui.available_width()),
-            );
-            if progress.finishing {
-                ui.label(format_message!(intl, default_message: "Upload complete. Finalizing and checking the file on your device."));
-            } else {
-                let sent = crate::text::format_bytes(progress.bytes_sent);
-                let total = crate::text::format_bytes(progress.total_bytes);
-                ui.label(format_message!(intl, default_message: "Sent {sent} of {total}", values: { sent: sent.as_str(), total: total.as_str() }));
-            }
-        } else {
-            ui.add(egui::Spinner::new());
-        }
     }
-    if let CourseTransferPhase::NeedsReview(reason) = &status.phase {
-        ui.label(reason);
-    }
-    let (label, id, action) = match status.phase {
-        CourseTransferPhase::NeedsReview(_) => (
-            format_message!(intl, default_message: "Review partial cleanup"),
-            "routes.transfer.cleanup.review",
-            Action::PrepareTransferCleanup {
-                device_key: device_key.to_owned(),
-                transfer: status.transfer,
-            },
-        ),
-        CourseTransferPhase::Missing => (
-            format_message!(intl, default_message: "Check device"),
-            "routes.transfer.check",
-            Action::PollTransfer {
-                device_key: device_key.to_owned(),
-                transfer: status.transfer,
-            },
-        ),
-        CourseTransferPhase::Running
-        | CourseTransferPhase::Verified
-        | CourseTransferPhase::Accepted => return None,
-    };
-    transfer_button(ui, &label, id, enabled).then_some(action)
 }
 
 fn transfer_storage(

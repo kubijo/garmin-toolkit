@@ -21,6 +21,16 @@ impl Host {
         }
     }
 
+    pub fn close(&mut self) {
+        self.window.close(&self.context);
+        let handle = state(&self.context);
+        let mut state = handle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.open = false;
+        state.focus_requested = false;
+    }
+
     pub fn update(&mut self, intl: &garmin_i18n::Intl) {
         let requested = {
             let handle = state(&self.context);

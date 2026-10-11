@@ -425,6 +425,7 @@ pub struct Driver {
     run: Option<Run>,
     held: Option<Pos2>,
     release: bool,
+    reset_modifiers: bool,
     launch_request: Option<&'static str>,
     pub launch_error: Option<String>,
     paused_at: Option<f64>,
@@ -478,6 +479,7 @@ impl Driver {
     fn start_steps(&mut self, name: &str, steps: Vec<Step>) -> Result<&mut Run, String> {
         if self.running()
             || self.release
+            || self.reset_modifiers
             || self.paused_at.is_some()
             || self.resumed_at.is_some()
             || self.viewport_restore.is_some()
@@ -638,6 +640,10 @@ impl Driver {
         reason
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the ordered automation frame protocol is kept together"
+    )]
     fn drive(&mut self, ctx: &Context, input: &mut RawInput) -> Result<(), String> {
         let run = self.run.as_mut().expect("only drive an active run");
         let (elapsed, screen, changed) = run.observe_environment(ctx, input)?;
@@ -689,6 +695,21 @@ impl Driver {
         if !run.pointer_ready(&step.action, rect, elapsed) {
             return Ok(());
         }
+        let destination_names: Vec<&str> = match &step.action {
+            Action::DragTo { destination, .. } => vec![destination],
+            Action::DragPath(stops) => stops.iter().map(|stop| stop.destination.as_str()).collect(),
+            _ => Vec::new(),
+        };
+        let destinations = destination_names
+            .into_iter()
+            .map(|destination| {
+                lookup(self.tree.as_ref(), destination, screen)?
+                    .ok_or_else(|| {
+                        format!("destination missing, disabled or clipped: {destination}")
+                    })
+                    .map(|(rect, _)| rect.center())
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         let (start, frame) = run.gesture.unwrap_or((rect.center(), 0));
         if let Action::Observe(seconds) = step.action {
             if value.as_deref() != Some("ready") {
@@ -701,12 +722,30 @@ impl Driver {
             }
         }
         let before = input.events.len();
-        let mut complete =
-            step.input(input, &mut self.held, start, frame, rect, value.as_deref())?;
-        if run.background && matches!(step.action, Action::Click) && frame == 0 {
+        let mut complete = step.input(
+            input,
+            &mut self.held,
+            start,
+            frame,
+            rect,
+            &destinations,
+            value.as_deref(),
+        )?;
+        if run.background
+            && matches!(step.action, Action::Click | Action::ClickWith(_))
+            && frame == 0
+        {
             // Background timers can leave more than egui's click duration between frames.
             // Deliver press and release together so an ordinary click remains a click.
-            complete = step.input(input, &mut self.held, start, 1, rect, value.as_deref())?;
+            complete = step.input(
+                input,
+                &mut self.held,
+                start,
+                1,
+                rect,
+                &destinations,
+                value.as_deref(),
+            )?;
         }
         run.report.input_events += input.events.len() - before;
         let pointer_position = last_pointer_position(&input.events[before..]);
@@ -731,6 +770,12 @@ impl Driver {
             action.pointer_position = pointer_position.or(action.pointer_position);
         }
         if complete {
+            if matches!(
+                step.action,
+                Action::DragTo { .. } | Action::DragPath(_) | Action::ClickWith(_)
+            ) {
+                self.reset_modifiers = true;
+            }
             run.input_layout_since = (input.events.len() > before).then_some(elapsed);
             run.complete_step(elapsed, step.after, waiting);
         } else {
@@ -742,6 +787,11 @@ impl Driver {
 }
 
 impl Step {
+    #[expect(
+        clippy::too_many_arguments,
+        clippy::too_many_lines,
+        reason = "all gesture variants share one frame dispatcher and its resolved target context"
+    )]
     fn input(
         &self,
         input: &mut RawInput,
@@ -749,6 +799,7 @@ impl Step {
         start: Pos2,
         frame: usize,
         rect: Rect,
+        destinations: &[Pos2],
         value: Option<&str>,
     ) -> Result<bool, String> {
         let mut complete = true;
@@ -760,6 +811,29 @@ impl Step {
                 input.events.push(pointer_button(start, frame == 0));
                 *held = (frame == 0).then_some(start);
                 complete = frame != 0;
+            }
+            Action::ClickWith(modifiers) => {
+                input.events.push(Event::ModifiersChanged(*modifiers));
+                input.events.push(Event::PointerMoved(start));
+                input.events.push(Event::PointerButton {
+                    pos: start,
+                    button: PointerButton::Primary,
+                    pressed: frame == 0,
+                    modifiers: *modifiers,
+                });
+                *held = (frame == 0).then_some(start);
+                complete = frame != 0;
+            }
+            Action::SecondaryClick => {
+                input.events.push(Event::PointerMoved(start));
+                for pressed in [true, false] {
+                    input.events.push(Event::PointerButton {
+                        pos: start,
+                        button: PointerButton::Secondary,
+                        pressed,
+                        modifiers: Modifiers::NONE,
+                    });
+                }
             }
             Action::Drag { x, y } => {
                 #[expect(
@@ -775,6 +849,50 @@ impl Step {
                 }
                 *held = (frame != 33).then_some(pos);
                 complete = frame == 33;
+            }
+            Action::DragTo {
+                modifiers,
+                dwell_frames,
+                ..
+            } => {
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "gesture has exactly thirty-two bounded samples"
+                )]
+                let fraction = frame.min(32) as f32 / 32.0;
+                let end = *destinations
+                    .first()
+                    .ok_or("drag_to destination was not resolved")?;
+                let pos = start.lerp(end, fraction);
+                input.events.push(Event::ModifiersChanged(*modifiers));
+                input.events.push(Event::PointerMoved(pos));
+                let release_frame = 33 + *dwell_frames;
+                if frame == 0 || frame == release_frame {
+                    input.events.push(Event::PointerButton {
+                        pos,
+                        button: PointerButton::Primary,
+                        pressed: frame == 0,
+                        modifiers: *modifiers,
+                    });
+                }
+                *held = (frame != release_frame).then_some(pos);
+                complete = frame == release_frame;
+            }
+            Action::DragPath(stops) => {
+                let (pos, modifiers, release) =
+                    drag_path_sample(start, frame, stops, destinations)?;
+                input.events.push(Event::ModifiersChanged(modifiers));
+                input.events.push(Event::PointerMoved(pos));
+                if frame == 0 || release {
+                    input.events.push(Event::PointerButton {
+                        pos,
+                        button: PointerButton::Primary,
+                        pressed: frame == 0,
+                        modifiers,
+                    });
+                }
+                *held = (!release).then_some(pos);
+                complete = release;
             }
             Action::Wheel(delta) | Action::Scroll(delta) => {
                 let point = if matches!(self.action, Action::Scroll(_)) {
@@ -795,16 +913,18 @@ impl Step {
                 });
             }
             Action::Text(text) => input.events.push(Event::Text(text.clone())),
-            Action::Key(key) => {
+            Action::Key { key, modifiers } => {
+                input.events.push(Event::ModifiersChanged(*modifiers));
                 for pressed in [true, false] {
                     input.events.push(Event::Key {
                         key: *key,
                         physical_key: None,
                         pressed,
                         repeat: false,
-                        modifiers: Modifiers::NONE,
+                        modifiers: *modifiers,
                     });
                 }
+                input.events.push(Event::ModifiersChanged(Modifiers::NONE));
             }
             Action::Value(expected) => {
                 if value != Some(expected.as_str()) {
@@ -819,6 +939,41 @@ impl Step {
         }
         Ok(complete)
     }
+}
+
+fn drag_path_sample(
+    start: Pos2,
+    frame: usize,
+    stops: &[scenarios::DragStop],
+    destinations: &[Pos2],
+) -> Result<(Pos2, Modifiers, bool), String> {
+    if stops.is_empty() || stops.len() != destinations.len() {
+        return Err("drag_path destinations were not resolved".into());
+    }
+    if frame == 0 {
+        return Ok((start, stops[0].modifiers, false));
+    }
+    let mut origin = start;
+    let mut offset = 0;
+    for (stop, end) in stops.iter().zip(destinations) {
+        let move_end = offset + 16;
+        if frame <= move_end {
+            #[expect(clippy::cast_precision_loss, reason = "bounded drag sample index")]
+            let fraction = (frame - offset) as f32 / 16.0;
+            return Ok((origin.lerp(*end, fraction), stop.modifiers, false));
+        }
+        let dwell_end = move_end + stop.dwell_frames;
+        if frame <= dwell_end {
+            return Ok((*end, stop.modifiers, false));
+        }
+        offset = dwell_end;
+        origin = *end;
+    }
+    Ok((
+        origin,
+        stops.last().expect("nonempty stops").modifiers,
+        true,
+    ))
 }
 
 fn last_pointer_position(events: &[Event]) -> Option<[f32; 2]> {
@@ -931,9 +1086,18 @@ impl egui::plugin::Plugin for Driver {
         if input.viewport_id != self.viewport {
             return;
         }
+        if self.reset_modifiers {
+            input.events.push(Event::ModifiersChanged(Modifiers::NONE));
+            self.reset_modifiers = false;
+        }
         self.resume_clock(input);
         let started = web_time::Instant::now();
         let was_running = self.running();
+        if was_running {
+            // A compositor may refuse a background focus request.
+            // Synthetic input still needs the focused viewport state for egui to accept it.
+            input.focused = true;
+        }
         if was_running || self.paused_at.is_some() || self.release {
             match self.capture_user_input(ctx, input) {
                 Ok(Some(reason)) => self.cancel(reason),
@@ -959,7 +1123,7 @@ impl egui::plugin::Plugin for Driver {
         if was_running && let Some(run) = &mut self.run {
             run.report.driver_milliseconds += started.elapsed().as_secs_f64() * 1000.0;
         }
-        if self.running() || self.release || self.paused_at.is_some() {
+        if self.running() || self.release || self.reset_modifiers || self.paused_at.is_some() {
             ctx.request_repaint_of(self.viewport);
         }
     }

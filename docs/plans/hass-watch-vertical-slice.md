@@ -1,64 +1,20 @@
-# Home Assistant watch vertical slice
+# Home Assistant add-on and hardware acceptance
 
-Verify the Course transfer and separate device pairing flows in the packaged add-on and on physical media.
-[Shared workflows](shared-interface-workflows.md) owns desktop parity; physical inspection evidence belongs to
-[device expansion](device-expansion-and-publication.md). Retain the native-host/WASM and
-[typed service](../architecture/workspace.md) architecture; Bluetooth and HASS domain publication remain excluded.
-Device reassociation has [demo acceptance](../research/usb-sync.md#demo-pairing-acceptance).
-
-## Remaining work
-
-1. Finish owned-hardware Course transfer acceptance. One successful transfer appeared as "Last Course Added" on an
-   Edge 1050 after disconnect; cancellation, interrupted writes, and disconnect/recovery still need inspection. The
-   demo confirms byte readback, not firmware behavior.
-2. Integrate Home Assistant host backups with the managed deployment and verify recovery of its selected storage
+1. Complete owned-hardware FIT Course transfer checks: cancellation, interrupted and partial writes, disconnect and
+   recovery, readback, and firmware discovery after recovery. The
+   [single successful Edge 1050 transfer](../research/usb-sync.md#course-transfer-evidence) establishes only the happy
+   path. Verify initial profile pairing and reassociation on physical media separately from Course transfer.
+2. Integrate Home Assistant host backups with the managed deployment and verify recovery of the selected storage
    generation. Portable application snapshots have a separate
    [storage contract](../architecture/storage.md#portable-snapshots).
-3. Build self-contained amd64/aarch64 add-ons with persistent `/data`; verify ingress-only mutation access, USB
-   permissions/ownership, disconnects, and workflow on Raspberry Pi 5. Do not assume desktop GIO mounts exist. Verify
-   [profile marker](../decisions/0018-on-device-profile-marker.md) initial pairing and reassociation in the add-on and
-   on physical media; initial pairing has unit coverage but still needs live acceptance.
+3. Build self-contained amd64 and aarch64 add-ons with persistent `/data`. On Raspberry Pi 5, verify ingress-only
+   mutation access, USB permissions and ownership, device disconnects, and the complete workflow. Do not assume desktop
+   GIO mounts exist in the add-on.
+4. Exercise the browser loader with slow, cached, unknown-size, failed, and stale-bundle responses under nested ingress.
+   Verify entrypoint and favicon refresh across redeploys, correct precompression negotiation and caching, and resolve
+   preload warnings. Measure live serving and save-to-visible latency. The semantic UI client starts after WASM loads,
+   so add host-side response-fault controls and startup capture before relying on it for loader acceptance.
+5. Verify `just hass::run` exits cleanly on SIGINT and SIGTERM without Just reporting an interrupted recipe.
 
-The packaged HASS demo has [asserted VM coverage](../../infra/integration/hass/README.md) for reviewed GPX import,
-Course versions and downloads, reviewed transfer with exact device bytes and unchanged pairing, restart reconciliation,
-restore at the stated boundaries, and duplicate-free demo seeding. Desktop parity and offline/device-free acceptance
-remain in [shared workflows](shared-interface-workflows.md). Keep the
-[route client contract](../architecture/storage.md#route-client-workflow) and
-[ADR 0028](../decisions/0028-user-owned-route-plans.md) as the durable owners.
-
-Keep focused validation for GPX 1.0/1.1, multiple segments, malformed and oversized input, optional elevation, retained
-original bytes, and distinct walking/hiking/running/cycling through FIT and snapshot restore. The HASS VM exercises only
-the fixture paths named in its README; it does not replace the parser and storage test matrix.
-
-## Device transfer contract
-
-Transfer a selected persisted Course artifact. Reuse device inspection, capability evidence, write exclusion,
-cancellation, and recovery from shared device workflows. The one-time approval is scoped to the requesting profile's
-artifact digest/version, the selected device identity and storage, and a create-only filename. Confirmation must be
-invalidated by a changed target or artifact. Do not expose a generic write-path RPC. Manual transfer does not pair the
-selected device or alter an existing pairing marker; pairing only enables automatic profile opening and device sync.
-
-Persist transfer intent before mutation and reconcile interrupted writes using the exact recorded destination and
-digest. Readback records transfer verification. Firmware discovery is a separate observation after MTP disconnect; the
-mounted UI cannot confirm it. Cleanup remains a separately approved operation restricted to this transfer's partial
-upload. Test with the demo device first; an owned-device trial needs explicit authorization and capability evidence.
-
-### Hardware acceptance still needed
-
-- Exercise cancellation, disconnect, partial write recovery, and readback on owned hardware without unintended mutation.
-- Repeat firmware discovery after recovery scenarios; the successful "Last Course Added: demo walk" observation on the
-  Edge 1050 covers only the happy path.
-
-Use the shared UI for desktop parity; the browser never acquires filesystem or device access. Keep the implementation
-source-neutral and add no Mapy.com account/API dependency.
-
-## Browser/process acceptance
-
-- Inspect the actual DOM loader under slow/cached/unknown-size/failed/stale-bundle responses and nested ingress.
-- Verify normal reload receives current entrypoint/favicon across a redeploy and resolve preload warnings.
-  Precompression requires correct encoding negotiation and redeploy-safe caching.
-- Verify `just hass::run` shuts down cleanly on SIGINT/SIGTERM without Just's interrupted error.
-
-Ingress authenticates transport; the native adapter supplies actor context. Browser code has no storage/device access.
-Persist no credentials. Close after the packaged add-on, hardware workflow, host snapshots, disconnects, and recovery
-pass.
+The [shared interface plan](shared-interface-workflows.md) owns client parity and runtime interaction checks; the
+[device expansion plan](device-expansion-and-publication.md) owns broader hardware conformance and publication.

@@ -1,57 +1,40 @@
 # Shared interface workflows
 
-Desktop and HASS share application models and actions. The [HASS watch plan](hass-watch-vertical-slice.md) owns hosting
-and hardware deployment. Contracts live in [application windows](../architecture/application-windows.md),
+Desktop and HASS share application models and actions. The [HASS add-on plan](hass-watch-vertical-slice.md) owns hosting
+and physical-device acceptance. Current contracts live in [application windows](../architecture/application-windows.md),
 [developer tools](../architecture/developer-tools.md), and the [device explorer](../architecture/device-explorer.md).
-
-## Map workflow acceptance
-
-The shared host workflow has passed desktop and packaged-HASS demo acceptance for reviewed update/removal, cancellation,
-reconnect, retained outcomes, device-write exclusion, and recovery after a process stop. A paced HASS transfer continued
-while the browser was disconnected and showed active progress after reconnect. Assisted recovery of an interrupted
-zero-byte upload required a separate review and preserved the empty object in quarantine before verified rollback.
-Neither browser reload nor host restart resumed writes without approval. The durable recovery contract and its limit are
-recorded in [device recovery evidence](../research/device-capacity-and-recovery.md); host regressions live in
-[`map_workflow.rs`](../../crates/garmin-services/tests/map_workflow.rs) and
-[`map_update_boundary.rs`](../../crates/garmin-services/tests/map_update_boundary.rs).
-
-Remaining: verify the workflow in the packaged add-on and on owned hardware before claiming either environment. The demo
-and directory-backed tests do not establish behavior for every mounted-MTP implementation or cable disconnect.
 
 ## Shared work
 
-- Verify GPX import, Course preview, export, and reviewed transfer on the desktop client. The shared route UI and
-  packaged HASS demo already exercise these paths; owned-device acceptance remains separate.
-- Limit drag and drop to visible, enabled targets with accept/reject feedback; report mutations through persistent
-  notifications.
 - Audit keyboard navigation, focus, modal trapping, translation, narrow layouts, and reconnect recovery.
 - Restore browser Ctrl+wheel zoom over the HASS canvas.
-
-Finish the [visual language](../architecture/visual-language.md) across shared controls, shells, device headers, and
-empty/offline/error states. Review Gray 100/10 layers, focus and keyboard activation, narrow layouts, Czech and long
-content. Decide whether the headless color picker needs separate state before changing its geometry. Inspect dark/light
-captures, including `infra/gallery/captures/activity-calendar.capture.toml`.
+- Resolve the gallery workspace map lock timeout before relying on hot reload. Measure first visible frame and
+  repeated-reload memory on Linux and macOS before claiming desktop hot reload.
+- Finish the [visual language](../architecture/visual-language.md) across controls, shells, device headers, and
+  empty/offline/error states. Review Gray 100/10 layers, keyboard activation, Czech and long copy, narrow overlays, and
+  dark/light captures. Decide whether the headless color picker needs separate state before changing its geometry.
 
 ## Runtime acceptance
 
-Use `just hass::control check` against a running demo. Remaining checks:
+Use `just hass::control check` against a running demo where semantic control is available. Open checks:
 
 - **Files:** desktop FIT import, refresh/error recovery, busy focus, picker cancellation, removal confirmation, and
-  snapshot directory state. Test disconnect after a write commits but before its reply. HASS selected FIT import after
-  WebSocket closure is recorded in [FIT evidence](../research/fit-implementation.md#browser-import-acceptance).
+  snapshot directory state. Test disconnect after a write commits but before its reply.
 - **Ownership:** profile switch/removal and window closure during operations or pickers; discard late results from old
   profiles on both clients.
-- **Windows:** blocked-popup retry/tab fallback, stale popup rejection after parent reload/closure, and foreground focus
-  across keyboard/touch and other Wayland compositors. Pending activation must not recreate closed windows.
+- **Windows:** before advertising Windows support, test blocked-popup retry/tab fallback, stale popup rejection after
+  parent reload/closure, and foreground focus across keyboard and touch. Pending activation must not recreate closed
+  windows.
 - **Decorations:** native title-bar actions, window menu, resizing, borders/shadows, maximized appearance, and both
   themes.
 - **Diagnostics:** file-export error recovery.
+- **Localization:** use the FormatJS `en-XA` pseudo-locale and deliberately long or untranslated copy; catalog parity
+  alone does not establish readable native, gallery, or browser layouts.
 
-Gallery captures cover layout and translation; they do not prove live tile-provider or device transport behavior.
-[Device expansion](device-expansion-and-publication.md) owns hardware inspection checks. Test macOS and Windows before
-claiming support beyond Linux. Measure translation adoption with the FormatJS `en-XA` pseudo-locale and deliberately
-untranslated/clipped copy; catalog parity alone is insufficient. Exercise native/gallery and browser surfaces, including
-egui canvas text and narrow overlays.
+Extend semantic automation when a runtime check needs hover or CSS cursor state, capture while the HASS backend is
+offline, or native operating-system file-picker inspection. Separate native child viewports currently advertise no
+screenshot support; use the app's inline file-browser mode for visual checks until native capture is available. These
+tool gaps are optional improvements for unattended checks.
 
 ### Deferred Wayland activation work
 

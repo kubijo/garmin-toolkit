@@ -147,6 +147,10 @@
     "source": "Save destination",
     "translation": "Cíl uložení"
   },
+  "1a5AVo+PbE": {
+    "source": "Could not rename item",
+    "translation": "Položku se nepodařilo přejmenovat"
+  },
   "1bZW4VoXLl": {
     "source": "garmin-cli — Removing map components",
     "translation": "garmin-cli — Odebírání mapových komponent"
@@ -162,6 +166,10 @@
   "2/gyWYOil8": {
     "source": "Delete Course version {version}?",
     "translation": "Smazat verzi trasy {version}?"
+  },
+  "21CNripptP": {
+    "source": "Removing selected items…",
+    "translation": "Odebírání vybraných položek…"
   },
   "21WrkI2+I5": {
     "source": "Inside the app",
@@ -223,10 +231,6 @@
     "source": "Full activity",
     "translation": "Celá aktivita"
   },
-  "3JCXZ2n9ch": {
-    "source": "Currently paired with {profile}",
-    "translation": "Aktuálně spárováno s profilem {profile}"
-  },
   "3Q13J6QetV": {
     "source": "No activities in this FIT file",
     "translation": "Tento soubor FIT neobsahuje žádné aktivity"
@@ -270,6 +274,10 @@
   "4MQ9zggf0W": {
     "source": "Saved {file}",
     "translation": "Uloženo: {file}"
+  },
+  "4l6vz1/eZ5": {
+    "source": "Copy",
+    "translation": "Kopírovat"
   },
   "4pFMl6Ug+w": {
     "source": "panel",
@@ -581,10 +589,6 @@
     "source": "Active operation:",
     "translation": "Aktivní operace:"
   },
-  "BsgPifIivC": {
-    "source": "Sent {sent} of {total}",
-    "translation": "Odesláno {sent} z {total}"
-  },
   "ByQwVA1h99": {
     "source": "Select a file or folder to see its details",
     "translation": "Výběrem souboru nebo složky zobrazíte podrobnosti"
@@ -593,10 +597,6 @@
     "source": "Map components",
     "translation": "Mapové komponenty"
   },
-  "C6iYmP0U61": {
-    "source": "This changes the device's profile association. Previous marker revisions remain on the device.",
-    "translation": "Tím se změní přiřazení zařízení k profilu. Předchozí verze záznamu párování zůstanou na zařízení."
-  },
   "C8rGezRtt/": {
     "source": "Restore this backup?",
     "translation": "Obnovit tuto zálohu?"
@@ -604,10 +604,6 @@
   "CCO9dTMlqW": {
     "source": "{received} of {total}",
     "translation": "{received} z {total}"
-  },
-  "CEVsFbYHlU": {
-    "source": "The FIT file matches the copy on your device. Disconnect it before checking whether the course appears in its menus.",
-    "translation": "Soubor FIT odpovídá kopii v zařízení. Odpojte zařízení a teprve potom zkontrolujte, zda se trasa zobrazuje v jeho nabídce."
   },
   "CKKmh+kHoK": {
     "source": "Use default color",
@@ -632,6 +628,10 @@
   "Cpy7ynymcy": {
     "source": "Folder not found. Check the path and try again.",
     "translation": "Složka nenalezena. Zkontrolujte cestu a zkuste to znovu."
+  },
+  "Csd8Cy1Wzk": {
+    "source": "{count} items selected",
+    "translation": "Vybrané položky: {count}"
   },
   "CuaE08GEbj": {
     "source": "The folder and everything inside it will be permanently removed from the device.",
@@ -862,6 +862,10 @@
     "source": "last data {seconds}s ago",
     "translation": "poslední data před {seconds} s"
   },
+  "IXuOczM/hP": {
+    "source": "New name",
+    "translation": "Nový název"
+  },
   "IZFEUgrg25": {
     "source": "Ready",
     "translation": "Připraveno"
@@ -897,10 +901,6 @@
   "J4SQjQZlH8": {
     "source": "select",
     "translation": "vybrat"
-  },
-  "JLaG9yEeUl": {
-    "source": "Course file is missing",
-    "translation": "Soubor trasy chybí"
   },
   "JLwGDxma/f": {
     "source": "current file progress shown below",
@@ -1082,6 +1082,10 @@
     "source": "No recorded route",
     "translation": "Žádná zaznamenaná trasa"
   },
+  "NlubAyTrrE": {
+    "source": "Transfer complete",
+    "translation": "Přenos dokončen"
+  },
   "Nyz15F0iCV": {
     "source": "Profiles keep each person's activities and devices separate.",
     "translation": "Profily oddělují aktivity a zařízení jednotlivých uživatelů."
@@ -1125,10 +1129,6 @@
   "OluyIIBMLd": {
     "source": "recover/clear",
     "translation": "obnovit/vymazat"
-  },
-  "Om2VEQ1Hmq": {
-    "source": "Check device",
-    "translation": "Zkontrolovat zařízení"
   },
   "OnM1xpU1Dm": {
     "source": "{used} used · {free} free · {total} total",
@@ -1246,6 +1246,10 @@
     "source": "This device contains an interrupted transaction. Resolve it before making more changes.",
     "translation": "Toto zařízení obsahuje přerušenou transakci. Před dalšími změnami ji vyřešte."
   },
+  "RRSG+MUOZX": {
+    "source": "Could not transfer selected items",
+    "translation": "Vybrané položky se nepodařilo přenést"
+  },
   "RSWC7eebNN": {
     "source": "Map component",
     "translation": "Mapová komponenta"
@@ -1349,6 +1353,10 @@
   "UIVqKumcgJ": {
     "source": "Recover",
     "translation": "Obnovit"
+  },
+  "UMbBzoLVFz": {
+    "source": "Move",
+    "translation": "Přesunout"
   },
   "UQWuJy6zQS": {
     "source": "history",
@@ -1554,6 +1562,10 @@
     "source": "Connecting to the device host…",
     "translation": "Připojování ke službě zařízení…"
   },
+  "ZIC5b0w9Eu": {
+    "source": "Renaming the item…",
+    "translation": "Přejmenovávání položky…"
+  },
   "ZsWBTFFfZ3": {
     "source": "Previous outcomes",
     "translation": "Předchozí výsledky"
@@ -1566,6 +1578,10 @@
     "source": "Hide hidden files",
     "translation": "Skrýt skryté soubory"
   },
+  "aVqBZJAgBs": {
+    "source": "Remove {count} selected items?",
+    "translation": "Odebrat vybrané položky ({count})?"
+  },
   "acrOozm08x": {
     "source": "Continue",
     "translation": "Pokračovat"
@@ -1573,6 +1589,10 @@
   "agOXPD4vII": {
     "source": "Size",
     "translation": "Velikost"
+  },
+  "arHMOUHUDu": {
+    "source": "Overwrite file",
+    "translation": "Přepsat soubor"
   },
   "b0bewtUePz": {
     "source": "New profile draft",
@@ -1674,13 +1694,33 @@
     "source": "Device operation interrupted",
     "translation": "Operace se zařízením přerušena"
   },
-  "e21lIgqT5q": {
-    "source": "This writes a profile marker to the selected device. The marker is not a credential.",
-    "translation": "Tím se na vybrané zařízení zapíše záznam párování profilu. Záznam není přihlašovacím údajem."
+  "device.pair.current_profile": {
+    "source": "Current profile",
+    "translation": "Aktuální profil"
+  },
+  "device.pair.description": {
+    "source": "This saves a pairing record on the device that links it to this profile.",
+    "translation": "Na zařízení se uloží záznam párování, který je propojí s tímto profilem."
+  },
+  "device.pair.new_profile": {
+    "source": "New profile",
+    "translation": "Nový profil"
+  },
+  "device.pair.profile": {
+    "source": "Profile",
+    "translation": "Profil"
+  },
+  "device.pair.reassign_description": {
+    "source": "This updates the device's pairing record to link it to this profile.",
+    "translation": "Tím se aktualizuje záznam párování v zařízení, aby odkazoval na tento profil."
   },
   "e5iRgzQaaC": {
     "source": "Resetting an unresponsive Garmin link…",
     "translation": "Resetování nereagujícího spojení Garmin…"
+  },
+  "e5vZGbYriN": {
+    "source": "The selected files and folders will be permanently removed from the device.",
+    "translation": "Vybrané soubory a složky budou ze zařízení trvale odebrány."
   },
   "e9q3Xftjm/": {
     "source": "Reading device storage…",
@@ -1850,6 +1890,10 @@
     "source": "Discard removes this notice. Cache and capture files remain.",
     "translation": "Zahozením se odstraní toto oznámení. Mezipaměť a soubory záznamu zůstanou."
   },
+  "iXNbPfQDIZ": {
+    "source": "Rename",
+    "translation": "Přejmenovat"
+  },
   "iZrhOoD6s9": {
     "source": "{summary} · {problem}",
     "translation": "{summary} · {problem}"
@@ -1873,10 +1917,6 @@
   "iz9kHWpm8T": {
     "source": "This host retained an interrupted transaction. Recover it before making more changes.",
     "translation": "Tento počítač zachoval přerušenou transakci. Před dalšími změnami ji obnovte."
-  },
-  "j+WuAp4KaQ": {
-    "source": "Pair {device} with {profile}",
-    "translation": "Spárovat {device} s profilem {profile}"
   },
   "j+tl+1QxN9": {
     "source": "Enter, Esc, q, or mouse",
@@ -1917,6 +1957,10 @@
   "jhj8RYgF7I": {
     "source": "No matching activities",
     "translation": "Žádné odpovídající aktivity"
+  },
+  "jlzHooAZSG": {
+    "source": "Items removed",
+    "translation": "Položky odebrány"
   },
   "jvo0vs3nF0": {
     "source": "Save",
@@ -1970,13 +2014,13 @@
     "source": "Average {rate}/s",
     "translation": "Průměrně {rate}/s"
   },
-  "lJ7zCIX208": {
-    "source": "Check previous transfer",
-    "translation": "Zkontrolovat předchozí přenos"
-  },
   "lR/7o8npaT": {
     "source": "Folder name",
     "translation": "Název složky"
+  },
+  "lVXCowRd/a": {
+    "source": "Transferring selected items…",
+    "translation": "Přenášení vybraných položek…"
   },
   "lkMoYJ9N2j": {
     "source": "Cancellation may require rollback or later recovery. Do not disconnect until this screen closes.",
@@ -2251,6 +2295,30 @@
     "source": "{completed} / {total} {total, plural, one {operation} other {operations}} — {label}",
     "translation": "{completed} / {total} {total, plural, one {operace} few {operace} other {operací}} — {label}"
   },
+  "rj9KIiC1cY": {
+    "source": "File already exists",
+    "translation": "Soubor již existuje"
+  },
+  "routes.transfer.file_missing_description": {
+    "source": "We checked the device's upload folder.",
+    "translation": "Zkontrolovali jsme složku pro nahrávání v zařízení."
+  },
+  "routes.transfer.file_missing_explanation": {
+    "source": "Import status is unknown.",
+    "translation": "Stav importu není znám."
+  },
+  "routes.transfer.file_missing_next_step": {
+    "source": "Disconnect the device and check its Courses menu.",
+    "translation": "Odpojte zařízení a zkontrolujte jeho nabídku tras."
+  },
+  "routes.transfer.file_missing_status": {
+    "source": "FIT file not found",
+    "translation": "Soubor FIT nebyl nalezen"
+  },
+  "routes.transfer.verified_description": {
+    "source": "Disconnect the device to check its Courses menu.",
+    "translation": "Odpojte zařízení a zkontrolujte jeho nabídku tras."
+  },
   "rs55JjP2Ym": {
     "source": "Upload interrupted. Discard it, then select the backup file again.",
     "translation": "Nahrávání bylo přerušeno. Zahoďte je a vyberte soubor zálohy znovu."
@@ -2294,6 +2362,10 @@
   "tOdNiYuuag": {
     "source": "Dark",
     "translation": "Tmavý"
+  },
+  "tx3c/+oGnx": {
+    "source": "{name} already exists in the destination folder. Replace it?",
+    "translation": "{name} již v cílové složce existuje. Nahradit jej?"
   },
   "tx9rZrc/Lz": {
     "source": "No automatic rollback; old device files can be identified only by their authorized path and size, and reinstall may be required after a failed update.",
@@ -2404,6 +2476,14 @@
     "source": "Refresh catalog",
     "translation": "Obnovit katalog"
   },
+  "wggmFwvpck": {
+    "source": "Could not remove selected items",
+    "translation": "Vybrané položky se nepodařilo odebrat"
+  },
+  "wmTKqv9Pfv": {
+    "source": "Rename item",
+    "translation": "Přejmenovat položku"
+  },
   "x/yXKSn1p9": {
     "source": "At cursor",
     "translation": "Na pozici kurzoru"
@@ -2500,6 +2580,10 @@
     "source": "Owner",
     "translation": "Vlastník"
   },
+  "zNS1NwUz+J": {
+    "source": "Use a single name without slashes or control characters",
+    "translation": "Zadejte jeden název bez lomítek a řídicích znaků"
+  },
   "zPxvqJZI9C": {
     "source": "Upload complete",
     "translation": "Nahrávání dokončeno"
@@ -2507,6 +2591,10 @@
   "zQ65ULoVnY": {
     "source": "Backup restored. Choose a profile to continue.",
     "translation": "Záloha obnovena. Pro pokračování vyberte profil."
+  },
+  "zoMIRCLqyb": {
+    "source": "Item renamed",
+    "translation": "Položka přejmenována"
   },
   "zq9vTaCwpV": {
     "source": "Transaction device ID",

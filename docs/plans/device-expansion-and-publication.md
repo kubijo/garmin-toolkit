@@ -25,5 +25,3 @@ Extend operation-specific device evidence, then publish only supported artifacts
    folder opening, and closing/reopening the tools window.
 6. Audit configuration, fixtures, identities, URLs, images, notices, and provenance.
 7. Publish the support matrix and adaptation guide. Mobile requires a separate decision.
-
-Close when every advertised operation has evidence, artifacts pass policy, and the public tree contains no private data.

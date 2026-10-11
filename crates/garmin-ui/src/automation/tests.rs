@@ -1011,6 +1011,206 @@ fn cancelled_background_drag_keeps_frames_until_input_is_released() {
 }
 
 #[test]
+fn drag_to_reaches_another_semantic_target_with_its_modifier() {
+    let context = Context::default();
+    context.add_plugin(Driver::default());
+    let mut dropped = false;
+    let mut stopped = false;
+    let mut released_over_destination = false;
+    let mut ctrl_on_release = false;
+    for tick in 0..100_u32 {
+        let mut output = context.run_ui(
+            RawInput {
+                time: Some(f64::from(tick) / 60.0),
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0))),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                let source = ui.put(
+                    Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(120.0, 40.0)),
+                    egui::Button::new("Source").sense(egui::Sense::click_and_drag()),
+                );
+                crate::semantics::target(ui, &source, "drag.source");
+                let destination = ui.put(
+                    Rect::from_min_size(egui::pos2(400.0, 200.0), egui::vec2(120.0, 40.0)),
+                    egui::Button::new("Destination"),
+                );
+                crate::semantics::target(ui, &destination, "drag.destination");
+                stopped |= source.drag_stopped();
+                ui.input(|input| {
+                    released_over_destination |= input.pointer.any_released()
+                        && input
+                            .pointer
+                            .interact_pos()
+                            .is_some_and(|point| destination.rect.contains(point));
+                    ctrl_on_release |= input.pointer.any_released() && input.modifiers.ctrl;
+                });
+                dropped |= stopped && released_over_destination && ctrl_on_release;
+            },
+        );
+        output.textures_delta.clear();
+        if tick == 1 {
+            command(
+                &context,
+                "action",
+                &serde_json::json!({
+                    "kind": "drag_to",
+                    "target": "drag.source",
+                    "destination": "drag.destination",
+                    "modifier": "ctrl",
+                    "dwell_frames": 12
+                }),
+            )
+            .unwrap();
+        }
+        if tick > 1 && !context.plugin::<Driver>().lock().running() {
+            break;
+        }
+    }
+    let plugin = context.plugin::<Driver>();
+    let driver = plugin.lock();
+    let report = driver.report().unwrap();
+    assert_eq!(report.state, "passed", "{:?}", report.failure);
+    assert!(
+        dropped,
+        "source stopped: {stopped}; destination released: {released_over_destination}; Ctrl held: {ctrl_on_release}"
+    );
+    assert!(driver.held.is_none());
+    drop(driver);
+    let mut output = context.run_ui(
+        RawInput {
+            time: Some(2.0),
+            ..Default::default()
+        },
+        |ui| assert!(!ui.input(|input| input.modifiers.ctrl)),
+    );
+    output.textures_delta.clear();
+}
+
+#[test]
+fn drag_path_changes_modifier_and_leaves_a_target_before_release() {
+    let context = Context::default();
+    context.add_plugin(Driver::default());
+    let first = Rect::from_min_size(egui::pos2(320.0, 80.0), egui::vec2(120.0, 40.0));
+    let second = Rect::from_min_size(egui::pos2(520.0, 240.0), egui::vec2(120.0, 40.0));
+    let mut saw_ctrl_on_first = false;
+    let mut saw_shift_on_second = false;
+    let mut released_on_second = false;
+    for tick in 0..120_u32 {
+        let mut output = context.run_ui(
+            RawInput {
+                time: Some(f64::from(tick) / 60.0),
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0))),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                for (id, rect) in [
+                    (
+                        "drag.source",
+                        Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(120.0, 40.0)),
+                    ),
+                    ("drag.first", first),
+                    ("drag.second", second),
+                ] {
+                    let response = ui.put(
+                        rect,
+                        egui::Button::new(id).sense(egui::Sense::click_and_drag()),
+                    );
+                    crate::semantics::target(ui, &response, id);
+                }
+                ui.input(|input| {
+                    let position = input.pointer.interact_pos();
+                    saw_ctrl_on_first |= input.pointer.primary_down()
+                        && input.modifiers.ctrl
+                        && position.is_some_and(|point| first.contains(point));
+                    saw_shift_on_second |= input.pointer.primary_down()
+                        && input.modifiers.shift
+                        && position.is_some_and(|point| second.contains(point));
+                    released_on_second |= input.pointer.any_released()
+                        && position.is_some_and(|point| second.contains(point));
+                });
+            },
+        );
+        output.textures_delta.clear();
+        if tick == 1 {
+            command(
+                &context,
+                "action",
+                &serde_json::json!({
+                    "kind": "drag_path",
+                    "target": "drag.source",
+                    "stops": [
+                        {"destination": "drag.first", "modifier": "ctrl", "dwell_frames": 8},
+                        {"destination": "drag.second", "modifier": "shift", "dwell_frames": 8}
+                    ]
+                }),
+            )
+            .expect("start staged drag");
+        }
+        if tick > 1 && !context.plugin::<Driver>().lock().running() {
+            break;
+        }
+    }
+    assert!(saw_ctrl_on_first);
+    assert!(saw_shift_on_second);
+    assert!(released_on_second);
+    let report = command(&context, "result", &serde_json::Value::Null).unwrap();
+    assert_eq!(report["state"], "passed", "{report}");
+}
+
+#[test]
+fn modified_click_keeps_ctrl_through_the_click() {
+    let context = Context::default();
+    context.add_plugin(Driver::default());
+    let mut clicked_with_ctrl = false;
+    for tick in 0..30_u32 {
+        let mut output = context.run_ui(
+            RawInput {
+                time: Some(f64::from(tick) / 60.0),
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0))),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                let response = ui.put(
+                    Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(120.0, 40.0)),
+                    egui::Button::new("Select"),
+                );
+                crate::semantics::target(ui, &response, "select.item");
+                clicked_with_ctrl |= response.clicked() && ui.input(|input| input.modifiers.ctrl);
+            },
+        );
+        output.textures_delta.clear();
+        if tick == 1 {
+            command(
+                &context,
+                "action",
+                &serde_json::json!({
+                    "kind": "click",
+                    "target": "select.item",
+                    "modifier": "ctrl"
+                }),
+            )
+            .unwrap();
+        }
+        if tick > 1 && !context.plugin::<Driver>().lock().running() {
+            break;
+        }
+    }
+    assert!(clicked_with_ctrl);
+    let mut output = context.run_ui(
+        RawInput {
+            time: Some(1.0),
+            ..Default::default()
+        },
+        |ui| assert!(!ui.input(|input| input.modifiers.ctrl)),
+    );
+    output.textures_delta.clear();
+}
+
+#[test]
 fn background_mode_drives_hidden_ui_with_throttled_frames() {
     for background in [false, true] {
         let context = Context::default();

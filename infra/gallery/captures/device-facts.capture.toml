@@ -37,19 +37,29 @@ width = 320
 
 [[shot]]
 name = "pairing-confirmation"
-scene = "device::PairingConfirmation"
+scene = "device::Pairing Confirmation"
 
 [[shot]]
 name = "pairing-confirmation-czech"
-scene = "device::PairingConfirmation"
+scene = "device::Pairing Confirmation"
 [shot.globals]
 Language = "Čeština"
 
 [[shot]]
 name = "reassignment-confirmation"
-scene = "device::PairingConfirmation"
+scene = "device::Pairing Confirmation"
 [shot.knobs]
 reassign = true
+
+[[shot]]
+name = "pairing-success"
+scene = "device::Pairing Success"
+
+[[shot]]
+name = "pairing-success-czech"
+scene = "device::Pairing Success"
+[shot.globals]
+Language = "Čeština"
 
 [[shot]]
 name = "ready-czech-narrow"

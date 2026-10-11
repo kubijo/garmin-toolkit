@@ -104,6 +104,8 @@ impl Files {
             state.connection_generation += 1;
             state.interrupt_device_browser_operation();
             state.device_browser_refresh = None;
+            state.file_toasts = notification::Toasts::default();
+            state.file_progress_toast = None;
             self.refresh_pending = false;
         }
         if self.snapshot.as_ref().is_none_or(|previous| {
@@ -252,13 +254,10 @@ impl eframe::App for Files {
             .snapshot
             .as_ref()
             .is_some_and(|snapshot| snapshot.available && !snapshot.busy);
-        if let Some(snapshot) = &self.snapshot {
-            if !snapshot.available {
-                ui.label("Device or profile unavailable. Reopen device files from the app.");
-            }
-            if let Some(notice) = &snapshot.notice {
-                ui.label(notice);
-            }
+        if let Some(snapshot) = &self.snapshot
+            && !snapshot.available
+        {
+            ui.label("Device or profile unavailable. Reopen device files from the app.");
         }
         let action = if let Some(browser) = &mut self.browser {
             ui.add_enabled_ui(
@@ -275,6 +274,12 @@ impl eframe::App for Files {
             ui.label(if self.snapshot.as_ref().is_none_or(|snapshot| snapshot.busy) { "Waiting for the device catalogue…" } else { "Device catalogue unavailable. Close this window and choose Browse files to retry." });
             None
         };
+        let _ = self.shared.borrow_mut().file_toasts.show_in(
+            ui.ctx(),
+            egui::Id::new("hass-file-notifications"),
+            garmin_ui::shell::overlay_bounds(ui.ctx().content_rect()),
+            notification::StackMode::Automatic,
+        );
         if let Some(action) = action {
             self.action(&context, action, now);
         }

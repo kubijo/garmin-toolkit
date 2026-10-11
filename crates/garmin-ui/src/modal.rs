@@ -1,7 +1,7 @@
 //! Modal dialogs.
 
 use cint::ColorInterop;
-use egui::{Align, Align2, Id, Layout, Order, Response, RichText, Ui};
+use egui::{Align, Align2, Id, Layout, Order, Response, RichText, TextStyle, Ui};
 use garmin_color::theme;
 
 use crate::{
@@ -78,6 +78,21 @@ pub struct Primary<'a> {
     pub enabled: bool,
 }
 
+/// Optional navigation action in a dialog footer.
+#[derive(Clone, Copy, Debug)]
+pub struct Back<'a> {
+    pub label: &'a str,
+    pub icon: Icon,
+    pub enabled: bool,
+}
+
+/// Additional footer controls for a multi-step dialog.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FooterOptions<'a> {
+    pub back: Option<Back<'a>>,
+    pub cancel_icon: Option<Icon>,
+}
+
 /// Dialog inputs.
 pub struct Props<'a> {
     pub title: &'a str,
@@ -106,6 +121,7 @@ pub struct Output<R> {
     pub inner: R,
     pub primary: Option<Response>,
     pub cancel: Option<Response>,
+    pub back: Option<Response>,
 }
 
 /// Shows a dialog in its configured presentation.
@@ -117,6 +133,18 @@ pub fn show<R>(
     props: &Props<'_>,
     body: impl FnOnce(&mut Ui) -> R,
 ) -> Output<R> {
+    show_with_footer(ui, id, props, FooterOptions::default(), body)
+}
+
+/// Shows a dialog with an optional Back action and cancel icon.
+#[must_use]
+pub fn show_with_footer<R>(
+    ui: &mut Ui,
+    id: Id,
+    props: &Props<'_>,
+    footer: FooterOptions<'_>,
+    body: impl FnOnce(&mut Ui) -> R,
+) -> Output<R> {
     let bounds = ui.max_rect();
     match props.presentation {
         Presentation::Modal => {
@@ -125,7 +153,7 @@ pub fn show<R>(
             let response = egui::Modal::new(id)
                 .frame(egui::Frame::new())
                 .backdrop_color(egui::Color32::from_black_alpha(BACKDROP_ALPHA))
-                .show(&ctx, |ui| render_surface(ui, props, viewport, body));
+                .show(&ctx, |ui| render_surface(ui, props, footer, viewport, body));
             let mut output = response.inner;
             let close_requested = response.response.should_close()
                 || (props.backdrop_closes.unwrap_or_default()
@@ -151,7 +179,7 @@ pub fn show<R>(
                 .pivot(Align2::CENTER_CENTER)
                 .constrain_to(bounds)
                 .show(ui.ctx(), |ui| {
-                    render_surface(ui, props, bounds.size(), body)
+                    render_surface(ui, props, footer, bounds.size(), body)
                 })
                 .inner;
             if output.action.is_none()
@@ -168,6 +196,7 @@ pub fn show<R>(
 fn render_surface<R>(
     ui: &mut Ui,
     props: &Props<'_>,
+    footer: FooterOptions<'_>,
     bounds: egui::Vec2,
     body: impl FnOnce(&mut Ui) -> R,
 ) -> Output<R> {
@@ -193,12 +222,13 @@ fn render_surface<R>(
                     })
                 })
                 .inner;
-            let (action, primary, cancel) = footer(ui, props);
+            let (action, primary, cancel, back) = render_footer(ui, props, footer);
             Output {
                 action,
                 inner,
                 primary,
                 cancel,
+                back,
             }
         })
         .inner
@@ -231,10 +261,11 @@ fn header(ui: &mut Ui, props: &Props<'_>) {
             .wrap(),
     );
     if let Some(description) = props.description {
-        ui.add_space(8.0);
+        ui.add_space(16.0);
+        let description = crate::text::balanced(ui, description, &TextStyle::Body, false);
         ui.add(
             egui::Label::new(
-                RichText::new(description).color(
+                RichText::new(description.as_ref()).color(
                     crate::theme::palette(ui)
                         .content()
                         .text_secondary()
@@ -248,7 +279,16 @@ fn header(ui: &mut Ui, props: &Props<'_>) {
     ui.add_space(24.0);
 }
 
-fn footer(ui: &mut Ui, props: &Props<'_>) -> (Option<Action>, Option<Response>, Option<Response>) {
+fn render_footer(
+    ui: &mut Ui,
+    props: &Props<'_>,
+    options: FooterOptions<'_>,
+) -> (
+    Option<Action>,
+    Option<Response>,
+    Option<Response>,
+    Option<Response>,
+) {
     let actions = crate::theme::palette(ui).modal_actions();
     let width = ui.available_width();
     ui.allocate_ui_with_layout(
@@ -276,13 +316,31 @@ fn footer(ui: &mut Ui, props: &Props<'_>) -> (Option<Action>, Option<Response>, 
             let cancel = props.cancel_label.map(|label| {
                 button::Props {
                     label,
-                    icon: None,
+                    icon: options.cancel_icon,
                     kind: button::Kind::Secondary,
                     size: ComponentSize::Medium,
                     width: button::Width::Fit,
                     enabled: !props.cancel_disabled.unwrap_or(false),
                 }
                 .show_with_states(ui, actions.cancel())
+            });
+            let back = options.back.map(|back| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), FOOTER_HEIGHT),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        button::Props {
+                            label: back.label,
+                            icon: Some(back.icon),
+                            kind: button::Kind::Secondary,
+                            size: ComponentSize::Medium,
+                            width: button::Width::Fit,
+                            enabled: back.enabled,
+                        }
+                        .show_with_states(ui, actions.cancel())
+                    },
+                )
+                .inner
             });
             let action = if props
                 .primary
@@ -295,7 +353,7 @@ fn footer(ui: &mut Ui, props: &Props<'_>) -> (Option<Action>, Option<Response>, 
             } else {
                 None
             };
-            (action, primary, cancel)
+            (action, primary, cancel, back)
         },
     )
     .inner

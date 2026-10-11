@@ -295,6 +295,7 @@ pub struct Buttons {
     primary: ButtonStates,
     secondary: ButtonStates,
     tertiary: ButtonStates,
+    tertiary_danger: ButtonStates,
     ghost: ButtonStates,
     danger: ButtonStates,
 }
@@ -338,6 +339,11 @@ impl Buttons {
     #[must_use]
     pub const fn tertiary(&self) -> &ButtonStates {
         &self.tertiary
+    }
+
+    #[must_use]
+    pub const fn tertiary_danger(&self) -> &ButtonStates {
+        &self.tertiary_danger
     }
 
     #[must_use]
@@ -537,6 +543,28 @@ pub const GRAY_100: Theme = Theme {
                 background: swatch::gray::G70,
                 foreground: swatch::gray::G10,
                 border: swatch::gray::G60,
+            },
+            disabled: ButtonState {
+                background: swatch::TRANSPARENT,
+                foreground: swatch::WHITE.with_alpha(0x40),
+                border: swatch::gray::G50.with_alpha(0x4d),
+            },
+        },
+        tertiary_danger: ButtonStates {
+            rest: ButtonState {
+                background: swatch::TRANSPARENT,
+                foreground: swatch::red::G50,
+                border: swatch::red::G50,
+            },
+            hover: ButtonState {
+                background: swatch::red::G60.with_alpha(0x29),
+                foreground: swatch::red::G40,
+                border: swatch::red::G50,
+            },
+            active: ButtonState {
+                background: swatch::red::G60.with_alpha(0x52),
+                foreground: swatch::red::G30,
+                border: swatch::red::G50,
             },
             disabled: ButtonState {
                 background: swatch::TRANSPARENT,
@@ -768,6 +796,28 @@ pub const GRAY_10: Theme = Theme {
                 background: swatch::gray::G30,
                 foreground: swatch::gray::G100,
                 border: swatch::gray::G60,
+            },
+            disabled: ButtonState {
+                background: swatch::TRANSPARENT,
+                foreground: swatch::gray::G100.with_alpha(0x40),
+                border: swatch::gray::G50.with_alpha(0x40),
+            },
+        },
+        tertiary_danger: ButtonStates {
+            rest: ButtonState {
+                background: swatch::TRANSPARENT,
+                foreground: swatch::red::G60,
+                border: swatch::red::G60,
+            },
+            hover: ButtonState {
+                background: swatch::red::G60.with_alpha(0x1f),
+                foreground: swatch::red::G70,
+                border: swatch::red::G60,
+            },
+            active: ButtonState {
+                background: swatch::red::G60.with_alpha(0x33),
+                foreground: swatch::red::G80,
+                border: swatch::red::G70,
             },
             disabled: ButtonState {
                 background: swatch::TRANSPARENT,

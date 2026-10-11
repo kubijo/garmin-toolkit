@@ -147,6 +147,7 @@ impl<C, S> WindowHost for NativeWindow<C, S> {
             && was_live
         {
             context.send_viewport_cmd_to(ViewportId::from_hash_of(spec.id), ViewportCommand::Close);
+            context.request_repaint_of(ViewportId::ROOT);
         }
     }
 

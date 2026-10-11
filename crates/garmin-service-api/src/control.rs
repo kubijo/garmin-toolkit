@@ -23,7 +23,10 @@ pub const OPERATIONS: &[&str] = &[
 ];
 pub const ACTIONS: &[&str] = &[
     "click",
+    "secondary_click",
     "drag",
+    "drag_to",
+    "drag_path",
     "scroll",
     "wheel",
     "key",

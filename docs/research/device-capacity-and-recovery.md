@@ -60,8 +60,9 @@ host backups and retained payloads qualify. Approval is bound to the reviewed fi
 capture, and all evidence is checked again before mutation. The host reads the empty objects into a durable quarantine
 with an approval manifest before removing them by checked size and invoking ordinary verified rollback. The recovered
 outcome retains the quarantine location. Back, refresh, stale approvals, cancellation, and changed evidence cannot
-bypass the review. Simulation recovery operates on the retained copy and preserves the source device. The
-[shared acceptance summary](../plans/shared-interface-workflows.md#map-workflow-acceptance) records the demo coverage.
+bypass the review. Simulation recovery operates on the retained copy and preserves the source device. Desktop and
+packaged-HASS demo acceptance covered reviewed update/removal, cancellation, reconnect, retained outcomes, exclusion of
+concurrent device writes, and recovery after a process stop; owned-hardware acceptance remains open.
 
 This does not prove every desktop-MTP implementation or recovery after a real cable disconnect. Current fēnix and Edge
 mounted-MTP update, firmware-restart acceptance, and process-interruption recovery evidence lives in

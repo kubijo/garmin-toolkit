@@ -30,7 +30,6 @@ fn snapshot() -> Snapshot {
         busy: false,
         preferences: ProfilePreferences::default(),
         dark: true,
-        notice: None,
         view: None,
     }
 }

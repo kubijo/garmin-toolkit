@@ -277,6 +277,12 @@ impl App {
         })
     }
 
+    fn close_child_windows(&mut self) {
+        self.close_file_window();
+        self.close_server_chooser();
+        self.developer.close();
+    }
+
     fn sync_profiles(&mut self, profiles: Rc<Vec<ProfileSnapshot>>) {
         if Rc::ptr_eq(&self.profiles, &profiles) {
             return;
@@ -988,10 +994,17 @@ impl App {
                             .await
                             .map_err(ConnectError::call)
                             .and_then(|result| result.map_err(ConnectError::domain));
-                        shared.borrow_mut().notice = Some(match result {
-                            Ok(_) => Notice::success(complete),
-                            Err(error) => Notice::error(failure, error),
-                        });
+                        let mut state = shared.borrow_mut();
+                        match result {
+                            Ok(_) => {
+                                state.notice = None;
+                                state.toasts.push(notification::Toast::new(
+                                    notification::Kind::Success,
+                                    complete,
+                                ));
+                            }
+                            Err(error) => state.notice = Some(Notice::error(failure, error)),
+                        }
                         context.request_repaint();
                     });
                 }
@@ -1319,6 +1332,36 @@ impl App {
             dialog.set_submitting(false);
         }
     }
+
+    fn sync_frame_state(
+        &mut self,
+        devices: &[DeviceSnapshot],
+        profiles: Rc<Vec<ProfileSnapshot>>,
+        activity_detail: Option<Rc<ActivityDetailSnapshot>>,
+    ) {
+        self.sync_profiles(profiles);
+        self.sync_file_window_owner();
+        self.apply_avatar_results();
+        self.apply_device_catalogs(devices);
+        self.apply_device_fit_results();
+        self.sync_activity_detail(activity_detail);
+        let profiles = Rc::clone(&self.profiles);
+        if matches!(&self.page, Page::Device(key) if !devices.iter().any(|device| &device.key == key))
+        {
+            self.device_browser = None;
+            self.device_fit_preview = None;
+            self.device_fit_plan = None;
+            self.device_fit_job = None;
+            self.page = Page::Activities;
+        }
+        if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
+            self.selected_activity = self
+                .selected_activity
+                .min(profile.activities.len().saturating_sub(1));
+        }
+        self.apply_profile_creation(&profiles);
+        self.sync_selected_preferences();
+    }
 }
 
 impl eframe::App for App {
@@ -1371,28 +1414,7 @@ impl eframe::App for App {
             DeploymentMode::Production => "Garmin Toolkit",
             DeploymentMode::Demo => "Garmin Toolkit Demo",
         };
-        self.sync_profiles(profiles);
-        self.sync_file_window_owner();
-        self.apply_avatar_results();
-        self.apply_device_catalogs(&devices);
-        self.apply_device_fit_results();
-        self.sync_activity_detail(activity_detail);
-        let profiles = Rc::clone(&self.profiles);
-        if matches!(&self.page, Page::Device(key) if !devices.iter().any(|device| &device.key == key))
-        {
-            self.device_browser = None;
-            self.device_fit_preview = None;
-            self.device_fit_plan = None;
-            self.device_fit_job = None;
-            self.page = Page::Activities;
-        }
-        if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
-            self.selected_activity = self
-                .selected_activity
-                .min(profile.activities.len().saturating_sub(1));
-        }
-        self.apply_profile_creation(&profiles);
-        self.sync_selected_preferences();
+        self.sync_frame_state(&devices, profiles, activity_detail);
         let offline = loaded && disconnected_since.is_some();
         if offline {
             ui.disable();
@@ -1425,11 +1447,20 @@ impl eframe::App for App {
         if let Some(since) = disconnected_since.filter(|_| loaded) {
             self.show_offline(ui, since);
         }
+        let _ = self
+            .shared
+            .borrow_mut()
+            .toasts
+            .show(ui.ctx(), Id::new("hass-notifications"));
         automation::dispatch_menu(ui.ctx());
-        self.developer.update(&self.intl);
-        self.update_file_window();
+        if connected {
+            self.developer.update(&self.intl);
+            self.update_file_window();
+            self.update_server_chooser();
+        } else {
+            self.close_child_windows();
+        }
         reconcile_pending_fit_import(Rc::clone(&self.shared), self.context.clone());
-        self.update_server_chooser();
         developer::update_logs(ui.ctx(), self.shared.borrow().logs.clone());
     }
 }
@@ -1594,6 +1625,9 @@ struct State {
     profile_create_problem: Option<String>,
     created_profile: Option<UserId>,
     notice: Option<Notice>,
+    toasts: notification::Toasts,
+    file_toasts: notification::Toasts,
+    file_progress_toast: Option<notification::ToastId>,
     error: Option<String>,
     disconnected_since_milliseconds: Option<f64>,
 }
@@ -1615,6 +1649,9 @@ struct FitImportMessages {
 impl State {
     fn interrupt_device_browser_operation(&mut self) -> bool {
         let interrupted = self.active_device_browser_operation.take().is_some();
+        if let Some(id) = self.file_progress_toast.take() {
+            self.file_toasts.dismiss(id);
+        }
         self.device_browser_interrupted |= interrupted && self.pending_fit_import.is_none();
         interrupted
     }
@@ -1629,10 +1666,13 @@ impl State {
                 intl,
                 default_message: "Refresh the files view and check the result before trying again.",
             );
-            self.notice = Some(Notice::error(
-                format_message!(intl, default_message: "Device operation interrupted"),
-                format!("{explanation}\n{instruction}"),
-            ));
+            self.file_toasts.push(
+                notification::Toast::new(
+                    notification::Kind::Error,
+                    format_message!(intl, default_message: "Device operation interrupted"),
+                )
+                .detail(format!("{explanation}\n{instruction}")),
+            );
         }
     }
 }
@@ -1884,6 +1924,19 @@ fn dispatch_file_action(
                 ),
             },
         ),
+        other => return dispatch_file_mutation_action(shared, context, intl, other, device_key),
+    }
+    None
+}
+
+fn dispatch_file_mutation_action(
+    shared: &Rc<RefCell<State>>,
+    context: &eframe::egui::Context,
+    intl: &Intl,
+    action: device_browser::Action,
+    device_key: String,
+) -> Option<device_browser::Action> {
+    match action {
         device_browser::Action::CreateDirectory {
             storage_id,
             parent,
@@ -1912,6 +1965,50 @@ fn dispatch_file_action(
             format_message!(intl, default_message: "Item removed"),
             format_message!(intl, default_message: "Could not remove item"),
         ),
+        device_browser::Action::RemoveMany(selections) => spawn_device_browser_request(
+            Rc::clone(shared),
+            context.clone(),
+            DeviceBrowserRequest::RemoveMany {
+                device_key,
+                targets: selections.into_iter().map(browser_target).collect(),
+            },
+            &format_message!(intl, default_message: "Removing selected items…"),
+            format_message!(intl, default_message: "Items removed"),
+            format_message!(intl, default_message: "Could not remove selected items"),
+        ),
+        device_browser::Action::Rename { selection, name } => spawn_device_browser_request(
+            Rc::clone(shared),
+            context.clone(),
+            DeviceBrowserRequest::Rename {
+                device_key,
+                target: browser_target(selection),
+                name,
+            },
+            &format_message!(intl, default_message: "Renaming the item…"),
+            format_message!(intl, default_message: "Item renamed"),
+            format_message!(intl, default_message: "Could not rename item"),
+        ),
+        device_browser::Action::Transfer {
+            selections,
+            storage_id,
+            directory,
+            copy,
+            overwrite,
+        } => spawn_device_browser_request(
+            Rc::clone(shared),
+            context.clone(),
+            DeviceBrowserRequest::Transfer {
+                device_key,
+                targets: selections.into_iter().map(browser_target).collect(),
+                storage_id,
+                directory,
+                copy,
+                overwrite,
+            },
+            &format_message!(intl, default_message: "Transferring selected items…"),
+            format_message!(intl, default_message: "Transfer complete"),
+            format_message!(intl, default_message: "Could not transfer selected items"),
+        ),
         other => return Some(other),
     }
     None
@@ -1933,7 +2030,13 @@ fn spawn_device_browser_request(
     complete: String,
     failure: String,
 ) {
-    let Some((client, token)) = begin_device_browser_request(&shared, progress) else {
+    let show_progress = !matches!(
+        &request,
+        DeviceBrowserRequest::CreateDirectory { .. } | DeviceBrowserRequest::Rename { .. }
+    );
+    let Some((client, token)) =
+        begin_device_browser_request(&shared, show_progress.then_some(progress))
+    else {
         return;
     };
     spawn_local(execute_device_browser_request(
@@ -1950,7 +2053,7 @@ fn spawn_device_download(
     complete: String,
     failure: String,
 ) {
-    let Some((client, token)) = begin_device_browser_request(&shared, progress) else {
+    let Some((client, token)) = begin_device_browser_request(&shared, Some(progress)) else {
         return;
     };
     spawn_local(async move {
@@ -1964,10 +2067,19 @@ fn spawn_device_download(
         if !finish_device_browser_request(&mut state, token) {
             return;
         }
-        state.notice = Some(match result.and_then(|ticket| trigger_download(&ticket)) {
-            Ok(()) => Notice::success(complete),
-            Err(error) => Notice::error(failure, error),
-        });
+        match result.and_then(|ticket| trigger_download(&ticket)) {
+            Ok(()) => {
+                state.file_toasts.push(notification::Toast::new(
+                    notification::Kind::Success,
+                    complete,
+                ));
+            }
+            Err(error) => {
+                state.file_toasts.push(
+                    notification::Toast::new(notification::Kind::Error, failure).detail(error),
+                );
+            }
+        }
         drop(state);
         context.request_repaint();
     });
@@ -1981,15 +2093,13 @@ fn spawn_device_upload(
     directory: Utf8PathBuf,
     copy: DeviceUploadCopy,
 ) {
-    let Some((client, token)) = begin_device_browser_request(&shared, &copy.progress) else {
+    let Some((client, token)) = begin_device_browser_request(&shared, Some(&copy.progress)) else {
         return;
     };
     spawn_local(async move {
         let Some(file) = rfd::AsyncFileDialog::new().pick_file().await else {
             let mut state = shared.borrow_mut();
-            if finish_device_browser_request(&mut state, token) {
-                state.notice = None;
-            }
+            let _ = finish_device_browser_request(&mut state, token);
             context.request_repaint();
             return;
         };
@@ -2000,7 +2110,10 @@ fn spawn_device_upload(
         if file.inner().size() > MAX_DEVICE_BROWSER_TRANSFER_BYTES {
             let mut state = shared.borrow_mut();
             if finish_device_browser_request(&mut state, token) {
-                state.notice = Some(Notice::error(copy.failure, copy.too_large));
+                state.file_toasts.push(
+                    notification::Toast::new(notification::Kind::Error, copy.failure)
+                        .detail(copy.too_large),
+                );
             }
             context.request_repaint();
             return;
@@ -2039,9 +2152,16 @@ fn spawn_device_upload(
         match result {
             Ok(catalog) => {
                 state.device_browser_refresh = Some((device_key, Ok(catalog)));
-                state.notice = Some(Notice::success(copy.complete));
+                state.file_toasts.push(notification::Toast::new(
+                    notification::Kind::Success,
+                    copy.complete,
+                ));
             }
-            Err(error) => state.notice = Some(Notice::error(copy.failure, error)),
+            Err(error) => {
+                state.file_toasts.push(
+                    notification::Toast::new(notification::Kind::Error, copy.failure).detail(error),
+                );
+            }
         }
         drop(state);
         context.request_repaint();
@@ -2093,7 +2213,7 @@ fn spawn_device_fit_preview(
     target: DeviceBrowserTarget,
     progress: &str,
 ) {
-    let Some((client, token)) = begin_device_browser_request(&shared, progress) else {
+    let Some((client, token)) = begin_device_browser_request(&shared, Some(progress)) else {
         return;
     };
     spawn_local(async move {
@@ -2107,7 +2227,6 @@ fn spawn_device_fit_preview(
         if !finish_device_browser_request(&mut state, token) {
             return;
         }
-        state.notice = None;
         state.device_fit_preview = Some((user_id, device_key, target, result));
         drop(state);
         context.request_repaint();
@@ -2123,7 +2242,8 @@ fn spawn_device_fit_import(
     review: (uuid::Uuid, uuid::Uuid),
     messages: FitImportMessages,
 ) {
-    let Some((client, token)) = begin_device_browser_request(&shared, &messages.progress) else {
+    let Some((client, token)) = begin_device_browser_request(&shared, Some(&messages.progress))
+    else {
         return;
     };
     let (plan, job) = review;
@@ -2165,7 +2285,10 @@ fn spawn_device_fit_import(
         if let Some(result) = result {
             state.device_fit_import = Some(result);
         } else {
-            state.notice = Some(Notice::information(messages.checking));
+            state.file_toasts.push(notification::Toast::new(
+                notification::Kind::Information,
+                messages.checking,
+            ));
         }
         drop(state);
         context.request_repaint();
@@ -2270,7 +2393,7 @@ fn reconcile_pending_fit_import(shared: Rc<RefCell<State>>, context: eframe::egu
 
 fn begin_device_browser_request(
     shared: &RefCell<State>,
-    progress: &str,
+    progress: Option<&str>,
 ) -> Option<(ApplicationServiceClient, DeviceBrowserOperationToken)> {
     let mut state = shared.borrow_mut();
     if device_browser_busy(&state) {
@@ -2284,7 +2407,11 @@ fn begin_device_browser_request(
     state.next_device_browser_operation = state.next_device_browser_operation.wrapping_add(1);
     state.active_device_browser_operation = Some(token);
     state.device_browser_interrupted = false;
-    state.notice = Some(Notice::information(progress.to_owned()));
+    if let Some(progress) = progress {
+        state.file_progress_toast = Some(state.file_toasts.push(
+            notification::Toast::new(notification::Kind::Information, progress).persistent(),
+        ));
+    }
     Some((client, token))
 }
 
@@ -2299,6 +2426,9 @@ fn finish_device_browser_request(state: &mut State, token: DeviceBrowserOperatio
         return false;
     }
     state.active_device_browser_operation = None;
+    if let Some(id) = state.file_progress_toast.take() {
+        state.file_toasts.dismiss(id);
+    }
     true
 }
 
@@ -2325,9 +2455,16 @@ async fn execute_device_browser_request(
     match result {
         Ok(catalog) => {
             state.device_browser_refresh = Some((device_key, Ok(catalog)));
-            state.notice = Some(Notice::success(complete));
+            state.file_toasts.push(notification::Toast::new(
+                notification::Kind::Success,
+                complete,
+            ));
         }
-        Err(error) => state.notice = Some(Notice::error(failure, error)),
+        Err(error) => {
+            state
+                .file_toasts
+                .push(notification::Toast::new(notification::Kind::Error, failure).detail(error));
+        }
     }
     drop(state);
     context.request_repaint();
@@ -2358,7 +2495,10 @@ fn trigger_download(ticket: &DownloadTicket) -> Result<(), String> {
 fn browser_request_device_key(request: &DeviceBrowserRequest) -> &str {
     match request {
         DeviceBrowserRequest::CreateDirectory { device_key, .. }
-        | DeviceBrowserRequest::Remove { device_key, .. } => device_key,
+        | DeviceBrowserRequest::Remove { device_key, .. }
+        | DeviceBrowserRequest::RemoveMany { device_key, .. }
+        | DeviceBrowserRequest::Rename { device_key, .. }
+        | DeviceBrowserRequest::Transfer { device_key, .. } => device_key,
     }
 }
 

@@ -1,5 +1,6 @@
 //! File-browser controller; the platform host only transports its view and actions.
 use crate::window::BrowserWindow;
+use eframe::egui;
 use garmin_model::identity::UserId;
 use garmin_ui::{
     device_browser,
@@ -31,8 +32,9 @@ impl crate::App {
             return;
         };
         let busy = crate::device_browser_busy(&self.shared.borrow());
-        let same_window =
-            self.files.owner == Some(owner) && self.files.device_key.as_ref() == Some(&key);
+        let same_window = self.files.window.is_open()
+            && self.files.owner == Some(owner)
+            && self.files.device_key.as_ref() == Some(&key);
         // Raising the current owner's view must not depend on FIT operation admission.
         // Switching devices still waits for the active operation to finish.
         if busy && !same_window {
@@ -45,6 +47,11 @@ impl crate::App {
             .iter()
             .find(|device| device.key == key)
             .map_or_else(|| key.clone(), |device| device.name.clone());
+        if !same_window {
+            let mut state = self.shared.borrow_mut();
+            state.file_toasts = garmin_ui::notification::Toasts::default();
+            state.file_progress_toast = None;
+        }
         if self.files.device_key.as_ref() != Some(&key) {
             self.device_browser = None;
             self.files.view = None;
@@ -91,14 +98,7 @@ impl crate::App {
         if self.files.owner.is_none() || self.files.owner == selected {
             return;
         }
-        self.files.window.close(&self.context);
-        self.files.owner = None;
-        self.files.device_key = None;
-        self.files.view = None;
-        self.device_browser = None;
-        self.device_fit_preview = None;
-        self.device_fit_plan = None;
-        self.device_fit_job = None;
+        self.close_file_window();
         let mut state = self.shared.borrow_mut();
         // Late results must not restore another user's catalogue or FIT preview.
         state.device_catalog_request.invalidate();
@@ -111,6 +111,20 @@ impl crate::App {
         state.pending_fit_import = None;
         state.reconciling_fit_import = None;
         state.notice = None;
+    }
+
+    pub(super) fn close_file_window(&mut self) {
+        self.files.window.close(&self.context);
+        self.files.owner = None;
+        self.files.device_key = None;
+        self.files.view = None;
+        self.device_browser = None;
+        self.device_fit_preview = None;
+        self.device_fit_plan = None;
+        self.device_fit_job = None;
+        let mut state = self.shared.borrow_mut();
+        state.file_toasts = garmin_ui::notification::Toasts::default();
+        state.file_progress_toast = None;
     }
 
     pub(super) fn update_file_window(&mut self) {
@@ -159,7 +173,7 @@ impl crate::App {
             &self.intl,
             || unreachable!("inline windows do not publish snapshots"),
             |ui| {
-                if let Some(browser) = &mut self.device_browser {
+                let action = if let Some(browser) = &mut self.device_browser {
                     browser.set_show_hidden_files(snapshot.preferences.show_hidden_files());
                     ui.add_enabled_ui(snapshot.available && !snapshot.busy, |ui| {
                         browser.show(ui, &self.intl)
@@ -172,7 +186,14 @@ impl crate::App {
                 } else {
                     ui.spinner();
                     None
-                }
+                };
+                let _ = self.shared.borrow_mut().file_toasts.show_in(
+                    ui.ctx(),
+                    egui::Id::new("hass-inline-file-notifications"),
+                    ui.max_rect(),
+                    garmin_ui::notification::StackMode::Automatic,
+                );
+                action
             },
         );
         self.files.window = window;
@@ -230,12 +251,6 @@ impl crate::App {
                 .map(|profile| profile.user.profile().preferences())
                 .unwrap_or_default(),
             dark: self.context.global_style().visuals.dark_mode,
-            notice: state.notice.as_ref().map(|notice| {
-                notice.detail.as_ref().map_or_else(
-                    || notice.title.clone(),
-                    |detail| format!("{}: {detail}", notice.title),
-                )
-            }),
             view: self.files.view.clone(),
         })
     }

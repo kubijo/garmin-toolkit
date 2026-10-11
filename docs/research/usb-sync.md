@@ -185,6 +185,12 @@ This read-access baseline proves attachment identity, enumeration, manifest disc
 reads, decoding, initial watch delivery, and generic GVFS create/read/delete. It does not prove later hotplug,
 reconnect, HASS permissions, or device acceptance of written Garmin content.
 
+## Course transfer evidence
+
+One owned Edge 1050 displayed a transferred FIT Course as “Last Course Added” after disconnect. This is happy-path
+firmware discovery only; cancellation, partial writes, disconnect/recovery, and discovery after recovery have not been
+inspected on the physical device.
+
 ## Map-maintenance evidence
 
 User-reported CLI runs separately showed successful map download, verification, and authorization capture on fēnix 8

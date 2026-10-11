@@ -29,3 +29,7 @@ Theme = "Light"
 [shot.knobs]
 expanded = true
 height = 180.0
+
+[[shot]]
+name = "long-error-toast"
+scene = "notification::Long Error Toast"

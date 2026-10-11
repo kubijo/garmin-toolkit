@@ -102,6 +102,28 @@ test('ready hides loading, ignores progress, but still surfaces a later runtime 
     assert.equal(instance.get('detail').textContent, 'runtime panic');
 });
 
+test('unknown-size downloads stay indeterminate while slow progress updates are coalesced', t => {
+    const instance = loader(t);
+    instance.hooks.onStart();
+    assert.equal(instance.get('detail').textContent, 'Starting download…');
+    instance.hooks.onProgress({ current: 1024, total: 0 });
+    instance.hooks.onProgress({ current: 4096, total: 0 });
+    assert.equal(instance.frames.size, 1);
+    instance.flush();
+    assert.equal(instance.get('progress').dataset.determinate, undefined);
+    assert.match(instance.get('detail').textContent, /MB.*MB\/s/);
+    assert.equal(instance.frames.size, 0);
+});
+
+test('cached download can become ready before any progress callback', t => {
+    const instance = loader(t);
+    instance.send('ready');
+    instance.hooks.onStart();
+    instance.hooks.onProgress({ current: 100, total: 100 });
+    assert.equal(instance.get('').hidden, true);
+    assert.equal(instance.frames.size, 0);
+});
+
 test('emitted WASM reports the original failure through the Rust CustomEvent bridge', {
     skip: !process.env.GARMIN_TEST_WEB_ROOT && 'requires emitted WASM; mandatory in the web package build',
 }, async t => {

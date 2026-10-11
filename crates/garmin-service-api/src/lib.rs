@@ -78,6 +78,23 @@ pub enum DeviceBrowserRequest {
         device_key: String,
         target: DeviceBrowserTarget,
     },
+    RemoveMany {
+        device_key: String,
+        targets: Vec<DeviceBrowserTarget>,
+    },
+    Rename {
+        device_key: String,
+        target: DeviceBrowserTarget,
+        name: String,
+    },
+    Transfer {
+        device_key: String,
+        targets: Vec<DeviceBrowserTarget>,
+        storage_id: String,
+        directory: Utf8PathBuf,
+        copy: bool,
+        overwrite: bool,
+    },
 }
 
 #[garmin_macros::portable(eq)]

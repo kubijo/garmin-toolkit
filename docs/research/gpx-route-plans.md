@@ -53,4 +53,4 @@ Course. The existing parser separates tracks, segments, and routes; validate the
 
 Routing-engine selection is deferred with the in-app planner. See
 [ADR 0028](../decisions/0028-user-owned-route-plans.md) and the
-[HASS watch plan](../plans/hass-watch-vertical-slice.md#remaining-work).
+[HASS add-on and hardware plan](../plans/hass-watch-vertical-slice.md).

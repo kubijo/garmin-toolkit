@@ -14,6 +14,5 @@ persisted, and no application-level confidentiality is claimed.
 4. Define recovery, loss, password changes, passwordless users, and unattended operation before migration.
 5. Implement behind existing boundaries with downgrade and failure tests.
 
-Delete this plan when every claim names its threat model and reviewed implementation; secrets cannot reach plaintext
-storage, exports, browser state, fixtures, or logs; failure and recovery paths are tested; and passwordless local use
-still works.
+Before making a protection claim, test that secrets cannot reach plaintext storage, exports, browser state, fixtures, or
+logs, and that passwordless local use and recovery still work.

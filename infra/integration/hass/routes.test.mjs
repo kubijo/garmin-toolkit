@@ -184,18 +184,17 @@ test('reviewed Course transfer reaches the mock watch without pairing', options,
         async () => (await existingEntries(directory)).length === before.length + 1,
         'Course on mock watch',
     );
-    await eventually(async () => {
-        await run(p, [click('routes.transfer.check')]);
-        return (await transferStatusText(p)).includes('Verified on device');
-    }, 'readback-verified Course');
+    await eventually(
+        async () => (await transferStatusText(p)).includes('FIT file verified'),
+        'live readback-verified Course status',
+    );
     const [fileName] = (await readdir(directory)).filter(name => !before.includes(name));
     assert.deepEqual(await readFile(join(directory, fileName)), f.storage.artifact(course.artifact_id));
     assert.deepEqual(await existingFile(marker), markerBefore, 'sending a Course must not change pairing');
-    await run(p, [click('routes.transfer.accept')]);
-    await eventually(
-        async () => (await transferStatusText(p)).includes('Confirmed on device'),
-        'user-confirmed Course on device',
-    );
+    const controls = await targets(p);
+    assert.equal(controls.find(target => target.id === 'routes.transfer.cancel').enabled, false);
+    assert.equal(controls.find(target => target.id === 'routes.transfer.close').enabled, true);
+    await run(p, [click('routes.transfer.close')]);
     await f.stopHost();
     await f.startHost();
     await selectProfile(p);
@@ -203,6 +202,7 @@ test('reviewed Course transfer reaches the mock watch without pairing', options,
     await courseVisible(p, course);
     await run(p, [click(`routes.send.${course.id}`), wait(device), click(device), wait(storage), click(storage)]);
     await run(p, [wait('routes.transfer.status')]);
+    assert((await transferStatusText(p)).includes('FIT file verified'));
     assert.equal((await readdir(directory)).length, before.length + 1, 'repeat send must not create another file');
 });
 

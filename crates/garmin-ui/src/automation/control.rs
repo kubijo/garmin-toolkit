@@ -52,6 +52,7 @@ impl Driver {
             && (self.running()
                 || self.resumed_at.is_some()
                 || self.release
+                || self.reset_modifiers
                 || self.viewport_restore.is_some())
     }
 

@@ -121,6 +121,29 @@ fn toast_stack_narrow(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     });
 }
 
+#[scene]
+fn long_error_toast(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+    stage!(ctx, ui, (480, 240), |ui| {
+        let bounds = ui.available_rect_before_wrap();
+        ui.painter()
+            .rect_filled(bounds, 0.0, ui.visuals().panel_fill);
+        let mut toasts = notification::Toasts::default();
+        toasts.push(
+            notification::Toast::new(
+                notification::Kind::Error,
+                "FIT file type course is unsupported in an activity import",
+            )
+            .persistent(),
+        );
+        let _ = toasts.show_in(
+            ui.ctx(),
+            egui::Id::new("notification-gallery-long-error"),
+            bounds,
+            notification::StackMode::Automatic,
+        );
+    });
+}
+
 #[derive(Default)]
 struct ToastScene {
     toasts: notification::Toasts,

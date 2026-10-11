@@ -261,6 +261,18 @@ pub enum DeviceBrowserOperation {
         name: String,
     },
     Remove(garmin_device::DeviceBrowserTarget),
+    RemoveMany(Vec<garmin_device::DeviceBrowserTarget>),
+    Rename {
+        target: garmin_device::DeviceBrowserTarget,
+        name: String,
+    },
+    Transfer {
+        targets: Vec<garmin_device::DeviceBrowserTarget>,
+        storage_id: String,
+        directory: Utf8PathBuf,
+        copy: bool,
+        overwrite: bool,
+    },
 }
 
 impl DeviceBrowserOperation {
@@ -272,6 +284,9 @@ impl DeviceBrowserOperation {
             Self::Upload { .. } => DeviceBrowserOperationKind::Upload,
             Self::CreateDirectory { .. } => DeviceBrowserOperationKind::CreateDirectory,
             Self::Remove(_) => DeviceBrowserOperationKind::Remove,
+            Self::RemoveMany(_) => DeviceBrowserOperationKind::RemoveMany,
+            Self::Rename { .. } => DeviceBrowserOperationKind::Rename,
+            Self::Transfer { .. } => DeviceBrowserOperationKind::Transfer,
         }
     }
 }
@@ -284,6 +299,9 @@ pub enum DeviceBrowserOperationKind {
     Upload,
     CreateDirectory,
     Remove,
+    RemoveMany,
+    Rename,
+    Transfer,
 }
 
 pub enum DeviceBrowserOutcome {
@@ -452,6 +470,10 @@ fn execute_command(
     true
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "device operation dispatch retains one catalog and transport snapshot"
+)]
 fn operate_device(
     runtime: &tokio::runtime::Runtime,
     application: &Application,
@@ -548,6 +570,59 @@ fn operate_device(
                     &device, &catalog, &target, progress,
                 ))
                 .map_err(|error| error.to_string())?;
+            candidate
+                .browse_with_progress(progress)
+                .map(DeviceBrowserOutcome::Refreshed)
+        }
+        DeviceBrowserOperation::RemoveMany(targets) => {
+            runtime
+                .block_on(garmin_device::remove_browser_targets_with_progress(
+                    &device, &catalog, &targets, progress,
+                ))
+                .map_err(|error| error.to_string())?;
+            candidate
+                .browse_with_progress(progress)
+                .map(DeviceBrowserOutcome::Refreshed)
+        }
+        DeviceBrowserOperation::Rename { target, name } => {
+            runtime
+                .block_on(garmin_device::rename_browser_target_with_progress(
+                    &device, &catalog, &target, &name, progress,
+                ))
+                .map_err(|error| error.to_string())?;
+            candidate
+                .browse_with_progress(progress)
+                .map(DeviceBrowserOutcome::Refreshed)
+        }
+        DeviceBrowserOperation::Transfer {
+            targets,
+            storage_id,
+            directory,
+            copy,
+            overwrite,
+        } => {
+            let result = if overwrite {
+                runtime.block_on(garmin_device::replace_browser_file_with_progress(
+                    &device,
+                    &catalog,
+                    &targets,
+                    &storage_id,
+                    &directory,
+                    copy,
+                    progress,
+                ))
+            } else {
+                runtime.block_on(garmin_device::transfer_browser_targets_with_progress(
+                    &device,
+                    &catalog,
+                    &targets,
+                    &storage_id,
+                    &directory,
+                    copy,
+                    progress,
+                ))
+            };
+            result.map_err(|error| error.to_string())?;
             candidate
                 .browse_with_progress(progress)
                 .map(DeviceBrowserOutcome::Refreshed)

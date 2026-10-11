@@ -1350,7 +1350,10 @@ async fn import_device_fit(
 pub(super) fn browser_device_key(request: &DeviceBrowserRequest) -> &str {
     match request {
         DeviceBrowserRequest::CreateDirectory { device_key, .. }
-        | DeviceBrowserRequest::Remove { device_key, .. } => device_key,
+        | DeviceBrowserRequest::Remove { device_key, .. }
+        | DeviceBrowserRequest::RemoveMany { device_key, .. }
+        | DeviceBrowserRequest::Rename { device_key, .. }
+        | DeviceBrowserRequest::Transfer { device_key, .. } => device_key,
     }
 }
 
@@ -1384,6 +1387,61 @@ where
             garmin_device::remove_browser_target_with_progress(device, catalog, &target, progress)
                 .await
                 .map_err(|error| error.to_string())
+        }
+        DeviceBrowserRequest::RemoveMany { targets, .. } => {
+            let targets = targets
+                .into_iter()
+                .map(device_browser_target)
+                .collect::<Vec<_>>();
+            garmin_device::remove_browser_targets_with_progress(device, catalog, &targets, progress)
+                .await
+                .map_err(|error| error.to_string())
+        }
+        DeviceBrowserRequest::Rename { target, name, .. } => {
+            let target = device_browser_target(target);
+            garmin_device::rename_browser_target_with_progress(
+                device, catalog, &target, &name, progress,
+            )
+            .await
+            .map_err(|error| error.to_string())
+        }
+        DeviceBrowserRequest::Transfer {
+            targets,
+            storage_id,
+            directory,
+            copy,
+            overwrite,
+            ..
+        } => {
+            let targets = targets
+                .into_iter()
+                .map(device_browser_target)
+                .collect::<Vec<_>>();
+            if overwrite {
+                garmin_device::replace_browser_file_with_progress(
+                    device,
+                    catalog,
+                    &targets,
+                    &storage_id,
+                    &directory,
+                    copy,
+                    progress,
+                )
+                .await
+                .map_err(|error| error.to_string())
+            } else {
+                garmin_device::transfer_browser_targets_with_progress(
+                    device,
+                    catalog,
+                    &targets,
+                    &storage_id,
+                    &directory,
+                    copy,
+                    progress,
+                )
+                .await
+                .map_err(|error| error.to_string())
+            }
         }
     }
 }

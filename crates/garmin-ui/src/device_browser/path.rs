@@ -1,7 +1,9 @@
 //! Editable location bar shared by device browsers and remote file choosers.
+use std::cell::RefCell;
+
 use super::{
-    BREADCRUMB_HEIGHT, Browser, DeviceCatalogEntryKind, Intl, Size, Ui, Utf8Path, Utf8PathBuf,
-    breadcrumb, button, format_message, icons, show_breadcrumb_separator,
+    BREADCRUMB_HEIGHT, Browser, DeviceCatalogEntryKind, DirectoryId, Intl, Rect, Size, Ui,
+    Utf8Path, Utf8PathBuf, breadcrumb, button, format_message, icons, show_breadcrumb_separator,
 };
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -19,7 +21,12 @@ impl Browser {
         self.path_editor.focus = true;
     }
 
-    pub(super) fn show_path(&mut self, ui: &mut Ui, intl: &Intl) -> Option<Utf8PathBuf> {
+    pub(super) fn show_path(
+        &mut self,
+        ui: &mut Ui,
+        intl: &Intl,
+        drop_targets: &RefCell<Vec<(DirectoryId, Rect)>>,
+    ) -> Option<Utf8PathBuf> {
         let shortcut = ui.is_enabled()
             && ui.is_visible()
             && ui.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::L));
@@ -43,6 +50,14 @@ impl Browser {
         } else {
             breadcrumb(ui, self.current.path.as_str().is_empty(), &storage.label)
         };
+        crate::semantics::target(ui, &root, "files.breadcrumb.root");
+        drop_targets.borrow_mut().push((
+            DirectoryId {
+                storage_index: self.current.storage_index,
+                path: Utf8PathBuf::new(),
+            },
+            root.rect.intersect(ui.clip_rect()),
+        ));
         if root.clicked() {
             target = Some(Utf8PathBuf::new());
         }
@@ -56,7 +71,16 @@ impl Browser {
         {
             show_breadcrumb_separator(ui);
             path.push(component);
-            if breadcrumb(ui, path == self.current.path, component).clicked() {
+            let response = breadcrumb(ui, path == self.current.path, component);
+            crate::semantics::target(ui, &response, format!("files.breadcrumb.{path}"));
+            drop_targets.borrow_mut().push((
+                DirectoryId {
+                    storage_index: self.current.storage_index,
+                    path: path.clone(),
+                },
+                response.rect.intersect(ui.clip_rect()),
+            ));
+            if response.clicked() {
                 target = Some(path.clone());
             }
         }

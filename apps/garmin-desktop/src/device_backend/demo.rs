@@ -66,11 +66,17 @@ pub fn transport(candidate: &Candidate) -> Device {
 pub fn map_connector(
     candidate: &Candidate,
 ) -> std::sync::Arc<dyn garmin_services::maps::device::Connector> {
-    std::sync::Arc::new(garmin_services::maps::device::DirectoryConnector {
-        root: candidate.fixture.root().to_owned(),
-        storage_id: fixture::STORAGE_ID.to_owned(),
-        storage_label: fixture::STORAGE_LABEL.to_owned(),
-    })
+    let delays = candidate.fixture.transfer_delays();
+    std::sync::Arc::new(
+        garmin_services::maps::device::DirectoryConnector {
+            root: candidate.fixture.root().to_owned(),
+            storage_id: fixture::STORAGE_ID.to_owned(),
+            storage_label: fixture::STORAGE_LABEL.to_owned(),
+        }
+        .with_transfer_delays(delays.0, delays.1)
+        .with_missing_uploaded_file_on_verify(candidate.fixture.remove_uploaded_before_verify())
+        .with_partial_uploaded_file_on_verify(candidate.fixture.truncate_uploaded_before_verify()),
+    )
 }
 
 #[cfg(test)]

@@ -21,7 +21,9 @@ pub use browser::{
     DeviceCatalogEntry, DeviceCatalogEntryKind, DeviceCatalogStorage, MAX_BROWSER_TRANSFER_BYTES,
     PreparedDeviceBrowserDownload, create_browser_directory,
     create_browser_directory_with_progress, prepare_browser_download, remove_browser_target,
-    remove_browser_target_with_progress, upload_browser_file_from_path,
+    remove_browser_target_with_progress, remove_browser_targets_with_progress,
+    rename_browser_target_with_progress, replace_browser_file_with_progress,
+    transfer_browser_targets_with_progress, upload_browser_file_from_path,
 };
 pub use domain::{
     DeviceInventory, DeviceManifest, DevicePathInspection, DevicePathState, DevicePathStatus,

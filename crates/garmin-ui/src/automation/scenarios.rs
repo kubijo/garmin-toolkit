@@ -9,25 +9,56 @@ pub const SCENARIOS: &[&str] = &[
 
 #[derive(Clone)]
 pub(super) enum Action {
-    Resize { width: f32, height: f32 },
+    Resize {
+        width: f32,
+        height: f32,
+    },
     Available,
     Wait,
     Ready,
     Click,
-    Drag { x: f32, y: f32 },
+    ClickWith(egui::Modifiers),
+    SecondaryClick,
+    Drag {
+        x: f32,
+        y: f32,
+    },
+    DragTo {
+        destination: String,
+        modifiers: egui::Modifiers,
+        dwell_frames: usize,
+    },
+    DragPath(Vec<DragStop>),
     Wheel(f32),
     Scroll(f32),
     Observe(f64),
     Value(String),
-    Key(egui::Key),
+    Key {
+        key: egui::Key,
+        modifiers: egui::Modifiers,
+    },
     Text(String),
+}
+
+#[derive(Clone)]
+pub(super) struct DragStop {
+    pub destination: String,
+    pub modifiers: egui::Modifiers,
+    pub dwell_frames: usize,
 }
 
 impl Action {
     pub(super) const fn uses_pointer(&self) -> bool {
         matches!(
             self,
-            Self::Click | Self::Drag { .. } | Self::Wheel(_) | Self::Scroll(_)
+            Self::Click
+                | Self::ClickWith(_)
+                | Self::SecondaryClick
+                | Self::Drag { .. }
+                | Self::DragTo { .. }
+                | Self::DragPath(_)
+                | Self::Wheel(_)
+                | Self::Scroll(_)
         )
     }
 
@@ -37,13 +68,16 @@ impl Action {
             Self::Available => "assert_available",
             Self::Wait => "wait",
             Self::Ready => "readiness",
-            Self::Click => "click",
+            Self::Click | Self::ClickWith(_) => "click",
+            Self::SecondaryClick => "secondary_click",
             Self::Drag { .. } => "drag",
+            Self::DragTo { .. } => "drag_to",
+            Self::DragPath(_) => "drag_path",
             Self::Wheel(_) => "zoom",
             Self::Scroll(_) => "scroll",
             Self::Observe(_) => "observe",
             Self::Value(_) => "assert",
-            Self::Key(_) => "key",
+            Self::Key { .. } => "key",
             Self::Text(_) => "text",
         }
     }

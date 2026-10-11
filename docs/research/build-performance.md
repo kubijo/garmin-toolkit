@@ -108,13 +108,6 @@ The existing gallery path misses the latency target and has a workspace correctn
 desktop reload solution. First-frame timing, interactive state checks, 30-generation resource testing, and macOS remain
 unverified.
 
-## Remaining work
-
-- Resolve the gallery workspace lock timeout before using it for reload acceptance tests.
-- Profile bindgen after real WASM edits. Samply was blocked by host `perf_event_paranoid=4`; no CPU capture exists.
-- Measure HASS live serving and save-to-visible latency.
-- Recheck nightly `recursion_depth_exceeding_limit` for `egui_adapter::Paint: Sync` through WGPU before upgrading Rust.
-
 Rejected experiments: disabling dependency debug information reduced WASM 143→80 MiB without improving bindgen time; one
 no-demangle probe reduced bindgen 2.941→2.745 s, insufficient evidence to sacrifice symbols; moving desktop CLI parsing
 into the library showed no clear gain.

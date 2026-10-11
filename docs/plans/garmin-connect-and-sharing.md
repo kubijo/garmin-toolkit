@@ -14,6 +14,3 @@ Add optional Garmin Connect and multi-user sharing without weakening local opera
 
 [Security hardening](security-hardening.md) must first provide target credential custody. Configuration stores only
 opaque references; application services own authorization. Sharing requires negative isolation and revocation tests.
-
-Delete this plan after Connect failures cannot harm local USB use, secrets cannot reach captures or exports, sharing
-isolation is tested, and every support claim names its evidence and unofficial boundary.

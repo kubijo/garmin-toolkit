@@ -1,7 +1,7 @@
 //! Explorer window for files exposed by a connected device.
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
 };
 
@@ -68,18 +68,20 @@ const TABLE_BORDER_ALPHA: u8 = 0x40;
 const TABLE_STRIPE_CONTRAST_DIVISOR: u8 = 5;
 const TABLE_STRIPE_CONTRAST_MULTIPLIER: u8 = 2;
 const UPLOAD_ACTION_AREA_HEIGHT: f32 = 52.0;
-const UPLOAD_ACTION_INSET: f32 = 12.0;
+const PANE_ACTION_HEIGHT: f32 = 32.0;
+const PANE_ACTION_BOTTOM_INSET: f32 = 12.0;
 const NAVIGATION_HISTORY_LIMIT: usize = 64;
 const CONTEXT_MENU_WIDTH: f32 = 208.0;
 const CONTEXT_MENU_ROW_HEIGHT: f32 = 36.0;
 const CONTEXT_MENU_INLINE_PADDING: f32 = 12.0;
 const CONTEXT_MENU_ICON_GAP: f32 = 8.0;
 const DETAILS_SUMMARY_ROW_HEIGHT: f32 = 20.0;
-const DETAILS_SUMMARY_GAP: f32 = 2.0;
-const DETAILS_ACTION_HEIGHT: f32 = 32.0;
+const DETAILS_SUMMARY_GAP: f32 = 8.0;
 const DETAILS_ACTION_GAP: f32 = 2.0;
 const DETAILS_ACTION_TOP_GAP: f32 = 8.0;
-const DETAILS_ACTION_BOTTOM_INSET: f32 = 12.0;
+const DRAG_PREVIEW_WIDTH: f32 = 240.0;
+const DRAG_PREVIEW_HEIGHT: f32 = 32.0;
+const DRAG_PREVIEW_OFFSET: f32 = 16.0;
 const TOOLKIT_CONTENT_OPACITY: f32 = 0.62;
 
 /// One entry selected in the device explorer.
@@ -133,7 +135,19 @@ pub enum Action {
         parent: Utf8PathBuf,
         name: String,
     },
+    Rename {
+        selection: Selection,
+        name: String,
+    },
     Remove(Selection),
+    RemoveMany(Vec<Selection>),
+    Transfer {
+        selections: Vec<Selection>,
+        storage_id: String,
+        directory: Utf8PathBuf,
+        copy: bool,
+        overwrite: bool,
+    },
     /// Reload the device catalogue while preserving the current directory and selection.
     Refresh,
     ShowHiddenFiles(bool),
@@ -230,15 +244,28 @@ enum ItemAction {
     ImportFit,
     Download,
     CreateDirectory,
+    Rename,
     Remove,
 }
 
 impl ItemAction {
+    const fn semantic_id(self) -> &'static str {
+        match self {
+            Self::Open => "files.context.open",
+            Self::ImportFit => "files.context.import",
+            Self::Download => "files.context.download",
+            Self::CreateDirectory => "files.context.new-folder",
+            Self::Rename => "files.context.rename",
+            Self::Remove => "files.context.remove",
+        }
+    }
+
     const fn icon(self) -> icons::Icon {
         match self {
             Self::Open => icons::ACTIVITY,
             Self::ImportFit => icons::PLUS,
             Self::CreateDirectory => icons::FOLDER_PLUS,
+            Self::Rename => icons::PENCIL,
             Self::Download => icons::DOWNLOAD_SIMPLE,
             Self::Remove => icons::TRASH,
         }
@@ -247,9 +274,11 @@ impl ItemAction {
     const fn row_kind(self) -> header_selector::RowKind {
         match self {
             Self::Remove => header_selector::RowKind::Danger,
-            Self::Open | Self::ImportFit | Self::Download | Self::CreateDirectory => {
-                header_selector::RowKind::Default
-            }
+            Self::Open
+            | Self::ImportFit
+            | Self::Download
+            | Self::CreateDirectory
+            | Self::Rename => header_selector::RowKind::Default,
         }
     }
 
@@ -262,13 +291,14 @@ impl ItemAction {
             }
             Self::Download => format_message!(intl, default_message: "Download"),
             Self::CreateDirectory => format_message!(intl, default_message: "New folder"),
+            Self::Rename => format_message!(intl, default_message: "Rename"),
             Self::Remove => format_message!(intl, default_message: "Remove"),
         }
     }
 }
 
 fn available_item_actions(selection: &Selection, can_remove: bool) -> Vec<ItemAction> {
-    let mut actions = Vec::with_capacity(5);
+    let mut actions = Vec::with_capacity(6);
     if selection.is_fit_file() {
         actions.extend([ItemAction::Open, ItemAction::ImportFit]);
     }
@@ -276,6 +306,9 @@ fn available_item_actions(selection: &Selection, can_remove: bool) -> Vec<ItemAc
     if !selection.is_toolkit_managed() {
         if selection.kind == DeviceCatalogEntryKind::Directory {
             actions.push(ItemAction::CreateDirectory);
+        }
+        if !selection.path.as_str().is_empty() {
+            actions.push(ItemAction::Rename);
         }
         if can_remove {
             actions.push(ItemAction::Remove);
@@ -288,10 +321,77 @@ fn activated_item_action(selection: &Selection) -> Option<ItemAction> {
     selection.is_fit_file().then_some(ItemAction::Open)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 enum EntryInteraction {
-    Select { index: usize, activate: bool },
-    Context { index: usize, action: ItemAction },
+    Select {
+        index: usize,
+        activate: bool,
+        intent: SelectionIntent,
+    },
+    Context {
+        index: usize,
+        action: ItemAction,
+    },
+    Marquee(MarqueeUpdate),
+    Drag(EntryDrag),
+    Drop(usize),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct EntryDrag {
+    index: usize,
+    finished: bool,
+    destination: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+struct MarqueeUpdate {
+    origin: egui::Pos2,
+    indices: Vec<usize>,
+    started: bool,
+    finished: bool,
+    add: bool,
+}
+
+struct MarqueeSelection {
+    origin: egui::Pos2,
+    baseline: Vec<Selection>,
+    add: bool,
+}
+
+struct DraggedEntries {
+    selections: Vec<Selection>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SelectionIntent {
+    Replace,
+    Toggle,
+    Range { add: bool },
+    Preserve,
+}
+
+#[derive(Clone, Copy)]
+struct EntryTableSelection<'a> {
+    focus: Option<&'a str>,
+    paths: &'a HashSet<Utf8PathBuf>,
+    marquee_origin: Option<egui::Pos2>,
+    drop_paths: &'a HashSet<Utf8PathBuf>,
+    dragging: bool,
+}
+
+#[derive(Clone, Copy)]
+struct EntryTableInput<'a> {
+    selection: EntryTableSelection<'a>,
+    keyboard_index: Option<usize>,
+    keyboard_context: Option<bool>,
+    background: Option<&'a egui::Response>,
+}
+
+#[derive(Clone, Copy)]
+enum ContextActions {
+    Single { can_remove: bool },
+    Multi { can_remove: bool },
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -299,6 +399,20 @@ struct CreateDirectoryDialog {
     parent: Selection,
     name: String,
     focus_name: bool,
+}
+
+struct RenameDialog {
+    selection: Selection,
+    name: String,
+    focus_name: bool,
+}
+
+struct PendingOverwrite {
+    selection: Selection,
+    storage_id: String,
+    directory: Utf8PathBuf,
+    existing: Utf8PathBuf,
+    copy: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -352,11 +466,19 @@ pub struct Browser {
     device_name: String,
     current: DirectoryId,
     selected: Option<Selection>,
+    additional_selected: Vec<Selection>,
+    selection_anchor: Option<Utf8PathBuf>,
+    marquee: Option<MarqueeSelection>,
+    dragged: Option<DraggedEntries>,
+    drop_action: Option<Action>,
     tree_state: TreeViewState<DirectoryId>,
     back_stack: Vec<DirectoryId>,
     forward_stack: Vec<DirectoryId>,
     create_directory: Option<CreateDirectoryDialog>,
+    rename: Option<RenameDialog>,
     pending_removal: Option<Selection>,
+    pending_bulk_removal: Option<Vec<Selection>>,
+    pending_overwrite: Option<PendingOverwrite>,
     compact_pane: Option<CompactPane>,
     window_position: Option<egui::Pos2>,
     show_hidden_files: bool,
@@ -394,11 +516,19 @@ impl Browser {
             device_name: device_name.to_owned(),
             current,
             selected: None,
+            additional_selected: Vec::new(),
+            selection_anchor: None,
+            marquee: None,
+            dragged: None,
+            drop_action: None,
             tree_state,
             back_stack: Vec::new(),
             forward_stack: Vec::new(),
             create_directory: None,
+            rename: None,
             pending_removal: None,
+            pending_bulk_removal: None,
+            pending_overwrite: None,
             compact_pane: None,
             window_position: None,
             show_hidden_files: false,
@@ -448,15 +578,211 @@ impl Browser {
         &self.catalog.device_key
     }
 
+    /// Select visible rows when constructing an automation preview.
+    ///
+    /// # Errors
+    /// Returns an error if a path is not a visible row in the current directory.
+    #[cfg(feature = "automation")]
+    pub fn select_paths_for_preview(&mut self, paths: &[&str]) -> Result<(), String> {
+        let storage = &self.catalog.storages[self.current.storage_index];
+        let storage_id = storage.id.clone();
+        let storage_label = storage.label.clone();
+        let rows = storage
+            .entries
+            .iter()
+            .filter(|entry| parent_path(&entry.path) == self.current.path)
+            .filter(|entry| self.show_hidden_files || !is_hidden(&entry.path))
+            .cloned()
+            .collect::<Vec<_>>();
+        let selections = paths
+            .iter()
+            .map(|path| {
+                let entry = rows
+                    .iter()
+                    .find(|entry| entry.path == *path)
+                    .ok_or_else(|| {
+                        format!("path `{path}` is not visible in the current directory")
+                    })?;
+                Ok(Selection {
+                    storage_id: storage_id.clone(),
+                    storage_label: storage_label.clone(),
+                    path: entry.path.clone(),
+                    kind: entry.kind,
+                    size: entry.size,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        self.selected = None;
+        self.additional_selected.clear();
+        self.selection_anchor = None;
+        for (index, selection) in selections.into_iter().enumerate() {
+            self.select_entry(
+                &rows,
+                selection,
+                if index == 0 {
+                    SelectionIntent::Replace
+                } else {
+                    SelectionIntent::Toggle
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn selections(&self) -> Vec<Selection> {
+        self.selected
+            .iter()
+            .chain(&self.additional_selected)
+            .cloned()
+            .collect()
+    }
+
+    fn replace_selection(&mut self, selection: Selection) {
+        self.selection_anchor = Some(selection.path.clone());
+        self.selected = Some(selection);
+        self.additional_selected.clear();
+    }
+
+    fn select_entry(
+        &mut self,
+        rows: &[DeviceCatalogEntry],
+        clicked: Selection,
+        intent: SelectionIntent,
+    ) {
+        let already_selected = self
+            .selections()
+            .iter()
+            .any(|selection| selection.path == clicked.path);
+        if matches!(intent, SelectionIntent::Preserve) && already_selected {
+            return;
+        }
+        if matches!(intent, SelectionIntent::Replace | SelectionIntent::Preserve) {
+            self.replace_selection(clicked);
+            return;
+        }
+
+        let mut selections = self.selections();
+        match intent {
+            SelectionIntent::Toggle => {
+                if already_selected {
+                    selections.retain(|selection| selection.path != clicked.path);
+                } else {
+                    selections.push(clicked.clone());
+                }
+                self.selection_anchor = Some(clicked.path.clone());
+            }
+            SelectionIntent::Range { add } => {
+                let anchor = self
+                    .selection_anchor
+                    .as_ref()
+                    .and_then(|path| rows.iter().position(|entry| entry.path == *path));
+                let end = rows.iter().position(|entry| entry.path == clicked.path);
+                let (Some(anchor), Some(end)) = (anchor, end) else {
+                    self.replace_selection(clicked);
+                    return;
+                };
+                if !add {
+                    selections.clear();
+                }
+                let storage = &self.catalog.storages[self.current.storage_index];
+                for entry in &rows[anchor.min(end)..=anchor.max(end)] {
+                    if !selections
+                        .iter()
+                        .any(|selection| selection.path == entry.path)
+                    {
+                        selections.push(Selection {
+                            storage_id: storage.id.clone(),
+                            storage_label: storage.label.clone(),
+                            path: entry.path.clone(),
+                            kind: entry.kind,
+                            size: entry.size,
+                        });
+                    }
+                }
+            }
+            SelectionIntent::Replace | SelectionIntent::Preserve => unreachable!(),
+        }
+        let focused = selections
+            .iter()
+            .position(|selection| selection.path == clicked.path)
+            .unwrap_or_else(|| selections.len().saturating_sub(1));
+        self.selected = (!selections.is_empty()).then(|| selections.remove(focused));
+        self.additional_selected = selections;
+    }
+
+    fn update_marquee(&mut self, rows: &[DeviceCatalogEntry], update: MarqueeUpdate) {
+        if update.started {
+            self.marquee = Some(MarqueeSelection {
+                origin: update.origin,
+                baseline: self.selections(),
+                add: update.add,
+            });
+        }
+        let Some(marquee) = self.marquee.as_ref() else {
+            return;
+        };
+        let mut selections = if marquee.add {
+            marquee.baseline.clone()
+        } else {
+            Vec::new()
+        };
+        let storage = &self.catalog.storages[self.current.storage_index];
+        for index in update.indices {
+            let entry = &rows[index];
+            if !selections
+                .iter()
+                .any(|selection| selection.path == entry.path)
+            {
+                selections.push(Selection {
+                    storage_id: storage.id.clone(),
+                    storage_label: storage.label.clone(),
+                    path: entry.path.clone(),
+                    kind: entry.kind,
+                    size: entry.size,
+                });
+            }
+        }
+        self.selected = selections.pop();
+        self.additional_selected = selections;
+        self.selection_anchor = self
+            .selected
+            .as_ref()
+            .map(|selection| selection.path.clone());
+        if update.finished {
+            self.marquee = None;
+        }
+    }
+
     pub fn set_show_hidden_files(&mut self, show: bool) {
+        if self.show_hidden_files == show {
+            return;
+        }
         self.show_hidden_files = show;
-        if !show
-            && self
+        self.marquee = None;
+        self.dragged = None;
+        self.drop_action = None;
+        self.pending_overwrite = None;
+        self.rename = None;
+        if !show {
+            self.additional_selected
+                .retain(|selection| !is_hidden(&selection.path));
+            if self
                 .selected
                 .as_ref()
-                .is_some_and(|entry| is_hidden(&entry.path))
-        {
-            self.selected = None;
+                .is_some_and(|selection| is_hidden(&selection.path))
+            {
+                self.selected = self.additional_selected.pop();
+            }
+            if self
+                .selection_anchor
+                .as_ref()
+                .is_some_and(|path| is_hidden(path))
+            {
+                self.selection_anchor = self
+                    .selected
+                    .as_ref()
+                    .map(|selection| selection.path.clone());
+            }
         }
     }
 
@@ -493,22 +819,35 @@ impl Browser {
         {
             current_path = parent_path(&current_path).to_owned();
         }
-        self.selected = self.selected.take().and_then(|mut selected| {
-            let storage = catalog
-                .storages
+        self.selected = self
+            .selected
+            .take()
+            .and_then(|selection| refreshed_selection(&catalog, selection));
+        self.additional_selected = self
+            .additional_selected
+            .drain(..)
+            .filter_map(|selection| refreshed_selection(&catalog, selection))
+            .collect();
+        if self.selected.is_none() {
+            self.selected = self.additional_selected.pop();
+        }
+        if self.selection_anchor.as_ref().is_some_and(|path| {
+            !self
+                .selections()
                 .iter()
-                .find(|storage| storage.id == selected.storage_id)?;
-            let entry = storage.entries.iter().find(|entry| {
-                entry.path == selected.path
-                    && entry.kind == selected.kind
-                    && (entry.kind == DeviceCatalogEntryKind::Directory
-                        || entry.size == selected.size)
-            })?;
-            selected.storage_label.clone_from(&storage.label);
-            selected.size = entry.size;
-            Some(selected)
-        });
+                .any(|selection| selection.path == *path)
+        }) {
+            self.selection_anchor = self
+                .selected
+                .as_ref()
+                .map(|selection| selection.path.clone());
+        }
         self.catalog = catalog;
+        self.marquee = None;
+        self.dragged = None;
+        self.drop_action = None;
+        self.pending_overwrite = None;
+        self.rename = None;
         self.current = DirectoryId {
             storage_index,
             path: current_path,
@@ -627,10 +966,10 @@ impl Browser {
                                 self.compact_pane = None;
                             }
                             if action.is_none() {
-                                let selection = self.selected.clone();
+                                let selections = self.selections();
                                 detail_request = self
-                                    .show_compact_pane(ui, intl, panel_rect, selection.as_ref())
-                                    .zip(selection);
+                                    .show_compact_pane(ui, intl, panel_rect, &selections)
+                                    .zip(selections.into_iter().next());
                             }
                             return;
                         }
@@ -641,13 +980,29 @@ impl Browser {
                 action
             })
             .inner;
+        if let Some(dragged) = self.dragged.as_ref()
+            && ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary))
+        {
+            let copy = copy_drag(ui);
+            ui.ctx().set_cursor_icon(if copy {
+                egui::CursorIcon::Copy
+            } else {
+                egui::CursorIcon::Default
+            });
+            show_drag_preview(ui, intl, dragged, copy);
+        }
         let page_action = page_action.or_else(|| {
             detail_request.and_then(|(item_action, selection)| {
                 self.handle_item_action(item_action, selection)
             })
         });
         let dialog_action = self.show_dialogs(ui, intl);
-        page_action.or(dialog_action)
+        let drop_action = self.drop_action.take();
+        let action = page_action.or(drop_action).or(dialog_action);
+        if ui.input(|input| input.pointer.button_released(egui::PointerButton::Primary)) {
+            self.dragged = None;
+        }
+        action
     }
 
     fn show_wide_panes(
@@ -678,7 +1033,7 @@ impl Browser {
             });
         restore_resize_strokes(ui, resize_strokes);
 
-        let selection = self.selected.clone();
+        let selections = self.selections();
         let resize_strokes = suppress_resize_strokes(ui);
         egui::Panel::right(Id::new(("device-explorer-details", self.device_key())))
             .resizable(true)
@@ -692,14 +1047,14 @@ impl Browser {
                     let (requested_action, close) = show_details(
                         ui,
                         intl,
-                        selection.as_ref(),
+                        &selections,
                         window.map(|window| window.close_label),
                         window.map(|window| window.drag_delta),
                     );
                     if close {
                         *action = Some(Action::Close);
                     } else {
-                        *detail_request = requested_action.zip(selection.clone());
+                        *detail_request = requested_action.zip(selections.first().cloned());
                     }
                 }
             });
@@ -781,6 +1136,7 @@ impl Browser {
             .allow_multi_selection(false)
             .allow_drag_and_drop(false);
         let catalog = &self.catalog;
+        let drop_targets = RefCell::new(Vec::new());
         let (bookmark_target, actions) = egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -790,7 +1146,8 @@ impl Browser {
                 let bookmark_target = if bookmarks.is_empty() {
                     None
                 } else {
-                    let target = show_bookmarks(ui, intl, catalog, &self.current, &bookmarks);
+                    let target =
+                        show_bookmarks(ui, intl, catalog, &self.current, &bookmarks, &drop_targets);
                     sidebar_separator(ui);
                     target
                 };
@@ -805,12 +1162,21 @@ impl Browser {
                 ui.visuals_mut().widgets.inactive.fg_stroke.width = 0.0;
                 let (_, actions) = tree.show_state(ui, &mut self.tree_state, |builder| {
                     for (storage_index, storage) in catalog.storages.iter().enumerate() {
-                        show_storage_tree(builder, storage_index, storage, self.show_hidden_files);
+                        show_storage_tree(
+                            builder,
+                            storage_index,
+                            storage,
+                            self.show_hidden_files,
+                            &drop_targets,
+                        );
                     }
                 });
                 (bookmark_target, actions)
             })
             .inner;
+        if self.handle_tree_drop(ui, &drop_targets) {
+            return false;
+        }
         if let Some(directory) = bookmark_target {
             self.navigate(&directory);
         }
@@ -824,6 +1190,38 @@ impl Browser {
             if let Some(directory) = selected {
                 self.navigate(&directory);
             }
+        }
+        false
+    }
+
+    fn handle_tree_drop(
+        &mut self,
+        ui: &Ui,
+        drop_targets: &RefCell<Vec<(DirectoryId, Rect)>>,
+    ) -> bool {
+        let hovered = ui.ctx().pointer_latest_pos().and_then(|pointer| {
+            drop_targets.borrow().iter().find_map(|(directory, rect)| {
+                rect.contains(pointer).then_some((directory.clone(), *rect))
+            })
+        });
+        let Some((directory, rect)) = hovered else {
+            return false;
+        };
+        if self.dragged.is_none() {
+            let fill = crate::theme::palette(ui)
+                .surfaces()
+                .layer_hover(color_theme::Level::One)
+                .with_alpha(0x64);
+            ui.painter().rect_filled(rect, 2.0, color32(fill));
+            return false;
+        }
+        if !self.can_drop_into(&directory) {
+            return false;
+        }
+        paint_drop_target(ui, ui.painter(), rect);
+        if ui.input(|input| input.pointer.button_released(egui::PointerButton::Primary)) {
+            self.drop_action = self.transfer_to(directory, copy_drag(ui));
+            return true;
         }
         false
     }
@@ -861,6 +1259,22 @@ impl Browser {
             .selected
             .as_ref()
             .map(|selection| selection.path.as_str());
+        let selected_paths = self
+            .selections()
+            .into_iter()
+            .map(|selection| selection.path)
+            .collect::<HashSet<_>>();
+        let drop_paths = rows
+            .iter()
+            .filter(|entry| {
+                entry.kind == DeviceCatalogEntryKind::Directory
+                    && self.can_drop_into(&DirectoryId {
+                        storage_index: self.current.storage_index,
+                        path: entry.path.clone(),
+                    })
+            })
+            .map(|entry| entry.path.clone())
+            .collect::<HashSet<_>>();
         let table_id = Id::new(("device-explorer-entry-table", self.device_key()));
         let keyboard_move = requested_table_movement(ui, table_id);
         let keyboard_index = (!rows.is_empty())
@@ -879,60 +1293,254 @@ impl Browser {
                 intl,
                 self.device_key(),
                 &rows,
-                selected_path,
-                keyboard_index,
-                Some(keyboard_context),
+                EntryTableInput {
+                    selection: EntryTableSelection {
+                        focus: selected_path,
+                        paths: &selected_paths,
+                        marquee_origin: self.marquee.as_ref().map(|marquee| marquee.origin),
+                        drop_paths: &drop_paths,
+                        dragging: self.dragged.is_some(),
+                    },
+                    keyboard_index,
+                    keyboard_context: Some(keyboard_context),
+                    background: Some(&background),
+                },
             )
         };
 
         if let Some(interaction) = interaction {
-            let (index, activate, context_action) = match interaction {
-                EntryInteraction::Select { index, activate } => (index, activate, None),
-                EntryInteraction::Context { index, action } => (index, false, Some(action)),
-            };
-            let entry = &rows[index];
-            let selection = Selection {
-                storage_id,
-                storage_label,
-                path: entry.path.clone(),
-                kind: entry.kind,
-                size: entry.size,
-            };
-            self.selected = Some(selection.clone());
-            if let Some(context_action) = context_action {
-                return self.handle_item_action(context_action, selection);
-            }
-            if !activate {
-                return None;
-            }
-            return match selection.kind {
-                DeviceCatalogEntryKind::Directory => {
-                    self.navigate(&DirectoryId {
-                        storage_index: self.current.storage_index,
-                        path: selection.path,
-                    });
-                    None
-                }
-                DeviceCatalogEntryKind::File => activated_item_action(&selection)
-                    .and_then(|item_action| self.handle_item_action(item_action, selection)),
-            };
+            return self.handle_entry_interaction(
+                ui,
+                &rows,
+                &storage_id,
+                &storage_label,
+                &selected_paths,
+                interaction,
+            );
         }
 
+        self.show_directory_context_menu(ui, intl, &background, table_id, keyboard_context)
+    }
+
+    fn show_directory_context_menu(
+        &mut self,
+        ui: &mut Ui,
+        intl: &Intl,
+        background: &egui::Response,
+        table_id: Id,
+        keyboard_context: bool,
+    ) -> Option<Action> {
         let current = self.current_directory_selection()?;
         if background.secondary_clicked() {
-            self.selected = Some(current.clone());
+            self.replace_selection(current.clone());
             ui.memory_mut(|memory| memory.request_focus(table_id));
         }
         let context_action = show_context_menu(
             ui,
-            &background,
+            background,
             Id::new(("device-explorer-current-directory-menu", self.device_key())),
             &current,
-            !current.path.as_str().is_empty(),
+            ContextActions::Single {
+                can_remove: !current.path.as_str().is_empty(),
+            },
             keyboard_context && self.selected.as_ref() == Some(&current),
             intl,
         )?;
         self.handle_item_action(context_action, current)
+    }
+
+    fn handle_entry_interaction(
+        &mut self,
+        ui: &Ui,
+        rows: &[DeviceCatalogEntry],
+        storage_id: &str,
+        storage_label: &str,
+        selected_paths: &HashSet<Utf8PathBuf>,
+        interaction: EntryInteraction,
+    ) -> Option<Action> {
+        let (index, activate, intent, context_action) = match interaction {
+            EntryInteraction::Marquee(update) => {
+                self.update_marquee(rows, update);
+                return None;
+            }
+            EntryInteraction::Drag(drag) => {
+                return self.handle_entry_drag(
+                    ui,
+                    rows,
+                    (storage_id, storage_label),
+                    selected_paths,
+                    drag,
+                );
+            }
+            EntryInteraction::Drop(index) => {
+                return self.transfer_to(
+                    DirectoryId {
+                        storage_index: self.current.storage_index,
+                        path: rows[index].path.clone(),
+                    },
+                    copy_drag(ui),
+                );
+            }
+            EntryInteraction::Select {
+                index,
+                activate,
+                intent,
+            } => (index, activate, intent, None),
+            EntryInteraction::Context { index, action } => {
+                (index, false, SelectionIntent::Preserve, Some(action))
+            }
+        };
+        let entry = &rows[index];
+        let selection = Selection {
+            storage_id: storage_id.to_owned(),
+            storage_label: storage_label.to_owned(),
+            path: entry.path.clone(),
+            kind: entry.kind,
+            size: entry.size,
+        };
+        self.select_entry(rows, selection.clone(), intent);
+        if let Some(context_action) = context_action {
+            return self.handle_item_action(context_action, selection);
+        }
+        if !activate {
+            return None;
+        }
+        match selection.kind {
+            DeviceCatalogEntryKind::Directory => {
+                self.navigate(&DirectoryId {
+                    storage_index: self.current.storage_index,
+                    path: selection.path,
+                });
+                None
+            }
+            DeviceCatalogEntryKind::File => activated_item_action(&selection)
+                .and_then(|item_action| self.handle_item_action(item_action, selection)),
+        }
+    }
+
+    fn handle_entry_drag(
+        &mut self,
+        ui: &Ui,
+        rows: &[DeviceCatalogEntry],
+        storage: (&str, &str),
+        selected_paths: &HashSet<Utf8PathBuf>,
+        drag: EntryDrag,
+    ) -> Option<Action> {
+        if self.dragged.is_none() {
+            let entry = &rows[drag.index];
+            let selection = Selection {
+                storage_id: storage.0.to_owned(),
+                storage_label: storage.1.to_owned(),
+                path: entry.path.clone(),
+                kind: entry.kind,
+                size: entry.size,
+            };
+            if !selected_paths.contains(&selection.path) {
+                self.replace_selection(selection);
+            }
+            self.dragged = Some(DraggedEntries {
+                selections: self.selections(),
+            });
+        }
+        if drag.finished {
+            return drag.destination.and_then(|index| {
+                self.transfer_to(
+                    DirectoryId {
+                        storage_index: self.current.storage_index,
+                        path: rows[index].path.clone(),
+                    },
+                    copy_drag(ui),
+                )
+            });
+        }
+        ui.ctx().set_cursor_icon(if copy_drag(ui) {
+            egui::CursorIcon::Copy
+        } else {
+            egui::CursorIcon::Default
+        });
+        None
+    }
+
+    fn transfer_to(&mut self, directory: DirectoryId, copy: bool) -> Option<Action> {
+        if !self.can_drop_into(&directory) {
+            self.dragged = None;
+            return None;
+        }
+        let dragged = self.dragged.take()?;
+        let storage = self.catalog.storages.get(directory.storage_index)?;
+        if let Some(existing) = self.overwrite_target(&dragged.selections, &directory) {
+            self.pending_overwrite = Some(PendingOverwrite {
+                selection: dragged.selections.into_iter().next()?,
+                storage_id: storage.id.clone(),
+                directory: directory.path,
+                existing,
+                copy,
+            });
+            return None;
+        }
+        Some(Action::Transfer {
+            selections: dragged.selections,
+            storage_id: storage.id.clone(),
+            directory: directory.path,
+            copy,
+            overwrite: false,
+        })
+    }
+
+    fn overwrite_target(
+        &self,
+        selections: &[Selection],
+        directory: &DirectoryId,
+    ) -> Option<Utf8PathBuf> {
+        let [selection] = selections else {
+            return None;
+        };
+        if selection.kind != DeviceCatalogEntryKind::File {
+            return None;
+        }
+        let storage = self.catalog.storages.get(directory.storage_index)?;
+        let destination = directory.path.join(file_name(&selection.path));
+        storage
+            .entries
+            .iter()
+            .find(|entry| {
+                entry
+                    .path
+                    .as_str()
+                    .eq_ignore_ascii_case(destination.as_str())
+            })
+            .filter(|entry| entry.kind == DeviceCatalogEntryKind::File)
+            .map(|entry| entry.path.clone())
+    }
+
+    fn can_drop_into(&self, directory: &DirectoryId) -> bool {
+        let Some(dragged) = &self.dragged else {
+            return false;
+        };
+        let Some(storage) = self.catalog.storages.get(directory.storage_index) else {
+            return false;
+        };
+        if path_is_toolkit_managed(&directory.path) {
+            return false;
+        }
+        let mut destinations = HashSet::new();
+        let overwrite = self.overwrite_target(&dragged.selections, directory);
+        dragged.selections.iter().all(|selection| {
+            let destination = directory.path.join(file_name(&selection.path));
+            !selection.is_toolkit_managed()
+                && !(selection.storage_id == storage.id
+                    && (parent_path(&selection.path) == directory.path
+                        || selection.kind == DeviceCatalogEntryKind::Directory
+                            && directory.path.starts_with(&selection.path)))
+                && !storage.entries.iter().any(|entry| {
+                    entry
+                        .path
+                        .as_str()
+                        .eq_ignore_ascii_case(destination.as_str())
+                        && overwrite.as_ref() != Some(&entry.path)
+                })
+                && destinations.insert(destination.as_str().to_ascii_lowercase())
+        })
     }
 
     fn current_directory_selection(&self) -> Option<Selection> {
@@ -957,6 +1565,8 @@ impl Browser {
             ItemAction::Download => Some(Action::Download(selection)),
             ItemAction::CreateDirectory => {
                 self.pending_removal = None;
+                self.pending_bulk_removal = None;
+                self.rename = None;
                 self.create_directory = Some(CreateDirectoryDialog {
                     parent: selection,
                     name: String::new(),
@@ -964,49 +1574,236 @@ impl Browser {
                 });
                 None
             }
+            ItemAction::Rename => {
+                self.create_directory = None;
+                self.pending_removal = None;
+                self.pending_bulk_removal = None;
+                self.rename = Some(RenameDialog {
+                    name: selection.name().to_owned(),
+                    selection,
+                    focus_name: true,
+                });
+                None
+            }
             ItemAction::Remove => {
                 self.create_directory = None;
-                self.pending_removal = Some(selection);
+                self.rename = None;
+                let selected = self.selections();
+                if selected.len() > 1 && selected.iter().any(|item| item.path == selection.path) {
+                    self.pending_removal = None;
+                    self.pending_bulk_removal = Some(selected);
+                } else {
+                    self.pending_bulk_removal = None;
+                    self.pending_removal = Some(selection);
+                }
                 None
             }
         }
     }
 
     fn show_dialogs(&mut self, ui: &mut Ui, intl: &Intl) -> Option<Action> {
-        if self.pending_removal.is_some() {
+        if self.pending_overwrite.is_some() {
+            return self.show_overwrite_dialog(ui, intl);
+        }
+        if self.pending_removal.is_some() || self.pending_bulk_removal.is_some() {
             return self.show_removal_dialog(ui, intl);
         }
         if self.create_directory.is_some() {
             return self.show_create_directory_dialog(ui, intl);
         }
+        if self.rename.is_some() {
+            return self.show_rename_dialog(ui, intl);
+        }
         None
     }
 
+    fn show_rename_dialog(&mut self, ui: &mut Ui, intl: &Intl) -> Option<Action> {
+        let mut dialog = self.rename.take()?;
+        let mut parent = dialog.selection.clone();
+        parent.path = parent_path(&dialog.selection.path).to_owned();
+        let unchanged = dialog
+            .name
+            .trim()
+            .eq_ignore_ascii_case(dialog.selection.name());
+        let validation = (!unchanged)
+            .then(|| validate_new_directory_name(&dialog.name, &self.catalog, &parent))
+            .flatten();
+        let validation_message = validation.map(|error| match error {
+            DirectoryNameError::Unsafe => format_message!(
+                intl,
+                default_message: "Use a single name without slashes or control characters",
+            ),
+            DirectoryNameError::Duplicate => format_message!(
+                intl,
+                default_message: "An item with that name already exists",
+            ),
+        });
+        let title = format_message!(intl, default_message: "Rename item");
+        let cancel = format_message!(intl, default_message: "Cancel");
+        let rename = format_message!(intl, default_message: "Rename");
+        let name_label = format_message!(intl, default_message: "New name");
+        let output = modal::show(
+            ui,
+            Id::new(("device-explorer-rename", self.device_key())),
+            &modal::Props {
+                title: &title,
+                description: None,
+                size: modal::Size::Small,
+                presentation: modal::Presentation::Modal,
+                cancel_label: Some(&cancel),
+                cancel_disabled: None,
+                backdrop_closes: Some(false),
+                primary: Some(modal::Primary {
+                    label: &rename,
+                    icon: Some(icons::PENCIL),
+                    kind: modal::PrimaryKind::Confirm,
+                    enabled: validation.is_none() && !dialog.name.trim().is_empty() && !unchanged,
+                }),
+            },
+            |ui| {
+                let props = input::Props::new(&name_label)
+                    .size(Size::Medium)
+                    .message(validation_message.as_deref().map(input::Message::Error));
+                let response = input::show(ui, &mut dialog.name, props);
+                crate::semantics::target(ui, &response, "files.rename.name");
+                if dialog.focus_name {
+                    response.request_focus();
+                    dialog.focus_name = false;
+                }
+                response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter))
+            },
+        );
+        if let Some(response) = &output.cancel {
+            crate::semantics::target(ui, response, "files.rename.cancel");
+        }
+        if let Some(response) = &output.primary {
+            crate::semantics::target(ui, response, "files.rename.confirm");
+        }
+        let enter = output.inner
+            && !dialog.name.trim().is_empty()
+            && !dialog
+                .name
+                .trim()
+                .eq_ignore_ascii_case(dialog.selection.name())
+            && validate_new_directory_name(&dialog.name, &self.catalog, &parent).is_none();
+        match output.action.or(enter.then_some(modal::Action::Primary)) {
+            Some(modal::Action::Cancel) => None,
+            Some(modal::Action::Primary) => Some(Action::Rename {
+                selection: dialog.selection,
+                name: dialog.name.trim().to_owned(),
+            }),
+            None => {
+                if output.inner {
+                    dialog.focus_name = true;
+                }
+                self.rename = Some(dialog);
+                None
+            }
+        }
+    }
+
+    fn show_overwrite_dialog(&mut self, ui: &mut Ui, intl: &Intl) -> Option<Action> {
+        let pending = self.pending_overwrite.as_ref()?;
+        let title = format_message!(intl, default_message: "File already exists");
+        let description = format_message!(
+            intl,
+            default_message: "{name} already exists in the destination folder. Replace it?",
+            values: { name: file_name(&pending.existing) },
+        );
+        let cancel = format_message!(intl, default_message: "Cancel");
+        let replace = format_message!(intl, default_message: "Overwrite file");
+        let output = modal::show(
+            ui,
+            Id::new(("device-explorer-confirm-overwrite", self.device_key())),
+            &modal::Props {
+                title: &title,
+                description: Some(&description),
+                size: modal::Size::Small,
+                presentation: modal::Presentation::Modal,
+                cancel_label: Some(&cancel),
+                cancel_disabled: None,
+                backdrop_closes: Some(false),
+                primary: Some(modal::Primary {
+                    label: &replace,
+                    icon: None,
+                    kind: modal::PrimaryKind::Danger,
+                    enabled: true,
+                }),
+            },
+            |_ui| {},
+        );
+        if let Some(response) = &output.cancel {
+            crate::semantics::target(ui, response, "files.overwrite.cancel");
+        }
+        if let Some(response) = &output.primary {
+            crate::semantics::target(ui, response, "files.overwrite.confirm");
+        }
+        match output.action {
+            Some(modal::Action::Cancel) => {
+                self.pending_overwrite = None;
+                None
+            }
+            Some(modal::Action::Primary) => {
+                let pending = self.pending_overwrite.take()?;
+                Some(Action::Transfer {
+                    selections: vec![pending.selection],
+                    storage_id: pending.storage_id,
+                    directory: pending.directory,
+                    copy: pending.copy,
+                    overwrite: true,
+                })
+            }
+            None => None,
+        }
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the removal review and its confirmation remain one modal interaction"
+    )]
     fn show_removal_dialog(&mut self, ui: &mut Ui, intl: &Intl) -> Option<Action> {
-        let selection = self.pending_removal.clone()?;
-        let title = match selection.kind {
-            DeviceCatalogEntryKind::Directory => {
-                format_message!(intl, default_message: "Remove this folder?")
-            }
-            DeviceCatalogEntryKind::File => {
-                format_message!(intl, default_message: "Remove this file?")
-            }
+        let selections = self.pending_bulk_removal.clone().or_else(|| {
+            self.pending_removal
+                .clone()
+                .map(|selection| vec![selection])
+        })?;
+        let multiple = selections.len() > 1;
+        let title = if multiple {
+            format_message!(
+                intl,
+                default_message: "Remove {count} selected items?",
+                values: { count: u64::try_from(selections.len()).unwrap_or(u64::MAX) },
+            )
+        } else if selections[0].kind == DeviceCatalogEntryKind::Directory {
+            format_message!(intl, default_message: "Remove this folder?")
+        } else {
+            format_message!(intl, default_message: "Remove this file?")
         };
-        let description = match selection.kind {
-            DeviceCatalogEntryKind::Directory => format_message!(
+        let description = if multiple {
+            format_message!(
+                intl,
+                default_message: "The selected files and folders will be permanently removed from the device.",
+            )
+        } else if selections[0].kind == DeviceCatalogEntryKind::Directory {
+            format_message!(
                 intl,
                 default_message: "The folder and everything inside it will be permanently removed from the device.",
-            ),
-            DeviceCatalogEntryKind::File => format_message!(
+            )
+        } else {
+            format_message!(
                 intl,
                 default_message: "The file will be permanently removed from the device.",
-            ),
+            )
         };
         let cancel = format_message!(intl, default_message: "Cancel");
         let remove = format_message!(intl, default_message: "Remove");
         let output = modal::show(
             ui,
-            Id::new(("device-explorer-confirm-removal", self.device_key())),
+            Id::new((
+                "device-explorer-confirm-removal",
+                self.device_key(),
+                multiple,
+            )),
             &modal::Props {
                 title: &title,
                 description: Some(&description),
@@ -1023,20 +1820,62 @@ impl Browser {
                 }),
             },
             |ui| {
-                ui.strong(selection.display_name());
-                if !selection.path.as_str().is_empty() {
-                    ui.label(RichText::new(selection.path.as_str()).weak());
-                }
+                egui::ScrollArea::vertical()
+                    .max_height(160.0)
+                    .show(ui, |ui| {
+                        for (index, selection) in selections.iter().enumerate() {
+                            if index > 0 {
+                                ui.add_space(8.0);
+                            }
+                            ui.horizontal_top(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                show_selection_icon(ui, selection, 16.0);
+                                let path = selection.path.as_str();
+                                let (directory, name) =
+                                    path.split_at(path.rfind('/').map_or(0, |index| index + 1));
+                                let name = if name.is_empty() {
+                                    selection.display_name()
+                                } else {
+                                    name
+                                };
+                                let mut label = egui::text::LayoutJob::default();
+                                for text in [
+                                    RichText::new(directory).weak(),
+                                    crate::typography::semibold(name),
+                                ] {
+                                    text.append_to(
+                                        &mut label,
+                                        ui.style(),
+                                        egui::FontSelection::Default,
+                                        egui::Align::Center,
+                                    );
+                                }
+                                ui.add(egui::Label::new(label).wrap());
+                            });
+                        }
+                    });
             },
         );
+        if let Some(response) = &output.cancel {
+            crate::semantics::target(ui, response, "files.remove.cancel");
+        }
+        if let Some(response) = &output.primary {
+            crate::semantics::target(ui, response, "files.remove.confirm");
+        }
         match output.action {
             Some(modal::Action::Cancel) => {
                 self.pending_removal = None;
+                self.pending_bulk_removal = None;
                 None
             }
             Some(modal::Action::Primary) => {
                 self.pending_removal = None;
-                Some(Action::Remove(selection))
+                self.pending_bulk_removal = None;
+                if multiple {
+                    Some(Action::RemoveMany(selections))
+                } else {
+                    Some(Action::Remove(selections[0].clone()))
+                }
             }
             None => None,
         }
@@ -1089,12 +1928,19 @@ impl Browser {
                     .size(Size::Medium)
                     .message(validation_message.as_deref().map(input::Message::Error));
                 let response = input::show(ui, &mut dialog.name, props);
+                crate::semantics::target(ui, &response, "files.new-folder.name");
                 if dialog.focus_name {
                     response.request_focus();
                     dialog.focus_name = false;
                 }
             },
         );
+        if let Some(response) = &output.cancel {
+            crate::semantics::target(ui, response, "files.new-folder.cancel");
+        }
+        if let Some(response) = &output.primary {
+            crate::semantics::target(ui, response, "files.new-folder.confirm");
+        }
         match output.action {
             Some(modal::Action::Cancel) => None,
             Some(modal::Action::Primary) => Some(Action::CreateDirectory {
@@ -1129,6 +1975,7 @@ impl Browser {
         let storage_control_label = format_message!(intl, default_message: "Storage");
         let details_control_label = format_message!(intl, default_message: "Details");
         let mut target = None;
+        let drop_targets = RefCell::new(Vec::new());
         let (history_move, compact_pane, action) = path_header(
             ui,
             &PathHeaderProps {
@@ -1148,12 +1995,17 @@ impl Browser {
                 window_drag_delta,
             },
             |ui| {
-                target = self.show_path(ui, intl).map(|path| DirectoryId {
-                    storage_index,
-                    path,
-                });
+                target = self
+                    .show_path(ui, intl, &drop_targets)
+                    .map(|path| DirectoryId {
+                        storage_index,
+                        path,
+                    });
             },
         );
+        if self.dragged.is_some() && self.handle_tree_drop(ui, &drop_targets) {
+            return action;
+        }
         if let Some(error) = &self.path_editor.error {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
@@ -1180,7 +2032,7 @@ impl Browser {
         ui: &mut Ui,
         intl: &Intl,
         panel_rect: Rect,
-        selection: Option<&Selection>,
+        selections: &[Selection],
     ) -> Option<ItemAction> {
         let compact_pane = self.compact_pane?;
         let drawer_width = COMPACT_DRAWER_WIDTH.min(panel_rect.width());
@@ -1236,7 +2088,7 @@ impl Browser {
                     }
                     CompactPane::Details => {
                         let (requested_action, pane_close) =
-                            show_details(ui, intl, selection, Some(&close_label), None);
+                            show_details(ui, intl, selections, Some(&close_label), None);
                         item_action = requested_action;
                         close |= pane_close;
                     }
@@ -1261,7 +2113,8 @@ impl Browser {
         .frame(egui::Frame::new().fill(workspace_fill))
         .show(ui, |ui| {
             let mut action_rect = ui.max_rect().intersect(ui.clip_rect());
-            action_rect.max.y -= UPLOAD_ACTION_INSET;
+            action_rect.max.y -= PANE_ACTION_BOTTOM_INSET;
+            action_rect.min.y = action_rect.max.y - PANE_ACTION_HEIGHT;
             let mut action_ui = ui.new_child(
                 UiBuilder::new()
                     .max_rect(action_rect)
@@ -1327,6 +2180,11 @@ impl Browser {
         self.path_editor = path::Editor::default();
         self.current = directory;
         self.selected = None;
+        self.additional_selected.clear();
+        self.selection_anchor = None;
+        self.marquee = None;
+        self.dragged = None;
+        self.drop_action = None;
         self.tree_state.set_one_selected(self.current.clone());
         let current = self.current.clone();
         self.open_ancestors(&current);
@@ -1561,6 +2419,7 @@ fn show_bookmarks(
     catalog: &DeviceCatalogSnapshot,
     current: &DirectoryId,
     bookmarks: &[Bookmark],
+    drop_targets: &RefCell<Vec<(DirectoryId, Rect)>>,
 ) -> Option<DirectoryId> {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
@@ -1569,16 +2428,20 @@ fn show_bookmarks(
             let label = bookmark.kind.label(intl);
             let storage = &catalog.storages[bookmark.directory.storage_index];
             let active = bookmark_contains_directory(&bookmark.directory, current);
-            if bookmark_row(
+            let response = bookmark_row(
                 ui,
                 bookmark.kind,
                 &label,
                 &storage.label,
                 bookmark.directory.path.as_str(),
                 active,
-            )
-            .clicked()
-            {
+            );
+            crate::semantics::target(ui, &response, format!("files.bookmark.{:?}", bookmark.kind));
+            drop_targets.borrow_mut().push((
+                bookmark.directory.clone(),
+                response.rect.intersect(ui.clip_rect()),
+            ));
+            if response.clicked() {
                 target = Some(bookmark.directory.clone());
             }
         }
@@ -1981,14 +2844,23 @@ fn show_storage_tree(
     storage_index: usize,
     storage: &DeviceCatalogStorage,
     show_hidden: bool,
+    drop_targets: &RefCell<Vec<(DirectoryId, Rect)>>,
 ) {
     let root = DirectoryId {
         storage_index,
         path: Utf8PathBuf::new(),
     };
+    let root_label = storage.label.clone();
+    let root_target = root.clone();
     let open = builder.node(
         NodeBuilder::dir(root)
-            .label(storage.label.clone())
+            .label_ui(move |ui| {
+                let response = ui.add(egui::Label::new(&root_label).selectable(false));
+                crate::semantics::target(ui, &response, format!("files.tree.{storage_index}.root"));
+                drop_targets
+                    .borrow_mut()
+                    .push((root_target.clone(), tree_drop_rect(ui)));
+            })
             .closer(|ui, state| show_tree_storage_icon(ui, &state))
             .height(TREE_ROW_HEIGHT)
             .activatable(true)
@@ -2002,6 +2874,7 @@ fn show_storage_tree(
             storage,
             Utf8Path::new(""),
             show_hidden,
+            drop_targets,
         );
     }
     builder.close_dir();
@@ -2013,6 +2886,7 @@ fn show_directory_children(
     storage: &DeviceCatalogStorage,
     parent: &Utf8Path,
     show_hidden: bool,
+    drop_targets: &RefCell<Vec<(DirectoryId, Rect)>>,
 ) {
     for entry in storage.entries.iter().filter(|entry| {
         entry.kind == DeviceCatalogEntryKind::Directory
@@ -2025,13 +2899,22 @@ fn show_directory_children(
             storage_index,
             path: entry.path.clone(),
         };
+        let drop_target = id.clone();
         let open = builder.node(
             NodeBuilder::dir(id)
                 .label_ui(move |ui| {
                     if toolkit_managed {
                         ui.multiply_opacity(TOOLKIT_CONTENT_OPACITY);
                     }
-                    ui.add(egui::Label::new(&label).selectable(false));
+                    let response = ui.add(egui::Label::new(&label).selectable(false));
+                    crate::semantics::target(
+                        ui,
+                        &response,
+                        format!("files.tree.{storage_index}.{}", drop_target.path),
+                    );
+                    drop_targets
+                        .borrow_mut()
+                        .push((drop_target.clone(), tree_drop_rect(ui)));
                 })
                 .closer(move |ui, state| {
                     if toolkit_managed {
@@ -2045,16 +2928,29 @@ fn show_directory_children(
                 .drop_allowed(false),
         );
         if open {
-            show_directory_children(builder, storage_index, storage, &entry.path, show_hidden);
+            show_directory_children(
+                builder,
+                storage_index,
+                storage,
+                &entry.path,
+                show_hidden,
+                drop_targets,
+            );
         }
         builder.close_dir();
     }
 }
 
+fn tree_drop_rect(ui: &Ui) -> Rect {
+    let mut rect = ui.max_rect();
+    rect.min.x = ui.clip_rect().left();
+    rect.intersect(ui.clip_rect())
+}
+
 fn show_details(
     ui: &mut Ui,
     intl: &Intl,
-    selection: Option<&Selection>,
+    selections: &[Selection],
     close_label: Option<&str>,
     window_drag_delta: Option<&Cell<egui::Vec2>>,
 ) -> (Option<ItemAction>, bool) {
@@ -2070,7 +2966,7 @@ fn show_details(
     });
     let action = egui::Frame::new()
         .inner_margin(PANE_CONTENT_MARGIN)
-        .show(ui, |ui| show_details_content(ui, intl, selection))
+        .show(ui, |ui| show_details_content(ui, intl, selections))
         .inner;
     (action, close)
 }
@@ -2134,8 +3030,8 @@ fn details_content_layout(available: Rect, action_count: usize) -> DetailsConten
             actions: None,
         };
     }
-    let action_bottom = available.bottom() - DETAILS_ACTION_BOTTOM_INSET;
-    let action_top = (action_bottom - DETAILS_ACTION_HEIGHT).max(available.top());
+    let action_bottom = available.bottom() - PANE_ACTION_BOTTOM_INSET;
+    let action_top = (action_bottom - PANE_ACTION_HEIGHT).max(available.top());
     DetailsContentLayout {
         summary: Rect::from_min_max(
             available.min,
@@ -2151,14 +3047,20 @@ fn details_content_layout(available: Rect, action_count: usize) -> DetailsConten
     }
 }
 
-fn show_details_content(
-    ui: &mut Ui,
-    intl: &Intl,
-    selection: Option<&Selection>,
-) -> Option<ItemAction> {
-    let actions = selection
-        .map(|selection| available_item_actions(selection, !selection.path.as_str().is_empty()))
-        .unwrap_or_default();
+fn show_details_content(ui: &mut Ui, intl: &Intl, selections: &[Selection]) -> Option<ItemAction> {
+    let actions = if selections.len() > 1 {
+        selections
+            .iter()
+            .all(|selection| !selection.is_toolkit_managed())
+            .then_some(ItemAction::Remove)
+            .into_iter()
+            .collect()
+    } else {
+        selections
+            .first()
+            .map(|selection| available_item_actions(selection, !selection.path.as_str().is_empty()))
+            .unwrap_or_default()
+    };
     let available = ui.available_rect_before_wrap().intersect(ui.clip_rect());
     ui.allocate_rect(available, Sense::hover());
     let layout = details_content_layout(available, actions.len());
@@ -2170,23 +3072,27 @@ fn show_details_content(
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(&mut summary_ui, |ui| {
-            show_details_summary(ui, intl, selection);
+            show_details_summary(ui, intl, selections);
         });
 
-    let selection = selection?;
+    let selection = selections.first()?;
     let action_rect = layout.actions?;
     let mut action_ui = ui.new_child(
         UiBuilder::new()
             .max_rect(action_rect)
             .layout(Layout::left_to_right(Align::Center)),
     );
-    action_ui.spacing_mut().interact_size.y = DETAILS_ACTION_HEIGHT;
+    action_ui.spacing_mut().interact_size.y = PANE_ACTION_HEIGHT;
     action_ui.spacing_mut().item_spacing.x = DETAILS_ACTION_GAP;
     actions.into_iter().find(|item_action| {
         button::IconProps {
             label: &item_action.label(intl, selection),
             icon: item_action.icon(),
-            kind: button::Kind::Tertiary,
+            kind: if *item_action == ItemAction::Remove {
+                button::Kind::TertiaryDanger
+            } else {
+                button::Kind::Tertiary
+            },
             size: Size::Small,
             enabled: true,
         }
@@ -2195,8 +3101,8 @@ fn show_details_content(
     })
 }
 
-fn show_details_summary(ui: &mut Ui, intl: &Intl, selection: Option<&Selection>) {
-    let Some(selection) = selection else {
+fn show_details_summary(ui: &mut Ui, intl: &Intl, selections: &[Selection]) {
+    let Some(selection) = selections.first() else {
         ui.label(format_message!(
             intl,
             default_message: "Select a file or folder to see its details",
@@ -2204,16 +3110,33 @@ fn show_details_summary(ui: &mut Ui, intl: &Intl, selection: Option<&Selection>)
         return;
     };
 
+    if selections.len() > 1 {
+        ui.strong(format_message!(
+            intl,
+            default_message: "{count} items selected",
+            values: { count: u64::try_from(selections.len()).unwrap_or(u64::MAX) },
+        ));
+        ui.add_space(8.0);
+        for selection in selections {
+            ui.label(selection.display_name());
+        }
+        return;
+    }
+
     ui.scope(|ui| {
         ui.spacing_mut().interact_size.y = DETAILS_SUMMARY_ROW_HEIGHT;
         ui.spacing_mut().item_spacing.y = DETAILS_SUMMARY_GAP;
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
             if selection.is_toolkit_managed() {
                 ui.multiply_opacity(TOOLKIT_CONTENT_OPACITY);
             }
             ui.spacing_mut().item_spacing.x = 8.0;
             show_selection_icon(ui, selection, 20.0);
-            ui.strong(selection.display_name());
+            ui.add(
+                egui::Label::new(RichText::new(selection.display_name()).strong())
+                    .wrap()
+                    .selectable(false),
+            );
         });
         if !selection.path.as_str().is_empty() {
             ui.add(
@@ -2420,7 +3343,7 @@ fn show_tree_icon(ui: &Ui, icon: icons::Icon, hovered: bool, color: Option<Color
 fn entry_table_background(ui: &mut Ui, intl: &Intl, device_key: &str) -> egui::Response {
     let rect = ui.available_rect_before_wrap().intersect(ui.clip_rect());
     let id = Id::new(("device-explorer-entry-table", device_key));
-    let response = ui.interact(rect, id, Sense::click());
+    let response = ui.interact(rect, id, Sense::click_and_drag());
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Other,
@@ -2428,6 +3351,7 @@ fn entry_table_background(ui: &mut Ui, intl: &Intl, device_key: &str) -> egui::R
             format_message!(intl, default_message: "Current directory contents"),
         )
     });
+    crate::semantics::target(ui, &response, "files.table.background");
     response
 }
 
@@ -2467,21 +3391,11 @@ fn show_entry_table(
     intl: &Intl,
     device_key: &str,
     rows: &[DeviceCatalogEntry],
-    selected_path: Option<&str>,
-    keyboard_index: Option<usize>,
-    keyboard_context: Option<bool>,
+    input: EntryTableInput<'_>,
 ) -> Option<EntryInteraction> {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
-        show_entry_table_content(
-            ui,
-            intl,
-            device_key,
-            rows,
-            selected_path,
-            keyboard_index,
-            keyboard_context,
-        )
+        show_entry_table_content(ui, intl, device_key, rows, input)
     })
     .inner
 }
@@ -2491,10 +3405,14 @@ fn show_entry_table_content(
     intl: &Intl,
     device_key: &str,
     rows: &[DeviceCatalogEntry],
-    selected_path: Option<&str>,
-    keyboard_index: Option<usize>,
-    keyboard_context: Option<bool>,
+    input: EntryTableInput<'_>,
 ) -> Option<EntryInteraction> {
+    let EntryTableInput {
+        selection,
+        keyboard_index,
+        keyboard_context,
+        background,
+    } = input;
     let table_id = Id::new(("device-explorer-entry-table", device_key));
     let activate = ui.memory(|memory| memory.has_focus(table_id))
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Enter));
@@ -2502,13 +3420,11 @@ fn show_entry_table_content(
         activate
             .then(|| {
                 rows.iter()
-                    .position(|entry| selected_path == Some(entry.path.as_str()))
+                    .position(|entry| selection.focus == Some(entry.path.as_str()))
             })
             .flatten()
     });
     let mut interaction = None;
-    let mut request_focus = false;
-    let mut row_responses = Vec::new();
     let table_clip = ui.available_rect_before_wrap().intersect(ui.clip_rect());
     ui.set_clip_rect(table_clip);
     let table_painter = ui.painter().with_clip_rect(table_clip);
@@ -2517,14 +3433,95 @@ fn show_entry_table_content(
     let stripe_alpha =
         stripe.as_rgba()[3] / TABLE_STRIPE_CONTRAST_DIVISOR * TABLE_STRIPE_CONTRAST_MULTIPLIER;
     ui.visuals_mut().faint_bg_color = color32(stripe.with_alpha(stripe_alpha));
+    if !palette.is_dark() {
+        ui.visuals_mut().selection.bg_fill =
+            color32(palette.surfaces().layer_hover(color_theme::Level::Two));
+    }
     let table_border = palette.borders().subtle().with_alpha(TABLE_BORDER_ALPHA);
     ui.visuals_mut().widgets.noninteractive.bg_stroke =
         egui::Stroke::new(1.0, color32(table_border));
+    let row_responses = render_entry_table(ui, intl, device_key, rows, selection, keyboard_index);
+    let divider = egui::Stroke::new(1.0, color32(palette.surfaces().background()));
+    for pair in row_responses.windows(2) {
+        let [(first_index, first), (second_index, _)] = pair else {
+            continue;
+        };
+        if *second_index == *first_index + 1
+            && selection.paths.contains(&rows[*first_index].path)
+            && selection.paths.contains(&rows[*second_index].path)
+        {
+            table_painter.hline(first.rect.x_range(), first.rect.bottom() - 0.5, divider);
+        }
+    }
+    if let Some(pointer) = ui.ctx().pointer_latest_pos() {
+        for (index, response) in &row_responses {
+            if selection.drop_paths.contains(&rows[*index].path) && response.rect.contains(pointer)
+            {
+                paint_drop_target(ui, &table_painter, response.rect);
+            }
+        }
+    }
+    if selection.dragging
+        && ui.input(|input| input.pointer.button_released(egui::PointerButton::Primary))
+        && let Some(pointer) = ui.ctx().pointer_latest_pos()
+        && let Some((index, _)) = row_responses.iter().find(|(index, response)| {
+            selection.drop_paths.contains(&rows[*index].path) && response.rect.contains(pointer)
+        })
+    {
+        return Some(EntryInteraction::Drop(*index));
+    }
+    if let Some(marquee) = entry_marquee_interaction(
+        ui,
+        background,
+        &row_responses,
+        selection.marquee_origin,
+        table_clip,
+    ) {
+        ui.memory_mut(|memory| memory.request_focus(table_id));
+        return Some(EntryInteraction::Marquee(marquee));
+    }
+    if let Some(pointer_interaction) = entry_pointer_interaction(
+        ui,
+        intl,
+        device_key,
+        rows,
+        &row_responses,
+        selection,
+        keyboard_context,
+    ) {
+        interaction = Some(pointer_interaction);
+    }
+    if interaction.is_some() {
+        ui.memory_mut(|memory| memory.request_focus(table_id));
+    }
+    interaction.or_else(|| {
+        keyboard_index.map(|index| EntryInteraction::Select {
+            index,
+            activate,
+            intent: SelectionIntent::Replace,
+        })
+    })
+}
+
+fn render_entry_table(
+    ui: &mut Ui,
+    intl: &Intl,
+    device_key: &str,
+    rows: &[DeviceCatalogEntry],
+    selection: EntryTableSelection<'_>,
+    keyboard_index: Option<usize>,
+) -> Vec<(usize, egui::Response)> {
+    let painter = ui.painter().clone();
+    let border = crate::theme::palette(ui)
+        .borders()
+        .subtle()
+        .with_alpha(TABLE_BORDER_ALPHA);
+    let mut responses = Vec::new();
     let mut table = TableBuilder::new(ui)
         .id_salt(("device-explorer-entries", device_key))
         .striped(true)
         .resizable(true)
-        .sense(Sense::click())
+        .sense(Sense::click_and_drag())
         .cell_layout(Layout::left_to_right(Align::Center))
         // A resizable remainder column keeps its initial width in `egui_extras`.
         // Keep the name column fluid so it follows every pane resize; the size
@@ -2553,17 +3550,17 @@ fn show_entry_table_content(
                 });
             });
             let response = header.response();
-            table_painter.hline(
+            painter.hline(
                 response.rect.x_range(),
                 response.rect.bottom(),
-                egui::Stroke::new(1.0, color32(table_border)),
+                egui::Stroke::new(1.0, color32(border)),
             );
         })
         .body(|body| {
             body.rows(ROW_HEIGHT, rows.len(), |mut row| {
                 let index = row.index();
                 let entry = &rows[index];
-                row.set_selected(selected_path == Some(entry.path.as_str()));
+                row.set_selected(selection.paths.contains(&entry.path));
                 row.col(|ui| {
                     prepare_entry_cell(ui);
                     ui.scope(|ui| {
@@ -2575,28 +3572,67 @@ fn show_entry_table_content(
                         ui.add(egui::Label::new(file_name(&entry.path)).truncate());
                     });
                 });
-                row.col(|ui| {
-                    show_table_size(ui, entry.size);
-                });
-                row_responses.push((index, row.response()));
+                row.col(|ui| show_table_size(ui, entry.size));
+                responses.push((index, row.response()));
             });
         });
-    if let Some(pointer_interaction) = entry_pointer_interaction(
-        ui,
-        intl,
-        device_key,
-        rows,
-        row_responses,
-        selected_path,
-        keyboard_context,
-    ) {
-        request_focus = true;
-        interaction = Some(pointer_interaction);
+    responses
+}
+
+fn entry_marquee_interaction(
+    ui: &Ui,
+    background: Option<&egui::Response>,
+    rows: &[(usize, egui::Response)],
+    previous_origin: Option<egui::Pos2>,
+    table_clip: Rect,
+) -> Option<MarqueeUpdate> {
+    let mut responses = background
+        .into_iter()
+        .chain(rows.iter().map(|(_, response)| response));
+    let dragging = responses.any(|response| {
+        response.drag_started_by(egui::PointerButton::Primary)
+            || response.dragged_by(egui::PointerButton::Primary)
+            || response.drag_stopped_by(egui::PointerButton::Primary)
+    });
+    if !dragging {
+        return None;
     }
-    if request_focus {
-        ui.memory_mut(|memory| memory.request_focus(table_id));
+    let os = ui.ctx().os();
+    let (origin, current, add) = ui.input(|input| {
+        (
+            previous_origin.or_else(|| input.pointer.press_origin()),
+            input.pointer.interact_pos(),
+            selection_toggle_modifier(input.modifiers, os),
+        )
+    });
+    let origin = origin?;
+    if origin.y < table_clip.top() + TABLE_HEADER_HEIGHT
+        || rows
+            .iter()
+            .any(|(_, response)| response.rect.contains(origin))
+    {
+        return None;
     }
-    interaction.or_else(|| keyboard_index.map(|index| EntryInteraction::Select { index, activate }))
+    let current = current.unwrap_or(origin);
+    let rect = Rect::from_two_pos(origin, current).intersect(table_clip);
+    if rect.is_positive() {
+        let painter = ui.painter().with_clip_rect(table_clip);
+        let visuals = &ui.visuals().selection;
+        painter.rect_filled(rect, 2.0, visuals.bg_fill.linear_multiply(0.25));
+        painter.rect_stroke(rect, 2.0, visuals.stroke, egui::StrokeKind::Inside);
+    }
+    Some(MarqueeUpdate {
+        origin,
+        indices: rows
+            .iter()
+            .filter(|(_, response)| rect.is_positive() && rect.intersects(response.rect))
+            .map(|(index, _)| *index)
+            .collect(),
+        started: previous_origin.is_none(),
+        finished: background.is_some_and(egui::Response::drag_stopped)
+            || rows.iter().any(|(_, response)| response.drag_stopped()),
+        add,
+    })
 }
 
 fn entry_pointer_interaction(
@@ -2604,13 +3640,22 @@ fn entry_pointer_interaction(
     intl: &Intl,
     device_key: &str,
     rows: &[DeviceCatalogEntry],
-    row_responses: Vec<(usize, egui::Response)>,
-    selected_path: Option<&str>,
+    row_responses: &[(usize, egui::Response)],
+    selection: EntryTableSelection<'_>,
     keyboard_context: Option<bool>,
 ) -> Option<EntryInteraction> {
     let mut interaction = None;
+    let hovered_directory = ui
+        .input(|input| input.pointer.interact_pos())
+        .and_then(|pointer| {
+            row_responses.iter().find_map(|(index, response)| {
+                (selection.drop_paths.contains(&rows[*index].path)
+                    && response.rect.contains(pointer))
+                .then_some(*index)
+            })
+        });
     for (index, response) in row_responses {
-        let entry = &rows[index];
+        let entry = &rows[*index];
         response.widget_info(|| {
             egui::WidgetInfo::labeled(
                 egui::WidgetType::SelectableLabel,
@@ -2618,11 +3663,11 @@ fn entry_pointer_interaction(
                 file_name(&entry.path),
             )
         });
-        crate::semantics::target(ui, &response, format!("files.entry.{}", entry.path));
+        crate::semantics::target(ui, response, format!("files.entry.{}", entry.path));
         let context_action = keyboard_context.and_then(|keyboard_context| {
             show_context_menu(
                 ui,
-                &response,
+                response,
                 Id::new(("device-explorer-entry-menu", device_key, &entry.path)),
                 &Selection {
                     storage_id: String::new(),
@@ -2631,26 +3676,184 @@ fn entry_pointer_interaction(
                     kind: entry.kind,
                     size: entry.size,
                 },
-                true,
-                keyboard_context && selected_path == Some(entry.path.as_str()),
+                if selection.paths.len() > 1 && selection.paths.contains(&entry.path) {
+                    ContextActions::Multi {
+                        can_remove: selection
+                            .paths
+                            .iter()
+                            .all(|path| !path_is_toolkit_managed(path)),
+                    }
+                } else {
+                    ContextActions::Single { can_remove: true }
+                },
+                keyboard_context && selection.focus == Some(entry.path.as_str()),
                 intl,
             )
         });
-        if let Some(action) = context_action {
-            interaction = Some(EntryInteraction::Context { index, action });
+        if response.drag_started_by(egui::PointerButton::Primary)
+            || response.dragged_by(egui::PointerButton::Primary)
+            || response.drag_stopped_by(egui::PointerButton::Primary)
+        {
+            interaction = Some(EntryInteraction::Drag(EntryDrag {
+                index: *index,
+                finished: response.drag_stopped_by(egui::PointerButton::Primary),
+                destination: hovered_directory,
+            }));
+        } else if let Some(action) = context_action {
+            interaction = Some(EntryInteraction::Context {
+                index: *index,
+                action,
+            });
         } else if response.double_clicked() {
             interaction = Some(EntryInteraction::Select {
-                index,
+                index: *index,
                 activate: true,
+                intent: SelectionIntent::Replace,
             });
-        } else if response.clicked() || response.secondary_clicked() {
+        } else if response.clicked() {
+            let modifiers = ui.input(|input| input.modifiers);
+            let intent = selection_intent(modifiers, ui.ctx().os());
             interaction = Some(EntryInteraction::Select {
-                index,
+                index: *index,
                 activate: false,
+                intent,
+            });
+        } else if response.secondary_clicked() {
+            interaction = Some(EntryInteraction::Select {
+                index: *index,
+                activate: false,
+                intent: SelectionIntent::Preserve,
             });
         }
     }
     interaction
+}
+
+fn selection_intent(modifiers: egui::Modifiers, os: egui::os::OperatingSystem) -> SelectionIntent {
+    let toggle = selection_toggle_modifier(modifiers, os);
+    if modifiers.shift {
+        SelectionIntent::Range { add: toggle }
+    } else if toggle {
+        SelectionIntent::Toggle
+    } else {
+        SelectionIntent::Replace
+    }
+}
+
+fn selection_toggle_modifier(modifiers: egui::Modifiers, os: egui::os::OperatingSystem) -> bool {
+    match os {
+        egui::os::OperatingSystem::Mac | egui::os::OperatingSystem::IOS => modifiers.mac_cmd,
+        egui::os::OperatingSystem::Unknown => modifiers.command,
+        _ => modifiers.ctrl,
+    }
+}
+
+fn show_drag_preview(ui: &Ui, intl: &Intl, dragged: &DraggedEntries, copy: bool) {
+    let Some(first) = dragged.selections.first() else {
+        return;
+    };
+    let Some(pointer) = ui.ctx().pointer_latest_pos() else {
+        return;
+    };
+    let bounds = ui.ctx().content_rect();
+    if !bounds.contains(pointer) {
+        return;
+    }
+    let label = if dragged.selections.len() == 1 {
+        first.display_name().to_owned()
+    } else {
+        format_message!(
+            intl,
+            default_message: "{count} items selected",
+            values: { count: u64::try_from(dragged.selections.len()).unwrap_or(u64::MAX) },
+        )
+    };
+    let width = DRAG_PREVIEW_WIDTH.min((bounds.width() - 16.0).max(48.0));
+    let x = if pointer.x + DRAG_PREVIEW_OFFSET + width <= bounds.right() - 8.0 {
+        pointer.x + DRAG_PREVIEW_OFFSET
+    } else {
+        pointer.x - DRAG_PREVIEW_OFFSET - width
+    };
+    let y = if pointer.y + DRAG_PREVIEW_OFFSET + DRAG_PREVIEW_HEIGHT <= bounds.bottom() - 8.0 {
+        pointer.y + DRAG_PREVIEW_OFFSET
+    } else {
+        pointer.y - DRAG_PREVIEW_OFFSET - DRAG_PREVIEW_HEIGHT
+    };
+    let position = egui::pos2(x.max(bounds.left() + 8.0), y.max(bounds.top() + 8.0));
+    let palette = crate::theme::palette(ui);
+    let operation = if copy {
+        format_message!(intl, default_message: "Copy")
+    } else {
+        format_message!(intl, default_message: "Move")
+    };
+    let operation_color = color32(palette.interaction().interactive());
+    let operation_fill = color32(palette.interaction().interactive().with_alpha(0x30));
+    let fill = color32(
+        palette
+            .surfaces()
+            .layer(color_theme::Level::Two)
+            .with_alpha(0xe8),
+    );
+    let border = color32(palette.borders().subtle());
+    egui::Area::new(ui.id().with("drag-preview"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(position)
+        .interactable(false)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::NONE
+                .fill(fill)
+                .stroke(egui::Stroke::new(1.0, border))
+                .inner_margin(4)
+                .show(ui, |ui| {
+                    ui.set_width(width - 8.0);
+                    ui.spacing_mut().interact_size.y = 24.0;
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        show_selection_icon(ui, first, 16.0);
+                        egui::Frame::NONE
+                            .fill(operation_fill)
+                            .corner_radius(2.0)
+                            .inner_margin(egui::Margin::symmetric(4, 2))
+                            .show(ui, |ui| {
+                                ui.spacing_mut().interact_size.y = 16.0;
+                                ui.label(
+                                    RichText::new(&operation)
+                                        .size(11.0)
+                                        .strong()
+                                        .color(operation_color),
+                                );
+                            });
+                        ui.add(egui::Label::new(RichText::new(&label).strong()).truncate());
+                    });
+                });
+        });
+}
+
+fn paint_drop_target(ui: &Ui, painter: &egui::Painter, rect: Rect) {
+    let accent = crate::theme::palette(ui).interaction().interactive();
+    painter.rect_filled(rect, 2.0, color32(accent.with_alpha(0x38)));
+    painter.rect_stroke(
+        rect,
+        2.0,
+        egui::Stroke::new(2.0, color32(accent)),
+        egui::StrokeKind::Inside,
+    );
+}
+
+fn copy_drag(ui: &Ui) -> bool {
+    let os = ui.ctx().os();
+    ui.input(|input| copy_drag_modifier(input.modifiers, os))
+}
+
+fn copy_drag_modifier(modifiers: egui::Modifiers, os: egui::os::OperatingSystem) -> bool {
+    if modifiers.shift {
+        return false;
+    }
+    match os {
+        egui::os::OperatingSystem::Mac | egui::os::OperatingSystem::IOS => modifiers.alt,
+        egui::os::OperatingSystem::Unknown => modifiers.ctrl || modifiers.alt,
+        _ => modifiers.ctrl,
+    }
 }
 
 fn show_context_menu(
@@ -2658,7 +3861,7 @@ fn show_context_menu(
     response: &egui::Response,
     id: Id,
     selection: &Selection,
-    can_remove: bool,
+    actions: ContextActions,
     open_from_keyboard: bool,
     intl: &Intl,
 ) -> Option<ItemAction> {
@@ -2678,14 +3881,23 @@ fn show_context_menu(
             ui.set_width(CONTEXT_MENU_WIDTH);
             ui.spacing_mut().item_spacing.y = 0.0;
             let mut action = None;
-            for item_action in available_item_actions(selection, can_remove) {
-                if context_menu_row(
+            let actions = match actions {
+                ContextActions::Single { can_remove } => {
+                    available_item_actions(selection, can_remove)
+                }
+                ContextActions::Multi { can_remove: true } => vec![ItemAction::Remove],
+                ContextActions::Multi { can_remove: false } => Vec::new(),
+            };
+            for item_action in actions {
+                let response = context_menu_row(
                     ui,
                     &item_action.label(intl, selection),
                     item_action.icon(),
                     item_action == ItemAction::Remove,
                     item_action.row_kind(),
-                ) {
+                );
+                crate::semantics::target(ui, &response, item_action.semantic_id());
+                if response.clicked() {
                     action = Some(item_action);
                 }
             }
@@ -2718,7 +3930,7 @@ fn context_menu_row(
     icon: icons::Icon,
     divided: bool,
     kind: header_selector::RowKind,
-) -> bool {
+) -> egui::Response {
     let response = header_selector::row_with_width_on_layer(
         ui,
         CONTEXT_MENU_WIDTH,
@@ -2752,7 +3964,7 @@ fn context_menu_row(
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
-    response.clicked()
+    response
 }
 
 fn prepare_entry_cell(ui: &mut Ui) {
@@ -2793,6 +4005,24 @@ fn moved_row_index(
         (RowMove::Previous, None) => rows.len() - 1,
         (RowMove::Next, None) => 0,
     }
+}
+
+fn refreshed_selection(
+    catalog: &DeviceCatalogSnapshot,
+    mut selection: Selection,
+) -> Option<Selection> {
+    let storage = catalog
+        .storages
+        .iter()
+        .find(|storage| storage.id == selection.storage_id)?;
+    let entry = storage.entries.iter().find(|entry| {
+        entry.path == selection.path
+            && entry.kind == selection.kind
+            && (entry.kind == DeviceCatalogEntryKind::Directory || entry.size == selection.size)
+    })?;
+    selection.storage_label.clone_from(&storage.label);
+    selection.size = entry.size;
+    Some(selection)
 }
 
 fn compare_entries(left: &DeviceCatalogEntry, right: &DeviceCatalogEntry) -> std::cmp::Ordering {
@@ -2980,6 +4210,242 @@ mod tests {
                 entries,
             }],
         }
+    }
+
+    #[test]
+    fn unchanged_hidden_file_setting_preserves_drag_into_sibling_directory() {
+        let translations = garmin_i18n::Translations::bundled().expect("catalogs are valid");
+        let intl = translations
+            .formatter(garmin_i18n::Language::English)
+            .expect("English locale is valid");
+        let mut browser = Browser::open_directory(
+            catalog(vec![
+                DeviceCatalogEntry {
+                    path: "Garmin".into(),
+                    kind: DeviceCatalogEntryKind::Directory,
+                    size: None,
+                },
+                DeviceCatalogEntry {
+                    path: "Garmin/Courses".into(),
+                    kind: DeviceCatalogEntryKind::Directory,
+                    size: None,
+                },
+                DeviceCatalogEntry {
+                    path: "Garmin/Courses/ccc".into(),
+                    kind: DeviceCatalogEntryKind::Directory,
+                    size: Some(0),
+                },
+                DeviceCatalogEntry {
+                    path: "Garmin/Courses/route.fit".into(),
+                    kind: DeviceCatalogEntryKind::File,
+                    size: Some(42),
+                },
+            ]),
+            &intl,
+            "Mock device",
+            "internal",
+            "Garmin/Courses",
+        )
+        .expect("the file catalog is valid");
+        let selection = Selection {
+            storage_id: "internal".to_owned(),
+            storage_label: "Internal storage".to_owned(),
+            path: "Garmin/Courses/route.fit".into(),
+            kind: DeviceCatalogEntryKind::File,
+            size: Some(42),
+        };
+        browser.dragged = Some(DraggedEntries {
+            selections: vec![selection.clone()],
+        });
+        let destination = DirectoryId {
+            storage_index: 0,
+            path: "Garmin/Courses/ccc".into(),
+        };
+
+        browser.set_show_hidden_files(false);
+        assert!(browser.dragged.is_some());
+        assert!(browser.can_drop_into(&destination));
+        assert_eq!(
+            browser.transfer_to(destination, false),
+            Some(Action::Transfer {
+                selections: vec![selection],
+                storage_id: "internal".to_owned(),
+                directory: "Garmin/Courses/ccc".into(),
+                copy: false,
+                overwrite: false,
+            })
+        );
+    }
+
+    #[test]
+    fn dropping_a_file_on_an_existing_name_waits_for_overwrite_confirmation() {
+        let translations = garmin_i18n::Translations::bundled().expect("catalogs are valid");
+        let intl = translations
+            .formatter(garmin_i18n::Language::English)
+            .expect("English locale is valid");
+        let mut browser = Browser::open_directory(
+            catalog(vec![
+                DeviceCatalogEntry {
+                    path: "Garmin".into(),
+                    kind: DeviceCatalogEntryKind::Directory,
+                    size: None,
+                },
+                DeviceCatalogEntry {
+                    path: "Garmin/Courses".into(),
+                    kind: DeviceCatalogEntryKind::Directory,
+                    size: None,
+                },
+                DeviceCatalogEntry {
+                    path: "Garmin/Courses/ccc".into(),
+                    kind: DeviceCatalogEntryKind::Directory,
+                    size: None,
+                },
+                DeviceCatalogEntry {
+                    path: "Garmin/Courses/route.fit".into(),
+                    kind: DeviceCatalogEntryKind::File,
+                    size: Some(42),
+                },
+                DeviceCatalogEntry {
+                    path: "Garmin/Courses/ccc/route.fit".into(),
+                    kind: DeviceCatalogEntryKind::File,
+                    size: Some(42),
+                },
+            ]),
+            &intl,
+            "Mock device",
+            "internal",
+            "Garmin/Courses/ccc",
+        )
+        .expect("the file catalog is valid");
+        browser.dragged = Some(DraggedEntries {
+            selections: vec![Selection {
+                storage_id: "internal".to_owned(),
+                storage_label: "Internal storage".to_owned(),
+                path: "Garmin/Courses/ccc/route.fit".into(),
+                kind: DeviceCatalogEntryKind::File,
+                size: Some(42),
+            }],
+        });
+        let parent = DirectoryId {
+            storage_index: 0,
+            path: "Garmin/Courses".into(),
+        };
+        assert!(browser.can_drop_into(&parent));
+        assert_eq!(browser.transfer_to(parent, false), None);
+        let pending = browser
+            .pending_overwrite
+            .expect("overwrite requires a choice");
+        assert_eq!(pending.existing.as_str(), "Garmin/Courses/route.fit");
+        assert!(!pending.copy);
+    }
+
+    #[test]
+    fn file_selection_modifiers_follow_the_host_os() {
+        use egui::os::OperatingSystem::{Mac, Nix, Windows};
+
+        let ctrl = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        let command = egui::Modifiers {
+            mac_cmd: true,
+            command: true,
+            ..Default::default()
+        };
+        assert_eq!(selection_intent(ctrl, Mac), SelectionIntent::Replace);
+        assert_eq!(selection_intent(command, Mac), SelectionIntent::Toggle);
+        assert_eq!(selection_intent(ctrl, Windows), SelectionIntent::Toggle);
+        assert_eq!(selection_intent(ctrl, Nix), SelectionIntent::Toggle);
+        assert_eq!(
+            selection_intent(
+                egui::Modifiers {
+                    shift: true,
+                    ..ctrl
+                },
+                Windows
+            ),
+            SelectionIntent::Range { add: true },
+        );
+        assert!(copy_drag_modifier(
+            egui::Modifiers {
+                alt: true,
+                ..Default::default()
+            },
+            Mac,
+        ));
+        assert!(!copy_drag_modifier(ctrl, Mac));
+        assert!(copy_drag_modifier(ctrl, Windows));
+        assert!(copy_drag_modifier(ctrl, Nix));
+        assert!(!copy_drag_modifier(
+            egui::Modifiers {
+                shift: true,
+                ..ctrl
+            },
+            Windows,
+        ));
+    }
+
+    #[test]
+    fn range_and_marquee_selection_track_the_drag_baseline() {
+        let translations = garmin_i18n::Translations::bundled().expect("catalogs are valid");
+        let intl = translations
+            .formatter(garmin_i18n::Language::English)
+            .expect("English locale is valid");
+        let rows = ["a.fit", "b.fit", "c.fit", "d.fit"]
+            .into_iter()
+            .map(|path| DeviceCatalogEntry {
+                path: path.into(),
+                kind: DeviceCatalogEntryKind::File,
+                size: Some(1),
+            })
+            .collect::<Vec<_>>();
+        let mut browser = Browser::open(catalog(rows.clone()), &intl, "Mock device").unwrap();
+        let selected = |index: usize| Selection {
+            storage_id: "internal".to_owned(),
+            storage_label: "Internal storage".to_owned(),
+            path: rows[index].path.clone(),
+            kind: DeviceCatalogEntryKind::File,
+            size: Some(1),
+        };
+        browser.select_entry(&rows, selected(0), SelectionIntent::Replace);
+        browser.select_entry(&rows, selected(2), SelectionIntent::Range { add: false });
+        assert_eq!(browser.selections().len(), 3);
+        browser.select_entry(&rows, selected(1), SelectionIntent::Toggle);
+        assert_eq!(browser.selections().len(), 2);
+
+        let origin = egui::pos2(10.0, 10.0);
+        browser.update_marquee(
+            &rows,
+            MarqueeUpdate {
+                origin,
+                indices: vec![2, 3],
+                started: true,
+                finished: false,
+                add: true,
+            },
+        );
+        assert_eq!(browser.selections().len(), 3);
+        browser.update_marquee(
+            &rows,
+            MarqueeUpdate {
+                origin,
+                indices: vec![3],
+                started: false,
+                finished: true,
+                add: false,
+            },
+        );
+        let paths = browser
+            .selections()
+            .into_iter()
+            .map(|selection| selection.path)
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            paths,
+            HashSet::from(["a.fit".into(), "c.fit".into(), "d.fit".into()])
+        );
+        assert!(browser.marquee.is_none());
     }
 
     #[test]
@@ -3399,6 +4865,7 @@ mod tests {
                 ItemAction::Open,
                 ItemAction::ImportFit,
                 ItemAction::Download,
+                ItemAction::Rename,
                 ItemAction::Remove,
             ]
         );
@@ -3410,6 +4877,7 @@ mod tests {
             vec![
                 ItemAction::Download,
                 ItemAction::CreateDirectory,
+                ItemAction::Rename,
                 ItemAction::Remove,
             ]
         );
@@ -3427,6 +4895,31 @@ mod tests {
             ),
             vec![ItemAction::Download]
         );
+    }
+
+    #[test]
+    fn rename_action_prefills_the_selected_file_name() {
+        let translations = garmin_i18n::Translations::bundled().expect("catalogs are valid");
+        let intl = translations
+            .formatter(garmin_i18n::Language::English)
+            .expect("English locale is valid");
+        let mut browser = Browser::open(catalog(Vec::new()), &intl, "Mock device")
+            .expect("the empty catalog is valid");
+        let selection = Selection {
+            storage_id: "internal".to_owned(),
+            storage_label: "Internal storage".to_owned(),
+            path: "Garmin/Courses/route.fit".into(),
+            kind: DeviceCatalogEntryKind::File,
+            size: Some(42),
+        };
+        assert_eq!(
+            browser.handle_item_action(ItemAction::Rename, selection.clone()),
+            None
+        );
+        let dialog = browser.rename.expect("rename dialog opened");
+        assert_eq!(dialog.selection, selection);
+        assert_eq!(dialog.name, "route.fit");
+        assert!(dialog.focus_name);
     }
 
     #[test]
