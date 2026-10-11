@@ -238,6 +238,13 @@ impl Chooser {
             .selected
             .as_ref()
             .map(|value| value.path.as_str());
+        let selected_paths = self
+            .browser
+            .selected
+            .iter()
+            .map(|selection| selection.path.clone())
+            .collect::<std::collections::HashSet<_>>();
+        let drop_paths = std::collections::HashSet::new();
         let table_id = Id::new(("device-explorer-entry-table", self.browser.device_key()));
         let _ = super::entry_table_background(ui, intl, self.browser.device_key());
         let moved = requested_table_movement(ui, table_id);
@@ -249,13 +256,25 @@ impl Chooser {
             intl,
             self.browser.device_key(),
             &rows,
-            selected,
-            index,
-            None,
+            super::EntryTableInput {
+                selection: super::EntryTableSelection {
+                    focus: selected,
+                    paths: &selected_paths,
+                    marquee_origin: None,
+                    drop_paths: &drop_paths,
+                    dragging: false,
+                },
+                keyboard_index: index,
+                keyboard_context: None,
+                background: None,
+            },
         );
-        if let Some(EntryInteraction::Select { index, activate }) = interaction {
+        if let Some(EntryInteraction::Select {
+            index, activate, ..
+        }) = interaction
+        {
             let entry = &rows[index];
-            self.browser.selected = Some(Selection {
+            self.browser.replace_selection(Selection {
                 storage_id: "server".into(),
                 storage_label: "/".into(),
                 path: entry.path.clone(),

@@ -77,6 +77,15 @@ impl Workspace {
                 state.transfer = None;
                 None
             }
+            Some(Action::BackTransfer) => {
+                if !state.busy {
+                    if let Some(transfer) = &mut state.transfer {
+                        transfer.go_back();
+                    }
+                    state.error = None;
+                }
+                None
+            }
             action => action,
         }
     }

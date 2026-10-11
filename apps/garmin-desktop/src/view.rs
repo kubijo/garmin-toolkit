@@ -8,7 +8,7 @@ use std::{
 use camino::Utf8Path;
 use eframe::egui::{
     ColorImage, Context, Id, Key, Modifiers, ScrollArea, TextureHandle, TextureOptions, Ui,
-    ViewportCommand, load::SizedTexture,
+    ViewportCommand, ViewportId, load::SizedTexture,
 };
 use garmin_color::{Color, swatch};
 use garmin_device::attachments as devices;
@@ -60,6 +60,8 @@ pub struct Desktop {
     avatar_editor: Option<AvatarEditor>,
     device_browser: Option<device_browser::Browser>,
     file_window: NativeWindow<device_browser::Action, ()>,
+    file_window_wake: Option<crate::developer::RootWakeRequest>,
+    file_window_close_pending: bool,
     file_window_device: Option<String>,
     file_window_owner: Option<UserId>,
     device_fit_preview: Option<device_fit_preview::Preview>,
@@ -69,6 +71,8 @@ pub struct Desktop {
     import: ImportStatus,
     notice: Option<Notice>,
     toasts: notification::Toasts,
+    file_toasts: notification::Toasts,
+    file_progress_toast: Option<notification::ToastId>,
     devices: devices::Manager<device_backend::Platform>,
     device_toasts: HashMap<notification::ToastId, String>,
     notify_on_inspection: HashSet<String>,
@@ -137,6 +141,8 @@ impl Desktop {
             avatar_editor: None,
             device_browser: None,
             file_window: NativeWindow::default(),
+            file_window_wake: None,
+            file_window_close_pending: false,
             file_window_device: None,
             file_window_owner: None,
             device_fit_preview: None,
@@ -146,6 +152,8 @@ impl Desktop {
             import: ImportStatus::default(),
             notice: None,
             toasts: notification::Toasts::default(),
+            file_toasts: notification::Toasts::default(),
+            file_progress_toast: None,
             devices: devices::Manager::with_inspector(device_platform, device_backend::inspect),
             device_toasts: HashMap::new(),
             notify_on_inspection: HashSet::new(),
@@ -393,7 +401,7 @@ impl Desktop {
         }
     }
 
-    fn show_file_window(&mut self) {
+    fn show_file_window(&mut self) -> bool {
         let selected = self
             .selected_profile
             .and_then(|index| self.profiles.get(index))
@@ -404,7 +412,9 @@ impl Desktop {
             self.file_window_device = None;
             self.device_browser = None;
             self.device_fit_preview = None;
-            return;
+            self.file_toasts = notification::Toasts::default();
+            self.file_progress_toast = None;
+            return false;
         }
         let show_hidden = self
             .selected_profile
@@ -420,7 +430,7 @@ impl Desktop {
             browser.set_show_hidden_files(show_hidden);
         }
         let intl = &self.intl;
-        let notice = &self.notice;
+        let file_toasts = &mut self.file_toasts;
         let busy = self.device_browser_status.is_busy()
             || self.device_browser_loading.is_some()
             || self.preferences_saving;
@@ -430,15 +440,24 @@ impl Desktop {
             &self.intl,
             || (),
             |ui| {
-                if let Some(notice) = notice {
-                    notification::show(ui, &notice.props());
-                }
-                if let Some(browser) = browser {
+                let action = if let Some(browser) = browser {
                     ui.add_enabled_ui(!busy, |ui| browser.show(ui, intl)).inner
                 } else {
                     ui.label(if loading { "Waiting for the device catalogue…" } else { "Device catalogue unavailable. Close this window and choose Browse files to retry." });
                     None
-                }
+                };
+                let toast_bounds = if inline {
+                    ui.max_rect()
+                } else {
+                    shell::overlay_bounds(ui.ctx().content_rect())
+                };
+                let _ = file_toasts.show_in(
+                    ui.ctx(),
+                    Id::new("desktop-file-notifications"),
+                    toast_bounds,
+                    notification::StackMode::Automatic,
+                );
+                action
             },
         );
         for event in events {
@@ -446,11 +465,18 @@ impl Desktop {
                 self.handle_device_browser_action(&command);
             }
         }
+        !inline && self.file_window.is_open()
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the file-window command dispatcher handles each action in one place"
+    )]
     fn handle_device_browser_action(&mut self, action: &device_browser::Action) {
         if matches!(action, device_browser::Action::Close) {
             self.file_window.close(&self.context);
+            self.file_toasts = notification::Toasts::default();
+            self.file_progress_toast = None;
             if !self.device_browser_status.is_busy() {
                 self.device_browser = None;
             }
@@ -467,10 +493,13 @@ impl Desktop {
             return;
         };
         let Some(candidate) = self.devices.candidate(&key) else {
-            self.notice = Some(Notice::error(format_message!(
-                &self.intl,
-                default_message: "The selected device is no longer connected",
-            )));
+            self.file_toasts.push(notification::Toast::new(
+                notification::Kind::Error,
+                format_message!(
+                    &self.intl,
+                    default_message: "The selected device is no longer connected",
+                ),
+            ));
             return;
         };
         let operation = match action {
@@ -520,6 +549,30 @@ impl Desktop {
             device_browser::Action::Remove(selection) => {
                 worker::DeviceBrowserOperation::Remove(device_browser_target(selection))
             }
+            device_browser::Action::RemoveMany(selections) => {
+                worker::DeviceBrowserOperation::RemoveMany(
+                    selections.iter().map(device_browser_target).collect(),
+                )
+            }
+            device_browser::Action::Rename { selection, name } => {
+                worker::DeviceBrowserOperation::Rename {
+                    target: device_browser_target(selection),
+                    name: name.clone(),
+                }
+            }
+            device_browser::Action::Transfer {
+                selections,
+                storage_id,
+                directory,
+                copy,
+                overwrite,
+            } => worker::DeviceBrowserOperation::Transfer {
+                targets: selections.iter().map(device_browser_target).collect(),
+                storage_id: storage_id.clone(),
+                directory: directory.clone(),
+                copy: *copy,
+                overwrite: *overwrite,
+            },
             device_browser::Action::Open(selection) => {
                 worker::DeviceBrowserOperation::OpenFit(device_browser_target(selection))
             }
@@ -539,10 +592,21 @@ impl Desktop {
             device_browser::Action::Close => unreachable!("close was handled above"),
         };
         self.device_browser_status = DeviceBrowserStatus::Busy;
-        self.notice = Some(Notice::information(device_browser_progress(
-            &self.intl,
+        if !matches!(
             operation.kind(),
-        )));
+            worker::DeviceBrowserOperationKind::CreateDirectory
+                | worker::DeviceBrowserOperationKind::Rename
+        ) {
+            self.file_progress_toast = Some(
+                self.file_toasts.push(
+                    notification::Toast::new(
+                        notification::Kind::Information,
+                        device_browser_progress(&self.intl, operation.kind()),
+                    )
+                    .persistent(),
+                ),
+            );
+        }
         self.worker.operate_device(candidate, operation);
     }
 
@@ -555,12 +619,17 @@ impl Desktop {
             return;
         };
         let busy = self.device_browser_status.is_busy() || self.device_browser_loading.is_some();
-        let same_window = self.file_window_owner == Some(owner)
+        let same_window = self.file_window.is_open()
+            && self.file_window_owner == Some(owner)
             && self.file_window_device.as_deref() == Some(key.as_str());
         // Raising the current owner's view must not depend on transfer admission.
         // Switching devices still waits for the active worker operation to finish.
         if busy && !same_window {
             return;
+        }
+        if !same_window {
+            self.file_toasts = notification::Toasts::default();
+            self.file_progress_toast = None;
         }
         let name = self
             .devices
@@ -597,10 +666,13 @@ impl Desktop {
         }
         self.device_browser = None;
         let Some(candidate) = self.devices.candidate(&key) else {
-            self.notice = Some(Notice::error(format_message!(
-                &self.intl,
-                default_message: "The selected device is no longer connected",
-            )));
+            self.file_toasts.push(notification::Toast::new(
+                notification::Kind::Error,
+                format_message!(
+                    &self.intl,
+                    default_message: "The selected device is no longer connected",
+                ),
+            ));
             return;
         };
         self.device_browser_loading = Some(key);
@@ -930,6 +1002,8 @@ impl Desktop {
                     if self.file_window_device.as_deref() == Some(key.as_str()) {
                         self.file_window.close(&self.context);
                         self.file_window_device = None;
+                        self.file_toasts = notification::Toasts::default();
+                        self.file_progress_toast = None;
                     }
                     self.dismiss_device_toasts(&key);
                     if self.device_browser_loading.as_deref() == Some(key.as_str()) {
@@ -1134,7 +1208,8 @@ impl Desktop {
         let catalog = match result {
             Ok(catalog) => catalog,
             Err(reason) => {
-                self.notice = Some(Notice::error(reason));
+                self.file_toasts
+                    .push(notification::Toast::new(notification::Kind::Error, reason));
                 return;
             }
         };
@@ -1142,7 +1217,8 @@ impl Desktop {
             && browser.device_key() == key
         {
             if let Err(reason) = browser.refresh(device_catalog_snapshot(key, catalog)) {
-                self.notice = Some(Notice::error(reason));
+                self.file_toasts
+                    .push(notification::Toast::new(notification::Kind::Error, reason));
             }
             return;
         }
@@ -1161,7 +1237,10 @@ impl Desktop {
             &device_name,
         ) {
             Ok(browser) => self.device_browser = Some(browser),
-            Err(reason) => self.notice = Some(Notice::error(reason)),
+            Err(reason) => {
+                self.file_toasts
+                    .push(notification::Toast::new(notification::Kind::Error, reason));
+            }
         }
     }
 
@@ -1172,11 +1251,17 @@ impl Desktop {
         result: Result<worker::DeviceBrowserOutcome, String>,
     ) {
         self.device_browser_status = DeviceBrowserStatus::Idle;
+        if let Some(id) = self.file_progress_toast.take() {
+            self.file_toasts.dismiss(id);
+        }
         if matches!(
             kind,
             worker::DeviceBrowserOperationKind::Upload
                 | worker::DeviceBrowserOperationKind::CreateDirectory
                 | worker::DeviceBrowserOperationKind::Remove
+                | worker::DeviceBrowserOperationKind::RemoveMany
+                | worker::DeviceBrowserOperationKind::Rename
+                | worker::DeviceBrowserOperationKind::Transfer
         ) {
             self.devices.invalidate(&key);
         }
@@ -1189,14 +1274,16 @@ impl Desktop {
         }
         match result {
             Ok(worker::DeviceBrowserOutcome::Downloaded(path)) => {
-                self.notice = Some(Notice::success(format_message!(
-                    &self.intl,
-                    default_message: "Saved {file}",
-                    values: { file: path.display().to_string() },
-                )));
+                self.file_toasts.push(notification::Toast::new(
+                    notification::Kind::Success,
+                    format_message!(
+                        &self.intl,
+                        default_message: "Saved {file}",
+                        values: { file: path.display().to_string() },
+                    ),
+                ));
             }
             Ok(worker::DeviceBrowserOutcome::FitPreview { target, preview }) => {
-                self.notice = None;
                 let fit_preview =
                     device_fit_preview::Preview::new(target, preview, &self.map_runtime);
                 self.device_fit_preview = Some(fit_preview);
@@ -1209,7 +1296,6 @@ impl Desktop {
                 self.replace_profiles(profiles, None);
                 self.device_fit_preview = None;
                 self.page = Page::Activities;
-                self.notice = None;
             }
             Ok(worker::DeviceBrowserOutcome::Refreshed(catalog)) => {
                 let snapshot = device_catalog_snapshot(key, catalog);
@@ -1220,13 +1306,21 @@ impl Desktop {
                     .refresh(snapshot)
                 {
                     Ok(()) => {
-                        self.notice =
-                            Some(Notice::success(device_browser_complete(&self.intl, kind)));
+                        self.file_toasts.push(notification::Toast::new(
+                            notification::Kind::Success,
+                            device_browser_complete(&self.intl, kind),
+                        ));
                     }
-                    Err(reason) => self.notice = Some(Notice::error(reason)),
+                    Err(reason) => {
+                        self.file_toasts
+                            .push(notification::Toast::new(notification::Kind::Error, reason));
+                    }
                 }
             }
-            Err(reason) => self.notice = Some(Notice::error(reason)),
+            Err(reason) => {
+                self.file_toasts
+                    .push(notification::Toast::new(notification::Kind::Error, reason));
+            }
         }
     }
 
@@ -1505,7 +1599,20 @@ impl eframe::App for Desktop {
         }
         self.show_create_profile(ui);
         self.show_avatar_editor(ui);
-        self.show_file_window();
+        if self.show_file_window() {
+            self.file_window_close_pending = false;
+            if self.file_window_wake.is_none() {
+                self.file_window_wake = crate::developer::request_root_wake(ui.ctx());
+            }
+        } else if self.file_window_close_pending {
+            // The previous pass still advertised the immediate child viewport.
+            // Keep the root awake until this pass omits it so eframe can remove it.
+            self.file_window_wake = None;
+            self.file_window_close_pending = false;
+        } else if self.file_window_wake.is_some() {
+            self.file_window_close_pending = true;
+            ui.ctx().request_repaint_of(ViewportId::ROOT);
+        }
         self.show_device_fit_preview(ui);
         self.show_quit_confirmation(ui);
         self.show_toasts(ui.ctx(), toast_bounds);
@@ -1949,13 +2056,6 @@ impl Notice {
         }
     }
 
-    const fn success(title: String) -> Self {
-        Self {
-            kind: notification::Kind::Success,
-            title,
-        }
-    }
-
     fn props(&self) -> notification::Props<'_> {
         notification::Props {
             kind: self.kind,
@@ -2044,6 +2144,15 @@ fn device_browser_progress(intl: &Intl, kind: worker::DeviceBrowserOperationKind
         worker::DeviceBrowserOperationKind::Remove => {
             format_message!(intl, default_message: "Removing the selected item…")
         }
+        worker::DeviceBrowserOperationKind::RemoveMany => {
+            format_message!(intl, default_message: "Removing selected items…")
+        }
+        worker::DeviceBrowserOperationKind::Rename => {
+            format_message!(intl, default_message: "Renaming the item…")
+        }
+        worker::DeviceBrowserOperationKind::Transfer => {
+            format_message!(intl, default_message: "Transferring selected items…")
+        }
     }
 }
 
@@ -2066,6 +2175,15 @@ fn device_browser_complete(intl: &Intl, kind: worker::DeviceBrowserOperationKind
         }
         worker::DeviceBrowserOperationKind::Remove => {
             format_message!(intl, default_message: "Item removed")
+        }
+        worker::DeviceBrowserOperationKind::RemoveMany => {
+            format_message!(intl, default_message: "Items removed")
+        }
+        worker::DeviceBrowserOperationKind::Rename => {
+            format_message!(intl, default_message: "Item renamed")
+        }
+        worker::DeviceBrowserOperationKind::Transfer => {
+            format_message!(intl, default_message: "Transfer complete")
         }
     }
 }

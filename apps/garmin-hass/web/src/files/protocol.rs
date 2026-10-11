@@ -33,7 +33,6 @@ pub struct Snapshot {
     pub busy: bool,
     pub preferences: ProfilePreferences,
     pub dark: bool,
-    pub notice: Option<String>,
     pub view: Option<device_browser::ViewState>,
 }
 

@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Mutex, PoisonError},
+    time::Duration,
+};
 
 use sha2::{Digest as _, Sha256};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -18,6 +22,11 @@ pub struct DirectoryDevice {
     root: PathBuf,
     storage_id: String,
     storage_label: String,
+    upload_delay: Duration,
+    verify_delay: Duration,
+    remove_uploaded_before_verify: bool,
+    truncate_uploaded_before_verify: bool,
+    recent_upload: Mutex<Option<SafeRelativePath>>,
 }
 
 impl DirectoryDevice {
@@ -37,7 +46,34 @@ impl DirectoryDevice {
             root,
             storage_id: storage_id.into(),
             storage_label: storage_label.into(),
+            upload_delay: Duration::ZERO,
+            verify_delay: Duration::ZERO,
+            remove_uploaded_before_verify: false,
+            truncate_uploaded_before_verify: false,
+            recent_upload: Mutex::new(None),
         }
+    }
+
+    /// Pause demo-backed transfers so UI automation can observe upload and verification states.
+    #[must_use]
+    pub fn with_transfer_delays(mut self, upload: Duration, verify: Duration) -> Self {
+        self.upload_delay = upload;
+        self.verify_delay = verify;
+        self
+    }
+
+    /// Remove only this transport's most recent upload at verification, for demo fault checks.
+    #[must_use]
+    pub fn with_missing_uploaded_file_on_verify(mut self, enabled: bool) -> Self {
+        self.remove_uploaded_before_verify = enabled;
+        self
+    }
+
+    /// Truncate only this transport's most recent upload at verification, for demo fault checks.
+    #[must_use]
+    pub fn with_partial_uploaded_file_on_verify(mut self, enabled: bool) -> Self {
+        self.truncate_uploaded_before_verify = enabled;
+        self
     }
 
     async fn resolve(
@@ -253,6 +289,35 @@ impl DeviceRead for DirectoryDevice {
         size: u64,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
+        if !self.verify_delay.is_zero() {
+            tokio::time::sleep(self.verify_delay).await;
+        }
+        if self.remove_uploaded_before_verify || self.truncate_uploaded_before_verify {
+            let alter_uploaded = {
+                let mut recent = self
+                    .recent_upload
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                if recent.as_ref() == Some(path) {
+                    recent.take().is_some()
+                } else {
+                    false
+                }
+            };
+            if alter_uploaded {
+                let uploaded = self.resolve(storage, path, false).await?;
+                if self.remove_uploaded_before_verify {
+                    tokio::fs::remove_file(uploaded).await?;
+                } else {
+                    tokio::fs::OpenOptions::new()
+                        .write(true)
+                        .open(uploaded)
+                        .await?
+                        .set_len(0)
+                        .await?;
+                }
+            }
+        }
         verify_file(&self.resolve(storage, path, false).await?, size, sha256).await
     }
 
@@ -461,6 +526,9 @@ impl DeviceWrite for DirectoryDevice {
             .open(&destination)
             .await?;
         let result = async {
+            if !self.upload_delay.is_zero() {
+                tokio::time::sleep(self.upload_delay).await;
+            }
             let mut source = tokio::fs::File::open(source).await?;
             let mut buffer = vec![0; 1024 * 1024];
             let mut bytes = 0_u64;
@@ -490,6 +558,11 @@ impl DeviceWrite for DirectoryDevice {
         drop(output);
         if result.is_err() {
             tokio::fs::remove_file(destination).await?;
+        } else {
+            *self
+                .recent_upload
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(path.clone());
         }
         result
     }

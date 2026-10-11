@@ -17,6 +17,7 @@ pub enum Kind {
     Primary,
     Secondary,
     Tertiary,
+    TertiaryDanger,
     Ghost,
     Danger,
 }
@@ -28,6 +29,7 @@ impl Kind {
             Self::Primary => buttons.primary(),
             Self::Secondary => buttons.secondary(),
             Self::Tertiary => buttons.tertiary(),
+            Self::TertiaryDanger => buttons.tertiary_danger(),
             Self::Ghost => buttons.ghost(),
             Self::Danger => buttons.danger(),
         }
@@ -512,7 +514,9 @@ fn icon_state_visuals(
 ) -> egui::style::WidgetVisuals {
     let foreground = match kind {
         Kind::Ghost => neutral_foreground,
-        Kind::Primary | Kind::Secondary | Kind::Tertiary | Kind::Danger => state.foreground(),
+        Kind::Primary | Kind::Secondary | Kind::Tertiary | Kind::TertiaryDanger | Kind::Danger => {
+            state.foreground()
+        }
     };
     widget(
         state.background(),

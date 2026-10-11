@@ -72,7 +72,7 @@ fn progress_accent(ui: &Ui) -> garmin_color::Color {
     widget_theme::selection_accent_on(ui, garmin_color::Color::from_rgb(r, g, b))
 }
 
-fn indeterminate(ui: &mut Ui, height: f32) {
+pub(crate) fn indeterminate(ui: &mut Ui, height: f32) {
     let width = ui.available_width().max(0.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
     response.widget_info(|| egui::WidgetInfo::new(egui::WidgetType::ProgressIndicator));

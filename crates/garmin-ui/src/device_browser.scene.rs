@@ -11,8 +11,8 @@ use garmin_ui::{device, device_browser, profile, shell, workspace};
 scene_meta! { title: "Components / File browser" }
 
 thread_local! {
-    static BROWSERS: crate::SceneState<device_browser::Browser, 6> = const { crate::SceneState::empty() };
-    static SELECTED_BROWSERS: crate::SceneState<(device_browser::Browser, u8), 2> = const { crate::SceneState::empty() };
+    static BROWSERS: crate::SceneState<device_browser::Browser, 7> = const { crate::SceneState::empty() };
+    static SELECTED_BROWSERS: crate::SceneState<(device_browser::Browser, u8), 3> = const { crate::SceneState::empty() };
     static CONTEXT_BROWSERS: crate::SceneState<(device_browser::Browser, bool), 2> = const { crate::SceneState::empty() };
 }
 
@@ -25,6 +25,7 @@ enum BrowserSlot {
     Narrow,
     Window,
     NarrowWindow,
+    MultiSelected,
 }
 
 #[derive(Clone, Copy)]
@@ -32,6 +33,7 @@ enum BrowserSlot {
 enum SelectedBrowserSlot {
     Generic,
     Fit,
+    LongPath,
 }
 
 #[derive(Clone, Copy)]
@@ -171,7 +173,15 @@ fn storage_root(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
 
 #[scene]
 fn selected_generic_file(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
-    show_selected_scene(ctx, ui, globals, "Garmin", 4, SelectedBrowserSlot::Generic);
+    show_selected_scene(
+        ctx,
+        ui,
+        globals,
+        "Garmin",
+        4,
+        catalog,
+        SelectedBrowserSlot::Generic,
+    );
 }
 
 #[scene]
@@ -182,8 +192,53 @@ fn selected_fit_file(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globa
         globals,
         INITIAL_DIRECTORY,
         2,
+        catalog,
         SelectedBrowserSlot::Fit,
     );
+}
+
+#[scene]
+fn selected_long_path(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    show_selected_scene(
+        ctx,
+        ui,
+        globals,
+        INITIAL_DIRECTORY,
+        2,
+        long_path_catalog,
+        SelectedBrowserSlot::LongPath,
+    );
+}
+
+#[scene]
+fn multi_selected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage((960.0, 640.0)), |ui| {
+        let intl = globals.intl();
+        BROWSERS.with_scene(
+            BrowserSlot::MultiSelected as usize,
+            || {
+                let mut browser = device_browser::Browser::open_directory(
+                    catalog(),
+                    &intl,
+                    "Mock Watch-o-Matic 9000",
+                    "mock-internal",
+                    "Garmin",
+                )
+                .expect("the gallery catalog and initial directory are valid");
+                browser
+                    .select_paths_for_preview(&[
+                        "Garmin/Activity",
+                        "Garmin/Courses",
+                        "Garmin/Workouts",
+                    ])
+                    .expect("the selected gallery rows are visible");
+                browser
+            },
+            |browser| {
+                let _ = browser.show(ui, &intl);
+            },
+        );
+    },);
 }
 
 #[scene]
@@ -248,6 +303,7 @@ fn show_selected_scene(
     globals: &crate::Globals,
     directory: &str,
     selection_steps: u8,
+    fixture: fn() -> DeviceCatalogSnapshot,
     slot: SelectedBrowserSlot,
 ) {
     stage!(ctx, ui, globals.stage((960.0, 640.0)), |ui| {
@@ -257,7 +313,7 @@ fn show_selected_scene(
             || {
                 (
                     device_browser::Browser::open_directory(
-                        catalog(),
+                        fixture(),
                         &intl,
                         "Mock Watch-o-Matic 9000",
                         "mock-internal",
@@ -370,6 +426,15 @@ fn catalog() -> DeviceCatalogSnapshot {
             },
         ],
     }
+}
+
+fn long_path_catalog() -> DeviceCatalogSnapshot {
+    let mut catalog = catalog();
+    catalog.storages[0].entries = entries(
+        "2026-10-10-morning-ride-along-the-river-and-through-the-old-town.fit",
+        true,
+    );
+    catalog
 }
 
 fn empty_catalog() -> DeviceCatalogSnapshot {

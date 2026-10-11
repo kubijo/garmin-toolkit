@@ -13,6 +13,14 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 mod wake;
+pub(crate) use wake::Request as RootWakeRequest;
+
+/// Immediate child viewports still need root passes when Wayland withholds root frame callbacks.
+pub(crate) fn request_root_wake(context: &egui::Context) -> Option<RootWakeRequest> {
+    context
+        .plugin_opt::<NativeTools>()
+        .map(|tools| tools.lock().wake.request())
+}
 
 #[derive(Clone, Copy, Debug, Default, clap::Parser)]
 pub struct Options {

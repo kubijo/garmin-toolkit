@@ -174,7 +174,7 @@ impl Wake {
     }
 }
 
-pub(super) struct Request {
+pub(crate) struct Request {
     wake: Wake,
 }
 

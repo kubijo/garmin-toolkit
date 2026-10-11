@@ -18,7 +18,7 @@ use wasm_bindgen_futures::{JsFuture, spawn_local};
 
 enum Completion {
     Route(RouteReply),
-    Targets(String, Vec<CourseTarget>, Vec<CourseTransferStatus>),
+    Targets(String, Vec<CourseTarget>),
     Prepared(CourseTransferPreparation),
     Status(CourseTransferStatus),
     Cleanup(CourseCleanupReview),
@@ -170,8 +170,8 @@ fn start(
         if state.routes.token == token {
             match result {
                 Ok(Some(Completion::Route(reply))) => state.routes.view.accept(reply),
-                Ok(Some(Completion::Targets(key, targets, receipts))) => {
-                    state.routes.view.transfer_targets(key, targets, receipts);
+                Ok(Some(Completion::Targets(key, targets))) => {
+                    state.routes.view.transfer_targets(key, targets);
                 }
                 Ok(Some(Completion::Prepared(result))) => {
                     state.routes.view.transfer_prepared(result);
@@ -244,7 +244,9 @@ async fn execute_transfer(
         | Action::CancelTransfer { device_key, .. }
         | Action::PrepareTransferCleanup { device_key, .. }
         | Action::ApproveTransferCleanup { device_key, .. } => device_key,
-        Action::BeginTransfer(_) | Action::DismissTransfer => return Ok(None),
+        Action::BeginTransfer(_) | Action::DismissTransfer | Action::BackTransfer => {
+            return Ok(None);
+        }
         Action::Request(_) | Action::Import { .. } | Action::Download(_) => {
             return Err("unexpected route action".into());
         }
@@ -259,11 +261,7 @@ async fn execute_transfer(
                 .targets(generation)
                 .await
                 .map_err(|error| error.to_string())??;
-            let receipts = service
-                .list(generation)
-                .await
-                .map_err(|error| error.to_string())??;
-            Ok(Some(Completion::Targets(device_key, targets, receipts)))
+            Ok(Some(Completion::Targets(device_key, targets)))
         }
         Action::PrepareTransfer {
             generation,
@@ -313,6 +311,7 @@ async fn execute_transfer(
         }
         Action::BeginTransfer(_)
         | Action::DismissTransfer
+        | Action::BackTransfer
         | Action::Request(_)
         | Action::Import { .. }
         | Action::Download(_) => Err("unexpected transfer action".into()),

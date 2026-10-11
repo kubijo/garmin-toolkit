@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use cint::ColorInterop;
-use egui::{Align, Align2, Id, Layout, Order, Rect, Response, RichText, Ui};
+use egui::{Align2, Id, Order, Rect, Response, RichText, Ui};
 use garmin_color::{Color, theme};
 
 use crate::{Size, button, icons, theme as widget_theme};
@@ -18,6 +18,15 @@ const TOAST_SHADOW_CLIP_MARGIN: f32 = 20.0;
 const SEVERITY_RAIL_WIDTH: f32 = 3.0;
 const CLOSE_ICON_SIZE: f32 = 14.0;
 const CLOSE_TARGET_SIZE: f32 = 24.0;
+const CLOSE_EDGE_INSET: f32 = 8.0;
+const CLOSE_TEXT_GAP: f32 = 8.0;
+const TOAST_STROKE_WIDTH: f32 = 1.0;
+const TOAST_CONTENT_MARGIN: egui::Margin = egui::Margin {
+    left: 16,
+    right: 16,
+    top: 8,
+    bottom: 12,
+};
 const TOAST_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
 const SEVERITY_RAIL_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
 
@@ -551,7 +560,7 @@ fn render_surface(ui: &mut Ui, props: &ActionableProps<'_>, content_opacity: f32
         ))
         .corner_radius(TOAST_RADIUS)
         .stroke(egui::Stroke::new(
-            1.0,
+            TOAST_STROKE_WIDTH,
             widget_theme::color32(palette.borders().subtle()),
         ))
         .shadow(egui::Shadow {
@@ -560,12 +569,7 @@ fn render_surface(ui: &mut Ui, props: &ActionableProps<'_>, content_opacity: f32
             spread: 0,
             color: egui::Color32::from_black_alpha(96),
         })
-        .inner_margin(egui::Margin {
-            left: 16,
-            right: 8,
-            top: 8,
-            bottom: 12,
-        })
+        .inner_margin(TOAST_CONTENT_MARGIN)
         .show(ui, |ui| render_surface_content(ui, props, content_opacity));
     ui.painter().rect_filled(
         severity_rail_rect(output.response.rect),
@@ -582,6 +586,10 @@ fn render_surface(ui: &mut Ui, props: &ActionableProps<'_>, content_opacity: f32
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the toast layout and its close and action hit targets share one surface"
+)]
 fn render_surface_content(
     ui: &mut Ui,
     props: &ActionableProps<'_>,
@@ -596,6 +604,22 @@ fn render_surface_content(
     ui.multiply_opacity(content_opacity);
     ui.set_min_width(ui.available_width());
     ui.spacing_mut().item_spacing.y = 8.0;
+    let close_rect = props.closable.then(|| {
+        let content = ui.max_rect();
+        Rect::from_min_size(
+            egui::pos2(
+                content.right() + f32::from(TOAST_CONTENT_MARGIN.right) + TOAST_STROKE_WIDTH
+                    - CLOSE_EDGE_INSET
+                    - CLOSE_TARGET_SIZE,
+                content.top() - f32::from(TOAST_CONTENT_MARGIN.top) - TOAST_STROKE_WIDTH
+                    + CLOSE_EDGE_INSET,
+            ),
+            egui::Vec2::splat(CLOSE_TARGET_SIZE),
+        )
+    });
+    if let Some(rect) = close_rect {
+        ui.set_min_height(rect.bottom() - ui.max_rect().top());
+    }
     let mut action = None;
     ui.horizontal_top(|ui| {
         icons::Props {
@@ -605,7 +629,14 @@ fn render_surface_content(
         }
         .show(ui);
         ui.add_space(4.0);
-        ui.with_layout(Layout::top_down(Align::Min), |ui| {
+        let text_width = close_rect.map_or_else(
+            || ui.available_width(),
+            |rect| {
+                (rect.left() - CLOSE_TEXT_GAP - ui.available_rect_before_wrap().left()).max(40.0)
+            },
+        );
+        ui.vertical(|ui| {
+            ui.set_width(text_width);
             ui.add(
                 egui::Label::new(
                     crate::typography::semibold(props.title)
@@ -625,19 +656,17 @@ fn render_surface_content(
                 );
             }
         });
-        if props.closable {
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                let response = close_button(ui, palette.content().icon_primary());
-                #[cfg(test)]
-                {
-                    close_target = Some((response.id, response.rect));
-                }
-                if response.clicked() {
-                    action = Some(Action::Dismiss);
-                }
-            });
-        }
     });
+    if let Some(rect) = close_rect {
+        let response = close_button(ui, palette.content().icon_primary(), rect);
+        #[cfg(test)]
+        {
+            close_target = Some((response.id, response.rect));
+        }
+        if response.clicked() {
+            action = Some(Action::Dismiss);
+        }
+    }
     if let Some(label) = props.action {
         ui.add_space(4.0);
         let response = ui
@@ -678,10 +707,9 @@ fn severity_rail_rect(surface: Rect) -> Rect {
     )
 }
 
-fn close_button(ui: &mut Ui, color: Color) -> Response {
-    let (id, icon_rect) = ui.allocate_space(egui::Vec2::splat(CLOSE_ICON_SIZE));
-    let target_expansion = (CLOSE_TARGET_SIZE - CLOSE_ICON_SIZE) / 2.0;
-    let response = ui.interact(icon_rect.expand(target_expansion), id, egui::Sense::click());
+fn close_button(ui: &Ui, color: Color, target: Rect) -> Response {
+    let icon_rect = Rect::from_center_size(target.center(), egui::Vec2::splat(CLOSE_ICON_SIZE));
+    let response = ui.interact(target, ui.auto_id_with("toast-close"), egui::Sense::click());
     icons::X
         .mask()
         .tint(color.into_cint())
@@ -948,6 +976,56 @@ mod tests {
         let gap =
             expanded_y_for(&[rest.rect.height(), hovered.rect.height()], 1) - rest.rect.height();
         assert!((gap - STACK_GAP).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn long_title_does_not_move_the_close_button() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        for title in [
+            "Import failed",
+            "FIT file type course is unsupported in an activity import",
+        ] {
+            let mut output = None;
+            context
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(TOAST_WIDTH, 200.0),
+                        )),
+                        ..egui::RawInput::default()
+                    },
+                    |ui| {
+                        ui.set_width(TOAST_WIDTH);
+                        output = Some(render_surface(
+                            ui,
+                            &ActionableProps {
+                                kind: Kind::Error,
+                                title,
+                                detail: None,
+                                action: None,
+                                closable: true,
+                            },
+                            1.0,
+                        ));
+                    },
+                )
+                .drop_without_applying_deltas();
+            let output = output.expect("toast rendered");
+            let close = output.close_target.expect("close button rendered").1;
+            assert!(
+                (output.rect.right() - close.right() - CLOSE_EDGE_INSET).abs() < 0.1,
+                "surface={:?}, close={close:?}",
+                output.rect,
+            );
+            assert!(
+                (close.top() - output.rect.top() - CLOSE_EDGE_INSET).abs() < 0.1,
+                "surface={:?}, close={close:?}",
+                output.rect,
+            );
+            assert!((close.width() - CLOSE_TARGET_SIZE).abs() < 0.1);
+        }
     }
 
     #[test]

@@ -88,6 +88,12 @@ wraps them in the existing bounded, single-use download tickets. Desktop writes 
 destination, syncs it, and publishes without replacing an existing file. Neither adapter regenerates Course bytes during
 download or writes to a device.
 
+Course transfer is a separate, explicitly approved device operation for a selected saved artifact, device identity, and
+storage location. It persists an intent before mutation, uses a create-only destination, and reconciles interrupted
+writes against the recorded path and digest. Readback verifies file bytes; it cannot establish whether firmware imported
+the Course after disconnect. Partial-upload cleanup requires its own approval and is limited to the recorded transfer.
+Sending a Course does not pair the device or change its profile marker.
+
 ## Database integration
 
 SQL lives under `queries`; migrations under `migrations`. SQLx checks a fresh migrated database and commits offline

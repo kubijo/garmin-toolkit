@@ -106,6 +106,153 @@ async fn settled_transfer(
     .await?
 }
 
+#[tokio::test]
+async fn file_removed_during_verification_is_missing_not_partial_cleanup() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let deployment = Deployment::open(root.path().join("host")).await?;
+    let (owner, _, operation, _) = generated_course(&deployment).await?;
+    let watch = Device::open(root.path().join("watch"))?;
+    let connector: Arc<dyn Connector> = Arc::new(
+        DirectoryConnector {
+            root: watch.root().to_owned(),
+            storage_id: fixture::STORAGE_ID.to_owned(),
+            storage_label: fixture::STORAGE_LABEL.to_owned(),
+        }
+        .with_transfer_delays(Duration::ZERO, Duration::from_millis(500)),
+    );
+    let transfers =
+        CourseTransfers::new(Arc::clone(&deployment), Arc::new(MutationLocks::default()));
+    let CourseTransferPreparation::Review(review) = transfers
+        .prepare(
+            owner,
+            operation,
+            fixture::KEY.into(),
+            fixture::STORAGE_ID,
+            Arc::clone(&connector),
+        )
+        .await?
+    else {
+        return Err("expected transfer review".into());
+    };
+    let started = transfers.approve(owner, review.approval).await?;
+    assert!(matches!(started.phase, CourseTransferPhase::Running));
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let status = transfers
+                .status(owner, review.transfer, connector.as_ref())
+                .await?;
+            if status
+                .progress
+                .as_ref()
+                .is_some_and(|progress| progress.finishing)
+            {
+                break Ok::<_, anyhow::Error>(());
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await??;
+    fs::remove_file(watch.root().join("Garmin/Courses").join(&review.file_name))?;
+    let finished = settled_transfer(&transfers, owner, review.transfer, connector.as_ref()).await?;
+    assert!(matches!(finished.phase, CourseTransferPhase::Missing));
+    assert!(
+        transfers
+            .prepare_cleanup(owner, review.transfer, connector.as_ref())
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn demo_missing_file_fault_reports_missing_without_cleanup() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let deployment = Deployment::open(root.path().join("host")).await?;
+    let (owner, _, operation, _) = generated_course(&deployment).await?;
+    let watch = Device::open(root.path().join("watch"))?;
+    let connector: Arc<dyn Connector> = Arc::new(
+        DirectoryConnector {
+            root: watch.root().to_owned(),
+            storage_id: fixture::STORAGE_ID.to_owned(),
+            storage_label: fixture::STORAGE_LABEL.to_owned(),
+        }
+        .with_transfer_delays(Duration::ZERO, Duration::from_millis(20))
+        .with_missing_uploaded_file_on_verify(true),
+    );
+    let transfers =
+        CourseTransfers::new(Arc::clone(&deployment), Arc::new(MutationLocks::default()));
+    let CourseTransferPreparation::Review(review) = transfers
+        .prepare(
+            owner,
+            operation,
+            fixture::KEY.into(),
+            fixture::STORAGE_ID,
+            Arc::clone(&connector),
+        )
+        .await?
+    else {
+        return Err("expected transfer review".into());
+    };
+    transfers.approve(owner, review.approval).await?;
+    let finished = settled_transfer(&transfers, owner, review.transfer, connector.as_ref()).await?;
+    assert!(matches!(finished.phase, CourseTransferPhase::Missing));
+    assert!(
+        !watch
+            .root()
+            .join("Garmin/Courses")
+            .join(&review.file_name)
+            .exists()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn demo_partial_file_fault_opens_cleanup_review() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let deployment = Deployment::open(root.path().join("host")).await?;
+    let (owner, _, operation, _) = generated_course(&deployment).await?;
+    let watch = Device::open(root.path().join("watch"))?;
+    let connector: Arc<dyn Connector> = Arc::new(
+        DirectoryConnector {
+            root: watch.root().to_owned(),
+            storage_id: fixture::STORAGE_ID.to_owned(),
+            storage_label: fixture::STORAGE_LABEL.to_owned(),
+        }
+        .with_transfer_delays(Duration::ZERO, Duration::from_millis(20))
+        .with_partial_uploaded_file_on_verify(true),
+    );
+    let transfers =
+        CourseTransfers::new(Arc::clone(&deployment), Arc::new(MutationLocks::default()));
+    let CourseTransferPreparation::Review(review) = transfers
+        .prepare(
+            owner,
+            operation,
+            fixture::KEY.into(),
+            fixture::STORAGE_ID,
+            Arc::clone(&connector),
+        )
+        .await?
+    else {
+        return Err("expected transfer review".into());
+    };
+    transfers.approve(owner, review.approval).await?;
+    let finished = settled_transfer(&transfers, owner, review.transfer, connector.as_ref()).await?;
+    assert!(matches!(
+        finished.phase,
+        CourseTransferPhase::NeedsReview(_)
+    ));
+    let cleanup = transfers
+        .prepare_cleanup(owner, review.transfer, connector.as_ref())
+        .await?;
+    assert_eq!(cleanup.byte_count, 0);
+    assert_eq!(
+        fs::metadata(watch.root().join("Garmin/Courses").join(&review.file_name))?.len(),
+        0
+    );
+    deployment.close().await;
+    Ok(())
+}
+
 async fn assert_recovered_acceptance(
     deployment: &Arc<Deployment>,
     actor: UserContext,

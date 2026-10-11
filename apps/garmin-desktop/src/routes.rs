@@ -32,7 +32,7 @@ use uuid::Uuid;
 enum Event {
     Reply(RouteReply),
     UploadStarted(GpxUpload),
-    TransferTargets(String, Vec<CourseTarget>, Vec<CourseTransferStatus>),
+    TransferTargets(String, Vec<CourseTarget>),
     TransferPrepared(CourseTransferPreparation),
     TransferStatus(CourseTransferStatus),
     CleanupReview(CourseCleanupReview),
@@ -118,8 +118,8 @@ impl Controller {
             match event {
                 Event::Reply(reply) => self.state.accept(reply),
                 Event::UploadStarted(upload) => self.state.begin_upload(upload),
-                Event::TransferTargets(key, targets, receipts) => {
-                    self.state.transfer_targets(key, targets, receipts);
+                Event::TransferTargets(key, targets) => {
+                    self.state.transfer_targets(key, targets);
                 }
                 Event::TransferPrepared(result) => self.state.transfer_prepared(result),
                 Event::TransferStatus(status) => self.state.transfer_status(status),
@@ -315,11 +315,7 @@ async fn execute_transfer(
                 .targets(user, generation, &device_key, connector.as_ref())
                 .await
                 .map_err(|error| format!("{error:#}"))?;
-            let receipts = transfers
-                .list(user, generation, &device_key)
-                .await
-                .map_err(|error| format!("{error:#}"))?;
-            Ok(Event::TransferTargets(device_key, targets, receipts))
+            Ok(Event::TransferTargets(device_key, targets))
         }
         Action::PrepareTransfer {
             generation,
@@ -370,6 +366,7 @@ async fn execute_transfer(
         }
         Action::BeginTransfer(_)
         | Action::DismissTransfer
+        | Action::BackTransfer
         | Action::Request(_)
         | Action::Import { .. }
         | Action::Download(_) => Ok(Event::Finished),

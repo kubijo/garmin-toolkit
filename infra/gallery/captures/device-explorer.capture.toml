@@ -25,8 +25,30 @@ name = "selected-generic-file"
 scene = "device_browser::Selected Generic File"
 
 [[shot]]
+name = "selected-generic-file-light"
+scene = "device_browser::Selected Generic File"
+
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
 name = "selected-fit-file"
 scene = "device_browser::Selected Fit File"
+
+[[shot]]
+name = "selected-long-path"
+scene = "device_browser::Selected Long Path"
+
+[[shot]]
+name = "multi-selected"
+scene = "device_browser::Multi Selected"
+
+[[shot]]
+name = "multi-selected-light"
+scene = "device_browser::Multi Selected"
+
+[shot.globals]
+Theme = "Light"
 
 [[shot]]
 name = "empty-storage"

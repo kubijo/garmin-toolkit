@@ -1,5 +1,6 @@
 use gallery::prelude::*;
-use garmin_ui::{device, icons, modal};
+use garmin_i18n::format_message;
+use garmin_ui::{device, icons, modal, notification};
 
 scene_meta! { title: "Application / Devices" }
 
@@ -104,6 +105,30 @@ fn pairing_confirmation(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Gl
             reassign.then_some("Sam Runner"),
             true,
             modal::Presentation::Contained,
+        );
+    });
+}
+
+#[scene]
+fn pairing_success(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let paired = format_message!(
+        &globals.intl(),
+        default_message: "Device paired with profile"
+    );
+    stage!(ctx, ui, (640, 420), |ui| {
+        let (bounds, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+        ui.painter()
+            .rect_filled(bounds, 0.0, ui.visuals().panel_fill);
+        let mut toasts = notification::Toasts::default();
+        toasts.push(notification::Toast::new(
+            notification::Kind::Success,
+            paired,
+        ));
+        let _ = toasts.show_in(
+            ui.ctx(),
+            egui::Id::new("device-pairing-success-gallery"),
+            bounds,
+            notification::StackMode::Expanded,
         );
     });
 }

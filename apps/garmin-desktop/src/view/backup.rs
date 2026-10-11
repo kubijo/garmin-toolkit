@@ -89,6 +89,8 @@ impl Desktop {
         self.file_window.close(&self.context);
         self.file_window_device = None;
         self.file_window_owner = None;
+        self.file_toasts = notification::Toasts::default();
+        self.file_progress_toast = None;
         self.import = ImportStatus::default();
         self.notice = None;
         self.toasts = notification::Toasts::default();

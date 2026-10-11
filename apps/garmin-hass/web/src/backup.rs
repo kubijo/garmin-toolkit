@@ -444,6 +444,10 @@ pub(super) fn show(
 }
 
 impl super::App {
+    pub(super) fn close_server_chooser(&mut self) {
+        chooser::close(&mut self.shared.borrow_mut().backup, &self.context);
+    }
+
     pub(super) fn update_server_chooser(&self) {
         chooser::update(
             &self.intl,

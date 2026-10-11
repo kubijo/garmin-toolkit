@@ -54,6 +54,7 @@ pub enum Action {
     Download(ArtifactId),
     BeginTransfer(CourseGenerationOperationId),
     DismissTransfer,
+    BackTransfer,
     ChooseTransferDevice {
         generation: CourseGenerationOperationId,
         device_key: String,
@@ -91,7 +92,6 @@ pub struct TransferState {
     pub targets: Vec<CourseTarget>,
     pub review: Option<CourseTransferReview>,
     pub status: Option<CourseTransferStatus>,
-    pub receipts: Vec<CourseTransferStatus>,
     pub cleanup: Option<CourseCleanupReview>,
 }
 
@@ -104,8 +104,26 @@ impl TransferState {
             targets: Vec::new(),
             review: None,
             status: None,
-            receipts: Vec::new(),
             cleanup: None,
+        }
+    }
+
+    #[must_use]
+    pub fn can_go_back(&self) -> bool {
+        self.cleanup.is_some()
+            || self.review.is_some()
+            || self.status.is_none() && self.device_key.is_some()
+    }
+
+    pub fn go_back(&mut self) {
+        if self.cleanup.take().is_some() || self.review.take().is_some() {
+            return;
+        }
+        // Once a transfer has a status, navigation must not expose an earlier
+        // approval step that could submit the same Course again.
+        if self.status.is_none() {
+            self.device_key = None;
+            self.targets.clear();
         }
     }
 }
@@ -275,16 +293,10 @@ impl State {
         }
     }
 
-    pub fn transfer_targets(
-        &mut self,
-        device_key: String,
-        targets: Vec<CourseTarget>,
-        receipts: Vec<CourseTransferStatus>,
-    ) {
+    pub fn transfer_targets(&mut self, device_key: String, targets: Vec<CourseTarget>) {
         if let Some(transfer) = &mut self.transfer {
             transfer.device_key = Some(device_key);
             transfer.targets = targets;
-            transfer.receipts = receipts;
             transfer.review = None;
             transfer.status = None;
             transfer.cleanup = None;
@@ -310,10 +322,6 @@ impl State {
         if let Some(transfer) = &mut self.transfer {
             transfer.review = None;
             transfer.cleanup = None;
-            transfer
-                .receipts
-                .retain(|receipt| receipt.transfer != status.transfer);
-            transfer.receipts.push(status.clone());
             transfer.status = Some(status);
         }
         self.busy = false;

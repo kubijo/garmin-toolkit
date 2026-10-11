@@ -9,8 +9,8 @@ use garmin_model::{
     value::ComponentVersion,
 };
 use garmin_service_api::course_transfer::{
-    CourseTarget, CourseTransferPhase, CourseTransferProgress, CourseTransferReview,
-    CourseTransferStatus,
+    CourseCleanupReview, CourseTarget, CourseTransferPhase, CourseTransferProgress,
+    CourseTransferReview, CourseTransferStatus,
 };
 use garmin_service_api::routes::{
     CourseVersion, GpxCandidate, GpxUpload, GpxUploadPhase, OutlinePoint, RouteSummary,
@@ -21,7 +21,7 @@ use garmin_ui::{activity::map_runtime, routes};
 scene_meta! { title: "Application / Routes" }
 
 thread_local! {
-    static ROUTES: crate::SceneState<(routes::Workspace, routes::State), 17> = const { crate::SceneState::empty() };
+    static ROUTES: crate::SceneState<(routes::Workspace, routes::State), 19> = const { crate::SceneState::empty() };
 }
 
 struct NoTiles;
@@ -54,6 +54,8 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             "transfer running",
             "transfer verified",
             "transfer accepted",
+            "transfer storage",
+            "transfer cleanup",
         ],
         3,
     );
@@ -147,6 +149,8 @@ fn review(mode: usize) -> routes::State {
         14 => show_transfer_running(&mut state),
         15 => show_transfer_verified(&mut state),
         16 => show_transfer_accepted(&mut state),
+        17 => show_transfer_storage(&mut state),
+        18 => show_transfer_cleanup(&mut state),
         _ => {}
     }
     if mode == 9 {
@@ -267,14 +271,30 @@ fn show_transfer_dialog(state: &mut routes::State) {
     state.devices = vec![DeviceSnapshot {
         key: "edge-1050".into(),
         name: "Edge 1050".into(),
-        identifier: None,
-        software_version: None,
+        identifier: Some(36_264_719),
+        software_version: Some(1870),
         inspection: InspectionState::Ready,
         inspection_error: None,
         report: None,
         capabilities: Vec::new(),
         storages: Vec::new(),
     }];
+}
+
+fn show_transfer_storage(state: &mut routes::State) {
+    show_transfer_dialog(state);
+    let transfer = state.transfer.as_mut().expect("gallery transfer exists");
+    transfer.device_key = Some("edge-1050".into());
+    let target = CourseTarget {
+        device_key: "edge-1050".into(),
+        device_name: "Edge 1050".into(),
+        device_digest: "gallery-device".into(),
+        storage_id: "internal".into(),
+        storage_label: "Internal Storage".into(),
+        directory: "/Garmin/NewFiles".into(),
+        free_bytes: Some(1_000_000),
+    };
+    transfer.targets = vec![target];
 }
 
 fn show_transfer_review(state: &mut routes::State) {
@@ -319,6 +339,20 @@ fn show_transfer_running(state: &mut routes::State) {
             total_bytes: 9_380,
             finishing: false,
         }),
+    });
+}
+
+fn show_transfer_cleanup(state: &mut routes::State) {
+    show_transfer_running(state);
+    let transfer = state.transfer.as_mut().expect("gallery transfer exists");
+    let status = transfer.status.as_mut().expect("gallery status exists");
+    status.phase = CourseTransferPhase::NeedsReview("Partial upload".into());
+    transfer.cleanup = Some(CourseCleanupReview {
+        approval: uuid::Uuid::default(),
+        transfer: status.transfer,
+        target: status.target.clone(),
+        file_name: status.file_name.clone(),
+        byte_count: 9_380,
     });
 }
 

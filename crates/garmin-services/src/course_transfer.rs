@@ -12,7 +12,10 @@ use std::{
 
 use anyhow::Context as _;
 use anyhow::{Result, bail, ensure};
-use garmin_device::{DevicePathStatus, SafeRelativePath, StorageCapacity, storage::DeviceRead};
+use garmin_device::{
+    DevicePathStatus, SafeRelativePath, StorageCapacity,
+    storage::{DeviceIoError, DeviceRead},
+};
 use garmin_model::{
     artifact::ArtifactDigest, identity::UserId, route::CourseGenerationOperationId,
 };
@@ -74,6 +77,11 @@ struct Outcome {
 struct ActiveTransfer {
     cancellation: CancellationToken,
     progress: Mutex<CourseTransferProgress>,
+}
+
+enum UploadFailure {
+    Write(DeviceIoError),
+    Verify(DeviceIoError),
 }
 
 impl ActiveTransfer {
@@ -328,7 +336,22 @@ impl CourseTransfers {
             let result = upload_and_verify(&connection, &target, &intent, &directory, active).await;
             let phase = match result {
                 Ok(()) => CourseTransferPhase::Verified,
-                Err(error) => CourseTransferPhase::NeedsReview(error.to_string()),
+                Err(UploadFailure::Verify(error)) => {
+                    if matches!(
+                        connection
+                            .device
+                            .inspect(&target.storage_id, &intent.path)
+                            .await,
+                        Ok(DevicePathStatus::Missing)
+                    ) {
+                        CourseTransferPhase::Missing
+                    } else {
+                        CourseTransferPhase::NeedsReview(error.to_string())
+                    }
+                }
+                Err(UploadFailure::Write(error)) => {
+                    CourseTransferPhase::NeedsReview(error.to_string())
+                }
             };
             if let Err(error) = owner.record_phase(&directory, phase) {
                 tracing::error!(%error, transfer = %intent.review.transfer, "Course transfer outcome could not be persisted");
@@ -403,7 +426,19 @@ impl CourseTransfers {
                 {
                     Ok(()) if accepted => CourseTransferPhase::Accepted,
                     Ok(()) => CourseTransferPhase::Verified,
-                    Err(error) => CourseTransferPhase::NeedsReview(error.to_string()),
+                    Err(error) => {
+                        if matches!(
+                            connection
+                                .device
+                                .inspect(&intent.review.target.storage_id, &intent.path)
+                                .await,
+                            Ok(DevicePathStatus::Missing)
+                        ) {
+                            CourseTransferPhase::Missing
+                        } else {
+                            CourseTransferPhase::NeedsReview(error.to_string())
+                        }
+                    }
                 }
             }
             _ => CourseTransferPhase::NeedsReview("recorded Course file differs on device".into()),
@@ -830,7 +865,7 @@ async fn upload_and_verify(
     intent: &Intent,
     directory: &Path,
     active: Arc<ActiveTransfer>,
-) -> Result<()> {
+) -> std::result::Result<(), UploadFailure> {
     let progress = Arc::clone(&active);
     let reporter = garmin_progress::ProgressReporter::default()
         .with_cancellation(active.cancellation.clone())
@@ -866,7 +901,8 @@ async fn upload_and_verify(
                 total: intent.review.byte_count.as_u64(),
             },
         )
-        .await?;
+        .await
+        .map_err(UploadFailure::Write)?;
     {
         let mut progress = active
             .progress
@@ -883,7 +919,8 @@ async fn upload_and_verify(
             intent.review.byte_count.as_u64(),
             &intent.sha256,
         )
-        .await?;
+        .await
+        .map_err(UploadFailure::Verify)?;
     Ok(())
 }
 

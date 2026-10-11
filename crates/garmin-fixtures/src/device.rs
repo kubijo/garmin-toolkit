@@ -5,6 +5,7 @@ use std::{
     ffi::OsStr,
     io,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use garmin_device::{
@@ -39,6 +40,15 @@ const MAX_DEPTH: usize = 32;
 const MAX_ENTRIES: usize = 4_096;
 const ROOT_MARKER: &str = ".garmin-toolkit-demo-device";
 const ROOT_MARKER_CONTENTS: &[u8] = b"garmin-toolkit demo device v1\n";
+const MAX_TRANSFER_DELAY_MS: u64 = 10_000;
+
+fn transfer_delay(environment: &str) -> Duration {
+    std::env::var(environment)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|milliseconds| *milliseconds <= MAX_TRANSFER_DELAY_MS)
+        .map_or(Duration::ZERO, Duration::from_millis)
+}
 
 /// A safely owned fake device tree.
 #[derive(Clone, Debug)]
@@ -120,7 +130,32 @@ impl Device {
 
     #[must_use]
     pub fn transport(&self) -> DirectoryDevice {
+        let (upload, verify) = self.transfer_delays();
         DirectoryDevice::with_storage(self.root.clone(), STORAGE_ID, STORAGE_LABEL)
+            .with_transfer_delays(upload, verify)
+            .with_missing_uploaded_file_on_verify(self.remove_uploaded_before_verify())
+            .with_partial_uploaded_file_on_verify(self.truncate_uploaded_before_verify())
+    }
+
+    /// Delays requested for this disposable device's transfer transport.
+    #[must_use]
+    pub fn transfer_delays(&self) -> (Duration, Duration) {
+        (
+            transfer_delay("GARMIN_TOOLKIT_DEMO_UPLOAD_DELAY_MS"),
+            transfer_delay("GARMIN_TOOLKIT_DEMO_VERIFY_DELAY_MS"),
+        )
+    }
+
+    /// Whether this disposable device should simulate a firmware-side removal at verification.
+    #[must_use]
+    pub fn remove_uploaded_before_verify(&self) -> bool {
+        std::env::var("GARMIN_TOOLKIT_DEMO_REMOVE_UPLOADED_BEFORE_VERIFY").as_deref() == Ok("1")
+    }
+
+    /// Whether this disposable device should simulate a partial upload at verification.
+    #[must_use]
+    pub fn truncate_uploaded_before_verify(&self) -> bool {
+        std::env::var("GARMIN_TOOLKIT_DEMO_TRUNCATE_UPLOADED_BEFORE_VERIFY").as_deref() == Ok("1")
     }
 }
 

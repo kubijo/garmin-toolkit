@@ -88,6 +88,13 @@ content. Check wrapping, clipping, contrast, focus, controls, and interaction in
 revision, viewport, font, locale, and capture results with the change. Reproducible capture recipes live in the repo;
 rendered captures belong in local or CI artifacts. Runtime tests cover behavior but do not replace visual inspection.
 
+For authorized runtime UI checks, keep app data and browser profiles under `.tmp`; bind control and debugging listeners
+to loopback. Cap Linux builds at two CPUs and 6 GiB with a verified cgroup, including the actual build workers rather
+than only a Nix client. Stop the processes started for the check and verify their listeners are gone. Prefer the app's
+semantic control API for actions and screenshots; use browser tools only for missing capabilities and record the gap in
+the owning plan. Capture before and after at the same viewport for visual fixes. Link the app-owned images in the review
+and explain the visible change. Do not substitute a full-desktop capture for an app screenshot.
+
 ## Headless hardware rendering probe
 
 The opt-in desktop `render-probe` feature runs the real demo UI and map callbacks with 4x MSAA into an offscreen Vulkan

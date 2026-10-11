@@ -48,8 +48,9 @@ The suite asserts:
 
 - Demo seeds, reviewed GPX import, byte-exact source/Course downloads, deletion/cancellation, and versioned
   regeneration.
-- Reviewed FIT Course transfer to the demo watch, exact device bytes, unchanged pairing marker, separate user
-  acceptance, host restart reconciliation, and duplicate-free repeat send.
+- Reviewed FIT Course transfer to the demo watch, live byte-verification status, exact device bytes, unchanged pairing
+  marker, host restart reconciliation, and duplicate-free repeat send. Firmware discovery requires a disconnected
+  device.
 - Separate candidates, rejected siblings, unresolved controls, malformed input, and subsequent valid import.
 - Profile isolation and upload interruption at an observed file-read boundary.
 - Lost responses after independently observed database commits, with duplicate-free import and Course retries.

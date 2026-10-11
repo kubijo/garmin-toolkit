@@ -470,7 +470,10 @@ const fn metrics(size: Size) -> Metrics {
 }
 
 fn control_style(ui: &mut Ui, fill: egui::Color32, readonly: bool) {
-    let text_primary = crate::theme::color32(crate::theme::palette(ui).content().text_primary());
+    let palette = crate::theme::palette(ui);
+    let text_primary = crate::theme::color32(palette.content().text_primary());
+    let selection_fill =
+        crate::theme::color32(palette.interaction().interactive().with_alpha(0x80));
     let vis = &mut ui.style_mut().visuals;
     for state in [
         &mut vis.widgets.inactive,
@@ -487,7 +490,8 @@ fn control_style(ui: &mut Ui, fill: egui::Color32, readonly: bool) {
         vis.widgets.noninteractive.weak_bg_fill = fill;
         vis.widgets.noninteractive.fg_stroke.color = text_primary;
     }
-    vis.selection.stroke = egui::Stroke::NONE;
+    vis.selection.bg_fill = selection_fill;
+    vis.selection.stroke = egui::Stroke::new(1.0, text_primary);
 }
 
 #[cfg(test)]
