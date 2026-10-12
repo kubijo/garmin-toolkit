@@ -191,9 +191,13 @@ test('reviewed Course transfer reaches the mock watch without pairing', options,
     const [fileName] = (await readdir(directory)).filter(name => !before.includes(name));
     assert.deepEqual(await readFile(join(directory, fileName)), f.storage.artifact(course.artifact_id));
     assert.deepEqual(await existingFile(marker), markerBefore, 'sending a Course must not change pairing');
-    const controls = await targets(p);
-    assert.equal(controls.find(target => target.id === 'routes.transfer.cancel').enabled, false);
-    assert.equal(controls.find(target => target.id === 'routes.transfer.close').enabled, true);
+    await eventually(async () => {
+        const controls = await targets(p);
+        return (
+            controls.find(target => target.id === 'routes.transfer.cancel')?.enabled === false &&
+            controls.find(target => target.id === 'routes.transfer.close')?.enabled === true
+        );
+    }, 'terminal transfer controls');
     await run(p, [click('routes.transfer.close')]);
     await f.stopHost();
     await f.startHost();

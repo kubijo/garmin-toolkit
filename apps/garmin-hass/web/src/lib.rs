@@ -3,6 +3,7 @@
 mod automation;
 mod backup;
 mod browser_timing;
+mod browser_zoom;
 mod control;
 mod developer;
 mod files;
@@ -1370,7 +1371,7 @@ impl eframe::App for App {
         context: &eframe::egui::Context,
         input: &mut eframe::egui::RawInput,
     ) {
-        garmin_ui::automation::prepare_background_input(context, input);
+        browser_zoom::prepare_input(context, input);
     }
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {

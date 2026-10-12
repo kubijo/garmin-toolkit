@@ -104,9 +104,44 @@ gallery host. Startup is excluded; tracing overhead is included.
 - Scene state is owned by library-local `WORKSPACES` in `activity.scene.rs`, initialized through `SceneState` in
   `infra/gallery/lib.rs`. It has no migration into a replacement generation; desktop state preservation is not provided.
 
-The existing gallery path misses the latency target and has a workspace correctness failure. It is not a validated
-desktop reload solution. First-frame timing, interactive state checks, 30-generation resource testing, and macOS remain
-unverified.
+The existing gallery path misses the latency target. It is not a validated desktop reload solution. First-frame timing,
+interactive state checks, 30-generation resource testing, and macOS remain unverified.
+
+On 2026-10-12, gallery 0.13.1 reproduced the workspace startup panic before any edit. The map worker timed out while
+reading egui's context in `TileTask::complete` to request a repaint; a debugger showed the UI thread idle at the time.
+The synthetic gallery map now processes its surface on the UI thread, while the normal native map runtime remains
+threaded. A 64-frame headless workspace capture was pixel-identical before and after the change. A 30-second windowed
+`--hot` run showed no map-worker thread or lock panic. Two edits to an ignored, watched gallery config then triggered
+real rebuilds and swaps: mapped library generations rose from one to three, with RSS samples of 220, 263, and 297 MiB.
+There was no lock panic, and Ctrl+C closed the run cleanly. This verifies startup, rendering, and two swaps, but not
+interaction, first-visible-frame timing, or long-run resource behavior.
+
+A longer Linux/Wayland probe on 2026-10-12 used an ignored watched gallery config, two Cargo jobs, a 200% CPU quota, and
+a 6 GiB memory cap. In one process, 25 config edits produced 26 mapped library generations; gallery RSS rose from 217
+MiB at startup to 1,159 MiB. The scope's 4.00 GiB peak includes the serial rebuild processes, so it is not gallery RSS.
+Five further edits rebuilt successfully, but the mapped generation count remained at 26 and the current mapped copy was
+over two minutes older than the latest rebuilt library. Its main thread remained in `ep_poll`, and it did not exit on
+INT or TERM; it required KILL. The first attempt's five-minute watchdog expired just after 30 edits, before a final
+sample. These runs establish significant retained memory and a reload-polling stall, **not** a successful 30-generation
+test. Diagnose the stall before using this gallery path for extended hot-reload sessions.
+
+A control run with the simple Select scene, using the same config edits and limits, completed all 30 swaps: mapped
+generations rose from 1 to 31, and RSS changed from 208 to 446 MiB (452 MiB at 25 swaps). INT closed this process
+normally. Thus the 25-swap stop is not a fixed loader generation limit. The workspace has a library-local `WORKSPACES`
+state holding a map runtime for each retained dylib generation; this could contribute to the first run's higher RSS, but
+the stall's immediate cause remains unproven.
+
+A third, workspace-scene run reached 23 mapped generations after 25 edits, then stopped advancing despite a newer built
+library. RSS was about 434 MiB and the thread count remained 16; the main thread waited in `ep_poll`, while the watcher
+and other threads were waiting normally. Live GDB attach was denied by the system's ptrace policy. After `SIGCONT`, one
+more generation mapped; subsequent edits advanced normally. With 33 edits, the process reached 32 mapped generations (31
+actual swaps), 474 MiB RSS, and exited cleanly on INT. This confirms that a 30-swap workspace run is possible, but the
+intermittent pause and the large difference between RSS samples remain unexplained. The signal's timing is consistent
+with a missed UI wakeup; it does not prove the cause. Reproduce with event-loop diagnostics before changing reload or
+map behavior. The polling timer is in the pinned gallery loader's `HotDylib::before_frame`; its watcher does not wake
+egui directly because a background repaint request previously hit the cross-dylib lock timeout. A durable fix would need
+a wake path that does not take egui locks from the watcher. This investigation is parked; it does not block desktop or
+HASS work.
 
 Rejected experiments: disabling dependency debug information reduced WASM 143→80 MiB without improving bindgen time; one
 no-demangle probe reduced bindgen 2.941→2.745 s, insufficient evidence to sacrifice symbols; moving desktop CLI parsing

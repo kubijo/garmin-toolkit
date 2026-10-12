@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::VecDeque,
     sync::{Arc, Mutex, Weak},
 };
@@ -48,30 +49,46 @@ impl SceneSlot {
     }
 }
 
-pub(in crate::activity::map_runtime) struct SurfaceRuntime {
-    worker: LatestWorker<SurfaceView>,
+pub(in crate::activity::map_runtime) enum SurfaceRuntime {
+    Worker(LatestWorker<SurfaceView>),
+    Inline(Box<RefCell<SurfaceDriver>>),
 }
 
 impl SurfaceRuntime {
-    pub(in crate::activity::map_runtime) fn new(mut driver: SurfaceDriver) -> Self {
-        Self {
-            worker: LatestWorker::spawn("garmin-toolkit-map-surface", move |view| {
-                driver.update(&view);
-            }),
+    pub(in crate::activity::map_runtime) fn new(mut driver: SurfaceDriver, inline: bool) -> Self {
+        if inline {
+            Self::Inline(Box::new(RefCell::new(driver)))
+        } else {
+            Self::Worker(LatestWorker::spawn(
+                "garmin-toolkit-map-surface",
+                move |view| {
+                    driver.update(&view);
+                },
+            ))
         }
     }
 
     pub(in crate::activity::map_runtime) fn submit(&self, view: SurfaceView) {
-        let _ = self.worker.submit(view);
+        match self {
+            Self::Worker(worker) => {
+                let _ = worker.submit(view);
+            }
+            Self::Inline(driver) => driver.borrow_mut().update(&view),
+        }
     }
 
     pub(in crate::activity::map_runtime) fn discarded(&self) -> u64 {
-        self.worker.discarded()
+        match self {
+            Self::Worker(worker) => worker.discarded(),
+            Self::Inline(_) => 0,
+        }
     }
 
     #[cfg(test)]
     pub(in crate::activity::map_runtime) fn synchronize(&self) {
-        self.worker.synchronize();
+        if let Self::Worker(worker) = self {
+            worker.synchronize();
+        }
     }
 }
 

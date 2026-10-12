@@ -139,6 +139,7 @@ pub(super) fn mode(canvas: &web_sys::HtmlCanvasElement) -> Result<String, JsValu
 
 pub(super) fn options(mode: &str) -> eframe::WebOptions {
     let mut options = eframe::WebOptions::default();
+    crate::browser_zoom::configure(&mut options);
     if !mode.is_empty() {
         // Use the same WebGL2 UI backend for main-thread and worker map modes.
         if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup
@@ -210,7 +211,7 @@ impl Fixture {
 
 impl eframe::App for Fixture {
     fn raw_input_hook(&mut self, context: &egui::Context, input: &mut egui::RawInput) {
-        garmin_ui::automation::prepare_background_input(context, input);
+        crate::browser_zoom::prepare_input(context, input);
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {

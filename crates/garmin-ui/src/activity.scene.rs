@@ -770,6 +770,7 @@ fn gallery_map_runtime(fail_tiles: bool) -> activity::map_runtime::MapRuntimeHan
         GalleryMapBackend { fail_tiles },
         activity::map_runtime::Renderer::software(),
     )
+    .on_ui_thread()
 }
 
 #[derive(Clone, Copy)]

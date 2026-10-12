@@ -7,9 +7,8 @@ and physical-device acceptance. Current contracts live in [application windows](
 ## Shared work
 
 - Audit keyboard navigation, focus, modal trapping, translation, narrow layouts, and reconnect recovery.
-- Restore browser Ctrl+wheel zoom over the HASS canvas.
-- Resolve the gallery workspace map lock timeout before relying on hot reload. Measure first visible frame and
-  repeated-reload memory on Linux and macOS before claiming desktop hot reload.
+- Confirm browser Ctrl+wheel page zoom in a headed browser. A headless demo check now shows that physical Ctrl+wheel is
+  no longer cancelled by the HASS canvas, but headless Chrome did not apply page zoom to the injected wheel gesture.
 - Finish the [visual language](../architecture/visual-language.md) across controls, shells, device headers, and
   empty/offline/error states. Review Gray 100/10 layers, keyboard activation, Czech and long copy, narrow overlays, and
   dark/light captures. Decide whether the headless color picker needs separate state before changing its geometry.
@@ -31,10 +30,17 @@ Use `just hass::control check` against a running demo where semantic control is 
 - **Localization:** use the FormatJS `en-XA` pseudo-locale and deliberately long or untranslated copy; catalog parity
   alone does not establish readable native, gallery, or browser layouts.
 
-Extend semantic automation when a runtime check needs hover or CSS cursor state, capture while the HASS backend is
-offline, or native operating-system file-picker inspection. Separate native child viewports currently advertise no
+Extend semantic automation when a runtime check needs hover or CSS cursor state, browser-native Ctrl+wheel input,
+capture while the HASS backend is offline, or native operating-system file-picker inspection. The current wheel action
+injects egui input and cannot check the browser's default zoom behavior. Separate native child viewports advertise no
 screenshot support; use the app's inline file-browser mode for visual checks until native capture is available. These
 tool gaps are optional improvements for unattended checks.
+
+### Deferred gallery hot reload
+
+Gallery hot reload is parked and does not block desktop or HASS work. The Linux measurements and intermittent reload
+pause are recorded in [build performance](../research/build-performance.md). If desktop hot reload becomes a priority,
+isolate the missed wake, verify workspace interaction and first-visible-frame timing, and repeat the checks on macOS.
 
 ### Deferred Wayland activation work
 

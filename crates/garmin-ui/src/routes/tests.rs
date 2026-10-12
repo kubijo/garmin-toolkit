@@ -785,3 +785,85 @@ fn deleting_a_course_requires_confirmation_and_cancel_preserves_it() {
         assert_eq!(state.versions, vec![version.clone()]);
     }
 }
+
+#[test]
+fn completed_transfer_can_be_closed_while_an_unrelated_route_request_is_busy() {
+    use garmin_model::route::{CourseGenerationId, CourseGenerationOperationId};
+    use garmin_service_api::course_transfer::{
+        CourseTarget, CourseTransferPhase, CourseTransferStatus,
+    };
+
+    let ctx = egui::Context::default();
+    crate::install(&ctx);
+    ctx.enable_accesskit();
+    let intl = Translations::bundled()
+        .unwrap()
+        .formatter(Language::English)
+        .unwrap();
+    let runtime =
+        MapRuntimeHandle::new(NoTiles, crate::activity::map_runtime::Renderer::software());
+    let mut view = Workspace::new(&runtime);
+    let status = CourseTransferStatus {
+        transfer: uuid::Uuid::new_v4(),
+        generation: CourseGenerationId::new_v4(),
+        target: CourseTarget {
+            device_key: "watch".into(),
+            device_name: "Watch".into(),
+            device_digest: "fixture".into(),
+            storage_id: "internal".into(),
+            storage_label: "Internal Storage".into(),
+            directory: "/Garmin/NewFiles".into(),
+            free_bytes: None,
+        },
+        file_name: "course.fit".into(),
+        phase: CourseTransferPhase::Verified,
+        progress: None,
+    };
+    let mut state = State {
+        detail: Some(route()),
+        busy: true,
+        transfer: Some(TransferState {
+            generation: CourseGenerationOperationId::new_v4(),
+            device_key: Some("watch".into()),
+            targets: vec![],
+            review: None,
+            status: Some(status),
+            cleanup: None,
+        }),
+        ..State::default()
+    };
+    let render = |view: &mut Workspace, state: &mut State| {
+        ctx.run_ui(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 1000.0))),
+                ..RawInput::default()
+            },
+            |ui| {
+                let _ = view.show(ui, &intl, state);
+            },
+        )
+    };
+    render(&mut view, &mut state).drop_without_applying_deltas();
+    let output = render(&mut view, &mut state);
+    let nodes = &output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes;
+    let close_disabled = nodes
+        .iter()
+        .find(|(_, node)| node.author_id() == Some("routes.transfer.close"))
+        .expect("transfer Close control")
+        .1
+        .is_disabled();
+    let cancel_disabled = nodes
+        .iter()
+        .find(|(_, node)| node.author_id() == Some("routes.transfer.cancel"))
+        .expect("transfer Cancel control")
+        .1
+        .is_disabled();
+    output.drop_without_applying_deltas();
+    assert!(!close_disabled);
+    assert!(cancel_disabled);
+}
