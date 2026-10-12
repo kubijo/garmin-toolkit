@@ -222,6 +222,7 @@ pub struct MapRuntimeHandle {
     metrics: MapMetrics,
     renderer: Renderer,
     decoder: Arc<OnceLock<MapTileDecoder>>,
+    inline_surface: bool,
 }
 
 /// Rendering strategy paired with a map runtime.
@@ -457,7 +458,19 @@ impl MapRuntimeHandle {
             metrics: MapMetrics::discard(),
             renderer,
             decoder: Arc::new(OnceLock::new()),
+            inline_surface: false,
         }
+    }
+
+    /// Run surface work on the UI thread for gallery scenes loaded from a dylib.
+    ///
+    /// Their synthetic backend completes immediately, and keeping its egui calls on the UI
+    /// thread avoids lock wakeups crossing the host/scene library boundary.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn on_ui_thread(mut self) -> Self {
+        self.inline_surface = true;
+        self
     }
 
     /// Attach a host-owned performance sink to every map surface made by this runtime.
@@ -482,7 +495,7 @@ impl MapRuntimeHandle {
             metrics: self.metrics.clone(),
             preparation: renderer.0.runtime(self.metrics.clone()),
             painter: None,
-            runtime: SurfaceRuntime::new(driver),
+            runtime: SurfaceRuntime::new(driver, self.inline_surface),
             scene,
         }
     }
@@ -956,6 +969,29 @@ mod tests {
 
         let worker_thread = submitted_on.lock().unwrap().expect("tile was dispatched");
         assert_ne!(worker_thread, ui_thread);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn inline_surface_dispatches_on_the_ui_thread() {
+        let backend = ThreadRecordingBackend::default();
+        let submitted_on = Arc::clone(&backend.submitted_on);
+        let runtime = MapRuntimeHandle::new(backend, Renderer::software()).on_ui_thread();
+        let mut surface = runtime.surface();
+        let context = egui::Context::default();
+        let ui_thread = std::thread::current().id();
+
+        surface.submit_view(
+            &context,
+            true,
+            &demand([walkers::TileId {
+                zoom: 4,
+                x: 8,
+                y: 6,
+            }]),
+        );
+
+        assert_eq!(*submitted_on.lock().unwrap(), Some(ui_thread));
     }
 
     #[test]

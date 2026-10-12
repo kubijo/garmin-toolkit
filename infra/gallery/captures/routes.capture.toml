@@ -54,6 +54,13 @@ state = "transfer verified"
 width = 960
 
 [[shot]]
+name = "transfer-verified-busy"
+scene = "routes::Playground"
+[shot.knobs]
+state = "transfer verified busy"
+width = 960
+
+[[shot]]
 name = "transfer-accepted"
 scene = "routes::Playground"
 [shot.knobs]

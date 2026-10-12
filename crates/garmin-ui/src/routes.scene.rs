@@ -21,7 +21,7 @@ use garmin_ui::{activity::map_runtime, routes};
 scene_meta! { title: "Application / Routes" }
 
 thread_local! {
-    static ROUTES: crate::SceneState<(routes::Workspace, routes::State), 19> = const { crate::SceneState::empty() };
+    static ROUTES: crate::SceneState<(routes::Workspace, routes::State), 20> = const { crate::SceneState::empty() };
 }
 
 struct NoTiles;
@@ -56,6 +56,7 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             "transfer accepted",
             "transfer storage",
             "transfer cleanup",
+            "transfer verified busy",
         ],
         3,
     );
@@ -147,11 +148,14 @@ fn review(mode: usize) -> routes::State {
         12 => show_transfer_dialog(&mut state),
         13 => show_transfer_review(&mut state),
         14 => show_transfer_running(&mut state),
-        15 => show_transfer_verified(&mut state),
+        15 | 19 => show_transfer_verified(&mut state),
         16 => show_transfer_accepted(&mut state),
         17 => show_transfer_storage(&mut state),
         18 => show_transfer_cleanup(&mut state),
         _ => {}
+    }
+    if mode == 19 {
+        state.busy = true;
     }
     if mode == 9 {
         state.busy = true;

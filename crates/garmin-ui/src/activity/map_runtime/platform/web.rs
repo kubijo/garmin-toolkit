@@ -50,7 +50,7 @@ impl SceneSlot {
 pub(in crate::activity::map_runtime) struct SurfaceRuntime(RefCell<SurfaceDriver>);
 
 impl SurfaceRuntime {
-    pub(in crate::activity::map_runtime) fn new(driver: SurfaceDriver) -> Self {
+    pub(in crate::activity::map_runtime) fn new(driver: SurfaceDriver, _inline: bool) -> Self {
         Self(RefCell::new(driver))
     }
 

@@ -387,7 +387,7 @@ fn transfer_dialog(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
                     label,
                     icon: Some(*icon),
                     kind: *kind,
-                    enabled: !(state.busy || status_open && running),
+                    enabled: if status_open { !running } else { !state.busy },
                 }),
         },
         modal::FooterOptions {
