@@ -14,7 +14,12 @@ Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands an
   deliberately made-up identities.
 - Use filtered flake/Just entrypoints, never `nix build path:.`.
 - Cargo and heavyweight Rust/Nix builds require explicit permission. Scope authorized commands, use low parallelism, and
-  on Linux run under a hard memory-limited cgroup; an unconstrained workload previously caused an OOM session loss.
+  on Linux run under a hard memory-limited cgroup; an unconstrained workload previously caused an OOM session loss. For
+  daemon-backed Nix builds, `memory-capped.sh` limits the client process, not the daemon's derivation workers; verify a
+  separate hard limit on the workers before starting a heavy Nix build. For local work with cached Nix toolchains and
+  vendored dependencies, run Cargo or Trunk directly in a limited `systemd-run --user --scope` and use the shared
+  `.tmp/cargo-target` rather than another persistent target directory; keep Cargo home and distribution outputs in
+  `.tmp`. Verify an active compiler's cgroup has `memory.max` at or below 6 GiB and `cpu.max` at or below two CPUs.
   Apple Silicon macOS development has an approved exception: the maintained wrapper forces one Cargo job, one Nix build
   at a time, and one core per Nix builder. This is a parallelism limit, not a hard RAM limit. Run heavyweight commands
   serially through the Just recipes or `infra/just/memory-capped.sh`; do not run concurrent builds. On Linux the wrapper

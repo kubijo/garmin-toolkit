@@ -233,6 +233,10 @@ def main() -> int:
     capture = commands.add_parser('screenshot')
     capture.add_argument('--output', type=Path, default=Path('.tmp/hass-control-runtime/screenshot.png'))
     capture.add_argument('--window', help='Child handle returned by the windows command; defaults to root')
+    browser_response = commands.add_parser('browser-response')
+    browser_response.add_argument('kind', choices=('fail', 'delay', 'unknown_size', 'clear'))
+    browser_response.add_argument('--path', help='Exact browser asset path, for example /index.html')
+    browser_response.add_argument('--milliseconds', type=int, help='Delay in milliseconds, from 1 to 30000')
     args = parser.parse_args()
     try:
         client = Client(args.url)
@@ -240,6 +244,19 @@ def main() -> int:
             check(client, args.output)
         elif args.mode == 'screenshot':
             screenshot(client, args.output, args.window)
+        elif args.mode == 'browser-response':
+            if (args.kind == 'clear') != (args.path is None):
+                parser.error('clear takes no path; other response faults require --path')
+            if (args.kind == 'delay') != (args.milliseconds is not None):
+                parser.error('--milliseconds is required only for delay')
+            payload: dict[str, str | int] = {'kind': args.kind}
+            if args.path is not None:
+                payload['path'] = args.path
+            if args.milliseconds is not None:
+                payload['milliseconds'] = args.milliseconds
+            status, result = client.request('api/browser-response', payload)
+            print(json.dumps({'http_status': status, 'response': result}, indent=2))
+            return 0 if status == 200 else 1
         else:
             if args.operation == 'screenshot':
                 parser.error('Use screenshot --output FILE.png to save a capture')
