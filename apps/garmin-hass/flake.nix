@@ -19,7 +19,7 @@
         {
           brandAssets,
           formatjsCli,
-          nixCargoTargetDir,
+          sharedCargoTargetDir,
           nodejs,
           system,
           toolchain,
@@ -173,7 +173,7 @@
             touch "$out"
           '';
           devShell = wasmCraneLib.devShell {
-            CARGO_TARGET_DIR = nixCargoTargetDir;
+            CARGO_TARGET_DIR = sharedCargoTargetDir;
             checks = { inherit package; };
             packages = [
               nodejs

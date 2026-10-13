@@ -6,7 +6,7 @@
   inheritanceCheck,
   licenseChecker,
   lib,
-  nixCargoTargetDir,
+  sharedCargoTargetDir,
   pkgs,
   pythonToolsEnv,
   toolchain,
@@ -158,7 +158,7 @@ let
           pkgs.gnumake
         ];
       runtimeEnv = {
-        CARGO_TARGET_DIR = nixCargoTargetDir;
+        CARGO_TARGET_DIR = sharedCargoTargetDir;
       }
       // testRuntimeEnv
       // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {

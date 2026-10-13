@@ -18,7 +18,7 @@
       lib.mkTool =
         {
           formatjsCli,
-          nixCargoTargetDir,
+          sharedCargoTargetDir,
           system,
           toolchain,
           workspaceSrc,
@@ -144,7 +144,7 @@
           inherit check package;
           devShell = craneLib.devShell (
             {
-              CARGO_TARGET_DIR = nixCargoTargetDir;
+              CARGO_TARGET_DIR = sharedCargoTargetDir;
               # A linkFarm does not carry the native inputs needed by mkShell.
               checks = {
                 inherit

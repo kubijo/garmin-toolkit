@@ -20,11 +20,21 @@ explicit input, not an update side effect of the quality gate.
 
 Coverage has a 30% global floor; [release work](../plans/README.md) owns per-owner floors. Generated licenses live in
 `assets/licenses`; `crates/garmin-brand/assets/icon.svg` is the sole app-icon source. AppImage/Flatpak exports use
-`dist/`. Cargo caches use `.tmp/cargo-target` for ambient builds and `.tmp/nix-cargo-target` for Nix-shell builds.
-Interactive gallery sessions own `.tmp/gallery-target`; captures, tests, checks, and profiling use
-`.tmp/gallery-check-target`. Never direct another build into a live session's target directory: the gallery watches its
-scene library and loads replacements without checking compiler compatibility. Restart gallery after changing toolchains
-or dependency configuration.
+`dist/`. Ambient builds, Nix development shells, gallery checks and captures, and stable build profiling share
+`.tmp/cargo-target`. Interactive gallery sessions use `.tmp/gallery-target`; compiler profiling keeps its separate
+nightly target. Never direct another build into a live gallery session's target directory: the gallery watches its scene
+library and loads replacements without checking compiler compatibility. Restart gallery after changing toolchains or
+dependency configuration. Different toolchains, target triples, profiles, and Cargo features may still produce distinct
+artifacts inside the shared directory. Nix package builds keep their isolated sandbox outputs.
+
+`just dev::cache-report` shows the target caches and read-only totals for the Cargo home and Nix user cache.
+`just dev::cache-clean shared` previews removal of the shared target; use `just dev::cache-clean shared apply` to remove
+it after builds have stopped. The other accepted names are `gallery-live`, `nightly`, and `legacy`; `legacy` covers the
+old Nix-shell, gallery-check, web-profile, and temporary HASS target directories. This command only removes the named
+repository target cache. It does not prune Nix store outputs, Cargo's global cache, or build-profile reports.
+[Git maintenance](https://git-scm.com/docs/git-maintenance) manages Git objects and does not clean ignored build
+artifacts. [Cargo's global cache cleanup](https://doc.rust-lang.org/cargo/reference/config.html#cache) likewise does not
+currently track target artifacts.
 
 Gallery recipes add pinned FormatJS to the executable path, including hot-reload child builds. They retain the caller's
 Rust toolchain and graphics runtime; entering the full Nix development shell remains explicit.
