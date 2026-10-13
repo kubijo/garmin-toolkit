@@ -43,7 +43,9 @@ export default function () {
         loading.setAttribute('aria-busy', 'false');
         loading.setAttribute('role', 'alert');
         message.textContent = 'Garmin Toolkit could not start.';
-        detail.textContent = reason(error);
+        const description = reason(error);
+        detail.textContent = description;
+        loading.dataset.preformatted = String(description.includes('\n'));
         trace.textContent = 'Reload the page. If the problem persists, inspect the browser console and host log.';
         retry.hidden = false;
         return true;

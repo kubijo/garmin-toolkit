@@ -77,6 +77,19 @@ test('failure rejects later start/progress and ready notifications', t => {
     assert.equal(instance.get('').hidden, false);
 });
 
+test('single-line failures can wrap', t => {
+    const singleLine = loader(t);
+    singleLine.hooks.onFailure('A long error without line breaks');
+    assert.equal(singleLine.get('').dataset.preformatted, 'false');
+});
+
+test('multiline code frames keep their original spacing', t => {
+    const codeFrame = loader(t);
+    codeFrame.hooks.onFailure('12 | const value = parse(input);\n   |               ^^^^^');
+    assert.equal(codeFrame.get('').dataset.preformatted, 'true');
+    assert.equal(codeFrame.get('detail').textContent, '12 | const value = parse(input);\n   |               ^^^^^');
+});
+
 test('failure event cancels pending progress and survives an already dispatched callback and trailing trap', t => {
     const instance = loader(t);
     instance.hooks.onProgress({ current: 100, total: 100 });
@@ -133,6 +146,7 @@ test('emitted WASM reports the original failure through the Rust CustomEvent bri
     const { module: js, wasm } = browserAssetPaths(html);
     assert.ok(js && wasm);
     // Initialize as a worker (no Window) so this test does not start a renderer.
+    assert.equal(globalThis.window, undefined);
     const module = await import(pathToFileURL(join(root, js)).href);
     await module.default({ module_or_path: await readFile(join(root, wasm)) });
     const instance = loader(t);

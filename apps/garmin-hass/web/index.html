@@ -4,6 +4,39 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Garmin Toolkit</title>
+        <script nonce="GARMIN_TOOLKIT_CSP_NONCE">
+        addEventListener(
+            'error',
+            event => {
+                const resource = event.target;
+                if (resource?.tagName !== 'SCRIPT' || resource.type !== 'module') return;
+
+                function showFailure() {
+                    const loading = document.getElementById('loading');
+                    if (!loading || loading.hidden || loading.dataset.state === 'failure') return;
+                    loading.dataset.state = 'failure';
+                    loading.dataset.preformatted = 'false';
+                    loading.setAttribute('aria-busy', 'false');
+                    loading.setAttribute('role', 'alert');
+                    document.getElementById('loading-message').textContent = 'Garmin Toolkit could not start.';
+                    document.getElementById('loading-detail').textContent =
+                        'A required application file could not load.';
+                    document.getElementById('loading-trace').textContent =
+                        'Reload the page. If the problem persists, inspect the browser console and host log.';
+                    const retry = document.getElementById('loading-retry');
+                    retry.hidden = false;
+                    retry.addEventListener('click', () => location.reload(), { once: true });
+                }
+
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', showFailure, { once: true });
+                } else {
+                    showFailure();
+                }
+            },
+            true,
+        );
+        </script>
         <link data-trunk rel="rust" data-wasm-opt="0" data-initializer="initializer.js">
         <link data-trunk rel="copy-file" href="map-worker.js">
         <link data-trunk rel="copy-file" href="map-render-worker.js">
@@ -95,6 +128,9 @@
         #loading[data-state="failure"] #loading-panel {
             border-color: rgb(255 157 153 / 24%);
         }
+        #loading[data-state="failure"][data-preformatted="true"] #loading-panel {
+            width: min(52rem, 100%);
+        }
         #loading[data-state="failure"] #loading-state {
             display: flex;
         }
@@ -140,7 +176,13 @@
             font-size: 0.82rem;
             text-align: left;
             user-select: text;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+        #loading[data-state="failure"][data-preformatted="true"] #loading-detail {
             white-space: pre;
+            overflow-wrap: normal;
+            line-height: 1;
         }
         #loading-trace {
             color: #7f8a98;

@@ -134,7 +134,8 @@ let
           ${lib.getExe nodejs} infra/javascript/ui-automation.test.mjs || exit $?
           ${lib.getExe nodejs} infra/javascript/diagnostics-view.test.mjs || exit $?
           ${lib.getExe nodejs} infra/javascript/logging.test.mjs || exit $?
-          exec ${lib.getExe nodejs} infra/javascript/initializer.test.mjs
+          ${lib.getExe nodejs} infra/javascript/initializer.test.mjs || exit $?
+          exec ${lib.getExe nodejs} infra/javascript/loader-bootstrap.test.mjs
         '';
         python-lock.command = pkgs.writeShellScript "python-lock-check" ''
           exec ${lib.getExe pkgs.uv} lock --check --offline \

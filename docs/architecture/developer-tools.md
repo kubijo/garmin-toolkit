@@ -33,6 +33,18 @@ Command shape: `{"operation":"start","argument":"activity-smoke"}`. Start/action
 `value: null`; poll status/result. HASS requires exactly one root tab: none →404, multiple →409; children do not count.
 Disconnect revokes that connection; commands never replay or migrate.
 
+The HASS demo host can also fault one browser asset response before WASM starts, without a connected app tab. This uses
+the same loopback-only control access rules. A rule applies to the next matching GET, then clears; unrelated requests
+leave it armed. Use an exact path from the browser's network log. `fail` returns 503, `delay` pauses for 1–30,000 ms,
+and `unknown_size` streams without `Content-Length`. `clear` disarms the rule.
+
+```sh
+just hass::control browser-response fail --path /
+just hass::control browser-response delay --path /app-ABCDEFG2.js --milliseconds 2000
+just hass::control browser-response unknown_size --path /app_bg-ABCDEFG2.wasm
+just hass::control browser-response clear
+```
+
 Limits: 16 connections, one pending command per connection, 16 KiB requests, 1 MiB JSON replies. Request IDs increase;
 explicit IDs must exceed the last admitted ID. Busy →429; reused ID →409. Five-second deadlines report unknown outcomes.
 

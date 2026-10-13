@@ -26,6 +26,8 @@ use std::{
 };
 use tower_http::services::ServeDir;
 
+mod browser_faults;
+
 const ADDRESS_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_ADDRESS";
 const WEB_ROOT_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_WEB_ROOT";
 const CSP_REPORT_LIMIT: usize = 32 * 1024;
@@ -184,6 +186,7 @@ fn router(
 ) -> io::Result<(Router, Option<crate::control::Broker>)> {
     browser.validate()?;
     let control = browser.control_server.then(crate::control::Broker::new);
+    let browser_faults = browser.control_server.then(browser_faults::Faults::default);
     let app = Router::new()
         .route("/remoc", any(websocket))
         .route("/download/{token}", get(download))
@@ -194,6 +197,11 @@ fn router(
         .layer(Extension(map_tiles));
     let app = if let Some(broker) = &control {
         app.merge(broker.routes())
+    } else {
+        app
+    };
+    let app = if let Some(faults) = &browser_faults {
+        app.merge(faults.routes())
     } else {
         app
     };
@@ -212,6 +220,10 @@ fn router(
         ),
     };
     let app = app
+        .layer(middleware::from_fn_with_state(
+            browser_faults,
+            browser_faults::apply,
+        ))
         .layer(DefaultBodyLimit::max(CSP_REPORT_LIMIT))
         .layer(middleware::from_fn_with_state(
             browser.control_server,

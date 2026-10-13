@@ -244,7 +244,7 @@ pub(super) fn local_connection(peer: Option<SocketAddr>, headers: &HeaderMap) ->
         })
 }
 
-async fn local_only(request: axum::extract::Request, next: Next) -> Response {
+pub(super) async fn local_only(request: axum::extract::Request, next: Next) -> Response {
     let peer = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
