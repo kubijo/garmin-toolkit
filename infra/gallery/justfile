@@ -1,6 +1,6 @@
 import '../just/common.just'
 
-export CARGO_TARGET_DIR := repository_root / ".tmp/gallery-check-target"
+export CARGO_TARGET_DIR := repository_root / ".tmp/cargo-target"
 gallery_live_target := repository_root / ".tmp/gallery-target"
 gallery_backend := env('WGPU_BACKEND', if os() == 'macos' { 'metal' } else { 'vulkan' })
 

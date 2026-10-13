@@ -55,6 +55,7 @@ let
             fenix.packages.${system}.targets.wasm32-unknown-unknown.stable.rust-std
           ];
           devTrunk = import ./trunk { inherit pkgs; };
+          sharedCargoTargetDir = ".tmp/cargo-target";
           diagnosticToolchain = fenix.packages.${system}.latest.withComponents [
             "cargo"
             "rustc"
@@ -105,7 +106,7 @@ let
               system
               toolchain
               ;
-            nixCargoTargetDir = ".tmp/nix-cargo-target";
+            inherit sharedCargoTargetDir;
             inherit workspaceSrc;
           };
           galleryTarget = gallery.lib.mkTool {
@@ -114,7 +115,7 @@ let
               system
               toolchain
               ;
-            nixCargoTargetDir = ".tmp/nix-cargo-target";
+            inherit sharedCargoTargetDir;
             inherit workspaceSrc;
           };
           hassTarget = hass.lib.mkTarget {
@@ -126,7 +127,7 @@ let
               toolchain
               wasmToolchain
               ;
-            nixCargoTargetDir = ".tmp/nix-cargo-target";
+            inherit sharedCargoTargetDir;
             inherit workspaceSrc;
           };
           mkHassIntegration =
@@ -164,7 +165,7 @@ let
             craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
             galleryRuntimeLibraries = galleryTarget.runtimeLibraries;
             licenseChecker = licenseAutomation.checker;
-            nixCargoTargetDir = ".tmp/nix-cargo-target";
+            inherit sharedCargoTargetDir;
             inherit workspaceSrc;
           };
         in

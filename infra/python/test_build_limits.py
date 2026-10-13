@@ -25,7 +25,7 @@ class BuildLimitsTests(unittest.TestCase):
             text=True,
             check=True,
         )
-        self.assertEqual(evaluated.stdout.strip(), str(root / '.tmp/gallery-check-target'))
+        self.assertEqual(evaluated.stdout.strip(), str(root / '.tmp/cargo-target'))
         for recipe in (
             ['hot'],
             ['run', '--hot'],
@@ -75,7 +75,7 @@ class BuildLimitsTests(unittest.TestCase):
                 f'git+file://{root}#formatjs-cli',
                 '--command',
                 'env',
-                f'CARGO_TARGET_DIR={root / ".tmp/gallery-check-target"}',
+                f'CARGO_TARGET_DIR={root / ".tmp/cargo-target"}',
                 '$@',
             ],
         )

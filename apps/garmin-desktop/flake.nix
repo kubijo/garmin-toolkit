@@ -22,7 +22,7 @@
         {
           brandAssets,
           formatjsCli,
-          nixCargoTargetDir,
+          sharedCargoTargetDir,
           system,
           toolchain,
           workspaceSrc,
@@ -229,7 +229,7 @@
               package;
           devShell = craneLib.devShell (
             {
-              CARGO_TARGET_DIR = nixCargoTargetDir;
+              CARGO_TARGET_DIR = sharedCargoTargetDir;
               checks = { inherit package; };
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux linuxRuntimeEnvironment

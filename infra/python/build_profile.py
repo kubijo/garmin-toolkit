@@ -218,13 +218,7 @@ def capture(args: Options) -> int:
     events_dir.mkdir()
     bin_dir, tools = setup_tools()
     target_dir = args.target_dir or (
-        BASE / 'nightly-target'
-        if 'nightly' in compiler_version
-        else BASE / 'target'
-        if args.target == 'web'
-        else ROOT / '.tmp' / 'gallery-check-target'
-        if args.target == 'gallery'
-        else ROOT / '.tmp' / 'cargo-target'
+        BASE / 'nightly-target' if 'nightly' in compiler_version else ROOT / '.tmp' / 'cargo-target'
     )
     os.environ['GARMIN_BUILD_TRACE'] = str(events_dir)
     environment = {
