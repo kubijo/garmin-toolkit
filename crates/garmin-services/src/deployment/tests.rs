@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, fs::File, process::Command, sync::Arc};
+use std::{error::Error as StdError, fs::File, path::Path, process::Command, sync::Arc};
 
 use garmin_storage::{
     Storage,
@@ -46,6 +46,20 @@ async fn name(deployment: &Deployment) -> Result<String> {
         .to_owned())
 }
 
+fn copy_tree(from: &Path, to: &Path) -> Result {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn restore_drains_leases_revokes_old_jobs_and_survives_reopen() -> Result {
     let (root, deployment, actor, prepared) = setup().await?;
@@ -71,6 +85,28 @@ async fn restore_drains_leases_revokes_old_jobs_and_survives_reopen() -> Result 
     let reopened = Deployment::open(root.path().join("live")).await?;
     assert_eq!(name(&reopened).await?, "Restored");
     assert!(root.path().join("live/storage.sqlite3").exists());
+    reopened.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn stopped_deployment_tree_restores_selected_generation() -> Result {
+    let (root, deployment, actor, prepared) = setup().await?;
+    let live = root.path().join("live");
+    let epoch = deployment.epoch();
+    deployment.restore(epoch, actor, prepared).await?;
+    assert_eq!(name(&deployment).await?, "Restored");
+    deployment.close().await;
+    drop(deployment);
+
+    let backup = root.path().join("supervisor-backup-copy");
+    copy_tree(&live, &backup)?;
+    std::fs::remove_dir_all(&live)?;
+    copy_tree(&backup, &live)?;
+
+    let reopened = Deployment::open(&live).await?;
+    assert_eq!(name(&reopened).await?, "Restored");
+    assert!(live.join("storage.sqlite3").exists());
     reopened.close().await;
     Ok(())
 }

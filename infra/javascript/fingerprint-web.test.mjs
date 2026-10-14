@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { fingerprintWeb, browserAssetPaths } from './fingerprint-web.mjs';
+import { pathToFileURL } from 'node:url';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
+import { browserAssetPaths, fingerprintWeb, precompressWeb } from './fingerprint-web.mjs';
 import { testDirectory } from './test-directory.mjs';
 
-async function build(t, version, wasm = 'wasm fixture', stageWorkers) {
+async function build(t, version, wasm = 'wasm fixture', stageWorkers, icon = '<svg/>') {
     const root = testDirectory(t, 'web-assets-test-');
     await mkdir(join(root, 'snippets', 'unchanged-directory-id'), { recursive: true });
     await writeFile(join(root, 'snippets', 'unchanged-directory-id', 'codec.js'), `export const version = ${version};`);
@@ -26,7 +27,7 @@ async function build(t, version, wasm = 'wasm fixture', stageWorkers) {
     `,
     );
     await writeFile(join(root, 'garmin-hass-web-abcdef_bg.wasm'), wasm);
-    await writeFile(join(root, 'icon.svg'), '<svg/>');
+    await writeFile(join(root, 'icon.svg'), icon);
     await writeFile(
         join(root, 'index.html'),
         '<html><head><link rel="icon" href="./icon.svg"><link rel="modulepreload" href="./garmin-hass-web-abcdef.js"></head><body></body></html>',
@@ -88,6 +89,18 @@ test('binary changes invalidate the dependent application module, while unchange
     assert.equal(first.assets['map-worker'], changed.assets['map-worker']);
 });
 
+test('a changed favicon gets a new URL in the deployment entrypoint', async t => {
+    const first = await build(t, 4, undefined, undefined, '<svg fill="#006680"/>');
+    const second = await build(t, 4, undefined, undefined, '<svg fill="#d64f4f"/>');
+    const firstIcon = first.names['icon.svg'];
+    const secondIcon = second.names['icon.svg'];
+    assert.ok(firstIcon && secondIcon);
+    assert.notEqual(firstIcon, secondIcon);
+    assert.ok(first.html.includes(`href="./${firstIcon}"`));
+    assert.ok(second.html.includes(`href="./${secondIcon}"`));
+    assert.ok(!second.html.includes(firstIcon));
+});
+
 test('Trunk copy declarations supply all production worker dependencies', async t => {
     const web = new URL('../../apps/garmin-hass/web/', import.meta.url);
     const html = await readFile(new URL('index.html', web), 'utf8');
@@ -105,14 +118,27 @@ test('Trunk copy declarations supply all production worker dependencies', async 
     }
 });
 
+test('precompressed browser assets preserve their fingerprinted source bytes', async t => {
+    const root = testDirectory(t, 'web-compression-test-');
+    const wasm = Buffer.alloc(8192, 42);
+    await writeFile(join(root, 'app-ABCDEFG2.wasm'), wasm);
+    await writeFile(join(root, 'index.html'), '<html></html>');
+    await precompressWeb(root);
+    assert.deepEqual(brotliDecompressSync(await readFile(join(root, 'app-ABCDEFG2.wasm.br'))), wasm);
+    assert.deepEqual(gunzipSync(await readFile(join(root, 'app-ABCDEFG2.wasm.gz'))), wasm);
+    assert.ok(!(await inventory(root)).has('index.html.br'));
+});
+
 test('every emitted production asset is fingerprinted and every declared path exists', {
     skip: !process.env.GARMIN_TEST_WEB_ROOT && 'requires the emitted Trunk bundle',
 }, async () => {
     const root = process.env.GARMIN_TEST_WEB_ROOT;
     const files = await inventory(root);
     for (const name of files.keys()) {
-        if (name !== 'index.html')
-            assert.match(name, /-[A-Z2-7]{8}\.[a-z]+$/, `unfingerprinted production asset: ${name}`);
+        if (name === 'index.html') continue;
+        const source = name.replace(/\.(br|gz)$/, '');
+        assert.match(source, /-[A-Z2-7]{8}\.[a-z]+$/, `unfingerprinted production asset: ${name}`);
+        if (source !== name) assert.ok(files.has(source), `compressed asset without source: ${name}`);
     }
     const assets = browserAssetPaths(files.get('index.html').toString());
     assert.deepEqual(Object.keys(assets).sort(), ['map-render-worker', 'map-worker', 'module', 'wasm']);

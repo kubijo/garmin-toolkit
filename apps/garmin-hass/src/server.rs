@@ -210,7 +210,12 @@ fn router(
         Some(root) => app
             .route("/", get(web_index))
             .route("/index.html", get(web_index))
-            .fallback_service(ServeDir::new(&root).append_index_html_on_directories(true))
+            .fallback_service(
+                ServeDir::new(&root)
+                    .precompressed_br()
+                    .precompressed_gzip()
+                    .append_index_html_on_directories(true),
+            )
             .layer(Extension(WebIndex::load(&root, browser)?)),
         None => app.route(
             "/",
@@ -271,6 +276,11 @@ async fn browser_cache_policy(mut request: Request<Body>, next: Next) -> Respons
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
+    }
+    if static_asset {
+        response
+            .headers_mut()
+            .append(header::VARY, HeaderValue::from_static("Accept-Encoding"));
     }
     response
         .headers_mut()
