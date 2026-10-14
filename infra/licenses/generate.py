@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Generate distributable third-party license bundles."""
 
-import argparse
 import filecmp
 import json
 import shlex
@@ -9,11 +8,23 @@ import subprocess
 import sys
 import tempfile
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import tyro
+
 REPOSITORY = Path.cwd()
 DEFAULT_OUTPUT = REPOSITORY / 'assets' / 'licenses'
+
+
+@dataclass(frozen=True, kw_only=True)
+class Options:
+    """Generate or check distributable third-party license bundles."""
+
+    config: Path
+    check: bool = False
+    output: Path = DEFAULT_OUTPUT
 
 
 def run_json(arguments: list[str]) -> dict[str, Any]:
@@ -208,11 +219,7 @@ def expanded_entries(path: Path) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--check', action='store_true')
-    parser.add_argument('--config', type=Path, required=True)
-    parser.add_argument('--output', type=Path, default=DEFAULT_OUTPUT)
-    arguments = parser.parse_args()
+    arguments = tyro.cli(Options)
     config = json.loads(arguments.config.read_text())
     try:
         if arguments.check:

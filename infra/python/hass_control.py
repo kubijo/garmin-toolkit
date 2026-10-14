@@ -1,6 +1,5 @@
 """Exercise an already-running HASS demo through its opt-in HTTP control API."""
 
-import argparse
 import ipaddress
 import json
 import sys
@@ -8,13 +7,67 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from email.message import Message
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Annotated, Any, Literal
+
+import tyro
 
 from json_data import is_object
 
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
+
+
+@dataclass(frozen=True, kw_only=True)
+class Command:
+    """Send one operation to the app control API."""
+
+    operation: tyro.conf.Positional[str]
+    argument: Annotated[str | None, tyro.conf.arg(help='JSON argument, including quotes for strings')] = None
+    request_id: Annotated[int | None, tyro.conf.arg(help='Optional explicit ID for replay checks')] = None
+    window: Annotated[str | None, tyro.conf.arg(help='Child handle from windows; defaults to root')] = None
+    run_in_background: Annotated[bool, tyro.conf.arg(help='Run this automation even in a hidden tab')] = False
+
+
+@dataclass(frozen=True, kw_only=True)
+class Check:
+    """Run the HTTP bridge checks."""
+
+    output: Path = Path('.tmp/hass-control-runtime')
+
+
+@dataclass(frozen=True, kw_only=True)
+class Screenshot:
+    """Save a screenshot from the app control API."""
+
+    output: Path = Path('.tmp/hass-control-runtime/screenshot.png')
+    window: Annotated[str | None, tyro.conf.arg(help='Child handle from windows; defaults to root')] = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class BrowserResponse:
+    """Control a browser asset response fault."""
+
+    kind: tyro.conf.Positional[Literal['fail', 'delay', 'unknown_size', 'clear']]
+    path: Annotated[str | None, tyro.conf.arg(help='Exact browser asset path, e.g. /index.html')] = None
+    milliseconds: Annotated[int | None, tyro.conf.arg(help='Delay in milliseconds, from 1 to 30000')] = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class Options:
+    """Exercise an already-running HASS demo through its opt-in HTTP control API."""
+
+    mode: Annotated[
+        (
+            Annotated[Command, tyro.conf.subcommand('command', prefix_name=False)]
+            | Annotated[Check, tyro.conf.subcommand('check', prefix_name=False)]
+            | Annotated[Screenshot, tyro.conf.subcommand('screenshot', prefix_name=False)]
+            | Annotated[BrowserResponse, tyro.conf.subcommand('browser-response', prefix_name=False)]
+        ),
+        tyro.conf.arg(name=''),
+    ]
+    url: str = 'http://127.0.0.1:8099/'
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -219,54 +272,37 @@ def check(client: Client, output: Path) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--url', default='http://127.0.0.1:8099/')
-    commands = parser.add_subparsers(dest='mode', required=True)
-    command = commands.add_parser('command')
-    command.add_argument('operation')
-    command.add_argument('--argument', type=json.loads, help='JSON argument, including quotes for strings')
-    command.add_argument('--request-id', type=int, help='Optional explicit ID for replay checks')
-    command.add_argument('--window', help='Child handle returned by the windows command; defaults to root')
-    command.add_argument('--run-in-background', action='store_true', help='Run this automation even in a hidden tab')
-    checks = commands.add_parser('check')
-    checks.add_argument('--output', type=Path, default=Path('.tmp/hass-control-runtime'))
-    capture = commands.add_parser('screenshot')
-    capture.add_argument('--output', type=Path, default=Path('.tmp/hass-control-runtime/screenshot.png'))
-    capture.add_argument('--window', help='Child handle returned by the windows command; defaults to root')
-    browser_response = commands.add_parser('browser-response')
-    browser_response.add_argument('kind', choices=('fail', 'delay', 'unknown_size', 'clear'))
-    browser_response.add_argument('--path', help='Exact browser asset path, for example /index.html')
-    browser_response.add_argument('--milliseconds', type=int, help='Delay in milliseconds, from 1 to 30000')
-    args = parser.parse_args()
+    args = tyro.cli(Options)
     try:
         client = Client(args.url)
-        if args.mode == 'check':
-            check(client, args.output)
-        elif args.mode == 'screenshot':
-            screenshot(client, args.output, args.window)
-        elif args.mode == 'browser-response':
-            if (args.kind == 'clear') != (args.path is None):
-                parser.error('clear takes no path; other response faults require --path')
-            if (args.kind == 'delay') != (args.milliseconds is not None):
-                parser.error('--milliseconds is required only for delay')
-            payload: dict[str, str | int] = {'kind': args.kind}
-            if args.path is not None:
-                payload['path'] = args.path
-            if args.milliseconds is not None:
-                payload['milliseconds'] = args.milliseconds
+        if isinstance(args.mode, Check):
+            check(client, args.mode.output)
+        elif isinstance(args.mode, Screenshot):
+            screenshot(client, args.mode.output, args.mode.window)
+        elif isinstance(args.mode, BrowserResponse):
+            mode = args.mode
+            if (mode.kind == 'clear') != (mode.path is None):
+                raise ValueError('clear takes no path; other response faults require --path')
+            if (mode.kind == 'delay') != (mode.milliseconds is not None):
+                raise ValueError('--milliseconds is required only for delay')
+            payload: dict[str, str | int] = {'kind': mode.kind}
+            if mode.path is not None:
+                payload['path'] = mode.path
+            if mode.milliseconds is not None:
+                payload['milliseconds'] = mode.milliseconds
             status, result = client.request('api/browser-response', payload)
             print(json.dumps({'http_status': status, 'response': result}, indent=2))
             return 0 if status == 200 else 1
         else:
-            if args.operation == 'screenshot':
-                parser.error('Use screenshot --output FILE.png to save a capture')
-            if args.run_in_background:
-                if args.operation not in ('start', 'action', 'sequence'):
-                    parser.error('--run-in-background applies only to start, action, or sequence')
-                args.argument = {'argument': args.argument, 'run_in_background': True}
-            status, result = client.command(
-                args.operation, args.argument, request_id=args.request_id, window=args.window
-            )
+            mode = args.mode
+            if mode.operation == 'screenshot':
+                raise ValueError('Use screenshot --output FILE.png to save a capture')
+            argument = json.loads(mode.argument) if mode.argument is not None else None
+            if mode.run_in_background:
+                if mode.operation not in ('start', 'action', 'sequence'):
+                    raise ValueError('--run-in-background applies only to start, action, or sequence')
+                argument = {'argument': argument, 'run_in_background': True}
+            status, result = client.command(mode.operation, argument, request_id=mode.request_id, window=mode.window)
             print(json.dumps({'http_status': status, 'response': result}, indent=2))
             return 0 if status == 200 else 1
     except (OSError, ValueError) as error:
