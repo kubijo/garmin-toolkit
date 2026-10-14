@@ -166,12 +166,12 @@ let
     ];
   };
   generator = workspaceSrc + "/infra/licenses/generate.py";
-  testCommand = "${lib.getExe pkgs.python3} -m unittest discover -s infra/licenses -p 'test_*.py'";
-  generateCommand =
-    arguments: "${lib.getExe pkgs.python3} ${generator} --config ${config} ${arguments}";
+  python = pkgs.python3.withPackages (packages: [ packages.tyro ]);
+  testCommand = "${lib.getExe python} -m unittest discover -s infra/licenses -p 'test_*.py'";
+  generateCommand = arguments: "${lib.getExe python} ${generator} --config ${config} ${arguments}";
   runtimeInputs = [
     pkgs.cargo-bundle-licenses
-    pkgs.python3
+    python
     toolchain
   ];
   app = pkgs.writeShellApplication {
@@ -210,7 +210,7 @@ let
     doInstallCargoArtifacts = false;
     nativeBuildInputs = [
       pkgs.cargo-bundle-licenses
-      pkgs.python3
+      python
     ];
     CARGO_NET_OFFLINE = "true";
     buildPhaseCargoCommand = ''
