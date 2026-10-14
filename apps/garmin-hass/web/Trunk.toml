@@ -11,3 +11,6 @@ nonce_placeholder = "GARMIN_TOOLKIT_CSP_NONCE"
 stage = "post_build"
 command = "node"
 command_arguments = ["../../../infra/javascript/fingerprint-web.mjs"]
+
+[watch]
+watch = [".", "../../../crates", "../../../vendor"]

@@ -100,7 +100,9 @@ SQL lives under `queries`; migrations under `migrations`. SQLx checks a fresh mi
 metadata under `.sqlx`.
 
 HASS uses a managed deployment under `/data`; desktop uses platform application data. Live copies are unsupported:
-external tools consume a completed snapshot or stopped store.
+external tools consume a completed snapshot or stopped store. A stopped-tree copy test restores a deployment with a
+non-default selected storage generation and reopens that selected database. It validates the on-disk layout, not Home
+Assistant Supervisor's backup or restore orchestration.
 
 ## Portable snapshots
 

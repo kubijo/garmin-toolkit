@@ -22,6 +22,26 @@ Unchanged-web numbers are medians of three alternating runs of the same patched 
 
 Reproduction commands and cache contracts: [build system](../architecture/build-system.md#development-build-timing).
 
+## HASS live serving
+
+Measured 2026-10-13 on Linux with pinned Trunk 0.21.14, a warmed shared Cargo target, two Cargo jobs, and Trunk limited
+to two CPUs and 6 GiB. The HASS demo backend, a temporary HTML/API bridge, and headless Chrome ran in separate capped
+scopes. The browser used the app's own screenshot control API. A temporary copy of `garmin-ui/src` was bind-mounted over
+the source directory inside Trunk's read-only sandbox; checked-out source did not change.
+
+With Trunk's default watch set, changing the shared UI crate produced no rebuild or reload within 45 seconds. Watching
+the web crate, shared crates, and vendor sources in `Trunk.toml` made directory-level edits trigger a build and browser
+reload. Three alternating edits to the profile chooser's visible label took **16.79, 13.50, and 13.33 seconds** from the
+temporary file write to receipt of an app-owned screenshot containing the new label. Median: **13.50 seconds**. These
+values include watcher delay, compilation, bindgen, asset processing, browser reload, app reconnection, and screenshot
+delivery. They exclude initial startup and the first cold build. Warm Cargo compile steps reported 3.07–3.93 seconds;
+the rest of the time is not yet attributed to a single stage.
+
+Trunk's raw HTML cannot start the app because HASS supplies canvas configuration values at serve time. The disposable
+bridge fetches the current Trunk entrypoint on each request, supplies the demo values, and forwards `/remoc` and `/api/`
+to the demo host. The [capture helpers](../architecture/developer-tools.md#automation-and-control) reproduce the visual
+check. This establishes live serving and an observed latency, not a subsecond edit cycle or performance on hardware.
+
 ## Linker and compiler evidence
 
 Two alternating executable-only rebuilds per linker, forced by touching `apps/garmin-desktop/src/main.rs`:

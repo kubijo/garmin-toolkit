@@ -1,9 +1,12 @@
 // Trunk's post-build gate. esbuild owns JavaScript dependency rewriting and transitive hashes.
 // In particular, wasm-bindgen snippet directory names are NOT content hashes.
 import { spawnSync } from 'node:child_process';
-import { readFile, writeFile, readdir, mkdir, rename, rm } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, relative, resolve } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import { constants, createBrotliCompress, createGzip } from 'node:zlib';
 
 async function files(root, directory = '') {
     const result = [];
@@ -122,7 +125,26 @@ export function browserAssetPaths(html) {
     );
 }
 
+export async function precompressWeb(directory) {
+    const root = resolve(directory);
+    for (const path of await files(root)) {
+        if (!/\.(js|wasm|svg)$/.test(path)) continue;
+        const source = join(root, path);
+        const original = (await stat(source)).size;
+        if (original < 1024) continue;
+        for (const [suffix, compressor] of [
+            ['.br', () => createBrotliCompress({ params: { [constants.BROTLI_PARAM_QUALITY]: 6 } })],
+            ['.gz', () => createGzip({ level: 9, mtime: 0 })],
+        ]) {
+            const destination = `${source}${suffix}`;
+            await pipeline(createReadStream(source), compressor(), createWriteStream(destination, { flags: 'wx' }));
+            if ((await stat(destination)).size >= original) await rm(destination);
+        }
+    }
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     if (!process.env.TRUNK_STAGING_DIR) throw Error('fingerprinting requires Trunk staging context');
     await fingerprintWeb(process.env.TRUNK_STAGING_DIR);
+    await precompressWeb(process.env.TRUNK_STAGING_DIR);
 }

@@ -11,7 +11,7 @@ its random loopback port; HASS uses its listener. Without control enabled, deskt
 reads are allowed. No token; ingress cannot access control.
 
 ```sh
-just hass::run demo "$PWD/.tmp/hass-ui-automation" --control-server
+just --quiet hass::run demo "$PWD/.tmp/hass-ui-automation" --control-server
 just hass::control command status
 just hass::control check
 ```
@@ -22,6 +22,39 @@ unpaced; physical-device writes and reopened recovery evidence are unaffected. P
 option.
 
 The checker writes `.tmp/hass-control-runtime`; `--url URL` selects another running listener.
+
+`just --quiet hass::run` preserves host output but suppresses Just's own `interrupted by SIGINT/SIGTERM` line when the
+foreground process group stops. The host logs its graceful shutdown for either signal. The recipe's `[no-exit-message]`
+attribute alone does not suppress Just's signal message.
+
+For Chrome DevTools MCP, point the client's command at `node` and its arguments at the absolute path to
+`infra/javascript/chrome-mcp-session.mjs`. For a Codex session from the repository root, override the existing
+`chrome-devtools` server without editing the user-level configuration:
+
+```sh
+codex -c 'mcp_servers.chrome-devtools.command="node"' \
+    -c "mcp_servers.chrome-devtools.args=[\"$PWD/infra/javascript/chrome-mcp-session.mjs\"]"
+```
+
+Claude Code reads shared project MCP servers from root `.mcp.json`. A project entry overrides a user-scoped entry with
+the same name, while a private local-scoped entry takes precedence over both. To configure the isolated launcher for
+this checkout without adding a machine-specific path to version control, run from the repository root:
+
+```sh
+claude mcp add --transport stdio --scope local chrome-devtools -- \
+    node "$PWD/infra/javascript/chrome-mcp-session.mjs"
+```
+
+Claude Code stores that local entry under this project's path in `~/.claude.json`. Check it with
+`claude mcp get chrome-devtools` or `/mcp` in Claude Code.
+
+The launcher starts headless Chrome with a disposable `.tmp/chrome-mcp-*` profile, discovers its random loopback
+debugging port, and starts MCP with `--browser-url` for that port. It removes the profile and stops both processes when
+the MCP session ends. It does not use the normal Chrome profile or `--autoConnect`. Run
+`node infra/javascript/chrome-mcp-session.mjs --probe` to check the connection and cleanup; set `CHROME_MCP_CLI` to an
+installed `chrome-devtools-mcp.js` path to avoid an npm download. Otherwise the launcher obtains the current package
+through `npx` with a reusable cache under `.tmp/cache/chrome-mcp-npm`. Application screenshots should still come from
+the built-in control API when the app can provide them.
 
 | Endpoint                | Result                                  |
 | ----------------------- | --------------------------------------- |
@@ -44,6 +77,55 @@ just hass::control browser-response delay --path /app-ABCDEFG2.js --milliseconds
 just hass::control browser-response unknown_size --path /app_bg-ABCDEFG2.wasm
 just hass::control browser-response clear
 ```
+
+For the source HTML's pre-WASM failure surface, run the demo with `GARMIN_TOOLKIT_HASS_WEB_ROOT` pointing to
+`apps/garmin-hass/web`, then run `node infra/javascript/hass-loader-capture.mjs` from the repository root under the
+[runtime safeguards](../development.md#interface-validation). Optional arguments are the loopback URL, module path,
+viewport width, and viewport height. The helper uses a temporary Chrome profile, consumes a one-shot module failure, and
+saves loading, failure, and reload captures under `.tmp/hass-loader-capture/<width>x<height>/`. It removes its Chrome
+profile and process. This source-loader check does not establish that a packaged WASM bundle loads or recovers under
+ingress.
+
+For packaged acceptance, build the demo host and Trunk bundle into `.tmp`, run the host with
+`GARMIN_TOOLKIT_HASS_WEB_ROOT` pointing to that bundle and both `--control-server --ui-automation`, then run the
+disposable nested ingress proxy with `node infra/javascript/hass-ingress-proxy.mjs`. From another process, run:
+
+```sh
+HASS_CONTROL_URL=http://127.0.0.1:8099/ node infra/javascript/hass-loader-capture.mjs \
+    http://127.0.0.1:8100/api/hassio_ingress/test/nested/ @packaged 390 700
+```
+
+Apply the [runtime safeguards](../development.md#interface-validation) to the host, proxy, and Chrome process. The proxy
+forwards only the nested browser path and WebSocket; its control routes return 404. The capture checks a delayed WASM
+download, WASM and module failures with recovery, a browser-cache reload, and unused preload warnings. The app's control
+API supplies the ready-state PNGs; Chrome captures only pre-app loader screens. Results are saved under
+`.tmp/hass-loader-capture/packaged-ingress-<width>x<height>/`, and the Chrome profile is removed. Stop the host and
+proxy after the check. The bundled WASM and scripts have Brotli and gzip variants; the host serves them with
+`Vary: Accept-Encoding` and immutable caching while the entrypoint remains `no-store`. The packaged loader capture
+covers delayed WASM, failed WASM and module recovery, a warm browser-cache reload without preload warnings, and mobile
+and desktop viewports. Brotli, gzip, identity, `Vary`, and immutable asset caching passed through the nested proxy. A
+one-shot unknown-size Brotli response was chunked through ingress, but Trunk embeds the original WASM byte count in its
+bootstrap, so download progress remains determinate once bytes arrive.
+
+For a redeploy check, keep the packaged bundle at `.tmp/hass-packaged-web` and the demo host executable at
+`.tmp/cargo-target/debug/garmin-hass`. Run `node infra/javascript/hass-redeploy-capture.mjs` under the same two-CPU,
+6-GiB cgroup. It starts disposable hosts on port 18099 and a nested ingress proxy on port 18100, using two hard-linked
+bundle variants under `.tmp/hass-redeploy`. The second variant changes the module and favicon fingerprints and omits the
+old URLs. The capture verifies that stale HTML reports a missing application file, Reload fetches the new entrypoint,
+the app reconnects, and the favicon URL and SVG bytes change. App-ready screenshots come from `/api/control`; Chrome
+captures the pre-app failure and a comparison of the SVGs returned by the browser. Evidence is saved under
+`.tmp/hass-redeploy/evidence/`. The harness stops its hosts, proxy, and Chrome, then removes its temporary browser
+profile, bundle variants, and demo data.
+
+For a live Rust UI edit, `node infra/javascript/hass-live-capture.mjs prepare` copies `garmin-ui/src` under
+`.tmp/hass-live-probe/ui-src`. Run the demo host on port 18099 and pinned Trunk on port 18100 under the
+[runtime safeguards](../development.md#interface-validation), with that temporary directory bind-mounted over
+`crates/garmin-ui/src` inside Trunk's read-only sandbox. Keep Trunk's dist under `.tmp`. Start
+`node infra/javascript/hass-live-proxy.mjs` on port 18101, then run `node infra/javascript/hass-live-capture.mjs` and
+`node infra/javascript/hass-live-capture.mjs reverse` from the repository root in capped scopes. The bridge loads fresh
+Trunk HTML, supplies the HASS demo canvas configuration, and sends API and Remoc traffic to the host. The capture edits
+only the temporary Rust copy, measures through a browser reload and app-control screenshot, and writes before/after PNGs
+under `.tmp/hass-live-probe/`. Stop Trunk, the bridge, and the host, then remove the temporary source copy and dist.
 
 Limits: 16 connections, one pending command per connection, 16 KiB requests, 1 MiB JSON replies. Request IDs increase;
 explicit IDs must exceed the last admitted ID. Busy →429; reused ID →409. Five-second deadlines report unknown outcomes.
