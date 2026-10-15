@@ -1,13 +1,12 @@
 # Home Assistant add-on and hardware acceptance
 
-1. Build self-contained amd64 and aarch64 Home Assistant apps with the managed deployment under persistent `/data` and
-   ingress-only mutation access. Configure Supervisor backup as `cold`, then restore a backup containing a non-default
-   selected storage generation and verify the application opens that generation. Home Assistant documents both
-   [persistent `/data` and cold backup](https://developers.home-assistant.io/docs/apps/configuration/); portable
-   application snapshots have a separate [storage contract](../architecture/storage.md#portable-snapshots). The local
-   stopped-tree copy test covers the selected-generation layout, but Supervisor integration remains untested.
-2. On Raspberry Pi 5, verify ingress-only mutation access, USB permissions and ownership, device disconnects, and the
-   complete workflow. Do not assume desktop GIO mounts exist in the app.
+1. Verify the native ARM64 CI image build, then install that image on ARM64 HAOS and exercise its ingress and cold
+   Supervisor backup/restore. The [AMD64 disposable HAOS run](../../infra/integration/hass/README.md#haos-app-smoke)
+   already covers those lifecycle checks. The
+   [interactive session](../../infra/integration/hass/README.md#interactive-haos-app-session) also verifies
+   authenticated frontend ingress on an onboarded instance.
+2. On Raspberry Pi 5, verify USB permissions and ownership, device disconnects, and the complete workflow. Do not assume
+   desktop GIO mounts exist in the app.
 3. Complete owned-hardware FIT Course transfer checks: cancellation, interrupted and partial writes, disconnect and
    recovery, readback, and firmware discovery after recovery. The
    [single successful Edge 1050 transfer](../research/usb-sync.md#course-transfer-evidence) establishes only the happy

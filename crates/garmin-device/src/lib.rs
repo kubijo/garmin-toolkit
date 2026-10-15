@@ -6,6 +6,7 @@ mod domain;
 pub mod manifest;
 mod mass_storage;
 mod mtp;
+mod raw_catalog;
 pub mod read_mounted;
 pub mod read_mtp;
 mod state;
@@ -42,6 +43,7 @@ pub use mtp::{
     RawMtpLink, RawMtpSession, discover_mtp_candidates, inventory_mtp,
     mtp_usb_reset_known_ineffective, open_mtp, reset_mtp_transport,
 };
+pub use raw_catalog::{RawMtpCandidate, RawMtpMonitor};
 pub use state::{DeviceStateSnapshot, DeviceStorageState, StorageCapacity, filesystem_capacity};
 pub use storage::{BackupDestination, DeviceDirectoryEntry};
 pub use system::{

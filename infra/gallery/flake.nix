@@ -17,6 +17,7 @@
     {
       lib.mkTool =
         {
+          dirspec,
           formatjsCli,
           sharedCargoTargetDir,
           system,
@@ -89,12 +90,17 @@
               doCheck = false;
             }
           );
+          packageSpec = workspaceSrc + "/infra/gallery/package.dirspec.toml";
           package = craneLib.buildPackage (
             commonArgs
             // {
               inherit cargoArtifacts;
               cargoExtraArgs = manifestArgs;
               doCheck = false;
+              nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ dirspec ];
+              postFixup = ''
+                dirspec "$out" --spec ${packageSpec}
+              '';
             }
           );
           clippy = craneLib.cargoClippy (

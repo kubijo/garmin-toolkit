@@ -21,6 +21,7 @@
       lib.mkTarget =
         {
           brandAssets,
+          dirspec,
           formatjsCli,
           sharedCargoTargetDir,
           system,
@@ -142,6 +143,12 @@
               cargoExtraArgs =
                 "-p garmin-desktop -p garmin-gpx-worker"
                 + lib.optionalString demo " --features garmin-desktop/demo";
+              packageSpec =
+                if pkgs.stdenv.hostPlatform.isLinux then
+                  workspaceSrc
+                  + "/apps/garmin-desktop/${if demo then "package-demo-linux" else "package-linux"}.dirspec.toml"
+                else
+                  workspaceSrc + "/apps/garmin-desktop/package-darwin.dirspec.toml";
             in
             craneLib.buildPackage (
               commonArgs
@@ -150,6 +157,7 @@
                 pname = "garmin-desktop" + lib.optionalString demo "-demo";
                 meta.mainProgram = "garmin-desktop";
                 inherit cargoArtifacts;
+                nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ dirspec ];
                 # Keep dynamically loaded libraries and GIO modules in the
                 # application's runtime closure, including outside the dev shell.
                 preFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
@@ -160,6 +168,9 @@
                 '';
                 postInstall = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
                   cp -r --no-preserve=mode ${launcher}/share "$out/"
+                '';
+                postFixup = ''
+                  dirspec "$out" --spec ${packageSpec}
                 '';
               }
             );

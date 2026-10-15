@@ -5,7 +5,7 @@ initial state, arrivals, and departures because host events are not durable. Att
 authorizes bounded manifest/storage inspection; file catalog, transfer, network contact, and mutation remain explicit.
 
 `garmin-device` provides raw MTP through `mtp-rs` and Linux system mounts through GIO. Current CLI composition selects
-either adapter; desktop and HASS attachment views use the system mount. A HASS add-on must compose raw MTP explicitly
+either adapter. Desktop and the standalone HASS host use the system mount; the Home Assistant app image selects raw MTP
 because it cannot assume a desktop GIO session. Windows raw MTP uses the `mtp-rs` WPD backend. Adapter locations remain
 private.
 

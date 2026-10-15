@@ -39,3 +39,47 @@ jobs:
         run: nix build -L .#checks.x86_64-linux.rust-source-closure --no-update-lock-file
       - name: Check flake
         run: nix flake check -L --max-jobs 1 --cores 2 --no-update-lock-file
+  hass-arm64-image:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            keep-env-derivations = true
+            keep-outputs = true
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
+        with:
+          use-gha-cache: enabled
+          use-flakehub: disabled
+          diagnostic-endpoint: ""
+      - name: Cap Nix daemon resources
+        run: |
+          sudo systemctl set-property --runtime nix-daemon.service MemoryMax=6G CPUQuota=400%
+          test "$(systemctl show nix-daemon.service --property MemoryMax --value)" = 6442450944
+      - name: Build and inspect ARM64 Home Assistant app image
+        id: image
+        run: |
+          archive="$(nix build -L .#packages.aarch64-linux.garmin-hass-app-image \
+            --no-link --print-out-paths --max-jobs 1 --cores 4 --no-update-lock-file)"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          config="$(tar -xOzf "$archive" manifest.json | jq -r '.[0].Config')"
+          tar -xOzf "$archive" "$config" | jq -e '
+            .architecture == "arm64" and
+            .os == "linux" and
+            .config.Labels["io.hass.arch"] == "aarch64" and
+            .config.Labels["io.hass.type"] == "app" and
+            .config.Volumes["/data"] == {} and
+            .config.ExposedPorts["8099/tcp"] == {} and
+            (.config.Env | index("GARMIN_TOOLKIT_HASS_DEVICE_SOURCE=raw-mtp") != null) and
+            (.config.Env | index("GARMIN_TOOLKIT_HASS_INGRESS_GATEWAY=172.30.32.2") != null)
+          '
+      - uses: actions/upload-artifact@v7
+        with:
+          name: garmin-hass-arm64-image
+          path: ${{ steps.image.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0

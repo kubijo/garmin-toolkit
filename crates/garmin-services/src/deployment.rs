@@ -147,6 +147,13 @@ impl Deployment {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "integration-hooks"),
+        expect(
+            clippy::unused_self,
+            reason = "Integration builds copy the deployment's restore gate into the new application."
+        )
+    )]
     fn application_for_selected(&self, storage: Storage) -> Application {
         let application = Application::new(storage);
         #[cfg(feature = "integration-hooks")]

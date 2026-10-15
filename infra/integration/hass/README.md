@@ -1,5 +1,98 @@
 # HASS integration tests
 
+## Home Assistant app package
+
+The `garmin-hass-app-image` flake output is defined to package the production host and browser assets as an
+OCI-compatible Docker image for the builder's Linux architecture.
+[App metadata](../../../apps/garmin-hass/addon/config.yaml) declares AMD64 and ARM64, raw USB access, ingress on port
+8099, and a cold backup of persistent `/data`. The image selects raw MTP directly and accepts HTTP and WebSocket
+connections only from the Supervisor ingress gateway. The ordinary standalone production host retains its
+desktop-mounted MTP source.
+
+An image archive built on each architecture must be available through a registry before Supervisor can install this app.
+The host-native runner below serves the locally built image from a registry inside its disposable guest. The ARM64 boot
+smoke does not install an app; a native ARM CI job is configured to build and inspect that image. The CI job keeps the
+ARM image as a one-day artifact for installation testing on an ARM64 HAOS device.
+
+On 2026-10-14, the AMD64 image built successfully under a four-CPU, six-GiB Nix daemon cap. Its archive declares the
+expected entrypoint, raw-MTP mode, ingress gateway, and persistent `/data`. A disposable Podman run served the packaged
+UI with HTTP 200 when loopback was configured as the gateway; the image's default gateway setting rejected a loopback
+request with HTTP 403. This validates image startup and the gateway restriction, not Supervisor installation. This
+builder has no ARM64 Nix builder or binfmt handler; CI uses a native ARM runner for that image. QEMU can emulate a
+directory-backed MTP USB device, but its fixed QEMU vendor ID (`0x46f4`) differs from the Garmin ID (`0x091e`) required
+by production discovery. It cannot exercise the full Garmin attachment path without a controlled VID-capable emulator or
+a passed-through device.
+
+## Interactive HAOS app session
+
+Use the app archive matching this host's CPU architecture:
+
+```bash
+just hass::haos-app-run --app-archive /nix/store/...-garmin-toolkit-hass.tar.gz
+just hass::haos-app-stop SESSION_ID
+```
+
+The runner defaults to the host architecture (`--arch auto`), validates the app image before boot, and selects the
+matching pinned HAOS image, QEMU, and firmware. It uses KVM when accessible for a native guest, with TCG as fallback.
+`--arch amd64` and `--arch aarch64` select an explicit guest. The existing smoke command accepts the same selector.
+
+The interactive command verifies an isolated headless Chrome page and screenshot capture before booting. It waits for
+full Home Assistant Core, creates a disposable `admin` / `admin` account, installs the app, and verifies authenticated
+ingress in that headless browser. Captures default to dark mode for Home Assistant and the embedded app. Once
+verification passes, it prints the URL and credentials for manual inspection. `--no-verify-browser` skips the browser
+check. The foreground runner owns the session until explicit stop, interruption, failure, or its two-hour inspection
+timeout. Startup has a separate thirty-minute limit; `--session-timeout` can shorten inspection. `--port` chooses the
+loopback HTTP port. An owned SSH tunnel forwards that port to the HTTP port reported by Core, so it also supports guests
+using port 80.
+
+The VM has four CPUs, four GiB of guest RAM, a verified six-GiB cgroup limit, and a sixteen-GiB overlay file-size limit.
+Guest disks, temporary SSH identity, credentials, and browser profile live under repository `.tmp`; cleanup removes them
+and the owned listeners. Only small version metadata, browser diagnostics, and screenshots remain under
+`.tmp/haos-evidence`. The production app disables semantic automation and screenshot routes, so the maintained browser
+helper verifies its canvas and Remoc connection through ingress and captures the app iframe using Chrome DevTools. The
+configured MCP server cannot attach to that isolated browser; the helper uses its session-owned DevTools socket.
+
+## HAOS app smoke
+
+Build `.#packages.x86_64-linux.garmin-hass-app-image` with a memory-capped Nix builder, then run:
+
+```bash
+just hass::haos-app-smoke --app-archive /nix/store/...-garmin-toolkit-hass.tar.gz --timeout 1200
+```
+
+The runner verifies the pinned official HAOS 18.3 OVA, boots it with four CPUs and a hard six-GiB memory cap, loads the
+archive, and serves it from a registry inside the guest. Only the guest's temporary local-app metadata points to that
+registry; the source app metadata keeps its publication image name. Supervisor installs and starts the app. The runner
+checks HTTP 200 from the Supervisor gateway, HTTP 403 from a second container on the same network, and no published host
+port. It then selects a non-default storage generation, proves the app opens it with the original database temporarily
+absent, creates a cold partial Supervisor backup, switches back to the original, restores the backup, and verifies the
+selected generation and running app. The guest is isolated from the user's Home Assistant and devices; the disk-backed
+overlay lives only under the repository's ignored `.tmp` and is removed with the VM. The overlay has an eight-GiB
+file-size limit, including while Docker loads and pushes the image.
+
+This passed locally on 2026-10-14 with the AMD64 `0.1.0` image. The guest uses the Home Assistant landing page instead
+of an onboarded Core instance, so this tests the gateway rule and Supervisor lifecycle, not an authenticated frontend
+ingress session. Registry publication and the ARM64 app install remain separate acceptance checks.
+
+## ARM64 HAOS boot smoke
+
+Run a fresh, networkless Home Assistant OS ARM64 guest on an x86 Linux host with QEMU software emulation:
+
+```bash
+just hass::haos-arm64-smoke
+```
+
+The runner downloads the pinned
+[official HAOS 18.3 generic AArch64 QCOW2 image](https://github.com/home-assistant/operating-system/releases/tag/18.3)
+to the repository's ignored, disk-backed `.tmp`, checks its published SHA-256, and boots a copy-on-write overlay. Pass
+`--image /path/to/haos_generic-aarch64-18.3.qcow2.xz` to reuse a downloaded archive. It asserts that GRUB boots Slot A
+and HAOS mounts its data partition. The VM has no network or USB access; its user scope is checked for a four-CPU and
+six-GiB cap, its overlay is limited to two GiB, and all scratch files and VM processes are removed afterward. This
+confirms that the ARM64 HAOS image boots in the disposable harness. It does not test Supervisor, app installation,
+ingress, backup/restore, or Garmin hardware.
+
+## NixOS application integration
+
 Run on a Linux Nix builder with KVM:
 
 ```bash

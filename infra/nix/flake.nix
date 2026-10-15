@@ -28,6 +28,7 @@ let
         let
           pkgs = import nixpkgs { inherit system; };
           inherit (pkgs) lib;
+          inherit (nix-tools.lib.packagesFor pkgs) dirspec;
           nodejs = pkgs.nodejs_26;
           # Match the ambient Just entrypoints. Target-scoped flags never reach WASM or Darwin.
           linuxLinkFlags = "-C link-arg=-fuse-ld=mold";
@@ -74,6 +75,7 @@ let
           build = import ./packages.nix {
             inherit
               crane
+              dirspec
               formatjsCli
               lib
               pkgs
@@ -84,6 +86,7 @@ let
           };
           tooling = import ./tooling.nix {
             inherit
+              dirspec
               lib
               nix-tools
               nodejs
@@ -102,6 +105,7 @@ let
           desktopTarget = desktop.lib.mkTarget {
             inherit
               brandAssets
+              dirspec
               formatjsCli
               system
               toolchain
@@ -111,6 +115,7 @@ let
           };
           galleryTarget = gallery.lib.mkTool {
             inherit
+              dirspec
               formatjsCli
               system
               toolchain
@@ -121,6 +126,7 @@ let
           hassTarget = hass.lib.mkTarget {
             inherit
               brandAssets
+              dirspec
               formatjsCli
               nodejs
               system
@@ -181,6 +187,7 @@ let
             default = build.garminCli;
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            garmin-hass-app-image = hassTarget.appImage;
             hass-reconnect-driver = hassReconnect.driver;
           };
 

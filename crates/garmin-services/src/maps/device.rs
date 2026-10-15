@@ -33,6 +33,19 @@ impl Connector for MountedConnector {
     }
 }
 
+/// Raw MTP device selected by a host that does not use a desktop mount session.
+pub struct RawMtpConnector(pub u64);
+
+#[async_trait]
+impl Connector for RawMtpConnector {
+    async fn connect(&self) -> Result<Connection> {
+        Ok(Connection {
+            manifest: garmin_device::open_mtp(self.0).await?,
+            device: Box::new(garmin_device::storage::MtpStorageDevice::discover(self.0).await?),
+        })
+    }
+}
+
 /// Directory transport selected by the host, including persistent demo devices.
 pub struct DirectoryConnector {
     pub root: std::path::PathBuf,

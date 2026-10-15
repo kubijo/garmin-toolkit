@@ -1,5 +1,6 @@
 {
   crane,
+  dirspec,
   formatjsCli,
   lib,
   pkgs,
@@ -43,15 +44,20 @@ let
   cargoArtifacts = craneLib.buildDepsOnly (
     commonArgs // import ./cargo-deps.nix { inherit lib workspaceSrc; }
   );
+  packageSpec = workspaceSrc + "/infra/nix/garmin-cli.dirspec.toml";
   garminCli = craneLib.buildPackage (
     commonArgs
     // {
       inherit cargoArtifacts;
       cargoExtraArgs = "--package garmin-cli";
+      nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ dirspec ];
       preFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
         gappsWrapperArgs+=(
           --set-default SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         )
+      '';
+      postFixup = ''
+        dirspec "$out" --spec ${packageSpec}
       '';
     }
   );

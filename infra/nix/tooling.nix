@@ -1,4 +1,5 @@
 {
+  dirspec,
   lib,
   nix-tools,
   nodejs,
@@ -120,6 +121,25 @@ let
       python.configFile = pythonConfig;
       typescript = true;
       extraProjectCheckers = {
+        dirspec-prescriptions.command = pkgs.writeShellScript "check-dirspec-prescriptions" ''
+          set -eu
+          empty_tree="$(mktemp -d)"
+          trap 'rm -rf "$empty_tree"' EXIT
+          for spec in \
+            apps/garmin-desktop/*.dirspec.toml \
+            apps/garmin-hass/*.dirspec.toml \
+            infra/gallery/*.dirspec.toml \
+            infra/nix/*.dirspec.toml; do
+            test -f "$spec"
+            if ${lib.getExe dirspec} "$empty_tree" --spec "$spec" >/dev/null; then
+              :
+            else
+              result=$?
+              # Missing artifact paths are expected; configuration errors exit 2.
+              test "$result" -eq 1 || exit "$result"
+            fi
+          done
+        '';
         hass-types.command = pkgs.writeShellScript "hass-types" ''
           exec ${pkgs.typescript}/bin/tsc --project infra/integration/hass/tsconfig.json
         '';
