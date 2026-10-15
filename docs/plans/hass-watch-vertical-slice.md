@@ -1,10 +1,9 @@
 # Home Assistant add-on and hardware acceptance
 
 1. Verify the native ARM64 CI image build, then install that image on ARM64 HAOS and exercise its ingress and cold
-   Supervisor backup/restore. The [AMD64 disposable HAOS run](../../infra/integration/hass/README.md#haos-app-smoke)
-   already covers those lifecycle checks. The
-   [interactive session](../../infra/integration/hass/README.md#interactive-haos-app-session) also verifies
-   authenticated frontend ingress on an onboarded instance.
+   Supervisor backup/restore. The
+   [AMD64 populated HAOS check](../../infra/integration/hass/README.md#populated-haos-workflow) already covers
+   authenticated ingress, persisted GPX/FIT downloads, app restart, and cold backup/restore.
 2. On Raspberry Pi 5, verify USB permissions and ownership, device disconnects, and the complete workflow. Do not assume
    desktop GIO mounts exist in the app.
 3. Complete owned-hardware FIT Course transfer checks: cancellation, interrupted and partial writes, disconnect and

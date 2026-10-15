@@ -23,6 +23,7 @@ import tyro
 from rich.text import Text
 
 import haos_app_vm as vm
+import haos_workflow
 from haos_platform import acceleration
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,6 +66,17 @@ class Stop:
     session_id: str
 
 
+@dataclass(frozen=True)
+class Check(Run):
+    """Verify populated ingress, restart, and cold backup/restore, then clean up."""
+
+    timeout: int = 1800
+    """Maximum startup and workflow time in seconds."""
+
+    session_timeout: tyro.conf.Suppress[int] = 7200
+    verify_browser: tyro.conf.Suppress[bool] = True
+
+
 @dataclass(frozen=True, kw_only=True)
 class Options:
     """Manage a disposable Home Assistant app session."""
@@ -72,6 +84,7 @@ class Options:
     command: Annotated[
         (
             Annotated[Run, tyro.conf.subcommand('run', prefix_name=False)]
+            | Annotated[Check, tyro.conf.subcommand('check', prefix_name=False)]
             | Annotated[Stop, tyro.conf.subcommand('stop', prefix_name=False)]
         ),
         tyro.conf.arg(name=''),
@@ -258,6 +271,8 @@ def wait_browser(browser: subprocess.Popen[str], evidence: Path, checkpoint: str
 def run_session(options: Run) -> int:
     if not 10 <= options.timeout <= 1800 or not 1 <= options.session_timeout <= 7200 or not 0 <= options.port <= 65535:
         raise ValueError('Startup must be 10-1800s, inspection 1-7200s, and port 0-65535')
+    if isinstance(options, Check) and not options.verify_browser:
+        raise ValueError('The populated workflow requires browser verification')
     guest = vm.validate_options(options)
     vm.SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
     session_id = secrets.token_hex(6)
@@ -285,6 +300,7 @@ def run_session(options: Run) -> int:
             'acceleration': acceleration(guest),
             'password': 'admin',
             'browser_temporary': browser_directory,
+            'workflow': isinstance(options, Check),
         }
         save_state(state_path, state)
         print(f'Session {session_id}: {guest.architecture}, {state["acceleration"]}; runtime {runtime}', flush=True)
@@ -308,6 +324,9 @@ def run_session(options: Run) -> int:
             if options.verify_browser:
                 assert browser is not None
                 wait_browser(browser, evidence)
+                if isinstance(options, Check):
+                    haos_workflow.exercise(browser, runtime, evidence, key, ssh_port)
+                    return
             state.update(phase='ready', expires_at=time.time() + options.session_timeout)
             save_state(state_path, state)
             signal.setitimer(signal.ITIMER_REAL, 0)
@@ -333,7 +352,7 @@ def run_session(options: Run) -> int:
                 image,
                 on_started=started,
                 on_boot=booted,
-                lifetime=options.timeout + options.session_timeout + 30,
+                lifetime=options.timeout + (0 if isinstance(options, Check) else options.session_timeout) + 30,
                 overlay_limit=OVERLAY_LIMIT,
             )
         except BaseException:
@@ -392,7 +411,7 @@ def main(command: Run | Stop) -> int:
         return run_session(command) if isinstance(command, Run) else stop_session(command.session_id)
     except SessionStopped:
         print('HAOS session stopped and cleaned up.', flush=True)
-        return 0
+        return 143 if isinstance(command, Check) else 0
     except KeyboardInterrupt:
         return 130
     except (subprocess.TimeoutExpired, TimeoutError) as error:

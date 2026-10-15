@@ -52,6 +52,31 @@ and the owned listeners. Only small version metadata, browser diagnostics, and s
 helper verifies its canvas and Remoc connection through ingress and captures the app iframe using Chrome DevTools. The
 configured MCP server cannot attach to that isolated browser; the helper uses its session-owned DevTools socket.
 
+## Populated HAOS workflow
+
+For a populated workflow through authenticated ingress, run:
+
+```bash
+just hass::haos-app-check --app-archive /nix/store/...-garmin-toolkit-hass.tar.gz
+```
+
+This creates a disposable profile, imports the project-owned
+[GPX candidate fixture](../../../crates/garmin-gpx/tests/fixtures/candidates.gpx), generates one FIT Course, and
+downloads both artifacts through ingress. It repeats those downloads after a Supervisor app restart and cold
+backup/restore. After backup it deletes the Course and creates another profile; restore must recover the original Course
+and remove that later profile. An independent SQLite oracle copies selected storage while Supervisor has the app
+stopped, then reads the private database and WAL before reopening the app. Downloaded bytes must equal the stored
+artifacts and the GPX must equal the imported fixture.
+
+The test first verifies the unmodified production frontend. Its isolated browser then enables the semantic driver
+already present in the web bundle by changing only that browser's canvas attribute before startup. Actions and app
+screenshots use the built-in APIs; Chrome DevTools handles the browser-native file chooser and downloads. The production
+host's HTTP control API remains disabled. The command exits and removes its VM, browser, listeners, credentials, and
+disks after success or failure; screenshots, synthetic downloads, version metadata, and the result remain under
+`.tmp/haos-evidence`.
+
+Passed locally on 2026-10-15 with the AMD64 `0.1.0` image, HAOS 18.3, and Home Assistant Core 2026.10.1.
+
 ## HAOS app smoke
 
 Build `.#packages.x86_64-linux.garmin-hass-app-image` with a memory-capped Nix builder, then run:
