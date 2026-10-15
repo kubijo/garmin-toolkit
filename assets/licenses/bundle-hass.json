@@ -6288,7 +6288,7 @@
     },
     {
       "name": "rustls",
-      "version": "0.23.45",
+      "version": "0.23.46",
       "license": "Apache-2.0 OR ISC OR MIT",
       "source": {
         "kind": "cargo"
