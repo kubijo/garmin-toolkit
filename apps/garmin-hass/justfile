@@ -33,6 +33,22 @@ control *options:
 integration *options:
     @just in-shell uv run --frozen --project infra/python python infra/python/hass_integration.py "$@"
 
+# Smoke-test official ARM64 Home Assistant OS in a capped, disposable QEMU VM.
+haos-arm64-smoke *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/haos_arm64_vm.py "$@"
+
+# Install and exercise the matching local app image in disposable HAOS.
+haos-app-smoke *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/haos_app_vm.py "$@"
+
+# Open a bounded host-native HAOS session in the browser.
+haos-app-run *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/haos_app_session.py run "$@"
+
+# Stop an interactive HAOS session and clean up its owned processes and disks.
+haos-app-stop session_id:
+    @just in-shell uv run --frozen --project infra/python python infra/python/haos_app_session.py stop --session-id "$1"
+
 # Read application logs or events with the shared Rust CLI.
 diagnostics *options:
     @just in-shell nix run {{ flake }}#garmin-cli -- diagnostics "$@"

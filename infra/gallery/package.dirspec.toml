@@ -1,0 +1,5 @@
+version = 1
+
+[paths]
+"bin/gallery" = { type = "file", mode_required = 0o100, min_size = 1 }
+"lib/libgarmin_gallery.*" = { type = "file", count = 1, min_size = 1 }

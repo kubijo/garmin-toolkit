@@ -1,4 +1,4 @@
-use std::{sync::mpsc, time::Duration};
+use std::{marker::PhantomData, sync::mpsc, time::Duration};
 
 use garmin_device::{attachments, attachments::Candidate as _};
 use garmin_progress::ProgressReporter;
@@ -20,38 +20,105 @@ impl SourceProvider for Provider {
         _data_root: &std::path::Path,
         _runtime: tokio::runtime::Handle,
     ) -> Result<Box<dyn Source>, SourceOpenError> {
-        Ok(Box::new(MountedSource::new()))
+        Ok(Box::new(DeviceSource::<MountedAdapter>::new()))
     }
 }
 
-pub(crate) struct MountedSource {
-    requests: Option<mpsc::Sender<MountedRequest>>,
-    last_snapshot: Vec<DeviceSnapshot>,
+pub(crate) trait Adapter: Send + 'static {
+    type Backend: attachments::Backend<Candidate = Self::Candidate>;
+    type Candidate: attachments::Candidate;
+    type Device: garmin_device::storage::DeviceWrite;
+
+    fn backend() -> Self::Backend;
+    fn inspect(
+        runtime: &tokio::runtime::Handle,
+        candidate: &Self::Candidate,
+    ) -> Result<attachments::Metadata, String>;
+    fn location(candidate: &Self::Candidate) -> String;
+    fn connector(
+        location: String,
+    ) -> Result<std::sync::Arc<dyn garmin_services::maps::device::Connector>, String>;
+    fn device(
+        runtime: &tokio::runtime::Runtime,
+        candidate: &Self::Candidate,
+    ) -> Result<Self::Device, String>;
 }
 
-impl MountedSource {
+struct MountedAdapter;
+
+impl Adapter for MountedAdapter {
+    type Backend = garmin_device::MountedMtpMonitor;
+    type Candidate = garmin_device::MountedMtpCandidate;
+    type Device = garmin_device::MountedMtpDevice;
+
+    fn backend() -> Self::Backend {
+        garmin_device::MountedMtpMonitor::new()
+    }
+
+    fn inspect(
+        runtime: &tokio::runtime::Handle,
+        candidate: &Self::Candidate,
+    ) -> Result<attachments::Metadata, String> {
+        Ok(
+            runtime.block_on(garmin_services::devices::inspect_attachment(
+                &garmin_device::MountedMtpDevice::new(&candidate.mount_id),
+                candidate.name(),
+                candidate.inspect(),
+            )),
+        )
+    }
+
+    fn location(candidate: &Self::Candidate) -> String {
+        candidate.mount_id.clone()
+    }
+
+    fn connector(
+        location: String,
+    ) -> Result<std::sync::Arc<dyn garmin_services::maps::device::Connector>, String> {
+        Ok(std::sync::Arc::new(
+            garmin_services::maps::device::MountedConnector(location),
+        ))
+    }
+
+    fn device(
+        _runtime: &tokio::runtime::Runtime,
+        candidate: &Self::Candidate,
+    ) -> Result<Self::Device, String> {
+        Ok(garmin_device::MountedMtpDevice::new(&candidate.mount_id))
+    }
+}
+
+pub(crate) struct DeviceSource<A: Adapter> {
+    requests: Option<mpsc::Sender<MountedRequest>>,
+    last_snapshot: Vec<DeviceSnapshot>,
+    adapter: PhantomData<A>,
+}
+
+impl<A: Adapter> DeviceSource<A> {
     pub(crate) fn new() -> Self {
         let (requests, receiver) = mpsc::channel();
         match std::thread::Builder::new()
             .name("garmin-toolkit-hass-devices".to_owned())
-            .spawn(move || mounted_worker(&receiver))
+            .spawn(move || device_worker::<A>(&receiver))
         {
             Ok(_worker) => Self {
                 requests: Some(requests),
                 last_snapshot: Vec::new(),
+                adapter: PhantomData,
             },
             Err(error) => {
                 tracing::error!(%error, "could not start device discovery");
                 Self {
                     requests: None,
                     last_snapshot: Vec::new(),
+                    adapter: PhantomData,
                 }
             }
         }
     }
 }
 
-impl Source for MountedSource {
+impl<A: Adapter> Source for DeviceSource<A> {
     fn device_connector(
         &mut self,
         key: &str,
@@ -64,12 +131,10 @@ impl Source for MountedSource {
         requests
             .send(MountedRequest::Maps(key.to_owned(), reply))
             .map_err(|error| error.to_string())?;
-        let mount_id = response
+        let location = response
             .recv_timeout(Duration::from_secs(2))
             .map_err(|error| error.to_string())??;
-        Ok(std::sync::Arc::new(
-            garmin_services::maps::device::MountedConnector(mount_id),
-        ))
+        A::connector(location)
     }
 
     fn refresh_device(&mut self, key: &str) -> Result<(), String> {
@@ -235,24 +300,15 @@ enum MountedRequest {
     ),
 }
 
-fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
+fn device_worker<A: Adapter>(requests: &mpsc::Receiver<MountedRequest>) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("device browser runtime must start");
     let handle = runtime.handle().clone();
-    let mut manager = attachments::Manager::with_inspector(
-        garmin_device::MountedMtpMonitor::new(),
-        move |candidate| {
-            Ok(
-                handle.block_on(garmin_services::devices::inspect_attachment(
-                    &garmin_device::MountedMtpDevice::new(&candidate.mount_id),
-                    candidate.name(),
-                    candidate.inspect(),
-                )),
-            )
-        },
-    );
+    let mut manager = attachments::Manager::with_inspector(A::backend(), move |candidate| {
+        A::inspect(&handle, candidate)
+    });
     loop {
         log_device_events(manager.poll());
         match requests.recv_timeout(Duration::from_millis(250)) {
@@ -279,7 +335,7 @@ fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
                 log_device_events(manager.poll());
                 let result = manager
                     .candidate(&key)
-                    .map(|candidate| candidate.mount_id.clone())
+                    .map(|candidate| A::location(&candidate))
                     .ok_or_else(|| "the selected device is no longer connected".to_owned());
                 let _ignored = reply.send(result);
             }
@@ -298,7 +354,7 @@ fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
                 let result = manager
                     .candidate(&key)
                     .ok_or_else(|| "the selected device is no longer connected".to_owned())
-                    .and_then(|candidate| browser(&runtime, &candidate, request, &progress));
+                    .and_then(|candidate| browser::<A>(&runtime, &candidate, request, &progress));
                 manager.invalidate(&key);
                 let _ignored = reply.send(result);
             }
@@ -307,7 +363,7 @@ fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
                 let result = manager
                     .candidate(&key)
                     .ok_or_else(|| "the selected device is no longer connected".to_owned())
-                    .and_then(|candidate| download(&runtime, &candidate, target, &progress));
+                    .and_then(|candidate| download::<A>(&runtime, &candidate, target, &progress));
                 let _ignored = reply.send(result);
             }
             Ok(MountedRequest::Upload(request, contents, progress, reply)) => {
@@ -317,7 +373,7 @@ fn mounted_worker(requests: &mpsc::Receiver<MountedRequest>) {
                     .candidate(&key)
                     .ok_or_else(|| "the selected device is no longer connected".to_owned())
                     .and_then(|candidate| {
-                        upload(&runtime, &candidate, &request, &contents, &progress)
+                        upload::<A>(&runtime, &candidate, &request, &contents, &progress)
                     });
                 manager.invalidate(&key);
                 let _ignored = reply.send(result);
@@ -352,15 +408,15 @@ fn log_device_events(events: Vec<attachments::Event>) {
     }
 }
 
-fn browser(
+fn browser<A: Adapter>(
     runtime: &tokio::runtime::Runtime,
-    candidate: &garmin_device::MountedMtpCandidate,
+    candidate: &A::Candidate,
     request: DeviceBrowserRequest,
     progress: &ProgressReporter,
 ) -> Result<DeviceCatalogSnapshot, String> {
     let device_key = browser_device_key(&request).to_owned();
     let catalog = candidate.browse_with_progress(progress)?;
-    let device = garmin_device::MountedMtpDevice::new(candidate.mount_id.clone());
+    let device = A::device(runtime, candidate)?;
     runtime.block_on(execute_browser_operation(
         &device, &catalog, request, progress,
     ))?;
@@ -369,29 +425,29 @@ fn browser(
         .map(|catalog| device_catalog(device_key, catalog))
 }
 
-fn download(
+fn download<A: Adapter>(
     runtime: &tokio::runtime::Runtime,
-    candidate: &garmin_device::MountedMtpCandidate,
+    candidate: &A::Candidate,
     target: DeviceBrowserTarget,
     progress: &ProgressReporter,
 ) -> Result<garmin_device::PreparedDeviceBrowserDownload, String> {
     let catalog = candidate.browse_with_progress(progress)?;
-    let device = garmin_device::MountedMtpDevice::new(candidate.mount_id.clone());
+    let device = A::device(runtime, candidate)?;
     runtime.block_on(execute_browser_download(
         &device, &catalog, target, progress,
     ))
 }
 
-fn upload(
+fn upload<A: Adapter>(
     runtime: &tokio::runtime::Runtime,
-    candidate: &garmin_device::MountedMtpCandidate,
+    candidate: &A::Candidate,
     request: &DeviceBrowserUpload,
     contents: &std::path::Path,
     progress: &ProgressReporter,
 ) -> Result<DeviceCatalogSnapshot, String> {
     let device_key = request.device_key.clone();
     let catalog = candidate.browse_with_progress(progress)?;
-    let device = garmin_device::MountedMtpDevice::new(candidate.mount_id.clone());
+    let device = A::device(runtime, candidate)?;
     runtime.block_on(execute_browser_upload(
         &device, &catalog, request, contents, progress,
     ))?;

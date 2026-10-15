@@ -20,7 +20,7 @@ use remoc::{codec, prelude::*};
 use serde::Deserialize;
 use std::{
     io::{self, IsTerminal as _, Write as _},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -30,11 +30,15 @@ mod browser_faults;
 
 const ADDRESS_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_ADDRESS";
 const WEB_ROOT_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_WEB_ROOT";
+const INGRESS_GATEWAY_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_INGRESS_GATEWAY";
 const CSP_REPORT_LIMIT: usize = 32 * 1024;
 const CSP_NONCE_PLACEHOLDER: &str = "GARMIN_TOOLKIT_CSP_NONCE";
 const UPLOAD_TELEMETRY_PLACEHOLDER: &str = "GARMIN_TOOLKIT_MAP_UPLOAD_TELEMETRY";
 const MAP_RENDER_WORKER_PLACEHOLDER: &str = "GARMIN_TOOLKIT_MAP_RENDER_WORKER";
 const UI_AUTOMATION_PLACEHOLDER: &str = "GARMIN_TOOLKIT_UI_AUTOMATION";
+
+#[derive(Clone, Copy)]
+struct IngressGateway(IpAddr);
 
 pub(super) async fn serve(
     host: Arc<Host>,
@@ -46,12 +50,39 @@ pub(super) async fn serve(
         .parse::<SocketAddr>()
         .map_err(std::io::Error::other)?;
     let (app, control) = router(host, map_tiles, browser)?;
+    let app = match std::env::var(INGRESS_GATEWAY_ENVIRONMENT) {
+        Ok(gateway) => {
+            let gateway = gateway.parse::<IpAddr>().map_err(io::Error::other)?;
+            app.layer(Extension(IngressGateway(gateway)))
+                .layer(middleware::from_fn_with_state(gateway, ingress_only))
+        }
+        Err(std::env::VarError::NotPresent) => app,
+        Err(error) => return Err(io::Error::other(error)),
+    };
     let listener = tokio::net::TcpListener::bind(address).await?;
     announce_server(address, crate::mode::PRODUCT_NAME)?;
     if browser.control_server {
         println!("Control API: http://{address}/api/control (localhost only)");
     }
     serve_http(listener, app, control, shutdown_signal()).await
+}
+
+async fn ingress_only(
+    State(gateway): State<IpAddr>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    if !ingress_peer_allowed(
+        gateway,
+        request.extensions().get::<ConnectInfo<SocketAddr>>(),
+    ) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(request).await
+}
+
+fn ingress_peer_allowed(gateway: IpAddr, peer: Option<&ConnectInfo<SocketAddr>>) -> bool {
+    peer.is_some_and(|peer| peer.0.ip() == gateway)
 }
 
 async fn serve_http(
@@ -505,11 +536,16 @@ fn log_csp_violation(kind: &str, context_url: Option<&str>, report: &CspViolatio
 async fn websocket(
     State(host): State<Arc<Host>>,
     Extension(control): Extension<Option<crate::control::Broker>>,
+    ingress: Option<Extension<IngressGateway>>,
     peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    if !browser_origin_allowed(&headers) {
+    if !browser_socket_allowed(
+        &headers,
+        ingress.as_ref().map(|Extension(gateway)| gateway.0),
+        peer.as_ref().map(|Extension(peer)| peer),
+    ) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let control = control
@@ -520,6 +556,15 @@ async fn websocket(
             tracing::warn!(%error, "Remoc client connection failed");
         }
     })
+}
+
+fn browser_socket_allowed(
+    headers: &HeaderMap,
+    ingress_gateway: Option<IpAddr>,
+    peer: Option<&ConnectInfo<SocketAddr>>,
+) -> bool {
+    browser_origin_allowed(headers)
+        || ingress_gateway.is_some_and(|gateway| ingress_peer_allowed(gateway, peer))
 }
 
 async fn download(
@@ -612,6 +657,24 @@ mod tests {
     use remoc::prelude::*;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+    #[test]
+    fn ingress_rejects_missing_and_other_peers() {
+        let gateway = "172.30.32.2".parse().expect("gateway address");
+        assert!(!super::ingress_peer_allowed(gateway, None));
+        assert!(!super::ingress_peer_allowed(
+            gateway,
+            Some(&axum::extract::ConnectInfo(
+                "172.30.32.3:4040".parse().expect("other peer"),
+            )),
+        ));
+        assert!(super::ingress_peer_allowed(
+            gateway,
+            Some(&axum::extract::ConnectInfo(
+                "172.30.32.2:4040".parse().expect("ingress peer"),
+            )),
+        ));
+    }
 
     #[cfg(feature = "demo")]
     #[tokio::test]
@@ -724,6 +787,19 @@ mod tests {
             HeaderValue::from_static("https://attacker.example"),
         );
         assert!(!browser_origin_allowed(&headers));
+        let gateway = "172.30.32.2".parse().expect("gateway");
+        let ingress_peer =
+            axum::extract::ConnectInfo("172.30.32.2:4040".parse().expect("ingress peer"));
+        assert!(super::browser_socket_allowed(
+            &headers,
+            Some(gateway),
+            Some(&ingress_peer),
+        ));
+        assert!(!super::browser_socket_allowed(
+            &headers,
+            None,
+            Some(&ingress_peer)
+        ));
 
         headers.insert("x-forwarded-host", HeaderValue::from_static("home.example"));
         headers.insert(

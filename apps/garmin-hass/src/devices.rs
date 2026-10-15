@@ -34,6 +34,8 @@ mod course_transfer;
 pub(super) mod demo;
 #[cfg(not(feature = "demo"))]
 pub(super) mod mounted;
+#[cfg(not(feature = "demo"))]
+pub(super) mod raw;
 
 const AVATAR_SOURCE_LABEL: &str = "Browser profile pictures";
 const AVATAR_SOURCE_ID_DOMAIN_V1: &[u8] = b"garmin-toolkit/browser-profile-pictures/source/v1";

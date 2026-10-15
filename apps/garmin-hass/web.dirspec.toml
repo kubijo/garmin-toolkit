@@ -1,0 +1,8 @@
+version = 1
+
+[paths]
+"index.html" = { type = "file", min_size = 1 }
+"*.js" = { type = "file", min = 1, min_size = 1 }
+"*.wasm" = { type = "file", min = 1, min_size = 1 }
+"*.svg" = { type = "file", min = 1, min_size = 1 }
+"**/*.map" = { count = 0 }

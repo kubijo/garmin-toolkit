@@ -1,0 +1,12 @@
+version = 1
+
+[paths]
+"bin/garmin-hass" = { type = "file", mode_required = 0o100, min_size = 1 }
+"bin/garmin-gpx-worker" = { type = "file", mode_required = 0o100, min_size = 1 }
+"share/garmin-hass/icon.png" = { type = "file", min_size = 1 }
+"share/garmin-hass/logo.png" = { type = "file", min_size = 1 }
+"share/garmin-hass/web/index.html" = { type = "file", min_size = 1 }
+"share/garmin-hass/web/*.js" = { type = "file", min = 1, min_size = 1 }
+"share/garmin-hass/web/*.wasm" = { type = "file", min = 1, min_size = 1 }
+"share/garmin-hass/web/*.svg" = { type = "file", min = 1, min_size = 1 }
+"share/garmin-hass/web/**/*.map" = { count = 0 }
