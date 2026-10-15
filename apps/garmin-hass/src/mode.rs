@@ -31,20 +31,4 @@ pub enum DataError {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use super::{DataError, device_source};
-
-    #[test]
-    fn device_source_reports_a_missing_runtime() {
-        let Err(DataError::DeviceSource(source)) = device_source(Path::new("unused")) else {
-            panic!("a missing runtime must retain its typed source error");
-        };
-        assert!(
-            source
-                .downcast_ref::<tokio::runtime::TryCurrentError>()
-                .is_some()
-        );
-    }
-}
+mod tests;
