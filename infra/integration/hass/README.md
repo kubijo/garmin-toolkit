@@ -9,6 +9,13 @@ OCI-compatible Docker image for the builder's Linux architecture.
 connections only from the Supervisor ingress gateway. The ordinary standalone production host retains its
 desktop-mounted MTP source.
 
+For standalone hosting, `GARMIN_TOOLKIT_HASS_ADDRESS` overrides `127.0.0.1:8099`, and `GARMIN_TOOLKIT_HASS_WEB_ROOT`
+overrides the package's bundled frontend default. A missing configured frontend fails startup.
+`GARMIN_TOOLKIT_HASS_INGRESS_GATEWAY` restricts requests to that socket peer when set; invalid addresses fail startup.
+The host's startup tests run the real HTTP server with a fake device source in isolated subprocesses, covering custom
+data/frontend roots, listener overrides, and allowed/rejected ingress peers in production and demo builds. Full QA and
+CI include both configurations.
+
 An image archive built on each architecture must be available through a registry before Supervisor can install this app.
 The host-native runner below serves the locally built image from a registry inside its disposable guest. The ARM64 boot
 smoke does not install an app; a native ARM CI job is configured to build and inspect that image. The CI job keeps the

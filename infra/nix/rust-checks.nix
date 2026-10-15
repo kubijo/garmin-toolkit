@@ -51,6 +51,30 @@ let
     "run"
   ]
   ++ workspaceArgs;
+  productionArgs = [
+    "--locked"
+    "-p"
+    "garmin-desktop"
+    "-p"
+    "garmin-hass"
+    "--no-default-features"
+  ];
+  productionClippyArgs = [
+    "clippy"
+  ]
+  ++ productionArgs
+  ++ [
+    "--all-targets"
+    "--"
+    "--deny"
+    "warnings"
+  ];
+  productionTestArgs = [
+    "nextest"
+    "run"
+  ]
+  ++ productionArgs
+  ++ [ "--lib" ];
   docArgs = [ "doc" ] ++ workspaceArgs ++ [ "--no-deps" ];
   denyArgs = [
     "deny"
@@ -208,6 +232,15 @@ let
       doCheck = false;
     }
   );
+  productionCargoArtifacts = craneLib.buildDepsOnly (
+    commonArgs
+    // import ./cargo-deps.nix { inherit lib workspaceSrc; }
+    // {
+      pname = "garmin-production-hosts-deps";
+      cargoExtraArgs = lib.escapeShellArgs (craneArgs productionArgs);
+      doCheck = false;
+    }
+  );
   extractSourceCatalog = destination: ''
     ${formatjs} extract \
       'apps/**/*.rs' \
@@ -313,9 +346,11 @@ let
         run_step "FormatJS catalogs" ${lib.getExe i18nCheck}
         run_step "cargo sqlx prepare --check" ${lib.getExe sqlxCheck}
         run_step "cargo clippy" ${cargoCommand clippyArgs}
+        run_step "cargo clippy (production hosts)" ${cargoCommand productionClippyArgs}
         run_step "cargo clippy (WASM)" ${lib.getExe wasmLint}
         run_step "cargo doc" env RUSTDOCFLAGS='-D warnings' ${cargoCommand docArgs}
         run_step "cargo nextest" ${cargoCommand testArgs}
+        run_step "cargo nextest (production hosts)" ${cargoCommand productionTestArgs}
         run_step "license bundles" ${lib.getExe licenseChecker}
         run_step "cargo deny" ${cargoCommand denyArgs}
         run_step "cargo machete" ${cargoCommand [ "machete" ]}
@@ -486,6 +521,7 @@ in
         ]
         ''
           ${cargoCommand testArgs} "$@"
+          ${cargoCommand productionTestArgs} "$@"
         '';
   };
 
@@ -605,6 +641,26 @@ in
       // {
         inherit cargoArtifacts;
         cargoExtraArgs = lib.escapeShellArgs (lib.drop 2 testArgs);
+        doCheck = true;
+      }
+    );
+
+    rust-production-clippy = craneLib.cargoClippy (
+      commonArgs
+      // {
+        pname = "garmin-production-hosts";
+        cargoArtifacts = productionCargoArtifacts;
+        cargoClippyExtraArgs = lib.escapeShellArgs (craneArgs (lib.tail productionClippyArgs));
+      }
+    );
+
+    rust-production-tests = craneLib.cargoNextest (
+      commonArgs
+      // testRuntimeEnv
+      // {
+        pname = "garmin-production-hosts";
+        cargoArtifacts = productionCargoArtifacts;
+        cargoExtraArgs = lib.escapeShellArgs (lib.drop 2 productionTestArgs);
         doCheck = true;
       }
     );

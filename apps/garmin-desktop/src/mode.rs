@@ -23,35 +23,5 @@ pub async fn open(data_root: &Path) -> Result<Arc<Deployment>, Error> {
     Deployment::open(data_root).await
 }
 
-#[cfg(all(test, feature = "demo"))]
-mod tests {
-    #[test]
-    fn demo_restart_preserves_profiles_instead_of_recreating_storage()
-    -> Result<(), Box<dyn std::error::Error>> {
-        futures_lite::future::block_on(async {
-            let root = tempfile::tempdir()?;
-            let deployment = super::open(root.path()).await?;
-            let epoch = deployment.epoch();
-            let before = deployment.application(epoch).await?.profiles().await?.len();
-            deployment
-                .application(epoch)
-                .await?
-                .create_profile("Persisted demo profile".parse()?)
-                .await?;
-            deployment.close().await;
-            drop(deployment);
-            let reopened = super::open(root.path()).await?;
-            assert_eq!(
-                reopened
-                    .application(reopened.epoch())
-                    .await?
-                    .profiles()
-                    .await?
-                    .len(),
-                before + 1
-            );
-            reopened.close().await;
-            Ok(())
-        })
-    }
-}
+#[cfg(test)]
+mod tests;

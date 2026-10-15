@@ -157,10 +157,7 @@ pub enum Error {
 mod tests {
     use std::path::Path;
 
-    use futures_lite::future::block_on;
-    use tempfile::tempdir;
-
-    use super::{DATA_BASE, configured_data_base, prepare_deployment};
+    use super::{DATA_BASE, configured_data_base};
 
     #[test]
     fn worker_map_is_default_in_both_deployment_modes() {
@@ -200,18 +197,6 @@ mod tests {
         };
         assert!(automation.map_render_worker);
         assert_eq!(automation.validate().is_ok(), cfg!(feature = "demo"));
-    }
-
-    #[test]
-    fn prepares_a_migrated_database() {
-        block_on(async {
-            let directory = tempdir().expect("the test data directory should be created");
-            let storage = prepare_deployment(directory.path())
-                .await
-                .expect("the target database should be prepared");
-
-            storage.close().await;
-        });
     }
 
     #[test]

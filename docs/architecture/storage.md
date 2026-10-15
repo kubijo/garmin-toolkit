@@ -99,10 +99,16 @@ Sending a Course does not pair the device or change its profile marker.
 SQL lives under `queries`; migrations under `migrations`. SQLx checks a fresh migrated database and commits offline
 metadata under `.sqlx`.
 
-HASS uses a managed deployment under `/data`; desktop uses platform application data. Live copies are unsupported:
-external tools consume a completed snapshot or stopped store. A stopped-tree copy test restores a deployment with a
-non-default selected storage generation and reopens that selected database. It validates the on-disk layout, not Home
-Assistant Supervisor's backup or restore orchestration.
+Desktop uses the [build mode's application ID](build-system.md#desktop-packaging) for platform data. HASS defaults to
+`/data`; `GARMIN_TOOLKIT_HASS_DATA_BASE` selects another base. Production uses that base directly; demo appends `demo`.
+Fresh production storage starts empty, and demo seeds examples only during initialization. Both preserve populated
+storage on restart. The host mode tests exercise startup beside another populated, locked deployment and compare saved
+profiles after reopening; the [populated HAOS workflow](../../infra/integration/hass/README.md#populated-haos-workflow)
+also verifies GPX/FIT bytes through production ingress after restart and cold restore.
+
+Live copies are unsupported: external tools consume a completed snapshot or stopped store. A stopped-tree copy test
+restores a deployment with a non-default selected storage generation and reopens that selected database. It validates
+the on-disk layout, not Home Assistant Supervisor's backup or restore orchestration.
 
 ## Portable snapshots
 

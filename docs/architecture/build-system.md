@@ -18,7 +18,13 @@ explicit input, not an update side effect of the quality gate.
 | `just qa::check`       | Pure Nix checks and application builds                                       |
 | `just qa::trunk-cache` | Isolated real-WASM bindgen-cache acceptance                                  |
 
-Coverage has a 30% global floor; [release work](../plans/README.md) owns per-owner floors. Generated licenses live in
+Full QA, `qa::test`, and CI run the workspace with all features plus separate desktop and HASS production suites with
+`--no-default-features`. Full QA and CI lint both configurations. All-features builds select demo composition, so the
+production checks exercise startup and device adapters that the demo excludes. Host tests cover application identity,
+isolated data roots, persisted profiles after restart, and HASS environment overrides using disposable storage and fake
+devices.
+
+Coverage has a 65% global floor; [release work](../plans/README.md) owns per-owner floors. Generated licenses live in
 `assets/licenses`; `crates/garmin-brand/assets/icon.svg` is the sole app-icon source. AppImage/Flatpak exports use
 `dist/`. Ambient builds, Nix development shells, gallery checks and captures, and stable build profiling share
 `.tmp/cargo-target`. Interactive gallery sessions use `.tmp/gallery-target`; compiler profiling keeps its separate

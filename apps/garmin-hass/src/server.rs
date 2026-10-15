@@ -28,6 +28,9 @@ use tower_http::services::ServeDir;
 
 mod browser_faults;
 
+#[cfg(test)]
+mod startup_tests;
+
 const ADDRESS_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_ADDRESS";
 const WEB_ROOT_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_WEB_ROOT";
 const INGRESS_GATEWAY_ENVIRONMENT: &str = "GARMIN_TOOLKIT_HASS_INGRESS_GATEWAY";
