@@ -1,9 +1,10 @@
 // Verify the production app through HA ingress when its semantic control API is disabled.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { open, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { populatedWorkflow } from './haos-workflow.mjs';
 
 const [sessionPath, evidencePath] = process.argv.slice(2);
 const probe = process.argv[4] === '--probe';
@@ -12,6 +13,7 @@ const origin = new URL(state.base_url);
 assert.equal(origin.hostname, '127.0.0.1');
 const profile = resolve(sessionPath, '..', 'browser-profile');
 await rm(`${profile}/DevToolsActivePort`, { force: true });
+const chromeLog = await open(resolve(evidencePath, 'chrome.log'), 'w');
 const chrome = spawn(
     process.env.CHROME_BINARY ?? 'google-chrome',
     [
@@ -28,7 +30,7 @@ const chrome = spawn(
         'about:blank',
     ],
     {
-        stdio: ['ignore', 'ignore', 'inherit'],
+        stdio: ['ignore', 'ignore', chromeLog.fd],
         env: {
             ...process.env,
             TMPDIR: state.browser_temporary,
@@ -37,6 +39,7 @@ const chrome = spawn(
         },
     },
 );
+await chromeLog.close();
 let socket;
 let client;
 let ending = false;
@@ -72,13 +75,20 @@ class DevTools {
     nextId = 0;
     pending = new Map();
     events = [];
+    contexts = new Map();
     recording = true;
     constructor(connection) {
         this.socket = connection;
         connection.addEventListener('message', event => {
             const message = JSON.parse(event.data);
             if (!message.id) {
-                if (this.recording && message.method.startsWith('Network.webSocket'))
+                if (message.method === 'Runtime.executionContextCreated')
+                    this.contexts.set(message.params.context.id, message.params.context);
+                if (message.method === 'Runtime.executionContextDestroyed')
+                    this.contexts.delete(message.params.executionContextId);
+                if (message.method === 'Runtime.executionContextsCleared') this.contexts.clear();
+                if (message.method === 'Page.fileChooserOpened') this.events.push(message);
+                else if (this.recording && message.method.startsWith('Network.webSocket'))
                     this.events.push({
                         method: message.method,
                         params: {
@@ -114,18 +124,32 @@ class DevTools {
             this.socket.send(JSON.stringify({ id, method, params }));
         });
     }
-    async evaluate(fn, argument) {
+    async evaluate(fn, argument, contextId) {
         const window = await this.call('Runtime.evaluate', {
             expression: 'window',
+            ...(contextId === undefined ? {} : { contextId }),
         });
+        if (window.exceptionDetails)
+            throw Error(
+                window.exceptionDetails.exception?.description ??
+                    window.exceptionDetails.exception?.value ??
+                    window.exceptionDetails.text,
+            );
+        assert.ok(window.result.objectId, 'the requested browser window is available');
         const reply = await this.call('Runtime.callFunctionOn', {
             objectId: window.result.objectId,
             functionDeclaration: fn.toString(),
             arguments: [{ value: argument }],
             returnByValue: true,
             awaitPromise: true,
+            userGesture: true,
         });
-        if (reply.exceptionDetails) throw Error(reply.exceptionDetails.text);
+        if (reply.exceptionDetails)
+            throw Error(
+                reply.exceptionDetails.exception?.description ??
+                    reply.exceptionDetails.exception?.value ??
+                    reply.exceptionDetails.text,
+            );
         return reply.result.value;
     }
     async capture(name, clip) {
@@ -262,6 +286,7 @@ try {
             }),
         );
         console.log('Garmin Toolkit rendered through authenticated Home Assistant ingress.');
+        if (state.workflow) await populatedWorkflow(client, state, sessionPath, evidencePath);
         await new Promise(done => chrome.once('exit', done));
     }
 } catch (error) {
