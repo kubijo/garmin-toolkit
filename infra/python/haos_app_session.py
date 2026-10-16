@@ -297,22 +297,24 @@ def run_session(options: Run) -> int:
             state.update(unit=unit, ssh_port=ssh_port)
             save_state(state_path, state)
 
-        def started(process: subprocess.Popen[str], key: Path, ssh_port: int, _unit: str) -> None:
+        def started(process: subprocess.Popen[str], key: Path, ssh_port: int, app_slug: str) -> None:
             nonlocal browser, tunnel
             tunnel = launch_tunnel(key, ssh_port, http_port, evidence, deadline)
             wait_for_core(process, tunnel, base, deadline)
             tokens = onboard(base, str(state['password']))
             state['tokens'] = tokens
-            state['url'] = base + '/app/local_garmin_toolkit'
+            state['url'] = base + '/app/' + app_slug
+            state['app_slug'] = app_slug
             state['phase'] = 'verifying'
             save_state(state_path, state)
             versions = vm.guest_data(key, ssh_port, 'ha info')
             save_state(evidence / 'versions.json', versions)
+            (evidence / 'installation.json').write_bytes((runtime / 'installation.json').read_bytes())
             if options.verify_browser:
                 assert browser is not None
                 wait_browser(browser, evidence)
                 if isinstance(options, Check):
-                    haos_workflow.exercise(browser, runtime, evidence, key, ssh_port)
+                    haos_workflow.exercise(browser, runtime, evidence, key, ssh_port, app_slug)
                     return
             state.update(phase='ready', expires_at=time.time() + options.session_timeout)
             save_state(state_path, state)

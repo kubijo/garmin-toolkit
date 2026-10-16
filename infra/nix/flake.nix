@@ -160,6 +160,7 @@ let
           };
           releaseAutomation = import ./hass-release.nix {
             inherit
+              brandAssets
               dirspec
               lib
               pkgs
@@ -201,6 +202,7 @@ let
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             garmin-hass-app-image = hassTarget.appImage;
             garmin-hass-app-sbom = releaseAutomation.sbom;
+            garmin-hass-app-repository = releaseAutomation.repository;
             hass-reconnect-driver = hassReconnect.driver;
           };
 
@@ -251,6 +253,7 @@ let
               gallery = galleryTarget.check;
               hass = hassTarget.check;
               license-bundles = licenseAutomation.check;
+              hass-app-repository = releaseAutomation.repository;
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               hass-integration = hassIntegration;

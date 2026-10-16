@@ -1,5 +1,70 @@
 # HASS integration tests
 
+## Repository-install acceptance
+
+Build or generate the [release-only store tree](../../release/README.md#generated-home-assistant-repository), then pass
+it to the existing disposable runner:
+
+```sh
+just hass::haos-app-check \
+    --app-archive /nix/store/IMAGE-garmin-toolkit-hass.tar.gz \
+    --repository /nix/store/REPOSITORY-garmin-hass-app-repository \
+    --timeout 1800
+```
+
+Replace the placeholders with actual output paths. The archive is independent expected image evidence; the runner uses a
+fresh HAOS disk and starts from empty app state. It creates a temporary Git repository on `hass-apps` from the generated
+tree, changing only the candidate copy's image repository to the guest's loopback registry. A host loopback HTTP
+listener serves Git's smart protocol, including Supervisor's shallow recursive clone. QEMU user networking exposes that
+listener to the guest at `10.0.2.2`; it does not publish it on the LAN.
+
+Supervisor adds the repository URL, discovers the generated app, and installs through the registry. The harness removes
+the loaded local image tags before installation so a registry pull is required. It checks the running container's
+image-config digest, image reference, Linux architecture, and registry pull digest against the expected inputs. A pull
+digest can identify an index or a single-platform manifest; it is distinct from the archive SHA-256 and image-config
+digest. `installation.json` records these identities and the repository URL alongside the existing version, screenshot,
+and populated-workflow evidence.
+
+Repository-derived app slugs flow through ingress, storage inspection, restart, and backup/restore; this path does not
+copy an app into Supervisor's local-app directory. The existing local-directory smoke mode remains available when no
+repository option is supplied.
+
+For a staged remote candidate, use its exact branch URL, generic image repository, and independently obtained registry
+pull digest:
+
+```sh
+just hass::haos-app-check \
+    --app-archive /nix/store/IMAGE-garmin-toolkit-hass.tar.gz \
+    --repository-url 'https://github.com/kubijo/garmin-toolkit#CANDIDATE_BRANCH' \
+    --registry-image ghcr.io/kubijo/garmin-toolkit-hass-CANDIDATE \
+    --registry-digest sha256:EXPECTED_PULL_DIGEST \
+    --timeout 1800
+```
+
+The remote path requires an anonymous HTTP(S) branch URL and a full SHA-256 digest. It installs the remote metadata
+unchanged; the app's version/image fields must select the expected image. Do not pass credentials in the URL. Generated
+tree and remote URL options are mutually exclusive. Registry publication and public-store promotion are separate work.
+
+The runner retains evidence in `.tmp/haos-evidence/`, defaults captures to dark mode, and removes its Git listener, VM,
+browser, credentials, and disk/runtime files on success and failure. Production control routes remain disabled; the
+existing browser-only ingress bridge supplies the documented automation/capture gap. No real HASS instance or physical
+USB device is needed for this software check.
+
+The generated-repository path passed on 2026-10-16 with the cached AMD64 `0.1.0` production image, HAOS 18.3, Core
+2026.10.1, Supervisor 2026.10.2, and Docker 29.7.2. Installation, gateway admission/rejection, populated ingress,
+byte-exact downloads, app restart, and cold backup/restore all passed. The tested identities were:
+
+```text
+Archive SHA-256: e458d9617f16d0c1d978a58c637caa3adf23c4f5daf6eda79be01fb6fb99c5ef
+Config digest:  sha256:0af8526f097b13903b1575c987a4e77c5ebb1f62ad7a5dc83fcdd0cab86df5d8
+Pull/manifest:  sha256:21c40855175a9dfdc0f2054c907b087f703aaa7df3e13b6360423a2c1273defd
+```
+
+This qualifies the generated metadata and installation harness against those cached bytes. It does not qualify a new
+native CI build, signed provenance, public GitHub/GHCR access, ARM64 runtime, upgrade, or HAOS restart. Docker's
+containerd-backed image ID identifies the manifest in this run; the harness hashes the registry's original manifest
+bytes and checks its config descriptor against the archive instead of treating that engine ID as a config digest.
+
 ## Home Assistant app package
 
 The `garmin-hass-app-image` flake output is defined to package the production host and browser assets as an
@@ -155,6 +220,37 @@ acceleration and refuse to fall back to CPU emulation. The local Python runner u
 progress output. Build and VM output go to separate log files in the printed diagnostics directory; cancellation stops
 the owned process group before removing temporary VM state. New files must be Git-tracked for the repository's
 Git-backed flake to include them.
+
+Host-user KVM access does not imply that a sandboxed Nix build user can open `/dev/kvm`. If the flake check fails before
+the QEMU monitor connects with a KVM permission error, use `just hass::integration` to run the same suite under your
+user. Pass `--driver /nix/store/DRIVER-nixos-test-driver-hass-routes-integration` to reuse its already-built driver
+without another build. A complete local `nix flake check` still requires KVM permission for the actual Nix builder; CI
+sets this up explicitly. VM disks and sockets stay under repository `.tmp` and are removed after failure as well as
+success; the diagnostic logs and copied test artifacts remain.
+
+For a multi-user Linux installation using the `nixbld` build group, persist builder access with
+`/etc/udev/rules.d/99-nix-kvm.rules`:
+
+```udev
+SUBSYSTEM=="misc", KERNEL=="kvm", RUN+="/usr/bin/setfacl -m g:nixbld:rw /dev/kvm"
+```
+
+Confirm the build group and `setfacl` path on the host first. The named group ACL preserves the device's existing
+`root:kvm` ownership and desktop-user access without granting access to every local user. It is reapplied when udev
+creates the device, including after reboot. Reload the rules and apply this one to the existing device:
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger --action=change --sysname-match=kvm
+sudo udevadm settle
+getfacl /dev/kvm
+```
+
+The ACL must include `group:nixbld:rw-`. Nix's sandbox drops supplementary groups, so adding build accounts to `kvm`
+does not reliably grant sandbox access. This rule assumes fixed build users with primary group `nixbld`; automatic
+UID/GID allocation requires a policy matching those identities instead. Verify with the actual sandboxed integration
+check, not only a command run as the logged-in user. Keep hardware acceleration mandatory so a permission regression
+fails instead of falling back to slow CPU emulation.
 
 Nix pins the host, Playwright, and its matching Chromium. No npm cache, developer browser profile, pre-existing HASS
 instance, or downloaded test data is used. Chromium runs headed on the VM's X display using Mesa's CPU renderer through
