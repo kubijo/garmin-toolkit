@@ -167,11 +167,13 @@ let
     name: runtimeInputs: text:
     pkgs.writeShellApplication {
       inherit name;
-      text =
-        lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
-          export NIX_LDFLAGS="-L${lib.getLib pkgs.libiconv}/lib ''${NIX_LDFLAGS:-}"
-        ''
-        + text;
+      text = ''
+        ${pythonToolsEnv}/bin/python ${workspaceSrc + "/infra/python/prepare_cargo_target.py"}
+      ''
+      + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+        export NIX_LDFLAGS="-L${lib.getLib pkgs.libiconv}/lib ''${NIX_LDFLAGS:-}"
+      ''
+      + text;
       runtimeInputs =
         runtimeInputs
         ++ [ formatjsCli ]
