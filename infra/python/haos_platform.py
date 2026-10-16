@@ -1,5 +1,6 @@
 """Architecture and image checks shared by disposable HAOS app runners."""
 
+import hashlib
 import json
 import os
 import platform
@@ -7,6 +8,8 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
+
+from json_data import is_object, unique_object
 
 Architecture = Literal['auto', 'amd64', 'aarch64']
 
@@ -89,29 +92,61 @@ def machine_arguments(guest: Platform, runtime: Path) -> list[str]:
     ]
 
 
-def archive_config(archive: Path) -> dict[str, object]:
+@dataclass(frozen=True)
+class ImageArchive:
+    configuration: dict[str, object]
+    config_digest: str
+    repository_tags: tuple[str, ...]
+
+
+def inspect_archive(archive: Path) -> ImageArchive:
+    """Read bounded regular metadata members without extracting the image to disk."""
     with tarfile.open(archive, 'r:*') as image:
-        manifest_file = image.extractfile('manifest.json')
-        if manifest_file is None:
-            raise ValueError('App archive has no Docker manifest')
-        manifest: object = json.loads(manifest_file.read(1024 * 1024))
+
+        def contents(name: str) -> bytes:
+            matching = [member for member in image.getmembers() if member.name == name]
+            if len(matching) != 1:
+                raise ValueError(f'App archive metadata must occur exactly once: {name}')
+            member = matching[0]
+            if not member.isfile() or member.size > 1024 * 1024:
+                raise ValueError(f'App archive metadata must be a bounded regular file: {name}')
+            stream = image.extractfile(member)
+            if stream is None:
+                raise ValueError(f'App archive metadata is missing: {name}')
+            with stream:
+                return stream.read(1024 * 1024 + 1)
+
+        manifest: object = json.loads(contents('manifest.json'), object_pairs_hook=unique_object)
         if not isinstance(manifest, list) or len(cast('list[object]', manifest)) != 1:
             raise ValueError('App archive must contain exactly one image')
         entry = cast('list[dict[str, object]]', manifest)[0]
+        if not is_object(entry):
+            raise ValueError('Invalid app archive manifest entry')
         config_name = entry.get('Config')
         if not isinstance(config_name, str):
             raise ValueError('App archive manifest has no image configuration')
-        config_file = image.extractfile(config_name)
-        if config_file is None:
-            raise ValueError('App archive image configuration is missing')
-        config: object = json.loads(config_file.read(1024 * 1024))
+        if Path(config_name).is_absolute() or '..' in Path(config_name).parts:
+            raise ValueError('App archive image configuration path is unsafe')
+        config_bytes = contents(config_name)
+        config: object = json.loads(config_bytes, object_pairs_hook=unique_object)
         if not isinstance(config, dict):
             raise ValueError('Invalid app archive image configuration')
-        return cast('dict[str, object]', config)
+        tags = entry.get('RepoTags', [])
+        if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in cast('list[object]', tags)):
+            raise ValueError('Invalid app archive repository tags')
+        return ImageArchive(
+            cast('dict[str, object]', config),
+            'sha256:' + hashlib.sha256(config_bytes).hexdigest(),
+            tuple(cast('list[str]', tags)),
+        )
 
 
-def validate_archive(archive: Path, guest: Platform, version: str) -> None:
-    config = archive_config(archive)
+def archive_config(archive: Path) -> dict[str, object]:
+    return inspect_archive(archive).configuration
+
+
+def validate_archive(archive: Path, guest: Platform, version: str, *, inspected: ImageArchive | None = None) -> None:
+    config = (inspect_archive(archive) if inspected is None else inspected).configuration
     expected = 'arm64' if guest.architecture == 'aarch64' else 'amd64'
     if config.get('architecture') != expected or config.get('os') != 'linux':
         raise ValueError(f'App archive must target linux/{expected}; found {config.get("architecture")}')

@@ -253,6 +253,9 @@ let
                     ++ galleryTarget.runtimeLibraries
                     ++ [
                       pkgs.bash
+                      pkgs.coreutils
+                      pkgs.git
+                      dirspec
                       formatjsCli
                       pkgs.cmake
                       pkgs.cargo-deny

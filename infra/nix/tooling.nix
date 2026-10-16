@@ -24,6 +24,8 @@ let
       "crates/garmin-diagnostics/templates/*.html"
       # Jinja owns the build report's template syntax.
       "infra/python/templates/*.html"
+      # The plain-text checksum template is rendered and checked by the release tests.
+      "infra/release/*.j2"
     ];
     html = true;
     javascript = true;
@@ -131,6 +133,7 @@ let
             apps/garmin-desktop/*.dirspec.toml \
             apps/garmin-hass/*.dirspec.toml \
             infra/gallery/*.dirspec.toml \
+            infra/release/*.dirspec.toml \
             infra/nix/*.dirspec.toml; do
             test -f "$spec"
             if ${lib.getExe dirspec} "$empty_tree" --spec "$spec" >/dev/null; then
@@ -168,7 +171,10 @@ let
           export PATH=${
             lib.makeBinPath [
               pkgs.bash
+              pkgs.coreutils
+              pkgs.git
               pkgs.just
+              dirspec
             ]
           }:$PATH
           exec ${pythonToolsEnv}/bin/python -m unittest discover -q \

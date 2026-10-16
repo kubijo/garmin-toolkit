@@ -1,5 +1,9 @@
 # Home Assistant add-on and hardware acceptance
 
+The [HASS experimental release](device-expansion-and-publication.md#hass-experimental-release) owns release artifacts,
+hashes/provenance, the installable app repository, and registry-based acceptance. This plan owns physical-device and
+platform qualification.
+
 1. Verify the native ARM64 CI image build, then install that image on ARM64 HAOS and exercise its ingress and cold
    Supervisor backup/restore. The
    [AMD64 populated HAOS check](../../infra/integration/hass/README.md#populated-haos-workflow) already covers

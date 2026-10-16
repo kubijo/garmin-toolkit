@@ -1,0 +1,33 @@
+version = 1
+
+[[files]]
+role = "source"
+name = "garmin-toolkit-{{ version }}-source.tar.gz"
+
+[[files]]
+role = "license"
+name = "LICENSE-AGPL"
+source = "LICENSE-AGPL"
+
+[[files]]
+role = "copyright"
+name = "COPYRIGHT.md"
+source = "COPYRIGHT.md"
+
+[[files]]
+role = "notices"
+name = "THIRD_PARTY_NOTICES.md"
+source = "THIRD_PARTY_NOTICES.md"
+
+[[files]]
+role = "license_bundle"
+name = "bundle-hass.json"
+source = "assets/licenses/bundle-hass.json"
+
+[[platform_files]]
+role = "image_archive"
+name = "garmin-toolkit-hass-{{ version }}-{{ architecture }}.tar.gz"
+
+[[platform_files]]
+role = "sbom"
+name = "garmin-toolkit-hass-{{ version }}-{{ architecture }}.spdx.json"
