@@ -33,7 +33,10 @@ library and loads replacements without checking compiler compatibility. Restart 
 dependency configuration. Different toolchains, target triples, profiles, and Cargo features may still produce distinct
 artifacts inside the shared directory. Nix package builds keep their isolated sandbox outputs.
 
-`just dev::cache-report` shows the target caches and read-only totals for the Cargo home and Nix user cache.
+`just dev::cache-report` shows the target caches and read-only totals for the Cargo home and Nix user cache. Root Just
+and Nix QA entrypoints make generated build-script outputs in repository target caches writable before reuse. Some
+dependency build scripts preserve read-only Nix source permissions when copying bindings into `out`; without this
+preparation, their next rebuild cannot overwrite those files. Preparation preserves other artifacts and source files.
 `just dev::cache-clean shared` previews removal of the shared target; use `just dev::cache-clean shared apply` to remove
 it after builds have stopped. The other accepted names are `gallery-live`, `nightly`, and `legacy`; `legacy` covers the
 old Nix-shell, gallery-check, web-profile, and temporary HASS target directories. This command only removes the named

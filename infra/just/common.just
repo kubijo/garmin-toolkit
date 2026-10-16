@@ -31,6 +31,10 @@ in-shell +cmd:
 
     cd {{ quote(repository_root) }}
 
+    if command -v python3 >/dev/null 2>&1; then
+        python3 infra/python/prepare_cargo_target.py
+    fi
+
     if command -v "$1" >/dev/null 2>&1 \
         && { [[ "$1" != cargo || $(uname -s) != Linux ]] \
             || { command -v mold >/dev/null 2>&1 && command -v ld.mold >/dev/null 2>&1; }; }; then
