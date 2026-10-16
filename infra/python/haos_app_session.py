@@ -1,6 +1,5 @@
 """Own a bounded, interactive HAOS app session and its disposable browser."""
 
-import contextlib
 import json
 import os
 import re
@@ -25,6 +24,7 @@ from rich.text import Text
 import haos_app_vm as vm
 import haos_workflow
 from haos_platform import acceleration
+from processes import stop_group
 
 ROOT = Path(__file__).resolve().parents[2]
 OVERLAY_LIMIT = 16 * 1024**3
@@ -200,19 +200,6 @@ def onboard(base: str, password: str) -> dict[str, object]:
     return tokens
 
 
-def stop_child(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        return
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGTERM)
-    try:
-        process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=5)
-
-
 def launch_browser(state_path: Path, evidence: Path) -> subprocess.Popen[str]:
     with (evidence / 'browser.log').open('w') as log:
         return subprocess.Popen(
@@ -361,10 +348,12 @@ def run_session(options: Run) -> int:
                 (evidence / 'serial-tail.log').write_text(serial.read_text(errors='replace')[-64_000:])
             raise
         finally:
-            if browser is not None:
-                stop_child(browser)
-            if tunnel is not None:
-                stop_child(tunnel)
+            try:
+                if browser is not None:
+                    stop_group(browser)
+            finally:
+                if tunnel is not None:
+                    stop_group(tunnel)
     return 0
 
 

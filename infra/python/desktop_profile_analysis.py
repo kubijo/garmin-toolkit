@@ -1,8 +1,5 @@
 """Headless analysis and comparison for guarded desktop profiling reports."""
 
-import gzip
-import json
-import math
 import re
 from collections import Counter
 from collections.abc import Callable
@@ -19,41 +16,13 @@ from desktop_profile import (
     file_digest,
     load_metrics,
 )
-from json_data import is_array, is_object
+from distribution import Distribution
+from json_data import is_array, is_object, read_json
 
 INTERACTION_FRAME_TARGET_MILLISECONDS = 1_000.0 / 60.0
 INTERACTION_STALL_LIMIT_MILLISECONDS = 33.0
 MINIMUM_INTERACTION_MILLISECONDS = 2_000.0
 MINIMUM_INTERACTION_SAMPLES = 120
-
-
-@dataclass(frozen=True)
-class Distribution:
-    count: int
-    mean: float
-    p50: float
-    p95: float
-    p99: float
-    maximum: float
-
-    @classmethod
-    def from_values(cls, values: list[float]) -> Distribution | None:
-        if not values:
-            return None
-        ordered = sorted(values)
-
-        def percentile(value: float) -> float:
-            rank = max(1, math.ceil(len(ordered) * value))
-            return ordered[min(len(ordered) - 1, rank - 1)]
-
-        return cls(
-            count=len(ordered),
-            mean=sum(ordered) / len(ordered),
-            p50=percentile(0.50),
-            p95=percentile(0.95),
-            p99=percentile(0.99),
-            maximum=ordered[-1],
-        )
 
 
 @dataclass(frozen=True)
@@ -158,17 +127,7 @@ class SymbolResolver:
 
 
 def load_json(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text())
-    if not is_object(value):
-        raise ProfileError(f'{path} has an unexpected root value')
-    return value
-
-
-def load_profile(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise ProfileError(f'profile is missing: {path}')
-    with gzip.open(path, 'rt') as source:
-        value = json.load(source)
+    value = read_json(path, max_bytes=512 * 1024 * 1024)
     if not is_object(value):
         raise ProfileError(f'{path} has an unexpected root value')
     return value
@@ -332,7 +291,7 @@ def analyze_report(report: Path) -> ReportAnalysis:
     if manifest.get('status') != 'complete':
         raise ProfileError(f'{report} is not a complete profiling report')
     verify_artifacts(report, manifest)
-    profile = load_profile(report / COMBINED_NAME)
+    profile = load_json(report / COMBINED_NAME)
     return ReportAnalysis(report, manifest, runtime_summary(report), cpu_summary(report, profile))
 
 

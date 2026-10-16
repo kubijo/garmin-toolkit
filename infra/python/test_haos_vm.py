@@ -1,12 +1,9 @@
 """Exercise image admission, native selection, and owned-session cleanup."""
 
-import io
-import json
 import os
 import signal
 import subprocess
 import sys
-import tarfile
 import tempfile
 import threading
 import unittest
@@ -16,6 +13,7 @@ from unittest.mock import patch
 
 import haos_app_session as session
 import haos_app_vm as vm
+from fixtures.images import write_image
 from haos_platform import PLATFORMS, acceleration, resolve, validate_archive
 
 
@@ -28,19 +26,7 @@ class HaosTests(unittest.TestCase):
 
     def image(self, architecture: str = 'amd64', version: str = '0.1.0') -> Path:
         archive = self.root / 'app.tar'
-        config = json.dumps(
-            {
-                'architecture': architecture,
-                'os': 'linux',
-                'config': {'Labels': {'io.hass.arch': architecture, 'io.hass.version': version, 'io.hass.type': 'app'}},
-            }
-        ).encode()
-        manifest = json.dumps([{'Config': 'image.json'}]).encode()
-        with tarfile.open(archive, 'w') as output:
-            for name, data in [('manifest.json', manifest), ('image.json', config)]:
-                entry = tarfile.TarInfo(name)
-                entry.size = len(data)
-                output.addfile(entry, io.BytesIO(data))
+        write_image(archive, architecture=architecture, version=version)
         return archive
 
     def test_auto_matches_native_architecture_and_rejects_unknown_host(self) -> None:

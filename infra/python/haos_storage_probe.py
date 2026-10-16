@@ -5,6 +5,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+from contextlib import closing
 from pathlib import Path
 from typing import cast
 from uuid import UUID
@@ -37,7 +38,7 @@ def collect(root: Path, scratch: Path) -> dict[str, object]:
 
 
 def read_database(database: Path) -> dict[str, object]:
-    with sqlite3.connect(database.as_uri() + '?mode=ro', uri=True) as connection:
+    with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute('BEGIN')
         profiles = [dict(row) for row in connection.execute('SELECT id, display_name FROM users ORDER BY id')]

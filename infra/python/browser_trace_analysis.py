@@ -1,6 +1,5 @@
 """Headless checks for raw Chrome traces captured from the HASS client."""
 
-import gzip
 import json
 import math
 from collections import Counter, defaultdict
@@ -12,7 +11,8 @@ from urllib.parse import urlsplit
 import tyro
 
 from browser_upload_analysis import UploadAnalysis, analyze_uploads, decode_mark_detail, finite_number
-from json_data import is_array, is_object
+from distribution import Distribution
+from json_data import is_array, is_object, read_json
 
 DEFAULT_URL_PREFIX = 'http://127.0.0.1:8099/'
 FRAME_TARGET_MILLISECONDS = 1_000.0 / 60.0
@@ -34,33 +34,6 @@ USER_TIMING_NAMES = (
 
 class TraceError(RuntimeError):
     """Trace data cannot support the requested analysis."""
-
-
-@dataclass(frozen=True)
-class Distribution:
-    count: int
-    p50: float
-    p95: float
-    p99: float
-    maximum: float
-
-    @classmethod
-    def from_values(cls, values: list[float]) -> Distribution | None:
-        if not values:
-            return None
-        ordered = sorted(values)
-
-        def percentile(fraction: float) -> float:
-            rank = max(1, math.ceil(len(ordered) * fraction))
-            return ordered[min(rank - 1, len(ordered) - 1)]
-
-        return cls(
-            count=len(ordered),
-            p50=percentile(0.50),
-            p95=percentile(0.95),
-            p99=percentile(0.99),
-            maximum=ordered[-1],
-        )
 
 
 @dataclass(frozen=True)
@@ -242,9 +215,7 @@ def tile_loading(events: list[dict[str, Any]], main_tid: int) -> TileLoading:
 
 
 def load_trace(path: Path) -> list[dict[str, Any]]:
-    opener = gzip.open if path.suffix == '.gz' else open
-    with opener(path, 'rt') as source:
-        document = json.load(source)
+    document = read_json(path, max_bytes=512 * 1024 * 1024)
     events = document.get('traceEvents') if is_object(document) else None
     if not is_array(events):
         raise TraceError('Chrome trace contains no traceEvents array')

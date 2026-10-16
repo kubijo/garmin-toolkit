@@ -344,13 +344,8 @@ def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
 
 def file_digest(path: Path) -> str:
     """Return the SHA-256 digest used to bind derived data to its inputs."""
-    digest = hashlib.sha256()
-
     with path.open('rb') as source:
-        while chunk := source.read(1024 * 1024):
-            digest.update(chunk)
-
-    return digest.hexdigest()
+        return hashlib.file_digest(source, 'sha256').hexdigest()
 
 
 def report_summary(report_dir: Path) -> str:

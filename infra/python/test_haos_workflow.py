@@ -4,6 +4,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -24,7 +25,7 @@ class WorkflowTests(unittest.TestCase):
     def database(self, directory: Path) -> Path:
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / 'storage.sqlite3'
-        with sqlite3.connect(path) as connection:
+        with closing(sqlite3.connect(path)) as connection, connection:
             for migration in sorted((workflow.ROOT / 'crates/garmin-storage/migrations').glob('*.sql')):
                 connection.executescript(migration.read_text())
         return path
@@ -33,7 +34,7 @@ class WorkflowTests(unittest.TestCase):
         original = self.database(self.root)
         generation = str(uuid4())
         selected = self.database(self.root / 'storage-generations' / generation)
-        with sqlite3.connect(selected) as connection:
+        with closing(sqlite3.connect(selected)) as connection, connection:
             connection.execute("INSERT INTO users (id, role, display_name) VALUES ('test-owner', 'owner', 'Selected')")
         (self.root / 'storage-selection.json').write_text(
             json.dumps({'active': {'Generation': generation}, 'rollback': 'Original'})
@@ -52,10 +53,28 @@ class WorkflowTests(unittest.TestCase):
                     probe.collect(self.root, self.root)
         self.assertEqual(list(self.root.glob('*.sqlite3')), [])
 
+    def test_probe_closes_its_database_on_success_and_query_failure(self) -> None:
+        for broken in (False, True):
+            with self.subTest(broken=broken):
+                database = self.database(self.root / str(broken))
+                connection = sqlite3.connect(database)
+                self.addCleanup(connection.close)
+                if broken:
+                    connection.execute('DROP TABLE users')
+                    connection.commit()
+                with patch.object(probe.sqlite3, 'connect', return_value=connection):
+                    if broken:
+                        with self.assertRaises(sqlite3.OperationalError):
+                            probe.read_database(database)
+                    else:
+                        probe.read_database(database)
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    connection.execute('SELECT 1')
+
     def test_probe_keeps_committed_wal_data_without_reusing_shared_memory(self) -> None:
         database = self.database(self.root)
         (self.root / 'storage-selection.json').write_text(json.dumps({'active': 'Original'}))
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             connection.execute('PRAGMA journal_mode=WAL')
             connection.execute("INSERT INTO users (id, role, display_name) VALUES ('test-owner', 'owner', 'WAL')")
             connection.commit()
