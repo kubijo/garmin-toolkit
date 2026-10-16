@@ -1,18 +1,23 @@
-# Security hardening
+# Security hardening (deferred)
 
-Add optional authentication and protection for credentials, storage, and snapshots without removing trusted passwordless
-operation or binding users to external identities. Until then, local storage is plaintext, credentials are not
-persisted, and no application-level confidentiality is claimed.
+This entire stage is postponed, including authentication, credential custody, database protection, and snapshot
+encryption. Preserve architectural compatibility with later choices. Do not run feasibility work or implement this stage
+now, and do not make its policy decisions a prerequisite for current work. See
+[ADR 0023](../decisions/0023-deferred-security-hardening.md).
 
-## Work
+Current operation remains trusted and passwordless, with plaintext storage/snapshots and no persisted connector
+credentials or application-level confidentiality claim.
 
-1. Model shared access, host compromise, copied storage, snapshots, recovery, and unattended HASS startup.
-2. Choose reviewed implementations independently for passwords, target credential custody, database protection, and
-   snapshot envelopes. Decide key-store versus manual unlock, recovery, and unattended HASS startup; preserve
-   passwordless use.
-3. Use only established, independently reviewed cryptography; create no primitives or protocols.
-4. Define recovery, loss, password changes, passwordless users, and unattended operation before migration.
-5. Implement behind existing boundaries with downgrade and failure tests.
+## When resumed
+
+1. Revisit the [parked threat model and options](../research/security-hardening.md). None of its candidate mechanisms or
+   suggested policies is an accepted decision.
+2. Resolve shared access, host compromise, copied storage, snapshots, recovery, password/key changes, and unattended
+   HASS startup before migrations or credential persistence.
+3. Choose independently reviewed implementations separately for authentication, target credential custody, database
+   protection, and snapshot envelopes. Invent no cryptography or key protocol.
+4. Prove compatibility, key custody, protected staging, recovery, and failure behavior with isolated fixtures.
+5. Implement behind existing boundaries with migration and downgrade tests while preserving passwordless operation.
 
 Before making a protection claim, test that secrets cannot reach plaintext storage, exports, browser state, fixtures, or
 logs, and that passwordless local use and recovery still work.

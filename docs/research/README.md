@@ -28,6 +28,7 @@ expectations, and review; prefer synthetic data.
 - [FIT implementation](fit-implementation.md)
 - [Garmin Connect](garmin-connect.md)
 - [GPX route plans](gpx-route-plans.md)
+- [Security hardening options (parked)](security-hardening.md)
 
 ## Interface and performance
 
