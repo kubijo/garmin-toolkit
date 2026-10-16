@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from fixtures.images import write_image
 from haos_platform import inspect_archive
 from hass_release import Assemble, Verify, assemble, verify
 from hass_release_contract import CONTRACT, json_bytes
@@ -97,35 +98,20 @@ class ReleaseTests(unittest.TestCase):
         version: str = '0.1.0',
         tag: str = 'ghcr.io/kubijo/garmin-toolkit-hass:0.1.0',
     ) -> dict[str, str]:
-        config = json.dumps(
-            {
-                'architecture': actual or ('arm64' if architecture == 'aarch64' else 'amd64'),
-                'os': 'linux',
-                'config': {'Labels': {'io.hass.arch': architecture, 'io.hass.version': version, 'io.hass.type': 'app'}},
-                'rootfs': {'type': 'layers', 'diff_ids': []},
-            }
-        ).encode()
-        manifest = json.dumps(
-            [
-                {
-                    'Config': 'image.json',
-                    'RepoTags': [tag],
-                    'Layers': [],
-                }
-            ]
-        ).encode()
         archive = self.artifacts / f'garmin-toolkit-hass-0.1.0-{architecture}.tar.gz'
-        with tarfile.open(archive, 'w:gz') as output:
-            for name, data in [('manifest.json', manifest), ('image.json', config)]:
-                entry = tarfile.TarInfo(name)
-                entry.size = len(data)
-                output.addfile(entry, io.BytesIO(data))
+        digest = write_image(
+            archive,
+            architecture=actual or ('arm64' if architecture == 'aarch64' else 'amd64'),
+            hass_arch=architecture,
+            version=version,
+            tag=tag,
+        )
         sbom = self.artifacts / f'garmin-toolkit-hass-0.1.0-{architecture}.spdx.json'
         sbom.write_text(json.dumps({'spdxVersion': 'SPDX-2.3', 'packages': [{'name': 'synthetic-image'}]}))
         return {
             'architecture': architecture,
             'manifest_digest': 'sha256:' + ('2' if architecture == 'amd64' else '3') * 64,
-            'config_digest': 'sha256:' + hashlib.sha256(config).hexdigest(),
+            'config_digest': digest,
             'archive_sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
             'sbom_sha256': hashlib.sha256(sbom.read_bytes()).hexdigest(),
             'builder_system': 'x86_64-linux' if architecture == 'amd64' else 'aarch64-linux',
@@ -398,7 +384,8 @@ class ReleaseTests(unittest.TestCase):
         self.document['platforms'][1]['workflow_run'] = None
         self.save_receipt()
         entrypoint = str(Path(__file__).with_name('hass_release.py'))
-        environment = {**os.environ, 'NO_COLOR': '1'}
+        # CI may force colors; select plain output independently of the parent environment.
+        environment = {**os.environ, 'NO_COLOR': '1', 'FORCE_COLOR': '0', 'CLICOLOR_FORCE': '0'}
         assembled = subprocess.run(
             [
                 sys.executable,

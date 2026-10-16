@@ -27,6 +27,7 @@ from rich.table import Table
 from rich.text import Text
 
 from cli_output import TerminalOutput, child_environment, strip_ansi, syntax
+from processes import stop_group
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = TerminalOutput()
@@ -62,22 +63,13 @@ def stop(
     live: Callable[[bytes], None] | None = None,
 ) -> None:
     """Allow driver cleanup, then kill any remaining members of our process group."""
-    with suppress(ProcessLookupError):
-        os.killpg(child.pid, signal.SIGTERM)
-    try:
-        if reader is not None and log is not None:
-            wait_logged(child, reader, log, grace, live=live)
-        else:
-            child.wait(timeout=grace)
-    except subprocess.TimeoutExpired:
-        pass
-    finally:
-        with suppress(ProcessLookupError):
-            os.killpg(child.pid, signal.SIGKILL)
-        child.wait()
-        if reader is not None and log is not None:
-            with suppress(subprocess.TimeoutExpired):
-                wait_logged(child, reader, log, 1, live=live)
+    waiter: Callable[[float], int] | None = (
+        None if reader is None or log is None else lambda timeout: wait_logged(child, reader, log, timeout, live=live)
+    )
+    stop_group(child, grace, wait=waiter)
+    if waiter is not None:
+        with suppress(subprocess.TimeoutExpired):
+            waiter(1)
 
 
 @contextmanager
@@ -185,14 +177,7 @@ def run_command(
             if code:
                 raise subprocess.CalledProcessError(code, command)
         finally:
-            previous = {
-                sig: signal.signal(sig, signal.SIG_IGN) for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
-            }
-            try:
-                stop(child, reader=reader, log=errors, live=live)
-            finally:
-                for sig, handler in previous.items():
-                    signal.signal(sig, handler)
+            stop(child, reader=reader, log=errors, live=live)
 
 
 def stage(

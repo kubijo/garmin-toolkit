@@ -1,9 +1,7 @@
 """Exercise a locally built Home Assistant app in disposable HAOS."""
 
-import hashlib
 import ipaddress
 import json
-import lzma
 import shlex
 import shutil
 import socket
@@ -21,13 +19,11 @@ import tyro
 from rich.text import Text
 
 from cli_output import TerminalOutput
-from haos_arm64_vm import stop, verify_scope
-from haos_platform import Architecture, Platform, machine_arguments, resolve, validate_archive
+from haos_platform import Architecture, Platform, resolve, validate_archive
+from haos_runtime import SCRATCH_ROOT, download_image, prepare_image, qemu_command, stop, verify_scope
 
 OUTPUT = TerminalOutput()
-MAX_COMPRESSED_BYTES = 600_000_000
 MAX_OVERLAY_BYTES = 8 * 1024**3
-SCRATCH_ROOT = Path(__file__).resolve().parents[2] / '.tmp'
 APP_CONFIG = Path(__file__).resolve().parents[2] / 'apps/garmin-hass/addon/config.yaml'
 GUEST_APP_DIR = '/mnt/data/supervisor/apps/local/garmin_toolkit'
 GUEST_DATA_DIR = '/mnt/data/supervisor/apps/data/local_garmin_toolkit'
@@ -59,30 +55,6 @@ def run(command: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess
     return result
 
 
-def prepare_image(compressed: Path, destination: Path, guest: Platform) -> None:
-    if compressed.stat().st_size > MAX_COMPRESSED_BYTES:
-        raise ValueError('HAOS image exceeds the download size limit')
-    with compressed.open('rb') as source:
-        digest = hashlib.file_digest(source, 'sha256').hexdigest()
-    if digest != guest.image_sha256:
-        raise ValueError(f'HAOS image SHA-256 differs from the pinned release: {digest}')
-    with lzma.open(compressed, 'rb') as source, destination.open('xb') as output:
-        shutil.copyfileobj(source, output, length=1024 * 1024)
-
-
-def download_image(destination: Path, guest: Platform) -> None:
-    from urllib.request import Request, urlopen
-
-    request = Request(guest.image_url, headers={'User-Agent': 'garmin-toolkit-haos-app'})
-    with urlopen(request, timeout=30) as source, destination.open('xb') as output:
-        total = 0
-        while chunk := source.read(1024 * 1024):
-            total += len(chunk)
-            if total > MAX_COMPRESSED_BYTES:
-                raise ValueError('HAOS image exceeds the download size limit')
-            output.write(chunk)
-
-
 def config_drive(runtime: Path) -> tuple[Path, Path]:
     key = runtime / 'ssh-key'
     run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)])
@@ -101,88 +73,18 @@ def free_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def qemu_command(
-    image: Path,
-    config: Path,
-    runtime: Path,
-    unit: str,
-    port: int,
-    timeout: int,
-    *,
-    guest: Platform,
-    overlay_limit: int = MAX_OVERLAY_BYTES,
-) -> list[str]:
-    forwarding = f'user,id=net0,hostfwd=tcp:127.0.0.1:{port}-:22222'
-    return [
-        'systemd-run',
-        '--user',
-        '--scope',
-        f'--unit={unit}',
-        '-p',
-        'MemoryMax=6G',
-        '-p',
-        'CPUQuota=400%',
-        '-p',
-        f'RuntimeMaxSec={timeout + 60}',
-        'prlimit',
-        f'--fsize={overlay_limit}',
-        '--',
-        'timeout',
-        '--signal=TERM',
-        '--kill-after=10s',
-        f'{timeout}s',
-        *machine_arguments(guest, runtime),
-        '-smp',
-        '4',
-        '-m',
-        '4096',
-        '-drive',
-        f'if=none,id=haos,file={image},format=qcow2,cache=none',
-        '-device',
-        'virtio-blk-pci,drive=haos,bootindex=0',
-        '-device',
-        'qemu-xhci',
-        '-drive',
-        f'if=none,id=config,file={config},format=raw,readonly=on',
-        '-device',
-        'usb-storage,drive=config',
-        '-netdev',
-        forwarding,
-        '-device',
-        'virtio-net-pci,netdev=net0',
-        '-display',
-        'none',
-        '-monitor',
-        'none',
-        '-serial',
-        f'file:{runtime / "serial.log"}',
-    ]
-
-
 def ssh_command(key: Path, port: int, remote: str | None = None) -> list[str]:
-    return [
-        'ssh',
-        '-F',
-        '/dev/null',
-        '-i',
-        str(key),
-        '-p',
-        str(port),
-        '-o',
+    options = (
         'BatchMode=yes',
-        '-o',
         'IdentitiesOnly=yes',
-        '-o',
         'IdentityAgent=none',
-        '-o',
         'ConnectTimeout=3',
-        '-o',
         'StrictHostKeyChecking=no',
-        '-o',
         'UserKnownHostsFile=/dev/null',
-        'root@127.0.0.1',
-        *([] if remote is None else [remote]),
-    ]
+    )
+    command = ['ssh', '-F', '/dev/null', '-i', str(key), '-p', str(port)]
+    command += [argument for option in options for argument in ('-o', option)]
+    return [*command, 'root@127.0.0.1', *([] if remote is None else [remote])]
 
 
 def send_file(key: Path, port: int, source: Path, destination: str) -> None:

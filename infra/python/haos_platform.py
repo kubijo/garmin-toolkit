@@ -4,12 +4,12 @@ import hashlib
 import json
 import os
 import platform
-import tarfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 
-from json_data import is_object, unique_object
+from archive_io import MAX_METADATA_BYTES, open_tar
+from json_data import Object, object_rows, object_value, strings, unique_object
 
 Architecture = Literal['auto', 'amd64', 'aarch64']
 
@@ -61,83 +61,69 @@ def acceleration(guest: Platform) -> str:
     return 'tcg,thread=multi'
 
 
-def machine_arguments(guest: Platform, runtime: Path) -> list[str]:
-    accelerator = acceleration(guest)
+def machine_arguments(guest: Platform, runtime: Path, *, force_tcg: bool = False) -> list[str]:
+    accelerator = 'tcg,thread=multi' if force_tcg else acceleration(guest)
     if guest.architecture == 'amd64':
-        return [
-            'qemu-system-x86_64',
-            '-machine',
-            'q35',
-            '-accel',
-            accelerator,
-            '-cpu',
-            'host' if accelerator == 'kvm' else 'max',
-            '-drive',
-            f'if=pflash,format=raw,unit=0,readonly=on,file={guest.firmware}',
-            '-drive',
-            f'if=pflash,format=raw,unit=1,file={runtime / "ovmf-vars.fd"}',
-        ]
-    return [
-        'qemu-system-aarch64',
-        '-machine',
-        'virt',
-        '-accel',
-        accelerator,
-        '-cpu',
-        'host' if accelerator == 'kvm' else 'cortex-a57',
-        '-bios',
-        str(guest.firmware),
-        '-device',
-        'ramfb',
-    ]
+        command = ['qemu-system-x86_64', '-machine', 'q35', '-accel', accelerator]
+        command += ['-cpu', 'host' if accelerator == 'kvm' else 'max']
+        command += ['-drive', f'if=pflash,format=raw,unit=0,readonly=on,file={guest.firmware}']
+        command += ['-drive', f'if=pflash,format=raw,unit=1,file={runtime / "ovmf-vars.fd"}']
+    else:
+        command = ['qemu-system-aarch64', '-machine', 'virt', '-accel', accelerator]
+        command += ['-cpu', 'host' if accelerator == 'kvm' else 'cortex-a57', '-bios', str(guest.firmware)]
+        command += ['-device', 'ramfb']
+    return command
 
 
 @dataclass(frozen=True)
 class ImageArchive:
-    configuration: dict[str, object]
+    configuration: Object
     config_digest: str
     repository_tags: tuple[str, ...]
+    layers: tuple[str, ...] = ()
 
 
 def inspect_archive(archive: Path) -> ImageArchive:
     """Read bounded regular metadata members without extracting the image to disk."""
-    with tarfile.open(archive, 'r:*') as image:
+    with open_tar(archive) as image:
+        metadata: dict[str, bytes] = {}
+        total = 0
+        for member in image:
+            if not member.name.endswith('.json'):
+                continue
+            if member.name in metadata:
+                raise ValueError(f'App archive metadata must occur exactly once: {member.name}')
+            total += member.size
+            if not member.isfile() or member.size > MAX_METADATA_BYTES or total > 16 * MAX_METADATA_BYTES:
+                raise ValueError(f'App archive metadata must be a bounded regular file: {member.name}')
+            stream = image.extractfile(member)
+            with stream:
+                metadata[member.name] = stream.read(MAX_METADATA_BYTES + 1)
 
         def contents(name: str) -> bytes:
-            matching = [member for member in image.getmembers() if member.name == name]
-            if len(matching) != 1:
+            if name not in metadata:
                 raise ValueError(f'App archive metadata must occur exactly once: {name}')
-            member = matching[0]
-            if not member.isfile() or member.size > 1024 * 1024:
-                raise ValueError(f'App archive metadata must be a bounded regular file: {name}')
-            stream = image.extractfile(member)
-            if stream is None:
-                raise ValueError(f'App archive metadata is missing: {name}')
-            with stream:
-                return stream.read(1024 * 1024 + 1)
+            return metadata[name]
 
-        manifest: object = json.loads(contents('manifest.json'), object_pairs_hook=unique_object)
-        if not isinstance(manifest, list) or len(cast('list[object]', manifest)) != 1:
+        manifest = object_rows(json.loads(contents('manifest.json'), object_pairs_hook=unique_object))
+        if len(manifest) != 1:
             raise ValueError('App archive must contain exactly one image')
-        entry = cast('list[dict[str, object]]', manifest)[0]
-        if not is_object(entry):
-            raise ValueError('Invalid app archive manifest entry')
+        entry = manifest[0]
         config_name = entry.get('Config')
         if not isinstance(config_name, str):
             raise ValueError('App archive manifest has no image configuration')
         if Path(config_name).is_absolute() or '..' in Path(config_name).parts:
             raise ValueError('App archive image configuration path is unsafe')
         config_bytes = contents(config_name)
-        config: object = json.loads(config_bytes, object_pairs_hook=unique_object)
-        if not isinstance(config, dict):
-            raise ValueError('Invalid app archive image configuration')
-        tags = entry.get('RepoTags', [])
-        if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in cast('list[object]', tags)):
-            raise ValueError('Invalid app archive repository tags')
+        config = object_value(json.loads(config_bytes, object_pairs_hook=unique_object))
+        tags, layers = strings(entry.get('RepoTags', [])), strings(entry.get('Layers', []))
+        if any(Path(layer).is_absolute() or '..' in Path(layer).parts for layer in layers):
+            raise ValueError('Invalid app archive layers')
         return ImageArchive(
-            cast('dict[str, object]', config),
+            config,
             'sha256:' + hashlib.sha256(config_bytes).hexdigest(),
-            tuple(cast('list[str]', tags)),
+            tuple(tags),
+            tuple(layers),
         )
 
 
@@ -150,13 +136,7 @@ def validate_archive(archive: Path, guest: Platform, version: str, *, inspected:
     expected = 'arm64' if guest.architecture == 'aarch64' else 'amd64'
     if config.get('architecture') != expected or config.get('os') != 'linux':
         raise ValueError(f'App archive must target linux/{expected}; found {config.get("architecture")}')
-    settings = config.get('config')
-    if not isinstance(settings, dict):
-        raise ValueError('App archive has no runtime configuration')
-    labels = cast('dict[str, object]', settings).get('Labels')
-    if not isinstance(labels, dict):
-        raise ValueError('App archive has no Home Assistant labels')
-    labels = cast('dict[str, object]', labels)
+    labels = object_value(object_value(config.get('config')).get('Labels'))
     expected_labels = {'io.hass.arch': guest.architecture, 'io.hass.version': version, 'io.hass.type': 'app'}
     if any(labels.get(key) != value for key, value in expected_labels.items()):
         raise ValueError(f'App archive Home Assistant labels differ from {expected_labels}')

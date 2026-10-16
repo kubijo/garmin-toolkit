@@ -137,6 +137,25 @@ class IntegrationRunnerTests(unittest.TestCase):
                     child.kill()
                     child.wait()
 
+    def test_cleanup_kills_remaining_group_members_after_the_leader_exits(self) -> None:
+        command = [sys.executable, '-c', 'import time; time.sleep(30)']
+        with (
+            subprocess.Popen(command, process_group=0) as leader,
+            subprocess.Popen(command, process_group=leader.pid) as descendant,
+        ):
+            try:
+                leader.terminate()
+                leader.wait(timeout=3)
+                stop(leader, grace=0.05)
+                self.assertLess(descendant.wait(timeout=3), 0)
+            finally:
+                if descendant.poll() is None:
+                    descendant.kill()
+                descendant.wait(timeout=3)
+                if leader.poll() is None:
+                    leader.kill()
+                leader.wait(timeout=3)
+
     def test_interruption_still_runs_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / 'vm.log'

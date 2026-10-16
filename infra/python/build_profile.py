@@ -10,15 +10,17 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import FrameType
-from typing import Any, Literal
+from typing import IO, Any, Literal
 
 import tyro
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
+
+from processes import stop_group
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / '.tmp' / 'build-profile'
@@ -45,22 +47,34 @@ class Options:
     """Profile compiler internals for the UI or desktop library using the diagnostic nightly shell."""
 
 
-def event(name: str, phase: str, **args: Any) -> None:
+def event(name: str, phase: str, **args: object) -> None:
     record = dict(name=name, ph=phase, ts=time.monotonic_ns() // 1000, pid=1, tid=os.getpid(), args=args)
     with (Path(os.environ['GARMIN_BUILD_TRACE']) / f'{os.getpid()}.jsonl').open('a') as output:
         output.write(json.dumps(record) + '\n')
 
 
-def invoke(command: list[str], name: str, *, group: bool = False, **options: Any) -> int:
-    event(name, 'B', command=command, cwd=str(options.get('cwd', Path.cwd())))
-    previous: dict[signal.Signals, Callable[[int, FrameType | None], Any] | int | None] = {}
+def invoke(
+    command: list[str],
+    name: str,
+    *,
+    group: bool = False,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    stdout: IO[str] | int | None = None,
+    stderr: IO[str] | int | None = None,
+) -> int:
+    event(name, 'B', command=command, cwd=str(cwd or Path.cwd()))
+    previous: dict[signal.Signals, Callable[[int, FrameType | None], object] | int | None] = {}
     code = 1
+    child: subprocess.Popen[bytes] | None = None
     try:
         # Preserve the descriptors the caller marked inheritable, including Cargo's jobserver pipes.
         # Python's own files are close-on-exec by default.
-        child = subprocess.Popen(command, close_fds=False, start_new_session=group, **options)
+        child = subprocess.Popen(
+            command, close_fds=False, start_new_session=group, cwd=cwd, env=env, stdout=stdout, stderr=stderr
+        )
 
-        def forward(signum: int, _frame: Any) -> None:
+        def forward(signum: int, _frame: FrameType | None) -> None:
             with suppress(ProcessLookupError):
                 if group:
                     os.killpg(child.pid, signum)
@@ -73,6 +87,8 @@ def invoke(command: list[str], name: str, *, group: bool = False, **options: Any
         code = code if code >= 0 else 128 - code
         return code
     finally:
+        if group and child is not None:
+            stop_group(child)
         for signum, handler in previous.items():
             signal.signal(signum, handler)
         event(name, 'E', code=code)
