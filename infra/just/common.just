@@ -25,8 +25,8 @@ require-linker:
 
 # Run through the ambient toolchain when available, otherwise enter the Nix shell.
 [private]
+[script("bash")]
 in-shell +cmd:
-    #!/usr/bin/env bash
     set -euo pipefail
 
     cd {{ quote(repository_root) }}
@@ -38,7 +38,7 @@ in-shell +cmd:
     if command -v "$1" >/dev/null 2>&1 \
         && { [[ "$1" != cargo || $(uname -s) != Linux ]] \
             || { command -v mold >/dev/null 2>&1 && command -v ld.mold >/dev/null 2>&1; }; }; then
-        exec {{ quote(memory_capped) }} "$@"
+        exec bash {{ quote(memory_capped) }} "$@"
     fi
-    exec {{ quote(memory_capped) }} \
+    exec bash {{ quote(memory_capped) }} \
         nix develop {{ quote(flake) }} --command "$@"
