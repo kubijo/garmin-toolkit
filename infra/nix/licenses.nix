@@ -165,10 +165,16 @@ let
       }
     ];
   };
-  generator = workspaceSrc + "/infra/licenses/generate.py";
+  generatorSource = lib.fileset.toSource {
+    root = workspaceSrc + "/infra/licenses";
+    fileset = lib.fileset.fileFilter (
+      file: file.hasExt "py" || file.hasExt "toml" || file.hasExt "txt"
+    ) (workspaceSrc + "/infra/licenses");
+  };
   python = pkgs.python3.withPackages (packages: [ packages.tyro ]);
   testCommand = "${lib.getExe python} -m unittest discover -s infra/licenses -p 'test_*.py'";
-  generateCommand = arguments: "${lib.getExe python} ${generator} --config ${config} ${arguments}";
+  generateCommand =
+    arguments: "${lib.getExe python} ${generatorSource}/generate.py --config ${config} ${arguments}";
   runtimeInputs = [
     pkgs.cargo-bundle-licenses
     python

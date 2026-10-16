@@ -1,0 +1,433 @@
+# Version-bound supplements for notices omitted or overlooked in published crates.
+# Source URLs identify the crate's VCS revision; hashes cover the original upstream bytes.
+# Identical files share storage while each upstream source remains recorded.
+
+[[notices]]
+license = "CC0-1.0"
+packages = ["blake3 1.8.7"]
+package_file = "LICENSE_CC0"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["blake3 1.8.7"]
+package_file = "LICENSE_A2"
+
+[[notices]]
+license = "Apache-2.0 WITH LLVM-exception"
+packages = ["blake3 1.8.7"]
+package_file = "LICENSE_A2LLVM"
+
+[[notices]]
+license = "CC0-1.0"
+packages = ["constant_time_eq 0.4.2"]
+package_file = "LICENSE-CC0"
+
+[[notices]]
+license = "MIT-0"
+packages = ["constant_time_eq 0.4.2"]
+package_file = "LICENSE-MIT0"
+
+[[notices]]
+license = "MIT"
+packages = ["crc-catalog 2.5.0"]
+package_file = "LICENSES/MIT.txt"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["crc-catalog 2.5.0"]
+package_file = "LICENSES/Apache-2.0.txt"
+
+[[notices]]
+license = "MIT"
+packages = ["enum-map 2.7.3"]
+package_file = "LICENSES/MIT.txt"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["enum-map 2.7.3"]
+package_file = "LICENSES/Apache-2.0.txt"
+
+[[notices]]
+license = "OFL-1.1"
+packages = ["epaint_default_fonts 0.36.2"]
+package_file = "fonts/OFL.txt"
+
+[[notices]]
+license = "Ubuntu-font-1.0"
+packages = ["epaint_default_fonts 0.36.2"]
+package_file = "fonts/UFL.txt"
+
+[[notices]]
+license = "CC0-1.0"
+packages = ["notify 8.2.0"]
+package_file = "LICENSE-CC0"
+
+[[notices]]
+license = "BSD-3-Clause"
+packages = ["rustyfit 0.10.2"]
+package_file = "LICENSE-BSD-3-CLAUSE"
+
+[[notices]]
+license = "GPL-2.0-only"
+packages = ["self_cell 1.3.0"]
+package_file = "LICENSE-GPLv2"
+
+[[notices]]
+license = "MIT"
+packages = ["accesskit 0.24.1"]
+file = "notices/accesskit-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-MIT"
+sha256 = "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["accesskit 0.24.1"]
+file = "notices/accesskit-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-APACHE"
+sha256 = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+[[notices]]
+license = "MIT"
+packages = ["accesskit_consumer 0.35.0"]
+file = "notices/accesskit-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/AccessKit/accesskit/1bbcf100942bac96c2c3a4a91cb67b0b20201a24/LICENSE-MIT"
+sha256 = "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["accesskit_consumer 0.35.0"]
+file = "notices/accesskit-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/AccessKit/accesskit/1bbcf100942bac96c2c3a4a91cb67b0b20201a24/LICENSE-APACHE"
+sha256 = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+[[notices]]
+license = "MIT"
+packages = ["block2 0.5.1", "objc-sys 0.3.5", "objc2 0.5.2"]
+file = "notices/objc2-LICENSE-txt.txt"
+source = "https://raw.githubusercontent.com/madsmtm/objc2/4fc083f1c6d6784577e38b0ee8dbd344481e2fd2/LICENSE.txt"
+sha256 = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+[[notices]]
+license = "MIT"
+packages = ["block2 0.6.2"]
+file = "notices/objc2-LICENSE-md.txt"
+source = "https://raw.githubusercontent.com/madsmtm/objc2/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+include_standard_terms = true
+
+[[notices]]
+license = "Zlib"
+packages = ["dispatch2 0.3.1"]
+file = "notices/objc2-LICENSE-md.txt"
+source = "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+include_standard_terms = true
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["dispatch2 0.3.1"]
+file = "notices/objc2-LICENSE-md.txt"
+source = "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+include_standard_terms = true
+
+[[notices]]
+license = "MIT"
+packages = ["dispatch2 0.3.1", "objc2 0.6.4"]
+file = "notices/objc2-LICENSE-md.txt"
+source = "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+include_standard_terms = true
+
+[[notices]]
+license = "MIT"
+packages = ["ecolor 0.36.2", "eframe 0.36.2", "egui 0.36.2", "egui-wgpu 0.36.2", "egui-winit 0.36.2", "egui_extras 0.36.2", "egui_glow 0.36.2", "emath 0.36.2", "epaint 0.36.2", "epaint_default_fonts 0.36.2"]
+file = "notices/egui-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/emilk/egui/49682f8baa058bf49e011035cfbd6e825f88a5ef/LICENSE-MIT"
+sha256 = "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["ecolor 0.36.2", "eframe 0.36.2", "egui 0.36.2", "egui-wgpu 0.36.2", "egui-winit 0.36.2", "egui_extras 0.36.2", "egui_glow 0.36.2", "emath 0.36.2", "epaint 0.36.2", "epaint_default_fonts 0.36.2"]
+file = "notices/egui-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/emilk/egui/49682f8baa058bf49e011035cfbd6e825f88a5ef/LICENSE-APACHE"
+sha256 = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+
+[[notices]]
+license = "MIT"
+packages = ["egui_plot 0.37.0"]
+file = "notices/accesskit-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/emilk/egui_plot/c31b61732c1acb58268bb26c786e7664797602bd/LICENSE-MIT"
+sha256 = "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["egui_plot 0.37.0"]
+file = "notices/egui-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/emilk/egui_plot/c31b61732c1acb58268bb26c786e7664797602bd/LICENSE-APACHE"
+sha256 = "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+
+[[notices]]
+license = "MIT"
+packages = ["geo 0.33.1"]
+file = "notices/geo-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/georust/geo/5ab50b072e34a915a33eaa46c80763d51d61295e/LICENSE-MIT"
+sha256 = "2f8267b247fd81e9555a2e196e119a5b341bcae21011cd93985c312f1312f727"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["geo 0.33.1"]
+file = "notices/geo-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/georust/geo/5ab50b072e34a915a33eaa46c80763d51d61295e/LICENSE-APACHE"
+sha256 = "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+
+[[notices]]
+license = "MIT"
+packages = ["http-cache 1.0.0-alpha.8", "http-cache-reqwest 1.0.0-alpha.9"]
+file = "notices/http-cache-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/06chaynes/http-cache/5c2e0a1884727bf96028df223fc81ac00f0f207f/LICENSE-MIT"
+sha256 = "7fed2971bcf4942fc02d05781d06dd910e019d4e044b25b3d6e9ce47ab0c27d9"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["http-cache 1.0.0-alpha.8", "http-cache-reqwest 1.0.0-alpha.9"]
+file = "notices/http-cache-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/06chaynes/http-cache/5c2e0a1884727bf96028df223fc81ac00f0f207f/LICENSE-APACHE"
+sha256 = "ad5924b15f7f5f7e04d424a1673d0b874f280ac73007002f4b43cce483bc3364"
+
+[[notices]]
+license = "MIT"
+packages = ["i_key_sort 0.10.3"]
+file = "notices/iKeySort-LICENSE.txt"
+source = "https://raw.githubusercontent.com/iShape-Rust/iKeySort/10a9a72f0cdae785dd2185896eed138b09945515/LICENSE"
+sha256 = "47e00f18b265d350a2860d3899f17dd1c7689b966545e929df8ffa7033f5acdc"
+
+[[notices]]
+license = "MIT"
+packages = ["i_overlay 4.5.2"]
+file = "notices/iOverlay-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/iShape-Rust/iOverlay/9448d8da87e11f5b7aedcf994967b18ff640c734/LICENSE-MIT"
+sha256 = "260cc580f53a756821a0f35475e2cd6da790f8fed0efc058252fe1bed8f2689e"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["i_overlay 4.5.2"]
+file = "notices/iOverlay-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/iShape-Rust/iOverlay/9448d8da87e11f5b7aedcf994967b18ff640c734/LICENSE-APACHE"
+sha256 = "59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b"
+no_final_newline = true
+
+[[notices]]
+license = "MIT"
+packages = ["lyon_geom 1.0.19", "lyon_path 1.0.19"]
+file = "notices/lyon-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-MIT"
+sha256 = "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["lyon_geom 1.0.19", "lyon_path 1.0.19"]
+file = "notices/lyon-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-APACHE"
+sha256 = "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+include_standard_terms = true
+
+[[notices]]
+license = "MIT"
+packages = ["lyon_tessellation 1.0.22"]
+file = "notices/lyon-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/nical/lyon/b456b143215a1942a617c4672776b68b9a30feee/LICENSE-MIT"
+sha256 = "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["lyon_tessellation 1.0.22"]
+file = "notices/lyon-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/nical/lyon/b456b143215a1942a617c4672776b68b9a30feee/LICENSE-APACHE"
+sha256 = "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+include_standard_terms = true
+
+[[notices]]
+license = "MIT"
+packages = ["objc2-app-kit 0.2.2", "objc2-core-data 0.2.2", "objc2-core-image 0.2.2", "objc2-foundation 0.2.2", "objc2-metal 0.2.2", "objc2-quartz-core 0.2.2"]
+file = "notices/objc2-LICENSE-txt.txt"
+source = "https://raw.githubusercontent.com/madsmtm/objc2/e282618be4c3a3b9542957e0c8540e9588472ce8/LICENSE.txt"
+sha256 = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+[[notices]]
+license = "Zlib"
+packages = ["objc2-app-kit 0.3.2", "objc2-core-foundation 0.3.2", "objc2-core-graphics 0.3.2", "objc2-io-surface 0.3.2", "objc2-metal 0.3.2", "objc2-quartz-core 0.3.2"]
+file = "notices/objc2-LICENSE-md.txt"
+source = "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+include_standard_terms = true
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["objc2-app-kit 0.3.2", "objc2-core-foundation 0.3.2", "objc2-core-graphics 0.3.2", "objc2-io-surface 0.3.2", "objc2-metal 0.3.2", "objc2-quartz-core 0.3.2"]
+file = "notices/objc2-LICENSE-md.txt"
+source = "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+include_standard_terms = true
+
+[[notices]]
+license = "MIT"
+packages = ["objc2-app-kit 0.3.2", "objc2-core-foundation 0.3.2", "objc2-core-graphics 0.3.2", "objc2-foundation 0.3.2", "objc2-io-surface 0.3.2", "objc2-metal 0.3.2", "objc2-quartz-core 0.3.2"]
+file = "notices/objc2-LICENSE-md.txt"
+source = "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+include_standard_terms = true
+
+[[notices]]
+license = "MIT"
+packages = ["objc2-encode 4.1.0"]
+file = "notices/objc2-LICENSE-md.txt"
+source = "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+include_standard_terms = true
+
+[[notices]]
+license = "MIT"
+packages = ["profiling 1.0.18"]
+file = "notices/profiling-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT"
+sha256 = "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333"
+no_final_newline = true
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["profiling 1.0.18"]
+file = "notices/profiling-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE"
+sha256 = "10d30a673cd5e9349bdc02aeb48f14b3386d27d0da32df8f0a555d4aa16aa551"
+no_final_newline = true
+
+[[notices]]
+license = "MIT"
+packages = ["rstar 0.12.2"]
+file = "notices/rstar-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/georust/rstar/c8c5bf9e41468281d030869d409e3f67f1aaf5b7/LICENSE-MIT"
+sha256 = "9b3a76c27bac8f3e0ff2d1f64f65941c50310ae3ff69318cea230bd4a36822c5"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["rstar 0.12.2"]
+file = "notices/geo-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/georust/rstar/c8c5bf9e41468281d030869d409e3f67f1aaf5b7/LICENSE-APACHE"
+sha256 = "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["spirv 0.4.0+sdk-1.4.341.0"]
+file = "notices/rspirv-LICENSE.txt"
+source = "https://raw.githubusercontent.com/gfx-rs/rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE"
+sha256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["uuid-rng-internal 1.26.1"]
+file = "notices/geo-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/uuid-rs/uuid/9f927126c89892ddfed6cd2f92df16852f3f9aa6/LICENSE-APACHE"
+sha256 = "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+
+[[notices]]
+license = "MIT"
+packages = ["uuid-rng-internal 1.26.1"]
+file = "notices/uuid-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/uuid-rs/uuid/9f927126c89892ddfed6cd2f92df16852f3f9aa6/LICENSE-MIT"
+sha256 = "436bc5a105d8e57dcd8778730f3754f7bf39c14d2f530e4cde4bd2d17a83ec3d"
+
+[[notices]]
+license = "MIT"
+packages = ["walkers 0.60.0"]
+file = "notices/walkers-LICENSE.txt"
+source = "https://raw.githubusercontent.com/podusowski/walkers/95bb2005719780ac4d8ee1ac8b98ec672915576e/LICENSE"
+sha256 = "f7b6455c802c0c0245a4e503c2b918b169cce15bf57fd06a1894b18785ce9d17"
+
+# Standard terms for the explicitly reviewed declarations below. SPDX template
+# copyright examples are omitted; published author attribution remains separate.
+
+[terms."MIT"]
+file = "notices/spdx-MIT.txt"
+source = "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt"
+sha256 = "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+omit_template_line = "Copyright (c) <year> <copyright holders>"
+
+[terms."Apache-2.0"]
+file = "notices/spdx-Apache-2.0.txt"
+source = "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/Apache-2.0.txt"
+sha256 = "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+
+[terms."Zlib"]
+file = "notices/spdx-Zlib.txt"
+source = "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/Zlib.txt"
+sha256 = "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d"
+
+[terms."BSD-3-Clause"]
+file = "notices/spdx-BSD-3-Clause.txt"
+source = "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/BSD-3-Clause.txt"
+sha256 = "5a93d5831e1297ab10fe643e1a631e83be392896da14ee2951285a79012df69d"
+omit_template_line = "Copyright (c) <year> <owner>."
+
+[[declarations]]
+package = "cint 0.3.1"
+expression = "MIT OR Apache-2.0 OR Zlib"
+licenses = ["MIT", "Apache-2.0", "Zlib"]
+source = "https://raw.githubusercontent.com/termhn/cint/f567a07d25e7581ac49a9089fae6f1f2acbfe872/Cargo.toml"
+sha256 = "b8819aaea298d6b8aec22be2011c330354b87f38bb57f61d81f37a9eb5f95cb2"
+
+[[declarations]]
+package = "custom_debug 0.6.2"
+expression = "Apache-2.0 OR MIT"
+licenses = ["Apache-2.0", "MIT"]
+source = "https://raw.githubusercontent.com/panicbit/custom_debug/5e3d98809be2b621160122720828b69ac9d335c2/Cargo.toml"
+sha256 = "35970a92e4f043f8f6c17f8c6cdfe119f78ed7c82852b0e3a25b0d62b7e04800"
+
+[[declarations]]
+package = "dispatch 0.2.0"
+expression = "MIT"
+licenses = ["MIT"]
+source = "https://raw.githubusercontent.com/SSheldon/rust-dispatch/82d6c7a5b75dc0c71c3f46f87bb6c16a476f7748/Cargo.toml"
+sha256 = "05c60b829931ef7f1f130735843c11f5cf9cc69546eca5fc941d014781c68e31"
+
+[[declarations]]
+package = "formatjs_icu_messageformat 0.1.3"
+expression = "BSD-3-Clause"
+licenses = ["BSD-3-Clause"]
+source = "https://raw.githubusercontent.com/formatjs/formatjs/e5914dd1e01e5ad412f1a5b7749eecaaa5ba09c9/crates/icu_messageformat/Cargo.toml"
+sha256 = "17220742e442df7e1181b8633aeb2bdb3ee1c3ef4c3afa18568c026de3955d7c"
+
+[[declarations]]
+package = "formatjs_icu_messageformat_parser 0.3.1"
+expression = "MIT"
+licenses = ["MIT"]
+source = "https://raw.githubusercontent.com/formatjs/formatjs/e5914dd1e01e5ad412f1a5b7749eecaaa5ba09c9/crates/icu_messageformat_parser/Cargo.toml"
+sha256 = "f25be696bf15cdff7e9c17ac1a3ebcaac6617f734230d6b844203aa623c55142"
+
+[[declarations]]
+package = "formatjs_icu_skeleton_parser 0.1.2"
+expression = "MIT"
+licenses = ["MIT"]
+source = "https://raw.githubusercontent.com/formatjs/formatjs/6449dd1e23d5bac9ffacd5b4918cea0728d09f3a/crates/icu_skeleton_parser/Cargo.toml"
+sha256 = "3d5472ee264b7893c7a3182c1279a728136c3bb25b29a3f47265e626386d445e"
+
+[[declarations]]
+package = "formatjs_intl 0.5.0"
+expression = "BSD-3-Clause"
+licenses = ["BSD-3-Clause"]
+source = "https://raw.githubusercontent.com/formatjs/formatjs/fcd1e4cdd22b6f950c814886a302424f399e89f5/crates/formatjs_intl/Cargo.toml"
+sha256 = "b3cbaa40e42899d21b54924dcfe56d9ac1b04482e9f45d41fe8bc750851ea721"
+
+[[declarations]]
+package = "http-serde 2.1.1"
+expression = "Apache-2.0 OR MIT"
+licenses = ["Apache-2.0", "MIT"]
+source = "https://gitlab.com/kornelski/http-serde/-/raw/c2403fb3d64bc0db31a05ca5d340ff82686163b1/Cargo.toml"
+sha256 = "e63ec3af7a0035b0a9f3db5f1045403489593c100f25a58c5f39b6f74c1ea5c6"
+
+[[declarations]]
+package = "usize_cast 1.1.0"
+expression = "MIT OR Apache-2.0"
+licenses = ["MIT", "Apache-2.0"]
+source = "https://raw.githubusercontent.com/Clikengo/usize_cast/74eb61c118e4e74e401ffc0f0fd8f51c05f2bec3/Cargo.toml"
+sha256 = "ece3b36fb104424fb82357383277aea2e5d9f757e965a64cc15bccffc157d585"

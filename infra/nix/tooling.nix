@@ -51,6 +51,8 @@ let
       "LICENSE-APACHE"
       "LICENSE-MIT"
       "assets/licenses/**"
+      # Preserve the exact upstream text checked by the notice manifest's hashes.
+      "infra/licenses/notices/**"
       "crates/garmin-ui/assets/fonts/**"
       "infra/fixtures/fit/development-activities/LICENSE"
       "infra/fixtures/fit/development-activities/LICENSE-DogWalkGPS"
