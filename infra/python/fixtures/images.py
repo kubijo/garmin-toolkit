@@ -5,23 +5,25 @@ import hashlib
 import io
 import json
 import tarfile
+from collections.abc import Mapping
 from pathlib import Path
 
 
-def tar_bytes(files: dict[str, bytes]) -> bytes:
+def tar_bytes(files: Mapping[str, bytes | None]) -> bytes:
     result = io.BytesIO()
     with tarfile.open(fileobj=result, mode='w') as archive:
         for name, data in files.items():
             member = tarfile.TarInfo(name)
-            member.size, member.mode = len(data), 0o755
-            archive.addfile(member, io.BytesIO(data))
+            member.size, member.mode = len(data) if data is not None else 0, 0o755
+            member.type = tarfile.DIRTYPE if data is None else tarfile.REGTYPE
+            archive.addfile(member, io.BytesIO(data) if data is not None else None)
     return result.getvalue()
 
 
 def write_image(
     path: Path,
     *,
-    files: dict[str, bytes] | None = None,
+    files: Mapping[str, bytes | None] | None = None,
     architecture: str = 'amd64',
     hass_arch: str = 'amd64',
     version: str = '0.1.0',

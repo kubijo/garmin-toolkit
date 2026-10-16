@@ -68,9 +68,10 @@ def native_dependencies(data: bytes, *, expected_machine: int | None = None) -> 
 
 def image_path(name: str) -> str:
     path = PurePosixPath(name)
-    if path.is_absolute() or '..' in path.parts:
+    if '..' in path.parts:
         raise ValueError(f'Unsafe image member: {name}')
-    return '/' + str(path).removeprefix('./')
+    # Nix layers include absolute container-root entries; no members are extracted on the host.
+    return '/' + str(path).removeprefix('./').lstrip('/')
 
 
 def unsigned_leb(data: bytes, offset: int) -> tuple[int, int]:
