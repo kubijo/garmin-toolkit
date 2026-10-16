@@ -269,6 +269,10 @@ def generate(archive: Path, closure: Path, bundle: Path, output: Path, created: 
             timeout=900,
         )
         document = object_value(read_json(document_path, max_bytes=MAX_SBOM_BYTES))
+        # Syft represents an explicit image-root directory with an empty file name.
+        for entry in object_rows(document.get('files')):
+            if entry.get('fileName') == '':
+                entry['fileName'] = '/'
         records = file_records(document, files)
         actual, extra = Inventory.read(document, records), supplemental(files, records, notices, digest, version)
         if actual.packages.keys() & extra.packages.keys():

@@ -20,7 +20,7 @@ from unittest.mock import patch
 from archive_io import expand
 from fixtures.images import tar_bytes, write_image
 from haos_platform import ImageArchive, inspect_archive
-from hass_image_inventory import inventory_image, wasm_dependencies
+from hass_image_inventory import image_path, inventory_image, wasm_dependencies
 from hass_image_sbom import generate, verify_sbom
 from hass_release_build import NativeBuild, native_derivation, record_build
 
@@ -156,10 +156,14 @@ class ImageSbomTests(unittest.TestCase):
 
     def test_real_scanner_covers_native_wasm_assets_and_every_file(self) -> None:
         self.assertIsNotNone(shutil.which('syft'), 'The pinned Syft scanner is required')
+        write_image(
+            self.archive, files={'/': None, '/nix': None, **{'/' + name: data for name, data in self.native.items()}}
+        )
         generate(self.archive, self.closure, self.bundle, self.output, 1)
         bundle = json.loads(self.bundle.read_bytes())
         verify_sbom(self.archive, self.output, bundle)
         document = json.loads(self.output.read_bytes())
+        self.assertIn('/', {entry['fileName'] for entry in document['files']})
         names = {entry['name'] for entry in document['packages']}
         self.assertTrue({'garmin-hass', 'garmin-gpx-worker', 'garmin-hass-web', 'synthetic-font'}.issubset(names))
         packages, edges = document['packages'], document['relationships']
@@ -171,6 +175,7 @@ class ImageSbomTests(unittest.TestCase):
         cases: list[tuple[str, tuple[str | int, ...], object]] = [
             ('hash', ('packages', index('SPDXRef-GarminImage'), 'checksums'), []),
             ('file', ('files',), []),
+            ('empty-file-name', ('files', 0, 'fileName'), ''),
             ('name', ('packages', wasm_index, 'name'), 'forged'),
             ('version', ('packages', wasm_index, 'versionInfo'), 'forged'),
             ('purl', ('packages', wasm_index, 'externalRefs'), []),
@@ -204,6 +209,13 @@ class ImageSbomTests(unittest.TestCase):
             tampered.write_text(json.dumps(modified))
             with self.subTest(change=change), self.assertRaises(ValueError):
                 verify_sbom(self.archive, tampered, bundle)
+
+    def test_layer_paths_accept_container_root_entries_and_reject_traversal(self) -> None:
+        for name in ('nix/store', './nix/store', '/nix/store', '//nix/store'):
+            self.assertEqual(image_path(name), '/nix/store')
+        for name in ('../nix', '/nix/../escape', 'nix/../../escape'):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'Unsafe image member'):
+                image_path(name)
 
     def test_real_scanner_handles_nix_terminal_output_without_interactive_input(self) -> None:
         master, terminal = pty.openpty()
