@@ -10,7 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cli_output import TerminalOutput
-from hass_integration import browser_progress, entrypoint, run_command, stage, stop
+from hass_integration import browser_progress, entrypoint, main, run_command, stage, stop
+from json_data import object_value, text
 
 
 @unittest.skipUnless(sys.platform == 'linux', 'The VM runner requires Linux process groups')
@@ -199,6 +200,31 @@ class RunnerPresentationTests(unittest.TestCase):
         self.patch = patch('hass_integration.OUTPUT', terminal)
         self.patch.start()
         self.addCleanup(self.patch.stop)
+
+    def test_failed_vm_run_removes_disks_from_repository_scratch(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory(prefix='integration-tests.', dir=root / '.tmp') as directory:
+            project = Path(directory)
+            runtime_paths: list[Path] = []
+
+            def fail_vm(*_args: object, **kwargs: object) -> None:
+                environment = object_value(kwargs['environment'])
+                runtime = Path(text(environment['TMPDIR']))
+                self.assertTrue(runtime.is_relative_to(project / '.tmp'))
+                self.assertEqual(str(runtime), environment['XDG_RUNTIME_DIR'])
+                (runtime / 'disk.img').write_bytes(b'synthetic VM disk')
+                runtime_paths.append(runtime)
+                raise subprocess.CalledProcessError(7, ['test-driver'])
+
+            with (
+                patch('hass_integration.ROOT', project),
+                patch('hass_integration.platform.system', return_value='Linux'),
+                patch('hass_integration.os.access', return_value=True),
+                patch('hass_integration.stage', side_effect=fail_vm),
+            ):
+                self.assertEqual(main(driver=project / 'cached-driver'), 7)
+            self.assertEqual(len(runtime_paths), 1)
+            self.assertFalse(runtime_paths[0].exists())
 
     def test_expected_errors_use_panels_and_correct_exit_codes(self) -> None:
         cases = [

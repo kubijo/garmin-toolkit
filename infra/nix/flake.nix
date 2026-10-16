@@ -94,8 +94,9 @@ let
               pythonToolsEnv
               system
               toolchain
-              workspaceSrc
               ;
+            # Reuse the flake source without copying a path during read-only evaluation.
+            src = self;
           };
           inheritanceCheck = pkgs.callPackage ./cargo-workspace-inheritance-check.nix { };
           brandAssets = import ./brand-assets.nix {
@@ -254,6 +255,22 @@ let
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               hass-integration = hassIntegration;
             };
+          legacyPackages.ci =
+            let
+              checks = self.checks.${system};
+              groups = lib.groupBy (
+                name:
+                if lib.hasPrefix "rust-" name then
+                  "rust"
+                else if lib.hasPrefix "hass" name then
+                  "hass"
+                else if name == "desktop" || name == "gallery" then
+                  name
+                else
+                  "tooling"
+              ) (builtins.attrNames checks);
+            in
+            lib.mapAttrs (group: names: pkgs.linkFarm "garmin-ci-${group}" (lib.getAttrs names checks)) groups;
           inherit (tooling) formatter;
 
           devShells = {

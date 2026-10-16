@@ -294,8 +294,8 @@ def main(driver: Path | None = None, suite: Literal['routes', 'reconnect'] = 'ro
             )
             driver = Path(strip_ansi(driver_path.read_text()).strip())
         log = output / 'vm.log'
-        # Virtiofs sockets need a short path to fit the Unix socket pathname limit.
-        with tempfile.TemporaryDirectory(prefix='hass-vm.', dir='/tmp') as runtime:
+        # Keep disk images off system temporary filesystems; use a short socket path.
+        with tempfile.TemporaryDirectory(prefix='v.', dir=parent) as runtime:
             stage(
                 'Run browser assertions and verify teardown',
                 [str(driver / 'bin' / 'nixos-test-driver'), '-o', str(results)],

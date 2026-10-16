@@ -146,15 +146,20 @@ let
 
     run_step() {
       local label=$1
+      local started=$SECONDS
       shift
       printf '\n%s━━ %s%s\n' "$section_color" "$label" "$reset_color"
 
       if "$@"; then
+        local elapsed=$((SECONDS - started))
+        printf '%s✓ %s%s (%dm %02ds)\n' \
+          "$success_color" "$label" "$reset_color" "$((elapsed / 60))" "$((elapsed % 60))"
         return 0
       else
         local status=$?
-        printf '\n%s✗ ${checkName} failed%s (%s, exit %d)\n' \
-          "$failure_color" "$reset_color" "$label" "$status" >&2
+        local elapsed=$((SECONDS - started))
+        printf '\n%s✗ ${checkName} failed%s (%s, exit %d, %dm %02ds)\n' \
+          "$failure_color" "$reset_color" "$label" "$status" "$((elapsed / 60))" "$((elapsed % 60))" >&2
         exit "$status"
       fi
     }
@@ -213,6 +218,8 @@ let
   };
   commonArgs = {
     inherit src;
+    pname = "garmin-toolkit";
+    CARGO_PROFILE = "dev";
     CARGO_TARGET_DIR = "target";
     SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
     buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.glib ];
@@ -231,7 +238,7 @@ let
     // import ./cargo-deps.nix { inherit lib workspaceSrc; }
     // {
       cargoExtraArgs = "--workspace --all-features";
-      doCheck = false;
+      doCheck = true;
     }
   );
   productionCargoArtifacts = craneLib.buildDepsOnly (
@@ -240,7 +247,7 @@ let
     // {
       pname = "garmin-production-hosts-deps";
       cargoExtraArgs = lib.escapeShellArgs (craneArgs productionArgs);
-      doCheck = false;
+      doCheck = true;
     }
   );
   extractSourceCatalog = destination: ''
@@ -541,7 +548,6 @@ in
       // testRuntimeEnv
       // {
         inherit cargoArtifacts;
-        CARGO_PROFILE = "dev";
         cargoExtraArgs = lib.escapeShellArgs (lib.drop 2 testArgs);
         cargoLlvmCovExtraArgs = lib.escapeShellArgs (
           coverageArgs

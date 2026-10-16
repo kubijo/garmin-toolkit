@@ -2,35 +2,35 @@
 resolver = "3"
 exclude = ["vendor/fast-mvt", "vendor/winit"]
 members = [
-  "apps/garmin-cli",
-  "apps/garmin-cli/tui",
-  "apps/garmin-desktop",
-  "apps/garmin-gpx-worker",
-  "apps/garmin-hass",
-  "apps/garmin-hass/web",
-  "crates/garmin-brand",
-  "crates/garmin-capture",
-  "crates/garmin-color",
-  "crates/garmin-device",
-  "crates/garmin-diagnostics",
-  "crates/garmin-fit",
-  "crates/garmin-fixtures",
-  "crates/garmin-gpx",
-  "crates/garmin-i18n",
-  "crates/garmin-importer",
-  "crates/garmin-map-service",
-  "crates/garmin-map-tiles",
-  "crates/garmin-macros",
-  "crates/garmin-model",
-  "crates/garmin-logging",
-  "crates/garmin-progress",
-  "crates/garmin-route",
-  "crates/garmin-service-api",
-  "crates/garmin-services",
-  "crates/garmin-simulator",
-  "crates/garmin-storage",
-  "crates/garmin-ui",
-  "crates/garmin-update",
+    "apps/garmin-cli",
+    "apps/garmin-cli/tui",
+    "apps/garmin-desktop",
+    "apps/garmin-gpx-worker",
+    "apps/garmin-hass",
+    "apps/garmin-hass/web",
+    "crates/garmin-brand",
+    "crates/garmin-capture",
+    "crates/garmin-color",
+    "crates/garmin-device",
+    "crates/garmin-diagnostics",
+    "crates/garmin-fit",
+    "crates/garmin-fixtures",
+    "crates/garmin-gpx",
+    "crates/garmin-i18n",
+    "crates/garmin-importer",
+    "crates/garmin-map-service",
+    "crates/garmin-map-tiles",
+    "crates/garmin-macros",
+    "crates/garmin-model",
+    "crates/garmin-logging",
+    "crates/garmin-progress",
+    "crates/garmin-route",
+    "crates/garmin-service-api",
+    "crates/garmin-services",
+    "crates/garmin-simulator",
+    "crates/garmin-storage",
+    "crates/garmin-ui",
+    "crates/garmin-update",
 ]
 
 [workspace.package]
@@ -199,46 +199,3 @@ strip = true
 inherits = "release"
 debug = "line-tables-only"
 strip = false
-
-# Interactive vector maps are prohibitively slow when
-# their parser and tessellator run fully unoptimized.
-# Optimize the rendering dependencies, not the frequently edited UI crate.
-# Cargo's default incremental, unoptimized application build keeps iteration fast.
-[profile.dev.package.walkers]
-opt-level = 3
-
-[profile.dev.package.mvt-reader]
-opt-level = 3
-
-[profile.dev.package.lyon_tessellation]
-opt-level = 3
-
-[profile.dev.package.lyon_path]
-opt-level = 3
-
-[profile.dev.package.prost]
-opt-level = 3
-
-[profile.dev.package.epaint]
-opt-level = 3
-
-[profile.dev.package.emath]
-opt-level = 3
-
-[profile.dev.package.egui_plot]
-opt-level = 3
-
-[profile.dev.package.egui-wgpu]
-opt-level = 3
-
-[profile.dev.package.wgpu]
-opt-level = 3
-
-[profile.dev.package.wgpu-core]
-opt-level = 3
-
-[profile.dev.package.wgpu-hal]
-opt-level = 3
-
-[profile.dev.package.naga]
-opt-level = 3

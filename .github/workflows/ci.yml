@@ -15,11 +15,17 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [tooling, rust, desktop, gallery, hass]
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
       - name: Enable KVM for disposable integration tests
+        if: matrix.group == 'hass'
         run: |
           test -c /dev/kvm
           sudo chmod a+rw /dev/kvm
@@ -41,9 +47,15 @@ jobs:
           test "$(systemctl show nix-daemon.service --property MemoryMax --value)" = 6442450944
           test "$(systemctl show nix-daemon.service --property CPUQuotaPerSecUSec --value)" = 2s
       - name: Verify sandboxed source
+        if: matrix.group == 'rust'
         run: nix build -L .#checks.x86_64-linux.rust-source-closure --max-jobs 1 --cores 2 --no-update-lock-file
-      - name: Check flake
-        run: nix flake check -L --max-jobs 1 --cores 2 --no-update-lock-file
+      - name: Evaluate flake
+        if: matrix.group == 'tooling'
+        run: nix flake check --no-build --no-update-lock-file
+      - name: Build checks
+        env:
+          CHECK_GROUP: ${{ matrix.group }}
+        run: nix build -L ".#legacyPackages.x86_64-linux.ci.$CHECK_GROUP" --max-jobs 1 --cores 2 --no-update-lock-file
   hass-native-image:
     strategy:
       fail-fast: false
@@ -96,3 +108,12 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
+  check:
+    needs: [checks, hass-native-image]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all checks and native images
+        run: |
+          test '${{ needs.checks.result }}' = success
+          test '${{ needs.hass-native-image.result }}' = success

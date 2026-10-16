@@ -147,7 +147,7 @@ class BuildLimitsTests(unittest.TestCase):
             self.assertEqual(actual['NIX_CONFIG'], environment['NIX_CONFIG'] + '\nmax-jobs = 1\ncores = 1')
             self.assertEqual(arguments, [argument])
 
-    def test_linux_retains_systemd_memory_limits(self) -> None:
+    def test_linux_enforces_systemd_cpu_and_memory_limits(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             for name, script in {
                 'uname': 'printf "Linux\\n"\n',
@@ -171,6 +171,8 @@ class BuildLimitsTests(unittest.TestCase):
                     '--scope',
                     '--quiet',
                     '-p',
+                    'CPUQuota=200%',
+                    '-p',
                     'MemoryHigh=4G',
                     '-p',
                     'MemoryMax=6G',
@@ -180,3 +182,26 @@ class BuildLimitsTests(unittest.TestCase):
                     'argument with spaces',
                 ],
             )
+
+    def test_linux_refuses_to_run_when_user_manager_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            for name, script in {
+                'uname': 'printf "Linux\\n"\n',
+                'systemctl': 'exit 1\n',
+                'systemd-run': 'exit 99\n',
+            }.items():
+                executable = Path(directory) / name
+                executable.write_text(script)
+                executable.chmod(0o755)
+            marker = Path(directory) / 'executed'
+            result = subprocess.run(
+                ['bash', str(WRAPPER), sys.executable, '-c', 'from pathlib import Path; Path("executed").touch()'],
+                cwd=directory,
+                env={**os.environ, 'PATH': f'{directory}:{os.environ["PATH"]}'},
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('required to enforce build resource limits', result.stderr)
+            self.assertFalse(marker.exists())
