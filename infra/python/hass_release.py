@@ -16,6 +16,8 @@ from rich.text import Text
 
 from cli_output import TerminalOutput
 from haos_platform import PLATFORMS, inspect_archive, validate_archive
+from hass_image_sbom import MAX_SBOM_BYTES
+from hass_release_build import NativeBuild, record_build
 from hass_release_contract import (
     Assembly,
     Release,
@@ -60,6 +62,7 @@ class Options:
         (
             Annotated[Assemble, tyro.conf.subcommand('assemble', prefix_name=False)]
             | Annotated[Verify, tyro.conf.subcommand('verify', prefix_name=False)]
+            | Annotated[NativeBuild, tyro.conf.subcommand('record-build', prefix_name=False)]
         ),
         tyro.conf.arg(name=''),
     ]
@@ -84,7 +87,7 @@ def check_payload_metadata(directory: Path, document: Assembly) -> None:
         expected_tag = document['image']['repository'] + ':' + document['version']
         if inspected.repository_tags != (expected_tag,):
             raise ValueError(f'Image repository/version differs from the receipt: {architecture}')
-        sbom = read_json(by_role['sbom'])
+        sbom = read_json(by_role['sbom'], max_bytes=MAX_SBOM_BYTES)
         if (
             not is_object(sbom)
             or sbom.get('spdxVersion') != 'SPDX-2.3'
@@ -116,7 +119,7 @@ def assemble(options: Assemble) -> str:
             if entry['role'] == 'source':
                 archive_source(options.source, document, destination.resolve())
             elif 'source' in entry:
-                destination.write_bytes(source_bytes(options.source, document, entry['source']))
+                destination.write_bytes(source_bytes(options.source, document['source']['commit'], entry['source']))
             else:
                 origin = options.artifacts / entry['name']
                 # copyfile preserves bytes without inheriting read-only source permissions.
@@ -175,15 +178,19 @@ def verify(options: Verify) -> None:
     check_shape(options.directory)
 
 
-def main(options: Assemble | Verify) -> int:
+def main(options: Assemble | Verify | NativeBuild) -> int:
     output = TerminalOutput()
     output.install_tracebacks()
     try:
         if isinstance(options, Assemble):
             digest = assemble(options)
             output.panel(Text(str(options.output) + '\nrelease.json SHA-256: ' + digest), title='Candidate assembled')
-        else:
+        elif isinstance(options, Verify):
             verify(options)
+        else:
+            record_build(options)
+            output.panel(Text(str(options.output)), title='Native build recorded', style='green')
+            return 0
         output.panel(
             Text('Local candidate content verified. Registry provenance and HAOS qualification are not checked.'),
             title='Local verification',

@@ -1,8 +1,65 @@
 # Local HASS release candidates
 
-These development commands assemble and check local candidates. They do not build images, contact a registry, publish,
-or qualify a Home Assistant installation. Output is explicitly `status: candidate` with no acceptance results. The
-[publication plan](../../docs/plans/device-expansion-and-publication.md#hass-experimental-release) owns the later gates.
+The release commands inspect existing build outputs and assemble local candidates. They do not contact a registry,
+publish, or qualify a Home Assistant installation. Candidate manifests use `status: candidate` with no acceptance
+results. The [publication plan](../../docs/plans/device-expansion-and-publication.md#hass-experimental-release) owns the
+later gates.
+
+## Native image inventories and build receipts
+
+`packages.SYSTEM.garmin-hass-app-sbom` produces SPDX 2.3 JSON for the corresponding production image. Build it on the
+matching Linux architecture with the worker limits in
+[development safeguards](../../docs/development.md#execution-safeguards):
+
+```sh
+nix build .#garmin-hass-app-image .#garmin-hass-app-sbom \
+    --no-link --print-out-paths --max-jobs 1 --cores 2 --no-update-lock-file
+```
+
+Production native and WebAssembly builds embed cargo-auditable dependency metadata. The pinned Syft scanner reads the
+finished image; the generator independently hashes every regular layer file, compares the actual Nix store paths with
+the producing runtime closure, and checks the native Rust dependency inventory. It reads the frontend's embedded Rust
+graph directly and adds the reviewed asset inventory with its original license text. Generation and verification share
+the expected package records and relationships: changed names, versions, package URLs, license text, duplicate
+identities, and missing file/dependency associations fail. The generator accepts the Nix-produced layer format;
+whiteouts, hardlinks, and conflicting entries are rejected. Archives are limited to 4 GiB compressed and uncompressed,
+with 100,000 members per archive and across image layers. JSON metadata has separate byte limits.
+
+The SPDX document describes the original archive and records its SHA-256. Registry manifest/index digests remain
+separate. Generation does not run image contents or contact a registry. Syft needs an uncompressed, seekable Docker
+archive: compressed input is expanded inside private scratch under the Nix build directory or repository `.tmp`, then
+removed on success or failure. Published archive bytes are unchanged. Creation time uses the builder's source epoch;
+repeated generation is covered by a real scanner test. These inventories do not establish license/source redistribution
+compliance or signed build provenance.
+
+Record the resulting files from a clean source checkout on the same native Linux platform:
+
+```sh
+just release::record-build \
+    --source . \
+    --archive /nix/store/IMAGE-garmin-toolkit-hass.tar.gz \
+    --sbom /nix/store/SBOM-garmin-hass-image.spdx.json \
+    --derivation /nix/store/IMAGE-garmin-toolkit-hass.tar.gz.drv \
+    --output .tmp/hass-native-build
+```
+
+Use the evaluated image derivation path from `nix eval --raw .#garmin-hass-app-image.drvPath`; the placeholders above
+are not literal commands. A producing GitHub job supplies `--workflow-run` with its actual run URL; local builds leave
+it absent. Recording checks the derivation's native system and exact output path, source/image versions and labels, and
+SBOM contents before exporting the unchanged archive, SPDX file, and `native-build.json`. The filesystem-backed
+prescription rejects missing, empty, or unexpected output. Existing destinations are never overwritten and partial
+output is discarded.
+
+Native receipts deliberately omit registry manifest/index digests. A clean branch build records `source.tag: null`; the
+exact version tag is recorded when it points at that commit. The later registry workflow must combine native receipts
+with independently verified registry descriptors before constructing the assembly receipt below. Assembly still requires
+its clean detached release tag reachable from main. Unsigned receipts cannot prove the source of a build; signed
+workflow provenance remains a separate publication gate.
+
+CI's `hass-native-image` matrix runs AMD64 and ARM64 builders independently. Each caps the actual Nix daemon at two CPUs
+and 6 GiB and checks both limits before starting builds. Its `garmin-hass-native-ARCH` artifact contains the original
+image archive, SPDX inventory, and unsigned native receipt. These build artifacts are not published releases or HAOS
+runtime qualification.
 
 ## Inputs
 
@@ -32,7 +89,7 @@ just release::assemble \
     --output .tmp/hass-release-candidate
 ```
 
-The command uses the pinned development shell, Tyro CLI, and locked Python dependencies. `dirspec` is required. Its
+The command uses the pinned Nix release tool, Tyro CLI, and locked Python dependencies. `dirspec` is included. Its
 filesystem prescription is [hass-release.dirspec.toml](hass-release.dirspec.toml); exact version/platform filenames and
 roles are additionally checked against the manifest. QA checks prescription syntax and exercises the real checker.
 

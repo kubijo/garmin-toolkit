@@ -2,13 +2,10 @@ import 'common.just'
 
 [private]
 in-release +args:
-    @just in-shell nix develop {{ flake }} \
+    @just in-shell nix run {{ flake }}#hass-release \
         --max-jobs 1 \
         --cores 2 \
-        --command uv run \
-        --frozen \
-        --project infra/python \
-        python infra/python/hass_release.py "$@"
+        -- "$@"
 
 # Assemble a local HASS release candidate from a clean source tag and existing build artifacts.
 assemble *options:
@@ -17,3 +14,7 @@ assemble *options:
 # Verify local candidate content against an independently expected manifest hash and source identity.
 verify *options:
     @just release::in-release verify "$@"
+
+# Record existing native Nix image/SBOM outputs for the publication workflow.
+record-build *options:
+    @just release::in-release record-build "$@"

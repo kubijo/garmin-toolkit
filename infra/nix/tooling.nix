@@ -174,6 +174,7 @@ let
               pkgs.coreutils
               pkgs.git
               pkgs.just
+              pkgs.syft
               dirspec
             ]
           }:$PATH
