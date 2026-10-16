@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import tomllib
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,8 +15,11 @@ from typing import Any
 
 import tyro
 
+from declarations import declaration_supplements, standard_terms, verified_text
+
 REPOSITORY = Path.cwd()
 DEFAULT_OUTPUT = REPOSITORY / 'assets' / 'licenses'
+NOTICE_MANIFEST = Path(__file__).with_name('notices.toml')
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -85,8 +89,9 @@ def resolve_linked(metadata: dict[str, Any], package_name: str) -> dict[tuple[st
 
 
 def harvested_entries() -> dict[tuple[str, str], dict[str, Any]]:
+    metadata = run_json(['cargo', 'metadata', '--format-version', '1', '--locked'])
     raw = run_json(['cargo', 'bundle-licenses', '--format', 'json', '--output', '-'])
-    return {
+    entries: dict[tuple[str, str], dict[str, Any]] = {
         (library['package_name'], library['package_version']): {
             'license': library['license'],
             'name': library['package_name'],
@@ -102,6 +107,76 @@ def harvested_entries() -> dict[tuple[str, str], dict[str, Any]]:
         }
         for library in raw['third_party_libraries']
     }
+    packages = {(package['name'], package['version']): package for package in metadata['packages']}
+    supplements = notice_supplements(packages)
+    expected = {(*key, notice['license']) for key, entry in entries.items() for notice in entry['notices']}
+    if unused := supplements.keys() - expected:
+        raise ValueError(f'stale license supplements: {sorted(unused)}')
+    for key, entry in entries.items():
+        package = packages[key]
+        local_texts = package_notices(package)
+        for notice in entry['notices']:
+            supplement = supplements.get((*key, notice['license']))
+            if notice['text'] in local_texts and (supplement is None or not supplement.startswith(notice['text'])):
+                continue
+            if supplement is not None:
+                notice['text'] = supplement
+            else:
+                # The upstream harvester climbs ancestors, including our checkout
+                # when CARGO_HOME lives here. Never trust text outside this package.
+                notice['text'] = ''
+    return entries
+
+
+def package_file(package: dict[str, Any], relative: str) -> Path:
+    root = Path(package['manifest_path']).resolve().parent
+    path = (root / relative).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError(f'license path escapes {package["name"]}: {relative}')
+    return path
+
+
+def package_notices(package: dict[str, Any]) -> set[str]:
+    """Bound accepted discovery to notice files shipped inside the package."""
+    root = Path(package['manifest_path']).resolve().parent
+    files: list[Path] = []
+    for path in sorted(root.iterdir()):
+        if not path.resolve().is_relative_to(root):
+            continue
+        if path.name.lower().startswith(('license', 'licence', 'copying', 'copyright', 'notice', 'unlicense')):
+            files.extend(path.rglob('*') if path.is_dir() else [path])
+    if package.get('license_file'):
+        files.append(package_file(package, package['license_file']))
+    texts: set[str] = set()
+    for path in files:
+        if path.is_file() and path.resolve().is_relative_to(root):
+            texts.add(path.read_bytes().decode('utf-8'))
+    return texts
+
+
+def notice_supplements(
+    packages: dict[tuple[str, str], dict[str, Any]], manifest: Path = NOTICE_MANIFEST
+) -> dict[tuple[str, str, str], str]:
+    """Load version-specific package paths or checked-in, pinned upstream notices."""
+    configured = tomllib.loads(manifest.read_text())
+    supplements = declaration_supplements(packages, configured, manifest.parent)
+    for notice in configured['notices']:
+        for identifier in notice['packages']:
+            name, version = identifier.split(' ', 1)
+            key = (name, version)
+            if key not in packages:
+                raise ValueError(f'stale license supplement: {identifier}')
+            if 'package_file' in notice:
+                text = package_file(packages[key], notice['package_file']).read_bytes().decode('utf-8')
+            else:
+                text = verified_text(manifest.parent, notice)
+            if notice.get('include_standard_terms', False):
+                text += '\n\n' + standard_terms(notice['license'], configured, manifest.parent)
+            full_key = (*key, notice['license'])
+            if full_key in supplements:
+                raise ValueError(f'duplicate license supplement: {full_key}')
+            supplements[full_key] = text
+    return supplements
 
 
 def asset_entry(asset: dict[str, Any]) -> dict[str, Any]:
@@ -117,11 +192,15 @@ def asset_entry(asset: dict[str, Any]) -> dict[str, Any]:
 
 def bundle_document(entries: list[dict[str, Any]]) -> str:
     ordered = sorted(entries, key=lambda entry: (entry['name'], entry['version']))
-    missing = [
-        f'{entry["name"]} {entry["version"]}'
-        for entry in ordered
-        if not any(notice['text'] for notice in entry['notices'])
-    ]
+    missing: list[str] = []
+    for entry in ordered:
+        absent = [
+            notice['license']
+            for notice in entry['notices']
+            if not notice['text'].strip() or notice['text'].strip() == 'NOT FOUND'
+        ]
+        if absent or not entry['notices']:
+            missing.append(f'{entry["name"]} {entry["version"]} ({", ".join(absent) or "no notices"})')
     if missing:
         raise ValueError(f'missing license text for {missing}')
     texts = sorted({notice['text'] for entry in ordered for notice in entry['notices'] if notice['text']})
@@ -155,12 +234,7 @@ def bundle_document(entries: list[dict[str, Any]]) -> str:
 def generate(config: dict[str, Any], output: Path) -> None:
     cargo = harvested_entries()
     assets = [asset_entry(asset) for asset in config['assets']]
-    output.mkdir(parents=True, exist_ok=True)
-    expected = {f'bundle-{target["name"]}.json' for target in config['targets']}
-    for stale in output.glob('bundle-*.json'):
-        if stale.name not in expected:
-            stale.unlink()
-
+    documents: dict[str, str] = {}
     for target in config['targets']:
         linked: dict[tuple[str, str], bool] = {}
         for component in [target, *target.get('bundled', [])]:
@@ -177,8 +251,15 @@ def generate(config: dict[str, Any], output: Path) -> None:
             for asset, configured in zip(assets, config['assets'], strict=True)
             if target['name'] in configured['targets']
         )
-        path = output / f'bundle-{target["name"]}.json'
-        path.write_text(bundle_document(entries))
+        documents[f'bundle-{target["name"]}.json'] = bundle_document(entries)
+
+    # Validate every target before updating any distributable bundle.
+    output.mkdir(parents=True, exist_ok=True)
+    for stale in output.glob('bundle-*.json'):
+        if stale.name not in documents:
+            stale.unlink()
+    for name, document in documents.items():
+        (output / name).write_text(document)
 
 
 def check(config: dict[str, Any], output: Path) -> bool:
@@ -227,6 +308,9 @@ def main() -> int:
         generate(config, arguments.output)
     except subprocess.CalledProcessError as error:
         print(f'license generation failed: {shlex.join(error.cmd)} (exit {error.returncode})', file=sys.stderr)
+        return 1
+    except (OSError, ValueError) as error:
+        print(f'license generation failed: {error}', file=sys.stderr)
         return 1
     return 0
 

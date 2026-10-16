@@ -1,0 +1,2 @@
+# Pinned upstream notices retain their original whitespace for checksum verification.
+infra/licenses/notices/** -text -whitespace
