@@ -33,6 +33,21 @@ library and loads replacements without checking compiler compatibility. Restart 
 dependency configuration. Different toolchains, target triples, profiles, and Cargo features may still produce distinct
 artifacts inside the shared directory. Nix package builds keep their isolated sandbox outputs.
 
+The root and gallery workspaces share development-profile overrides in `.cargo/config.toml`. Ordinary code stays
+unoptimized; rendering dependencies retain their targeted optimizations. A blanket optimization override in either
+workspace would prevent otherwise compatible dependencies from sharing artifacts.
+
+Workspace Nix quality checks use the development profile for both dependency caches and check commands. The caches
+compile test dependencies too, so each check can reuse them. This avoids release-profile LTO for test executables;
+production package builds retain the release profile.
+
+Local QA prints elapsed time for each stage, including failed stages, so slow checks can be identified separately from
+the overall run. Linux Just scopes enforce a two-CPU quota, a 6 GiB memory limit, and a 1 GiB swap limit. Daemon-backed
+Nix derivations run outside the client scope and do not inherit its limits.
+
+The CLI package and its dependency cache share the same locked package selection. Building the entire workspace in that
+cache would compile unused packages and unify dependency features differently from the final CLI build.
+
 `just dev::cache-report` shows the target caches and read-only totals for the Cargo home and Nix user cache. Root Just
 and Nix QA entrypoints make generated build-script outputs in repository target caches writable before reuse. Some
 dependency build scripts preserve read-only Nix source permissions when copying bindings into `out`; without this
@@ -52,6 +67,11 @@ Root and gallery apply the same `vendor/` patches: bounded MVT decoding in `fast
 control-request redraw override in `winit`. Each has `PATCHES.md`. Nix sources, license checks, and dependency-cache
 builds retain full patched sources/manifests. Headless Linux GPU checks use pinned Mesa software Vulkan and fail if no
 adapter exists. Tests use pinned timezone data through `TZDIR`, including sandboxed tests and coverage.
+
+CI partitions every flake check into tooling, Rust, desktop, gallery, or HASS groups exposed under
+`legacyPackages.SYSTEM.ci`. New checks enter a group automatically. Each group runs in its own job with two CPUs, 6 GiB
+of memory, and a 120-minute deadline; package checks retain their release builds. The tooling job also evaluates the
+full flake. The final `check` job requires every group and both native HASS image jobs to succeed.
 
 CI uses [Magic Nix Cache](https://github.com/DeterminateSystems/magic-nix-cache-action) to cache individual Nix store
 paths in GitHub Actions storage. Completed builds can be saved even when later checks fail; unfinished derivations

@@ -16,17 +16,22 @@ Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands an
 - Cargo and heavyweight Rust/Nix builds require explicit permission. Scope authorized commands, use low parallelism, and
   on Linux run under a hard memory-limited cgroup; an unconstrained workload previously caused an OOM session loss. For
   daemon-backed Nix builds, `memory-capped.sh` limits the client process, not the daemon's derivation workers; verify a
-  separate hard limit on the workers before starting a heavy Nix build. For local work with cached Nix toolchains and
-  vendored dependencies, run Cargo or Trunk directly in a limited `systemd-run --user --scope` and use the shared
-  `.tmp/cargo-target` rather than another persistent target directory; keep Cargo home and distribution outputs in
-  `.tmp`. Verify an active compiler's cgroup has `memory.max` at or below 6 GiB and `cpu.max` at or below two CPUs.
-  Apple Silicon macOS development has an approved exception: the maintained wrapper forces one Cargo job, one Nix build
-  at a time, and one core per Nix builder. This is a parallelism limit, not a hard RAM limit. Run heavyweight commands
-  serially through the Just recipes or `infra/just/memory-capped.sh`; do not run concurrent builds. On Linux the wrapper
-  defaults Cargo to two jobs unless `CARGO_BUILD_JOBS` is set, avoiding memory throttling from excessive parallel
-  workers.
+  separate hard limit on the workers before starting a heavy Nix build. Do not request or change daemon-wide limits;
+  constrain agent-owned workloads individually. For local work with cached Nix toolchains and vendored dependencies, run
+  Cargo or Trunk directly in a limited `systemd-run --user --scope` and use the shared `.tmp/cargo-target` rather than
+  another persistent target directory; keep Cargo home and distribution outputs in `.tmp`. Verify an active compiler's
+  cgroup has `memory.max` at or below 6 GiB and `cpu.max` at or below two CPUs. Apple Silicon macOS development has an
+  approved exception: the maintained wrapper forces one Cargo job, one Nix build at a time, and one core per Nix
+  builder. This is a parallelism limit, not a hard RAM limit. Run heavyweight commands serially through the Just recipes
+  or `infra/just/memory-capped.sh`; do not run concurrent builds. On Linux the wrapper defaults Cargo to two jobs unless
+  `CARGO_BUILD_JOBS` is set, avoiding memory throttling from excessive parallel workers. Its Linux scope also enforces a
+  two-CPU quota and refuses to run without a working systemd user manager.
 - Keep diagnostics and analysis in maintained tooling, not disposable scripts. Temporary outputs belong under the
   repository's ignored `.tmp/` directories; gallery captures belong under `.tmp/gallery/`.
+- An isolated tooling shell can hide `/dev/kvm` even when the host has it. Check through a transient host user service
+  before declaring HAOS acceptance unavailable. Run only the requested disposable harness there, with its explicit tool
+  paths, four-CPU/six-GiB VM limits, and runtime deadline; collect the service and verify cleanup afterward. The service
+  must not use a real HASS instance or inherit a personal browser profile.
 - Real-device manifest comparisons require a separately approved anonymization procedure. Never commit raw device
   identifiers or private captures; follow the fixture rules below.
 

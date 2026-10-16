@@ -51,16 +51,6 @@ egui_kittest = { version = "=0.36.2", features = ["eframe"] }
 fast-mvt = { path = "../../vendor/fast-mvt" }
 winit = { path = "../../vendor/winit" }
 
-[profile.dev]
-opt-level = 1
-
-[profile.dev.package."*"]
-opt-level = 3
-
-# This path dependency contains the scenes under active development.
-[profile.dev.package.garmin-ui]
-opt-level = 0
-
 [lints.rust]
 unsafe_code = "forbid"
 

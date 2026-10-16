@@ -26,6 +26,7 @@ let
     inherit src;
     pname = "garmin-cli";
     version = "0.1.0";
+    cargoExtraArgs = "--locked --package garmin-cli";
     strictDeps = true;
     nativeBuildInputs = [
       formatjsCli
@@ -49,7 +50,6 @@ let
     commonArgs
     // {
       inherit cargoArtifacts;
-      cargoExtraArgs = "--package garmin-cli";
       nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ dirspec ];
       preFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
         gappsWrapperArgs+=(

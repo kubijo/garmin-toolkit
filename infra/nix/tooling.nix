@@ -5,9 +5,9 @@
   nodejs,
   pkgs,
   pythonToolsEnv,
+  src,
   system,
   toolchain,
-  workspaceSrc,
 }:
 let
   pythonConfig = ../../ruff.toml;
@@ -45,8 +45,7 @@ let
   };
 
   project = nix-tools.lib.configure {
-    inherit system;
-    src = workspaceSrc;
+    inherit src system;
     exclude = [
       ".python-version"
       "LICENSE-AGPL"

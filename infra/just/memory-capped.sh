@@ -20,10 +20,12 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 if ! command -v systemd-run >/dev/null 2>&1 \
     || ! command -v systemctl >/dev/null 2>&1 \
     || ! systemctl --user show-environment >/dev/null 2>&1; then
-    exec "$@"
+    printf 'error: a working systemd user manager is required to enforce build resource limits.\n' >&2
+    exit 1
 fi
 
 exec systemd-run --user --scope --quiet \
+    -p CPUQuota=200% \
     -p MemoryHigh=4G \
     -p MemoryMax=6G \
     -p MemorySwapMax=1G \

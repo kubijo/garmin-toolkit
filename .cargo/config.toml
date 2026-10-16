@@ -3,3 +3,44 @@ target-dir = ".tmp/cargo-target"
 
 [term]
 quiet = false
+
+# Share development profiles between the root and gallery workspaces.
+# Keep ordinary code unoptimized; interactive maps need these rendering dependencies optimized.
+[profile.dev.package.walkers]
+opt-level = 3
+
+[profile.dev.package.mvt-reader]
+opt-level = 3
+
+[profile.dev.package.lyon_tessellation]
+opt-level = 3
+
+[profile.dev.package.lyon_path]
+opt-level = 3
+
+[profile.dev.package.prost]
+opt-level = 3
+
+[profile.dev.package.epaint]
+opt-level = 3
+
+[profile.dev.package.emath]
+opt-level = 3
+
+[profile.dev.package.egui_plot]
+opt-level = 3
+
+[profile.dev.package.egui-wgpu]
+opt-level = 3
+
+[profile.dev.package.wgpu]
+opt-level = 3
+
+[profile.dev.package.wgpu-core]
+opt-level = 3
+
+[profile.dev.package.wgpu-hal]
+opt-level = 3
+
+[profile.dev.package.naga]
+opt-level = 3
