@@ -1,4 +1,4 @@
-# Active plans
+# Plans
 
 Unfinished work only. On completion, move lasting contracts/evidence to their owners and delete the plan. Follow
 [development safeguards and interface validation](../development.md) and
@@ -8,8 +8,11 @@ QA and audit, plus package evidence for deployment claims.
 Current implementation focus: [packaged HASS add-on and hardware acceptance](hass-watch-vertical-slice.md).
 
 Other active plans: [shared interfaces](shared-interface-workflows.md), [portable data](data-foundation.md),
-[security](security-hardening.md), [Garmin Connect and sharing](garmin-connect-and-sharing.md),
+[Garmin Connect and sharing](garmin-connect-and-sharing.md),
 [device expansion and publication](device-expansion-and-publication.md), and [CLI distribution](distribution.md).
+
+Deferred stage: [security hardening](security-hardening.md). Keep its future options possible without requiring
+decisions or implementation during current work.
 
 Cross-cutting release work: replace the global coverage floor with per-owner behavioral floors and audit crate
 boundaries after transaction work. Profile bindgen after real WASM edits and recheck the nightly
