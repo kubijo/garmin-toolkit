@@ -19,16 +19,16 @@ def rows(snapshot: dict[str, object], key: str) -> list[dict[str, object]]:
     return cast('list[dict[str, object]]', value)
 
 
-def snapshot(key: Path, port: int) -> dict[str, object]:
+def snapshot(key: Path, port: int, app_slug: str = 'local_garmin_toolkit') -> dict[str, object]:
     # The independent oracle reads a closed database, including its checkpointed
     # WAL. It never competes with the application's SQLite connections.
-    vm.run(vm.ssh_command(key, port, 'ha apps stop local_garmin_toolkit'), timeout=90)
+    vm.run(vm.ssh_command(key, port, f'ha apps stop {app_slug}'), timeout=90)
     probe = ROOT / 'infra/python/haos_storage_probe.py'
     result = subprocess.run(
         vm.ssh_command(
             key,
             port,
-            'docker exec -i hassio_supervisor python3 - /data/apps/data/local_garmin_toolkit',
+            f'docker exec -i hassio_supervisor python3 - /data/apps/data/{app_slug}',
         ),
         input=probe.read_text(),
         capture_output=True,
@@ -41,8 +41,8 @@ def snapshot(key: Path, port: int) -> dict[str, object]:
     value: object = json.loads(result.stdout)
     if not isinstance(value, dict):
         raise RuntimeError('The disposable storage oracle returned invalid JSON')
-    vm.run(vm.ssh_command(key, port, 'ha apps start local_garmin_toolkit'), timeout=120)
-    vm.assert_started(key, port)
+    vm.run(vm.ssh_command(key, port, f'ha apps start {app_slug}'), timeout=120)
+    vm.assert_started(key, port, app_slug)
     return cast('dict[str, object]', value)
 
 
@@ -66,7 +66,14 @@ def verify_downloads(state: dict[str, object], evidence: Path, prefix: str) -> d
     return hashes
 
 
-def exercise(browser: subprocess.Popen[str], runtime: Path, evidence: Path, key: Path, port: int) -> None:
+def exercise(
+    browser: subprocess.Popen[str],
+    runtime: Path,
+    evidence: Path,
+    key: Path,
+    port: int,
+    app_slug: str = 'local_garmin_toolkit',
+) -> None:
     request_id = 0
 
     def command(operation: str, *, timeout: int = 120) -> dict[str, object]:
@@ -93,46 +100,47 @@ def exercise(browser: subprocess.Popen[str], runtime: Path, evidence: Path, key:
             time.sleep(0.2)
         raise TimeoutError(f'Browser workflow {operation} timed out')
 
-    initial = snapshot(key, port)
+    initial = snapshot(key, port, app_slug)
     if any(rows(initial, name) for name in ('profiles', 'routes', 'courses')):
         raise RuntimeError('The populated ingress workflow requires a fresh disposable app')
     command('populate')
-    populated = snapshot(key, port)
+    populated = snapshot(key, port, app_slug)
     if len(rows(populated, 'profiles')) != 1:
         raise RuntimeError('Profile creation did not persist exactly one profile')
     hashes = verify_downloads(populated, evidence, 'populated')
     print('Restarting the disposable app through Supervisor...', flush=True)
-    vm.run(vm.ssh_command(key, port, 'ha apps restart local_garmin_toolkit'), timeout=120)
-    vm.assert_started(key, port)
+    vm.run(vm.ssh_command(key, port, f'ha apps restart {app_slug}'), timeout=120)
+    vm.assert_started(key, port, app_slug)
     command('restarted')
-    if snapshot(key, port) != populated or verify_downloads(populated, evidence, 'restarted') != hashes:
+    if snapshot(key, port, app_slug) != populated or verify_downloads(populated, evidence, 'restarted') != hashes:
         raise RuntimeError('App restart changed the populated storage or ingress downloads')
-    backup = vm.guest_data(key, port, 'ha backups new --app local_garmin_toolkit --no-progress', timeout=600)
+    backup = vm.guest_data(key, port, f'ha backups new --app {app_slug} --no-progress', timeout=600)
     slug = backup.get('slug')
     if not isinstance(slug, str) or not slug.isalnum():
         raise RuntimeError('Supervisor returned an invalid cold-backup slug')
-    vm.assert_started(key, port)
+    vm.assert_started(key, port, app_slug)
     command('mutate')
-    mutated = snapshot(key, port)
+    mutated = snapshot(key, port, app_slug)
     if rows(mutated, 'courses') or len(rows(mutated, 'profiles')) != 2:
         raise RuntimeError('The post-backup mutation did not remove the Course and add a profile')
     restored: object = json.loads(
         vm.run(
-            vm.ssh_command(key, port, f'ha backups restore {slug} --app local_garmin_toolkit --no-progress --raw-json'),
+            vm.ssh_command(key, port, f'ha backups restore {slug} --app {app_slug} --no-progress --raw-json'),
             timeout=600,
         ).stdout
     )
     if not isinstance(restored, dict) or cast('dict[str, object]', restored).get('result') != 'ok':
         raise RuntimeError('Supervisor did not report a successful cold restore')
-    vm.assert_started(key, port)
+    vm.assert_started(key, port, app_slug)
     command('restored')
-    recovered = snapshot(key, port)
+    recovered = snapshot(key, port, app_slug)
     if recovered != populated or verify_downloads(recovered, evidence, 'restored') != hashes:
         raise RuntimeError('Cold restore did not recover the exact populated state and downloaded artifacts')
     (evidence / 'workflow.json').write_text(
         json.dumps(
             {
                 'passed': True,
+                'app_slug': app_slug,
                 'profile_count': 1,
                 'route_count': 1,
                 'course_count': 1,

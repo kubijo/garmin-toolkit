@@ -169,9 +169,9 @@ def check_directory(directory: Path, expected: set[str]) -> None:
         regular_file(directory / name)
 
 
-def check_shape(directory: Path) -> None:
+def check_shape(directory: Path, prescription: str = 'hass-release.dirspec.toml') -> None:
     subprocess.run(
-        ['dirspec', str(directory), '--spec', str(CONTRACT / 'hass-release.dirspec.toml')],
+        ['dirspec', str(directory), '--spec', str(CONTRACT / prescription)],
         check=True,
         capture_output=True,
         text=True,

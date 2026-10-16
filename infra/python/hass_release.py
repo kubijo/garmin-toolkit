@@ -33,6 +33,7 @@ from hass_release_contract import (
     validate_identity,
 )
 from hass_release_source import admit_source, archive_source, source_bytes
+from hass_repository import Repository, generate_repository
 from json_data import is_array, is_object
 
 
@@ -63,6 +64,7 @@ class Options:
             Annotated[Assemble, tyro.conf.subcommand('assemble', prefix_name=False)]
             | Annotated[Verify, tyro.conf.subcommand('verify', prefix_name=False)]
             | Annotated[NativeBuild, tyro.conf.subcommand('record-build', prefix_name=False)]
+            | Annotated[Repository, tyro.conf.subcommand('repository', prefix_name=False)]
         ),
         tyro.conf.arg(name=''),
     ]
@@ -178,7 +180,7 @@ def verify(options: Verify) -> None:
     check_shape(options.directory)
 
 
-def main(options: Assemble | Verify | NativeBuild) -> int:
+def main(options: Assemble | Verify | NativeBuild | Repository) -> int:
     output = TerminalOutput()
     output.install_tracebacks()
     try:
@@ -187,9 +189,13 @@ def main(options: Assemble | Verify | NativeBuild) -> int:
             output.panel(Text(str(options.output) + '\nrelease.json SHA-256: ' + digest), title='Candidate assembled')
         elif isinstance(options, Verify):
             verify(options)
-        else:
+        elif isinstance(options, NativeBuild):
             record_build(options)
             output.panel(Text(str(options.output)), title='Native build recorded', style='green')
+            return 0
+        else:
+            generate_repository(options)
+            output.panel(Text(str(options.output)), title='App repository generated', style='green')
             return 0
         output.panel(
             Text('Local candidate content verified. Registry provenance and HAOS qualification are not checked.'),

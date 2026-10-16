@@ -5,6 +5,37 @@ publish, or qualify a Home Assistant installation. Candidate manifests use `stat
 results. The [publication plan](../../docs/plans/device-expansion-and-publication.md#hass-experimental-release) owns the
 later gates.
 
+## Generated Home Assistant repository
+
+`packages.SYSTEM.garmin-hass-app-repository` produces a release-only store tree from the canonical
+[app metadata and documentation](../../apps/garmin-hass/addon/README.md) and shared generated brand assets. It contains
+`repository.yaml` and `garmin_toolkit/` with config, README, DOCS, CHANGELOG, icon, and logo. The filesystem-backed
+[prescription](hass-app-repository.dirspec.toml) rejects missing, empty, or extra entries.
+
+The Nix output selects AMD64 only. The CLI requires an explicit architecture list and rejects empty, duplicate, or
+unsupported selections. An architecture selection is metadata, not runtime qualification; advertise ARM64 only after its
+own acceptance evidence exists. Generation preserves the canonical source files and refuses an existing output.
+
+```sh
+nix build .#garmin-hass-app-repository \
+    --no-link --print-out-paths --max-jobs 1 --cores 2 --no-update-lock-file
+
+just release::repository \
+    --source . \
+    --branding /nix/store/BRANDING-garmin-toolkit-brand-assets \
+    --architectures amd64 \
+    --output .tmp/hass-app-repository
+```
+
+The branding placeholder names the existing shared brand-assets output, not images copied from a screenshot. Repository
+generation does not create or push `hass-apps`, publish images, or advertise an installable public release. The
+publication workflow will advance that branch only after candidate acceptance.
+
+Use the generated tree with the maintained
+[repository-install HAOS check](../integration/hass/README.md#repository-install-acceptance). That check serves a
+disposable candidate over Git HTTP, lets Supervisor discover and pull the app, and verifies the installed image's
+registry/config digests and platform before the populated ingress workflow.
+
 ## Native image inventories and build receipts
 
 `packages.SYSTEM.garmin-hass-app-sbom` produces SPDX 2.3 JSON for the corresponding production image. Build it on the

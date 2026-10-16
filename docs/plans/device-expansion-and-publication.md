@@ -60,10 +60,9 @@ application authentication, credential custody, encryption, and Connect remain d
 
 ### Installable repository and publication order
 
-- Generate a release-only `hass-apps` branch in this GitHub repository from the tagged source. It contains root
-  `repository.yaml` and `garmin_toolkit/` with `config.yaml`, README, DOCS, CHANGELOG, icon, and logo. Keep the existing
-  slug and generate from canonical source files and brand assets; do not maintain an independent handwritten copy. The
-  proposed store URL is `https://github.com/kubijo/garmin-toolkit#hass-apps`. Supervisor's
+- Publish the [generated store tree](../../infra/release/README.md#generated-home-assistant-repository) from the tagged
+  source to a release-only `hass-apps` branch. The proposed public URL is
+  `https://github.com/kubijo/garmin-toolkit#hass-apps`. Supervisor's
   [repository parser](https://github.com/home-assistant/supervisor/blob/main/supervisor/validate.py) accepts a branch
   suffix; verify the complete URL in the supported HAOS version before advertising it. The root manifest follows
   [Home Assistant's repository contract](https://developers.home-assistant.io/docs/apps/repository/).
@@ -75,9 +74,9 @@ application authentication, credential custody, encryption, and Connect remain d
   credentials. Pin release actions, grant write/OIDC permissions only to the jobs that need them, serialize promotion
   across app releases, and hard-fail on incomplete architecture output or an existing version/digest conflict.
 - Stage uniquely named candidate image references and repository metadata first. Verify the candidate index and each
-  platform through registry pulls, then exercise the generated repository in disposable HAOS. Extend the maintained
-  harness to accept candidate registry/repository references; retain the existing production app and semantic workflow.
-  This must cover store discovery and installation, rather than installing only a copied local app directory.
+  platform through registry pulls, then run the maintained
+  [repository-install acceptance](../../infra/integration/hass/README.md#repository-install-acceptance) against those
+  remote references. Preserve the production app and semantic workflow.
 - After acceptance, assign the final version reference to the tested index, verify final registry digests, and upload
   the complete assets and attestations to a draft GitHub Release. Re-download and verify them, publish the release, then
   advance `hass-apps` to expose that accepted version. Test the final public store URL and anonymous image pulls. GHCR
@@ -93,10 +92,10 @@ application authentication, credential custody, encryption, and Connect remain d
 
 ### Acceptance and user documentation
 
-- Extend the [populated HAOS workflow](../../infra/integration/hass/README.md#populated-haos-workflow) to install via
-  the generated app repository and registry. Assert the selected platform and exact digest, then cover authenticated
-  ingress, profile creation, GPX import, FIT Course generation, byte-verified downloads, app/HAOS restart, and cold
-  Supervisor backup/restore against an independent storage oracle.
+- Qualify the exact staged artifacts with the
+  [repository-install workflow](../../infra/integration/hass/README.md#repository-install-acceptance), retaining its
+  platform/digest assertions, authenticated ingress, profile/GPX/FIT workflow, byte-verified downloads, app restart, and
+  cold Supervisor backup/restore oracle. Add a HAOS restart to this path.
 - Cover upgrade from the previous advertised version with populated state and backup before update. For the first
   release, use an explicitly identified unpublished fixture baseline and record that no previous public version exists.
   Demonstrate recovery by reinstalling the compatible previous image and restoring its backup; do not equate this with
@@ -108,11 +107,9 @@ application authentication, credential custody, encryption, and Connect remain d
 - Keep physical USB claims separate from software acceptance. The [HASS hardware plan](hass-watch-vertical-slice.md)
   owns Raspberry Pi permissions, attachment/disconnect, pairing/reassociation, and interrupted Course transfer/recovery.
   Publish only tested device/firmware/host/operation combinations; mark other combinations unknown or unsupported.
-- Write a clean-install quickstart, the first useful GPX-to-FIT workflow, device attachment expectations,
-  persistent-data location, update/backup/restore/removal instructions, verification commands, troubleshooting, and
-  supported versions. Explain trusted local operation and the existing plaintext storage/snapshot limits without making
-  the deferred security stage a release prerequisite. Include where to report failures and how to provide redacted
-  diagnostics.
+- Bind the [packaged quickstart](../../apps/garmin-hass/addon/DOCS.md) to the final public store URL, qualified Home
+  Assistant versions, architectures, hardware evidence, and exercised update/recovery behavior. Add the published
+  checksum and provenance verification commands. Keep the deferred security stage separate.
 - Capture production ingress screens in dark mode with synthetic data using the established app control/screenshot
   mechanism, and document browser-only gaps. Bind acceptance results and image evidence to the release commit and
   artifact digests. Keep durable results with the release; remove VM disks, credentials, browser profiles, listeners,
@@ -125,8 +122,8 @@ application authentication, credential custody, encryption, and Connect remain d
    digest verification, and signed provenance verification. Qualify the native image/SBOM derivations with real capped
    AMD64 and ARM64 builds and confirm emitted CI receipts. Local assembly/content checks and synthetic scanner tests do
    not qualify publication.
-2. Produce the app repository layout and user documentation from canonical source; extend the existing HAOS harness for
-   registry/repository installation, platform/digest checks, upgrade, and cleanup.
+2. Extend repository-install acceptance with HAOS restart, upgrade/recovery, and uninstall/reinstall. Bind user
+   documentation to the qualified versions and published references.
 3. Add the capped native build, provenance, staging, promotion, and release workflow. Validate the complete candidate
    artifacts and attestations before making the version discoverable.
 4. Run public download/verification and clean-install acceptance, then record supported platforms/operations and publish

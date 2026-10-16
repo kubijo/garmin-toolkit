@@ -1,5 +1,8 @@
 """Exercise image admission, native selection, and owned-session cleanup."""
 
+import base64
+import hashlib
+import json
 import os
 import signal
 import subprocess
@@ -7,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -15,6 +19,7 @@ import haos_app_session as session
 import haos_app_vm as vm
 from fixtures.images import write_image
 from haos_platform import PLATFORMS, acceleration, resolve, validate_archive
+from json_data import object_value
 
 
 class HaosTests(unittest.TestCase):
@@ -108,22 +113,166 @@ class HaosTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'labels differ'):
             validate_archive(archive, PLATFORMS['amd64'], '9.0.0')
 
-    def test_store_timeout_checks_discovery_then_retries(self) -> None:
-        with (
-            patch.object(
-                vm,
-                'run',
-                side_effect=[
-                    RuntimeError('context deadline exceeded'),
-                    subprocess.CompletedProcess([], 0, stdout='{"apps":[]}'),
-                    subprocess.CompletedProcess([], 0),
-                    subprocess.CompletedProcess([], 0, stdout='{"apps":[{"slug":"local_garmin_toolkit"}]}'),
-                ],
-            ) as run,
-            patch('haos_app_vm.time.sleep'),
+    def test_remote_candidate_requires_anonymous_branch_url_and_independent_digest(self) -> None:
+        archive = self.image()
+        for url, digest, message in (
+            ('https://example.invalid/repository', 'sha256:' + '1' * 64, 'branch suffix'),
+            ('https://user:secret@example.invalid/repository#candidate', 'sha256:' + '1' * 64, 'anonymous'),
+            ('https://example.invalid/repository#candidate', None, 'expected registry digest'),
+            ('https://example.invalid/repository#candidate', 'not-a-digest', 'expected registry digest'),
         ):
-            vm.reload_store(self.root / 'key', 2222)
-        self.assertEqual(run.call_count, 4)
+            with self.subTest(url=url), self.assertRaisesRegex(ValueError, message):
+                vm.validate_options(vm.Options(app_archive=archive, repository_url=url, registry_digest=digest))
+
+    def test_installed_image_binds_registry_digest_config_and_platform(self) -> None:
+        config = 'sha256:' + '1' * 64
+        digest = 'sha256:' + '2' * 64
+        manifest = 'sha256:' + '4' * 64
+        reference = 'localhost:5000/candidate:0.1.0'
+        container: dict[str, object] = {'Image': manifest, 'Config': {'Image': reference}}
+        image: dict[str, object] = {
+            'Id': manifest,
+            'Architecture': 'amd64',
+            'Os': 'linux',
+            'RepoDigests': ['localhost:5000/candidate@' + digest],
+        }
+        for change, message in (
+            ('none', ''),
+            ('legacy', ''),
+            ('index', ''),
+            ('wrong-index-platform', 'archive/configuration'),
+            ('config', 'archive/configuration'),
+            ('reference', 'archive/configuration'),
+            ('architecture', 'platform'),
+            ('digest', 'registry digest'),
+        ):
+            actual_container, actual_image = deepcopy(container), deepcopy(image)
+            if change == 'legacy':
+                actual_container['Image'] = actual_image['Id'] = config
+            elif change in ('index', 'wrong-index-platform'):
+                actual_container['Image'] = actual_image['Id'] = digest
+                actual_container['ImageManifestDescriptor'] = {
+                    'digest': manifest if change == 'index' else 'sha256:' + '3' * 64
+                }
+            elif change == 'config':
+                actual_container['Image'] = 'sha256:' + '3' * 64
+            elif change == 'reference':
+                object_value(actual_container['Config'])['Image'] = 'other/image:0.1.0'
+            elif change == 'architecture':
+                actual_image['Architecture'] = 'arm64'
+            elif change == 'digest':
+                actual_image['RepoDigests'] = ['localhost:5000/candidate@sha256:' + '3' * 64]
+            results = [
+                subprocess.CompletedProcess([], 0, stdout=json.dumps(value))
+                for value in (actual_container, actual_image)
+            ]
+            with (
+                self.subTest(change=change),
+                patch.object(vm, 'registry_manifest', return_value=manifest),
+                patch.object(vm, 'run', side_effect=results),
+            ):
+                if not message:
+                    result = vm.assert_installed_image(
+                        self.root / 'key',
+                        2222,
+                        '12345678_garmin_toolkit',
+                        reference=reference,
+                        digest=digest,
+                        config_digest=config,
+                        architecture='amd64',
+                    )
+                    self.assertEqual(result['config_digest'], config)
+                    self.assertEqual(result['manifest_digest'], manifest)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        vm.assert_installed_image(
+                            self.root / 'key',
+                            2222,
+                            '12345678_garmin_toolkit',
+                            reference=reference,
+                            digest=digest,
+                            config_digest=config,
+                            architecture='amd64',
+                        )
+
+    def test_registry_manifest_verifies_original_bytes_config_and_unique_platform(self) -> None:
+        config = 'sha256:' + '1' * 64
+        raw = json.dumps({'schemaVersion': 2, 'config': {'digest': config}}).encode()
+        digest = 'sha256:' + hashlib.sha256(raw).hexdigest()
+        manifest: dict[str, object] = {
+            'Descriptor': {'digest': digest, 'platform': {'architecture': 'amd64', 'os': 'linux'}},
+            'Raw': base64.b64encode(raw).decode(),
+        }
+        for change, message in (
+            ('none', ''),
+            ('index', ''),
+            ('bytes', 'manifest bytes'),
+            ('config', 'archive configuration'),
+            ('digest', 'independently expected digest'),
+            ('platform', 'expected platform'),
+            ('duplicate', 'exactly one manifest'),
+        ):
+            actual = deepcopy(manifest)
+            expected_config, expected_digest = config, digest
+            if change == 'bytes':
+                actual['Raw'] = base64.b64encode(raw + b' ').decode()
+            elif change == 'config':
+                expected_config = 'sha256:' + '3' * 64
+            elif change == 'digest':
+                expected_digest = 'sha256:' + '3' * 64
+            elif change == 'platform':
+                object_value(actual['Descriptor'])['platform'] = {'architecture': 'arm64', 'os': 'linux'}
+            document = [actual, actual] if change == 'duplicate' else [actual] if change == 'index' else actual
+            with (
+                self.subTest(change=change),
+                patch.object(vm, 'run', return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps(document))),
+            ):
+                if message:
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        vm.registry_manifest(
+                            self.root / 'key',
+                            2222,
+                            'localhost:5000/candidate',
+                            expected_digest,
+                            expected_config,
+                            'amd64',
+                        )
+                else:
+                    self.assertEqual(
+                        vm.registry_manifest(
+                            self.root / 'key',
+                            2222,
+                            'localhost:5000/candidate',
+                            expected_digest,
+                            expected_config,
+                            'amd64',
+                        ),
+                        digest,
+                    )
+
+    def test_store_timeout_checks_discovery_then_retries(self) -> None:
+        slug = '12345678_garmin_toolkit'
+        for collection in ('apps', 'addons'):
+            with (
+                self.subTest(collection=collection),
+                patch.object(
+                    vm,
+                    'run',
+                    side_effect=[
+                        RuntimeError('context deadline exceeded'),
+                        subprocess.CompletedProcess(
+                            [], 0, stdout=json.dumps({'result': 'ok', 'data': {collection: []}})
+                        ),
+                        subprocess.CompletedProcess([], 0),
+                        subprocess.CompletedProcess(
+                            [], 0, stdout=json.dumps({'result': 'ok', 'data': {collection: [{'slug': slug}]}})
+                        ),
+                    ],
+                ) as run,
+                patch('haos_app_vm.time.sleep'),
+            ):
+                vm.reload_store(self.root / 'key', 2222, slug)
+            self.assertEqual(run.call_count, 4)
 
     def test_browser_forwarding_is_loopback_and_vm_resources_are_bounded(self) -> None:
         for architecture, binary in [('amd64', 'qemu-system-x86_64'), ('aarch64', 'qemu-system-aarch64')]:

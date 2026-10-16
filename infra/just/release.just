@@ -18,3 +18,7 @@ verify *options:
 # Record existing native Nix image/SBOM outputs for the publication workflow.
 record-build *options:
     @just release::in-release record-build "$@"
+
+# Generate a release-only Home Assistant app repository for selected architectures.
+repository *options:
+    @just release::in-release repository "$@"
