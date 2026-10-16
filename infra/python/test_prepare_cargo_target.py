@@ -23,8 +23,7 @@ class PrepareCargoTargetTests(unittest.TestCase):
             scripts.mkdir(parents=True)
             shutil.copy2(source_root / 'infra/just/common.just', scripts / 'common.just')
             wrapper = scripts / 'memory-capped.sh'
-            wrapper.write_text('#!/usr/bin/env bash\nexec "$@"\n')
-            wrapper.chmod(0o755)
+            wrapper.write_text('exec "$@"\n')
             tools = root / 'infra/python'
             tools.mkdir()
             shutil.copy2(source_root / 'infra/python/prepare_cargo_target.py', tools)
