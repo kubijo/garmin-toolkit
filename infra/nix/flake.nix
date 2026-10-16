@@ -157,6 +157,16 @@ let
             craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
             inherit workspaceSrc;
           };
+          releaseAutomation = import ./hass-release.nix {
+            inherit
+              dirspec
+              lib
+              pkgs
+              pythonToolsEnv
+              workspaceSrc
+              ;
+            inherit (hassTarget) appImage package;
+          };
           expandedQuality = import ./rust-checks.nix {
             inherit
               coverageMinimum
@@ -184,10 +194,12 @@ let
             garmin-cli = build.garminCli;
             gallery = galleryTarget.package;
             formatjs-cli = formatjsCli;
+            hass-release = releaseAutomation.app;
             default = build.garminCli;
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             garmin-hass-app-image = hassTarget.appImage;
+            garmin-hass-app-sbom = releaseAutomation.sbom;
             hass-reconnect-driver = hassReconnect.driver;
           };
 
@@ -207,6 +219,7 @@ let
                 program = lib.getExe licenseAutomation.checker;
               };
               garmin-cli = flake-utils.lib.mkApp { drv = build.garminCli; };
+              hass-release = flake-utils.lib.mkApp { drv = releaseAutomation.app; };
               default = self.apps.${system}.garmin-cli;
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

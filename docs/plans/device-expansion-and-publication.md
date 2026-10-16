@@ -122,8 +122,9 @@ application authentication, credential custody, encryption, and Connect remain d
 ### Implementation slices and completion
 
 1. Extend the [local candidate contract](../../infra/release/README.md) with producing CI receipts, actual registry
-   digest verification, complete image SBOM generation, and signed provenance verification. Local assembly/content
-   checks do not qualify publication.
+   digest verification, and signed provenance verification. Qualify the native image/SBOM derivations with real capped
+   AMD64 and ARM64 builds and confirm emitted CI receipts. Local assembly/content checks and synthetic scanner tests do
+   not qualify publication.
 2. Produce the app repository layout and user documentation from canonical source; extend the existing HAOS harness for
    registry/repository installation, platform/digest checks, upgrade, and cleanup.
 3. Add the capped native build, provenance, staging, promotion, and release workflow. Validate the complete candidate

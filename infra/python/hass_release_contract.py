@@ -1,22 +1,23 @@
 """Filesystem-backed contracts and content checks for local HASS release candidates."""
 
 import hashlib
-import json
 import re
-import stat
 import subprocess
 import tomllib
 from pathlib import Path
-from typing import Any, Literal, NotRequired, TypedDict, cast
+from typing import Literal, NotRequired, TypedDict, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from jsonschema import Draft202012Validator, validate
 from jsonschema.exceptions import ValidationError
 
-from json_data import unique_object
+from json_data import file_sha256 as file_sha256
+from json_data import json_bytes as json_bytes
+from json_data import object_value
+from json_data import read_json as read_json
+from json_data import regular_file as regular_file
 
 CONTRACT = Path(__file__).resolve().parents[1] / 'release'
-MAX_JSON_BYTES = 8 * 1024 * 1024
 type Architecture = Literal['amd64', 'aarch64']
 
 
@@ -72,34 +73,8 @@ class FileSpec(TypedDict):
     source: NotRequired[str]
 
 
-def regular_file(path: Path) -> None:
-    """Reject links and special files before opening or hashing a release payload."""
-    metadata = path.lstat()
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_size == 0:
-        raise ValueError(f'Expected a nonempty regular file: {path}')
-
-
-def file_sha256(path: Path) -> str:
-    regular_file(path)
-    with path.open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
-
-
-def read_json(path: Path) -> Any:
-    regular_file(path)
-    with path.open('rb') as stream:
-        data = stream.read(MAX_JSON_BYTES + 1)
-    if len(data) > MAX_JSON_BYTES:
-        raise ValueError(f'JSON metadata exceeds {MAX_JSON_BYTES} bytes: {path}')
-    return json.loads(data, object_pairs_hook=unique_object)
-
-
-def json_bytes(value: object) -> bytes:
-    return (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False) + '\n').encode()
-
-
-def validate_document(value: object, definition: Literal['assembly', 'release']) -> None:
-    schema = read_json(CONTRACT / 'hass-release.schema.json')
+def validate_document(value: object, definition: Literal['assembly', 'release', 'native_build']) -> None:
+    schema = object_value(read_json(CONTRACT / 'hass-release.schema.json'))
     schema['$ref'] = f'#/$defs/{definition}'
     try:
         validate(value, schema, cls=Draft202012Validator)

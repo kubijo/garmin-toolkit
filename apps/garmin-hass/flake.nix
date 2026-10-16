@@ -35,6 +35,12 @@
           inherit (pkgs) lib;
           craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
           wasmCraneLib = (crane.mkLib pkgs).overrideToolchain wasmToolchain;
+          auditableCargo = pkgs.writeShellScriptBin "cargo" ''
+            exec ${lib.getExe' wasmToolchain "cargo"} auditable "$@"
+          '';
+          enableAuditMetadata = ''
+            export PATH=${auditableCargo}/bin:$PATH
+          '';
           src = import (workspaceSrc + "/infra/nix/cargo-source.nix") {
             inherit craneLib lib workspaceSrc;
           };
@@ -82,8 +88,10 @@
               nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
                 dirspec
                 nodejs
+                pkgs.cargo-auditable
                 pkgs.esbuild
               ];
+              preBuild = enableAuditMetadata;
 
               buildPhaseCargoCommand = ''
                 ( cd apps/garmin-hass/web && trunk build --release=true index.html )
@@ -136,9 +144,11 @@
                 inherit cargoArtifacts;
                 nativeBuildInputs = nativeArgs.nativeBuildInputs ++ [
                   dirspec
+                  pkgs.cargo-auditable
                   pkgs.makeWrapper
                   pkgs.pkg-config
                 ];
+                preBuild = enableAuditMetadata;
                 postInstall = ''
                   install -Dm444 ${presentation}/icon.png "$out/share/garmin-hass/icon.png"
                   install -Dm444 ${presentation}/logo.png "$out/share/garmin-hass/logo.png"

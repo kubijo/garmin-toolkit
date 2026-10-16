@@ -188,6 +188,95 @@
         }
       }
     },
+    "native_build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "version",
+        "source",
+        "image_repository",
+        "platform"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "image_repository": {
+          "$ref": "#/$defs/image/properties/repository"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repository",
+            "commit",
+            "tag",
+            "lock_sha256"
+          ],
+          "properties": {
+            "repository": {
+              "$ref": "#/$defs/source/properties/repository"
+            },
+            "commit": {
+              "$ref": "#/$defs/source/properties/commit"
+            },
+            "lock_sha256": {
+              "$ref": "#/$defs/source/properties/lock_sha256"
+            },
+            "tag": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/source/properties/tag"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "platform": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "architecture",
+            "config_digest",
+            "archive_sha256",
+            "sbom_sha256",
+            "builder_system",
+            "derivation",
+            "workflow_run"
+          ],
+          "properties": {
+            "architecture": {
+              "$ref": "#/$defs/architecture"
+            },
+            "config_digest": {
+              "$ref": "#/$defs/platform/properties/config_digest"
+            },
+            "archive_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "sbom_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "builder_system": {
+              "$ref": "#/$defs/platform/properties/builder_system"
+            },
+            "derivation": {
+              "$ref": "#/$defs/platform/properties/derivation"
+            },
+            "workflow_run": {
+              "$ref": "#/$defs/platform/properties/workflow_run"
+            }
+          }
+        }
+      }
+    },
     "release": {
       "type": "object",
       "additionalProperties": false,

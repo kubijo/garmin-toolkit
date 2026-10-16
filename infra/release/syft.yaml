@@ -1,0 +1,13 @@
+check-for-app-update: false
+parallelism: 2
+scope: squashed
+file:
+  metadata:
+    selection: all
+    digests: [sha1, sha256]
+nix:
+  capture-owned-files: true
+python:
+  search-remote-licenses: false
+cache:
+  dir: ""
