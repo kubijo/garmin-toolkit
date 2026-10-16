@@ -16,4 +16,5 @@ let
     ]
   );
 in
-pythonSet.mkVirtualEnv "garmin-python-tools-env" workspace.deps.default
+# Tooling includes development groups so strict checks can load their type stubs.
+pythonSet.mkVirtualEnv "garmin-python-tools-env" workspace.deps.all

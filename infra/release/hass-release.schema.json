@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/release",
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "filename": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "maxLength": 200
+    },
+    "architecture": {
+      "enum": [
+        "amd64",
+        "aarch64"
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "tag",
+        "commit",
+        "lock_sha256"
+      ],
+      "properties": {
+        "repository": {
+          "const": "https://github.com/kubijo/garmin-toolkit"
+        },
+        "tag": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "lock_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "index_digest"
+      ],
+      "properties": {
+        "repository": {
+          "const": "ghcr.io/kubijo/garmin-toolkit-hass"
+        },
+        "index_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "architecture",
+        "manifest_digest",
+        "config_digest",
+        "archive_sha256",
+        "sbom_sha256",
+        "builder_system",
+        "derivation",
+        "workflow_run"
+      ],
+      "properties": {
+        "architecture": {
+          "$ref": "#/$defs/architecture"
+        },
+        "manifest_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "config_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "archive_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sbom_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "builder_system": {
+          "enum": [
+            "x86_64-linux",
+            "aarch64-linux"
+          ]
+        },
+        "derivation": {
+          "type": "string",
+          "pattern": "^/nix/store/[0-9a-df-np-sv-z]{32}-[A-Za-z0-9+._?-]+\\.drv$"
+        },
+        "workflow_run": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^https://github\\.com/kubijo/garmin-toolkit/actions/runs/[1-9][0-9]*$"
+        }
+      }
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/platform"
+      }
+    },
+    "assembly": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "version",
+        "source",
+        "image",
+        "platforms"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "image": {
+          "$ref": "#/$defs/image"
+        },
+        "platforms": {
+          "$ref": "#/$defs/platforms"
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "role",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/filename"
+        },
+        "role": {
+          "enum": [
+            "source",
+            "license",
+            "copyright",
+            "notices",
+            "license_bundle",
+            "image_archive",
+            "sbom"
+          ]
+        },
+        "architecture": {
+          "$ref": "#/$defs/architecture"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "status",
+        "version",
+        "source",
+        "image",
+        "platforms",
+        "acceptance",
+        "files"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "status": {
+          "const": "candidate"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "image": {
+          "$ref": "#/$defs/image"
+        },
+        "platforms": {
+          "$ref": "#/$defs/platforms"
+        },
+        "acceptance": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "files": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 9,
+          "items": {
+            "$ref": "#/$defs/file"
+          }
+        }
+      }
+    }
+  }
+}
