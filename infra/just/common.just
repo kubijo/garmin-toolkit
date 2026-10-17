@@ -1,6 +1,5 @@
 repository_root := parent_directory(parent_directory(source_directory()))
 flake := "git+file://" + repository_root
-memory_capped := repository_root / "infra/just/memory-capped.sh"
 export GARMIN_TOOLKIT_CACHE_DIR := repository_root + "/.tmp/app-cache"
 
 # Target-specific flags keep the WASM and macOS linkers independent of Linux development.
@@ -38,7 +37,6 @@ in-shell +cmd:
     if command -v "$1" >/dev/null 2>&1 \
         && { [[ "$1" != cargo || $(uname -s) != Linux ]] \
             || { command -v mold >/dev/null 2>&1 && command -v ld.mold >/dev/null 2>&1; }; }; then
-        exec bash {{ quote(memory_capped) }} "$@"
+        exec "$@"
     fi
-    exec bash {{ quote(memory_capped) }} \
-        nix develop {{ quote(flake) }} --command "$@"
+    exec nix develop {{ quote(flake) }} --command "$@"

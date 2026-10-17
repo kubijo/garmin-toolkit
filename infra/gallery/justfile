@@ -7,7 +7,7 @@ gallery_backend := env('WGPU_BACKEND', if os() == 'macos' { 'metal' } else { 'vu
 # Add the catalog compiler without replacing the host graphics runtime.
 [private]
 in-gallery +cmd: require-linker
-    @{{ quote(memory_capped) }} nix shell {{ quote(flake + "#formatjs-cli") }} --command \
+    @nix shell {{ quote(flake + "#formatjs-cli") }} --command \
         env CARGO_TARGET_DIR={{ quote(CARGO_TARGET_DIR) }} "$@"
 
 # Run the gallery; --hot enables scene reload.
@@ -59,7 +59,7 @@ test *args:
 
 # Build the isolated gallery and its lints through Nix.
 ci:
-    {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 \
+    env CARGO_INCREMENTAL=0 \
         nix build -L {{ flake }}#checks.{{ arch() }}-{{ if os() == 'macos' { 'darwin' } else { 'linux' } }}.gallery
 
 # List a scene's configurable capture values.

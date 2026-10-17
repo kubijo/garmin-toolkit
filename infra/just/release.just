@@ -2,10 +2,7 @@ import 'common.just'
 
 [private]
 in-release +args:
-    @just in-shell nix run {{ flake }}#hass-release \
-        --max-jobs 1 \
-        --cores 2 \
-        -- "$@"
+    @just in-shell nix run {{ flake }}#hass-release -- "$@"
 
 # Assemble a local HASS release candidate from a clean source tag and existing build artifacts.
 assemble *options:
