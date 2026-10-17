@@ -29,6 +29,7 @@ expectations, and review; prefer synthetic data.
 - [Garmin Connect](garmin-connect.md)
 - [GPX route plans](gpx-route-plans.md)
 - [Security hardening options (parked)](security-hardening.md)
+- [Publication readiness and source delivery options](publication-readiness.md)
 
 ## Interface and performance
 

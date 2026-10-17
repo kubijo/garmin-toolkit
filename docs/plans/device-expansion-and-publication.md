@@ -8,21 +8,23 @@ Publish the existing app through GHCR and a GitHub Release using the [candidate 
 and [repository-install check](../../infra/integration/hass/README.md#repository-install-acceptance). Desktop/CLI
 distribution, application authentication, credential custody, encryption, and Connect remain separate work.
 
-### Registry and provenance
+### Provenance and redistribution
 
 - Generate GitHub OIDC attestations for archives, published image digests, `release.json`, and `SHA256SUMS`. Publish
   downloadable bundles and registry attestations. Verification must enforce `kubijo/garmin-toolkit`, the release
   workflow, source tag/commit, and subject digest; see
   [GitHub's interface](https://cli.github.com/manual/gh_attestation_verify).
-- Exercise `sha256sum --check SHA256SUMS` and `gh attestation verify`, verifying checksum provenance first. Reject
-  modified files, substituted images/platforms, wrong revisions/signers, missing attestations, and incomplete
-  inventories.
-- Audit the shipped closure's license/source redistribution requirements; an SBOM alone does not satisfy them.
+- Exercise [provenance verification](../../infra/release/README.md#signed-provenance) with real workflow-issued bundles
+  and registry attestations, including altered payloads/platforms, wrong revisions/signers, and missing inventory.
+- Complete the shipped closure's license/source audit and select a
+  [source delivery approach](../research/publication-readiness.md#dependency-sources); an SBOM alone does not satisfy
+  it.
 
 ### Lifecycle acceptance
 
-- Run install/ingress/lifecycle acceptance on every advertised architecture. Exclude ARM64 from store metadata until it
-  passes; pending ARM64 runtime work must not block an AMD64-only release.
+- Run install/ingress/lifecycle acceptance against the staged, release-tagged registry image on every advertised
+  architecture. Exclude ARM64 from store metadata until its runtime acceptance passes; pending ARM64 work must not block
+  an AMD64-only release.
 - Keep physical-device claims within the [HASS hardware plan](hass-watch-vertical-slice.md) and publish only tested
   device/firmware/host/operation combinations.
 

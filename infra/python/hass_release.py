@@ -2,6 +2,8 @@
 
 import errno
 import hashlib
+import json
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +18,7 @@ from rich.text import Text
 
 from cli_output import TerminalOutput
 from haos_platform import PLATFORMS, inspect_archive, validate_archive
+from hass_attestations import VerifyProvenance, attest, attest_payloads
 from hass_image_sbom import MAX_SBOM_BYTES
 from hass_registry import PrepareRegistry, VerifyRegistry, prepare_registry, verify_registry
 from hass_release_build import NativeBuild, record_build
@@ -30,12 +33,13 @@ from hass_release_contract import (
     inventory,
     json_bytes,
     read_json,
+    regular_file,
     validate_document,
     validate_identity,
 )
 from hass_release_source import admit_source, archive_source, source_bytes
 from hass_repository import Repository, generate_repository
-from json_data import is_array, is_object, object_value
+from json_data import MAX_JSON_BYTES, is_array, is_object, object_value, unique_object
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -68,6 +72,7 @@ class Options:
             | Annotated[Repository, tyro.conf.subcommand('repository', prefix_name=False)]
             | Annotated[PrepareRegistry, tyro.conf.subcommand('prepare-registry', prefix_name=False)]
             | Annotated[VerifyRegistry, tyro.conf.subcommand('verify-registry', prefix_name=False)]
+            | Annotated[VerifyProvenance, tyro.conf.subcommand('verify-provenance', prefix_name=False)]
         ),
         tyro.conf.arg(name=''),
     ]
@@ -156,13 +161,18 @@ def assemble(options: Assemble) -> str:
     return digest
 
 
-def verify(options: Verify) -> None:
+def verify(options: Verify) -> Release:
     if options.directory.is_symlink() or not options.directory.is_dir():
         raise ValueError('Expected a release directory, not a symlink')
     manifest_path = options.directory / 'release.json'
-    if file_sha256(manifest_path) != options.manifest_sha256:
+    regular_file(manifest_path)
+    with manifest_path.open('rb') as source:
+        raw = source.read(MAX_JSON_BYTES + 1)
+    if len(raw) > MAX_JSON_BYTES:
+        raise ValueError('Release manifest exceeds the size limit')
+    if hashlib.sha256(raw).hexdigest() != options.manifest_sha256:
         raise ValueError('release.json differs from the expected SHA-256')
-    document = cast(Release, read_json(manifest_path))
+    document = cast(Release, json.loads(raw, object_pairs_hook=unique_object))
     validate_document(document, 'release')
     validate_identity(document)
     if document['version'] != options.version or document['source']['commit'] != options.commit:
@@ -174,18 +184,54 @@ def verify(options: Verify) -> None:
         raise ValueError('Manifest file inventory has duplicate, missing, or unexpected entries')
     check_directory(options.directory, {*expected, 'release.json', 'SHA256SUMS'})
     for name, entry in recorded.items():
+        if (options.directory / name).stat().st_size != entry['size']:
+            raise ValueError(f'Release file size differs from the manifest: {name}')
+    for name, entry in recorded.items():
         if entry != describe_file(options.directory, expected[name]):
             raise ValueError(f'Release file content or role differs from the manifest: {name}')
     manifest = json_bytes(document)
-    if manifest_path.read_bytes() != manifest:
+    if raw != manifest:
         raise ValueError('Release manifest is not canonically serialized')
     if (options.directory / 'SHA256SUMS').read_bytes() != checksums(document, manifest):
         raise ValueError('SHA256SUMS differs from the complete manifest inventory')
     check_payload_metadata(options.directory, document)
     check_shape(options.directory)
+    return document
 
 
-def main(options: Assemble | Verify | NativeBuild | Repository | PrepareRegistry | VerifyRegistry) -> int:
+def verify_provenance(options: VerifyProvenance) -> None:
+    if any(path.is_symlink() or not path.is_dir() for path in (options.directory, options.bundles)):
+        raise ValueError('Expected release and attestation directories, not symlinks')
+    path = options.directory / 'SHA256SUMS'
+    regular_file(path)
+    with path.open('rb') as source:
+        authenticated = source.read(1024 * 1024 + 1)
+    if len(authenticated) > 1024 * 1024:
+        raise ValueError('Release checksums exceed the size limit')
+    with tempfile.TemporaryDirectory(prefix='hass-provenance.') as scratch:
+        snapshot = Path(scratch) / 'SHA256SUMS'
+        snapshot.write_bytes(authenticated)
+        attest(options, str(snapshot), 'checksums.sigstore.jsonl')
+    matches = re.findall(rb'^([0-9a-f]{64})  release\.json$', authenticated, re.MULTILINE)
+    if len(matches) != 1:
+        raise ValueError('Authenticated checksums must name release.json exactly once')
+    document = verify(
+        Verify(
+            directory=options.directory,
+            manifest_sha256=matches[0].decode('ascii'),
+            version=options.version,
+            commit=options.commit,
+        )
+    )
+    if authenticated != checksums(document, json_bytes(document)):
+        raise ValueError('Authenticated checksums differ from the manifest inventory')
+    attest(options, str(options.directory / 'release.json'), 'artifacts.sigstore.jsonl')
+    attest_payloads(options, document)
+
+
+def main(
+    options: Assemble | Verify | NativeBuild | Repository | PrepareRegistry | VerifyRegistry | VerifyProvenance,
+) -> int:
     output = TerminalOutput()
     output.install_tracebacks()
     try:
@@ -194,6 +240,14 @@ def main(options: Assemble | Verify | NativeBuild | Repository | PrepareRegistry
             output.panel(Text(str(options.output) + '\nrelease.json SHA-256: ' + digest), title='Candidate assembled')
         elif isinstance(options, Verify):
             verify(options)
+        elif isinstance(options, VerifyProvenance):
+            verify_provenance(options)
+            output.panel(
+                Text('Release artifacts and image digests match the trusted release workflow.'),
+                title='Provenance verified',
+                style='green',
+            )
+            return 0
         elif isinstance(options, NativeBuild):
             record_build(options)
             output.panel(Text(str(options.output)), title='Native build recorded', style='green')

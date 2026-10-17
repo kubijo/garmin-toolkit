@@ -1,6 +1,6 @@
 # HASS release candidates
 
-These commands assemble candidates and verify contents and registry identities. Publication and HAOS
+These commands assemble candidates and verify contents, registry identities, and provenance. Publication and HAOS
 qualification follow the
 [publication plan](../../docs/plans/device-expansion-and-publication.md#hass-experimental-release). Outputs are never
 overwritten; failures remove partial output.
@@ -158,3 +158,25 @@ just release::verify \
 `SHA256SUMS` includes `release.json`; neither file hashes itself. After establishing provenance, run
 `sha256sum --check SHA256SUMS` inside the candidate directory. Local verification does not establish build provenance,
 SBOM completeness, registry availability, or HAOS/USB acceptance.
+
+## Signed provenance
+
+`verify-provenance` uses `gh attestation verify` to authenticate `SHA256SUMS` first, then the manifest, local inventory,
+payloads, and image digests. Supply an independently trusted version and commit:
+
+```sh
+just release::verify-provenance \
+    --directory .tmp/hass-release-candidate \
+    --bundles .tmp/hass-release-attestations \
+    --version 0.1.0 \
+    --commit EXPECTED_FULL_COMMIT
+```
+
+Keep bundles outside the release inventory: `checksums.sigstore.jsonl` authenticates the checksum file;
+`artifacts.sigstore.jsonl` covers `release.json` and payloads; `sha256-DIGEST.sigstore.jsonl` covers each index/platform
+manifest. This avoids checksum/signature cycles.
+
+Policy requires `kubijo/garmin-toolkit/.github/workflows/hass-release.yml`, the exact tag and source/signer commit,
+GitHub's OIDC issuer, SLSA provenance v1, and hosted runners. GitHub CLI needs registry/trust-root access. Actual
+signing workflow issuance remains a [publication gate](../../docs/plans/device-expansion-and-publication.md); local
+policy tests do not prove issuance.

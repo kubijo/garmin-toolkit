@@ -12,6 +12,10 @@ assemble *options:
 verify *options:
     @just release::in-release verify "$@"
 
+# Verify signed checksum provenance before release files and registry image attestations.
+verify-provenance *options:
+    @just release::in-release verify-provenance "$@"
+
 # Record existing native Nix image/SBOM outputs for the publication workflow.
 record-build *options:
     @just release::in-release record-build "$@"
