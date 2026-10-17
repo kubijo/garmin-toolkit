@@ -94,15 +94,22 @@ class RegistryTests(unittest.TestCase):
                 capture_output=True,
             )
         cls.builds: list[Path] = []
+        commit = subprocess.check_output(['git', '-C', str(cls.source), 'rev-parse', 'HEAD'], text=True).strip()
         store = '/nix/store/' + '0' * 32 + '-synthetic'
         for architecture in ('amd64', 'aarch64'):
             directory = cls.root / architecture
             directory.mkdir()
-            archive = directory / 'image.tar.gz'
+            archive = directory / 'image.oci.tar'
             write_image(
                 archive,
                 architecture='arm64' if architecture == 'aarch64' else architecture,
                 hass_arch=architecture,
+                annotations={
+                    'org.opencontainers.image.source': 'https://github.com/kubijo/garmin-toolkit',
+                    'org.opencontainers.image.revision': commit,
+                    'org.opencontainers.image.version': '0.1.0',
+                    'org.opencontainers.image.licenses': 'AGPL-3.0-or-later',
+                },
                 files={
                     store.lstrip('/') + '/bin/garmin-hass': elf(
                         'garmin-hass', 183 if architecture == 'aarch64' else 62
@@ -156,7 +163,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(len(object_rows(self.document['platforms'])), 2)
         for build, platform in zip(self.builds[::-1], object_rows(self.document['platforms']), strict=True):
             native = object_value(object_value(read_json(build / 'native-build.json'))['platform'])
-            self.assertEqual(native, {key: value for key, value in platform.items() if key != 'manifest_digest'})
+            self.assertEqual(native, platform)
 
     def test_missing_duplicate_and_substituted_platforms_are_rejected(self) -> None:
         original = metadata(self.layout, root_descriptor(self.layout), INDEX)
@@ -215,6 +222,14 @@ class RegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'outside'):
             prepare_registry(PrepareRegistry(source=self.source, builds=self.builds, output=self.builds[0] / 'nested'))
 
+    def test_oversized_native_archive_is_rejected_before_hashing(self) -> None:
+        with (
+            patch('archive_io.MAX_IMAGE_BYTES', 100),
+            patch('hass_release_build.file_sha256', side_effect=AssertionError('Unexpected payload read')),
+            self.assertRaisesRegex(ValueError, 'archive size limit'),
+        ):
+            native_inputs(self.source, self.builds)
+
     def test_a_different_filesystem_is_rejected_even_with_valid_descriptor_hashes(self) -> None:
         index = metadata(self.layout, root_descriptor(self.layout), INDEX)
         descriptors = object_rows(index['manifests'])
@@ -227,12 +242,13 @@ class RegistryTests(unittest.TestCase):
         descriptors[0] = {**write_blob(self.layout, manifest), 'platform': descriptors[0]['platform']}
         index['manifests'] = descriptors
         self.rewrite(index)
-        with self.assertRaisesRegex(ValueError, 'filesystem'):
+        with self.assertRaisesRegex(ValueError, 'filesystem|manifest'):
             verify_layout(self.layout, self.document, self.expected)
 
     def test_failure_leaves_no_partial_output_or_scratch(self) -> None:
         with (
             patch('hass_registry.preflight'),
+            patch('hass_registry.unpack_archive', side_effect=ValueError('transport failed')),
             patch('hass_registry.copy_image', side_effect=ValueError('transport failed')),
         ):
             with self.assertRaisesRegex(ValueError, 'transport failed'):
@@ -257,6 +273,9 @@ class RegistryTests(unittest.TestCase):
         descriptors[0] = {**write_blob(self.layout, manifest), 'platform': descriptors[0]['platform']}
         index['manifests'] = descriptors
         self.rewrite(index)
+        next(platform for platform in object_rows(self.document['platforms']) if platform['architecture'] == 'amd64')[
+            'manifest_digest'
+        ] = descriptors[0]['digest']
         options = VerifyRegistry(
             source=self.source,
             builds=self.builds,
@@ -265,6 +284,7 @@ class RegistryTests(unittest.TestCase):
             + text(object_value(self.document['image'])['index_digest']),
         )
         with (
+            patch('hass_registry.native_inputs', return_value=self.document),
             patch('hass_registry.remote_manifest', side_effect=[json_bytes(index), json_bytes(manifest)]),
             patch('hass_registry.copy_image') as download,
             self.assertRaisesRegex(ValueError, 'external'),
@@ -273,6 +293,25 @@ class RegistryTests(unittest.TestCase):
         download.assert_not_called()
         self.assertFalse(options.output.exists())
         self.assertFalse(list(self.case.glob('.hass-registry.*')))
+
+    def test_substituted_native_manifest_is_rejected_before_fetching_it(self) -> None:
+        index = metadata(self.layout, root_descriptor(self.layout), INDEX)
+        object_rows(index['manifests'])[0]['digest'] = 'sha256:' + '0' * 64
+        self.rewrite(index)
+        options = VerifyRegistry(
+            source=self.source,
+            builds=self.builds,
+            output=self.case / 'rejected',
+            reference='ghcr.io/kubijo/garmin-toolkit-hass@'
+            + text(object_value(self.document['image'])['index_digest']),
+        )
+        with (
+            patch('hass_registry.remote_manifest', side_effect=[json_bytes(index), AssertionError('Unexpected fetch')]),
+            patch('hass_registry.copy_image') as download,
+            self.assertRaisesRegex(ValueError, 'native export'),
+        ):
+            verify_registry(options)
+        download.assert_not_called()
 
     def test_unpinned_noncanonical_and_insecure_remote_references_are_rejected(self) -> None:
         for reference, plain in (
@@ -298,6 +337,7 @@ class RegistryTests(unittest.TestCase):
             'version': native['version'],
             'architecture': 'amd64',
             'config_digest': platform['config_digest'],
+            'manifest_digest': platform['manifest_digest'],
             'archive_sha256': platform['archive_sha256'],
             'registry_digest': 'sha256:' + '1' * 64,
         }
@@ -307,7 +347,7 @@ class RegistryTests(unittest.TestCase):
         result = bind_acceptance((self.case,), self.document)
         self.assertEqual(result[0]['scope'], 'native-image-content')
         self.assertNotEqual(result[0]['runtime_registry_digest'], result[0]['manifest_digest'])
-        for field in ('config_digest', 'archive_sha256', 'version', 'architecture'):
+        for field in ('config_digest', 'manifest_digest', 'archive_sha256', 'version', 'architecture'):
             wrong = {**installed, field: 'substituted'}
             (self.case / 'installation.json').write_bytes(json_bytes(wrong))
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'Acceptance'):

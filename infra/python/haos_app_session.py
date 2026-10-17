@@ -241,20 +241,7 @@ def launch_tunnel(key: Path, ssh_port: int, http_port: int, evidence: Path, dead
     core_port = int(str(core['port']))
     if core.get('ssl') is not False or not 1 <= core_port <= 65535:
         raise RuntimeError('The disposable Core must expose a valid plain HTTP port')
-    command = vm.ssh_command(key, ssh_port)
-    command[1:1] = [
-        '-N',
-        '-o',
-        'ExitOnForwardFailure=yes',
-        '-o',
-        'ServerAliveInterval=15',
-        '-o',
-        'ServerAliveCountMax=2',
-        '-L',
-        f'127.0.0.1:{http_port}:127.0.0.1:{core_port}',
-    ]
-    with (evidence / 'tunnel.log').open('w') as log:
-        return subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+    return vm.forward_port(key, ssh_port, http_port, core_port, evidence / 'tunnel.log')
 
 
 def wait_browser(browser: subprocess.Popen[str], evidence: Path, checkpoint: str = 'ready.json') -> None:
@@ -301,7 +288,7 @@ def run_session(options: Run) -> int:
         runtime = Path(directory)
         runtime.chmod(0o700)
         if isinstance(options, Check) and options.lifecycle:
-            baseline = runtime / 'baseline-fixture.tar.gz'
+            baseline = runtime / 'baseline-fixture.oci.tar'
             baseline_fixture(options.app_archive, baseline)
             options = replace(options, baseline_archive=baseline)
         state_path = runtime / 'session.json'

@@ -98,7 +98,7 @@ class ReleaseTests(unittest.TestCase):
         version: str = '0.1.0',
         tag: str = 'ghcr.io/kubijo/garmin-toolkit-hass:0.1.0',
     ) -> dict[str, str]:
-        archive = self.artifacts / f'garmin-toolkit-hass-0.1.0-{architecture}.tar.gz'
+        archive = self.artifacts / f'garmin-toolkit-hass-0.1.0-{architecture}.oci.tar'
         digest = write_image(
             archive,
             architecture=actual or ('arm64' if architecture == 'aarch64' else 'amd64'),
@@ -110,7 +110,7 @@ class ReleaseTests(unittest.TestCase):
         sbom.write_text(json.dumps({'spdxVersion': 'SPDX-2.3', 'packages': [{'name': 'synthetic-image'}]}))
         return {
             'architecture': architecture,
-            'manifest_digest': 'sha256:' + ('2' if architecture == 'amd64' else '3') * 64,
+            'manifest_digest': inspect_archive(archive).manifest_digest,
             'config_digest': digest,
             'archive_sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
             'sbom_sha256': hashlib.sha256(sbom.read_bytes()).hexdigest(),
@@ -276,8 +276,9 @@ class ReleaseTests(unittest.TestCase):
     def test_tampered_payload_is_rejected_even_with_rewritten_checksum_file(self) -> None:
         digest = assemble(self.options())
         payload = self.output / 'LICENSE-AGPL'
-        previous = hashlib.sha256(payload.read_bytes()).hexdigest()
-        payload.write_text('Changed payload\n')
+        original = payload.read_bytes()
+        previous = hashlib.sha256(original).hexdigest()
+        payload.write_bytes(b'X' + original[1:])
         current = hashlib.sha256(payload.read_bytes()).hexdigest()
         checksum = self.output / 'SHA256SUMS'
         checksum.write_text(checksum.read_text().replace(previous, current))
@@ -285,7 +286,7 @@ class ReleaseTests(unittest.TestCase):
             verify(self.verify_options(digest))
 
     def test_producing_receipt_binds_archive_and_sbom_bytes(self) -> None:
-        for suffix in ('tar.gz', 'spdx.json'):
+        for suffix in ('oci.tar', 'spdx.json'):
             path = self.artifacts / ('garmin-toolkit-hass-0.1.0-amd64.' + suffix)
             original = path.read_bytes()
             path.write_bytes(original + b'\n')
@@ -297,10 +298,10 @@ class ReleaseTests(unittest.TestCase):
         for condition in ('duplicate', 'link', 'duplicate-json-key'):
             path = self.root / 'invalid.tar'
             with tarfile.open(path, 'w') as image:
-                payload = b'[{"Config":"config.json"}]'
+                payload = b'{"imageLayoutVersion":"1.0.0"}'
                 if condition == 'duplicate-json-key':
-                    payload = b'[{"Config":"config.json","Config":"other.json"}]'
-                member = tarfile.TarInfo('manifest.json')
+                    payload = b'{"imageLayoutVersion":"1.0.0","imageLayoutVersion":"other"}'
+                member = tarfile.TarInfo('oci-layout')
                 member.size = len(payload)
                 if condition == 'link':
                     member.type = tarfile.SYMTYPE
@@ -308,7 +309,10 @@ class ReleaseTests(unittest.TestCase):
                 image.addfile(member, io.BytesIO(payload) if condition != 'link' else None)
                 if condition == 'duplicate':
                     image.addfile(member, io.BytesIO(payload))
-            with self.subTest(condition=condition), self.assertRaisesRegex(ValueError, 'metadata|Duplicate JSON key'):
+            with (
+                self.subTest(condition=condition),
+                self.assertRaisesRegex(ValueError, 'metadata|regular|Duplicate JSON key'),
+            ):
                 inspect_archive(path)
 
     def test_manifest_hash_and_expected_source_identity_are_independent_inputs(self) -> None:

@@ -4,6 +4,7 @@
   inputs = {
     crane.url = "github:ipetkov/crane";
     nixpkgs.url = "github:NixOS/nixpkgs";
+    nix-oci.url = "github:systemstart/nix-oci/v0.6.0";
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
@@ -11,6 +12,7 @@
     {
       crane,
       nixpkgs,
+      nix-oci,
       rust-overlay,
       ...
     }:
@@ -26,6 +28,7 @@
           toolchain,
           wasmToolchain,
           workspaceSrc,
+          sourceRevision,
         }:
         let
           pkgs = import nixpkgs {
@@ -174,9 +177,11 @@
               throw "Home Assistant app images require amd64 or aarch64 Linux";
           appVersion =
             (builtins.fromTOML (builtins.readFile (workspaceSrc + "/Cargo.toml"))).workspace.package.version;
-          appImage = pkgs.dockerTools.buildLayeredImage {
-            name = "ghcr.io/kubijo/garmin-toolkit-hass";
-            tag = appVersion;
+          appImage = nix-oci.legacyPackages.${system}.buildOCIImage {
+            name = "garmin-toolkit-hass.oci.tar";
+            format = "archive";
+            ref = "ghcr.io/kubijo/garmin-toolkit-hass:${appVersion}";
+            arch = if appArch == "aarch64" then "arm64" else appArch;
             contents = [
               package
               pkgs.cacert
@@ -185,24 +190,29 @@
               mkdir -p tmp data
               chmod 1777 tmp
             '';
-            config = {
-              Entrypoint = [ "${package}/bin/garmin-hass" ];
-              WorkingDir = "/data";
-              Volumes."/data" = { };
-              ExposedPorts."8099/tcp" = { };
-              Env = [
-                "HOME=/data"
-                "TMPDIR=/tmp"
-                "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-                "GARMIN_TOOLKIT_HASS_ADDRESS=0.0.0.0:8099"
-                "GARMIN_TOOLKIT_HASS_DEVICE_SOURCE=raw-mtp"
-                "GARMIN_TOOLKIT_HASS_INGRESS_GATEWAY=172.30.32.2"
-              ];
-              Labels = {
-                "io.hass.version" = appVersion;
-                "io.hass.type" = "app";
-                "io.hass.arch" = appArch;
-              };
+            entrypoint = [ "${package}/bin/garmin-hass" ];
+            workingDir = "/data";
+            volumes = [ "/data" ];
+            exposedPorts = [ "8099/tcp" ];
+            env = [
+              "HOME=/data"
+              "TMPDIR=/tmp"
+              "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+              "GARMIN_TOOLKIT_HASS_ADDRESS=0.0.0.0:8099"
+              "GARMIN_TOOLKIT_HASS_DEVICE_SOURCE=raw-mtp"
+              "GARMIN_TOOLKIT_HASS_INGRESS_GATEWAY=172.30.32.2"
+            ];
+            labels = {
+              "io.hass.version" = appVersion;
+              "io.hass.type" = "app";
+              "io.hass.arch" = appArch;
+            };
+            annotations = {
+              "org.opencontainers.image.source" = "https://github.com/kubijo/garmin-toolkit";
+              "org.opencontainers.image.revision" = sourceRevision;
+              "org.opencontainers.image.version" = appVersion;
+              "org.opencontainers.image.licenses" =
+                (builtins.fromTOML (builtins.readFile (workspaceSrc + "/Cargo.toml"))).workspace.package.license;
             };
           };
         in

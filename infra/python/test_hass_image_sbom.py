@@ -103,6 +103,30 @@ class ImageSbomTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Duplicate image file'):
             inventory_image(self.archive, inspected)
 
+    def test_hardlinks_share_file_hashes_and_reject_unsafe_targets(self) -> None:
+        source = self.store.lstrip('/') + '/share/garmin-hass/web/index.html'
+        linked = self.store.lstrip('/') + '/share/garmin-hass/web/copy.html'
+        write_image(self.archive, files=self.native, hardlinks={linked: source})
+        inventory = inventory_image(self.archive, inspect_archive(self.archive))
+        self.assertEqual(inventory.hashes['/' + source], inventory.hashes['/' + linked])
+        for target in ('../escape', '/missing', linked):
+            write_image(self.archive, files=self.native, hardlinks={linked: target})
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, 'Unsafe|earlier regular'):
+                inventory_image(self.archive, inspect_archive(self.archive))
+
+    def test_gzip_layers_share_one_decompression_budget(self) -> None:
+        first = tar_bytes(self.native)
+        second = tar_bytes({'extra': b'x' * len(first)})
+        self.archive.write_bytes(tar_bytes({'one': gzip.compress(first), 'two': gzip.compress(second)}))
+        inspected = ImageArchive(
+            {'architecture': 'amd64'}, '', (), ('one', 'two'), compressed_layers=frozenset(('one', 'two'))
+        )
+        with (
+            patch('hass_image_inventory.MAX_IMAGE_BYTES', len(first) + len(second) - 1),
+            self.assertRaisesRegex(ValueError, 'size limit'),
+        ):
+            inventory_image(self.archive, inspected)
+
     def test_real_scanner_covers_native_wasm_assets_and_every_file(self) -> None:
         self.assertIsNotNone(shutil.which('syft'), 'The pinned Syft scanner is required')
         write_image(
@@ -269,12 +293,12 @@ class ImageSbomTests(unittest.TestCase):
             receipt = json.loads((options.output / 'native-build.json').read_bytes())
             self.assertIsNone(receipt['source']['tag'])
             self.assertIsNone(receipt['platform']['workflow_run'])
-            self.assertNotIn('manifest_digest', receipt['platform'])
+            self.assertEqual(receipt['platform']['manifest_digest'], inspect_archive(self.archive).manifest_digest)
             self.assertEqual(
                 receipt['platform']['archive_sha256'], hashlib.sha256(self.archive.read_bytes()).hexdigest()
             )
             self.assertEqual(len(list(options.output.iterdir())), 3)
-            archive = next(options.output.glob('*.tar.gz'))
+            archive = next(options.output.glob('*.oci.tar'))
             receipt_path = options.output / 'native-build.json'
             self.assertEqual(verify_build_inputs(archive, receipt_path, options.source), receipt)
             sbom = next(options.output.glob('*.spdx.json'))

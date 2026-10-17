@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import cast
 
 from archive_io import MAX_IMAGE_BYTES, MAX_METADATA_BYTES, LimitedReader, chunks, open_tar
-from haos_platform import inspect_archive
+from haos_platform import inspect_archive, unpack_archive
 from hass_release_build import verify_build_inputs
 from hass_release_contract import check_shape, validate_document
 from hass_release_source import git, source_bytes
@@ -60,7 +60,7 @@ def native_inputs(source: Path, builds: list[Path]) -> Object:
     documents: list[Object] = []
     for directory in builds:
         check_shape(directory, 'hass-native-build.dirspec.toml')
-        archive = next(directory.glob('*.tar.gz'))
+        archive = next(directory.glob('*.oci.tar'))
         document = verify_build_inputs(archive, directory / 'native-build.json', source)
         identity = object_value(document['source'])
         tag = identity.get('tag')
@@ -72,6 +72,7 @@ def native_inputs(source: Path, builds: list[Path]) -> Object:
         inspected = inspect_archive(archive)
         expected = strings(object_value(inspected.configuration.get('rootfs')).get('diff_ids'))
         actual: dict[str, str] = {}
+        remaining = MAX_IMAGE_BYTES
         with open_tar(archive) as image:
             for member in image:
                 if member.name in inspected.layers:
@@ -79,8 +80,15 @@ def native_inputs(source: Path, builds: list[Path]) -> Object:
                         raise ValueError('Expected distinct regular native image layers')
                     with image.extractfile(member) as stream:
                         digest = hashlib.sha256()
-                        for chunk in chunks(stream):
-                            digest.update(chunk)
+                        with (
+                            gzip.GzipFile(fileobj=stream)
+                            if member.name in inspected.compressed_layers
+                            else stream as decoded,
+                            LimitedReader(decoded, remaining) as limited,
+                        ):
+                            for chunk in chunks(limited):
+                                digest.update(chunk)
+                            remaining = limited.remaining
                         actual[member.name] = 'sha256:' + digest.hexdigest()
         if (
             not expected
@@ -223,8 +231,18 @@ def preflight(options: VerifyRegistry, document: Object, scratch: Path) -> None:
     ):
         raise ValueError('Registry must expose the complete OCI image index')
     total = 0
+    native = {
+        text(platform['manifest_digest']): text(platform['architecture'])
+        for platform in object_rows(document['platforms'])
+    }
     for descriptor in manifests:
         digest = descriptor_digest(descriptor, MAX_METADATA_BYTES)
+        architecture = native.pop(digest, None)
+        if architecture is None or descriptor.get('platform') != {
+            'architecture': 'arm64' if architecture == 'aarch64' else architecture,
+            'os': 'linux',
+        }:
+            raise ValueError('Registry manifest/platform differs from the native export')
         if descriptor.get('mediaType') != MANIFEST:
             raise ValueError('Registry index must reference image manifests directly')
         raw = remote_manifest(options, repository + '@' + digest, scratch)
@@ -271,6 +289,8 @@ def verify_layout(layout: Path, document: Object, expected_annotations: Object) 
             'os': 'linux',
         }:
             raise ValueError('OCI index has a duplicate, missing, or substituted platform')
+        if expected.get('manifest_digest') != descriptor.get('digest'):
+            raise ValueError('Registry manifest differs from the native OCI image')
         manifest = metadata(layout, descriptor, MANIFEST)
         if (
             manifest.get('schemaVersion') != 2
@@ -304,7 +324,6 @@ def verify_layout(layout: Path, document: Object, expected_annotations: Object) 
                 total += MAX_IMAGE_BYTES - total - stream.remaining
             if actual != expected_diff:
                 raise ValueError('Registry layer differs from the native image filesystem')
-        expected['manifest_digest'] = descriptor['digest']
     if remaining:
         raise ValueError('OCI index is missing native build platforms')
 
@@ -330,24 +349,17 @@ def prepare_registry(options: PrepareRegistry) -> Object:
         manifests: list[Object] = []
         for directory in options.builds:
             imported = Path(temporary) / 'import'
-            archive = next(directory.glob('*.tar.gz'))
-            original = inspect_archive(archive)
-            copy_image('docker-archive:' + str(archive.resolve()), imported, '--format', 'oci')
-            manifest = metadata(imported, root_descriptor(imported), MANIFEST)
+            archive = next(directory.glob('*.oci.tar'))
+            # Native OCI archives are verified above; transport uses a layout to avoid rootless chown on unpack.
+            unpack_archive(archive, imported)
+            descriptor = root_descriptor(imported)
+            manifest = metadata(imported, descriptor, MANIFEST)
             for blob in (imported / 'blobs/sha256').iterdir():
                 blob.replace(layout / 'blobs/sha256' / blob.name)
             shutil.rmtree(imported)
-            # Skopeo's OCI conversion rewrites config JSON; preserve the CI image's exact configuration bytes.
-            (layout / 'blobs/sha256' / original.config_digest.removeprefix('sha256:')).write_bytes(
-                original.configuration_bytes
-            )
-            manifest['config'] = {
-                'mediaType': CONFIG,
-                'digest': original.config_digest,
-                'size': len(original.configuration_bytes),
-            }
-            manifest['annotations'] = expected
-            descriptor = write_blob(layout, manifest)
+            if manifest.get('annotations') != expected:
+                raise ValueError('Native OCI manifest annotations differ from the producing source')
+            descriptor.pop('annotations', None)
             config = metadata(layout, object_value(manifest['config']), CONFIG)
             descriptor['platform'] = {'architecture': config['architecture'], 'os': config['os']}
             manifests.append(descriptor)
@@ -376,12 +388,11 @@ def bind_acceptance(directories: tuple[Path, ...], document: Object) -> list[Obj
         expected = platforms.pop(architecture, None)
         if expected is None or native['source'] != document['source'] or native['version'] != document['version']:
             raise ValueError('Acceptance source identity or platform differs from native builds')
-        if object_value(native['platform']) != {
-            key: value for key, value in expected.items() if key != 'manifest_digest'
-        }:
+        if object_value(native['platform']) != expected:
             raise ValueError('Acceptance native receipt differs from the verified image')
         if (
             installed.get('config_digest') != expected['config_digest']
+            or installed.get('manifest_digest') != expected['manifest_digest']
             or installed.get('archive_sha256') != expected['archive_sha256']
             or installed.get('architecture') != ('arm64' if architecture == 'aarch64' else architecture)
             or installed.get('version') != document['version']

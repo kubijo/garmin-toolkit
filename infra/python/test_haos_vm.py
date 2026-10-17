@@ -1,7 +1,9 @@
 """Exercise image admission, native selection, and owned-session cleanup."""
 
 import base64
+import gzip
 import hashlib
+import io
 import json
 import os
 import signal
@@ -18,7 +20,7 @@ from unittest.mock import Mock, patch
 
 import haos_app_session as session
 import haos_app_vm as vm
-from fixtures.images import write_image
+from fixtures.images import tar_bytes, write_image
 from haos_platform import (
     BASELINE_VERSION,
     PLATFORMS,
@@ -26,6 +28,7 @@ from haos_platform import (
     baseline_fixture,
     inspect_archive,
     resolve,
+    unpack_archive,
     validate_archive,
 )
 from json_data import object_value
@@ -53,7 +56,7 @@ class HaosTests(unittest.TestCase):
     def test_baseline_fixture_preserves_candidate_bytes_and_filesystem_layers(self) -> None:
         source = self.image()
         before = source.read_bytes()
-        fixture = self.root / 'baseline.tar.gz'
+        fixture = self.root / 'baseline.oci.tar'
         baseline_fixture(source, fixture)
         original, previous = inspect_archive(source), inspect_archive(fixture)
         validate_archive(fixture, PLATFORMS['amd64'], BASELINE_VERSION, inspected=previous)
@@ -84,6 +87,25 @@ class HaosTests(unittest.TestCase):
         self.assertEqual(command[command.index('-F') + 1], '/dev/null')
         self.assertIn('IdentitiesOnly=yes', command)
         self.assertIn('IdentityAgent=none', command)
+
+    def test_native_publish_preserves_digests_and_closes_tunnel_after_failure(self) -> None:
+        archive = self.image()
+        tunnel = Mock(spec=subprocess.Popen)
+        tunnel.poll.return_value = None
+        with (
+            patch.object(vm, 'forward_port', return_value=tunnel),
+            patch.object(vm.socket, 'socket') as connection,
+            patch.object(vm, 'run', side_effect=RuntimeError('push failed')) as push,
+            patch.object(vm, 'stop_group') as stop,
+        ):
+            connection.return_value.__enter__.return_value.connect_ex.return_value = 0
+            with self.assertRaisesRegex(RuntimeError, 'push failed'):
+                vm.publish_image(archive, '0.1.0', self.root / 'key', 2222, self.root)
+        command = push.call_args.args[0]
+        self.assertEqual(command[0], 'skopeo')
+        self.assertIn('--preserve-digests', command)
+        self.assertFalse(any(self.root.glob('image-import.*')))
+        stop.assert_called_once_with(tunnel)
 
     def test_http_redirect_cannot_escape_guest_origin(self) -> None:
         followed: list[str] = []
@@ -161,6 +183,27 @@ class HaosTests(unittest.TestCase):
             validate_archive(archive, PLATFORMS['aarch64'], '0.1.0')
         with self.assertRaisesRegex(ValueError, 'labels differ'):
             validate_archive(archive, PLATFORMS['amd64'], '9.0.0')
+
+    def test_unreferenced_blobs_cannot_spoof_content_addresses(self) -> None:
+        archive = self.image()
+        data = b'Not the claimed content hash'
+        with tarfile.open(archive, 'a') as image:
+            member = tarfile.TarInfo('blobs/sha256/' + '0' * 64)
+            member.size = len(data)
+            image.addfile(member, io.BytesIO(data))
+        with self.assertRaisesRegex(ValueError, 'blob name'):
+            inspect_archive(archive)
+
+    def test_unpacking_cannot_escape_its_directory_or_exceed_archive_limits(self) -> None:
+        archive = self.root / 'unsafe.tar'
+        for name in ('../escaped', '/escaped'):
+            archive.write_bytes(tar_bytes({name: b'Untrusted'}))
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'regular native OCI'):
+                unpack_archive(archive, self.root / name.replace('/', '_'))
+        payload = b'x' * 200_000
+        archive.write_bytes(gzip.compress(tar_bytes({'blobs/sha256/' + hashlib.sha256(payload).hexdigest(): payload})))
+        with patch('archive_io.MAX_IMAGE_BYTES', 64 * 1024), self.assertRaisesRegex(ValueError, 'size limit'):
+            unpack_archive(archive, self.root / 'limited')
 
     def test_remote_candidate_requires_anonymous_branch_url_and_independent_digest(self) -> None:
         archive = self.image()

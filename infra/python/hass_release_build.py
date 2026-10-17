@@ -10,8 +10,9 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from archive_io import check_archive
 from haos_platform import PLATFORMS, inspect_archive, validate_archive
-from hass_image_sbom import verify_sbom
+from hass_image_sbom import MAX_SBOM_BYTES, verify_sbom
 from hass_release_contract import (
     CONTRACT,
     check_shape,
@@ -91,16 +92,21 @@ def verify_build_inputs(archive: Path, receipt: Path, source: Path) -> Object:
         raise ValueError('Native receipt version or image differs from its committed source')
     if hashlib.sha256(source_bytes(source, commit, 'flake.lock')).hexdigest() != identity['lock_sha256']:
         raise ValueError('Native receipt lockfile differs from its committed source')
-    exported = next(receipt.parent.glob('*.tar.gz'))
+    exported = next(receipt.parent.glob('*.oci.tar'))
     sbom = next(receipt.parent.glob('*.spdx.json'))
     if not archive.samefile(exported):
         raise ValueError('Acceptance archive is not the native receipt export')
+    check_archive(archive)
+    if sbom.stat().st_size > MAX_SBOM_BYTES:
+        raise ValueError('Native SPDX inventory exceeds the size limit')
     if file_sha256(archive) != producing['archive_sha256'] or file_sha256(sbom) != producing['sbom_sha256']:
         raise ValueError('Native build payload hashes differ from the receipt')
     inspected = inspect_archive(archive)
     validate_archive(archive, PLATFORMS[text(producing['architecture'])], version, inspected=inspected)
     if inspected.config_digest != producing['config_digest']:
         raise ValueError('Native receipt config digest differs from its archive')
+    if inspected.manifest_digest != producing['manifest_digest']:
+        raise ValueError('Native receipt manifest digest differs from its archive')
     bundle = json.loads(
         source_bytes(source, commit, 'assets/licenses/bundle-hass.json'), object_pairs_hook=unique_object
     )
@@ -146,6 +152,7 @@ def record_build(options: NativeBuild) -> None:
         'platform': {
             'architecture': architecture,
             'config_digest': inspected.config_digest,
+            'manifest_digest': inspected.manifest_digest,
             'archive_sha256': hashes['image_archive'],
             'sbom_sha256': hashes['sbom'],
             'builder_system': builder,
