@@ -40,6 +40,7 @@ let
     ++ (map (name: "infra/python/${name}.py") [
       "cli_output"
       "hass_release"
+      "hass_attestations"
       "hass_release_build"
       "hass_release_source"
       "hass_release_contract"
@@ -111,6 +112,7 @@ let
     runtimeInputs = [
       pythonToolsEnv
       pkgs.git
+      pkgs.gh
       pkgs.nix
       pkgs.skopeo
       dirspec

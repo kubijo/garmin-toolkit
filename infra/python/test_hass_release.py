@@ -11,13 +11,14 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from fixtures.images import write_image
 from haos_platform import inspect_archive
-from hass_release import Assemble, Verify, assemble, verify
-from hass_release_contract import CONTRACT, json_bytes
+from hass_attestations import VerifyProvenance
+from hass_release import Assemble, Verify, assemble, verify, verify_provenance
+from hass_release_contract import CONTRACT, Release, checksums, json_bytes
 
 SCRATCH = Path(__file__).resolve().parents[2] / '.tmp'
 
@@ -155,6 +156,106 @@ class ReleaseTests(unittest.TestCase):
             stream = source.extractfile('garmin-toolkit-0.1.0/Cargo.toml')
             assert stream is not None
             self.assertEqual(stream.read(), (self.source / 'Cargo.toml').read_bytes())
+
+    def provenance(self) -> VerifyProvenance:
+        assemble(self.options())
+        bundles = self.root / 'bundles'
+        bundles.mkdir()
+        digests = [self.document['image']['index_digest'], *(p['manifest_digest'] for p in self.document['platforms'])]
+        for name in ('checksums', 'artifacts', *(digest.replace(':', '-') for digest in digests)):
+            (bundles / (name + '.sigstore.jsonl')).write_text('Synthetic verifier-input fixture\n')
+        return VerifyProvenance(
+            directory=self.output, bundles=bundles, version='0.1.0', commit=self.document['source']['commit']
+        )
+
+    def test_provenance_enforces_certificate_policy_and_verifies_checksums_first(self) -> None:
+        options = self.provenance()
+        real_run = subprocess.run
+        commands: list[list[str]] = []
+
+        def verifier(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if command[0] != 'gh':
+                return cast(subprocess.CompletedProcess[str], real_run(command, **kwargs))
+            commands.append(command)
+            return subprocess.CompletedProcess(command, 0, stdout='[]')
+
+        with patch('hass_attestations.subprocess.run', side_effect=verifier):
+            verify_provenance(options)
+        self.assertEqual([Path(command[3]).name for command in commands[:2]], ['SHA256SUMS', 'release.json'])
+        for command in commands:
+            self.assertIn('--deny-self-hosted-runners', command)
+            for flag, value in (
+                ('--repo', 'kubijo/garmin-toolkit'),
+                ('--source-ref', 'refs/tags/v0.1.0'),
+                ('--source-digest', options.commit),
+                ('--signer-digest', options.commit),
+                ('--signer-workflow', 'kubijo/garmin-toolkit/.github/workflows/hass-release.yml'),
+                (
+                    '--cert-identity',
+                    'https://github.com/kubijo/garmin-toolkit/.github/workflows/hass-release.yml@refs/tags/v0.1.0',
+                ),
+            ):
+                self.assertEqual(command[command.index(flag) + 1], value)
+        subjects = {command[3] for command in commands}
+        manifest = json.loads((self.output / 'release.json').read_bytes())
+        self.assertTrue({str(self.output / item['name']) for item in manifest['files']}.issubset(subjects))
+        self.assertEqual(sum(subject.startswith('oci://') for subject in subjects), 3)
+
+    def test_failed_checksum_attestation_stops_before_payload_admission(self) -> None:
+        options = self.provenance()
+        with (
+            patch('hass_attestations.subprocess.run', side_effect=subprocess.CalledProcessError(1, ['gh'])) as gh,
+            patch('hass_release.verify') as contents,
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
+            verify_provenance(options)
+        gh.assert_called_once()
+        contents.assert_not_called()
+
+    def test_missing_attestation_is_not_accepted(self) -> None:
+        options = self.provenance()
+        (options.bundles / 'checksums.sigstore.jsonl').unlink()
+        with patch('hass_attestations.subprocess.run') as gh, self.assertRaises(FileNotFoundError):
+            verify_provenance(options)
+        gh.assert_not_called()
+
+    def test_authenticated_checksums_anchor_the_manifest_even_if_downloads_change(self) -> None:
+        options = self.provenance()
+
+        def replace_downloads(_options: VerifyProvenance, _subject: str, bundle: str) -> None:
+            if bundle != 'checksums.sigstore.jsonl':
+                return
+            document = cast(Release, json.loads((self.output / 'release.json').read_bytes()))
+            document['image']['index_digest'] = 'sha256:' + 'e' * 64
+            encoded = json_bytes(document)
+            (self.output / 'release.json').write_bytes(encoded)
+            (self.output / 'SHA256SUMS').write_bytes(checksums(document, encoded))
+
+        with (
+            patch('hass_release.attest', side_effect=replace_downloads),
+            patch('hass_release.attest_payloads') as payloads,
+            self.assertRaisesRegex(ValueError, 'expected SHA-256'),
+        ):
+            verify_provenance(options)
+        payloads.assert_not_called()
+
+    def test_signed_checksums_must_name_the_manifest_once(self) -> None:
+        options = self.provenance()
+        row = ('0' * 64 + '  release.json\n').encode()
+        for invalid in (b'No manifest\n', row + row):
+            (self.output / 'SHA256SUMS').write_bytes(invalid)
+            with patch('hass_release.attest'), self.assertRaisesRegex(ValueError, 'exactly once'):
+                verify_provenance(options)
+
+    def test_wrong_payload_size_is_rejected_before_hashing_payloads(self) -> None:
+        digest = assemble(self.options())
+        target = self.output / 'LICENSE-AGPL'
+        target.write_bytes(target.read_bytes() + b'Unexpected data')
+        with (
+            patch('hass_release.describe_file', side_effect=AssertionError('Unexpected payload read')),
+            self.assertRaisesRegex(ValueError, 'file size'),
+        ):
+            verify(self.verify_options(digest))
 
     def test_identical_inputs_produce_identical_manifest_and_source_archive(self) -> None:
         first = assemble(self.options())
