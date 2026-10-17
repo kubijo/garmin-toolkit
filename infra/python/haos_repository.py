@@ -17,8 +17,47 @@ from hass_release_contract import check_shape
 from json_data import object_value, strings
 
 
+def git(runtime: Path, *arguments: str) -> None:
+    environment = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    environment.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+    subprocess.run(
+        [
+            'git',
+            '-c',
+            'user.name=HAOS Candidate',
+            '-c',
+            'user.email=haos@example.invalid',
+            '-c',
+            'commit.gpgsign=false',
+            '-c',
+            f'core.hooksPath={runtime / "no-hooks"}',
+            *arguments,
+        ],
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def publish_version(runtime: Path, version: str) -> None:
+    working = runtime / 'repository-work'
+    path = working / 'garmin_toolkit/config.yaml'
+    config = object_value(yaml.safe_load(path.read_text()))
+    config['version'] = version
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    git(runtime, '-C', str(working), 'add', '.')
+    git(runtime, '-C', str(working), 'commit', '-qm', 'Disposable lifecycle fixture version')
+    git(
+        runtime, '-C', str(working), 'push', '-q', str(runtime / 'repository-http/garmin-toolkit.git'), 'HEAD:hass-apps'
+    )
+
+
 @contextmanager
-def serve_repository(directory: Path, runtime: Path, *, image: str, architecture: str, version: str) -> Generator[str]:
+def serve_repository(
+    directory: Path, runtime: Path, *, image: str, architecture: str, version: str, initial_version: str | None = None
+) -> Generator[str]:
     check_shape(directory, 'hass-app-repository.dirspec.toml')
     if directory.is_symlink() or any(path.is_symlink() for path in directory.rglob('*')):
         raise ValueError('Candidate repository must contain regular files and directories')
@@ -29,38 +68,18 @@ def serve_repository(directory: Path, runtime: Path, *, image: str, architecture
     if config.get('version') != version or architecture not in strings(config.get('arch')):
         raise ValueError('Candidate repository architecture/version differs from the image')
     config['image'] = image
+    config['version'] = initial_version or version
     config_path.write_text(yaml.safe_dump(config, sort_keys=False))
     environment = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
     environment.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
 
-    def git(*arguments: str) -> None:
-        subprocess.run(
-            [
-                'git',
-                '-c',
-                'user.name=HAOS Candidate',
-                '-c',
-                'user.email=haos@example.invalid',
-                '-c',
-                'commit.gpgsign=false',
-                '-c',
-                f'core.hooksPath={runtime / "no-hooks"}',
-                *arguments,
-            ],
-            env=environment,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-
-    git('init', '-q', '--initial-branch=hass-apps', str(working))
-    git('-C', str(working), 'add', '.')
-    git('-C', str(working), 'commit', '-qm', 'Disposable generated candidate')
+    git(runtime, 'init', '-q', '--initial-branch=hass-apps', str(working))
+    git(runtime, '-C', str(working), 'add', '.')
+    git(runtime, '-C', str(working), 'commit', '-qm', 'Disposable generated candidate')
     published = runtime / 'repository-http'
     published.mkdir()
     bare = published / 'garmin-toolkit.git'
-    git('clone', '--bare', '-q', str(working), str(bare))
+    git(runtime, 'clone', '--bare', '-q', str(working), str(bare))
 
     class GitHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:

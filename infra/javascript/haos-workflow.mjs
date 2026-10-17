@@ -216,7 +216,16 @@ export async function populatedWorkflow(client, state, sessionPath, evidencePath
         try {
             if (request.operation === 'populate') await populate();
             else if (request.operation === 'mutate') await mutate();
-            else if (['restarted', 'rebooted', 'restored'].includes(request.operation)) {
+            else if (request.operation === 'reinstalled') {
+                await client.call('Page.navigate', { url: state.url });
+                await target('profile.create');
+                assert.ok(!(await targets()).some(node => node.id === 'profile.0'), 'reinstall has no old profile');
+                await capture('reinstalled-empty');
+            } else if (
+                ['upgraded', 'restarted', 'rebooted', 'restored', 'recovered', 'recovered-upgraded'].includes(
+                    request.operation,
+                )
+            ) {
                 await openPopulated();
                 await exports(request.operation);
             } else throw Error(`Unknown workflow command: ${request.operation}`);

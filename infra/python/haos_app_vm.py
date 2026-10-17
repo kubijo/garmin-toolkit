@@ -24,7 +24,7 @@ import tyro
 from rich.text import Text
 
 from cli_output import TerminalOutput
-from haos_platform import Architecture, Platform, inspect_archive, resolve, validate_archive
+from haos_platform import BASELINE_VERSION, Architecture, Platform, inspect_archive, resolve, validate_archive
 from haos_repository import serve_repository
 from haos_runtime import SCRATCH_ROOT, download_image, prepare_image, qemu_command, stop, verify_scope
 from hass_release_contract import check_shape
@@ -75,6 +75,8 @@ class Options:
 
     registry_image: str = PUBLISHED_IMAGE
     """Generic image repository named by the remote candidate's app metadata."""
+
+    baseline_archive: tyro.conf.Suppress[Path | None] = None
 
 
 def run(command: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -465,6 +467,41 @@ def assert_installed_image(
     }
 
 
+def publish_image(
+    archive: Path, version: str, key: Path, port: int, process: subprocess.Popen[str], runtime: Path, overlay_limit: int
+) -> str:
+    print(f'Publishing {version} to the disposable guest registry...', flush=True)
+    reference = f'{TEST_IMAGE}:{version}'
+    for attempt in range(3):
+        try:
+            send_file(key, port, archive, '/mnt/data/garmin-hass-app.tar.gz')
+            break
+        except RuntimeError:
+            if attempt == 2 or process.poll() is not None:
+                raise
+            overlay = runtime / 'overlay.qcow2'
+            wait_for_guest(process, overlay, key, port, runtime, 120, overlay_limit=overlay_limit)
+            wait_for_supervisor(process, overlay, key, port, 120, overlay_limit=overlay_limit)
+    loaded = run(
+        ssh_command(
+            key, port, 'docker load -i /mnt/data/garmin-hass-app.tar.gz && rm /mnt/data/garmin-hass-app.tar.gz'
+        ),
+        timeout=600,
+    ).stdout
+    if f'Loaded image: {PUBLISHED_IMAGE}:{version}' not in loaded:
+        raise RuntimeError('Archive does not contain the canonical app image and version')
+    run(ssh_command(key, port, f'docker tag {PUBLISHED_IMAGE}:{version} {reference}'))
+    run(ssh_command(key, port, f'docker push {reference}'), timeout=300)
+    pushed = strings(
+        json.loads(run(ssh_command(key, port, "docker image inspect -f '{{json .RepoDigests}}' " + reference)).stdout)
+    )
+    matches = [item.removeprefix(TEST_IMAGE + '@') for item in pushed if item.startswith(TEST_IMAGE + '@')]
+    if len(matches) != 1:
+        raise RuntimeError('Disposable registry push did not produce exactly one image digest')
+    run(ssh_command(key, port, f'docker image rm {reference} {PUBLISHED_IMAGE}:{version}'))
+    return matches[0]
+
+
 def install_app(
     options: Options,
     runtime: Path,
@@ -487,42 +524,34 @@ def install_app(
         ),
         timeout=180,
     )
-    digest = options.registry_digest
     image = options.registry_image if options.repository_url else TEST_IMAGE
-    reference = f'{image}:{version}'
+    expected: Object = {
+        'image_reference': f'{image}:{version}',
+        'registry_digest': options.registry_digest,
+        'config_digest': inspected.config_digest,
+        'architecture': text(inspected.configuration.get('architecture')),
+        'version': version,
+        'archive_sha256': file_sha256(options.app_archive),
+    }
+    initial_version = BASELINE_VERSION if options.baseline_archive is not None else version
     if not options.repository_url:
-        print('Loading the local image and publishing it to the disposable guest registry...', flush=True)
-        for attempt in range(3):
-            try:
-                send_file(key, port, options.app_archive, '/mnt/data/garmin-hass-app.tar.gz')
-                break
-            except RuntimeError:
-                if attempt == 2 or process.poll() is not None:
-                    raise
-                overlay = runtime / 'overlay.qcow2'
-                wait_for_guest(process, overlay, key, port, runtime, 120, overlay_limit=overlay_limit)
-                wait_for_supervisor(process, overlay, key, port, 120, overlay_limit=overlay_limit)
-        loaded = run(
-            ssh_command(
-                key, port, 'docker load -i /mnt/data/garmin-hass-app.tar.gz && rm /mnt/data/garmin-hass-app.tar.gz'
-            ),
-            timeout=600,
-        ).stdout
-        if f'Loaded image: {PUBLISHED_IMAGE}:{version}' not in loaded:
-            raise RuntimeError('Archive does not contain the canonical app image and version')
-        run(ssh_command(key, port, f'docker tag {PUBLISHED_IMAGE}:{version} {reference}'))
-        run(ssh_command(key, port, f'docker push {reference}'), timeout=300)
-        pushed = strings(
-            json.loads(
-                run(ssh_command(key, port, "docker image inspect -f '{{json .RepoDigests}}' " + reference)).stdout
-            )
+        expected['registry_digest'] = publish_image(
+            options.app_archive, version, key, port, process, runtime, overlay_limit
         )
-        matches = [item.removeprefix(image + '@') for item in pushed if item.startswith(image + '@')]
-        if len(matches) != 1:
-            raise RuntimeError('Disposable registry push did not produce exactly one image digest')
-        digest = matches[0]
-        # Require Supervisor to pull from the registry, rather than reuse the loaded image's local tag.
-        run(ssh_command(key, port, f'docker image rm {reference} {PUBLISHED_IMAGE}:{version}'))
+        if options.baseline_archive is not None:
+            baseline = inspect_archive(options.baseline_archive)
+            previous: Object = {
+                'image_reference': f'{image}:{BASELINE_VERSION}',
+                'registry_digest': publish_image(
+                    options.baseline_archive, BASELINE_VERSION, key, port, process, runtime, overlay_limit
+                ),
+                'config_digest': baseline.config_digest,
+                'architecture': text(baseline.configuration['architecture']),
+                'version': BASELINE_VERSION,
+                'archive_sha256': file_sha256(options.baseline_archive),
+            }
+            (runtime / 'lifecycle-images.json').write_bytes(json_bytes({'baseline': previous, 'candidate': expected}))
+            expected = previous
     repository_url = options.repository_url
     if options.repository is not None:
         repository_url = services.enter_context(
@@ -532,6 +561,7 @@ def install_app(
                 image=image,
                 architecture=guest.architecture,
                 version=version,
+                initial_version=initial_version,
             )
         )
     if repository_url is not None:
@@ -545,18 +575,18 @@ def install_app(
     print(f'Installing and starting {slug}...', flush=True)
     run(ssh_command(key, port, f'ha apps install {slug}'), timeout=600)
     run(ssh_command(key, port, f'ha apps start {slug}'), timeout=120)
-    if digest is None:
+    if expected['registry_digest'] is None:
         raise ValueError('Repository installation requires an expected registry digest')
     identity = assert_installed_image(
         key,
         port,
         slug,
-        reference=reference,
-        digest=digest,
-        config_digest=inspected.config_digest,
-        architecture=text(inspected.configuration.get('architecture')),
+        reference=text(expected['image_reference']),
+        digest=text(expected['registry_digest']),
+        config_digest=text(expected['config_digest']),
+        architecture=text(expected['architecture']),
     )
-    identity.update(repository_url=repository_url, version=version, archive_sha256=file_sha256(options.app_archive))
+    identity.update(repository_url=repository_url, version=initial_version, archive_sha256=expected['archive_sha256'])
     (runtime / 'installation.json').write_bytes(json_bytes(identity))
     return slug
 

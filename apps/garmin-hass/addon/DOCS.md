@@ -36,6 +36,9 @@ For recovery, restore the backup with the compatible app version recorded by the
 older executable over newer app data is not a supported downgrade. Verify your profile, route, and Course downloads
 after restoration.
 
+On Supervisor 2026.10.2, run `ha supervisor restart` after restoring a reinstalled app, then reopen its web interface.
+This refreshes stale Supervisor ingress routing that can otherwise return HTTP 503.
+
 Uninstalling removes the installed app and its app data. Reinstallation starts empty unless you restore a backup.
 Downloaded GPX/FIT files and backups stored outside the app remain separate. Check the release's lifecycle acceptance
 results before relying on upgrade or recovery behavior.

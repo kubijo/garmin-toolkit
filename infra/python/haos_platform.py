@@ -1,17 +1,21 @@
 """Architecture and image checks shared by disposable HAOS app runners."""
 
 import hashlib
+import io
 import json
 import os
 import platform
+import tarfile
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from archive_io import MAX_METADATA_BYTES, open_tar
-from json_data import Object, object_rows, object_value, strings, unique_object
+from json_data import Object, json_bytes, object_rows, object_value, strings, unique_object
 
 Architecture = Literal['auto', 'amd64', 'aarch64']
+BASELINE_VERSION = '0.0.0'
 
 
 @dataclass(frozen=True)
@@ -129,6 +133,41 @@ def inspect_archive(archive: Path) -> ImageArchive:
 
 def archive_config(archive: Path) -> dict[str, object]:
     return inspect_archive(archive).configuration
+
+
+def baseline_fixture(source: Path, destination: Path) -> None:
+    """Keep candidate layers unchanged; change only metadata for a private Supervisor upgrade fixture."""
+    original = inspect_archive(source)
+    config = deepcopy(original.configuration)
+    labels = object_value(object_value(config['config'])['Labels'])
+    if labels['io.hass.version'] == BASELINE_VERSION:
+        raise ValueError('The candidate must differ from the fixture baseline version')
+    labels['io.hass.version'] = BASELINE_VERSION
+    encoded = json_bytes(config)
+    name = hashlib.sha256(encoded).hexdigest() + '.json'
+    manifest = [
+        {
+            'Config': name,
+            'RepoTags': ['ghcr.io/kubijo/garmin-toolkit-hass:' + BASELINE_VERSION],
+            'Layers': list(original.layers),
+        }
+    ]
+    with destination.open('xb') as target, tarfile.open(fileobj=target, mode='w|gz', compresslevel=1) as output:
+        copied: set[str] = set()
+        with open_tar(source) as archive:
+            for member in archive:
+                if member.name in original.layers:
+                    if not member.isfile() or member.name in copied:
+                        raise ValueError('Fixture layers must be regular files')
+                    with archive.extractfile(member) as payload:
+                        output.addfile(member, payload)
+                    copied.add(member.name)
+        if copied != set(original.layers):
+            raise ValueError('Fixture source is missing an image layer')
+        for filename, contents in ((name, encoded), ('manifest.json', json_bytes(manifest))):
+            member = tarfile.TarInfo(filename)
+            member.size = len(contents)
+            output.addfile(member, io.BytesIO(contents))
 
 
 def validate_archive(archive: Path, guest: Platform, version: str, *, inspected: ImageArchive | None = None) -> None:

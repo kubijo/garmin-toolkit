@@ -23,9 +23,6 @@ distribution, application authentication, credential custody, encryption, and Co
 
 ### Lifecycle acceptance
 
-- Test upgrade with populated state and a backup. For the first release, identify an unpublished fixture baseline.
-  Recover by reinstalling the compatible previous image and restoring its backup; do not promise database downgrade.
-- Test uninstall/reinstall and document which data survives.
 - Run install/ingress/lifecycle acceptance on every advertised architecture. Exclude ARM64 from store metadata until it
   passes; pending ARM64 runtime work must not block an AMD64-only release.
 - Keep physical-device claims within the [HASS hardware plan](hass-watch-vertical-slice.md) and publish only tested
