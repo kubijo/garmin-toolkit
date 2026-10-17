@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import unittest
@@ -18,7 +19,15 @@ from unittest.mock import Mock, patch
 import haos_app_session as session
 import haos_app_vm as vm
 from fixtures.images import write_image
-from haos_platform import PLATFORMS, acceleration, resolve, validate_archive
+from haos_platform import (
+    BASELINE_VERSION,
+    PLATFORMS,
+    acceleration,
+    baseline_fixture,
+    inspect_archive,
+    resolve,
+    validate_archive,
+)
 from json_data import object_value
 
 
@@ -40,6 +49,27 @@ class HaosTests(unittest.TestCase):
                 self.assertEqual(resolve().architecture, expected)
         with patch('haos_platform.platform.machine', return_value='unknown'), self.assertRaises(ValueError):
             resolve()
+
+    def test_baseline_fixture_preserves_candidate_bytes_and_filesystem_layers(self) -> None:
+        source = self.image()
+        before = source.read_bytes()
+        fixture = self.root / 'baseline.tar.gz'
+        baseline_fixture(source, fixture)
+        original, previous = inspect_archive(source), inspect_archive(fixture)
+        validate_archive(fixture, PLATFORMS['amd64'], BASELINE_VERSION, inspected=previous)
+        self.assertEqual(previous.layers, original.layers)
+        self.assertEqual(previous.configuration['rootfs'], original.configuration['rootfs'])
+        with tarfile.open(source) as source_tar, tarfile.open(fixture) as fixture_tar:
+            for name in original.layers:
+                source_layer, fixture_layer = source_tar.extractfile(name), fixture_tar.extractfile(name)
+                assert source_layer is not None and fixture_layer is not None
+                with source_layer, fixture_layer:
+                    self.assertEqual(source_layer.read(), fixture_layer.read())
+        self.assertNotEqual(previous.config_digest, original.config_digest)
+        self.assertEqual(previous.repository_tags, ('ghcr.io/kubijo/garmin-toolkit-hass:' + BASELINE_VERSION,))
+        self.assertEqual(source.read_bytes(), before)
+        with self.assertRaises(FileExistsError):
+            baseline_fixture(source, fixture)
 
     def test_kvm_requires_native_guest_and_device_access(self) -> None:
         with patch('haos_platform.platform.machine', return_value='x86_64'):

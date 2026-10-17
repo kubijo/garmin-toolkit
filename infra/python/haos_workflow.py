@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import haos_app_vm as vm
+from haos_lifecycle import Lifecycle
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -67,6 +68,26 @@ def verify_downloads(state: dict[str, object], evidence: Path, prefix: str) -> d
     return hashes
 
 
+def backup(key: Path, port: int, app_slug: str) -> str:
+    slug = vm.guest_data(key, port, f'ha backups new --app {app_slug} --no-progress', timeout=600).get('slug')
+    if not isinstance(slug, str) or not slug.isalnum():
+        raise RuntimeError('Supervisor returned an invalid cold-backup slug')
+    vm.assert_started(key, port, app_slug)
+    return slug
+
+
+def restore(key: Path, port: int, app_slug: str, slug: str) -> None:
+    restored: object = json.loads(
+        vm.run(
+            vm.ssh_command(key, port, f'ha backups restore {slug} --app {app_slug} --no-progress --raw-json'),
+            timeout=600,
+        ).stdout
+    )
+    if not isinstance(restored, dict) or cast('dict[str, object]', restored).get('result') != 'ok':
+        raise RuntimeError('Supervisor did not report a successful cold restore')
+    vm.assert_started(key, port, app_slug)
+
+
 def exercise(
     browser: subprocess.Popen[str],
     runtime: Path,
@@ -76,6 +97,7 @@ def exercise(
     app_slug: str = 'local_garmin_toolkit',
     *,
     reboot: Callable[[], dict[str, str]],
+    lifecycle: Lifecycle | None = None,
 ) -> None:
     request_id = 0
 
@@ -103,6 +125,11 @@ def exercise(
             time.sleep(0.2)
         raise TimeoutError(f'Browser workflow {operation} timed out')
 
+    def persisted(phase: str, state: dict[str, object], hashes: dict[str, str]) -> None:
+        command(phase)
+        if snapshot(key, port, app_slug) != state or verify_downloads(state, evidence, phase) != hashes:
+            raise RuntimeError(f'{phase} changed the populated state or ingress downloads')
+
     initial = snapshot(key, port, app_slug)
     if any(rows(initial, name) for name in ('profiles', 'routes', 'courses')):
         raise RuntimeError('The populated ingress workflow requires a fresh disposable app')
@@ -111,39 +138,50 @@ def exercise(
     if len(rows(populated, 'profiles')) != 1:
         raise RuntimeError('Profile creation did not persist exactly one profile')
     hashes = verify_downloads(populated, evidence, 'populated')
+    previous_backup = None
+    if lifecycle is not None:
+        lifecycle.assert_image('baseline')
+        previous_backup = backup(key, port, app_slug)
+        lifecycle.upgrade()
+        persisted('upgraded', populated, hashes)
     print('Restarting the disposable app through Supervisor...', flush=True)
     vm.run(vm.ssh_command(key, port, f'ha apps restart {app_slug}'), timeout=120)
     vm.assert_started(key, port, app_slug)
-    command('restarted')
-    if snapshot(key, port, app_slug) != populated or verify_downloads(populated, evidence, 'restarted') != hashes:
-        raise RuntimeError('App restart changed the populated storage or ingress downloads')
+    persisted('restarted', populated, hashes)
     boot_ids = reboot()
-    command('rebooted')
-    rebooted = snapshot(key, port, app_slug)
-    if rebooted != populated or verify_downloads(rebooted, evidence, 'rebooted') != hashes:
-        raise RuntimeError('HAOS reboot changed the populated storage or ingress downloads')
-    backup = vm.guest_data(key, port, f'ha backups new --app {app_slug} --no-progress', timeout=600)
-    slug = backup.get('slug')
-    if not isinstance(slug, str) or not slug.isalnum():
-        raise RuntimeError('Supervisor returned an invalid cold-backup slug')
-    vm.assert_started(key, port, app_slug)
+    persisted('rebooted', populated, hashes)
+    slug = backup(key, port, app_slug)
     command('mutate')
     mutated = snapshot(key, port, app_slug)
     if rows(mutated, 'courses') or len(rows(mutated, 'profiles')) != 2:
         raise RuntimeError('The post-backup mutation did not remove the Course and add a profile')
-    restored: object = json.loads(
-        vm.run(
-            vm.ssh_command(key, port, f'ha backups restore {slug} --app {app_slug} --no-progress --raw-json'),
-            timeout=600,
-        ).stdout
-    )
-    if not isinstance(restored, dict) or cast('dict[str, object]', restored).get('result') != 'ok':
-        raise RuntimeError('Supervisor did not report a successful cold restore')
-    vm.assert_started(key, port, app_slug)
-    command('restored')
-    recovered = snapshot(key, port, app_slug)
-    if recovered != populated or verify_downloads(recovered, evidence, 'restored') != hashes:
-        raise RuntimeError('Cold restore did not recover the exact populated state and downloaded artifacts')
+    restore(key, port, app_slug, slug)
+    persisted('restored', populated, hashes)
+    lifecycle_result = None
+    if lifecycle is not None:
+        assert previous_backup is not None
+        command('mutate')
+        lifecycle.reinstall_baseline(previous_backup)
+        empty = snapshot(key, port, app_slug)
+        if any(rows(empty, name) for name in ('profiles', 'routes', 'courses', 'artifacts')):
+            raise RuntimeError('Uninstall/reinstall retained private app data')
+        command('reinstalled')
+        restore(key, port, app_slug, previous_backup)
+        lifecycle.refresh_ingress()
+        lifecycle.assert_image('baseline')
+        persisted('recovered', populated, hashes)
+        lifecycle.upgrade()
+        persisted('recovered-upgraded', populated, hashes)
+        lifecycle_result = {
+            'upgrade': True,
+            'recovery': True,
+            'app_data_removed': True,
+            'reinstall_empty': True,
+            'backup_retained': True,
+            'supervisor_restarted_after_restore': True,
+            'baseline': 'metadata-only fixture; candidate filesystem; no previous public release',
+            'migration_compatibility': False,
+        }
     (evidence / 'workflow.json').write_text(
         json.dumps(
             {
@@ -158,6 +196,7 @@ def exercise(
                 'cold_restore': True,
                 'post_backup_mutation_reverted': True,
                 'browser_only_automation': True,
+                'lifecycle': lifecycle_result,
             },
             indent=2,
         )

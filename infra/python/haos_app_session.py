@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http.client import HTTPMessage
 from pathlib import Path
 from typing import IO, Annotated, cast
@@ -23,7 +23,8 @@ from rich.text import Text
 
 import haos_app_vm as vm
 import haos_workflow
-from haos_platform import acceleration
+from haos_lifecycle import Lifecycle
+from haos_platform import acceleration, baseline_fixture
 from hass_release_build import verify_build_inputs
 from processes import stop_group
 
@@ -79,6 +80,9 @@ class Check(Run):
 
     build_receipt: Path | None = None
     """Verify the downloaded native export and SBOM against its receipt and committed Git source."""
+
+    lifecycle: bool = False
+    """Test fixture-baseline upgrade, backup recovery, and uninstall/reinstall; requires repository and receipt."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -265,6 +269,12 @@ def wait_browser(browser: subprocess.Popen[str], evidence: Path, checkpoint: str
 
 
 def run_session(options: Run) -> int:
+    if (
+        isinstance(options, Check)
+        and options.lifecycle
+        and (options.repository is None or options.build_receipt is None)
+    ):
+        raise ValueError('Lifecycle acceptance requires a generated repository and native build receipt')
     if not 10 <= options.timeout <= 1800 or not 1 <= options.session_timeout <= 7200 or not 0 <= options.port <= 65535:
         raise ValueError('Startup must be 10-1800s, inspection 1-7200s, and port 0-65535')
     if isinstance(options, Check) and not options.verify_browser:
@@ -290,6 +300,10 @@ def run_session(options: Run) -> int:
     ):
         runtime = Path(directory)
         runtime.chmod(0o700)
+        if isinstance(options, Check) and options.lifecycle:
+            baseline = runtime / 'baseline-fixture.tar.gz'
+            baseline_fixture(options.app_archive, baseline)
+            options = replace(options, baseline_archive=baseline)
         state_path = runtime / 'session.json'
         http_port = options.port or vm.free_port()
         base = f'http://127.0.0.1:{http_port}'
@@ -353,7 +367,14 @@ def run_session(options: Run) -> int:
                         )
                         return boot_ids
 
-                    haos_workflow.exercise(browser, runtime, evidence, key, ssh_port, app_slug, reboot=reboot)
+                    lifecycle = (
+                        Lifecycle(runtime, evidence, key, ssh_port, app_slug, process, OVERLAY_LIMIT)
+                        if options.lifecycle
+                        else None
+                    )
+                    haos_workflow.exercise(
+                        browser, runtime, evidence, key, ssh_port, app_slug, reboot=reboot, lifecycle=lifecycle
+                    )
                     return
             state.update(phase='ready', expires_at=time.time() + options.session_timeout)
             save_state(state_path, state)

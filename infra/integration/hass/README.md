@@ -43,7 +43,7 @@ browser, credentials, listeners, and disks. It needs no real HASS instance or US
 
 Qualified AMD64 software: image `0.1.0`, HAOS 18.3, Core/Supervisor 2026.10.2, Docker 29.7.2.
 [CI artifact](https://github.com/kubijo/garmin-toolkit/actions/runs/39018402935), source commit
-`274f3d3639e8b11bf9022c4c18b75c998f24f263`, local evidence `.tmp/haos-evidence/02bf54ef61d7`.
+`274f3d3639e8b11bf9022c4c18b75c998f24f263`.
 
 ```text
 Archive SHA-256: bbf4b6ef6e4a950ec690bce722095032b0108618c41e657400a56aa63f37a232
@@ -119,7 +119,21 @@ and GPX must match the fixture. Restore must also reverse the post-backup Course
 
 The unmodified production frontend is checked first. The isolated browser then enables the bundled semantic driver
 through its canvas attribute. Actions and screenshots use built-in APIs; DevTools handles file choosers and downloads.
-Evidence includes synthetic downloads and `workflow.json`; cleanup follows the runner contract above.
+When ingress has no app canvas, DevTools captures the Home Assistant error page. Evidence includes synthetic downloads
+and `workflow.json`; cleanup follows the runner contract above.
+
+Add `--lifecycle` with a generated repository and native receipt to test first-release upgrade/recovery. A private
+`0.0.0` fixture keeps the candidate's filesystem layers and changes only image metadata. Supervisor must discover and
+install the unchanged candidate as an update, preserving state and exact downloads. The test then uninstalls the app,
+checks its container/private data are gone and its backup remains, and verifies an empty reinstall. Restoring the
+pre-upgrade backup on the fixture must recover the original data; a second upgrade must retain it. Image identities are
+recorded in `lifecycle-images.json`. This qualifies Supervisor lifecycle behavior, not older-binary/schema migration.
+
+On Supervisor 2026.10.2, recovery restarts Supervisor after restoring a reinstalled app: restore replaces the ingress
+token but leaves the routing map stale, producing HTTP 503. The
+[restore implementation](https://github.com/home-assistant/supervisor/blob/2026.10.2/supervisor/apps/app.py#L1679) and
+[ingress map](https://github.com/home-assistant/supervisor/blob/2026.10.2/supervisor/ingress.py#L125) identify the
+upstream limitation. The app image and stored data need no changes.
 
 ## HAOS app smoke
 

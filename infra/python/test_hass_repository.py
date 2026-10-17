@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from haos_repository import serve_repository
+from haos_repository import publish_version, serve_repository
 from hass_release_contract import Architecture
 from hass_repository import Repository, generate_repository
 
@@ -99,7 +99,12 @@ class RepositoryTests(unittest.TestCase):
         with (
             self.assertRaisesRegex(RuntimeError, 'simulated VM failure'),
             serve_repository(
-                self.output, runtime, image='localhost:5000/candidate', architecture='amd64', version='0.1.0'
+                self.output,
+                runtime,
+                image='localhost:5000/candidate',
+                architecture='amd64',
+                version='0.1.0',
+                initial_version='0.0.0',
             ) as url,
         ):
             parsed = urlsplit(url)
@@ -108,6 +113,7 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual(parsed.fragment, 'hass-apps')
             clone_url = parsed._replace(netloc=f'127.0.0.1:{port}', fragment='').geturl()
             cloned = self.root / 'cloned'
+            git_environment = {**os.environ, 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
             subprocess.run(
                 [
                     'git',
@@ -123,7 +129,7 @@ class RepositoryTests(unittest.TestCase):
                     clone_url,
                     str(cloned),
                 ],
-                env={**os.environ, 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'},
+                env=git_environment,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -132,6 +138,16 @@ class RepositoryTests(unittest.TestCase):
             config = yaml.safe_load((cloned / 'garmin_toolkit/config.yaml').read_bytes())
             self.assertEqual(config['image'], 'localhost:5000/candidate')
             self.assertEqual(config['arch'], ['amd64'])
+            self.assertEqual(config['version'], '0.0.0')
+            publish_version(runtime, '0.1.0')
+            subprocess.run(
+                ['git', '-C', str(cloned), 'pull', '--ff-only', '-q'],
+                env=git_environment,
+                check=True,
+                capture_output=True,
+                timeout=15,
+            )
+            self.assertEqual(yaml.safe_load((cloned / 'garmin_toolkit/config.yaml').read_bytes())['version'], '0.1.0')
             raise RuntimeError('simulated VM failure')
         self.assertEqual((self.output / 'garmin_toolkit/config.yaml').read_bytes(), original)
         with socket.socket() as probe:
