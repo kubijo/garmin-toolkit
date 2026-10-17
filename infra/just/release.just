@@ -19,3 +19,11 @@ record-build *options:
 # Generate a release-only Home Assistant app repository for selected architectures.
 repository *options:
     @just release::in-release repository "$@"
+
+# Prepare annotated OCI manifests from verified native image exports; no registry access.
+prepare-registry *options:
+    @just release::in-release prepare-registry "$@"
+
+# Pull an immutable registry index and verify every platform against native exports.
+verify-registry *options:
+    @just release::in-release verify-registry "$@"

@@ -85,6 +85,7 @@ class ImageArchive:
     config_digest: str
     repository_tags: tuple[str, ...]
     layers: tuple[str, ...] = ()
+    configuration_bytes: bytes = b''
 
 
 def inspect_archive(archive: Path) -> ImageArchive:
@@ -128,6 +129,7 @@ def inspect_archive(archive: Path) -> ImageArchive:
             'sha256:' + hashlib.sha256(config_bytes).hexdigest(),
             tuple(tags),
             tuple(layers),
+            config_bytes,
         )
 
 

@@ -17,6 +17,7 @@ from rich.text import Text
 from cli_output import TerminalOutput
 from haos_platform import PLATFORMS, inspect_archive, validate_archive
 from hass_image_sbom import MAX_SBOM_BYTES
+from hass_registry import PrepareRegistry, VerifyRegistry, prepare_registry, verify_registry
 from hass_release_build import NativeBuild, record_build
 from hass_release_contract import (
     Assembly,
@@ -34,7 +35,7 @@ from hass_release_contract import (
 )
 from hass_release_source import admit_source, archive_source, source_bytes
 from hass_repository import Repository, generate_repository
-from json_data import is_array, is_object
+from json_data import is_array, is_object, object_value
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -65,6 +66,8 @@ class Options:
             | Annotated[Verify, tyro.conf.subcommand('verify', prefix_name=False)]
             | Annotated[NativeBuild, tyro.conf.subcommand('record-build', prefix_name=False)]
             | Annotated[Repository, tyro.conf.subcommand('repository', prefix_name=False)]
+            | Annotated[PrepareRegistry, tyro.conf.subcommand('prepare-registry', prefix_name=False)]
+            | Annotated[VerifyRegistry, tyro.conf.subcommand('verify-registry', prefix_name=False)]
         ),
         tyro.conf.arg(name=''),
     ]
@@ -180,7 +183,7 @@ def verify(options: Verify) -> None:
     check_shape(options.directory)
 
 
-def main(options: Assemble | Verify | NativeBuild | Repository) -> int:
+def main(options: Assemble | Verify | NativeBuild | Repository | PrepareRegistry | VerifyRegistry) -> int:
     output = TerminalOutput()
     output.install_tracebacks()
     try:
@@ -193,9 +196,17 @@ def main(options: Assemble | Verify | NativeBuild | Repository) -> int:
             record_build(options)
             output.panel(Text(str(options.output)), title='Native build recorded', style='green')
             return 0
-        else:
+        elif isinstance(options, Repository):
             generate_repository(options)
             output.panel(Text(str(options.output)), title='App repository generated', style='green')
+            return 0
+        else:
+            document = verify_registry(options) if isinstance(options, VerifyRegistry) else prepare_registry(options)
+            output.panel(
+                Text(str(options.output) + '\nOCI index: ' + str(object_value(document['image'])['index_digest'])),
+                title='Registry content verified' if isinstance(options, VerifyRegistry) else 'OCI candidate prepared',
+                style='green',
+            )
             return 0
         output.panel(
             Text('Local candidate content verified. Registry provenance and HAOS qualification are not checked.'),

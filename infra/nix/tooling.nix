@@ -174,6 +174,8 @@ let
               pkgs.git
               pkgs.just
               pkgs.syft
+              pkgs.skopeo
+              pkgs.distribution
               dirspec
             ]
           }:$PATH

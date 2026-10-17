@@ -1,0 +1,8 @@
+version = 1
+strict = true
+
+[paths]
+"registry.json" = { type = "file", min_size = 1 }
+"oci/oci-layout" = { type = "file", min_size = 1 }
+"oci/index.json" = { type = "file", min_size = 1 }
+"oci/blobs/sha256/*" = { type = "file", min = 4, min_size = 1 }

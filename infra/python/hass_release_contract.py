@@ -73,7 +73,7 @@ class FileSpec(TypedDict):
     source: NotRequired[str]
 
 
-def validate_document(value: object, definition: Literal['assembly', 'release', 'native_build']) -> None:
+def validate_document(value: object, definition: Literal['assembly', 'release', 'native_build', 'registry']) -> None:
     schema = object_value(read_json(CONTRACT / 'hass-release.schema.json'))
     schema['$ref'] = f'#/$defs/{definition}'
     try:

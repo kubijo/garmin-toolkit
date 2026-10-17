@@ -124,6 +124,78 @@
         "$ref": "#/$defs/platform"
       }
     },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "version",
+        "source",
+        "image",
+        "platforms",
+        "registry_reference",
+        "acceptance"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "source": {
+          "$ref": "#/$defs/native_build/properties/source"
+        },
+        "image": {
+          "$ref": "#/$defs/image"
+        },
+        "platforms": {
+          "$ref": "#/$defs/platforms"
+        },
+        "registry_reference": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "acceptance": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "architecture",
+              "scope",
+              "runtime_registry_digest",
+              "workflow_sha256",
+              "installation_sha256",
+              "manifest_digest"
+            ],
+            "properties": {
+              "architecture": {
+                "$ref": "#/$defs/architecture"
+              },
+              "scope": {
+                "const": "native-image-content"
+              },
+              "runtime_registry_digest": {
+                "$ref": "#/$defs/digest"
+              },
+              "workflow_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "installation_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "manifest_digest": {
+                "$ref": "#/$defs/digest"
+              }
+            }
+          }
+        }
+      }
+    },
     "assembly": {
       "type": "object",
       "additionalProperties": false,

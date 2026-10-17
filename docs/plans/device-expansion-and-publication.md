@@ -10,8 +10,6 @@ distribution, application authentication, credential custody, encryption, and Co
 
 ### Registry and provenance
 
-- Verify the staged OCI index and each platform's manifest/config descriptors against native CI exports. Bind acceptance
-  results to those digests and the release commit. Set OCI source, revision, version, and license annotations.
 - Generate GitHub OIDC attestations for archives, published image digests, `release.json`, and `SHA256SUMS`. Publish
   downloadable bundles and registry attestations. Verification must enforce `kubijo/garmin-toolkit`, the release
   workflow, source tag/commit, and subject digest; see
