@@ -312,40 +312,7 @@
           }
         },
         "platform": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "architecture",
-            "config_digest",
-            "archive_sha256",
-            "sbom_sha256",
-            "builder_system",
-            "derivation",
-            "workflow_run"
-          ],
-          "properties": {
-            "architecture": {
-              "$ref": "#/$defs/architecture"
-            },
-            "config_digest": {
-              "$ref": "#/$defs/platform/properties/config_digest"
-            },
-            "archive_sha256": {
-              "$ref": "#/$defs/sha256"
-            },
-            "sbom_sha256": {
-              "$ref": "#/$defs/sha256"
-            },
-            "builder_system": {
-              "$ref": "#/$defs/platform/properties/builder_system"
-            },
-            "derivation": {
-              "$ref": "#/$defs/platform/properties/derivation"
-            },
-            "workflow_run": {
-              "$ref": "#/$defs/platform/properties/workflow_run"
-            }
-          }
+          "$ref": "#/$defs/platform"
         }
       }
     },

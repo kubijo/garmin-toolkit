@@ -75,7 +75,7 @@ class Archive:
 
 
 @contextmanager
-def open_tar(source: Path | IO[bytes]) -> Generator[Archive]:
+def open_tar(source: Path | IO[bytes] | gzip.GzipFile, *, max_bytes: int | None = None) -> Generator[Archive]:
     if isinstance(source, Path):
         check_archive(source)
     with source.open('rb') if isinstance(source, Path) else closing(source) as raw:
@@ -85,7 +85,7 @@ def open_tar(source: Path | IO[bytes]) -> Generator[Archive]:
             raw.seek(0)
         with (
             gzip.GzipFile(fileobj=raw) if compressed else nullcontext(raw) as decoded,
-            LimitedReader(decoded, MAX_IMAGE_BYTES) as limited,
+            LimitedReader(decoded, MAX_IMAGE_BYTES if max_bytes is None else max_bytes) as limited,
         ):
             limited.header_remaining = MAX_METADATA_BYTES
             with tarfile.open(fileobj=limited, mode='r|') as archive:

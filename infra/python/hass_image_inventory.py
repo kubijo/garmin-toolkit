@@ -1,5 +1,6 @@
 """Read the actual Nix-built image without extracting or executing its contents."""
 
+import gzip
 import hashlib
 import json
 import re
@@ -9,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TypedDict, cast
 
-from archive_io import MAX_MEMBERS, chunks, open_tar
+from archive_io import MAX_IMAGE_BYTES, MAX_MEMBERS, chunks, open_tar
 from haos_platform import ImageArchive
 from json_data import object_rows, object_value, text, unique_object
 
@@ -135,15 +136,18 @@ def inventory_image(archive: Path, inspected: ImageArchive) -> ImageFiles:
     wasm: dict[str, list[Dependency]] = {}
     native: dict[str, list[Dependency]] = {}
     count = 0
+    uncompressed = 0
     with open_tar(archive) as outer:
         for member in outer:
             if member.name not in inspected.layers:
                 continue
             if member.name in layers or not member.isfile():
                 raise ValueError('Duplicate or nonregular image layer')
-            stream = outer.extractfile(member)
             layers.add(member.name)
-            with open_tar(stream) as layer:
+            stream = outer.extractfile(member)
+            decoded = gzip.GzipFile(fileobj=stream) if member.name in inspected.compressed_layers else stream
+            regular: set[str] = set()
+            with stream, open_tar(decoded, max_bytes=MAX_IMAGE_BYTES - uncompressed) as layer:
                 for entry in layer:
                     count += 1
                     if count > MAX_MEMBERS:
@@ -152,10 +156,20 @@ def inventory_image(archive: Path, inspected: ImageArchive) -> ImageFiles:
                     if name in seen and not (seen[name] and entry.isdir()):
                         raise ValueError(f'Duplicate image file or conflicting entry: {name}')
                     seen[name] = entry.isdir()
-                    if any(part.startswith('.wh.') for part in PurePosixPath(name).parts) or entry.islnk():
-                        raise ValueError('Expected Nix image layers without whiteouts or hardlinks')
+                    if any(part.startswith('.wh.') for part in PurePosixPath(name).parts):
+                        raise ValueError('Expected Nix image layers without whiteouts')
                     if root := STORE_PATH.match(name):
                         store_paths.add(root[0])
+                    if entry.islnk():
+                        target = image_path(entry.linkname)
+                        if target not in regular:
+                            raise ValueError('Image hardlinks must target an earlier regular file in the same layer')
+                        hashes[name] = hashes[target]
+                        if target in native:
+                            native[name] = native[target]
+                        if target in wasm:
+                            wasm[name] = wasm[target]
+                        continue
                     if not entry.isfile():
                         if not (entry.isdir() or entry.issym()):
                             raise ValueError(f'Unsupported image entry: {name}')
@@ -183,6 +197,8 @@ def inventory_image(archive: Path, inspected: ImageArchive) -> ImageFiles:
                                 hasher.update(chunk)
                             digest = hasher.hexdigest()
                     hashes[name] = digest
+                    regular.add(name)
+                uncompressed = MAX_IMAGE_BYTES - layer.reader.remaining
     if layers != set(inspected.layers):
         raise ValueError('Image layer inventory is incomplete')
     roots = {entry['name'] for packages in native.values() for entry in packages}

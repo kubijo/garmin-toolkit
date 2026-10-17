@@ -42,6 +42,8 @@ class Lifecycle:
             config_digest=text(expected['config_digest']),
             architecture=text(expected['architecture']),
         )
+        if identity['manifest_digest'] != expected['manifest_digest']:
+            raise RuntimeError('Lifecycle installation differs from the native OCI manifest')
         installed = object_value(json.loads((self.runtime / 'installation.json').read_bytes()))
         installed.update(expected)
         installed.update(identity)

@@ -3,6 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nix-oci = {
+      url = "github:systemstart/nix-oci/v0.6.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     flake-utils.url = "github:numtide/flake-utils";
 
     nix-appimage = {
@@ -72,6 +76,7 @@
       inputs = {
         crane.follows = "crane";
         nixpkgs.follows = "nixpkgs";
+        nix-oci.follows = "nix-oci";
         rust-overlay.follows = "rust-overlay";
       };
     };

@@ -8,6 +8,7 @@
   gallery,
   hass,
   nix-tools,
+  nix-oci,
   pyproject-build-systems,
   pyproject-nix,
   uv2nix,
@@ -85,6 +86,7 @@ let
               ;
           };
           tooling = import ./tooling.nix {
+            nixOci = nix-oci.packages.${system}.default;
             inherit
               dirspec
               lib
@@ -125,6 +127,7 @@ let
             inherit workspaceSrc;
           };
           hassTarget = hass.lib.mkTarget {
+            sourceRevision = self.rev or self.dirtyRev or "unreleased";
             inherit
               brandAssets
               dirspec

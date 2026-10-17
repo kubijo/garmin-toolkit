@@ -1,4 +1,4 @@
-"""Assemble and verify local HASS release candidates; performs no publication or network access."""
+"""Assemble HASS candidates and verify local artifacts or digest-addressed registry content."""
 
 import errno
 import hashlib
@@ -89,6 +89,8 @@ def check_payload_metadata(directory: Path, document: Assembly) -> None:
         validate_archive(archive, PLATFORMS[architecture], document['version'], inspected=inspected)
         if inspected.config_digest != platform['config_digest']:
             raise ValueError(f'Image config digest differs from the receipt: {architecture}')
+        if inspected.manifest_digest != platform['manifest_digest']:
+            raise ValueError(f'Image manifest digest differs from the receipt: {architecture}')
         expected_tag = document['image']['repository'] + ':' + document['version']
         if inspected.repository_tags != (expected_tag,):
             raise ValueError(f'Image repository/version differs from the receipt: {architecture}')

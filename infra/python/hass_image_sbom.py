@@ -253,7 +253,7 @@ def generate(archive: Path, closure: Path, bundle: Path, output: Path, created: 
             [
                 'syft',
                 'scan',
-                'docker-archive:' + str(expanded),
+                'oci-archive:' + str(expanded),
                 '--config',
                 str(CONTRACT / 'syft.yaml'),
                 '--source-name',

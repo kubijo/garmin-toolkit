@@ -7,7 +7,7 @@ disposable runner:
 
 ```sh
 just hass::haos-app-check \
-    --app-archive /nix/store/IMAGE-garmin-toolkit-hass.tar.gz \
+    --app-archive /nix/store/IMAGE-garmin-toolkit-hass.oci.tar \
     --repository /nix/store/REPOSITORY-garmin-hass-app-repository \
     --timeout 1800
 ```
@@ -16,18 +16,17 @@ Replace the placeholders with actual paths. Starting with fresh HAOS and empty a
 `hass-apps` Git branch and guest registry. Only the copied metadata's image repository changes. The Git listener uses
 host loopback, reachable from QEMU at `10.0.2.2`, with no LAN exposure.
 
-Supervisor discovers and installs the repository app. Removing preloaded tags forces a registry pull; assertions compare
-the running image's reference, architecture, config digest, and pull digest with expected inputs. `installation.json`
-records these identities and the repository URL. The pull digest identifies an index or manifest, separately from the
-archive hash and config digest. Docker's containerd image ID may identify the manifest; the harness hashes the
-registry's original manifest and checks its config descriptor against the archive.
+The runner pushes OCI through an owned SSH tunnel without changing image digests. Supervisor pulls and installs the app;
+checks bind the running reference, architecture, manifest/config, and registry digest to expected inputs.
+`installation.json` records these identities and the repository URL. The archive hash, config digest, and registry
+manifest/index digest remain distinct.
 
 Without a repository option, the runner uses Supervisor's local-app directory. For a staged remote candidate, supply its
 branch URL, image repository, and independently obtained pull digest:
 
 ```sh
 just hass::haos-app-check \
-    --app-archive /nix/store/IMAGE-garmin-toolkit-hass.tar.gz \
+    --app-archive /nix/store/IMAGE-garmin-toolkit-hass.oci.tar \
     --repository-url 'https://github.com/kubijo/garmin-toolkit#CANDIDATE_BRANCH' \
     --registry-image ghcr.io/kubijo/garmin-toolkit-hass-CANDIDATE \
     --registry-digest sha256:EXPECTED_PULL_DIGEST \
@@ -41,26 +40,15 @@ exclusive.
 The runner uses dark screenshots and retains evidence in `.tmp/haos-evidence/`. Success or failure removes its VM,
 browser, credentials, listeners, and disks. It needs no real HASS instance or USB device.
 
-Qualified AMD64 software: image `0.1.0`, HAOS 18.3, Core/Supervisor 2026.10.2, Docker 29.7.2.
-[CI artifact](https://github.com/kubijo/garmin-toolkit/actions/runs/39018402935), source commit
-`274f3d3639e8b11bf9022c4c18b75c998f24f263`.
-
-```text
-Archive SHA-256: bbf4b6ef6e4a950ec690bce722095032b0108618c41e657400a56aa63f37a232
-Config digest:  sha256:31e39977713cd50694e2636733c932e6be8b56e0cb3d1474d7b47d6a72f7945c
-Pull/manifest:  sha256:805a9c2c33ac615391de1033d6f6b8658e3bfc64726d8daeb6e60c99fdfa5d33
-```
-
 Remaining release gates belong to the [publication plan](../../../docs/plans/device-expansion-and-publication.md).
 
 ## Home Assistant app package
 
-The `garmin-hass-app-image` flake output is defined to package the production host and browser assets as an
-OCI-compatible Docker image for the builder's Linux architecture.
-[App metadata](../../../apps/garmin-hass/addon/config.yaml) declares AMD64 and ARM64, raw USB access, ingress on port
-8099, and a cold backup of persistent `/data`. The image selects raw MTP directly and accepts HTTP and WebSocket
-connections only from the Supervisor ingress gateway. The ordinary standalone production host retains its
-desktop-mounted MTP source.
+The `garmin-hass-app-image` flake output packages the production host and browser assets as a native OCI archive for the
+builder's Linux architecture. [App metadata](../../../apps/garmin-hass/addon/config.yaml) declares AMD64 and ARM64, raw
+USB access, ingress on port 8099, and a cold backup of persistent `/data`. The image selects raw MTP directly and
+accepts HTTP and WebSocket connections only from the Supervisor ingress gateway. The ordinary standalone production host
+retains its desktop-mounted MTP source.
 
 For standalone hosting, `GARMIN_TOOLKIT_HASS_ADDRESS` overrides `127.0.0.1:8099`, and `GARMIN_TOOLKIT_HASS_WEB_ROOT`
 overrides the package's bundled frontend default. A missing configured frontend fails startup.
@@ -77,7 +65,7 @@ Full attachment testing needs a VID-capable emulator or a passed-through device.
 Use the app archive matching this host's CPU architecture:
 
 ```bash
-just hass::haos-app-run --app-archive /nix/store/...-garmin-toolkit-hass.tar.gz
+just hass::haos-app-run --app-archive /nix/store/...-garmin-toolkit-hass.oci.tar
 just hass::haos-app-stop SESSION_ID
 ```
 
@@ -102,7 +90,7 @@ For a populated workflow through authenticated ingress, run:
 
 ```bash
 just hass::haos-app-check \
-    --app-archive .tmp/hass-native-build/garmin-toolkit-hass-0.1.0-amd64.tar.gz \
+    --app-archive .tmp/hass-native-build/garmin-toolkit-hass-0.1.0-amd64.oci.tar \
     --build-receipt .tmp/hass-native-build/native-build.json \
     --repository /nix/store/REPOSITORY-garmin-hass-app-repository
 ```
@@ -140,21 +128,16 @@ upstream limitation. The app image and stored data need no changes.
 Build `.#packages.x86_64-linux.garmin-hass-app-image` with a memory-capped Nix builder, then run:
 
 ```bash
-just hass::haos-app-smoke --app-archive /nix/store/...-garmin-toolkit-hass.tar.gz --timeout 1200
+just hass::haos-app-smoke --app-archive /nix/store/...-garmin-toolkit-hass.oci.tar --timeout 1200
 ```
 
-The runner verifies the pinned official HAOS 18.3 OVA, boots it with four CPUs and a hard six-GiB memory cap, loads the
-archive, and serves it from a registry inside the guest. Only the guest's temporary local-app metadata points to that
-registry; the source app metadata keeps its publication image name. Supervisor installs and starts the app. The runner
-checks HTTP 200 from the Supervisor gateway, HTTP 403 from a second container on the same network, and no published host
-port. It then selects a non-default storage generation, proves the app opens it with the original database temporarily
-absent, creates a cold partial Supervisor backup, switches back to the original, restores the backup, and verifies the
-selected generation and running app. The guest is isolated from the user's Home Assistant and devices; the disk-backed
-overlay lives only under the repository's ignored `.tmp` and is removed with the VM. The overlay has an eight-GiB
-file-size limit, including while Docker loads and pushes the image.
+The runner installs the unchanged OCI image in pinned HAOS 18.3. It checks gateway HTTP 200, non-gateway HTTP 403, and
+no published host port. It also opens an alternate storage generation with the original database absent, then verifies
+Supervisor cold backup/restore of that selection.
 
-The guest uses the Home Assistant landing page without onboarding Core; use the populated workflow for authenticated
-ingress acceptance.
+The VM has four CPUs, a six-GiB memory cap, and an eight-GiB overlay under repository `.tmp`; cleanup removes the VM and
+disks. It uses the landing page without Core onboarding. Use the populated workflow for authenticated ingress
+acceptance.
 
 ## ARM64 HAOS boot smoke
 
@@ -164,14 +147,13 @@ Run a fresh, networkless Home Assistant OS ARM64 guest on an x86 Linux host with
 just hass::haos-arm64-smoke
 ```
 
-The runner downloads the pinned
-[official HAOS 18.3 generic AArch64 QCOW2 image](https://github.com/home-assistant/operating-system/releases/tag/18.3)
-to the repository's ignored, disk-backed `.tmp`, checks its published SHA-256, and boots a copy-on-write overlay. Pass
-`--image /path/to/haos_generic-aarch64-18.3.qcow2.xz` to reuse a downloaded archive. It asserts that GRUB boots Slot A
-and HAOS mounts its data partition. The VM has no network or USB access; its user scope is checked for a four-CPU and
-six-GiB cap, its overlay is limited to two GiB, and all scratch files and VM processes are removed afterward. This
-confirms that the ARM64 HAOS image boots in the disposable harness. It does not test Supervisor, app installation,
-ingress, backup/restore, or Garmin hardware.
+The runner verifies the SHA-256 of pinned
+[HAOS 18.3 AArch64](https://github.com/home-assistant/operating-system/releases/tag/18.3), then checks GRUB Slot A and
+the mounted data partition. Reuse a download with `--image /path/to/haos_generic-aarch64-18.3.qcow2.xz`.
+
+The networkless guest has no USB access, verified four-CPU/six-GiB limits, and a two-GiB overlay. Runtime files stay
+under repository `.tmp` and are removed afterward. This checks OS boot only; app installation, ingress, and hardware
+need separate acceptance.
 
 ## NixOS application integration
 

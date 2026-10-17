@@ -24,7 +24,15 @@ import tyro
 from rich.text import Text
 
 from cli_output import TerminalOutput
-from haos_platform import BASELINE_VERSION, Architecture, Platform, inspect_archive, resolve, validate_archive
+from haos_platform import (
+    BASELINE_VERSION,
+    Architecture,
+    Platform,
+    inspect_archive,
+    resolve,
+    unpack_archive,
+    validate_archive,
+)
 from haos_repository import serve_repository
 from haos_runtime import SCRATCH_ROOT, download_image, prepare_image, qemu_command, stop, verify_scope
 from hass_release_contract import check_shape
@@ -39,6 +47,7 @@ from json_data import (
     text,
     unique_object,
 )
+from processes import stop_group
 
 OUTPUT = TerminalOutput()
 MAX_OVERLAY_BYTES = 8 * 1024**3
@@ -53,7 +62,7 @@ class Options:
     """Load a local app archive into an isolated HAOS guest."""
 
     app_archive: Path
-    """Nix-built garmin-hass-app-image tar.gz archive."""
+    """Nix-built garmin-hass-app-image OCI archive."""
 
     arch: Architecture = 'auto'
     """Guest CPU architecture; auto matches the host."""
@@ -116,6 +125,23 @@ def ssh_command(key: Path, port: int, remote: str | None = None) -> list[str]:
     command = ['ssh', '-F', '/dev/null', '-i', str(key), '-p', str(port)]
     command += [argument for option in options for argument in ('-o', option)]
     return [*command, 'root@127.0.0.1', *([] if remote is None else [remote])]
+
+
+def forward_port(key: Path, ssh_port: int, local_port: int, remote_port: int, log: Path) -> subprocess.Popen[str]:
+    command = ssh_command(key, ssh_port)
+    command[1:1] = [
+        '-N',
+        '-o',
+        'ExitOnForwardFailure=yes',
+        '-o',
+        'ServerAliveInterval=15',
+        '-o',
+        'ServerAliveCountMax=2',
+        '-L',
+        f'127.0.0.1:{local_port}:127.0.0.1:{remote_port}',
+    ]
+    with log.open('w') as output:
+        return subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT, text=True, start_new_session=True)
 
 
 def send_file(key: Path, port: int, source: Path, destination: str) -> None:
@@ -467,39 +493,58 @@ def assert_installed_image(
     }
 
 
-def publish_image(
-    archive: Path, version: str, key: Path, port: int, process: subprocess.Popen[str], runtime: Path, overlay_limit: int
-) -> str:
+def publish_image(archive: Path, version: str, key: Path, port: int, runtime: Path) -> str:
     print(f'Publishing {version} to the disposable guest registry...', flush=True)
-    reference = f'{TEST_IMAGE}:{version}'
-    for attempt in range(3):
+    inspected = inspect_archive(archive)
+    if inspected.repository_tags != (f'{PUBLISHED_IMAGE}:{version}',):
+        raise ValueError('Archive does not contain the canonical app image and version')
+    with tempfile.TemporaryDirectory(prefix='image-import.', dir=runtime) as temporary:
+        layout = Path(temporary) / 'oci'
+        unpack_archive(archive, layout)
+        local_port = free_port()
+        tunnel = forward_port(key, port, local_port, 5000, Path(temporary) / 'tunnel.log')
         try:
-            send_file(key, port, archive, '/mnt/data/garmin-hass-app.tar.gz')
-            break
-        except RuntimeError:
-            if attempt == 2 or process.poll() is not None:
-                raise
-            overlay = runtime / 'overlay.qcow2'
-            wait_for_guest(process, overlay, key, port, runtime, 120, overlay_limit=overlay_limit)
-            wait_for_supervisor(process, overlay, key, port, 120, overlay_limit=overlay_limit)
-    loaded = run(
-        ssh_command(
-            key, port, 'docker load -i /mnt/data/garmin-hass-app.tar.gz && rm /mnt/data/garmin-hass-app.tar.gz'
-        ),
-        timeout=600,
-    ).stdout
-    if f'Loaded image: {PUBLISHED_IMAGE}:{version}' not in loaded:
-        raise RuntimeError('Archive does not contain the canonical app image and version')
-    run(ssh_command(key, port, f'docker tag {PUBLISHED_IMAGE}:{version} {reference}'))
-    run(ssh_command(key, port, f'docker push {reference}'), timeout=300)
-    pushed = strings(
-        json.loads(run(ssh_command(key, port, "docker image inspect -f '{{json .RepoDigests}}' " + reference)).stdout)
-    )
-    matches = [item.removeprefix(TEST_IMAGE + '@') for item in pushed if item.startswith(TEST_IMAGE + '@')]
-    if len(matches) != 1:
-        raise RuntimeError('Disposable registry push did not produce exactly one image digest')
-    run(ssh_command(key, port, f'docker image rm {reference} {PUBLISHED_IMAGE}:{version}'))
-    return matches[0]
+            deadline = time.monotonic() + 10
+            while True:
+                if tunnel.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError('Disposable registry SSH tunnel did not start')
+                with socket.socket() as connection:
+                    if connection.connect_ex(('127.0.0.1', local_port)) == 0:
+                        break
+                time.sleep(0.05)
+            run(
+                [
+                    'skopeo',
+                    '--insecure-policy',
+                    '--tmpdir',
+                    temporary,
+                    '--command-timeout',
+                    '5m',
+                    'copy',
+                    '--all',
+                    '--preserve-digests',
+                    '--image-parallel-copies',
+                    '1',
+                    '--retry-times',
+                    '2',
+                    '--dest-no-creds',
+                    '--dest-tls-verify=false',
+                    'oci:' + str(layout),
+                    f'docker://127.0.0.1:{local_port}/garmin-toolkit-hass:{version}',
+                ],
+                timeout=330,
+            )
+            registry_manifest(
+                key,
+                port,
+                TEST_IMAGE,
+                inspected.manifest_digest,
+                inspected.config_digest,
+                text(inspected.configuration['architecture']),
+            )
+        finally:
+            stop_group(tunnel)
+    return inspected.manifest_digest
 
 
 def install_app(
@@ -508,9 +553,6 @@ def install_app(
     key: Path,
     port: int,
     services: ExitStack,
-    process: subprocess.Popen[str],
-    *,
-    overlay_limit: int = MAX_OVERLAY_BYTES,
 ) -> str:
     config_text, version = test_config()
     inspected = inspect_archive(options.app_archive)
@@ -529,23 +571,21 @@ def install_app(
         'image_reference': f'{image}:{version}',
         'registry_digest': options.registry_digest,
         'config_digest': inspected.config_digest,
+        'manifest_digest': inspected.manifest_digest,
         'architecture': text(inspected.configuration.get('architecture')),
         'version': version,
         'archive_sha256': file_sha256(options.app_archive),
     }
     initial_version = BASELINE_VERSION if options.baseline_archive is not None else version
     if not options.repository_url:
-        expected['registry_digest'] = publish_image(
-            options.app_archive, version, key, port, process, runtime, overlay_limit
-        )
+        expected['registry_digest'] = publish_image(options.app_archive, version, key, port, runtime)
         if options.baseline_archive is not None:
             baseline = inspect_archive(options.baseline_archive)
             previous: Object = {
                 'image_reference': f'{image}:{BASELINE_VERSION}',
-                'registry_digest': publish_image(
-                    options.baseline_archive, BASELINE_VERSION, key, port, process, runtime, overlay_limit
-                ),
+                'registry_digest': publish_image(options.baseline_archive, BASELINE_VERSION, key, port, runtime),
                 'config_digest': baseline.config_digest,
+                'manifest_digest': baseline.manifest_digest,
                 'architecture': text(baseline.configuration['architecture']),
                 'version': BASELINE_VERSION,
                 'archive_sha256': file_sha256(options.baseline_archive),
@@ -586,6 +626,8 @@ def install_app(
         config_digest=text(expected['config_digest']),
         architecture=text(expected['architecture']),
     )
+    if identity['manifest_digest'] != expected['manifest_digest']:
+        raise RuntimeError('Installed app manifest differs from the native OCI archive')
     identity.update(repository_url=repository_url, version=initial_version, archive_sha256=expected['archive_sha256'])
     (runtime / 'installation.json').write_bytes(json_bytes(identity))
     return slug
@@ -636,7 +678,7 @@ def boot(
             wait_for_supervisor(process, overlay, key, port, options.timeout, overlay_limit=overlay_limit), flush=True
         )
         print(run(ssh_command(key, port, 'df -h /mnt/data; free -h')).stdout, flush=True)
-        slug = install_app(options, runtime, key, port, services, process, overlay_limit=overlay_limit)
+        slug = install_app(options, runtime, key, port, services)
         assert_started(key, port, slug)
         assert_gateway_response(key, port, slug)
         assert_non_gateway_rejected(key, port, slug)

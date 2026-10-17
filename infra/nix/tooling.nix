@@ -2,6 +2,7 @@
   dirspec,
   lib,
   nix-tools,
+  nixOci,
   nodejs,
   pkgs,
   pythonToolsEnv,
@@ -176,6 +177,7 @@ let
               pkgs.syft
               pkgs.skopeo
               pkgs.distribution
+              nixOci
               dirspec
             ]
           }:$PATH
