@@ -4,7 +4,7 @@ use cint::ColorInterop;
 use egui::{Align2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use garmin_color::theme;
 
-use crate::theme::color32;
+use crate::theme::{PANEL_RADIUS, color32};
 
 const DEFAULT_HEIGHT: f32 = 220.0;
 const PADDING: f32 = 18.0;
@@ -39,7 +39,7 @@ pub fn preview(ui: &mut Ui, props: &Props<'_>) {
     let palette = crate::theme::palette(ui);
     ui.painter().rect_filled(
         rect,
-        0.0,
+        PANEL_RADIUS,
         palette.surfaces().layer(theme::Level::One).into_cint(),
     );
 
@@ -60,7 +60,7 @@ pub fn preview(ui: &mut Ui, props: &Props<'_>) {
     };
 
     let target = rect.shrink(PADDING);
-    let stroke = Stroke::new(PATH_WIDTH, palette.interaction().interactive().into_cint());
+    let stroke = Stroke::new(PATH_WIDTH, crate::theme::selection_accent(ui).into_cint());
     for segment in drawable {
         let points = segment
             .points

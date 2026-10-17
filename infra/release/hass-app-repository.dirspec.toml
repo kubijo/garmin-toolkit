@@ -1,0 +1,12 @@
+version = 1
+strict = true
+
+[paths]
+"repository.yaml" = { type = "file", min_size = 1 }
+"garmin_toolkit" = { type = "directory" }
+"garmin_toolkit/config.yaml" = { type = "file", min_size = 1 }
+"garmin_toolkit/README.md" = { type = "file", min_size = 1 }
+"garmin_toolkit/DOCS.md" = { type = "file", min_size = 1 }
+"garmin_toolkit/CHANGELOG.md" = { type = "file", min_size = 1 }
+"garmin_toolkit/icon.png" = { type = "file", min_size = 1 }
+"garmin_toolkit/logo.png" = { type = "file", min_size = 1 }

@@ -17,7 +17,23 @@ use std::{
     time::Instant,
 };
 
+mod catalog;
+pub mod device;
+mod locks;
 mod target;
+pub use locks::MutationLocks;
+mod operations;
+mod outcomes;
+mod session;
+pub use operations::Operations;
+mod workflow;
+pub use session::Session;
+pub use workflow::Settings;
+pub mod recovery;
+mod removal;
+pub use catalog::CatalogSource;
+pub use removal::{RemovalPlanReport, execute_removal, prepare_removal};
+pub mod pending_recovery;
 pub use target::{PhysicalTarget, SimulatedTarget, TargetSession, UpdateTarget};
 type DeviceUpdateAdapter = Box<dyn UpdateTarget>;
 
@@ -31,6 +47,29 @@ pub struct UpdateExecution {
     pub progress: ProgressReporter,
     pub capture: SessionCapture,
     pub device: DeviceUpdateAdapter,
+    /// Payloads already verified during interactive plan review.
+    pub prepared: Option<PreparedUpdatePayloads>,
+}
+
+impl UpdateExecution {
+    /// Download, verify, and authorize payloads without modifying the target.
+    /// # Errors
+    /// Download, authorization, cancellation, or capture failure.
+    pub async fn prepare_payloads(&self) -> Result<PreparedUpdatePayloads> {
+        let downloader = Downloader::new(self.concurrency, GARMIN_EXPRESS_USER_AGENT)?
+            .with_url_authorizer(Arc::clone(&self.download_authorizer))
+            .with_capture(Some(self.capture.clone()));
+        prepare_update_payloads(
+            &downloader,
+            &self.client,
+            &self.manifest,
+            &self.plan,
+            &self.cache,
+            &self.progress,
+            &self.capture,
+        )
+        .await
+    }
 }
 
 /// Garmin map-service policy for protected deliverable URLs.
@@ -47,6 +86,52 @@ impl DownloadUrlAuthorizer for GarminDownloadAuthorizer {
 pub struct UpdateOutcome {
     pub apply: garmin_update::ApplyReport,
     pub artifact: Option<PathBuf>,
+}
+
+/// Execute a plan while retaining durable host recovery evidence.
+///
+/// # Errors
+/// Receipt creation, preparation, device mutation, or evidence capture failed.
+pub async fn execute_registered_update(
+    execution: UpdateExecution,
+    receipts: Option<&pending_recovery::PendingRecoveryStore>,
+) -> Result<UpdateOutcome> {
+    if receipts.is_some() {
+        execution.capture.write_json(Path::new("workflow-target.json"), &serde_json::json!({
+            "version": 1, "device": execution.plan.device_digest, "plan": execution.plan.digest,
+            "simulation": !execution.device.modifies_device(),
+        })).await?;
+    }
+    let pending = receipts
+        .map(|store| {
+            store.register(
+                pending_recovery::PendingRecoveryKind::Update,
+                execution.capture.root(),
+                &execution.plan.device_digest,
+                &execution.plan.digest,
+            )
+        })
+        .transpose()?;
+    let result = execute_update_plan(execution).await;
+    if let Some((store, recovery)) = receipts.zip(pending.as_ref()) {
+        let rolled_back = result.as_ref().err().is_some_and(|error| {
+            matches!(
+                error.downcast_ref::<garmin_update::MountedInstallError>(),
+                Some(garmin_update::MountedInstallError::RolledBack(_))
+            )
+        });
+        if result.is_ok() || rolled_back {
+            store.clear_completed(recovery);
+        } else {
+            match recovery.is_prepared() {
+                Ok(false) => store.clear_completed(recovery),
+                Ok(true) => {}
+                Err(error) => tracing::warn!(%error, capture = %recovery.transaction.display(),
+                    "pending update state could not be inspected"),
+            }
+        }
+    }
+    result
 }
 
 pub struct RecoveryExecution {
@@ -71,9 +156,11 @@ pub async fn recover_update(
     .await?)
 }
 
-struct PreparedUpdatePayloads {
+/// Verified payloads bound to one immutable device plan.
+pub struct PreparedUpdatePayloads {
     downloads: Vec<DownloadProgress>,
     authorization: MapAuthorization,
+    plan_digest: String,
 }
 
 fn verification_report(
@@ -129,38 +216,32 @@ pub async fn execute_update_plan(execution: UpdateExecution) -> Result<UpdateOut
     }
 }
 
-async fn execute_update_plan_inner(execution: UpdateExecution) -> Result<UpdateOutcome> {
-    let UpdateExecution {
-        client,
-        manifest,
-        plan,
-        cache,
-        concurrency,
-        download_authorizer,
-        progress,
-        capture,
-        device,
-    } = execution;
-    let evidence = capture.clone();
-    let progress = progress.observe(move |event| {
+async fn execute_update_plan_inner(mut execution: UpdateExecution) -> Result<UpdateOutcome> {
+    let evidence = execution.capture.clone();
+    execution.progress = execution.progress.observe(move |event| {
         let _ = evidence.append_event(event);
     });
     let started = Instant::now();
-    let device_modified = device.modifies_device();
-    capture_initial_state(device.as_ref(), &capture, &progress).await?;
-    let downloader = Downloader::new(concurrency, GARMIN_EXPRESS_USER_AGENT)?
-        .with_url_authorizer(download_authorizer)
-        .with_capture(Some(capture.clone()));
-    let prepared = prepare_update_payloads(
-        &downloader,
-        &client,
-        &manifest,
-        &plan,
-        &cache,
-        &progress,
-        &capture,
+    capture_initial_state(
+        execution.device.as_ref(),
+        &execution.capture,
+        &execution.progress,
     )
     .await?;
+    let prepared = match execution.prepared.take() {
+        Some(prepared) if prepared.plan_digest == execution.plan.digest => prepared,
+        Some(_) => bail!("verified payloads belong to a different plan"),
+        None => execution.prepare_payloads().await?,
+    };
+    let UpdateExecution {
+        manifest,
+        plan,
+        progress,
+        capture,
+        device,
+        ..
+    } = execution;
+    let device_modified = device.modifies_device();
     let target = device
         .prepare(
             &manifest,
@@ -279,5 +360,6 @@ async fn prepare_update_payloads(
     Ok(PreparedUpdatePayloads {
         downloads,
         authorization,
+        plan_digest: plan.digest.clone(),
     })
 }

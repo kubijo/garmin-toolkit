@@ -1,0 +1,7 @@
+version = 1
+strict = true
+
+[paths]
+"native-build.json" = { type = "file", min_size = 1 }
+"garmin-toolkit-hass-*.tar.gz" = { type = "file", count = 1, min_size = 1 }
+"garmin-toolkit-hass-*.spdx.json" = { type = "file", count = 1, min_size = 1 }

@@ -478,7 +478,7 @@ async fn fail_removal<D: DeviceWrite + ?Sized>(
         Err(error) => Err(error.to_string()),
     };
     match rollback {
-        Ok(()) => operation,
+        Ok(()) => RemovalExecutionError::RolledBack(Box::new(operation)),
         Err(rollback) => RemovalExecutionError::Rollback {
             operation: operation.to_string(),
             rollback,
@@ -1085,6 +1085,9 @@ async fn require_missing<D: DeviceWrite + ?Sized>(
 
 #[derive(Debug, Error)]
 pub enum RemovalExecutionError {
+    /// The original operation failed, but restoration was proven and device state cleared.
+    #[error(transparent)]
+    RolledBack(Box<RemovalExecutionError>),
     #[error(transparent)]
     DeviceState(#[from] crate::DeviceStateError),
     #[error("the bound removal plan contains no device files")]
@@ -1129,6 +1132,19 @@ pub enum RemovalExecutionError {
     ByteCountOverflow,
     #[error("removal failed ({operation}); rollback also failed ({rollback})")]
     Rollback { operation: String, rollback: String },
+}
+
+impl RemovalExecutionError {
+    /// Recognize cancellation, including when required rollback has completed successfully.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        match self {
+            Self::Cancelled => true,
+            Self::Device(source) => source.is_cancelled(),
+            Self::RolledBack(operation) => operation.is_cancelled(),
+            _ => false,
+        }
+    }
 }
 
 fn validate_removal_candidate(index: usize, map: &MapComponent) -> Result<(), RemovalPlanError> {
@@ -1859,7 +1875,10 @@ mod tests {
 
         let result = execute_removal(&plan, &capture, &ProgressReporter::default(), &device).await;
 
-        assert!(matches!(result, Err(RemovalExecutionError::Device(_))));
+        assert!(
+            matches!(result, Err(RemovalExecutionError::RolledBack(operation))
+            if matches!(*operation, RemovalExecutionError::Device(_)))
+        );
         assert_eq!(device.files_len(), 2);
         assert!(
             capture

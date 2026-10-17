@@ -18,6 +18,11 @@ use thiserror::Error;
 const PRODUCT_ID: u16 = 1;
 const PRODUCT_NAME: &str = "Garmin Toolkit";
 
+/// Identity recorded alongside generated artifacts.
+pub const ENCODER_NAME: &str = "garmin-fit-course";
+/// Version of the encoder which produced persisted bytes.
+pub const ENCODER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// A nonzero serial assigned to one generated FIT Course artifact.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SerialNumber(NonZeroU32);
@@ -485,6 +490,8 @@ const fn encode_sport(sport: RouteSport) -> typedef::Sport {
     match sport {
         RouteSport::Cycling => typedef::Sport::CYCLING,
         RouteSport::Running => typedef::Sport::RUNNING,
+        RouteSport::Walking => typedef::Sport::WALKING,
+        RouteSport::Hiking => typedef::Sport::HIKING,
     }
 }
 
@@ -492,6 +499,8 @@ const fn decode_sport(sport: typedef::Sport) -> Result<RouteSport, Error> {
     match sport {
         typedef::Sport::CYCLING => Ok(RouteSport::Cycling),
         typedef::Sport::RUNNING => Ok(RouteSport::Running),
+        typedef::Sport::WALKING => Ok(RouteSport::Walking),
+        typedef::Sport::HIKING => Ok(RouteSport::Hiking),
         _ => Err(Error::InvalidStructure("unsupported course sport")),
     }
 }
@@ -567,7 +576,19 @@ mod tests {
 
     #[test]
     fn course_round_trip_preserves_route_semantics() -> TestResult {
-        let revision = revision(RouteShape::from_geometry(points())?)?;
+        for sport in [
+            RouteSport::Cycling,
+            RouteSport::Running,
+            RouteSport::Walking,
+            RouteSport::Hiking,
+        ] {
+            assert_sport_round_trip(sport)?;
+        }
+        Ok(())
+    }
+
+    fn assert_sport_round_trip(sport: RouteSport) -> TestResult {
+        let revision = revision_with_sport(RouteShape::from_geometry(points())?, sport)?;
         let bytes = encode(&revision, SerialNumber::from_u32(42)?)?;
         let decoded = decode(&bytes)?;
 
@@ -636,6 +657,13 @@ mod tests {
     }
 
     fn revision(shape: RouteShape) -> Result<RoutePlanRevision, garmin_model::route::Error> {
+        revision_with_sport(shape, RouteSport::Cycling)
+    }
+
+    fn revision_with_sport(
+        shape: RouteShape,
+        sport: RouteSport,
+    ) -> Result<RoutePlanRevision, garmin_model::route::Error> {
         RoutePlanRevision::from_parts(
             RoutePlanRevisionId::new_v4(),
             RoutePlanId::new_v4(),
@@ -643,7 +671,7 @@ mod tests {
             Timestamp::from_unix_seconds(1_780_000_000)
                 .expect("the fixture timestamp is in Jiff's supported range"),
             RouteName::from_string("Helsinki loop".to_owned())?,
-            RouteSport::Cycling,
+            sport,
             shape,
             vec![NavigationCue::from_parts(
                 RoutePointIndex::from_usize(1),

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE course_serial_counter SET last_serial = 4294967295;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "5ce2f0503e79fba7ac54e9466d6959e84036414554e62b73e8c45c7eda6935f9"
+}

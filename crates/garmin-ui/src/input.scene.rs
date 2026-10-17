@@ -13,7 +13,7 @@ struct SceneProps {
 }
 
 #[scene(default)]
-fn text_playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+fn text_playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let mut props = SceneProps {
         value: ctx.text("value", "Alex Rider"),
         state: ctx.buttons("message", &["none", "helper", "error"], 1),
@@ -22,7 +22,7 @@ fn text_playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
         width: ctx.slider("width", 360.0, 220.0, 640.0, 1.0),
     };
 
-    stage!(ctx, ui, |ui| {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(props.width);
         input::show(
             ui,
@@ -37,8 +37,8 @@ fn text_playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 #[scene]
-fn text_states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    stage!(ctx, ui, |ui| {
+fn text_states(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(360.0);
         let mut empty = String::new();
         input::show(
@@ -74,8 +74,8 @@ fn text_states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
 }
 
 #[scene]
-fn text_sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
-    stage!(ctx, ui, |ui| {
+fn text_sizes(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
         ui.set_width(360.0);
         for (label, size) in [
             ("Small", Size::Small),

@@ -3,13 +3,16 @@
 mod backup;
 mod device_state;
 mod download;
+mod host;
 mod install;
 mod mounted_install;
 mod plan;
+mod profile_marker;
 mod removal;
 pub mod space;
 
 pub use backup::{BackupError, BackupFile, BackupReport, backup_mass_storage};
+pub use device_state::inspection::inspect as inspect_device_state;
 pub use device_state::{
     DEVICE_STATE_MAGIC, DEVICE_STATE_VERSION, DeviceIdentityState, DeviceStateError,
     DeviceTransactionKind, DeviceTransactionStore, PortableTransaction,
@@ -23,12 +26,17 @@ pub use install::{
     apply_mass_storage_with_progress, preflight_mass_storage_update, recover_mass_storage,
 };
 pub use mounted_install::{
-    MountedInstallError, MountedMtpPreflight, MountedUpdateRecoveryOutcome,
-    MountedUpdateRecoveryReport, UnprotectedMutationEvidence, apply_mounted_mtp_with_progress,
-    preflight_mounted_mtp_update, recover_mounted_mtp_update,
+    AssistedRecoveryPlan, AssistedRecoveryReport, EmptyUpload, MountedInstallError,
+    MountedMtpPreflight, MountedUpdateRecoveryOutcome, MountedUpdateRecoveryReport,
+    UnprotectedMutationEvidence, apply_mounted_mtp_with_progress, approve_assisted_recovery,
+    preflight_mounted_mtp_update, recover_mounted_mtp_update, review_assisted_recovery,
 };
 pub use plan::{
     BackupPolicy, DownloadSpec, UPDATE_PLAN_SCHEMA_VERSION, UpdatePlan, UpdatePlanError,
+};
+pub use profile_marker::{
+    PROFILE_MARKER_PATH, ProfileMarker, ProfileMarkerError, create_profile_marker,
+    read_profile_marker, reassign_profile_marker,
 };
 pub use removal::{
     ComponentDisposition, RemovalApplyReport, RemovalBackup, RemovalComponent,

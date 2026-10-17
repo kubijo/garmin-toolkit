@@ -12,15 +12,19 @@ use garmin_model::identity::DisplayName;
 use garmin_service_api::ProfileSnapshot;
 use std::borrow::Cow;
 
-use crate::{header_selector, icons, input, modal, theme::color32};
+use crate::{
+    header_selector, icons, input, modal,
+    theme::{CONTROL_RADIUS, color32},
+};
 
 const AVATAR_SIZE: f32 = 36.0;
 const ROW_PADDING: f32 = 8.0;
 const CHOOSER_MAX_WIDTH: f32 = 440.0;
 const CHOOSER_AVATAR_SIZE: f32 = 48.0;
-const CHOOSER_ROW_HEIGHT: f32 = 72.0;
+const CHOOSER_ROW_HEIGHT: f32 = 64.0;
 const CHOOSER_ROW_PADDING: f32 = 12.0;
-const HEADER_AVATAR_SIZE: f32 = 28.0;
+const HEADER_AVATAR_SIZE: f32 = 20.0;
+const ACCENT_WASH_OPACITY: f32 = 0.16;
 
 pub struct Presentation {
     display_name: String,
@@ -116,14 +120,15 @@ pub fn create_dialog(ui: &mut Ui, intl: &Intl, state: &mut CreateState) -> Optio
             description: Some(&description),
             size: modal::Size::Medium,
             presentation: modal::Presentation::Modal,
-            cancel_label: &cancel,
+            cancel_label: Some(&cancel),
+            cancel_disabled: None,
             backdrop_closes: Some(!state.submitting),
-            primary: modal::Primary {
+            primary: Some(modal::Primary {
                 label: &create,
                 icon: Some(icons::PLUS),
                 kind: modal::PrimaryKind::Confirm,
                 enabled: parsed.is_ok() && !state.submitting,
-            },
+            }),
         },
         |ui| {
             let response = input::show(
@@ -137,9 +142,16 @@ pub fn create_dialog(ui: &mut Ui, intl: &Intl, state: &mut CreateState) -> Optio
             if response.changed() {
                 state.problem = None;
             }
+            crate::semantics::target(ui, &response, "profile.create.name");
             response
         },
     );
+    if let Some(primary) = &output.primary {
+        crate::semantics::target(ui, primary, "profile.create.submit");
+    }
+    if let Some(cancel) = &output.cancel {
+        crate::semantics::target(ui, cancel, "profile.create.cancel");
+    }
     match output.action {
         Some(modal::Action::Cancel) if !state.submitting => Some(CreateAction::Cancel),
         Some(modal::Action::Primary) => parsed.ok().map(CreateAction::Submit),
@@ -184,13 +196,21 @@ impl AvatarProps<'_> {
         let palette = crate::theme::palette(ui);
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(self.size), Sense::hover());
         let painter = ui.painter();
-        painter.circle_filled(rect.center(), self.size / 2.0, self.accent.into_cint());
+        let accent = self
+            .accent
+            .contrasting_marker(palette.surfaces().layer(theme::Level::One));
+        painter.circle_filled(rect.center(), self.size / 2.0, accent.into_cint());
 
         let image_rect = rect.shrink(2.0);
+        let background = if self.image.is_some() {
+            palette.surfaces().layer(theme::Level::One)
+        } else {
+            initials_background(self.accent, palette.content())
+        };
         painter.circle_filled(
             image_rect.center(),
             image_rect.width() / 2.0,
-            palette.surfaces().layer(theme::Level::One).into_cint(),
+            background.into_cint(),
         );
         if let Some(image) = self.image {
             Image::new(image.source())
@@ -210,6 +230,21 @@ impl AvatarProps<'_> {
     }
 }
 
+fn initials_background(accent: Color, content: &theme::Content) -> Color {
+    let inverse = content.text_primary().invert();
+    // An opaque fill keeps contrast independent of both accent alpha and the host surface.
+    let accent = accent.with_alpha(255);
+    for step in 16..=32u8 {
+        let background = accent
+            .mix(inverse, f32::from(step) / 32.0)
+            .unwrap_or(inverse);
+        if background.contrast_ratio(content.text_primary()) >= 4.5 {
+            return background;
+        }
+    }
+    inverse
+}
+
 /// Presentation data for one profile.
 pub struct ProfileProps<'a> {
     pub display_name: &'a str,
@@ -223,17 +258,20 @@ pub struct SelectorProps<'a> {
     pub profiles: &'a [ProfileProps<'a>],
     pub selected: Option<usize>,
     pub expanded: bool,
+    pub backup_enabled: bool,
 }
 
-/// Inputs for account actions below a separate trigger.
+/// Inputs for profile and application actions below a separate trigger.
 pub struct MenuProps<'a> {
     pub intl: &'a Intl,
+    pub backup_enabled: bool,
 }
 
 /// Inputs for the application-entry profile chooser.
 pub struct ChooserProps<'a> {
     pub intl: &'a Intl,
     pub profiles: &'a [ProfileProps<'a>],
+    pub owner_index: Option<usize>,
 }
 
 /// A profile selector interaction.
@@ -243,6 +281,7 @@ pub enum Action {
     Select(usize),
     Create,
     Settings,
+    Backup,
     Logout,
 }
 
@@ -250,7 +289,8 @@ pub enum Action {
 pub fn header(ui: &mut Ui, rect: egui::Rect, props: &SelectorProps<'_>, label: &str) -> Response {
     let selected = props.selected.and_then(|index| props.profiles.get(index));
     let palette = crate::theme::palette(ui);
-    header_selector::control(
+    let painter = ui.painter().clone();
+    let response = header_selector::control(
         ui,
         rect,
         ui.make_persistent_id("active-profile"),
@@ -258,6 +298,7 @@ pub fn header(ui: &mut Ui, rect: egui::Rect, props: &SelectorProps<'_>, label: &
         props.expanded,
         |ui, wide| {
             if let Some(profile) = selected {
+                paint_accent_wash(&painter, rect, profile.accent);
                 AvatarProps {
                     display_name: profile.display_name,
                     accent: profile.accent,
@@ -281,7 +322,9 @@ pub fn header(ui: &mut Ui, rect: egui::Rect, props: &SelectorProps<'_>, label: &
                 .show(ui);
             }
         },
-    )
+    );
+    crate::semantics::target(ui, &response, "profile.toggle");
+    response
 }
 
 pub(crate) fn preferred_header_width(ui: &Ui, props: &SelectorProps<'_>) -> f32 {
@@ -299,10 +342,6 @@ pub(crate) fn preferred_header_width(ui: &Ui, props: &SelectorProps<'_>) -> f32 
 
 #[must_use]
 pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
-    let heading = format_message!(
-        props.intl,
-        default_message: "Choose a profile",
-    );
     let empty = format_message!(
         props.intl,
         default_message: "No profiles yet",
@@ -311,6 +350,7 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
         props.intl,
         default_message: "Create a profile",
     );
+    let owner = format_message!(props.intl, default_message: "Owner");
     let available = ui.available_size_before_wrap();
     let content_height = chooser_content_height(props.profiles.len());
     let top_padding = if available.y.is_finite() {
@@ -318,6 +358,8 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
     } else {
         24.0
     };
+    let gap_user = 2.0;
+    let gap_add = 4.0;
     let width = available.x.min(CHOOSER_MAX_WIDTH);
     let mut action = None;
 
@@ -327,25 +369,36 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
             egui::vec2(width, content_height),
             Layout::top_down(Align::Min),
             |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.label(crate::typography::semibold(heading).size(28.0));
-                });
-                ui.add_space(32.0);
+                // The explicit gaps below include all spacing between chooser rows.
+                ui.spacing_mut().item_spacing.y = 0.0;
 
                 if props.profiles.is_empty() {
                     ui.label(RichText::new(empty).weak());
-                    ui.add_space(16.0);
-                } else {
+                    ui.add_space(gap_user);
+                }
+                // Contentful
+                else {
+                    let count = props.profiles.len();
                     for (index, profile) in props.profiles.iter().enumerate() {
-                        if chooser_profile_row(ui, profile).clicked() {
+                        let badge = (props.owner_index == Some(index)).then_some(owner.as_str());
+                        let response = chooser_profile_row(ui, profile, badge);
+                        crate::semantics::target(ui, &response, format!("profile.{index}"));
+
+                        if response.clicked() {
                             action = Some(Action::Select(index));
                         }
-                        ui.add_space(8.0);
+
+                        if index < count - 1 {
+                            ui.add_space(gap_user);
+                        }
                     }
-                    ui.add_space(8.0);
                 }
 
-                if chooser_create_row(ui, &create).clicked() {
+                // Gap is doubled before the create button
+                ui.add_space(gap_add);
+                let response = chooser_create_row(ui, &create);
+                crate::semantics::target(ui, &response, "profile.create");
+                if response.clicked() {
                     action = Some(Action::Create);
                 }
             },
@@ -357,21 +410,21 @@ pub fn chooser(ui: &mut Ui, props: &ChooserProps<'_>) -> Option<Action> {
 fn chooser_content_height(profile_count: usize) -> f32 {
     let profiles_height = std::iter::repeat_n(CHOOSER_ROW_HEIGHT + 8.0, profile_count).sum::<f32>();
     let empty_height = if profile_count == 0 { 36.0 } else { 8.0 };
-    40.0 + 32.0 + profiles_height + empty_height + 56.0
+    32.0 + 32.0 + profiles_height + empty_height + 48.0
 }
 
-fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>) -> Response {
+fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>, badge: Option<&str>) -> Response {
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), CHOOSER_ROW_HEIGHT),
         Sense::click(),
     );
     let response = row_response(ui, response);
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            profile.display_name,
-        )
+        let label = badge.map_or_else(
+            || profile.display_name.to_owned(),
+            |badge| format!("{}, {badge}", profile.display_name),
+        );
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     let palette = crate::theme::palette(ui);
     let fill = if response.highlighted() {
@@ -384,22 +437,31 @@ fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>) -> Response {
     } else {
         palette.borders().subtle()
     };
-    ui.painter().rect_filled(rect, 0.0, fill.into_cint());
+    ui.painter()
+        .rect_filled(rect, CONTROL_RADIUS, fill.into_cint());
+    paint_accent_wash(ui.painter(), rect, profile.accent);
     ui.painter().rect_stroke(
         rect,
-        0.0,
+        CONTROL_RADIUS,
         egui::Stroke::new(1.0, border.into_cint()),
         egui::StrokeKind::Inside,
     );
 
+    let content_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + CHOOSER_ROW_PADDING, rect.top()),
+        egui::pos2(rect.right() - CHOOSER_ROW_PADDING, rect.bottom()),
+    );
     let mut child = ui.new_child(
         UiBuilder::new()
-            .max_rect(rect.shrink(CHOOSER_ROW_PADDING))
+            .max_rect(content_rect)
             .layout(Layout::left_to_right(Align::Center)),
     );
     avatar(&mut child, profile, CHOOSER_AVATAR_SIZE);
     child
         .add(egui::Label::new(crate::typography::semibold(profile.display_name)).selectable(false));
+    if let Some(badge) = badge {
+        chooser_owner_badge(&mut child, badge);
+    }
     child.with_layout(Layout::right_to_left(Align::Center), |ui| {
         icons::Props {
             icon: icons::CARET_RIGHT,
@@ -412,8 +474,33 @@ fn chooser_profile_row(ui: &mut Ui, profile: &ProfileProps<'_>) -> Response {
     response
 }
 
+fn chooser_owner_badge(ui: &mut Ui, label: &str) {
+    let palette = crate::theme::palette(ui);
+    let color = color32(palette.content().text_secondary());
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        crate::typography::font(11.0, crate::typography::Weight::SemiBold),
+        color,
+    );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(galley.size().x + 12.0, 20.0), Sense::hover());
+    ui.painter().rect_filled(
+        rect,
+        3.0,
+        color32(palette.surfaces().layer(theme::Level::Two)),
+    );
+    ui.painter().rect_stroke(
+        rect,
+        3.0,
+        egui::Stroke::new(1.0, color32(palette.borders().subtle())),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, color);
+}
+
 fn chooser_create_row(ui: &mut Ui, label: &str) -> Response {
-    const HEIGHT: f32 = 56.0;
+    const HEIGHT: f32 = 48.0;
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), HEIGHT), Sense::click());
     let response = row_response(ui, response);
@@ -421,9 +508,14 @@ fn chooser_create_row(ui: &mut Ui, label: &str) -> Response {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     let visuals = ui.style().interact(&response);
-    ui.painter().rect_filled(rect, 0.0, visuals.weak_bg_fill);
     ui.painter()
-        .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+        .rect_filled(rect, CONTROL_RADIUS, visuals.weak_bg_fill);
+    ui.painter().rect_stroke(
+        rect,
+        CONTROL_RADIUS,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
 
     let icon_center = egui::pos2(
         rect.left() + CHOOSER_ROW_PADDING + CHOOSER_AVATAR_SIZE / 2.0,
@@ -459,6 +551,7 @@ pub fn menu(ui: &mut Ui, props: &MenuProps<'_>) -> Option<Action> {
         props.intl,
         default_message: "Log out",
     );
+    let backup = format_message!(props.intl, default_message: "Backup and restore");
     let mut action = None;
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
@@ -474,15 +567,28 @@ pub fn menu(ui: &mut Ui, props: &MenuProps<'_>) -> Option<Action> {
             {
                 action = Some(Action::Settings);
             }
-            if action_row(
+            if props.backup_enabled {
+                let response = action_row(
+                    ui,
+                    &backup,
+                    icons::FOLDER_OPEN,
+                    header_selector::RowKind::Default,
+                    false,
+                );
+                crate::semantics::target(ui, &response, "profile.backup");
+                if response.clicked() {
+                    action = Some(Action::Backup);
+                }
+            }
+            let logout = action_row(
                 ui,
                 &logout,
                 icons::SIGN_OUT,
                 header_selector::RowKind::Danger,
                 true,
-            )
-            .clicked()
-            {
+            );
+            crate::semantics::target(ui, &logout, "profile.logout");
+            if logout.clicked() {
                 action = Some(Action::Logout);
             }
         });
@@ -539,7 +645,7 @@ fn paint_focus_ring(ui: &Ui, response: &Response) {
     if response.has_focus() {
         ui.painter().rect_stroke(
             response.rect,
-            0.0,
+            CONTROL_RADIUS,
             egui::Stroke::new(
                 2.0,
                 crate::theme::palette(ui)
@@ -550,6 +656,32 @@ fn paint_focus_ring(ui: &Ui, response: &Response) {
             egui::StrokeKind::Inside,
         );
     }
+}
+
+fn paint_accent_wash(painter: &egui::Painter, rect: egui::Rect, accent: Color) {
+    // Shift the 45° fade right, keeping the preceding corner filled to avoid a hard edge.
+    let reach = rect.height() * 2.0;
+    let offset = rect.height() * 0.25;
+    let corner = rect.left_bottom();
+    let tint = color32(accent).gamma_multiply(ACCENT_WASH_OPACITY);
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(corner, tint);
+    mesh.colored_vertex(corner - egui::vec2(0.0, offset), tint);
+    mesh.colored_vertex(corner + egui::vec2(offset, 0.0), tint);
+    mesh.colored_vertex(
+        corner - egui::vec2(0.0, offset + reach),
+        egui::Color32::TRANSPARENT,
+    );
+    mesh.colored_vertex(
+        corner + egui::vec2(offset + reach, 0.0),
+        egui::Color32::TRANSPARENT,
+    );
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(1, 3, 4);
+    mesh.add_triangle(1, 4, 2);
+    painter
+        .with_clip_rect(painter.clip_rect().intersect(rect))
+        .add(mesh);
 }
 
 fn avatar(ui: &mut Ui, profile: &ProfileProps<'_>, size: f32) {

@@ -1,0 +1,4 @@
+version = 1
+
+[paths]
+"bin/garmin-cli" = { type = "file", mode_required = 0o100, min_size = 1 }

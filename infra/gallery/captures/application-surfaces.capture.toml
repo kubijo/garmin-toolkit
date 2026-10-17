@@ -1,0 +1,42 @@
+out = "../../../.tmp/gallery/application-surfaces"
+size = "1440x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = false
+
+[[shot]]
+name = "empty-dark"
+scene = "activity::Application"
+frames = 32
+[shot.knobs]
+empty = true
+
+[[shot]]
+name = "empty-light"
+scene = "activity::Application"
+frames = 32
+[shot.knobs]
+empty = true
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "narrow-dark"
+scene = "activity::Narrow Application"
+frames = 32
+[shot.knobs]
+empty = true
+
+[[shot]]
+name = "narrow-light"
+scene = "activity::Narrow Application"
+frames = 32
+[shot.knobs]
+empty = true
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "activity-dark"
+scene = "activity::Application"
+frames = 256

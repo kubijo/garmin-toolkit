@@ -1,0 +1,70 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    (SELECT count(*) FROM sources) AS sources,\n    (SELECT count(*) FROM artifact_blobs) AS blobs,\n    (SELECT count(*) FROM artifacts) AS artifacts,\n    (SELECT count(*) FROM acquisitions) AS acquisitions,\n    (SELECT count(*) FROM route_plans) AS plans,\n    (SELECT count(*) FROM route_plan_revisions) AS revisions,\n    (SELECT count(*) FROM route_plan_heads) AS heads,\n    (SELECT count(*) FROM route_import_receipts) AS receipts;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "sources",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "blobs",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "artifacts",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "acquisitions",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "plans",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "revisions",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "heads",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "receipts",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ad206317fa6fab3e8bfa9fff61f012db652394edcded37a3320cdf66804d1e48"
+}

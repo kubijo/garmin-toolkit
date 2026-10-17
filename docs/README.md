@@ -1,11 +1,14 @@
 # Documentation
 
-| Location        | Contents                                                 |
-| --------------- | -------------------------------------------------------- |
-| `architecture/` | Current boundaries and ownership                         |
-| `decisions/`    | Accepted choices and superseding history                 |
-| `plans/`        | Temporary work not yet promoted to durable documentation |
-| `research/`     | Reproducible evidence, including negative results        |
+| Location                               | Contents                                           |
+| -------------------------------------- | -------------------------------------------------- |
+| [Architecture](architecture/README.md) | Current boundaries and ownership                   |
+| [Decisions](decisions/README.md)       | Durable choices whose rationale is still useful    |
+| [Plans](plans/README.md)               | Unresolved work, grouped by its owning outcome     |
+| [Research](research/README.md)         | Reproducible evidence, including negative results  |
+| [Development](development.md)          | Execution safeguards and documentation maintenance |
 
-Architecture changes with the system. Decisions are superseded, not rewritten. Completed plans are deleted after their
-lasting results move into code, architecture, decisions, or user documentation.
+Desktop and HASS users: [backup and restore](backup-restore.md).
+
+Architecture changes with the system. Retire decisions when current documentation owns their useful content; Git keeps
+the history. Delete completed plans after their lasting results move into code, architecture, or user documentation.

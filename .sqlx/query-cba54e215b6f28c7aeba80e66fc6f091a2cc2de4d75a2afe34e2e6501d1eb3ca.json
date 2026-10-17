@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT pragma_page_count.page_count * pragma_page_size.page_size AS bytes\nFROM pragma_page_count, pragma_page_size;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "bytes",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cba54e215b6f28c7aeba80e66fc6f091a2cc2de4d75a2afe34e2e6501d1eb3ca"
+}

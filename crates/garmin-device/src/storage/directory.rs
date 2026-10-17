@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Mutex, PoisonError},
+    time::Duration,
+};
 
 use sha2::{Digest as _, Sha256};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -16,12 +20,60 @@ use garmin_progress::OperationStage;
 /// Filesystem transport using the same object transaction as MTP.
 pub struct DirectoryDevice {
     root: PathBuf,
+    storage_id: String,
+    storage_label: String,
+    upload_delay: Duration,
+    verify_delay: Duration,
+    remove_uploaded_before_verify: bool,
+    truncate_uploaded_before_verify: bool,
+    recent_upload: Mutex<Option<SafeRelativePath>>,
 }
 
 impl DirectoryDevice {
     #[must_use]
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self::with_storage(root, "primary", "Device storage")
+    }
+
+    /// Opens a directory-backed device with an explicit storage identity.
+    #[must_use]
+    pub fn with_storage(
+        root: PathBuf,
+        storage_id: impl Into<String>,
+        storage_label: impl Into<String>,
+    ) -> Self {
+        Self {
+            root,
+            storage_id: storage_id.into(),
+            storage_label: storage_label.into(),
+            upload_delay: Duration::ZERO,
+            verify_delay: Duration::ZERO,
+            remove_uploaded_before_verify: false,
+            truncate_uploaded_before_verify: false,
+            recent_upload: Mutex::new(None),
+        }
+    }
+
+    /// Pause demo-backed transfers so UI automation can observe upload and verification states.
+    #[must_use]
+    pub fn with_transfer_delays(mut self, upload: Duration, verify: Duration) -> Self {
+        self.upload_delay = upload;
+        self.verify_delay = verify;
+        self
+    }
+
+    /// Remove only this transport's most recent upload at verification, for demo fault checks.
+    #[must_use]
+    pub fn with_missing_uploaded_file_on_verify(mut self, enabled: bool) -> Self {
+        self.remove_uploaded_before_verify = enabled;
+        self
+    }
+
+    /// Truncate only this transport's most recent upload at verification, for demo fault checks.
+    #[must_use]
+    pub fn with_partial_uploaded_file_on_verify(mut self, enabled: bool) -> Self {
+        self.truncate_uploaded_before_verify = enabled;
+        self
     }
 
     async fn resolve(
@@ -30,7 +82,7 @@ impl DirectoryDevice {
         path: &SafeRelativePath,
         create_parents: bool,
     ) -> Result<PathBuf, DeviceIoError> {
-        if storage != "primary" {
+        if storage != self.storage_id {
             return Err(DeviceIoError::Storage(storage.to_owned()));
         }
         let mut current = self.root.clone();
@@ -134,6 +186,8 @@ impl DeviceRead for DirectoryDevice {
     }
     async fn state(&self) -> Result<crate::DeviceStateSnapshot, DeviceIoError> {
         let root = self.root.clone();
+        let storage_id = self.storage_id.clone();
+        let storage_label = self.storage_label.clone();
         tokio::task::spawn_blocking(move || {
             let metadata = std::fs::symlink_metadata(&root)?;
             if !metadata.is_dir() {
@@ -141,8 +195,8 @@ impl DeviceRead for DirectoryDevice {
             }
             Ok(crate::DeviceStateSnapshot {
                 storages: vec![crate::DeviceStorageState {
-                    id: "primary".to_owned(),
-                    label: "Device storage".to_owned(),
+                    id: storage_id,
+                    label: storage_label,
                     capacity: crate::filesystem_capacity(&root),
                     writable: metadata.permissions().readonly().then_some(false),
                 }],
@@ -157,10 +211,10 @@ impl DeviceRead for DirectoryDevice {
     ) -> Result<DeviceInventory, DeviceIoError> {
         let mut items = Vec::new();
         for path in paths {
-            let status = self.inspect("primary", path).await?;
+            let status = self.inspect(&self.storage_id, path).await?;
             items.push(DevicePathInspection {
-                storage_id: "primary".to_owned(),
-                storage_label: "Device storage".to_owned(),
+                storage_id: self.storage_id.clone(),
+                storage_label: self.storage_label.clone(),
                 path: path.clone(),
                 state: status.state(),
                 size: status.size(),
@@ -172,7 +226,7 @@ impl DeviceRead for DirectoryDevice {
         })
     }
     async fn primary_storage_id(&self) -> Result<String, DeviceIoError> {
-        Ok("primary".to_owned())
+        Ok(self.storage_id.clone())
     }
     async fn inspect(
         &self,
@@ -235,6 +289,35 @@ impl DeviceRead for DirectoryDevice {
         size: u64,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
+        if !self.verify_delay.is_zero() {
+            tokio::time::sleep(self.verify_delay).await;
+        }
+        if self.remove_uploaded_before_verify || self.truncate_uploaded_before_verify {
+            let alter_uploaded = {
+                let mut recent = self
+                    .recent_upload
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                if recent.as_ref() == Some(path) {
+                    recent.take().is_some()
+                } else {
+                    false
+                }
+            };
+            if alter_uploaded {
+                let uploaded = self.resolve(storage, path, false).await?;
+                if self.remove_uploaded_before_verify {
+                    tokio::fs::remove_file(uploaded).await?;
+                } else {
+                    tokio::fs::OpenOptions::new()
+                        .write(true)
+                        .open(uploaded)
+                        .await?
+                        .set_len(0)
+                        .await?;
+                }
+            }
+        }
         verify_file(&self.resolve(storage, path, false).await?, size, sha256).await
     }
 
@@ -256,7 +339,12 @@ impl DeviceRead for DirectoryDevice {
         if metadata.len() > limit {
             return Err(DeviceIoError::LimitExceeded(path.to_string()));
         }
-        let bytes = tokio::fs::read(resolved).await?;
+        let mut bytes = Vec::new();
+        tokio::fs::File::open(resolved)
+            .await?
+            .take(limit.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .await?;
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
             return Err(DeviceIoError::LimitExceeded(path.to_string()));
         }
@@ -303,7 +391,7 @@ impl DeviceWrite for DirectoryDevice {
         storage: &str,
         path: &SafeRelativePath,
     ) -> Result<(), DeviceIoError> {
-        if storage != "primary" {
+        if storage != self.storage_id {
             return Err(DeviceIoError::Storage(storage.to_owned()));
         }
         let mut current = self.root.clone();
@@ -438,6 +526,9 @@ impl DeviceWrite for DirectoryDevice {
             .open(&destination)
             .await?;
         let result = async {
+            if !self.upload_delay.is_zero() {
+                tokio::time::sleep(self.upload_delay).await;
+            }
             let mut source = tokio::fs::File::open(source).await?;
             let mut buffer = vec![0; 1024 * 1024];
             let mut bytes = 0_u64;
@@ -467,6 +558,11 @@ impl DeviceWrite for DirectoryDevice {
         drop(output);
         if result.is_err() {
             tokio::fs::remove_file(destination).await?;
+        } else {
+            *self
+                .recent_upload
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(path.clone());
         }
         result
     }

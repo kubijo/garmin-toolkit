@@ -37,11 +37,13 @@ fn show(
         avatar: None,
     }];
     let devices = [DeviceSnapshot {
-        key: "edge-1050".to_owned(),
-        name: "Garmin Edge 1050".to_owned(),
+        key: "mock-cycle-o-matic-9000".to_owned(),
+        name: "Mock Cycle-o-Matic 9000".to_owned(),
         identifier: Some(36_264_719),
         software_version: Some(3_220),
         inspection: InspectionState::Ready,
+        inspection_error: None,
+        report: None,
         capabilities: Vec::new(),
         storages: Vec::new(),
     }];
@@ -64,6 +66,7 @@ fn show(
                 page: &workspace::Page::Activities,
                 navigation: shell::Navigation::Expanded,
                 devices: &devices,
+                backup_enabled: false,
                 window_controls: native_controls.then_some(&controls),
             },
             |ui| {

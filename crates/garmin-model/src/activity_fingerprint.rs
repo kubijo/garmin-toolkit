@@ -83,6 +83,9 @@ impl From<crate::activity::ActivitySummary> for CanonicalSummary {
 enum CanonicalSport {
     Running,
     Cycling,
+    Swimming,
+    Walking,
+    Hiking,
 }
 
 impl From<ActivitySport> for CanonicalSport {
@@ -90,6 +93,9 @@ impl From<ActivitySport> for CanonicalSport {
         match sport {
             ActivitySport::Running => Self::Running,
             ActivitySport::Cycling => Self::Cycling,
+            ActivitySport::Swimming => Self::Swimming,
+            ActivitySport::Walking => Self::Walking,
+            ActivitySport::Hiking => Self::Hiking,
         }
     }
 }

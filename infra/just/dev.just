@@ -1,18 +1,32 @@
 import 'common.just'
 
+cache_tool := repository_root / "infra/just/build-cache.sh"
+
+# Report repository build caches and read-only external cache totals.
+cache-report:
+    @bash {{ quote(cache_tool) }} report
+
+# Clean one named target cache; preview unless MODE is explicitly apply.
+cache-clean CACHE MODE='dry-run':
+    @bash {{ quote(cache_tool) }} clean {{ quote(CACHE) }} {{ quote(MODE) }}
+
 # Enter the pinned development shell.
 shell:
     just in-shell nix develop {{ flake }}
 
-# Build the production garmin-cli package.
-build:
-    just in-shell nix build {{ flake }}#garmin-cli
+# Trace a development build without starting an application.
+build-profile target label *options:
+    @just in-shell nix develop {{ flake }} --command uv run --frozen --project infra/python python infra/python/build_profile.py "$@"
+
+# Profile the UI or desktop library's compiler internals in an isolated nightly cache.
+compiler-profile target label *options:
+    @just in-shell nix develop {{ flake }}\#compiler-profile --command uv run --frozen --project infra/python python infra/python/build_profile.py "$@" --compiler-profile
 
 # Build API documentation with warnings denied.
 docs *args:
     @just in-shell nix run {{ flake }}#docs -- "$@"
 
-# Report outdated direct Rust dependencies without changing manifests.
+# Report outdated Nix inputs, Python dependencies, and CI actions.
 outdated *args:
     @just in-shell nix run {{ flake }}#outdated -- "$@"
 

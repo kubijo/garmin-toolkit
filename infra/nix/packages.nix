@@ -1,5 +1,7 @@
 {
   crane,
+  dirspec,
+  formatjsCli,
   lib,
   pkgs,
   toolchain,
@@ -24,8 +26,10 @@ let
     inherit src;
     pname = "garmin-cli";
     version = "0.1.0";
+    cargoExtraArgs = "--locked --package garmin-cli";
     strictDeps = true;
     nativeBuildInputs = [
+      formatjsCli
       pkgs.pkg-config
     ]
     ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
@@ -33,19 +37,27 @@ let
       pkgs.wrapGAppsNoGuiHook
     ];
     buildInputs = runtimeLibraries;
-    LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibraries;
     SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+  }
+  // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+    LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibraries;
   };
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+  cargoArtifacts = craneLib.buildDepsOnly (
+    commonArgs // import ./cargo-deps.nix { inherit lib workspaceSrc; }
+  );
+  packageSpec = workspaceSrc + "/infra/nix/garmin-cli.dirspec.toml";
   garminCli = craneLib.buildPackage (
     commonArgs
     // {
       inherit cargoArtifacts;
-      cargoExtraArgs = "--package garmin-cli";
-      preFixup = ''
+      nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ dirspec ];
+      preFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
         gappsWrapperArgs+=(
           --set-default SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         )
+      '';
+      postFixup = ''
+        dirspec "$out" --spec ${packageSpec}
       '';
     }
   );

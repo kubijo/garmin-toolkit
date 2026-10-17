@@ -12,6 +12,9 @@ use garmin_model::route::{Elevation, RouteName, RoutePlanRevision, RoutePoint, R
 use gpx_format::{Gpx, GpxVersion, Route, Track, TrackSegment, Waypoint};
 use thiserror::Error;
 
+#[cfg(feature = "worker")]
+pub mod worker;
+
 /// Adapter identity recorded in route-revision provenance.
 pub const ADAPTER_NAME: &str = "garmin-gpx";
 /// Adapter version recorded in route-revision provenance.
@@ -21,20 +24,7 @@ pub const MAX_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum accepted points across all tracks and routes.
 pub const MAX_POINTS: usize = 1_000_000;
 
-/// Location of one candidate in the GPX document.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum CandidateSource {
-    TrackSegment {
-        /// Zero-based track index.
-        track: usize,
-        /// Zero-based segment index within the track.
-        segment: usize,
-    },
-    Route {
-        /// Zero-based route index.
-        route: usize,
-    },
-}
+pub use garmin_model::route::RouteCandidateSource as CandidateSource;
 
 /// One valid route-plan candidate.
 #[derive(Clone, Debug, PartialEq)]

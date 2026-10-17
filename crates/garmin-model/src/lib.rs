@@ -1,5 +1,8 @@
 //! Source-neutral application domain.
 
+pub mod diagnostics;
+pub mod logging;
+
 macro_rules! define_id {
     ($kind:ident, $name:ident, $tag:literal, $kind_doc:literal, $name_doc:literal) => {
         #[doc = $kind_doc]

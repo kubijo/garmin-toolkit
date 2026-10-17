@@ -63,6 +63,7 @@ fn assert_boundary_storage_snapshots(events: &[ProgressEvent], storages: usize) 
 enum Fault {
     None,
     BackupFailure(usize),
+    CancelAfterBackup,
     InspectFailure(usize),
     UploadFailure(usize),
     UploadAcceptanceFailure(usize),
@@ -211,9 +212,15 @@ impl DeviceRead for TestDevice {
         if matches!(self.fault, Fault::BackupFailure(expected) if backup == expected) {
             return Err(std::io::Error::other("injected disconnect during backup").into());
         }
-        self.adapter
+        let cancellation = progress.reporter.cancellation_token();
+        let result = self
+            .adapter
             .backup(storage, path, size, destination, progress)
-            .await
+            .await;
+        if matches!(self.fault, Fault::CancelAfterBackup) {
+            cancellation.cancel();
+        }
+        result
     }
     async fn verify(
         &self,
@@ -351,6 +358,7 @@ impl DeviceWrite for TestDevice {
         let fault = match self.fault {
             Fault::None
             | Fault::BackupFailure(_)
+            | Fault::CancelAfterBackup
             | Fault::InspectFailure(_)
             | Fault::UploadAcceptanceFailure(_)
             | Fault::CancelAfterUpload(_)
@@ -1218,7 +1226,8 @@ async fn cancellation_between_each_upload_rolls_back_the_transaction() -> Result
 
         assert!(matches!(
             transaction.apply_with(&device, &authorization).await,
-            Err(MountedInstallError::Cancelled)
+            Err(MountedInstallError::RolledBack(operation))
+                if matches!(*operation, MountedInstallError::Cancelled)
         ));
         verify_multi_file_originals(&device).await?;
     }
@@ -1493,6 +1502,231 @@ async fn task_abort_refuses_an_empty_partial_file() -> Result {
             .join("mounted-update/transaction/rolled-back.json")
             .exists()
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn assisted_recovery_preserves_reviewed_empty_upload_before_rollback() -> Result {
+    let (device, _transaction, capture) = interrupted().await?;
+    let partial = device.root.join("internal/Garmin/map.img");
+    fs::write(&partial, [])?;
+    let progress = ProgressReporter::default();
+    let review = garmin_update::review_assisted_recovery(
+        &capture,
+        TEST_DEVICE_DIGEST,
+        device.as_ref(),
+        &progress,
+    )
+    .await?
+    .ok_or("empty upload review missing")?;
+    assert_eq!(review.files().len(), 1);
+    assert_eq!(review.files()[0].path.to_string(), "Garmin/map.img");
+    assert_eq!(fs::metadata(&partial)?.len(), 0);
+    assert!(
+        !capture
+            .join("mounted-update/transaction/rolled-back.json")
+            .exists()
+    );
+    let report = garmin_update::approve_assisted_recovery(
+        &capture,
+        TEST_DEVICE_DIGEST,
+        device.as_ref(),
+        &review,
+        &progress,
+    )
+    .await?;
+    assert_eq!(
+        report.recovery.outcome,
+        MountedUpdateRecoveryOutcome::Restored
+    );
+    verify(&device, ORIGINAL_MAP_BYTES).await?;
+    let quarantine = fs::read_dir(&capture)?
+        .filter_map(std::result::Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("assisted-recovery-")
+        })
+        .ok_or("quarantine missing")?
+        .path();
+    assert_eq!(fs::metadata(quarantine.join("000000.bin"))?.len(), 0);
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(quarantine.join("approval.json"))?)?;
+    assert_eq!(manifest["approval"], review.approval().to_string());
+    assert_eq!(manifest["files"][0]["path"], "Garmin/map.img");
+    Ok(())
+}
+
+#[tokio::test]
+async fn assisted_recovery_rejects_changes_after_review() -> Result {
+    for corrupt_backup in [false, true] {
+        let (device, _transaction, capture) = interrupted().await?;
+        let partial = device.root.join("internal/Garmin/map.img");
+        fs::write(&partial, [])?;
+        let progress = ProgressReporter::default();
+        let review = garmin_update::review_assisted_recovery(
+            &capture,
+            TEST_DEVICE_DIGEST,
+            device.as_ref(),
+            &progress,
+        )
+        .await?
+        .ok_or("empty upload review missing")?;
+        if corrupt_backup {
+            let backup = fs::read_dir(capture.join("mounted-update/backups"))?
+                .next()
+                .ok_or("backup missing")??;
+            fs::write(backup.path(), b"bad backup!!")?;
+        } else {
+            fs::write(&partial, b"unrelated")?;
+        }
+        let before = fs::read(&partial)?;
+        assert!(
+            garmin_update::approve_assisted_recovery(
+                &capture,
+                TEST_DEVICE_DIGEST,
+                device.as_ref(),
+                &review,
+                &progress
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(fs::read(&partial)?, before);
+        assert!(
+            !capture
+                .join("mounted-update/transaction/rolled-back.json")
+                .exists()
+        );
+        assert!(
+            !fs::read_dir(&capture)?
+                .filter_map(std::result::Result::ok)
+                .any(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("assisted-recovery-"))
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn assisted_recovery_cancelled_approval_preserves_device() -> Result {
+    let (device, _transaction, capture) = interrupted().await?;
+    let partial = device.root.join("internal/Garmin/map.img");
+    fs::write(&partial, [])?;
+    let progress = ProgressReporter::default();
+    let review = garmin_update::review_assisted_recovery(
+        &capture,
+        TEST_DEVICE_DIGEST,
+        device.as_ref(),
+        &progress,
+    )
+    .await?
+    .ok_or("empty upload review missing")?;
+    progress.cancellation_token().cancel();
+    assert!(
+        garmin_update::approve_assisted_recovery(
+            &capture,
+            TEST_DEVICE_DIGEST,
+            device.as_ref(),
+            &review,
+            &progress
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(fs::metadata(&partial)?.len(), 0);
+    assert!(
+        !capture
+            .join("mounted-update/transaction/rolled-back.json")
+            .exists()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn assisted_recovery_requires_unapplied_write_intent() -> Result {
+    for applied in [false, true] {
+        let (device, _transaction, capture) = interrupted().await?;
+        let partial = device.root.join("internal/Garmin/map.img");
+        fs::write(&partial, [])?;
+        let started = capture.join("mounted-update/transaction/000001-started.json");
+        if applied {
+            fs::copy(
+                &started,
+                capture.join("mounted-update/transaction/000001-applied.json"),
+            )?;
+        } else {
+            fs::remove_file(started)?;
+        }
+        assert!(
+            garmin_update::review_assisted_recovery(
+                &capture,
+                TEST_DEVICE_DIGEST,
+                device.as_ref(),
+                &ProgressReporter::default()
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(fs::metadata(&partial)?.len(), 0);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn assisted_recovery_preserves_quarantine_when_cancelled_before_deletion() -> Result {
+    let (owner, _transaction, capture) = interrupted().await?;
+    let partial = owner.root.join("internal/Garmin/map.img");
+    fs::write(&partial, [])?;
+    let device = TestDevice::attach(
+        owner.root.clone(),
+        Fault::CancelAfterBackup,
+        TEST_CAPACITY,
+        false,
+        None,
+    );
+    let progress = ProgressReporter::default();
+    let review =
+        garmin_update::review_assisted_recovery(&capture, TEST_DEVICE_DIGEST, &device, &progress)
+            .await?
+            .ok_or("empty upload review missing")?;
+    assert!(
+        garmin_update::approve_assisted_recovery(
+            &capture,
+            TEST_DEVICE_DIGEST,
+            &device,
+            &review,
+            &progress
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(fs::metadata(&partial)?.len(), 0);
+    let quarantine = fs::read_dir(&capture)?
+        .filter_map(std::result::Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("assisted-recovery-")
+        })
+        .ok_or("quarantine missing")?
+        .path();
+    assert!(quarantine.join("approval.json").is_file());
+    assert_eq!(fs::metadata(quarantine.join("000000.bin"))?.len(), 0);
+    let resumed = TestDevice::attach(owner.root.clone(), Fault::None, TEST_CAPACITY, false, None);
+    garmin_update::approve_assisted_recovery(
+        &capture,
+        TEST_DEVICE_DIGEST,
+        &resumed,
+        &review,
+        &ProgressReporter::default(),
+    )
+    .await?;
+    verify(&resumed, ORIGINAL_MAP_BYTES).await?;
     Ok(())
 }
 

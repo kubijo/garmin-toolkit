@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO course_generations (\n    id, operation_id, owner_id, plan_id, revision_id, artifact_id,\n    version, serial, encoder_name, encoder_version, generated_at\n)\nVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "69bd987da55d2b326e3a1f9e5d50dda1375dd1aabc30c2066dc9d7897f9dbe7a"
+}

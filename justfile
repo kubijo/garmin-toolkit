@@ -12,8 +12,15 @@ mod hass 'apps/garmin-hass'
 # Repository quality gates and focused checks.
 mod qa 'infra/just/qa.just'
 
+# Local release assembly and artifact verification.
+mod release 'infra/just/release.just'
+
 # Native Garmin Toolkit desktop application and its packages.
 mod desktop 'apps/garmin-desktop'
 
 # CLI application and its packages.
 mod cli 'apps/garmin-cli'
+
+update:
+    cargo update
+    nix flake update

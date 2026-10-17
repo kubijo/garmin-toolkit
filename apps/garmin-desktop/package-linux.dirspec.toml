@@ -1,0 +1,10 @@
+version = 1
+
+[paths]
+"bin/garmin-desktop" = { type = "file", mode_required = 0o100, min_size = 1 }
+"bin/garmin-gpx-worker" = { type = "file", mode_required = 0o100, min_size = 1 }
+"share/applications/io.kubijo.GarminToolkit.desktop" = { type = "file", min_size = 1 }
+"share/metainfo/io.kubijo.GarminToolkit.metainfo.xml" = { type = "file", min_size = 1 }
+"share/icons/hicolor/128x128/apps/io.kubijo.GarminToolkit.png" = { type = "file", min_size = 1 }
+"share/icons/hicolor/256x256/apps/io.kubijo.GarminToolkit.png" = { type = "file", min_size = 1 }
+"share/icons/hicolor/512x512/apps/io.kubijo.GarminToolkit.png" = { type = "file", min_size = 1 }

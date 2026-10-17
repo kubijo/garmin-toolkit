@@ -6,14 +6,24 @@
   inheritanceCheck,
   licenseChecker,
   lib,
-  nixCargoTargetDir,
+  sharedCargoTargetDir,
   pkgs,
+  pythonToolsEnv,
   toolchain,
+  wasmToolchain,
   workspaceSrc,
 }:
 
 let
   cargo = lib.getExe' toolchain "cargo";
+  # Tests need named time zones and GPU upload/readback without host resources.
+  testRuntimeEnv = {
+    TZDIR = "${pkgs.tzdata}/share/zoneinfo";
+  }
+  // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+    WGPU_BACKEND = "vulkan";
+    VK_DRIVER_FILES = "${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.parsed.cpu.name}.json";
+  };
   formatjs = lib.getExe formatjsCli;
   sqlx = lib.getExe pkgs.sqlx-cli;
   # Gallery snapshots exercise immediate-mode rendering outside llvm-cov.
@@ -41,6 +51,30 @@ let
     "run"
   ]
   ++ workspaceArgs;
+  productionArgs = [
+    "--locked"
+    "-p"
+    "garmin-desktop"
+    "-p"
+    "garmin-hass"
+    "--no-default-features"
+  ];
+  productionClippyArgs = [
+    "clippy"
+  ]
+  ++ productionArgs
+  ++ [
+    "--all-targets"
+    "--"
+    "--deny"
+    "warnings"
+  ];
+  productionTestArgs = [
+    "nextest"
+    "run"
+  ]
+  ++ productionArgs
+  ++ [ "--lib" ];
   docArgs = [ "doc" ] ++ workspaceArgs ++ [ "--no-deps" ];
   denyArgs = [
     "deny"
@@ -112,15 +146,20 @@ let
 
     run_step() {
       local label=$1
+      local started=$SECONDS
       shift
       printf '\n%s━━ %s%s\n' "$section_color" "$label" "$reset_color"
 
       if "$@"; then
+        local elapsed=$((SECONDS - started))
+        printf '%s✓ %s%s (%dm %02ds)\n' \
+          "$success_color" "$label" "$reset_color" "$((elapsed / 60))" "$((elapsed % 60))"
         return 0
       else
         local status=$?
-        printf '\n%s✗ ${checkName} failed%s (%s, exit %d)\n' \
-          "$failure_color" "$reset_color" "$label" "$status" >&2
+        local elapsed=$((SECONDS - started))
+        printf '\n%s✗ ${checkName} failed%s (%s, exit %d, %dm %02ds)\n' \
+          "$failure_color" "$reset_color" "$label" "$status" "$((elapsed / 60))" "$((elapsed % 60))" >&2
         exit "$status"
       fi
     }
@@ -132,9 +171,35 @@ let
   mkApp =
     name: runtimeInputs: text:
     pkgs.writeShellApplication {
-      inherit name runtimeInputs text;
+      inherit name;
+      text = ''
+        ${pythonToolsEnv}/bin/python ${workspaceSrc + "/infra/python/prepare_cargo_target.py"}
+      ''
+      + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+        export NIX_LDFLAGS="-L${lib.getLib pkgs.libiconv}/lib ''${NIX_LDFLAGS:-}"
+      ''
+      + text;
+      runtimeInputs =
+        runtimeInputs
+        ++ [ formatjsCli ]
+        ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.mold ]
+        ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+          pkgs.stdenv.cc
+          pkgs.cmake
+          pkgs.gnumake
+        ];
       runtimeEnv = {
-        CARGO_TARGET_DIR = nixCargoTargetDir;
+        CARGO_TARGET_DIR = sharedCargoTargetDir;
+      }
+      // testRuntimeEnv
+      // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+        CC = lib.getExe' pkgs.stdenv.cc "cc";
+        CXX = lib.getExe' pkgs.stdenv.cc "c++";
+        DEVELOPER_DIR = "${pkgs.apple-sdk}";
+        SDKROOT = "${pkgs.apple-sdk}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
+        MACOSX_DEPLOYMENT_TARGET = pkgs.stdenv.hostPlatform.darwinMinVersion;
+        "NIX_CC_WRAPPER_TARGET_HOST_${pkgs.stdenv.cc.suffixSalt}" = "1";
+        "NIX_BINTOOLS_WRAPPER_TARGET_HOST_${pkgs.stdenv.cc.bintools.suffixSalt}" = "1";
       }
       // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
         LD_LIBRARY_PATH = lib.makeLibraryPath galleryRuntimeLibraries;
@@ -143,13 +208,26 @@ let
   src = import ./cargo-source.nix {
     inherit craneLib lib workspaceSrc;
   };
+  i18nSrc = import ./cargo-source.nix {
+    inherit craneLib lib workspaceSrc;
+    extraFilesets = [
+      (workspaceSrc + "/infra/python/check_translation_metadata.py")
+      (workspaceSrc + "/infra/python/json_data.py")
+      (workspaceSrc + "/infra/python/test_check_translation_metadata.py")
+    ];
+  };
   commonArgs = {
     inherit src;
+    pname = "garmin-toolkit";
+    CARGO_PROFILE = "dev";
     CARGO_TARGET_DIR = "target";
     SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
     buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.glib ];
     cargoLock = workspaceSrc + "/Cargo.lock";
-    nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
+    nativeBuildInputs = [
+      formatjsCli
+    ]
+    ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
     strictDeps = true;
   }
   // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
@@ -157,9 +235,19 @@ let
   };
   cargoArtifacts = craneLib.buildDepsOnly (
     commonArgs
+    // import ./cargo-deps.nix { inherit lib workspaceSrc; }
     // {
       cargoExtraArgs = "--workspace --all-features";
-      doCheck = false;
+      doCheck = true;
+    }
+  );
+  productionCargoArtifacts = craneLib.buildDepsOnly (
+    commonArgs
+    // import ./cargo-deps.nix { inherit lib workspaceSrc; }
+    // {
+      pname = "garmin-production-hosts-deps";
+      cargoExtraArgs = lib.escapeShellArgs (craneArgs productionArgs);
+      doCheck = true;
     }
   );
   extractSourceCatalog = destination: ''
@@ -186,28 +274,31 @@ let
     trap 'rm -rf "$i18n_dir"' EXIT
 
     ${extractSourceCatalog "$i18n_dir/en-source.json"}
-    ${lib.getExe pkgs.jq} --exit-status \
-      --slurpfile translation crates/garmin-i18n/translations/cs.json \
-      '(length == ($translation[0] | length)) and all(to_entries[];
-        $translation[0][.key].source == .value.message and
-        ($translation[0][.key].description // null) == (.value.description // null) and
-        ($translation[0][.key].translation | type == "string" and length > 0))' \
-      "$i18n_dir/en-source.json" > /dev/null
+    ${pythonToolsEnv}/bin/python -m unittest discover -q \
+      --start-directory infra/python --pattern 'test_check_translation_metadata.py'
+    ${pythonToolsEnv}/bin/python infra/python/check_translation_metadata.py \
+      "$i18n_dir/en-source.json" \
+      crates/garmin-i18n/translations/cs.json
+
     message_count=$(${lib.getExe pkgs.jq} length "$i18n_dir/en-source.json")
-    echo "FormatJS catalog completeness: $message_count/$message_count Czech messages"
+    echo "FormatJS source catalog: $message_count messages"
+
     ${compileCatalogs "$i18n_dir"}
-    cmp crates/garmin-i18n/catalogs/cs.json "$i18n_dir/cs.json"
+
     ${formatjs} verify "$i18n_dir/en.json" "$i18n_dir/cs.json" \
       --source-locale en \
       --missing-keys \
       --extra-keys \
       --structural-equality
   '';
+
   i18nCheck = mkApp "i18n-check" [
     formatjsCli
     pkgs.coreutils
     pkgs.jq
+    pythonToolsEnv
   ] i18nCheckCommand;
+
   i18nSync =
     mkApp "i18n-sync"
       [
@@ -231,11 +322,17 @@ let
           } + if $message.description then { description: $message.description } else {} end))' \
           "$i18n_dir/en-source.json" > "$i18n_dir/cs-source.json"
         cp "$i18n_dir/cs-source.json" crates/garmin-i18n/translations/cs.json
-        ${formatjs} compile \
-          --format lokalise \
-          --out-file crates/garmin-i18n/catalogs/cs.json \
-          crates/garmin-i18n/translations/cs.json
       '';
+
+  wasmLint = mkApp "wasm-lint" [ wasmToolchain ] ''
+    ${lib.getExe' wasmToolchain "cargo"} clippy --locked -p garmin-hass-web \
+      --target wasm32-unknown-unknown --lib -- --deny warnings
+  '';
+
+  galleryLint = mkApp "gallery-lint" [ toolchain ] ''
+    ${cargoCommand galleryClippyArgs}
+  '';
+
   projectLint =
     mkApp "project-lint"
       [
@@ -250,23 +347,29 @@ let
         toolchain
       ]
       ''
+        mkdir -p .tmp/qa-tmp
+        export TMPDIR="$PWD/.tmp/qa-tmp"
         ${checkOutput "project lint"}
         run_step "Rust source shape" ${lib.getExe sourceShapeCheck}
         run_step "cargo workspace-inheritance-check" ${lib.getExe inheritanceCheck} --path .
         run_step "FormatJS catalogs" ${lib.getExe i18nCheck}
         run_step "cargo sqlx prepare --check" ${lib.getExe sqlxCheck}
         run_step "cargo clippy" ${cargoCommand clippyArgs}
+        run_step "cargo clippy (production hosts)" ${cargoCommand productionClippyArgs}
+        run_step "cargo clippy (WASM)" ${lib.getExe wasmLint}
         run_step "cargo doc" env RUSTDOCFLAGS='-D warnings' ${cargoCommand docArgs}
         run_step "cargo nextest" ${cargoCommand testArgs}
+        run_step "cargo nextest (production hosts)" ${cargoCommand productionTestArgs}
         run_step "license bundles" ${lib.getExe licenseChecker}
         run_step "cargo deny" ${cargoCommand denyArgs}
         run_step "cargo machete" ${cargoCommand [ "machete" ]}
-        run_step "gallery clippy" ${cargoCommand galleryClippyArgs}
+        run_step "gallery clippy" ${lib.getExe galleryLint}
         run_step "gallery doc" env RUSTDOCFLAGS='-D warnings' ${cargoCommand galleryDocArgs}
         run_step "gallery nextest" ${cargoCommand galleryTestArgs}
         run_step "gallery deny" ${cargoCommand galleryDenyArgs}
         finish_check
       '';
+
   projectCheck =
     name: nativeBuildInputs: command:
     pkgs.runCommand name { inherit nativeBuildInputs; } ''
@@ -276,6 +379,7 @@ let
       ${command}
       touch "$out"
     '';
+
   sqlxPrepareCommand = check: ''
     sqlx_prepare_dir=$(mktemp -d)
     trap 'rm -rf "$sqlx_prepare_dir"' EXIT
@@ -293,16 +397,19 @@ let
       --all-features \
       --all-targets
   '';
+
   sqlxPrepare = mkApp "sqlx-prepare" [
     pkgs.coreutils
     pkgs.sqlx-cli
     toolchain
   ] (sqlxPrepareCommand false);
+
   sqlxCheck = mkApp "sqlx-check" [
     pkgs.coreutils
     pkgs.sqlx-cli
     toolchain
   ] (sqlxPrepareCommand true);
+
   sourceShapeCommands = ''
     if rg --line-number \
       --glob '*.md' \
@@ -314,6 +421,7 @@ let
       exit 1
     fi
   '';
+
   sourceShapeCheck = pkgs.writeShellApplication {
     name = "source-shape-check";
     runtimeInputs = [ pkgs.ripgrep ];
@@ -345,6 +453,7 @@ in
           run_step "staged secrets" ${lib.getExe pkgs.gitleaks} git --config infra/gitleaks.toml --redact --no-banner --pre-commit --staged .
           finish_check
         '';
+
     coverage =
       mkApp "coverage"
         [
@@ -387,6 +496,7 @@ in
             (toString coverageMinimum)
           ]}
         '';
+
     dedupe = mkApp "dedupe" [ pkgs.cargo-deny ] ''
       ${cargoCommand [
         "deny"
@@ -394,27 +504,24 @@ in
         "bans"
       ]}
     '';
+
     docs = mkApp "docs" [ toolchain ] ''
       env RUSTDOCFLAGS='-D warnings' ${cargoCommand docArgs} --open "$@"
     '';
+
     project-lint = projectLint;
+    gallery-lint = galleryLint;
+
+    wasm-lint = wasmLint;
+
     i18n-check = i18nCheck;
+
     i18n-sync = i18nSync;
-    outdated =
-      mkApp "outdated"
-        [
-          pkgs.cargo-outdated
-          toolchain
-        ]
-        ''
-          ${cargoCommand [
-            "outdated"
-            "--workspace"
-            "--root-deps-only"
-          ]}
-        '';
+
     sqlx-prepare = sqlxPrepare;
+
     sqlx-check = sqlxCheck;
+
     test =
       mkApp "test"
         [
@@ -423,8 +530,10 @@ in
         ]
         ''
           ${cargoCommand testArgs} "$@"
+          ${cargoCommand productionTestArgs} "$@"
         '';
   };
+
   checks = {
     rust-clippy = craneLib.cargoClippy (
       commonArgs
@@ -433,11 +542,12 @@ in
         cargoClippyExtraArgs = lib.escapeShellArgs (craneArgs (lib.tail clippyArgs));
       }
     );
+
     rust-coverage = craneLib.cargoNextest (
       commonArgs
+      // testRuntimeEnv
       // {
         inherit cargoArtifacts;
-        CARGO_PROFILE = "dev";
         cargoExtraArgs = lib.escapeShellArgs (lib.drop 2 testArgs);
         cargoLlvmCovExtraArgs = lib.escapeShellArgs (
           coverageArgs
@@ -452,6 +562,7 @@ in
         withLlvmCov = true;
       }
     );
+
     rust-deny = craneLib.cargoDeny (
       commonArgs
       // {
@@ -459,6 +570,7 @@ in
         cargoDenyChecks = lib.concatStringsSep " " (lib.drop 2 denyArgs);
       }
     );
+
     rust-doc = craneLib.cargoDoc (
       commonArgs
       // {
@@ -467,9 +579,11 @@ in
         RUSTDOCFLAGS = "-D warnings";
       }
     );
+
     rust-inheritance = projectCheck "rust-workspace-inheritance" [ inheritanceCheck ] ''
       ${lib.getExe inheritanceCheck} --path .
     '';
+
     rust-i18n =
       pkgs.runCommand "rust-i18n"
         {
@@ -480,12 +594,13 @@ in
           ];
         }
         ''
-          cp -R ${src} source
+          cp -R ${i18nSrc} source
           chmod -R u+w source
           cd source
           ${i18nCheckCommand}
           touch "$out"
         '';
+
     rust-machete =
       projectCheck "rust-unused-dependencies"
         [
@@ -495,6 +610,7 @@ in
         ''
           ${cargoCommand [ "machete" ]}
         '';
+
     rust-sqlx = craneLib.mkCargoDerivation (
       commonArgs
       // {
@@ -509,7 +625,9 @@ in
         doInstallCargoArtifacts = false;
       }
     );
+
     rust-source-shape = projectCheck "rust-source-shape" [ pkgs.ripgrep ] sourceShapeCommands;
+
     rust-source-closure = pkgs.runCommandLocal "rust-source-closure" { } ''
       diff --recursive --brief \
         ${workspaceSrc}/crates/garmin-brand/assets \
@@ -518,13 +636,39 @@ in
         ${workspaceSrc}/crates/garmin-ui/assets \
         ${src}/crates/garmin-ui/assets
       test ! -e ${src}/infra/gallery
+      for crate in fast-mvt winit; do
+        diff --recursive --brief ${workspaceSrc}/vendor/$crate ${src}/vendor/$crate
+        diff --recursive --brief ${workspaceSrc}/vendor/$crate ${cargoArtifacts.src}/vendor/$crate
+      done
       touch "$out"
     '';
+
     rust-tests = craneLib.cargoNextest (
       commonArgs
+      // testRuntimeEnv
       // {
         inherit cargoArtifacts;
         cargoExtraArgs = lib.escapeShellArgs (lib.drop 2 testArgs);
+        doCheck = true;
+      }
+    );
+
+    rust-production-clippy = craneLib.cargoClippy (
+      commonArgs
+      // {
+        pname = "garmin-production-hosts";
+        cargoArtifacts = productionCargoArtifacts;
+        cargoClippyExtraArgs = lib.escapeShellArgs (craneArgs (lib.tail productionClippyArgs));
+      }
+    );
+
+    rust-production-tests = craneLib.cargoNextest (
+      commonArgs
+      // testRuntimeEnv
+      // {
+        pname = "garmin-production-hosts";
+        cargoArtifacts = productionCargoArtifacts;
+        cargoExtraArgs = lib.escapeShellArgs (lib.drop 2 productionTestArgs);
         doCheck = true;
       }
     );

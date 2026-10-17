@@ -1,0 +1,53 @@
+out = "../../../.tmp/gallery/selects"
+size = "640x480"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "sizes-dark"
+scene = "select::Sizes"
+
+[[shot]]
+name = "sizes-light"
+scene = "select::Sizes"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "focused-dark"
+scene = "select::Playground"
+[shot.knobs]
+focused = true
+
+[[shot]]
+name = "focused-light"
+scene = "select::Playground"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+focused = true
+
+[[shot]]
+name = "disabled-dark"
+scene = "select::Playground"
+[shot.knobs]
+disabled = true
+
+[[shot]]
+name = "disabled-light"
+scene = "select::Playground"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+disabled = true
+
+[[shot]]
+name = "open-dark"
+scene = "select::Open Menu"
+
+[[shot]]
+name = "open-light"
+scene = "select::Open Menu"
+[shot.globals]
+Theme = "Light"

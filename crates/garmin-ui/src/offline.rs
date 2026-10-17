@@ -48,6 +48,7 @@ pub fn show(ui: &Ui, id: Id, props: &Props<'_>) {
             let content = palette.content();
             egui::Frame::new()
                 .fill(widget_theme::color32(surfaces.layer(theme::Level::One)))
+                .corner_radius(widget_theme::FLOATING_RADIUS)
                 .stroke(egui::Stroke::new(
                     1.0,
                     widget_theme::color32(palette.borders().subtle()),

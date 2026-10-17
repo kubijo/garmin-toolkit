@@ -2,15 +2,57 @@ import '../../infra/just/common.just'
 
 # Run the selected deployment mode against a caller-owned base directory.
 [no-exit-message]
-run mode data_base:
+run mode data_base *options:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    case {{ quote(mode) }} in
+    case "$1" in
         production) package=garmin-hass ;;
         demo) package=garmin-hass-demo ;;
         *) printf 'deployment mode must be production or demo\n' >&2; exit 64 ;;
     esac
 
-    package_path="$(nix build --quiet --no-warn-dirty --no-link --print-out-paths "{{ flake }}#${package}")"
-    exec env GARMIN_TOOLKIT_HASS_DATA_BASE={{ quote(data_base) }} "$package_path/bin/garmin-hass"
+    package_path="$(
+        env CARGO_INCREMENTAL=0 \
+            nix build --quiet --no-warn-dirty --no-link --print-out-paths \
+            "{{ flake }}#${package}"
+    )"
+    data_base="$2"
+    shift 2
+    exec env GARMIN_TOOLKIT_HASS_DATA_BASE="$data_base" "$package_path/bin/garmin-hass" "$@"
+
+# Summarize a raw Chrome performance trace for this HASS page.
+profile-analyze trace *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/browser_trace_analysis.py "$@"
+
+# Inspect or exercise the control API of an already-running demo.
+control *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/hass_control.py "$@"
+
+# Build and run the disposable VM's asserted browser/recovery suite (requires KVM).
+integration *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/hass_integration.py "$@"
+
+# Smoke-test official ARM64 Home Assistant OS in a capped, disposable QEMU VM.
+haos-arm64-smoke *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/haos_arm64_vm.py "$@"
+
+# Install and exercise the matching local app image in disposable HAOS.
+haos-app-smoke *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/haos_app_vm.py "$@"
+
+# Open a bounded host-native HAOS session in the browser.
+haos-app-run *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/haos_app_session.py run "$@"
+
+# Verify populated ingress, app/HAOS restarts, and cold restore in disposable host-native HAOS.
+haos-app-check *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/haos_app_session.py check "$@"
+
+# Stop an interactive HAOS session and clean up its owned processes and disks.
+haos-app-stop session_id:
+    @just in-shell uv run --frozen --project infra/python python infra/python/haos_app_session.py stop --session-id "$1"
+
+# Read application logs or events with the shared Rust CLI.
+diagnostics *options:
+    @just in-shell nix run {{ flake }}#garmin-cli -- diagnostics "$@"

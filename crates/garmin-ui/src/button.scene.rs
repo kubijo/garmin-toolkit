@@ -2,9 +2,16 @@ use gallery::prelude::*;
 use garmin_ui::button::{GroupChoice, GroupProps, IconProps, Kind, Props, Width};
 use garmin_ui::{Size, button, icons};
 
-scene_meta! { title: "Components / Actions / Buttons" }
+scene_meta! { title: "Components / Buttons" }
 
-const KINDS: &[&str] = &["primary", "secondary", "tertiary", "ghost", "danger"];
+const KINDS: &[&str] = &[
+    "primary",
+    "secondary",
+    "tertiary",
+    "tertiary-danger",
+    "ghost",
+    "danger",
+];
 const SIZES: &[&str] = &["small", "medium", "large"];
 
 struct SceneProps {
@@ -43,6 +50,7 @@ fn states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
             ("Primary", Kind::Primary),
             ("Secondary", Kind::Secondary),
             ("Tertiary", Kind::Tertiary),
+            ("Tertiary danger", Kind::TertiaryDanger),
             ("Ghost", Kind::Ghost),
             ("Delete", Kind::Danger),
         ] {
@@ -50,7 +58,7 @@ fn states(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
                 for enabled in [true, false] {
                     Props {
                         label,
-                        icon: Some(if kind == Kind::Danger {
+                        icon: Some(if matches!(kind, Kind::Danger | Kind::TertiaryDanger) {
                             icons::TRASH
                         } else {
                             icons::CHECK
@@ -117,7 +125,9 @@ fn group(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
             &choices,
             GroupProps {
                 size: Size::Medium,
+                width: Width::Fit,
                 enabled: true,
+                style: button::GroupStyle::Subtle,
             },
         );
     });
@@ -127,8 +137,9 @@ const fn kind(index: usize) -> Kind {
     match index {
         1 => Kind::Secondary,
         2 => Kind::Tertiary,
-        3 => Kind::Ghost,
-        4 => Kind::Danger,
+        3 => Kind::TertiaryDanger,
+        4 => Kind::Ghost,
+        5 => Kind::Danger,
         _ => Kind::Primary,
     }
 }

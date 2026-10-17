@@ -15,7 +15,7 @@ Before atomic publish or restore, stage and decode; verify structure, digest, le
 compatibility. Restore supports rollback.
 
 Snapshots remain plaintext pending an audited envelope. Exclude credentials, pairing state, caches, logs, maps, rendered
-output, and temporary data. This supersedes ADR 0021.
+output, and temporary data.
 
 ## Why
 

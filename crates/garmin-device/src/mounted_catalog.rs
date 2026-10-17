@@ -9,8 +9,9 @@ use std::{
     time::SystemTime,
 };
 
-use crate::capabilities::{
-    DataType, Error as ManifestError, Manifest, TransferDirection, is_device_manifest, parse,
+use crate::manifest::{
+    DataType, ManifestError, ParsedManifest as Manifest, TransferDirection, is_device_manifest,
+    parse_document,
 };
 use gio::{
     File, FileQueryInfoFlags, FileType, Mount, VolumeMonitor,
@@ -116,12 +117,29 @@ impl crate::attachments::Candidate for MountedMtpCandidate {
             }
         }
         Ok(crate::attachments::Metadata {
-            id: manifest.id(),
+            id: Some(manifest.id()),
+            device_digest: Some(first.identity_digest()),
+            report: None,
             name: normalize_display_name(manifest.model().description()),
-            software_version: manifest.model().software_version(),
+            software_version: Some(manifest.model().software_version()),
             capabilities,
             storage,
         })
+    }
+
+    fn browse(&self) -> Result<crate::DeviceCatalog, String> {
+        super::mounted_mtp::browse_mounted_attachment_blocking(&self.root, &self.mount_id)
+    }
+
+    fn browse_with_progress(
+        &self,
+        progress: &garmin_progress::ProgressReporter,
+    ) -> Result<crate::DeviceCatalog, String> {
+        super::mounted_mtp::browse_mounted_attachment_blocking_with_progress(
+            &self.root,
+            &self.mount_id,
+            progress,
+        )
     }
 }
 
@@ -511,7 +529,7 @@ fn scan_storage(
     manifest_entry: &Entry,
 ) -> Result<Catalog, Error> {
     let manifest = read_manifest(&manifest_entry.source)?;
-    let manifest = parse(std::str::from_utf8(&manifest)?)?;
+    let manifest = parse_document(std::str::from_utf8(&manifest)?)?;
     let mut files = Vec::new();
     let mut seen = HashSet::new();
 
@@ -660,7 +678,7 @@ mod tests {
             namespace: NAMESPACE,
             model: ModelFixture {
                 version: 2244,
-                description: "Synthetic Garmin",
+                description: "Mock Storage-o-Matic 9000",
             },
             id,
             mass_storage: StorageFixture {
@@ -717,15 +735,15 @@ mod tests {
         let [catalog] = catalogs.as_slice() else {
             return Err("expected one manifest-bearing storage".into());
         };
-        assert_eq!(catalog.manifest().model().description(), "Synthetic Garmin");
+        assert_eq!(
+            catalog.manifest().model().description(),
+            "Mock Storage-o-Matic 9000"
+        );
         let [file] = catalog.files() else {
             return Err("expected one readable file".into());
         };
-        assert_eq!(file.data_type(), crate::capabilities::DataType::Activity);
-        assert_eq!(
-            file.direction(),
-            crate::capabilities::TransferDirection::OutputFromUnit
-        );
+        assert_eq!(file.data_type(), crate::DataType::Activity);
+        assert_eq!(file.direction(), crate::TransferDirection::OutputFromUnit);
         assert_eq!(file.declared_size(), 4);
         assert!(format!("{file:?}").contains("declared_size"));
 
@@ -764,11 +782,8 @@ mod tests {
         let metadata =
             crate::attachments::Candidate::inspect(&candidate).map_err(io::Error::other)?;
 
-        assert_eq!(
-            metadata.id,
-            crate::capabilities::DeviceId::from_u32(123_456)
-        );
-        assert_eq!(metadata.name, "Synthetic Garmin");
+        assert_eq!(metadata.id, Some(crate::DeviceId::from_u32(123_456)));
+        assert_eq!(metadata.name, "Mock Storage-o-Matic 9000");
         assert_eq!(metadata.storage.storages.len(), 1);
         Ok(())
     }
@@ -799,12 +814,12 @@ mod tests {
             metadata.capabilities,
             [
                 crate::attachments::Capability::new(
-                    crate::capabilities::DataType::Activity,
-                    crate::capabilities::TransferDirection::OutputFromUnit,
+                    crate::DataType::Activity,
+                    crate::TransferDirection::OutputFromUnit,
                 ),
                 crate::attachments::Capability::new(
-                    crate::capabilities::DataType::Workout,
-                    crate::capabilities::TransferDirection::InputToUnit,
+                    crate::DataType::Workout,
+                    crate::TransferDirection::InputToUnit,
                 ),
             ]
         );

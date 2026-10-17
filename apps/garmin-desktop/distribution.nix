@@ -1,22 +1,21 @@
 {
   craneLib,
-  craneLibPortable,
   launcher,
   lib,
   demoIdentity,
   demoLauncher,
+  demoPackage,
+  mkAppImage,
+  package,
   pkgs,
-  pkgsPortable,
   productionIdentity,
   src,
-  workspaceSrc,
+  withHostGraphics,
 }:
 
 let
-  inherit (builtins) readFile;
-
-  version = (fromTOML (readFile (workspaceSrc + "/Cargo.toml"))).workspace.package.version;
   flatpakRuntimeVersion = "25.08";
+
   arch =
     if pkgs.stdenv.hostPlatform.isx86_64 then
       "x86_64"
@@ -24,101 +23,21 @@ let
       "aarch64"
     else
       throw "desktop distribution supports only x86_64-linux and aarch64-linux";
-  interpreter =
-    if pkgs.stdenv.hostPlatform.isx86_64 then
-      "/lib64/ld-linux-x86-64.so.2"
-    else
-      "/lib/ld-linux-aarch64.so.1";
-  appImageRuntime = pkgs.fetchurl {
-    url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-${arch}";
-    hash =
-      {
-        x86_64 = "sha256-L8qLRDySUQ8Ug6iD9gBhrQm0a5eLJjHIB82HOkfsJg0=";
-        aarch64 = "sha256-AMvfz5F8xsD/bTNH1Z4Moff0Wm3xpCig1tinhmTYdEQ=";
-      }
-      .${arch};
-  };
-  portableBuildInputs = with pkgsPortable; [
-    glib
-    libGL
-    libxkbcommon
-    vulkan-loader
-    wayland
-    xorg.libX11
-    xorg.libXcursor
-    xorg.libXi
-    xorg.libXrandr
-  ];
-  portableCommonArgs = {
-    inherit src version;
-    CARGO_TARGET_DIR = "target";
-    SQLX_OFFLINE = "true";
-    buildInputs = portableBuildInputs;
-    cargoLock = workspaceSrc + "/Cargo.lock";
-    doCheck = false;
-    nativeBuildInputs = [ pkgsPortable.pkg-config ];
-    strictDeps = true;
-  };
-  portableCargoArtifacts = craneLibPortable.buildDepsOnly (
-    portableCommonArgs
-    // {
-      cargoExtraArgs = "--locked -p garmin-desktop --all-features";
-      pname = "garmin-toolkit-portable-deps";
-    }
-  );
-  mkPortable =
-    { identity, demo }:
-    let
-      cargoExtraArgs = "--locked -p garmin-desktop" + lib.optionalString demo " --features demo";
-    in
-    craneLibPortable.buildPackage (
-      portableCommonArgs
-      // {
-        inherit cargoExtraArgs;
-        cargoArtifacts = portableCargoArtifacts;
-        pname = "${identity.slug}-portable";
-        nativeBuildInputs = portableCommonArgs.nativeBuildInputs ++ [ pkgsPortable.patchelf ];
-        postInstall = ''
-          patchelf --set-interpreter ${interpreter} --remove-rpath "$out/bin/garmin-desktop"
-        '';
-      }
-    );
-  portable = mkPortable {
-    identity = productionIdentity;
-    demo = false;
-  };
-  demoPortable = mkPortable {
-    identity = demoIdentity;
-    demo = true;
-  };
-  mkAppImage =
-    {
-      identity,
-      launcher,
-      portable,
-    }:
-    pkgs.runCommand "${identity.slug}-${arch}.AppImage" { nativeBuildInputs = [ pkgs.squashfsTools ]; }
-      ''
-        mkdir -p AppDir/usr/bin
-        cp ${portable}/bin/garmin-desktop AppDir/usr/bin/
-        cp -r --no-preserve=mode ${launcher}/share AppDir/usr/
-        ln -s usr/bin/garmin-desktop AppDir/AppRun
-        cp AppDir/usr/share/applications/${identity.id}.desktop AppDir/
-        cp AppDir/usr/share/icons/hicolor/256x256/apps/${identity.id}.png AppDir/
-        ln -s ${identity.id}.png AppDir/.DirIcon
-        mksquashfs AppDir fs.squashfs -root-owned -noappend -no-progress -comp zstd
-        cat ${appImageRuntime} fs.squashfs > "$out"
-        chmod +x "$out"
-      '';
+
   appImage = mkAppImage {
-    inherit launcher portable;
-    identity = productionIdentity;
+    program = lib.getExe (withHostGraphics {
+      inherit package;
+    });
+    name = "${productionIdentity.slug}-${arch}.AppImage";
   };
+
   demoAppImage = mkAppImage {
-    identity = demoIdentity;
-    launcher = demoLauncher;
-    portable = demoPortable;
+    program = lib.getExe (withHostGraphics {
+      package = demoPackage;
+    });
+    name = "${demoIdentity.slug}-${arch}.AppImage";
   };
+
   mkAppImageExporter =
     { appImage, identity }:
     pkgs.writeShellApplication {
@@ -130,10 +49,12 @@ let
         printf 'wrote %s\n' "dist/${identity.slug}-${arch}.AppImage"
       '';
     };
+
   appImageExporter = mkAppImageExporter {
     inherit appImage;
     identity = productionIdentity;
   };
+
   demoAppImageExporter = mkAppImageExporter {
     appImage = demoAppImage;
     identity = demoIdentity;
@@ -147,6 +68,7 @@ let
     substituteInPlace "$out/config.toml" --replace-fail "${vendor}" "${buildDir}/vendor"
   '';
   yamlFormat = pkgs.formats.yaml { };
+
   mkFlatpakStage =
     {
       identity,
@@ -155,8 +77,9 @@ let
     }:
     let
       cargoCommand =
-        "cargo --offline build --locked --release -p garmin-desktop"
-        + lib.optionalString demo " --features demo";
+        "cargo --offline build --locked --release -p garmin-desktop -p garmin-gpx-worker"
+        + lib.optionalString demo " --features garmin-desktop/demo";
+
       manifest = yamlFormat.generate "${identity.id}.yml" {
         app-id = identity.id;
         runtime = "org.freedesktop.Platform";
@@ -173,24 +96,29 @@ let
           "--socket=wayland"
           "--talk-name=org.gtk.vfs.*"
         ];
+
         modules = [
           {
             name = "garmin-desktop";
             buildsystem = "simple";
             build-options = {
               append-path = "/usr/lib/sdk/rust-stable/bin";
+
               env = {
                 CARGO_HOME = "${buildDir}/cargo";
                 CARGO_TARGET_DIR = "target";
                 SQLX_OFFLINE = "true";
               };
             };
+
             build-commands = [
               "mkdir -p cargo && cp vendor/config.toml cargo/config.toml"
               cargoCommand
               "install -Dm755 target/release/garmin-desktop /app/bin/garmin-desktop"
+              "install -Dm755 target/release/garmin-gpx-worker /app/bin/garmin-gpx-worker"
               "mkdir -p /app/share && cp -r launcher/share/. /app/share/"
             ];
+
             sources = [
               {
                 type = "dir";
@@ -218,16 +146,19 @@ let
       ln -s ${launcher} "$out/launcher"
       ln -s ${flatpakVendor} "$out/vendor"
     '';
+
   flatpakStage = mkFlatpakStage {
     identity = productionIdentity;
     inherit launcher;
     demo = false;
   };
+
   demoFlatpakStage = mkFlatpakStage {
     identity = demoIdentity;
     launcher = demoLauncher;
     demo = true;
   };
+
   mkFlatpakBuilder =
     { identity, stage }:
     pkgs.writeShellApplication {
@@ -272,10 +203,12 @@ let
         printf 'wrote %s\n' "$destination"
       '';
     };
+
   flatpakBuilder = mkFlatpakBuilder {
     identity = productionIdentity;
     stage = flatpakStage;
   };
+
   demoFlatpakBuilder = mkFlatpakBuilder {
     identity = demoIdentity;
     stage = demoFlatpakStage;
@@ -291,7 +224,5 @@ in
     demoAppImageExporter
     demoFlatpakBuilder
     demoFlatpakStage
-    demoPortable
-    portable
     ;
 }

@@ -1,0 +1,17 @@
+out = "../../../.tmp/gallery/typography"
+size = "800x480"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "body-dark"
+scene = "typography::Body"
+
+[[shot]]
+name = "body-light-narrow"
+scene = "typography::Body"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+width = 288

@@ -9,15 +9,29 @@ const COMPACT_WIDTH: f32 = 56.0;
 const CARET_SIZE: f32 = 14.0;
 const CARET_GAP: f32 = 4.0;
 const MENU_BORDER_WIDTH: f32 = 1.0;
+const CONTROL_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
+const MENU_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
+const ROW_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
 
 pub struct MenuGeometry {
     pub position: Pos2,
     pub width: f32,
 }
 
+#[derive(Clone, Copy)]
 pub enum RowKind {
     Default,
     Danger,
+}
+
+#[derive(Clone, Copy)]
+struct RowConfig {
+    width: f32,
+    height: f32,
+    divided: bool,
+    interactive: bool,
+    kind: RowKind,
+    level: Option<theme::Level>,
 }
 
 pub fn control(
@@ -45,7 +59,8 @@ pub fn control(
     } else {
         palette.surfaces().layer(theme::Level::One)
     };
-    ui.painter().rect_filled(rect, 0.0, fill.into_cint());
+    ui.painter()
+        .rect_filled(rect, CONTROL_RADIUS, fill.into_cint());
     let wide = rect.width() > COMPACT_WIDTH;
     let inner = rect.shrink2(egui::vec2(CONTROL_PADDING, 4.0));
     let (content_rect, layout) = if wide {
@@ -81,7 +96,7 @@ pub fn control(
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect,
-            0.0,
+            CONTROL_RADIUS,
             egui::Stroke::new(2.0, palette.interaction().focus().into_cint()),
             egui::StrokeKind::Inside,
         );
@@ -129,6 +144,7 @@ pub fn menu<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> InnerResponse
     let palette = crate::theme::palette(ui);
     egui::Frame::new()
         .fill(color32(palette.surfaces().background()))
+        .corner_radius(MENU_RADIUS)
         .stroke(egui::Stroke::new(
             MENU_BORDER_WIDTH,
             palette.borders().subtle().into_cint(),
@@ -139,6 +155,7 @@ pub fn menu<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> InnerResponse
             spread: 0,
             color: egui::Color32::from_black_alpha(96),
         })
+        .inner_margin(egui::Margin::ZERO)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             content(ui)
@@ -153,18 +170,69 @@ pub fn row(
     kind: RowKind,
     paint: impl FnOnce(&Ui, Rect, Color),
 ) -> Response {
-    let sense = if interactive {
+    row_with_surface(
+        ui,
+        RowConfig {
+            width: ui.available_width(),
+            height,
+            divided,
+            interactive,
+            kind,
+            level: None,
+        },
+        paint,
+    )
+}
+
+/// Draw a fixed-width menu row on a semantic floating layer.
+pub fn row_with_width_on_layer(
+    ui: &mut Ui,
+    width: f32,
+    height: f32,
+    divided: bool,
+    kind: RowKind,
+    level: theme::Level,
+    paint: impl FnOnce(&Ui, Rect, Color),
+) -> Response {
+    row_with_surface(
+        ui,
+        RowConfig {
+            width,
+            height,
+            divided,
+            interactive: true,
+            kind,
+            level: Some(level),
+        },
+        paint,
+    )
+}
+
+fn row_with_surface(
+    ui: &mut Ui,
+    config: RowConfig,
+    paint: impl FnOnce(&Ui, Rect, Color),
+) -> Response {
+    let sense = if config.interactive {
         Sense::click()
     } else {
         Sense::hover()
     };
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), sense);
-    if interactive && response.hovered() {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(config.width, config.height), sense);
+    if config.interactive && response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 
     let palette = crate::theme::palette(ui);
-    let (fill, foreground) = match (kind, response.hovered()) {
+    let base = config.level.map_or_else(
+        || palette.surfaces().background(),
+        |level| palette.surfaces().layer(level),
+    );
+    let hover = config.level.map_or_else(
+        || palette.surfaces().layer(theme::Level::One),
+        |level| palette.surfaces().layer_hover(level),
+    );
+    let (fill, foreground) = match (config.kind, response.hovered()) {
         (RowKind::Danger, true) => {
             let states = palette.buttons().danger();
             let state = if response.is_pointer_button_down_on() {
@@ -174,18 +242,12 @@ pub fn row(
             };
             (state.background(), state.foreground())
         }
-        (RowKind::Danger, false) => (palette.surfaces().background(), palette.support().error()),
-        (RowKind::Default, true) => (
-            palette.surfaces().layer(theme::Level::One),
-            palette.content().icon_primary(),
-        ),
-        (RowKind::Default, false) => (
-            palette.surfaces().background(),
-            palette.content().icon_primary(),
-        ),
+        (RowKind::Danger, false) => (base, palette.support().error()),
+        (RowKind::Default, true) => (hover, palette.content().icon_primary()),
+        (RowKind::Default, false) => (base, palette.content().icon_primary()),
     };
-    ui.painter().rect_filled(rect, 0.0, fill.into_cint());
-    if divided {
+    ui.painter().rect_filled(rect, ROW_RADIUS, fill.into_cint());
+    if config.divided {
         ui.painter().hline(
             rect.x_range(),
             rect.top(),
@@ -196,7 +258,7 @@ pub fn row(
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect,
-            0.0,
+            ROW_RADIUS,
             egui::Stroke::new(2.0, palette.interaction().focus().into_cint()),
             egui::StrokeKind::Inside,
         );

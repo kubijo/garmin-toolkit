@@ -1,0 +1,96 @@
+out = "../../../.tmp/gallery/profile-accent"
+size = "1600x1000"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "pink-dark"
+scene = "shell::Playground"
+[shot.knobs]
+accent = "pink"
+"accent examples" = true
+
+[[shot]]
+name = "pink-light"
+scene = "shell::Playground"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+accent = "pink"
+"accent examples" = true
+
+[[shot]]
+name = "green-rail"
+scene = "shell::Playground"
+[shot.knobs]
+accent = "green"
+navigation = "rail"
+"accent examples" = true
+
+[[shot]]
+name = "black-dark"
+scene = "shell::Playground"
+[shot.knobs]
+accent = "black"
+"accent examples" = true
+
+[[shot]]
+name = "white-light"
+scene = "shell::Playground"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+accent = "white"
+"accent examples" = true
+
+[[shot]]
+name = "transparent-dark"
+scene = "shell::Playground"
+[shot.knobs]
+accent = "transparent"
+"accent examples" = true
+
+[[shot]]
+name = "settings-dark"
+scene = "profile_settings::Playground"
+[shot.knobs]
+accent = "pink"
+application = true
+width = 1120
+height = 1000
+
+[[shot]]
+name = "activities-dark"
+scene = "activity::Application"
+[shot.knobs]
+accent = "pink"
+
+[[shot]]
+name = "activities-light"
+scene = "activity::Application"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+accent = "pink"
+
+[[shot]]
+name = "settings-disabled"
+scene = "profile_settings::Playground"
+[shot.knobs]
+accent = "pink"
+application = true
+disabled = true
+width = 1120
+height = 1000
+
+[[shot]]
+name = "settings-light"
+scene = "profile_settings::Playground"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+accent = "pink"
+application = true
+width = 1120
+height = 1000

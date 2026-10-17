@@ -1,0 +1,36 @@
+out = "../../../.tmp/gallery/components"
+size = "1920x1080"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "device-inspection-dark"
+scene = "garmin_gallery::device::Partial Inspection"
+
+[[shot]]
+name = "device-inspection-light-czech"
+scene = "garmin_gallery::device::Partial Inspection"
+
+[shot.globals]
+theme = "Light"
+language = "Čeština"
+
+[[shot]]
+name = "attached-device-storage"
+scene = "capacity::Multiple Storages"
+
+[[shot]]
+name = "notification-toast-stack"
+scene = "garmin_gallery::notification::Toast Stack"
+
+[shot.knobs]
+mode = "expanded"
+
+[[shot]]
+name = "notification-toast-stack-narrow"
+scene = "garmin_gallery::notification::Toast Stack Narrow"
+
+[[shot]]
+name = "device-explorer-populated"
+scene = "garmin_gallery::device_browser::Populated"

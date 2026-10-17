@@ -4,7 +4,7 @@ use garmin_i18n::format_message;
 use garmin_service_api::{DeviceSnapshot, InspectionState};
 use garmin_ui::{offline, profile, shell, workspace};
 
-scene_meta! { title: "Application / States / Offline" }
+scene_meta! { title: "Application / Offline" }
 
 #[scene(default)]
 fn disconnected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
@@ -27,11 +27,13 @@ fn disconnected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         avatar: None,
     }];
     let devices = [DeviceSnapshot {
-        key: "edge-1050".to_owned(),
-        name: "Garmin Edge 1050".to_owned(),
+        key: "mock-cycle-o-matic-9000".to_owned(),
+        name: "Mock Cycle-o-Matic 9000".to_owned(),
         identifier: Some(36_264_719),
         software_version: Some(3_220),
         inspection: InspectionState::Ready,
+        inspection_error: None,
+        report: None,
         capabilities: Vec::new(),
         storages: Vec::new(),
     }];
@@ -48,6 +50,7 @@ fn disconnected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                 page: &workspace::Page::Activities,
                 navigation: shell::Navigation::Expanded,
                 devices: &devices,
+                backup_enabled: false,
                 window_controls: None,
             },
             |ui| {

@@ -1,7 +1,35 @@
-use eframe::egui::{Context, CursorIcon, Pos2, Rect, ResizeDirection, Ui, ViewportCommand};
+use eframe::egui::{Context, Pos2};
 
-const EDGE_WIDTH: f32 = 6.0;
-const CORNER_WIDTH: f32 = 12.0;
+#[derive(Default)]
+struct Background {
+    child: bool,
+}
+
+impl eframe::egui::plugin::Plugin for Background {
+    fn debug_name(&self) -> &'static str {
+        "native window background"
+    }
+
+    fn on_end_pass(&mut self, ui: &mut eframe::egui::Ui) {
+        self.child = ui.ctx().viewport_id() != eframe::egui::ViewportId::ROOT;
+    }
+}
+
+pub fn install(context: &Context) {
+    context.add_plugin(Background::default());
+}
+
+pub fn clear_color(context: &Context) -> [f32; 4] {
+    // eframe asks after the viewport pass, when Context::viewport_id() is root again.
+    if context
+        .plugin_opt::<Background>()
+        .is_some_and(|state| state.lock().child)
+    {
+        [0.0; 4]
+    } else {
+        eframe::egui::Color32::from_rgb(12, 12, 12).to_normalized_gamma_f32()
+    }
+}
 
 pub fn show_menu(context: &Context, frame: &eframe::Frame, position: Pos2) {
     let key = eframe::egui::Id::new((context.viewport_id(), "desktop-window-menu-pass"));
@@ -24,70 +52,33 @@ pub fn show_menu(context: &Context, frame: &eframe::Frame, position: Pos2) {
     }
 }
 
-pub fn resize(ui: &Ui) {
-    let context = ui.ctx();
-    let unavailable = context.input(|input| {
-        input.viewport().maximized.unwrap_or_default()
-            || input.viewport().fullscreen.unwrap_or_default()
-    });
-    if unavailable {
-        return;
-    }
-    let Some(pointer) = context.pointer_hover_pos() else {
-        return;
-    };
-    let Some((direction, cursor)) = resize_target(ui.max_rect(), pointer) else {
-        return;
-    };
-    context.set_cursor_icon(cursor);
-    if context.input(|input| input.pointer.primary_pressed()) {
-        context.send_viewport_cmd(ViewportCommand::BeginResize(direction));
-    }
-}
-
-fn resize_target(bounds: Rect, pointer: Pos2) -> Option<(ResizeDirection, CursorIcon)> {
-    let left = pointer.x <= bounds.left() + EDGE_WIDTH;
-    let right = pointer.x >= bounds.right() - EDGE_WIDTH;
-    let top = pointer.y <= bounds.top() + EDGE_WIDTH;
-    let bottom = pointer.y >= bounds.bottom() - EDGE_WIDTH;
-    let near_left = pointer.x <= bounds.left() + CORNER_WIDTH;
-    let near_right = pointer.x >= bounds.right() - CORNER_WIDTH;
-    let near_top = pointer.y <= bounds.top() + CORNER_WIDTH;
-    let near_bottom = pointer.y >= bounds.bottom() - CORNER_WIDTH;
-    let target = match (near_left, near_right, near_top, near_bottom) {
-        (true, _, true, _) => (ResizeDirection::NorthWest, CursorIcon::ResizeNorthWest),
-        (_, true, true, _) => (ResizeDirection::NorthEast, CursorIcon::ResizeNorthEast),
-        (true, _, _, true) => (ResizeDirection::SouthWest, CursorIcon::ResizeSouthWest),
-        (_, true, _, true) => (ResizeDirection::SouthEast, CursorIcon::ResizeSouthEast),
-        _ if top => (ResizeDirection::North, CursorIcon::ResizeNorth),
-        _ if bottom => (ResizeDirection::South, CursorIcon::ResizeSouth),
-        _ if left => (ResizeDirection::West, CursorIcon::ResizeWest),
-        _ if right => (ResizeDirection::East, CursorIcon::ResizeEast),
-        _ => return None,
-    };
-    Some(target)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const BOUNDS: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(100.0, 80.0));
-
-    #[test]
-    fn corners_take_precedence_over_edges() {
-        assert_eq!(
-            resize_target(BOUNDS, Pos2::new(4.0, 8.0)),
-            Some((ResizeDirection::NorthWest, CursorIcon::ResizeNorthWest))
-        );
-        assert_eq!(
-            resize_target(BOUNDS, Pos2::new(96.0, 72.0)),
-            Some((ResizeDirection::SouthEast, CursorIcon::ResizeSouthEast))
-        );
-    }
+    use eframe::egui::{RawInput, ViewportId, ViewportInfo};
 
     #[test]
-    fn center_is_not_a_resize_target() {
-        assert_eq!(resize_target(BOUNDS, BOUNDS.center()), None);
+    fn deferred_child_background_stays_transparent_after_egui_restores_root() {
+        let context = Context::default();
+        install(&context);
+        let child = ViewportId::from_hash_of("test-child");
+        for viewport in [ViewportId::ROOT, child, ViewportId::ROOT] {
+            let mut input = RawInput {
+                viewport_id: viewport,
+                ..Default::default()
+            };
+            input
+                .viewports
+                .entry(viewport)
+                .or_insert_with(|| ViewportInfo {
+                    parent: Some(ViewportId::ROOT),
+                    ..Default::default()
+                });
+            let mut output = context.run_ui(input, |_| {});
+            output.textures_delta.clear();
+            assert_eq!(context.viewport_id(), ViewportId::ROOT);
+            let alpha: f32 = if viewport == child { 0.0 } else { 1.0 };
+            assert_eq!(clear_color(&context)[3].to_bits(), alpha.to_bits());
+        }
     }
 }

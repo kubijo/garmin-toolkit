@@ -5,17 +5,29 @@
     reason = "egui and resvg require compatible bitflags, kurbo, and miniz_oxide versions"
 )]
 
+pub mod accordion;
 pub mod activity;
+#[cfg(any(test, feature = "automation"))]
+pub mod automation;
+pub mod backup;
 pub mod brand;
 pub mod button;
 pub mod capacity;
+#[cfg(any(test, feature = "automation"))]
+pub mod capture;
+pub mod developer;
 pub mod device;
+pub mod device_browser;
+pub mod device_fit_preview;
+pub mod diagnostics;
+pub mod facts;
 pub mod file_import;
 mod header_selector;
 pub mod icons;
 pub mod image_crop;
 pub mod images;
 pub mod input;
+pub mod maps;
 pub mod modal;
 pub mod notification;
 pub mod offline;
@@ -23,12 +35,16 @@ pub mod path;
 pub mod profile;
 pub mod profile_settings;
 pub mod progress;
+pub mod radio;
+pub mod routes;
 pub mod select;
+pub mod semantics;
 pub mod shell;
 mod size;
 mod text;
 pub mod theme;
 pub mod typography;
+pub mod window;
 pub mod workspace;
 
 pub use size::Size;
@@ -36,6 +52,9 @@ pub use size::Size;
 /// Installs shared loaders and styling.
 pub fn install(ctx: &egui::Context) {
     install_assets(ctx);
+    // Browser windows do not support native decoration theme commands.
+    #[cfg(target_arch = "wasm32")]
+    ctx.options_mut(|options| options.sync_window_theme = false);
     ctx.style_mut_of(egui::Theme::Dark, |style| {
         theme::apply_palette(style, &garmin_color::theme::GRAY_100);
     });

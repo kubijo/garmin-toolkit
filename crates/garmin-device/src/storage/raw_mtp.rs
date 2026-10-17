@@ -1,5 +1,7 @@
 use std::{
     fs::File,
+    future::Future as _,
+    num::NonZeroU64,
     path::Path,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -58,6 +60,7 @@ pub(crate) async fn upload_mtp_file(
     source: tokio::fs::File,
     size: u64,
     progress: RawMtpUploadProgress,
+    upload_rate: Option<NonZeroU64>,
 ) -> RawMtpUploadOutcome {
     report_started(
         &progress.reporter,
@@ -74,6 +77,7 @@ pub(crate) async fn upload_mtp_file(
         started,
         Arc::clone(&payload_elapsed),
         progress.clone(),
+        upload_rate,
     );
     let upload = storage.upload(parent, NewObjectInfo::file(name, size), stream);
     tokio::pin!(upload);
@@ -105,12 +109,54 @@ pub(crate) async fn upload_mtp_file(
     classify_upload(result, payload_elapsed, total_elapsed, size, &progress)
 }
 
+struct UploadPacing {
+    rate: NonZeroU64,
+    next_chunk: tokio::time::Instant,
+    timer: Pin<Box<tokio::time::Sleep>>,
+}
+
+impl UploadPacing {
+    fn new(rate: NonZeroU64) -> Self {
+        Self {
+            rate,
+            next_chunk: tokio::time::Instant::now(),
+            timer: Box::pin(tokio::time::sleep(Duration::ZERO)),
+        }
+    }
+
+    fn poll_ready(&mut self, context: &mut std::task::Context<'_>) -> Poll<()> {
+        loop {
+            std::task::ready!(self.timer.as_mut().poll(context));
+            let now = tokio::time::Instant::now();
+            if now >= self.next_chunk {
+                return Poll::Ready(());
+            }
+            // Wake periodically even below ten bytes per second so the caller
+            // can observe cancellation before another whole byte is due.
+            self.timer
+                .as_mut()
+                .reset(self.next_chunk.min(now + Duration::from_millis(100)));
+        }
+    }
+
+    fn sent(&mut self, bytes: usize) {
+        let bytes = u64::try_from(bytes).expect("chunk fits in u64");
+        let delay = Duration::from_nanos((bytes * 1_000_000_000).div_ceil(self.rate.get()));
+        let now = tokio::time::Instant::now();
+        self.next_chunk = now + delay;
+        self.timer
+            .as_mut()
+            .reset(self.next_chunk.min(now + Duration::from_millis(100)));
+    }
+}
+
 fn payload_stream(
     mut source: tokio::fs::File,
     size: u64,
     started: Instant,
     payload_elapsed: Arc<Mutex<Option<Duration>>>,
     progress: RawMtpUploadProgress,
+    upload_rate: Option<NonZeroU64>,
 ) -> impl futures_util::Stream<Item = Result<Bytes, std::io::Error>> + Unpin {
     let RawMtpUploadProgress {
         reporter,
@@ -122,13 +168,24 @@ fn payload_stream(
         complete_payload_stage,
     } = progress;
     let mut copied = 0_u64;
-    let mut buffer = vec![0_u8; 4 * 1024 * 1024];
+    // Limit each paced chunk to roughly 100 ms of data.
+    // Cancellation is checked on every wake, including
+    // while the stream waits for its next chunk.
+    let buffer_len = upload_rate.map_or(4 * 1024 * 1024, |rate| {
+        usize::try_from(rate.get().div_ceil(10).min(4 * 1024 * 1024))
+            .expect("paced buffer fits in usize")
+    });
+    let mut buffer = vec![0_u8; buffer_len];
+    let mut pacing = upload_rate.map(UploadPacing::new);
     futures_util::stream::poll_fn(move |context| {
         if reporter.is_cancelled() {
             return Poll::Ready(Some(Err(std::io::Error::new(
                 std::io::ErrorKind::Interrupted,
                 "MTP upload cancelled",
             ))));
+        }
+        if let Some(pacing) = pacing.as_mut() {
+            std::task::ready!(pacing.poll_ready(context));
         }
         if copied == size {
             let mut payload_clock = payload_elapsed.lock().expect("MTP payload clock poisoned");
@@ -191,6 +248,9 @@ fn payload_stream(
                 match count {
                     Ok(count) => {
                         copied = count;
+                        if let Some(pacing) = pacing.as_mut() {
+                            pacing.sent(chunk.len());
+                        }
                         report_advanced(
                             &reporter,
                             stage,
@@ -330,6 +390,8 @@ pub struct MtpStorageDevice {
     target: Option<String>,
     keys: Vec<String>,
     primary: String,
+    physical_ids: bool,
+    upload_rate: Option<NonZeroU64>,
 }
 
 impl MtpStorageDevice {
@@ -340,7 +402,42 @@ impl MtpStorageDevice {
             target,
             keys,
             primary,
+            physical_ids: false,
+            upload_rate: None,
         }
+    }
+
+    /// Limit payload uploads in bytes per second.
+    /// Used by simulated devices to exercise progress
+    /// and cancellation without depending on host disk speed.
+    pub const fn set_upload_rate(&mut self, bytes_per_second: Option<NonZeroU64>) {
+        self.upload_rate = bytes_per_second;
+    }
+
+    /// Enumerates storage IDs without requiring a readable Garmin manifest.
+    /// # Errors
+    /// The selected transport or its storage metadata is unavailable.
+    pub async fn discover(location: u64) -> Result<Self, DeviceIoError> {
+        let device = crate::mtp::open_raw_mtp(location).await?;
+        let result = device
+            .storages()
+            .await
+            .map(|storages| {
+                let keys = storages
+                    .iter()
+                    .map(|storage| format!("{:016x}", storage.id().0))
+                    .collect::<Vec<_>>();
+                Self {
+                    location,
+                    target: None,
+                    primary: keys.first().cloned().unwrap_or_default(),
+                    keys,
+                    physical_ids: true,
+                    upload_rate: None,
+                }
+            })
+            .map_err(DeviceIoError::from);
+        finish(device, result).await
     }
 
     async fn connect(&self) -> Result<MtpDevice, DeviceIoError> {
@@ -348,6 +445,14 @@ impl MtpStorageDevice {
     }
 
     async fn storage(&self, device: &MtpDevice, key: &str) -> Result<Storage, DeviceIoError> {
+        if self.physical_ids {
+            return device
+                .storages()
+                .await?
+                .into_iter()
+                .find(|storage| format!("{:016x}", storage.id().0) == key)
+                .ok_or_else(|| DeviceIoError::Storage(key.to_owned()));
+        }
         let index = self
             .keys
             .iter()
@@ -867,6 +972,7 @@ impl DeviceWrite for MtpStorageDevice {
                     path: Some(display_path),
                     complete_payload_stage: false,
                 },
+                self.upload_rate,
             )
             .await;
             let (handle, ambiguous) = match outcome {
@@ -1011,6 +1117,7 @@ mod tests {
             Instant::now(),
             Arc::new(Mutex::new(None)),
             progress(ProgressReporter::default(), 1024),
+            None,
         );
         let mut chunks = Vec::new();
         while let Some(chunk) = stream.next().await {
@@ -1019,6 +1126,78 @@ mod tests {
 
         assert_eq!(chunks.last().map(Bytes::len), Some(1));
         assert_eq!(chunks.into_iter().flatten().collect::<Vec<_>>(), expected);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn paced_upload_reports_partial_progress_and_preserves_payload() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("payload.bin");
+        let expected = vec![0xA5; 1024];
+        tokio::fs::write(&path, &expected).await.unwrap();
+        let file = tokio::fs::File::open(path).await.unwrap();
+        let (reporter, receiver) = ProgressReporter::channel();
+        let mut stream = payload_stream(
+            file,
+            1024,
+            Instant::now(),
+            Arc::new(Mutex::new(None)),
+            progress(reporter, 1024),
+            NonZeroU64::new(1024),
+        );
+        let started = tokio::time::Instant::now();
+        let mut chunks = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            chunks.push(chunk.unwrap());
+        }
+        assert!(started.elapsed() >= Duration::from_secs(1));
+        assert!(chunks.len() >= 10);
+        assert_eq!(chunks.last().map(Bytes::len), Some(1));
+        assert_eq!(chunks.into_iter().flatten().collect::<Vec<_>>(), expected);
+        let counts = receiver
+            .try_iter()
+            .filter(|event| event.state == ProgressState::Advanced)
+            .map(|event| event.completed)
+            .collect::<Vec<_>>();
+        assert!(
+            counts
+                .first()
+                .is_some_and(|count| *count > 0 && *count < 1024)
+        );
+        assert!(counts.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(counts.last(), Some(&1024));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancellation_interrupts_a_slow_pacing_wait() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("payload.bin");
+        tokio::fs::write(&path, [1, 2, 3]).await.unwrap();
+        let file = tokio::fs::File::open(path).await.unwrap();
+        let reporter = ProgressReporter::default();
+        let cancellation = reporter.cancellation_token();
+        let mut stream = payload_stream(
+            file,
+            3,
+            Instant::now(),
+            Arc::new(Mutex::new(None)),
+            progress(reporter, 3),
+            NonZeroU64::new(1),
+        );
+        assert_eq!(stream.next().await.unwrap().unwrap().as_ref(), &[1]);
+        let next = stream.next();
+        tokio::pin!(next);
+        assert!(futures_util::poll!(&mut next).is_pending());
+        let cancel = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            cancellation.cancel();
+        });
+        let error = tokio::time::timeout(Duration::from_millis(150), next)
+            .await
+            .expect("cancellation must wake during the one-second pacing delay")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+        cancel.await.unwrap();
     }
 
     #[tokio::test]
@@ -1033,6 +1212,7 @@ mod tests {
             Instant::now(),
             Arc::new(Mutex::new(None)),
             progress(ProgressReporter::default(), 5),
+            None,
         );
 
         assert!(stream.next().await.unwrap().is_ok());

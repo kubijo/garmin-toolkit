@@ -4,7 +4,45 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Garmin Toolkit</title>
+        <script nonce="GARMIN_TOOLKIT_CSP_NONCE">
+        addEventListener(
+            'error',
+            event => {
+                const resource = event.target;
+                if (resource?.tagName !== 'SCRIPT' || resource.type !== 'module') return;
+
+                function showFailure() {
+                    const loading = document.getElementById('loading');
+                    if (!loading || loading.hidden || loading.dataset.state === 'failure') return;
+                    loading.dataset.state = 'failure';
+                    loading.dataset.preformatted = 'false';
+                    loading.setAttribute('aria-busy', 'false');
+                    loading.setAttribute('role', 'alert');
+                    document.getElementById('loading-message').textContent = 'Garmin Toolkit could not start.';
+                    document.getElementById('loading-detail').textContent =
+                        'A required application file could not load.';
+                    document.getElementById('loading-trace').textContent =
+                        'Reload the page. If the problem persists, inspect the browser console and host log.';
+                    const retry = document.getElementById('loading-retry');
+                    retry.hidden = false;
+                    retry.addEventListener('click', () => location.reload(), { once: true });
+                }
+
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', showFailure, { once: true });
+                } else {
+                    showFailure();
+                }
+            },
+            true,
+        );
+        </script>
         <link data-trunk rel="rust" data-wasm-opt="0" data-initializer="initializer.js">
+        <link data-trunk rel="copy-file" href="map-worker.js">
+        <link data-trunk rel="copy-file" href="map-render-worker.js">
+        <link data-trunk rel="copy-file" href="map-clock.js">
+        <link data-trunk rel="copy-file" href="worker-codec.js">
+        <link data-trunk rel="copy-file" href="logging.js">
         <link data-trunk rel="icon" href="../../../crates/garmin-brand/assets/icon.svg">
         <style>
         :root {
@@ -28,20 +66,77 @@
         }
         #loading {
             position: fixed;
+            z-index: 2;
             inset: 0;
             display: grid;
-            place-content: center;
+            place-items: center;
             gap: 0.75rem;
             padding: 2rem;
-            background: #0b0e13;
+            background: radial-gradient(circle at 50% 45%, rgb(67 183 221 / 8%), transparent 34rem), #0b0e13;
             text-align: center;
+        }
+        #loading[hidden] {
+            display: none;
+        }
+        #loading-panel {
+            box-sizing: border-box;
+            display: grid;
+            width: min(38rem, 100%);
+            gap: 0.85rem;
+            padding: 2.25rem;
+            border: 1px solid #252c35;
+            border-radius: 0.75rem;
+            background: #11161c;
+            box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 28%);
         }
         #loading[aria-busy="false"] #loading-progress {
             display: none;
         }
+        #loading-state {
+            display: none;
+            align-items: center;
+            gap: 0.55rem;
+            color: #ff9d99;
+            font-size: 0.75rem;
+            font-weight: 650;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        #loading-state-icon {
+            display: grid;
+            width: 1.5rem;
+            height: 1.5rem;
+            place-items: center;
+            border: 1px solid rgb(255 157 153 / 48%);
+            border-radius: 50%;
+            background: rgb(255 157 153 / 10%);
+            font-size: 0.9rem;
+            letter-spacing: 0;
+        }
+        #loading-message {
+            color: #f4f7fa;
+            font-size: 1.2rem;
+            line-height: 1.35;
+        }
+        #loading[data-state="failure"] #loading-message {
+            font-size: 1.35rem;
+            text-align: left;
+        }
+        #loading[data-state="failure"] {
+            background: radial-gradient(circle at 50% 45%, rgb(255 107 103 / 7%), transparent 34rem), #0b0e13;
+        }
+        #loading[data-state="failure"] #loading-panel {
+            border-color: rgb(255 157 153 / 24%);
+        }
+        #loading[data-state="failure"][data-preformatted="true"] #loading-panel {
+            width: min(52rem, 100%);
+        }
+        #loading[data-state="failure"] #loading-state {
+            display: flex;
+        }
         #loading-progress {
             height: 0.35rem;
-            width: min(28rem, 75vw);
+            width: 100%;
             overflow: hidden;
             border: 1px solid #68717c;
             border-radius: 999px;
@@ -66,12 +161,55 @@
         }
         #loading-detail {
             color: #abb6c3;
+            line-height: 1.5;
             font-variant-numeric: tabular-nums;
         }
+        #loading[data-state="failure"] #loading-detail {
+            max-height: min(16rem, 35vh);
+            overflow: auto;
+            padding: 0.9rem 1rem;
+            border: 1px solid #2b333d;
+            border-radius: 0.4rem;
+            background: #0b0e13;
+            color: #d8e0e9;
+            font-family: ui-monospace, "Cascadia Code", "Roboto Mono", monospace;
+            font-size: 0.82rem;
+            text-align: left;
+            user-select: text;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+        #loading[data-state="failure"][data-preformatted="true"] #loading-detail {
+            white-space: pre;
+            overflow-wrap: normal;
+            line-height: 1;
+        }
         #loading-trace {
-            max-width: 42rem;
             color: #7f8a98;
             font-size: 0.8rem;
+            line-height: 1.5;
+        }
+        #loading[data-state="failure"] #loading-trace {
+            text-align: left;
+        }
+        #loading-retry {
+            justify-self: end;
+            min-width: 6.5rem;
+            padding: 0.65rem 1.15rem;
+            border: 1px solid #1596c3;
+            border-radius: 0.35rem;
+            background: #087da8;
+            color: #fff;
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #loading-retry:hover {
+            background: #0b8fbd;
+        }
+        #loading-retry:focus-visible {
+            outline: 2px solid #43b7dd;
+            outline-offset: 2px;
         }
         @keyframes loading-slide {
             to {
@@ -87,17 +225,37 @@
                 transition: none;
             }
         }
+        @media (max-width: 36rem) {
+            #loading {
+                padding: 1rem;
+            }
+            #loading-panel {
+                padding: 1.5rem;
+            }
+        }
         </style>
     </head>
     <body>
-        <canvas id="garmin-toolkit"></canvas>
+        <canvas
+            id="garmin-toolkit"
+            data-map-upload-telemetry="GARMIN_TOOLKIT_MAP_UPLOAD_TELEMETRY"
+            data-map-render-worker="GARMIN_TOOLKIT_MAP_RENDER_WORKER"
+            data-ui-automation="GARMIN_TOOLKIT_UI_AUTOMATION"
+        ></canvas>
         <main id="loading" aria-live="polite" aria-busy="true">
-            <strong id="loading-message">Loading Garmin Toolkit…</strong>
-            <div id="loading-progress" role="progressbar" aria-label="Application download">
-                <span id="loading-progress-bar"></span>
-            </div>
-            <span id="loading-detail">Loading application files…</span>
-            <span id="loading-trace">Waiting for the download to begin.</span>
+            <section id="loading-panel" aria-labelledby="loading-message">
+                <div id="loading-state" aria-hidden="true">
+                    <span id="loading-state-icon">!</span>
+                    <span>Startup failure</span>
+                </div>
+                <strong id="loading-message">Loading Garmin Toolkit…</strong>
+                <div id="loading-progress" role="progressbar" aria-label="Application download">
+                    <span id="loading-progress-bar"></span>
+                </div>
+                <span id="loading-detail">Loading application files…</span>
+                <span id="loading-trace">Waiting for the download to begin.</span>
+                <button id="loading-retry" type="button" hidden>Reload</button>
+            </section>
         </main>
     </body>
 </html>

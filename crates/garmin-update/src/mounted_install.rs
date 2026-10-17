@@ -28,6 +28,12 @@ use crate::{
 const TRANSACTION_VERSION: u8 = 1;
 const DEVICE_STATE_HEADROOM_BYTES: u64 = 16 * 1024 * 1024;
 
+mod assisted;
+pub use assisted::{
+    AssistedRecoveryPlan, AssistedRecoveryReport, EmptyUpload, approve_assisted_recovery,
+    review_assisted_recovery,
+};
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MountedMtpPreflight {
     pub files_to_write: usize,
@@ -438,7 +444,7 @@ where
         Err(error) => Err(error),
     };
     match rollback {
-        Ok(()) => operation,
+        Ok(()) => MountedInstallError::RolledBack(Box::new(operation)),
         Err(rollback) => MountedInstallError::Rollback {
             operation: Box::new(operation),
             rollback: Box::new(rollback),
@@ -3561,6 +3567,9 @@ impl std::fmt::Display for UnprotectedMutationEvidence {
 
 #[derive(Debug, Error)]
 pub enum MountedInstallError {
+    /// The original operation failed, but restoration was proven and device state cleared.
+    #[error(transparent)]
+    RolledBack(Box<MountedInstallError>),
     #[error(transparent)]
     DeviceState(#[from] crate::DeviceStateError),
     #[error(
@@ -3651,6 +3660,18 @@ pub enum MountedInstallError {
     Capture(#[from] garmin_capture::CaptureError),
     #[error("mounted update journal is invalid JSON: {0}")]
     JournalJson(#[from] serde_json::Error),
+}
+
+impl MountedInstallError {
+    /// Recognize cancellation, including when required rollback has completed successfully.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        match self {
+            Self::Cancelled => true,
+            Self::RolledBack(operation) => operation.is_cancelled(),
+            _ => false,
+        }
+    }
 }
 
 impl From<DeviceIoError> for MountedInstallError {

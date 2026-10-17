@@ -6,12 +6,13 @@ use garmin_gpx::CandidateSource;
 use garmin_model::{
     artifact::{
         Acquisition, AcquisitionId, AcquisitionIdKind, AcquisitionOperationId, Artifact,
-        ArtifactId, ArtifactIdKind, MediaType, SourceIdentity,
+        ArtifactDigest, ArtifactId, ArtifactIdKind, MediaType, SourceIdentity,
     },
     identity::{Source, UserId},
     route::{
-        RevisionProvenance, RevisionSource, RouteName, RoutePlan, RoutePlanId, RoutePlanIdKind,
-        RoutePlanRevision, RoutePlanRevisionId, RoutePlanRevisionIdKind, RouteSport,
+        RevisionProvenance, RevisionSource, RouteImportIdentity, RouteName, RoutePlan, RoutePlanId,
+        RoutePlanIdKind, RoutePlanRevision, RoutePlanRevisionId, RoutePlanRevisionIdKind,
+        RouteSport,
     },
     value::{ComponentVersion, Timestamp, Transformation},
 };
@@ -19,6 +20,8 @@ use garmin_storage::{RouteImport, Storage};
 use thiserror::Error;
 
 use crate::ids::derived_id;
+
+pub use garmin_model::route::RouteImportReceipt;
 
 const GPX_MEDIA_TYPE: &str = "application/gpx+xml";
 
@@ -67,37 +70,6 @@ impl<'a> RouteImportRequest<'a> {
     }
 }
 
-/// Records produced by one selected-candidate import.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RouteImportReceipt {
-    artifact: ArtifactId,
-    acquisition: AcquisitionId,
-    plan: RoutePlanId,
-    revision: RoutePlanRevisionId,
-}
-
-impl RouteImportReceipt {
-    #[must_use]
-    pub const fn artifact_id(self) -> ArtifactId {
-        self.artifact
-    }
-
-    #[must_use]
-    pub const fn acquisition_id(self) -> AcquisitionId {
-        self.acquisition
-    }
-
-    #[must_use]
-    pub const fn plan_id(self) -> RoutePlanId {
-        self.plan
-    }
-
-    #[must_use]
-    pub const fn revision_id(self) -> RoutePlanRevisionId {
-        self.revision
-    }
-}
-
 /// GPX route-plan import service.
 pub struct RouteImporter<'a> {
     storage: &'a Storage,
@@ -116,10 +88,60 @@ impl<'a> RouteImporter<'a> {
         &self,
         request: RouteImportRequest<'_>,
     ) -> Result<RouteImportReceipt, RouteImportError> {
-        if request.actor_id != request.source.owner_id() {
-            return Err(RouteImportError::ActorCannotUseSource);
+        let identity = request_identity(&request)?;
+        if let Some(receipt) = self.retry(&request, &identity).await? {
+            return Ok(receipt);
         }
         let document = garmin_gpx::parse(request.bytes)?;
+        let adapter = ComponentVersion::from_parts(
+            garmin_gpx::ADAPTER_NAME,
+            garmin_gpx::ADAPTER_VERSION
+                .parse()
+                .map_err(|error| definition("GPX adapter version", error))?,
+        )
+        .map_err(|error| definition("GPX adapter", error))?;
+        self.persist(request, &identity, &document, &adapter).await
+    }
+
+    /// Commits a retained, contained parse without parsing the input a second time.
+    /// # Errors
+    /// [`RouteImportError`] for a changed input, ownership, selection, or persistence failure.
+    pub async fn import_prepared(
+        &self,
+        request: RouteImportRequest<'_>,
+        prepared: &garmin_gpx::worker::PreparedGpx,
+    ) -> Result<RouteImportReceipt, RouteImportError> {
+        let identity = request_identity(&request)?;
+        if let Some(receipt) = self.retry(&request, &identity).await? {
+            return Ok(receipt);
+        }
+        if request.bytes != prepared.bytes() {
+            return Err(RouteImportError::PreparedInputMismatch);
+        }
+        self.persist(request, &identity, prepared.document(), prepared.parser())
+            .await
+    }
+
+    async fn retry(
+        &self,
+        request: &RouteImportRequest<'_>,
+        identity: &RouteImportIdentity,
+    ) -> Result<Option<RouteImportReceipt>, RouteImportError> {
+        self.storage
+            .route_import(request.actor_id, request.operation_id)
+            .await?
+            .map(|existing| existing.retry(identity))
+            .transpose()
+            .map_err(Into::into)
+    }
+
+    async fn persist(
+        &self,
+        request: RouteImportRequest<'_>,
+        identity: &RouteImportIdentity,
+        document: &garmin_gpx::Document,
+        adapter: &ComponentVersion,
+    ) -> Result<RouteImportReceipt, RouteImportError> {
         let candidate = document
             .candidates()
             .iter()
@@ -138,13 +160,6 @@ impl<'a> RouteImporter<'a> {
             request.source_identity,
             request.acquired_at,
         );
-        let adapter = ComponentVersion::from_parts(
-            garmin_gpx::ADAPTER_NAME,
-            garmin_gpx::ADAPTER_VERSION
-                .parse()
-                .map_err(|error| definition("GPX adapter version", error))?,
-        )
-        .map_err(|error| definition("GPX adapter", error))?;
         let revision = RoutePlanRevision::from_parts(
             ids.revision,
             ids.plan,
@@ -156,21 +171,37 @@ impl<'a> RouteImporter<'a> {
             Vec::new(),
             RevisionProvenance::from_parts(
                 RevisionSource::Artifact(artifact.id()),
-                vec![Transformation::from_component(adapter)],
+                vec![Transformation::from_component(adapter.clone())],
             ),
         )?;
         let plan = RoutePlan::from_parts(ids.plan, request.actor_id, ids.revision);
-        self.storage
-            .save_route_import(RouteImport::from_parts(
-                &artifact,
-                request.bytes,
-                &acquisition,
-                &plan,
-                &revision,
-            )?)
-            .await?;
-        Ok(ids.receipt())
+        Ok(self
+            .storage
+            .save_selected_route_import(
+                request.source,
+                identity,
+                adapter,
+                RouteImport::from_parts(&artifact, request.bytes, &acquisition, &plan, &revision)?,
+            )
+            .await?)
     }
+}
+
+fn request_identity(
+    request: &RouteImportRequest<'_>,
+) -> Result<RouteImportIdentity, RouteImportError> {
+    if request.actor_id != request.source.owner_id() {
+        return Err(RouteImportError::ActorCannotUseSource);
+    }
+    Ok(RouteImportIdentity::from_parts(
+        request.actor_id,
+        request.source.id(),
+        request.source_identity.clone(),
+        ArtifactDigest::from_bytes(request.bytes),
+        request.candidate,
+        request.name.clone(),
+        request.sport,
+    ))
 }
 
 #[derive(Clone, Copy)]
@@ -193,15 +224,6 @@ impl ImportIds {
                 operation,
                 RevisionKey(candidate),
             ),
-        }
-    }
-
-    const fn receipt(self) -> RouteImportReceipt {
-        RouteImportReceipt {
-            artifact: self.artifact,
-            acquisition: self.acquisition,
-            plan: self.plan,
-            revision: self.revision,
         }
     }
 }
@@ -238,6 +260,8 @@ fn definition(field: &'static str, error: impl fmt::Display) -> RouteImportError
 /// GPX import failure.
 #[derive(Debug, Error)]
 pub enum RouteImportError {
+    #[error("prepared GPX belongs to different input bytes")]
+    PreparedInputMismatch,
     #[error("acting user cannot import through another user's source")]
     ActorCannotUseSource,
     #[error("selected GPX candidate is not available")]

@@ -1,45 +1,50 @@
 # Shared interface workflows
 
-Deliver device, FIT, route, activity, asset, and recovery workflows through the same application models and actions in
-desktop and HASS. Target shells adapt transport and presentation mechanics without creating parallel behavior.
-
-[The HASS watch slice](hass-watch-vertical-slice.md) owns hosting, ingress, packaging, and hardware deployment. This
-plan owns user-visible workflow parity between its browser client and the native desktop app.
+Desktop and HASS share application models and actions. The [HASS add-on plan](hass-watch-vertical-slice.md) owns hosting
+and physical-device acceptance. Current contracts live in [application windows](../architecture/application-windows.md),
+[developer tools](../architecture/developer-tools.md), and the [device explorer](../architecture/device-explorer.md).
 
 ## Shared work
 
-1. Populate each device page through automatic bounded inspection, then give it explicit FIT import, route upload, map
-   management, and asset-management entry points. File transfer and mutation require separate confirmation.
-2. Stage FIT ingress before persistence. Pre-parse selected or dropped files and present their activities, metadata,
-   duplicates, warnings, and failures for review. Import nothing until the user explicitly confirms the staged set.
-3. Confine drag and drop to visible, enabled targets. Show clear accept or reject feedback while hovering. A drop target
-   cannot remain active elsewhere in the window or application.
-4. Add a consented mounted-device browser behind an owned `garmin-ui` model. Render storages separately and treat
-   optional volume icons as bounded untrusted input.
-5. Replace the activity-detail spike with maps, laps, charts, measurements, device data, and provenance.
-6. Report mutations through the notification host. Success follows persistence; failures remain visible and actionable
-   across reconnects.
-7. Prove offline sync, visualization, export, snapshot and restore, and one confirmed upload through both clients.
-8. Use only original or individually licensed artwork with generated attribution.
-9. Complete a keyboard-only audit of both shells, including focus visibility, traversal order, modal trapping, and
-   reconnect recovery.
-10. Add redacted structured diagnostics with configurable startup verbosity, bounded live history, rotated log files,
-    shared filtering, and explicit download from the UI.
+- Audit keyboard navigation, focus, modal trapping, translation, narrow layouts, and reconnect recovery.
+- Confirm browser Ctrl+wheel page zoom in a headed browser.
+- Finish the [visual language](../architecture/visual-language.md) across controls, shells, device headers, and
+  empty/offline/error states. Review Gray 100/10 layers, keyboard activation, Czech and long copy, narrow overlays, and
+  dark/light captures. Decide whether the headless color picker needs separate state before changing its geometry.
 
-## Target edges
+## Runtime acceptance
 
-- Desktop composes application services in process. Native pickers remain visibly modal, and system attachment
-  differences stay behind device adapters. Test Linux GIO first; test macOS and Windows before advertising them.
-- HASS sends owned inputs and opaque staged or operation IDs across the typed service boundary. Browser code receives no
-  host paths, storage handles, credentials, or mutation adapters. Reconnect must recover staged review and operation
-  state without replaying a write.
+Use `just hass::control check` against a running demo where semantic control is available. Open checks:
 
-Every interface state requires validated `garmin-ui` gallery evidence, including narrow layouts, translated prose,
-rejection, partial parsing, confirmation, progress, disconnect, and recovery. HASS loader and ingress behavior also
-require captured browser evidence because shared component scenes cannot prove the deployed boundary.
+- **Files:** desktop FIT import, refresh/error recovery, busy focus, picker cancellation, removal confirmation, and
+  snapshot directory state. Test disconnect after a write commits but before its reply.
+- **Ownership:** profile switch/removal and window closure during operations or pickers; discard late results from old
+  profiles on both clients.
+- **Windows:** before advertising Windows support, test blocked-popup retry/tab fallback, stale popup rejection after
+  parent reload/closure, and foreground focus across keyboard and touch. Pending activation must not recreate closed
+  windows.
+- **Decorations:** native title-bar actions, window menu, resizing, borders/shadows, maximized appearance, and both
+  themes.
+- **Diagnostics:** file-export error recovery.
+- **Localization:** use the FormatJS `en-XA` pseudo-locale and deliberately long or untranslated copy; catalog parity
+  alone does not establish readable native, gallery, or browser layouts.
 
-The OS session or HASS ingress grants process access but never identifies a toolkit user. Persist no credentials; keep
-snapshots opaque and exports plaintext.
+Extend semantic automation when a runtime check needs hover or CSS cursor state, browser-native Ctrl+wheel input,
+capture while the HASS backend is offline, or native operating-system file-picker inspection. The current wheel action
+injects egui input and cannot check the browser's default zoom behavior. Separate native child viewports advertise no
+screenshot support; use the app's inline file-browser mode for visual checks until native capture is available. These
+tool gaps are optional improvements for unattended checks.
 
-Delete this plan after desktop and HASS complete the same watch workflow through shared contracts, snapshots round-trip
-between targets, advertised packages have explicit test tiers, and platform conditions remain inside adapters.
+### Deferred gallery hot reload
+
+Gallery hot reload is parked and does not block desktop or HASS work. The Linux measurements and intermittent reload
+pause are recorded in [build performance](../research/build-performance.md). If desktop hot reload becomes a priority,
+isolate the missed wake, verify workspace interaction and first-visible-frame timing, and repeat the checks on macOS.
+
+### Deferred Wayland activation work
+
+Keep the [winit patch](../../vendor/winit/PATCHES.md) until an upstream fix covers real pointer, keyboard, touch,
+multi-seat, and compositor focus. Synthetic automation cannot supply the required input serial. Before upstreaming,
+reproduce with two windows, agree on the initiating-window token API, and port to a compatible winit branch. See
+[winit #3633](https://github.com/rust-windowing/winit/issues/3633) and
+[egui #8142](https://github.com/emilk/egui/issues/8142).

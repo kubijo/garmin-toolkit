@@ -27,3 +27,10 @@ The watch advertised nothing identifiable while phone Bluetooth was on. With it 
 manufacturer advertisement appeared; no connection followed.
 
 Further proof needs a disposable/reset device and complete inventories. macOS waits for Garmin protocol safety.
+
+Historical source audit: AGPL-3.0 [Gadgetbridge 0.93.0][gb-audit] archives or acknowledges downloaded data in some sync
+paths; that behavior is not inherited. AGPL-3.0-only
+[garmin-bridge 0.1.0](https://github.com/wh1le/garmin-bridge/commit/5b849c7b81c005765560b7193d28c580ac80ca2c) uses BlueZ
+but does not prove coexistence or history sync. Neither is a dependency or a substitute for the safety gate.
+
+[gb-audit]: https://codeberg.org/Freeyourgadget/Gadgetbridge/commit/d5961f0e2bcde00aa201e34d11571ee005f58d86
