@@ -2,8 +2,8 @@
 
 ## Repository-install acceptance
 
-Build or generate the [release-only store tree](../../release/README.md#generated-home-assistant-repository), then pass
-it to the existing disposable runner:
+Pass a [generated store tree](../../release/README.md#generated-home-assistant-repository) and matching image to the
+disposable runner:
 
 ```sh
 just hass::haos-app-check \
@@ -12,25 +12,18 @@ just hass::haos-app-check \
     --timeout 1800
 ```
 
-Replace the placeholders with actual output paths. The archive is independent expected image evidence; the runner uses a
-fresh HAOS disk and starts from empty app state. It creates a temporary Git repository on `hass-apps` from the generated
-tree, changing only the candidate copy's image repository to the guest's loopback registry. A host loopback HTTP
-listener serves Git's smart protocol, including Supervisor's shallow recursive clone. QEMU user networking exposes that
-listener to the guest at `10.0.2.2`; it does not publish it on the LAN.
+Replace the placeholders with actual paths. Starting with fresh HAOS and empty app state, the runner serves a temporary
+`hass-apps` Git branch and guest registry. Only the copied metadata's image repository changes. The Git listener uses
+host loopback, reachable from QEMU at `10.0.2.2`, with no LAN exposure.
 
-Supervisor adds the repository URL, discovers the generated app, and installs through the registry. The harness removes
-the loaded local image tags before installation so a registry pull is required. It checks the running container's
-image-config digest, image reference, Linux architecture, and registry pull digest against the expected inputs. A pull
-digest can identify an index or a single-platform manifest; it is distinct from the archive SHA-256 and image-config
-digest. `installation.json` records these identities and the repository URL alongside the existing version, screenshot,
-and populated-workflow evidence.
+Supervisor discovers and installs the repository app. Removing preloaded tags forces a registry pull; assertions compare
+the running image's reference, architecture, config digest, and pull digest with expected inputs. `installation.json`
+records these identities and the repository URL. The pull digest identifies an index or manifest, separately from the
+archive hash and config digest. Docker's containerd image ID may identify the manifest; the harness hashes the
+registry's original manifest and checks its config descriptor against the archive.
 
-Repository-derived app slugs flow through ingress, storage inspection, restart, and backup/restore; this path does not
-copy an app into Supervisor's local-app directory. The existing local-directory smoke mode remains available when no
-repository option is supplied.
-
-For a staged remote candidate, use its exact branch URL, generic image repository, and independently obtained registry
-pull digest:
+Without a repository option, the runner uses Supervisor's local-app directory. For a staged remote candidate, supply its
+branch URL, image repository, and independently obtained pull digest:
 
 ```sh
 just hass::haos-app-check \
@@ -41,29 +34,24 @@ just hass::haos-app-check \
     --timeout 1800
 ```
 
-The remote path requires an anonymous HTTP(S) branch URL and a full SHA-256 digest. It installs the remote metadata
-unchanged; the app's version/image fields must select the expected image. Do not pass credentials in the URL. Generated
-tree and remote URL options are mutually exclusive. Registry publication and public-store promotion are separate work.
+Remote metadata stays unchanged and must select the expected image. The URL must allow anonymous HTTP(S), contain no
+credentials, and select a branch; the digest must be SHA-256. `--repository` and `--repository-url` are mutually
+exclusive.
 
-The runner retains evidence in `.tmp/haos-evidence/`, defaults captures to dark mode, and removes its Git listener, VM,
-browser, credentials, and disk/runtime files on success and failure. Production control routes remain disabled; the
-existing browser-only ingress bridge supplies the documented automation/capture gap. No real HASS instance or physical
-USB device is needed for this software check.
+The runner uses dark screenshots and retains evidence in `.tmp/haos-evidence/`. Success or failure removes its VM,
+browser, credentials, listeners, and disks. It needs no real HASS instance or USB device.
 
-The generated-repository path passed on 2026-10-16 with the cached AMD64 `0.1.0` production image, HAOS 18.3, Core
-2026.10.1, Supervisor 2026.10.2, and Docker 29.7.2. Installation, gateway admission/rejection, populated ingress,
-byte-exact downloads, app restart, and cold backup/restore all passed. The tested identities were:
+Qualified AMD64 software: image `0.1.0`, HAOS 18.3, Core/Supervisor 2026.10.2, Docker 29.7.2.
+[CI artifact](https://github.com/kubijo/garmin-toolkit/actions/runs/39018402935), source commit
+`274f3d3639e8b11bf9022c4c18b75c998f24f263`, local evidence `.tmp/haos-evidence/02bf54ef61d7`.
 
 ```text
-Archive SHA-256: e458d9617f16d0c1d978a58c637caa3adf23c4f5daf6eda79be01fb6fb99c5ef
-Config digest:  sha256:0af8526f097b13903b1575c987a4e77c5ebb1f62ad7a5dc83fcdd0cab86df5d8
-Pull/manifest:  sha256:21c40855175a9dfdc0f2054c907b087f703aaa7df3e13b6360423a2c1273defd
+Archive SHA-256: bbf4b6ef6e4a950ec690bce722095032b0108618c41e657400a56aa63f37a232
+Config digest:  sha256:31e39977713cd50694e2636733c932e6be8b56e0cb3d1474d7b47d6a72f7945c
+Pull/manifest:  sha256:805a9c2c33ac615391de1033d6f6b8658e3bfc64726d8daeb6e60c99fdfa5d33
 ```
 
-This qualifies the generated metadata and installation harness against those cached bytes. It does not qualify a new
-native CI build, signed provenance, public GitHub/GHCR access, ARM64 runtime, upgrade, or HAOS restart. Docker's
-containerd-backed image ID identifies the manifest in this run; the harness hashes the registry's original manifest
-bytes and checks its config descriptor against the archive instead of treating that engine ID as a config digest.
+Remaining release gates belong to the [publication plan](../../../docs/plans/device-expansion-and-publication.md).
 
 ## Home Assistant app package
 
@@ -81,19 +69,8 @@ The host's startup tests run the real HTTP server with a fake device source in i
 data/frontend roots, listener overrides, and allowed/rejected ingress peers in production and demo builds. Full QA and
 CI include both configurations.
 
-An image archive built on each architecture must be available through a registry before Supervisor can install this app.
-The host-native runner below serves the locally built image from a registry inside its disposable guest. The ARM64 boot
-smoke does not install an app; a native ARM CI job is configured to build and inspect that image. The CI job keeps the
-ARM image as a one-day artifact for installation testing on an ARM64 HAOS device.
-
-On 2026-10-14, the AMD64 image built successfully under a four-CPU, six-GiB Nix daemon cap. Its archive declares the
-expected entrypoint, raw-MTP mode, ingress gateway, and persistent `/data`. A disposable Podman run served the packaged
-UI with HTTP 200 when loopback was configured as the gateway; the image's default gateway setting rejected a loopback
-request with HTTP 403. This validates image startup and the gateway restriction, not Supervisor installation. This
-builder has no ARM64 Nix builder or binfmt handler; CI uses a native ARM runner for that image. QEMU can emulate a
-directory-backed MTP USB device, but its fixed QEMU vendor ID (`0x46f4`) differs from the Garmin ID (`0x091e`) required
-by production discovery. It cannot exercise the full Garmin attachment path without a controlled VID-capable emulator or
-a passed-through device.
+QEMU's directory-backed MTP emulator uses vendor ID `0x46f4`, while production discovery requires Garmin's `0x091e`.
+Full attachment testing needs a VID-capable emulator or a passed-through device.
 
 ## Interactive HAOS app session
 
@@ -104,50 +81,45 @@ just hass::haos-app-run --app-archive /nix/store/...-garmin-toolkit-hass.tar.gz
 just hass::haos-app-stop SESSION_ID
 ```
 
-The runner defaults to the host architecture (`--arch auto`), validates the app image before boot, and selects the
-matching pinned HAOS image, QEMU, and firmware. It uses KVM when accessible for a native guest, with TCG as fallback.
-`--arch amd64` and `--arch aarch64` select an explicit guest. The existing smoke command accepts the same selector.
+The runner validates the app archive and selects matching HAOS, QEMU, and firmware. `--arch auto` defaults to the host;
+`--arch amd64` and `--arch aarch64` override it. The smoke command accepts the same selector. Native guests use KVM when
+accessible, otherwise TCG.
 
-The interactive command verifies an isolated headless Chrome page and screenshot capture before booting. It waits for
-full Home Assistant Core, creates a disposable `admin` / `admin` account, installs the app, and verifies authenticated
-ingress in that headless browser. Captures default to dark mode for Home Assistant and the embedded app. Once
-verification passes, it prints the URL and credentials for manual inspection. `--no-verify-browser` skips the browser
-check. The foreground runner owns the session until explicit stop, interruption, failure, or its two-hour inspection
-timeout. Startup has a separate thirty-minute limit; `--session-timeout` can shorten inspection. `--port` chooses the
-loopback HTTP port. An owned SSH tunnel forwards that port to the HTTP port reported by Core, so it also supports guests
-using port 80.
+After a headless Chrome capture preflight, the runner boots HAOS, onboards `admin` / `admin`, installs the app, and
+verifies authenticated ingress. It prints the URL and credentials for manual inspection. `--no-verify-browser` skips
+browser verification. Startup allows thirty minutes; inspection allows two hours, adjustable with `--session-timeout`.
+Stopping, interrupting, or exceeding either deadline cleans up. `--port` selects the loopback HTTP listener, forwarded
+through an owned SSH tunnel to Core's reported port.
 
-The VM has four CPUs, four GiB of guest RAM, a verified six-GiB cgroup limit, and a sixteen-GiB overlay file-size limit.
-Guest disks, temporary SSH identity, credentials, and browser profile live under repository `.tmp`; cleanup removes them
-and the owned listeners. Only small version metadata, browser diagnostics, and screenshots remain under
-`.tmp/haos-evidence`. The production app disables semantic automation and screenshot routes, so the maintained browser
-helper verifies its canvas and Remoc connection through ingress and captures the app iframe using Chrome DevTools. The
-configured MCP server cannot attach to that isolated browser; the helper uses its session-owned DevTools socket.
+The VM has four CPUs, four GiB guest RAM, a verified six-GiB cgroup limit, and a sixteen-GiB overlay limit. Runtime
+files stay under repository `.tmp`; evidence includes versions, screenshots, and browser diagnostics. The browser helper
+uses its owned DevTools socket to verify the canvas/Remoc connection and capture initial ingress. Production HTTP
+control routes stay disabled; the populated workflow's automation is described below.
 
 ## Populated HAOS workflow
 
 For a populated workflow through authenticated ingress, run:
 
 ```bash
-just hass::haos-app-check --app-archive /nix/store/...-garmin-toolkit-hass.tar.gz
+just hass::haos-app-check \
+    --app-archive .tmp/hass-native-build/garmin-toolkit-hass-0.1.0-amd64.tar.gz \
+    --build-receipt .tmp/hass-native-build/native-build.json \
+    --repository /nix/store/REPOSITORY-garmin-hass-app-repository
 ```
 
-This creates a disposable profile, imports the project-owned
-[GPX candidate fixture](../../../crates/garmin-gpx/tests/fixtures/candidates.gpx), generates one FIT Course, and
-downloads both artifacts through ingress. It repeats those downloads after a Supervisor app restart and cold
-backup/restore. After backup it deletes the Course and creates another profile; restore must recover the original Course
-and remove that later profile. An independent SQLite oracle copies selected storage while Supervisor has the app
-stopped, then reads the private database and WAL before reopening the app. Downloaded bytes must equal the stored
-artifacts and the GPX must equal the imported fixture.
+Keep the receipt, archive, and SBOM together. `--build-receipt` verifies their filesystem contract, payload hashes,
+architecture/config digest, and SBOM against committed source version, lockfile, and notices. Fetch the recorded commit
+first: PR builds record GitHub's tested merge commit. The retained receipt is unsigned; local images can omit it.
 
-The test first verifies the unmodified production frontend. Its isolated browser then enables the semantic driver
-already present in the web bundle by changing only that browser's canvas attribute before startup. Actions and app
-screenshots use the built-in APIs; Chrome DevTools handles the browser-native file chooser and downloads. The production
-host's HTTP control API remains disabled. The command exits and removes its VM, browser, listeners, credentials, and
-disks after success or failure; screenshots, synthetic downloads, version metadata, and the result remain under
-`.tmp/haos-evidence`.
+The test creates a profile, imports the [GPX fixture](../../../crates/garmin-gpx/tests/fixtures/candidates.gpx),
+generates a FIT Course, and downloads both artifacts. It repeats state/download checks after app restart, HAOS reboot,
+and cold backup/restore. Reboot must change the kernel boot ID and automatically start the same image before ingress
+reopens. An independent oracle reads the stopped app's SQLite database and WAL: downloads must match stored artifacts,
+and GPX must match the fixture. Restore must also reverse the post-backup Course deletion and added profile.
 
-Passed locally on 2026-10-15 with the AMD64 `0.1.0` image, HAOS 18.3, and Home Assistant Core 2026.10.1.
+The unmodified production frontend is checked first. The isolated browser then enables the bundled semantic driver
+through its canvas attribute. Actions and screenshots use built-in APIs; DevTools handles file choosers and downloads.
+Evidence includes synthetic downloads and `workflow.json`; cleanup follows the runner contract above.
 
 ## HAOS app smoke
 
@@ -167,9 +139,8 @@ selected generation and running app. The guest is isolated from the user's Home 
 overlay lives only under the repository's ignored `.tmp` and is removed with the VM. The overlay has an eight-GiB
 file-size limit, including while Docker loads and pushes the image.
 
-This passed locally on 2026-10-14 with the AMD64 `0.1.0` image. The guest uses the Home Assistant landing page instead
-of an onboarded Core instance, so this tests the gateway rule and Supervisor lifecycle, not an authenticated frontend
-ingress session. Registry publication and the ARM64 app install remain separate acceptance checks.
+The guest uses the Home Assistant landing page without onboarding Core; use the populated workflow for authenticated
+ingress acceptance.
 
 ## ARM64 HAOS boot smoke
 
@@ -207,11 +178,9 @@ enabled or disabled, and tracing enabled or disabled. Each of the 16 cases alter
 restarts, then verifies process and state cleanup. Constructor counters assert that the application always selects
 standard WebSocket. It is an explicit diagnostic target, separate from the route workflow check in CI.
 
-The application explicitly selects `websocket-web`'s standard interface. On 2026-10-07 its automatic WebSocketStream
-selection reproduced Chromium 153.0.8010.12's native null-pointer crash during reconnect, including without fault hooks
-or tracing. The native stack matched the queued-restore failure; standard WebSocket passed 64 comparison reconnects.
-Bare sockets also passed, so the evidence identifies the application/stream-transport interaction, not a specific
-Chromium function. Keep the normal library buffering and transport semantics when changing this selection.
+The application selects `websocket-web`'s standard interface to avoid a Chromium 153.0.8010.12 native reconnect crash
+with automatic WebSocketStream selection, reproducible without fault hooks or tracing. Bare sockets did not reproduce
+it. Preserve the library's buffering and transport semantics when changing this selection.
 
 Both suites build the packaged demo and run a disposable NixOS VM with two CPUs and 4 GiB RAM. The route suite is also a
 Linux flake check, so CI's `nix flake check` runs it; ordinary `qa::full` does not boot a VM. The local recipe runs the
@@ -295,5 +264,4 @@ host has no checkpoints.
 TAP output, host/browser logs, screenshots, and Playwright traces are retained under the check output's `artifacts`
 directory, or the local recipe's printed `.tmp/hass-integration.*/results` directory. For failed Nix builds, pass
 `--keep-failed` to retain the build directory and inspect `nix log`; its driver output contains the collected artifacts.
-State is disposable; diagnostics are retained. On 2026-10-08 the packaged route suite passed all 14 cases and the
-intentional-failure cleanup probe with standard WebSocket selected by the application.
+State is disposable; diagnostics are retained.

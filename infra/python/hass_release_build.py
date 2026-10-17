@@ -12,7 +12,15 @@ from pathlib import Path
 
 from haos_platform import PLATFORMS, inspect_archive, validate_archive
 from hass_image_sbom import verify_sbom
-from hass_release_contract import CONTRACT, environment, file_sha256, json_bytes, validate_document
+from hass_release_contract import (
+    CONTRACT,
+    check_shape,
+    environment,
+    file_sha256,
+    json_bytes,
+    read_json,
+    validate_document,
+)
 from hass_release_source import clean_commit, source_bytes, source_metadata
 from json_data import Object, object_value, strings, text, unique_object
 
@@ -69,6 +77,35 @@ def native_derivation(path: Path) -> tuple[str, Path]:
             raise ValueError('Invalid relative Nix output path')
         output = path.parent / output
     return text(producing.get('system')), output
+
+
+def verify_build_inputs(archive: Path, receipt: Path, source: Path) -> Object:
+    """Bind acceptance inputs to an unsigned native receipt and committed source material."""
+    check_shape(receipt.parent, 'hass-native-build.dirspec.toml')
+    document = object_value(read_json(receipt))
+    validate_document(document, 'native_build')
+    identity, producing = object_value(document['source']), object_value(document['platform'])
+    commit = text(identity['commit'])
+    version, app = source_metadata(source, commit)
+    if version != document['version'] or app.get('image') != document['image_repository']:
+        raise ValueError('Native receipt version or image differs from its committed source')
+    if hashlib.sha256(source_bytes(source, commit, 'flake.lock')).hexdigest() != identity['lock_sha256']:
+        raise ValueError('Native receipt lockfile differs from its committed source')
+    exported = next(receipt.parent.glob('*.tar.gz'))
+    sbom = next(receipt.parent.glob('*.spdx.json'))
+    if not archive.samefile(exported):
+        raise ValueError('Acceptance archive is not the native receipt export')
+    if file_sha256(archive) != producing['archive_sha256'] or file_sha256(sbom) != producing['sbom_sha256']:
+        raise ValueError('Native build payload hashes differ from the receipt')
+    inspected = inspect_archive(archive)
+    validate_archive(archive, PLATFORMS[text(producing['architecture'])], version, inspected=inspected)
+    if inspected.config_digest != producing['config_digest']:
+        raise ValueError('Native receipt config digest differs from its archive')
+    bundle = json.loads(
+        source_bytes(source, commit, 'assets/licenses/bundle-hass.json'), object_pairs_hook=unique_object
+    )
+    verify_sbom(archive, sbom, bundle, inspected=inspected)
+    return document
 
 
 def record_build(options: NativeBuild) -> None:

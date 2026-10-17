@@ -4,10 +4,8 @@ The [HASS experimental release](device-expansion-and-publication.md#hass-experim
 hashes/provenance, the installable app repository, and registry-based acceptance. This plan owns physical-device and
 platform qualification.
 
-1. Verify the native ARM64 CI image build, then install that image on ARM64 HAOS and exercise its ingress and cold
-   Supervisor backup/restore. The
-   [AMD64 populated HAOS check](../../infra/integration/hass/README.md#populated-haos-workflow) already covers
-   authenticated ingress, persisted GPX/FIT downloads, app restart, and cold backup/restore.
+1. Run the [populated HAOS check](../../infra/integration/hass/README.md#populated-haos-workflow) with the CI-built
+   ARM64 image on ARM64 HAOS.
 2. On Raspberry Pi 5, verify USB permissions and ownership, device disconnects, and the complete workflow. Do not assume
    desktop GIO mounts exist in the app.
 3. Complete owned-hardware FIT Course transfer checks: cancellation, interrupted and partial writes, disconnect and

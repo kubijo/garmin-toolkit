@@ -357,6 +357,45 @@ def wait_for_supervisor(
     raise TimeoutError(f'HAOS Supervisor did not become ready in {timeout}s: {last_error}')
 
 
+def reboot_guest(
+    process: subprocess.Popen[str], runtime: Path, key: Path, port: int, *, timeout: int, overlay_limit: int
+) -> dict[str, str]:
+    command = ssh_command(key, port, 'cat /proc/sys/kernel/random/boot_id')
+    before = str(uuid.UUID(run(command).stdout.strip()))
+    print('Rebooting disposable HAOS and waiting for a new kernel boot ID...', flush=True)
+    result = subprocess.run(
+        ssh_command(key, port, 'ha host reboot'), capture_output=True, text=True, timeout=30, check=False
+    )
+    if result.returncode not in (0, 255):
+        raise RuntimeError(f'HAOS reboot request failed: {result.stderr[-1000:]}')
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError('HAOS VM exited during reboot')
+        if (runtime / 'overlay.qcow2').stat().st_size > overlay_limit:
+            raise RuntimeError('HAOS VM overlay exceeded its configured file-size limit')
+        try:
+            probe = subprocess.run(command, capture_output=True, text=True, timeout=8, check=False)
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            if probe.returncode == 0:
+                after = str(uuid.UUID(probe.stdout.strip()))
+                if after != before:
+                    wait_for_supervisor(
+                        process,
+                        runtime / 'overlay.qcow2',
+                        key,
+                        port,
+                        max(1, int(deadline - time.monotonic())),
+                        overlay_limit=overlay_limit,
+                    )
+                    print(f'HAOS kernel boot ID changed: {before} -> {after}', flush=True)
+                    return {'before': before, 'after': after}
+        time.sleep(3)
+    raise TimeoutError('HAOS kernel boot ID did not change within the reboot window')
+
+
 def registry_manifest(key: Path, port: int, repository: str, digest: str, config_digest: str, architecture: str) -> str:
     # Docker's verbose output retains the original manifest bytes as base64 Raw.
     # Address the registry by the independently expected digest, never by its mutable tag.
@@ -441,7 +480,11 @@ def install_app(
     guest = resolve(options.arch)
     # This registry is confined to the disposable guest and also supplies the untrusted ingress probe.
     run(
-        ssh_command(key, port, 'docker run -d --name garmin-test-registry -p 127.0.0.1:5000:5000 registry:2'),
+        ssh_command(
+            key,
+            port,
+            'docker run -d --restart=unless-stopped --name garmin-test-registry -p 127.0.0.1:5000:5000 registry:2',
+        ),
         timeout=180,
     )
     digest = options.registry_digest

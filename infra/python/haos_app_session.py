@@ -24,6 +24,7 @@ from rich.text import Text
 import haos_app_vm as vm
 import haos_workflow
 from haos_platform import acceleration
+from hass_release_build import verify_build_inputs
 from processes import stop_group
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -68,13 +69,16 @@ class Stop:
 
 @dataclass(frozen=True)
 class Check(Run):
-    """Verify populated ingress, restart, and cold backup/restore, then clean up."""
+    """Verify populated ingress, app/HAOS restarts, and cold backup/restore, then clean up."""
 
     timeout: int = 1800
     """Maximum startup and workflow time in seconds."""
 
     session_timeout: tyro.conf.Suppress[int] = 7200
     verify_browser: tyro.conf.Suppress[bool] = True
+
+    build_receipt: Path | None = None
+    """Verify the downloaded native export and SBOM against its receipt and committed Git source."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -136,7 +140,9 @@ def object_response(value: object) -> dict[str, object]:
     return cast('dict[str, object]', value)
 
 
-def wait_for_core(process: subprocess.Popen[str], tunnel: subprocess.Popen[str], base: str, deadline: float) -> None:
+def wait_for_core(
+    process: subprocess.Popen[str], tunnel: subprocess.Popen[str], base: str, deadline: float, *, onboarding: bool
+) -> None:
     notice = 0.0
     while time.monotonic() < deadline:
         if process.poll() is not None:
@@ -144,12 +150,15 @@ def wait_for_core(process: subprocess.Popen[str], tunnel: subprocess.Popen[str],
         if tunnel.poll() is not None:
             raise RuntimeError('The owned Home Assistant HTTP tunnel exited before Core was ready')
         try:
-            if isinstance(request_json(base, '/api/onboarding'), list):
+            ready = request_json(base, '/api/onboarding' if onboarding else '/auth/providers')
+            if not onboarding:
+                ready = object_response(ready).get('providers')
+            if isinstance(ready, list):
                 return
         except OSError, ValueError, RuntimeError:
             pass
         if time.monotonic() >= notice:
-            print('Waiting for full Home Assistant Core and onboarding...', flush=True)
+            print('Waiting for full Home Assistant Core authentication...', flush=True)
             notice = time.monotonic() + 30
         time.sleep(3)
     raise TimeoutError('Home Assistant Core did not become ready within the startup window')
@@ -261,10 +270,17 @@ def run_session(options: Run) -> int:
     if isinstance(options, Check) and not options.verify_browser:
         raise ValueError('The populated workflow requires browser verification')
     guest = vm.validate_options(options)
+    build = (
+        verify_build_inputs(options.app_archive, options.build_receipt, ROOT)
+        if isinstance(options, Check) and options.build_receipt is not None
+        else None
+    )
     vm.SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
     session_id = secrets.token_hex(6)
     evidence = vm.SCRATCH_ROOT / 'haos-evidence' / session_id
     evidence.mkdir(parents=True)
+    if build is not None:
+        (evidence / 'native-build.json').write_text(json.dumps(build, indent=2) + '\n')
     deadline = time.monotonic() + options.timeout
     browser: subprocess.Popen[str] | None = None
     tunnel: subprocess.Popen[str] | None = None
@@ -300,7 +316,7 @@ def run_session(options: Run) -> int:
         def started(process: subprocess.Popen[str], key: Path, ssh_port: int, app_slug: str) -> None:
             nonlocal browser, tunnel
             tunnel = launch_tunnel(key, ssh_port, http_port, evidence, deadline)
-            wait_for_core(process, tunnel, base, deadline)
+            wait_for_core(process, tunnel, base, deadline, onboarding=True)
             tokens = onboard(base, str(state['password']))
             state['tokens'] = tokens
             state['url'] = base + '/app/' + app_slug
@@ -314,7 +330,30 @@ def run_session(options: Run) -> int:
                 assert browser is not None
                 wait_browser(browser, evidence)
                 if isinstance(options, Check):
-                    haos_workflow.exercise(browser, runtime, evidence, key, ssh_port, app_slug)
+
+                    def reboot() -> dict[str, str]:
+                        nonlocal tunnel
+                        assert tunnel is not None
+                        stop_group(tunnel)
+                        boot_ids = vm.reboot_guest(
+                            process, runtime, key, ssh_port, timeout=300, overlay_limit=OVERLAY_LIMIT
+                        )
+                        tunnel = launch_tunnel(key, ssh_port, http_port, evidence, deadline)
+                        wait_for_core(process, tunnel, base, deadline, onboarding=False)
+                        vm.assert_started(key, ssh_port, app_slug)
+                        installed = object_response(json.loads((evidence / 'installation.json').read_bytes()))
+                        vm.assert_installed_image(
+                            key,
+                            ssh_port,
+                            app_slug,
+                            reference=str(installed['image_reference']),
+                            digest=str(installed['registry_digest']),
+                            config_digest=str(installed['config_digest']),
+                            architecture=str(installed['architecture']),
+                        )
+                        return boot_ids
+
+                    haos_workflow.exercise(browser, runtime, evidence, key, ssh_port, app_slug, reboot=reboot)
                     return
             state.update(phase='ready', expires_at=time.time() + options.session_timeout)
             save_state(state_path, state)

@@ -45,7 +45,7 @@ haos-app-smoke *options:
 haos-app-run *options:
     @just in-shell uv run --frozen --project infra/python python infra/python/haos_app_session.py run "$@"
 
-# Verify populated ingress, restart, and cold restore in disposable host-native HAOS.
+# Verify populated ingress, app/HAOS restarts, and cold restore in disposable host-native HAOS.
 haos-app-check *options:
     @just in-shell uv run --frozen --project infra/python python infra/python/haos_app_session.py check "$@"
 

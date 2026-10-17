@@ -13,7 +13,7 @@ import unittest
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import haos_app_session as session
 import haos_app_vm as vm
@@ -104,6 +104,25 @@ class HaosTests(unittest.TestCase):
         ):
             session.launch_tunnel(self.root / 'key', 2222, 18123, self.root, float('inf'))
         self.assertIn('127.0.0.1:18123:127.0.0.1:80', start.call_args.args[0])
+
+    def test_core_readiness_uses_the_available_api_before_and_after_onboarding(self) -> None:
+        process = Mock(spec=subprocess.Popen)
+        process.poll.return_value = None
+        for onboarding, response, path in (
+            (True, [{'step': 'user', 'done': False}], '/api/onboarding'),
+            (False, {'providers': [{'type': 'homeassistant'}]}, '/auth/providers'),
+        ):
+            with (
+                self.subTest(onboarding=onboarding),
+                patch.object(
+                    session,
+                    'request_json',
+                    side_effect=[response, AssertionError('Successful readiness must not retry')],
+                ) as request,
+                patch.object(session.time, 'sleep'),
+            ):
+                session.wait_for_core(process, process, 'http://127.0.0.1:18123', float('inf'), onboarding=onboarding)
+            request.assert_called_once_with('http://127.0.0.1:18123', path)
 
     def test_image_admission_rejects_wrong_architecture_and_metadata(self) -> None:
         archive = self.image()
@@ -294,6 +313,48 @@ class HaosTests(unittest.TestCase):
                 self.assertEqual(command[command.index('-smp') + 1], '4')
                 self.assertEqual(command[command.index('-m') + 1], '4096')
                 self.assertIn('user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22222', command)
+
+    def test_haos_reboot_waits_for_a_different_boot_id_after_ssh_disconnect(self) -> None:
+        before, after = '11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'
+        (self.root / 'overlay.qcow2').write_bytes(b'synthetic-overlay')
+        process = Mock(spec=subprocess.Popen)
+        process.poll.return_value = None
+        with (
+            patch.object(vm, 'run', return_value=subprocess.CompletedProcess([], 0, stdout=before)),
+            patch.object(
+                vm.subprocess,
+                'run',
+                side_effect=[
+                    subprocess.CompletedProcess([], 255),
+                    subprocess.CompletedProcess([], 0, stdout=before),
+                    subprocess.TimeoutExpired('ssh', 8),
+                    subprocess.CompletedProcess([], 0, stdout=after),
+                ],
+            ),
+            patch.object(vm.time, 'sleep'),
+            patch.object(vm, 'wait_for_supervisor') as ready,
+        ):
+            self.assertEqual(
+                vm.reboot_guest(process, self.root, self.root / 'key', 2222, timeout=30, overlay_limit=1024),
+                {'before': before, 'after': after},
+            )
+            ready.assert_called_once()
+
+    def test_haos_reboot_cannot_pass_if_the_kernel_boot_id_does_not_change(self) -> None:
+        before = '11111111-1111-4111-8111-111111111111'
+        (self.root / 'overlay.qcow2').write_bytes(b'synthetic-overlay')
+        process = Mock(spec=subprocess.Popen)
+        process.poll.return_value = None
+        with (
+            patch.object(vm, 'run', return_value=subprocess.CompletedProcess([], 0, stdout=before)),
+            patch.object(vm.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, stdout=before)),
+            patch.object(vm.time, 'monotonic', side_effect=[0, 0, 31]),
+            patch.object(vm.time, 'sleep'),
+            patch.object(vm, 'wait_for_supervisor') as ready,
+            self.assertRaisesRegex(TimeoutError, 'boot ID did not change'),
+        ):
+            vm.reboot_guest(process, self.root, self.root / 'key', 2222, timeout=30, overlay_limit=1024)
+        ready.assert_not_called()
 
     def test_stop_refuses_reused_process_identity(self) -> None:
         directory = self.root / 'haos-session.aabbccddeeff.test'
