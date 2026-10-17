@@ -22,7 +22,7 @@ from fixtures.images import tar_bytes, write_image
 from haos_platform import ImageArchive, inspect_archive
 from hass_image_inventory import image_path, inventory_image, wasm_dependencies
 from hass_image_sbom import generate, verify_sbom
-from hass_release_build import NativeBuild, native_derivation, record_build
+from hass_release_build import NativeBuild, native_derivation, record_build, verify_build_inputs
 
 
 def leb(value: int) -> bytes:
@@ -325,6 +325,17 @@ class ImageSbomTests(unittest.TestCase):
                 receipt['platform']['archive_sha256'], hashlib.sha256(self.archive.read_bytes()).hexdigest()
             )
             self.assertEqual(len(list(options.output.iterdir())), 3)
+            archive = next(options.output.glob('*.tar.gz'))
+            receipt_path = options.output / 'native-build.json'
+            self.assertEqual(verify_build_inputs(archive, receipt_path, options.source), receipt)
+            sbom = next(options.output.glob('*.spdx.json'))
+            sbom.write_bytes(sbom.read_bytes() + b' ')
+            with self.assertRaisesRegex(ValueError, 'payload hashes'):
+                verify_build_inputs(archive, receipt_path, options.source)
+            receipt['source']['lock_sha256'] = '0' * 64
+            receipt_path.write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, 'lockfile'):
+                verify_build_inputs(archive, receipt_path, options.source)
             shutil.rmtree(options.output)
             producing.return_value = ('aarch64-linux', self.archive)
             with self.assertRaisesRegex(ValueError, 'native builder'):

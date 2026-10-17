@@ -4,135 +4,55 @@ Extend operation-specific device evidence, then publish only supported artifacts
 
 ## HASS experimental release
 
-Deliver an installable Home Assistant app through GHCR and a GitHub Release, with verification and a documented first
-workflow. This slice covers publication of existing functionality. Desktop and CLI distribution remain separate;
-application authentication, credential custody, encryption, and Connect remain deferred.
+Publish the existing app through GHCR and a GitHub Release using the [candidate contract](../../infra/release/README.md)
+and [repository-install check](../../infra/integration/hass/README.md#repository-install-acceptance). Desktop/CLI
+distribution, application authentication, credential custody, encryption, and Connect remain separate work.
 
-### Source, versions, and builds
+### Registry and provenance
 
-- Release from an explicit `vVERSION` tag reachable from `main`, with a clean source tree and locked dependencies.
-  Require the workspace version, app metadata, image tag, and Home Assistant/OCI version labels to agree. Reject a
-  branch checkout, mismatched revision, dirty input, missing platform, or reused version with different content.
-- Build the production image once per selected architecture with the existing Nix derivations. Native AMD64 and ARM64
-  builders produce `linux/amd64` and `linux/arm64` images; Home Assistant calls the latter `aarch64`. Verify the actual
-  workers' hard limits of two CPUs and 6 GiB, and run heavy work sequentially per host. Reuse the shared Cargo target
-  for local development; use the existing four-CPU disposable-VM exception only for acceptance runs.
-- Promote the tested bytes without rebuilding. Record the source commit, source tag, lockfile hash, builder platform,
-  derivation identity, workflow run, and runtime-test versions. Locked inputs and provenance do not establish bitwise
-  reproducibility; make that claim only after an independent rebuild matches the published digests.
+- Verify the staged OCI index and each platform's manifest/config descriptors against native CI exports. Bind acceptance
+  results to those digests and the release commit. Set OCI source, revision, version, and license annotations.
+- Generate GitHub OIDC attestations for archives, published image digests, `release.json`, and `SHA256SUMS`. Publish
+  downloadable bundles and registry attestations. Verification must enforce `kubijo/garmin-toolkit`, the release
+  workflow, source tag/commit, and subject digest; see
+  [GitHub's interface](https://cli.github.com/manual/gh_attestation_verify).
+- Exercise `sha256sum --check SHA256SUMS` and `gh attestation verify`, verifying checksum provenance first. Reject
+  modified files, substituted images/platforms, wrong revisions/signers, missing attestations, and incomplete
+  inventories.
+- Audit the shipped closure's license/source redistribution requirements; an SBOM alone does not satisfy them.
 
-### Published artifacts and verification
+### Lifecycle acceptance
 
-- Publish `ghcr.io/kubijo/garmin-toolkit-hass:VERSION` as a multi-architecture index, retaining the digest of that index
-  and of each platform manifest. OCI source, revision, version, and license annotations must identify this release. Keep
-  version tags fixed; use digest references for machine verification and avoid a dependency on `latest`.
-- Attach `garmin-toolkit-hass-VERSION-amd64.tar.gz` and `garmin-toolkit-hass-VERSION-aarch64.tar.gz` to the GitHub
-  Release for the architectures included in that release. These are the Nix-built Docker image archives, retained
-  without a second `docker save` or other repackaging. Also attach `garmin-toolkit-VERSION-source.tar.gz` with
-  `flake.lock` and build instructions, `bundle-hass.json`, and the release's license/copyright/third-party notice files.
-- Publish a machine-readable SPDX SBOM per platform covering the shipped image, including the Rust dependencies,
-  frontend/assets, and native Nix runtime closure. Verify its contents against that image rather than presenting the
-  Cargo notice list as a complete image inventory. Include the corresponding license/source material required for the
-  bundled components; audit the actual distribution closure. Name each SBOM
-  `garmin-toolkit-hass-VERSION-ARCH.spdx.json`, using `amd64` or `aarch64` for `ARCH`.
-- Publish schema-validated `release.json` with the source/build identity above, each downloadable payload's filename,
-  byte size and SHA-256, each platform's OCI manifest/config digests, the index digest, SBOM references, and acceptance
-  results bound to those digests. Its file inventory excludes itself, `SHA256SUMS`, and attestation envelopes to avoid
-  cycles. Define deterministic serialization and reject duplicate/missing platforms or files.
-- Publish `SHA256SUMS` for every release payload and descriptive file, including `release.json`, source, SBOMs, and
-  notices. Exclude the checksum file itself and its attestation envelopes to avoid self-reference. Derive the list from
-  the validated artifact inventory, then independently download and hash the public release assets.
-- Keep archive SHA-256, OCI index digest, platform manifest digest, image-config digest, and Nix store identity distinct
-  in the schema and user instructions. Hashes identify different objects; an image archive's hash is not a pull digest.
-  The [OCI descriptor contract](https://specs.opencontainers.org/image-spec/descriptor/) defines registry content
-  digests.
-- Generate GitHub OIDC build-provenance attestations for the archives and published image digests, and attest the
-  aggregate `release.json` and `SHA256SUMS`. Publish downloadable attestation bundles as well as registry attestations.
-  Verification must enforce `kubijo/garmin-toolkit`, the release workflow identity, source tag, source commit, and
-  expected subject digest. A hash alone checks content against an expected value; provenance also identifies its
-  producing workflow. Follow [GitHub's attestation interface](https://cli.github.com/manual/gh_attestation_verify).
-- Document and exercise both `sha256sum --check SHA256SUMS` and `gh attestation verify` for files and image digest
-  references. Verify checksum provenance before trusting the checksum list. Acceptance must reject a modified file,
-  substituted image/platform, wrong source revision, unexpected signer, missing attestation, or incomplete inventory.
-- Keep artifact prescriptions, release schemas, templates, and verification tooling in filesystem-backed files enrolled
-  in QA. Extend `dirspec` checks to the assembled release directory so missing, empty, or unexpected deliverables fail
-  immediately. Python tooling uses Tyro and the maintained formatter/checkers.
+- Test upgrade with populated state and a backup. For the first release, identify an unpublished fixture baseline.
+  Recover by reinstalling the compatible previous image and restoring its backup; do not promise database downgrade.
+- Test uninstall/reinstall and document which data survives.
+- Run install/ingress/lifecycle acceptance on every advertised architecture. Exclude ARM64 from store metadata until it
+  passes; pending ARM64 runtime work must not block an AMD64-only release.
+- Keep physical-device claims within the [HASS hardware plan](hass-watch-vertical-slice.md) and publish only tested
+  device/firmware/host/operation combinations.
 
-### Installable repository and publication order
+### Publication workflow
 
-- Publish the [generated store tree](../../infra/release/README.md#generated-home-assistant-repository) from the tagged
-  source to a release-only `hass-apps` branch. The proposed public URL is
-  `https://github.com/kubijo/garmin-toolkit#hass-apps`. Supervisor's
-  [repository parser](https://github.com/home-assistant/supervisor/blob/main/supervisor/validate.py) accepts a branch
-  suffix; verify the complete URL in the supported HAOS version before advertising it. The root manifest follows
-  [Home Assistant's repository contract](https://developers.home-assistant.io/docs/apps/repository/).
-- Retain `stage: experimental`, ingress, and cold `/data` backup. Keep production control routes disabled. Request only
-  the USB/udev access supported by the packaged adapter and acceptance evidence. App `version` selects the image tag;
-  `image` names the generic multi-architecture repository, as specified by
-  [Home Assistant's app configuration](https://developers.home-assistant.io/docs/apps/configuration/).
-- Add a maintainer-triggered workflow dispatched at the release tag. PRs validate and build without publication
-  credentials. Pin release actions, grant write/OIDC permissions only to the jobs that need them, serialize promotion
-  across app releases, and hard-fail on incomplete architecture output or an existing version/digest conflict.
-- Stage uniquely named candidate image references and repository metadata first. Verify the candidate index and each
-  platform through registry pulls, then run the maintained
-  [repository-install acceptance](../../infra/integration/hass/README.md#repository-install-acceptance) against those
-  remote references. Preserve the production app and semantic workflow.
-- After acceptance, assign the final version reference to the tested index, verify final registry digests, and upload
-  the complete assets and attestations to a draft GitHub Release. Re-download and verify them, publish the release, then
-  advance `hass-apps` to expose that accepted version. Test the final public store URL and anonymous image pulls. GHCR
-  visibility must allow installation without the developer's credentials, as supported by
-  [GitHub's registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
-  If the final public install probe fails, restore the previous advertised metadata and mark the release failed while
-  retaining its artifacts for diagnosis.
-- Retries must verify and reuse identical staged artifacts or stop; never replace a published version with new bytes. A
-  failed build, verification, or acceptance run before promotion must leave the advertised app version unchanged.
-  Preserve previous images, source, hashes, and attestations for backup restoration. Withdraw a bad version through
-  repository metadata and release notes while retaining its evidence; do not silently repoint its tag or promise
-  database downgrade.
+- Add a maintainer-triggered workflow for a clean `vVERSION` tag reachable from `main`, reusing native build jobs and
+  [execution safeguards](../development.md#execution-safeguards). Pin actions, restrict write/OIDC permissions,
+  serialize promotion, and reject incomplete platforms or version/digest conflicts. PR jobs receive no publication
+  credentials.
+- Stage uniquely named image references and generated repository metadata. Verify registry pulls and run the
+  repository-install check against the remote candidate, retaining experimental status and the production app.
+- Promote the tested index without rebuilding or repackaging. Verify final registry digests, upload the complete
+  candidate and attestations to a draft GitHub Release, then independently download and verify them.
+- Publish the release before advancing the release-only `hass-apps` branch. Test
+  `https://github.com/kubijo/garmin-toolkit#hass-apps` and anonymous GHCR pulls. If final installation fails, restore
+  the previous advertised metadata and retain failure evidence.
+- Retries must reuse identical bytes or stop. Keep version tags immutable and preserve previous artifacts for recovery.
+  Failures before promotion leave the advertised version unchanged; withdraw bad versions through metadata/release
+  notes.
 
-### Acceptance and user documentation
+### User documentation
 
-- Qualify the exact staged artifacts with the
-  [repository-install workflow](../../infra/integration/hass/README.md#repository-install-acceptance), retaining its
-  platform/digest assertions, authenticated ingress, profile/GPX/FIT workflow, byte-verified downloads, app restart, and
-  cold Supervisor backup/restore oracle. Add a HAOS restart to this path.
-- Cover upgrade from the previous advertised version with populated state and backup before update. For the first
-  release, use an explicitly identified unpublished fixture baseline and record that no previous public version exists.
-  Demonstrate recovery by reinstalling the compatible previous image and restoring its backup; do not equate this with
-  opening a newer database in an older executable. Verify uninstall/reinstall with disposable state and document which
-  data survives and which is removed.
-- Qualify every advertised architecture with its own HAOS install/ingress/lifecycle evidence. An ARM64 build or an AMD64
-  VM does not qualify ARM64 runtime support. If ARM64 acceptance remains pending, exclude it from the store's supported
-  architecture list and record the limit; its builder work must not block an AMD64-only experimental release.
-- Keep physical USB claims separate from software acceptance. The [HASS hardware plan](hass-watch-vertical-slice.md)
-  owns Raspberry Pi permissions, attachment/disconnect, pairing/reassociation, and interrupted Course transfer/recovery.
-  Publish only tested device/firmware/host/operation combinations; mark other combinations unknown or unsupported.
-- Bind the [packaged quickstart](../../apps/garmin-hass/addon/DOCS.md) to the final public store URL, qualified Home
-  Assistant versions, architectures, hardware evidence, and exercised update/recovery behavior. Add the published
-  checksum and provenance verification commands. Keep the deferred security stage separate.
-- Capture production ingress screens in dark mode with synthetic data using the established app control/screenshot
-  mechanism, and document browser-only gaps. Bind acceptance results and image evidence to the release commit and
-  artifact digests. Keep durable results with the release; remove VM disks, credentials, browser profiles, listeners,
-  and owned processes after both success and failure. Preserve the execution safeguards in
-  [development](../development.md).
-
-### Implementation slices and completion
-
-1. Extend the [local candidate contract](../../infra/release/README.md) with producing CI receipts, actual registry
-   digest verification, and signed provenance verification. Qualify the native image/SBOM derivations with real capped
-   AMD64 and ARM64 builds and confirm emitted CI receipts. Local assembly/content checks and synthetic scanner tests do
-   not qualify publication.
-2. Extend repository-install acceptance with HAOS restart, upgrade/recovery, and uninstall/reinstall. Bind user
-   documentation to the qualified versions and published references.
-3. Add the capped native build, provenance, staging, promotion, and release workflow. Validate the complete candidate
-   artifacts and attestations before making the version discoverable.
-4. Run public download/verification and clean-install acceptance, then record supported platforms/operations and publish
-   the experimental release. Track the physical hardware work with its existing owner.
-
-Completion means a new user can add the documented repository, install a qualified platform image without registry
-credentials, complete the GPX-to-FIT workflow, update and recover data as documented, and independently verify the
-downloaded bytes and their build identity. Release failures do not advertise incomplete versions. This plan section
-remains open until that path works with the final published artifacts.
+- Update the [quickstart](../../apps/garmin-hass/addon/DOCS.md) with the public URL, qualified Home Assistant versions,
+  architectures, hardware limits, update/recovery behavior, and checksum/provenance commands.
+- Attach digest-bound acceptance results, runtime versions, and dark app captures to the release.
 
 ## Hardware and other distribution
 

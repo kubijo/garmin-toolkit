@@ -7,8 +7,7 @@ and physical-device acceptance. Current contracts live in [application windows](
 ## Shared work
 
 - Audit keyboard navigation, focus, modal trapping, translation, narrow layouts, and reconnect recovery.
-- Confirm browser Ctrl+wheel page zoom in a headed browser. A headless demo check now shows that physical Ctrl+wheel is
-  no longer cancelled by the HASS canvas, but headless Chrome did not apply page zoom to the injected wheel gesture.
+- Confirm browser Ctrl+wheel page zoom in a headed browser.
 - Finish the [visual language](../architecture/visual-language.md) across controls, shells, device headers, and
   empty/offline/error states. Review Gray 100/10 layers, keyboard activation, Czech and long copy, narrow overlays, and
   dark/light captures. Decide whether the headless color picker needs separate state before changing its geometry.

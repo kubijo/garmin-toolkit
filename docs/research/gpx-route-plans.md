@@ -27,21 +27,9 @@ Tests run the real helper, inspect its installed process limits, exercise reject
 protocol replies, and confirm a contained preview through persisted import and FIT Course generation. Packaging recipes
 include the helper beside both native hosts.
 
-Demo AppImage acceptance on 2026-10-06 passed GPX import/preview, byte-exact GPX/FIT exports, deletion/cancellation,
-versioned regeneration, and persistence across restart. Fresh-demo seeding and device transfer were not covered.
-Automation verification limits are recorded in [developer tools](../architecture/developer-tools.md).
-
-Packaged HASS VM acceptance on 2026-10-08 passed all 14 [route/recovery cases](../../infra/integration/hass/README.md):
-seeded recorded activities/routes, reviewed import, rejected siblings and unresolved controls, byte-exact GPX/FIT
-exports, versioned deletion/regeneration, profile isolation, narrow layouts, interrupted uploads, lost-response retries,
-queued requests across restore, and graceful/abrupt restarts. Reviewed FIT Course transfer asserted exact device bytes,
-unchanged pairing, explicit user acceptance, restart reconciliation, and duplicate-free repeat send. Assertions compare
-persisted artifacts and selected storage, including duplicate-free seeding. An intentional-failure probe also verified
-process and state cleanup; the VM shut down after collecting diagnostics.
-
-Earlier headed-browser acceptance additionally checked the seeded walking/hiking activity maps and charts. The VM uses
-software rendering without external map tiles. Owned-device transfer, mounted-MTP disconnects, and firmware discovery
-remain unverified.
+The [packaged HASS route suite](../../infra/integration/hass/README.md#nixos-application-integration) owns import,
+generation, transfer, recovery, and cleanup acceptance. It uses software rendering without external map tiles. Physical
+transfer/disconnect and firmware discovery belong to [hardware acceptance](../plans/hass-watch-vertical-slice.md).
 
 ## Planned-route exports
 

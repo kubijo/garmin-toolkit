@@ -216,7 +216,7 @@ export async function populatedWorkflow(client, state, sessionPath, evidencePath
         try {
             if (request.operation === 'populate') await populate();
             else if (request.operation === 'mutate') await mutate();
-            else if (['restarted', 'restored'].includes(request.operation)) {
+            else if (['restarted', 'rebooted', 'restored'].includes(request.operation)) {
                 await openPopulated();
                 await exports(request.operation);
             } else throw Error(`Unknown workflow command: ${request.operation}`);

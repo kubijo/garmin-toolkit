@@ -4,6 +4,7 @@ import hashlib
 import json
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -73,6 +74,8 @@ def exercise(
     key: Path,
     port: int,
     app_slug: str = 'local_garmin_toolkit',
+    *,
+    reboot: Callable[[], dict[str, str]],
 ) -> None:
     request_id = 0
 
@@ -114,6 +117,11 @@ def exercise(
     command('restarted')
     if snapshot(key, port, app_slug) != populated or verify_downloads(populated, evidence, 'restarted') != hashes:
         raise RuntimeError('App restart changed the populated storage or ingress downloads')
+    boot_ids = reboot()
+    command('rebooted')
+    rebooted = snapshot(key, port, app_slug)
+    if rebooted != populated or verify_downloads(rebooted, evidence, 'rebooted') != hashes:
+        raise RuntimeError('HAOS reboot changed the populated storage or ingress downloads')
     backup = vm.guest_data(key, port, f'ha backups new --app {app_slug} --no-progress', timeout=600)
     slug = backup.get('slug')
     if not isinstance(slug, str) or not slug.isalnum():
@@ -146,6 +154,7 @@ def exercise(
                 'course_count': 1,
                 'downloads_sha256': hashes,
                 'restart': True,
+                'haos_reboot': boot_ids,
                 'cold_restore': True,
                 'post_backup_mutation_reverted': True,
                 'browser_only_automation': True,
@@ -154,4 +163,6 @@ def exercise(
         )
         + '\n'
     )
-    print(f'Populated ingress, restart, and cold backup/restore passed; evidence: {evidence}', flush=True)
+    print(
+        f'Populated ingress, app restart, HAOS reboot, and cold backup/restore passed; evidence: {evidence}', flush=True
+    )
