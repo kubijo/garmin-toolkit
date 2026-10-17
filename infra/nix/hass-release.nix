@@ -43,6 +43,7 @@ let
       "hass_release_build"
       "hass_release_source"
       "hass_release_contract"
+      "hass_registry"
       "hass_repository"
     ])
     ++ (map (name: "infra/release/${name}") [
@@ -51,6 +52,7 @@ let
       "SHA256SUMS.j2"
       "hass-release.dirspec.toml"
       "hass-native-build.dirspec.toml"
+      "hass-registry.dirspec.toml"
       "hass-app-repository.dirspec.toml"
     ])
   );
@@ -110,6 +112,7 @@ let
       pythonToolsEnv
       pkgs.git
       pkgs.nix
+      pkgs.skopeo
       dirspec
     ];
     text = ''
