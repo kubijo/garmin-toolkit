@@ -41,9 +41,9 @@ Workspace Nix quality checks use the development profile for both dependency cac
 compile test dependencies too, so each check can reuse them. This avoids release-profile LTO for test executables;
 production package builds retain the release profile.
 
-Local QA prints elapsed time for each stage, including failed stages, so slow checks can be identified separately from
-the overall run. Linux Just scopes enforce a two-CPU quota, a 6 GiB memory limit, and a 1 GiB swap limit. Daemon-backed
-Nix derivations run outside the client scope and do not inherit its limits.
+Local QA prints elapsed time per stage. Manual Just commands inherit the caller's resource settings. Agent builds opt
+into `infra/just/memory-capped.sh`: two CPUs, memory throttling above 4 GiB, a 6 GiB hard limit, and 1 GiB swap. Nix
+daemon workers run outside that client scope.
 
 The CLI package and its dependency cache share the same locked package selection. Building the entire workspace in that
 cache would compile unused packages and unify dependency features differently from the final CLI build.

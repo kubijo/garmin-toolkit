@@ -12,6 +12,53 @@ WRAPPER = Path(__file__).resolve().parents[1] / 'just' / 'memory-capped.sh'
 
 
 class BuildLimitsTests(unittest.TestCase):
+    def test_manual_commands_preserve_resources_and_arguments_with_and_without_nix(self) -> None:
+        just, bash = shutil.which('just'), shutil.which('bash')
+        assert just is not None and bash is not None
+        root = WRAPPER.parents[2]
+        variables = ('CARGO_BUILD_JOBS', 'NIX_BUILD_CORES', 'NIX_CONFIG')
+        argument = 'a path with spaces; $(false)'
+        with tempfile.TemporaryDirectory() as directory:
+            scratch = Path(directory)
+            (scratch / 'bash').symlink_to(bash)
+            (scratch / 'python3').write_text('#!/bin/sh\nexit 0\n')
+            (scratch / 'python3').chmod(0o755)
+            probe = scratch / 'probe'
+            probe.write_text(
+                f'#!{sys.executable}\n'
+                'import json, os, sys\n'
+                f'print(json.dumps([sys.argv[1:], [os.getenv(key) for key in {variables!r}]]))\n'
+            )
+            probe.chmod(0o755)
+            (scratch / 'nix').symlink_to(probe)
+            invocation = [just, '--tempdir', directory, '--justfile', str(root / 'justfile'), 'in-shell']
+            for ambient in (True, False):
+                for configured in (True, False):
+                    with self.subTest(ambient=ambient, configured=configured):
+                        environment = {key: value for key, value in os.environ.items() if key not in variables}
+                        environment['PATH'] = directory
+                        overrides: dict[str, str] = (
+                            dict(zip(variables, ('8', '8', 'max-jobs = 8\ncores = 8'), strict=True))
+                            if configured
+                            else {}
+                        )
+                        environment.update(overrides)
+                        expected = [overrides.get(key) for key in variables]
+                        command = 'probe' if ambient else 'missing-command'
+                        result = subprocess.run(
+                            [*invocation, command, argument],
+                            env=environment,
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
+                        arguments, actual = json.loads(result.stdout)
+                        self.assertEqual(actual, expected)
+                        expected_args = [argument]
+                        if not ambient:
+                            expected_args = ['develop', f'git+file://{root}', '--command', command, argument]
+                        self.assertEqual(arguments, expected_args)
+
     def test_gallery_checks_cannot_replace_live_scene_library(self) -> None:
         just = shutil.which('just')
         assert just is not None
@@ -69,7 +116,6 @@ class BuildLimitsTests(unittest.TestCase):
         self.assertEqual(
             shlex.split(result.stderr.replace('\\\n', '')),
             [
-                str(WRAPPER),
                 'nix',
                 'shell',
                 f'git+file://{root}#formatjs-cli',

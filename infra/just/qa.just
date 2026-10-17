@@ -15,7 +15,7 @@ wasm:
 
 # Evaluate and build every pure Nix flake check.
 check *args:
-    @just in-shell nix flake check {{ flake }} --max-jobs 1 --cores 2 --no-update-lock-file "$@"
+    @just in-shell nix flake check {{ flake }} --no-update-lock-file "$@"
 
 # Check dependency advisories and Git secrets.
 audit *args:
@@ -47,4 +47,4 @@ sqlx:
 
 # Check bindgen cache restoration and invalidation with a real WASM fixture.
 trunk-cache:
-    just in-shell nix develop {{ flake }} --max-jobs 1 --cores 2 --command uv run --frozen --project infra/python python infra/python/trunk_cache_acceptance.py
+    just in-shell nix develop {{ flake }} --command uv run --frozen --project infra/python python infra/python/trunk_cache_acceptance.py

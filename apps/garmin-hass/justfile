@@ -13,7 +13,7 @@ run mode data_base *options:
     esac
 
     package_path="$(
-        {{ quote(memory_capped) }} env CARGO_INCREMENTAL=0 \
+        env CARGO_INCREMENTAL=0 \
             nix build --quiet --no-warn-dirty --no-link --print-out-paths \
             "{{ flake }}#${package}"
     )"

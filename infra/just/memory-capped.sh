@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Explicit resource limits for agent-owned commands; ordinary Just recipes do not call this wrapper.
 set -euo pipefail
 
 if (($# == 0)); then

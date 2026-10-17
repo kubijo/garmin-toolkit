@@ -26,7 +26,6 @@ class TrunkCacheAcceptance(unittest.TestCase):
             environment = {
                 **os.environ,
                 'CARGO_TARGET_DIR': str(root / 'target'),
-                'CARGO_BUILD_JOBS': '2',
                 'TRUNK_SKIP_VERSION_CHECK': 'true',
                 'TRUNK_COLOR': 'never',
             }
