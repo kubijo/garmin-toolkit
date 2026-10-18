@@ -31,6 +31,7 @@
           sourceRevision,
         }:
         let
+          inherit (builtins) fromTOML readFile;
           pkgs = import nixpkgs {
             inherit system;
             overlays = [ rust-overlay.overlays.default ];
@@ -176,8 +177,7 @@
               "aarch64"
             else
               throw "Home Assistant app images require amd64 or aarch64 Linux";
-          appVersion =
-            (builtins.fromTOML (builtins.readFile (workspaceSrc + "/Cargo.toml"))).workspace.package.version;
+          appVersion = (fromTOML (readFile (workspaceSrc + "/Cargo.toml"))).workspace.package.version;
           sourceMetadata = import (workspaceSrc + "/infra/nix/hass-source-metadata.nix") {
             inherit lib;
             roots = [
@@ -253,7 +253,7 @@
               "org.opencontainers.image.revision" = sourceRevision;
               "org.opencontainers.image.version" = appVersion;
               "org.opencontainers.image.licenses" =
-                (builtins.fromTOML (builtins.readFile (workspaceSrc + "/Cargo.toml"))).workspace.package.license;
+                (fromTOML (readFile (workspaceSrc + "/Cargo.toml"))).workspace.package.license;
             };
           };
         in

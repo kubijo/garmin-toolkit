@@ -11,4 +11,6 @@ Keep gallery `.scene.rs` files beside the implementation they demonstrate, using
 
 Use the edit tool for file changes. Do not create or rewrite content through shell/Python heredocs.
 
+In Nix, inherit used `builtins` attributes at the top of the scope instead of calling `builtins.name`.
+
 Keep CI YAML declarative. Put orchestration and branching in checked scripts; pass parameters from the workflow.
