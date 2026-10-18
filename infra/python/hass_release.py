@@ -20,6 +20,24 @@ from cli_output import TerminalOutput
 from haos_platform import PLATFORMS, inspect_archive, validate_archive
 from hass_attestations import VerifyProvenance, attest, attest_payloads
 from hass_image_sbom import MAX_SBOM_BYTES
+from hass_publish import (
+    CleanupStaging,
+    CompletePublication,
+    PreparePublication,
+    PromoteDraft,
+    ReleaseEvidence,
+    ReleaseGuard,
+    RollbackStore,
+    StagePublication,
+    cleanup_staging,
+    complete_publication,
+    package_evidence,
+    prepare_publication,
+    promote_draft,
+    release_guard,
+    rollback_store,
+    stage_publication,
+)
 from hass_registry import PrepareRegistry, VerifyRegistry, prepare_registry, verify_registry
 from hass_release_build import NativeBuild, record_build
 from hass_release_contract import (
@@ -75,6 +93,14 @@ class Options:
             | Annotated[VerifyRegistry, tyro.conf.subcommand('verify-registry', prefix_name=False)]
             | Annotated[VerifyProvenance, tyro.conf.subcommand('verify-provenance', prefix_name=False)]
             | Annotated[BundleSources, tyro.conf.subcommand('bundle-sources', prefix_name=False)]
+            | Annotated[ReleaseGuard, tyro.conf.subcommand('guard-release', prefix_name=False)]
+            | Annotated[PreparePublication, tyro.conf.subcommand('prepare-publication', prefix_name=False)]
+            | Annotated[StagePublication, tyro.conf.subcommand('stage-publication', prefix_name=False)]
+            | Annotated[ReleaseEvidence, tyro.conf.subcommand('release-evidence', prefix_name=False)]
+            | Annotated[CompletePublication, tyro.conf.subcommand('complete-publication', prefix_name=False)]
+            | Annotated[RollbackStore, tyro.conf.subcommand('rollback-store', prefix_name=False)]
+            | Annotated[PromoteDraft, tyro.conf.subcommand('promote-draft', prefix_name=False)]
+            | Annotated[CleanupStaging, tyro.conf.subcommand('cleanup-staging', prefix_name=False)]
         ),
         tyro.conf.arg(name=''),
     ]
@@ -245,11 +271,43 @@ def main(
     | PrepareRegistry
     | VerifyRegistry
     | VerifyProvenance
-    | BundleSources,
+    | BundleSources
+    | ReleaseGuard
+    | PreparePublication
+    | StagePublication
+    | ReleaseEvidence
+    | CompletePublication
+    | RollbackStore
+    | CleanupStaging
+    | PromoteDraft,
 ) -> int:
     output = TerminalOutput()
     output.install_tracebacks()
     try:
+        if isinstance(options, ReleaseGuard):
+            release_guard(options)
+            return 0
+        if isinstance(options, PreparePublication):
+            prepare_publication(options)
+            return 0
+        if isinstance(options, CompletePublication):
+            complete_publication(options)
+            return 0
+        if isinstance(options, ReleaseEvidence):
+            package_evidence(options)
+            return 0
+        if isinstance(options, StagePublication):
+            stage_publication(options)
+            return 0
+        if isinstance(options, CleanupStaging):
+            cleanup_staging(options)
+            return 0
+        if isinstance(options, RollbackStore):
+            rollback_store(options)
+            return 0
+        if isinstance(options, PromoteDraft):
+            promote_draft(options)
+            return 0
         if isinstance(options, Assemble):
             digest = assemble(options)
             output.panel(Text(str(options.output) + '\nrelease.json SHA-256: ' + digest), title='Candidate assembled')

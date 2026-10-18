@@ -1,0 +1,137 @@
+name: HASS experimental release
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Promote an existing signed draft; false builds and tests a new draft.
+        type: boolean
+        default: false
+concurrency:
+  group: hass-publication
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  native:
+    if: github.repository == 'kubijo/garmin-toolkit' && !inputs.publish
+    uses: ./.github/workflows/hass-native.yml
+    with:
+      release: true
+  release:
+    needs: native
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      packages: write
+      attestations: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DOCKER_CONFIG: ${{ github.workspace }}/.tmp/docker-auth
+      REGISTRY_AUTH_FILE: ${{ github.workspace }}/.tmp/docker-auth/config.json
+      TMPDIR: ${{ github.workspace }}/.tmp/runner-tmp
+    steps:
+      # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/nix
+        with:
+          kvm: "true"
+          haos: "true"
+      # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: garmin-hass-native-amd64
+          path: .tmp/native
+      # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: garmin-hass-sources-amd64
+          path: .tmp/sources
+      - name: Stage and qualify the candidate in HAOS
+        id: identity
+        run: nix run .#hass-ci -- draft
+      - uses: ./.github/actions/attest
+        with:
+          checksums: .tmp/publication/candidate/SHA256SUMS
+          bundle: .tmp/bundles/artifacts.sigstore.jsonl
+      - uses: ./.github/actions/attest
+        with:
+          path: .tmp/publication/candidate/SHA256SUMS
+          bundle: .tmp/bundles/checksums.sigstore.jsonl
+      - uses: ./.github/actions/attest
+        with:
+          name: ${{ steps.identity.outputs.image }}
+          digest: ${{ steps.identity.outputs.index }}
+          registry: "true"
+          bundle: ${{ steps.identity.outputs.index_bundle }}
+      - uses: ./.github/actions/attest
+        with:
+          name: ${{ steps.identity.outputs.image }}
+          digest: ${{ steps.identity.outputs.manifest }}
+          registry: "true"
+          bundle: ${{ steps.identity.outputs.manifest_bundle }}
+      - uses: ./.github/actions/attest
+        with:
+          path: .tmp/publication/haos-acceptance.tar.gz
+          bundle: .tmp/bundles/acceptance.sigstore.jsonl
+      - name: Verify independent draft downloads
+        run: |
+          nix run .#hass-release -- complete-publication --source "$PWD" --directory .tmp/publication \
+            --build .tmp/native --bundles .tmp/bundles --evidence .tmp/staged-acceptance
+      # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: hass-publication-evidence
+          path: |
+            .tmp/publication/*.json
+            .tmp/publication/haos-acceptance.tar.gz
+            .tmp/sources/dependency-sources.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Recover unfinished promotion and remove credentials and candidate branch
+        if: always()
+        run: bash infra/ci/runner.sh cleanup
+  promote:
+    if: github.repository == 'kubijo/garmin-toolkit' && inputs.publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DOCKER_CONFIG: ${{ github.workspace }}/.tmp/docker-auth
+      REGISTRY_AUTH_FILE: ${{ github.workspace }}/.tmp/docker-auth/config.json
+      TMPDIR: ${{ github.workspace }}/.tmp/runner-tmp
+    steps:
+      # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/nix
+        with:
+          kvm: "true"
+          haos: "true"
+      - name: Promote the signed draft and verify advertised installation
+        run: nix run .#hass-ci -- promote
+      # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: hass-promotion-evidence
+          path: |
+            .tmp/publication/*.json
+            .tmp/final-acceptance/installation.json
+            .tmp/final-acceptance/workflow.json
+            .tmp/final-acceptance/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Recover unfinished promotion and remove credentials and candidate branch
+        if: always()
+        run: bash infra/ci/runner.sh cleanup

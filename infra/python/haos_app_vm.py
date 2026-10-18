@@ -4,6 +4,7 @@ import base64
 import hashlib
 import ipaddress
 import json
+import os
 import re
 import shlex
 import shutil
@@ -47,7 +48,7 @@ from json_data import (
     text,
     unique_object,
 )
-from processes import stop_group
+from processes import ACCEPTANCE_SCOPE, stop_group, vm_scope
 
 OUTPUT = TerminalOutput()
 MAX_OVERLAY_BYTES = 8 * 1024**3
@@ -84,6 +85,9 @@ class Options:
 
     registry_image: str = PUBLISHED_IMAGE
     """Generic image repository named by the remote candidate's app metadata."""
+
+    registry_tag: str | None = None
+    """Staging tag used by remote metadata; the native archive retains its release version."""
 
     baseline_archive: tyro.conf.Suppress[Path | None] = None
 
@@ -568,7 +572,7 @@ def install_app(
     )
     image = options.registry_image if options.repository_url else TEST_IMAGE
     expected: Object = {
-        'image_reference': f'{image}:{version}',
+        'image_reference': f'{image}:{options.registry_tag or version}',
         'registry_digest': options.registry_digest,
         'config_digest': inspected.config_digest,
         'manifest_digest': inspected.manifest_digest,
@@ -650,7 +654,8 @@ def boot(
         shutil.copyfile(guest.firmware_vars, runtime / 'ovmf-vars.fd')
     config, key = config_drive(runtime)
     port = free_port()
-    unit = f'garmin-haos-app-{uuid.uuid4().hex[:12]}'
+    owner = os.environ.get(ACCEPTANCE_SCOPE)
+    unit = vm_scope(owner).removesuffix('.scope') if owner else f'garmin-haos-app-{uuid.uuid4().hex[:12]}'
     process = subprocess.Popen(
         qemu_command(
             overlay,
@@ -732,8 +737,16 @@ def validate_options(options: Options) -> Platform:
             raise ValueError('Expected an anonymous HTTP(S) repository URL with a branch suffix')
         if not options.registry_digest or not re.fullmatch(r'sha256:[0-9a-f]{64}', options.registry_digest):
             raise ValueError('Remote repository installation requires an independently expected registry digest')
-    elif options.registry_digest is not None or options.registry_image != PUBLISHED_IMAGE:
+    elif (
+        options.registry_digest is not None
+        or options.registry_image != PUBLISHED_IMAGE
+        or options.registry_tag is not None
+    ):
         raise ValueError('Registry overrides require a remote repository URL')
+    if options.registry_tag is not None and not re.fullmatch(
+        r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}', options.registry_tag
+    ):
+        raise ValueError('Invalid candidate image tag')
     if not re.fullmatch(r'[a-z0-9][a-z0-9./:_-]*', options.registry_image) or '..' in options.registry_image.split('/'):
         raise ValueError('Invalid candidate image repository')
     guest = resolve(options.arch)

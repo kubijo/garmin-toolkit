@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from http.client import HTTPMessage
 from pathlib import Path
@@ -26,7 +27,7 @@ import haos_workflow
 from haos_lifecycle import Lifecycle
 from haos_platform import acceleration, baseline_fixture
 from hass_release_build import verify_build_inputs
-from processes import stop_group
+from processes import ACCEPTANCE_SCRATCH, session_scratch, stop_group
 
 ROOT = Path(__file__).resolve().parents[2]
 OVERLAY_LIMIT = 16 * 1024**3
@@ -80,6 +81,9 @@ class Check(Run):
 
     build_receipt: Path | None = None
     """Verify the downloaded native export and SBOM against its receipt and committed Git source."""
+
+    evidence_directory: Path | None = None
+    """Fresh evidence directory under repository .tmp; defaults to an owned session directory."""
 
     lifecycle: bool = False
     """Test fixture-baseline upgrade, backup recovery, and uninstall/reinstall; requires repository and receipt."""
@@ -273,8 +277,15 @@ def run_session(options: Run) -> int:
         else None
     )
     vm.SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    scratch = session_scratch(vm.SCRATCH_ROOT)
     session_id = secrets.token_hex(6)
     evidence = vm.SCRATCH_ROOT / 'haos-evidence' / session_id
+    if isinstance(options, Check) and options.evidence_directory is not None:
+        evidence = options.evidence_directory.resolve()
+        if not evidence.is_relative_to(vm.SCRATCH_ROOT.resolve()):
+            raise ValueError('Acceptance evidence must remain under repository .tmp')
+    if ACCEPTANCE_SCRATCH in os.environ and evidence.resolve().is_relative_to(scratch.resolve()):
+        raise ValueError('Acceptance evidence must remain outside disposable scratch')
     evidence.mkdir(parents=True)
     if build is not None:
         (evidence / 'native-build.json').write_text(json.dumps(build, indent=2) + '\n')
@@ -282,8 +293,12 @@ def run_session(options: Run) -> int:
     browser: subprocess.Popen[str] | None = None
     tunnel: subprocess.Popen[str] | None = None
     with (
-        tempfile.TemporaryDirectory(prefix=f'haos-session.{session_id}.', dir=vm.SCRATCH_ROOT) as directory,
-        tempfile.TemporaryDirectory(prefix='c.', dir=vm.SCRATCH_ROOT) as browser_directory,
+        tempfile.TemporaryDirectory(prefix=f'haos-session.{session_id}.', dir=scratch) as directory,
+        (
+            nullcontext(str(scratch))
+            if ACCEPTANCE_SCRATCH in os.environ
+            else tempfile.TemporaryDirectory(prefix='c.', dir=vm.SCRATCH_ROOT)
+        ) as browser_directory,
     ):
         runtime = Path(directory)
         runtime.chmod(0o700)
@@ -409,7 +424,10 @@ def run_session(options: Run) -> int:
 def stop_session(session_id: str) -> int:
     if not re.fullmatch('[a-f0-9]{12}', session_id):
         raise ValueError('Invalid HAOS session ID')
-    directories = list(vm.SCRATCH_ROOT.glob(f'haos-session.{session_id}.*'))
+    directories = [
+        *vm.SCRATCH_ROOT.glob(f'haos-session.{session_id}.*'),
+        *vm.SCRATCH_ROOT.glob(f'a.*/haos-session.{session_id}.*'),
+    ]
     if len(directories) != 1:
         raise ValueError(f'No active HAOS session {session_id}')
     runtime = directories[0]

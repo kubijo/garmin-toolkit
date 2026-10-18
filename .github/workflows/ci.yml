@@ -6,6 +6,11 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      sources:
+        description: Export AMD64 dependency sources for pre-release audit.
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
@@ -23,97 +28,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v7
-      - name: Enable KVM for disposable integration tests
-        if: matrix.group == 'hass'
-        run: |
-          test -c /dev/kvm
-          sudo chmod a+rw /dev/kvm
-      - uses: cachix/install-nix-action@v31
+      # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-            keep-env-derivations = true
-            keep-outputs = true
-            system-features = nixos-test benchmark big-parallel kvm
-      - uses: DeterminateSystems/magic-nix-cache-action@v15
+          persist-credentials: false
+      - uses: ./.github/actions/nix
         with:
-          use-gha-cache: enabled
-          use-flakehub: disabled
-          diagnostic-endpoint: ""
-      - name: Cap Nix daemon resources
-        run: |
-          sudo systemctl set-property --runtime nix-daemon.service MemoryMax=6G CPUQuota=200%
-          test "$(systemctl show nix-daemon.service --property MemoryMax --value)" = 6442450944
-          test "$(systemctl show nix-daemon.service --property CPUQuotaPerSecUSec --value)" = 2s
-      - name: Verify sandboxed source
-        if: matrix.group == 'rust'
-        run: nix build -L .#checks.x86_64-linux.rust-source-closure --max-jobs 1 --cores 2 --no-update-lock-file
-      - name: Evaluate flake
-        if: matrix.group == 'tooling'
-        run: nix flake check --no-build --no-update-lock-file
+          kvm: ${{ matrix.group == 'hass' }}
       - name: Build checks
         env:
           CHECK_GROUP: ${{ matrix.group }}
-        run: nix build -L ".#legacyPackages.x86_64-linux.ci.$CHECK_GROUP" --max-jobs 1 --cores 2 --no-update-lock-file
-  hass-native-image:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture: amd64
-            system: x86_64-linux
-            runner: ubuntu-latest
-          - architecture: aarch64
-            system: aarch64-linux
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-            keep-env-derivations = true
-            keep-outputs = true
-      - uses: DeterminateSystems/magic-nix-cache-action@v15
-        with:
-          use-gha-cache: enabled
-          use-flakehub: disabled
-          diagnostic-endpoint: ""
-      - name: Cap Nix daemon resources
-        run: |
-          sudo systemctl set-property --runtime nix-daemon.service MemoryMax=6G CPUQuota=200%
-          test "$(systemctl show nix-daemon.service --property MemoryMax --value)" = 6442450944
-          test "$(systemctl show nix-daemon.service --property CPUQuotaPerSecUSec --value)" = 2s
-      - name: Build and record native Home Assistant app image
-        env:
-          BUILD_SYSTEM: ${{ matrix.system }}
-          WORKFLOW_RUN: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          image=".#packages.$BUILD_SYSTEM.garmin-hass-app-image"
-          archive="$(nix build -L "$image" \
-            --no-link --print-out-paths --max-jobs 1 --cores 2 --no-update-lock-file)"
-          sbom="$(nix build -L ".#packages.$BUILD_SYSTEM.garmin-hass-app-sbom" \
-            --no-link --print-out-paths --max-jobs 1 --cores 2 --no-update-lock-file)"
-          derivation="$(nix eval --raw "$image.drvPath" --no-update-lock-file)"
-          nix run .#hass-release --max-jobs 1 --cores 2 --no-update-lock-file -- record-build \
-            --source "$PWD" --archive "$archive" --sbom "$sbom" --derivation "$derivation" \
-            --workflow-run "$WORKFLOW_RUN" --output .tmp/hass-native-build
-      - uses: actions/upload-artifact@v7
-        with:
-          name: garmin-hass-native-${{ matrix.architecture }}
-          path: .tmp/hass-native-build
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
+        run: bash infra/ci/runner.sh checks "$CHECK_GROUP"
+  hass-amd64:
+    uses: ./.github/workflows/hass-native.yml
+    with:
+      sources: ${{ github.event_name == 'workflow_dispatch' && inputs.sources }}
+  hass-arm64:
+    uses: ./.github/workflows/hass-native.yml
+    with:
+      system: aarch64-linux
+      runner: ubuntu-24.04-arm
   check:
-    needs: [checks, hass-native-image]
+    needs: [checks, hass-amd64, hass-arm64]
     if: always()
     runs-on: ubuntu-latest
     steps:
+      # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - name: Require all checks and native images
-        run: |
-          test '${{ needs.checks.result }}' = success
-          test '${{ needs.hass-native-image.result }}' = success
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          AMD64: ${{ needs.hass-amd64.result }}
+          ARM64: ${{ needs.hass-arm64.result }}
+        run: bash infra/ci/runner.sh require-success "$CHECKS" "$AMD64" "$ARM64"

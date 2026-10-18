@@ -1,0 +1,54 @@
+name: Native HASS images
+on:
+  workflow_call:
+    inputs:
+      system:
+        type: string
+        default: x86_64-linux
+      runner:
+        type: string
+        default: ubuntu-latest
+      release:
+        type: boolean
+        default: false
+      sources:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    steps:
+      # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/nix
+      - name: Build and record native image
+        id: build
+        env:
+          BUILD_SYSTEM: ${{ inputs.system }}
+          RELEASE: ${{ inputs.release }}
+          SOURCES: ${{ inputs.sources }}
+        run: nix run .#hass-ci -- native --system "$BUILD_SYSTEM" --release "$RELEASE" --sources "$SOURCES"
+      # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() && steps.build.outputs.architecture != '' }}
+        with:
+          name: garmin-hass-native-${{ steps.build.outputs.architecture }}
+          path: .tmp/hass-native-build
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: steps.build.outputs.sources == 'true'
+        with:
+          name: garmin-hass-sources-${{ steps.build.outputs.architecture }}
+          path: .tmp/hass-native-sources
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0

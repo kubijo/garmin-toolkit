@@ -37,7 +37,10 @@ Retain the complete notices and their copyright, attribution, and font naming co
 
 ## Distribution choices
 
-HASS uses GHCR and GitHub Releases for AMD64 experimental releases. ARM64 requires runtime acceptance. Use GitHub as the
-only project hosting.
+HASS uses GHCR and GitHub Releases for AMD64 experimental releases. ARM64 requires runtime acceptance. After public
+installation is qualified, add a
+[My Home Assistant link](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/) to the repository page,
+prefilling `https://github.com/kubijo/garmin-toolkit#hass-apps`. Users confirm repository addition and installation.
+GitHub is the only project hosting.
 
 Desktop publication still needs supported-host, channel, and signing decisions; mobile remains separate.

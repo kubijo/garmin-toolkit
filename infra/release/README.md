@@ -3,6 +3,34 @@
 Build, verify, and publish candidates under the
 [publication plan](../../docs/plans/device-expansion-and-publication.md). Commands reject existing output directories.
 
+## GitHub publication
+
+Dispatch [HASS experimental release](../../.github/workflows/hass-release.yml) from a clean `vVERSION` tag reachable
+from `main`, matching workspace/app versions:
+
+- **Publish disabled:** build AMD64 images and sources, stage unique references, run HAOS and provenance rejection
+  checks, sign artifacts, and independently verify draft downloads.
+- **Publish enabled:** authenticate and promote the original tested bytes, publish the release, advance `hass-apps` with
+  a branch lease, and verify public installation. Failure restores the previous store metadata.
+
+CI is read-only. Publication is manual, serialized, and restricted to this repository. GHCR must allow anonymous pulls;
+the package's first creation may require a visibility change. Conflicts and incomplete drafts fail without replacing
+published bytes. Cleanup removes candidate branches and credentials.
+
+Promotion journals intent before publication. The durable `hass-publication` state branch advances atomically with
+`hass-apps`; recovery advances that state even if the store still shows its previous head, blocking delayed pushes.
+Installation success records qualification remotely. Fresh retries recover unfinished attempts and preserve qualified
+metadata; unrelated changes stop recovery. Keep the state branch. To retry, dispatch the same tag with **Publish
+enabled**. Signed assets are reverified even for public releases; published bytes remain unchanged. Cancellation allows
+graceful cleanup, then reclaims the acceptance scope and its bound VM scope, including detached descendants. Cleanup
+verifies both cgroups are empty before removing their private runtime and browser scratch; evidence remains separate. If
+scope cleanup fails, scratch is retained and its path is reported. The VM retains its four-CPU/six-GiB limit; the
+acceptance scope uses two CPUs/six GiB.
+
+[Python phases](../python/hass_ci.py) own orchestration; [runner setup](../ci/runner.sh) owns host preparation and
+cleanup. The upgrade fixture changes image metadata only; it qualifies recovery, not migration from older binaries or
+schemas.
+
 ## Generated Home Assistant repository
 
 `garmin-hass-app-repository` builds an AMD64 store tree from canonical app metadata and branding, checked by
@@ -51,7 +79,8 @@ supply their actual `--workflow-run`; local builds omit it.
 
 ## Dependency source bundles
 
-For local export, evaluate `legacyPackages.SYSTEM.hass-source-metadata` into a JSON file, then run:
+Dispatch read-only CI with **sources enabled** for an AMD64 audit before tagging. For local export, evaluate
+`legacyPackages.SYSTEM.hass-source-metadata` into a JSON file, then run:
 
 ```sh
 just release::bundle-sources \
@@ -167,7 +196,8 @@ just release::verify-provenance \
 
 Keep bundles outside the payload inventory: `checksums.sigstore.jsonl` authenticates `SHA256SUMS`;
 `artifacts.sigstore.jsonl` covers the manifest and payloads; `sha256-DIGEST.sigstore.jsonl` covers index/platform
-manifests.
+manifests. `acceptance.sigstore.jsonl` authenticates `haos-acceptance.tar.gz` before bounded extraction of reports and
+dark captures.
 
 `gh attestation verify` enforces this repository's `hass-release.yml`, exact tag and source/signer commit, GitHub OIDC,
 SLSA v1, and hosted runners. It needs registry/trust-root access. Live issuance remains a

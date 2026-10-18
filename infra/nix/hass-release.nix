@@ -4,6 +4,7 @@
   dirspec,
   package,
   lib,
+  nodejs,
   pkgs,
   pythonToolsEnv,
   workspaceSrc,
@@ -48,6 +49,10 @@ let
       "hass_repository"
       "hass_sources"
       "hass_source_parts"
+      "hass_store"
+      "hass_publish"
+      "hass_ci"
+      "processes"
     ])
     ++ (map (name: "infra/release/${name}") [
       "hass-release.schema.json"
@@ -63,7 +68,6 @@ let
   repositorySource = source (
     (map (name: "infra/python/${name}.py") [
       "hass_repository"
-      "hass_sources"
       "hass_release_contract"
       "json_data"
     ])
@@ -111,21 +115,26 @@ let
           --created "''${SOURCE_DATE_EPOCH:-1}"
         test -s "$out"
       '';
-  app = pkgs.writeShellApplication {
-    name = "hass-release";
-    runtimeInputs = [
-      pythonToolsEnv
-      pkgs.git
-      pkgs.gh
-      pkgs.nix
-      pkgs.skopeo
-      dirspec
-    ];
-    text = ''
-      exec python ${releaseSource}/infra/python/hass_release.py "$@"
-    '';
-  };
+  releaseApp =
+    name: module: extraInputs:
+    pkgs.writeShellApplication {
+      inherit name;
+      runtimeInputs = [
+        pythonToolsEnv
+        pkgs.git
+        pkgs.gh
+        pkgs.nix
+        pkgs.skopeo
+        dirspec
+      ]
+      ++ extraInputs;
+      text = ''
+        exec python ${releaseSource}/infra/python/${module}.py "$@"
+      '';
+    };
 in
 {
-  inherit app repository sbom;
+  inherit repository sbom;
+  app = releaseApp "hass-release" "hass_release" [ ];
+  ci = releaseApp "hass-ci" "hass_ci" [ nodejs ];
 }

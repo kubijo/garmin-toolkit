@@ -1,7 +1,6 @@
 """Serve generated candidate metadata through a disposable Git HTTP repository."""
 
 import os
-import shutil
 import subprocess
 import threading
 from collections.abc import Generator
@@ -14,6 +13,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from hass_release_contract import check_shape
+from hass_repository import copy_repository
 from json_data import object_value, strings
 
 
@@ -62,7 +62,7 @@ def serve_repository(
     if directory.is_symlink() or any(path.is_symlink() for path in directory.rglob('*')):
         raise ValueError('Candidate repository must contain regular files and directories')
     working = runtime / 'repository-work'
-    shutil.copytree(directory, working)
+    copy_repository(directory, working)
     config_path = working / 'garmin_toolkit/config.yaml'
     config = object_value(yaml.safe_load(config_path.read_text()))
     if config.get('version') != version or architecture not in strings(config.get('arch')):
