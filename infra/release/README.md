@@ -1,57 +1,37 @@
 # HASS release candidates
 
-These commands assemble candidates and verify contents, registry identities, and provenance. Publication and HAOS
-qualification follow the
-[publication plan](../../docs/plans/device-expansion-and-publication.md#hass-experimental-release). Outputs are never
-overwritten; failures remove partial output.
+Build, verify, and publish candidates under the
+[publication plan](../../docs/plans/device-expansion-and-publication.md). Commands reject existing output directories.
 
 ## Generated Home Assistant repository
 
-`packages.SYSTEM.garmin-hass-app-repository` generates an AMD64 store tree from canonical
-[app metadata](../../apps/garmin-hass/addon/README.md) and shared brand assets. Its
-[prescription](hass-app-repository.dirspec.toml) requires `repository.yaml` and app metadata, documentation, icon, and
-logo. CLI generation accepts an explicit architecture list; advertise ARM64 only after runtime acceptance.
+`garmin-hass-app-repository` builds an AMD64 store tree from canonical app metadata and branding, checked by
+[dirspec](hass-app-repository.dirspec.toml). ARM64 requires runtime acceptance before advertisement.
 
 ```sh
 nix build .#garmin-hass-app-repository \
     --no-link --print-out-paths --max-jobs 1 --cores 2 --no-update-lock-file
-
-just release::repository \
-    --source . \
-    --branding /nix/store/BRANDING-garmin-toolkit-brand-assets \
-    --architectures amd64 \
-    --output .tmp/hass-app-repository
 ```
 
-Replace store-path placeholders with actual outputs. Generation leaves source metadata unchanged. Test the tree with the
-[repository-install HAOS check](../integration/hass/README.md#repository-install-acceptance) before publishing
-`hass-apps`.
+For manual generation, use `just release::repository --help`. Run the
+[repository-install check](../integration/hass/README.md#repository-install-acceptance) before publication.
 
 ## Native image inventories and build receipts
 
-`packages.SYSTEM.garmin-hass-app-image` uses pinned [nix-oci](https://github.com/systemstart/nix-oci) to build an OCI
-archive with source, revision, version, and license annotations. Registry preparation preserves manifest/config/layer
-bytes.
-
-`packages.SYSTEM.garmin-hass-app-sbom` produces SPDX 2.3 JSON for the corresponding production image. Build it on the
-matching Linux architecture with the worker limits in
-[development safeguards](../../docs/development.md#execution-safeguards):
+Pinned [nix-oci](https://github.com/systemstart/nix-oci) produces the annotated OCI archive; Syft produces SPDX 2.3.
+Build on the matching Linux architecture, following the
+[execution safeguards](../../docs/development.md#execution-safeguards):
 
 ```sh
 nix build .#garmin-hass-app-image .#garmin-hass-app-sbom \
     --no-link --print-out-paths --max-jobs 1 --cores 2 --no-update-lock-file
 ```
 
-Pinned Syft scans the image. Independent checks bind regular-file hashes, Nix store paths, embedded native/WASM
-cargo-auditable dependencies, and reviewed asset notices to the SPDX inventory. Missing or conflicting records fail.
-Hardlinks must target earlier regular files in the same layer; whiteouts and conflicting entries are rejected.
+Inventory checks bind file hashes, Nix paths, cargo-auditable native/WASM dependencies, and asset notices. Whiteouts,
+conflicting entries, and hardlinks without earlier regular targets are rejected. Archives and decoded layers have 4 GiB
+/ 100,000-member limits. Scratch is removed afterward.
 
-Archives and decompressed layers have 4 GiB limits and a combined 100,000-member limit; JSON metadata is separately
-bounded. Scanner scratch stays under the Nix build directory or repository `.tmp` and is removed afterward. The SPDX
-document records the original archive hash and uses the source epoch. An inventory does not establish provenance or
-redistribution compliance.
-
-Record the resulting files from a clean source checkout on the same native Linux platform:
+Record outputs from a clean checkout on the same native host:
 
 ```sh
 just release::record-build \
@@ -62,17 +42,41 @@ just release::record-build \
     --output .tmp/hass-native-build
 ```
 
-Obtain the derivation with `nix eval --raw .#garmin-hass-app-image.drvPath`. Recording verifies its native
-system/output, source/image versions, runtime configuration, and SBOM, then exports the archive, SPDX file, and
-`native-build.json`. Producing GitHub jobs supply their actual `--workflow-run`; local builds omit it.
+Get the derivation with `nix eval --raw .#garmin-hass-app-image.drvPath`. Recording verifies system/output, versions,
+runtime configuration, and SBOM, then exports the archive, SPDX file, and `native-build.json`. Receipts bind source,
+lockfile, archive/SBOM hashes, and config/manifest digests. Branch builds use `source.tag: null`.
 
-Receipts bind archive/SBOM hashes and config/manifest digests. A matching version tag is recorded; branch builds use
-`source.tag: null`. CI exports `garmin-hass-native-ARCH` from independent AMD64/ARM64 builders with verified two-CPU,
-six-GiB daemon limits. Unsigned artifacts establish neither release provenance nor runtime qualification.
+CI exports `garmin-hass-native-ARCH` from native AMD64/ARM64 builders capped at two CPUs / six GiB. Producing jobs
+supply their actual `--workflow-run`; local builds omit it.
+
+## Dependency source bundles
+
+For local export, evaluate `legacyPackages.SYSTEM.hass-source-metadata` into a JSON file, then run:
+
+```sh
+just release::bundle-sources \
+    --archive /nix/store/IMAGE-garmin-toolkit-hass.oci.tar \
+    --metadata .tmp/dependency-metadata.json \
+    --output .tmp/hass-native-sources --realise
+```
+
+The [export](hass-sources.dirspec.toml) contains an image-bound license/source report and deterministic archive of
+transitive sources, patches, fixed-output inputs, vendored Cargo sources, and build recipes. Its dependency graph binds
+each recipe to required inputs; verification rejects missing upstream sources and recipe-only runtime coverage. Entries
+retain their Nix store basenames under `sources/`. The workspace archive and `flake.lock` provide build instructions;
+build tools may still need downloading.
+
+`--realise` requests only missing source paths, never recipe builds. Agent/CI callers must cap actual Nix workers. The
+compressed stream splits into at most 16 checksummed parts of up to 1.5 GiB each. The first retains the `.tar.gz` name;
+subsequent parts append `.002`, `.003`, and so on. Verification streams them in order without joining them on disk. The
+whole archive is limited to 32 GiB decoded and 2,000,000 members. A metadata-only preflight reports exact tar size and
+entry count and rejects oversized exports before compression. The writer and verifier enforce the same limits. OCI image
+limits remain 4 GiB / 100,000 members. Unknown/nonfree licenses, missing recipes, or altered archives block publication.
+Audit the downloaded sources and notices against the shipped closure.
 
 ## Registry identity
 
-Prepare an OCI layout from one or two native export directories:
+Prepare an index from one or two native exports:
 
 ```sh
 just release::prepare-registry \
@@ -81,34 +85,27 @@ just release::prepare-registry \
     --output .tmp/hass-oci-candidate
 ```
 
-Preparation verifies native exports, matching source/version, manifest annotations, and layer `diff_ids`, then combines
-unchanged platform manifests into an annotated index. Output contains `oci/` and `registry.json`, checked by
-[prescription](hass-registry.dirspec.toml) and schema. Archive unpacking restores neither builder ownership nor
-permissions.
+Preparation verifies source/version, annotations, and layer `diff_ids`, preserving platform manifest/config/layer bytes.
+Output is `oci/` and `registry.json`, checked by [dirspec](hass-registry.dirspec.toml) and schema.
 
-Push with `skopeo copy --all --preserve-digests`, then independently verify the staged digest:
+Push with `skopeo copy --all --preserve-digests`, then verify independently:
 
 ```sh
 just release::verify-registry \
     --source . \
     --builds .tmp/hass-native-amd64 \
     --reference ghcr.io/kubijo/garmin-toolkit-hass@sha256:EXPECTED_INDEX_SHA256 \
-    --acceptance .tmp/haos-evidence/SESSION \
     --output .tmp/hass-registry-verified
 ```
 
-References must pin the expected index in the canonical GHCR repository or a literal loopback test registry. Pulls use
-verified TLS and anonymous access unless `--authfile` is supplied; plain HTTP is loopback-only. Bounded preflight
-rejects external blob URLs. Full verification rejects altered identities, platforms, descriptors, annotations, and layer
-hashes. Decompressed registry layers share a 4 GiB budget. Only `registry.json` is retained; download scratch is
-removed.
+References pin the canonical GHCR repository or literal loopback registry. Pulls are anonymous unless `--authfile` is
+supplied; HTTP is loopback-only. Verification rejects external blob URLs, altered identities, platforms, descriptors,
+annotations, and layer hashes. Decoded layers share a 4 GiB budget; only `registry.json` survives cleanup.
 
-Optional `--acceptance` evidence must report success for the same source, native receipt, archive, installed
-manifest/config, version, and architecture. Its hashes and runtime digest have scope `native-image-content`, which does
-not qualify installation of the combined index. Remote acceptance and signed provenance remain publication gates.
+Optional `--acceptance` binds successful evidence to source, native receipt, archive, installed manifest/config,
+version, and architecture. Its `native-image-content` scope does not qualify combined-index installation.
 
-QA runs a real disposable OCI Distribution registry with synthetic AMD64/ARM64 images; this tests transport, not ARM64
-runtime support. To repeat the same test against an existing CI export and retain its small receipt:
+QA exercises a disposable Distribution registry with synthetic AMD64/ARM64 images. To test a retained CI export:
 
 ```sh
 GARMIN_REGISTRY_BUILD="$PWD/.tmp/hass-native-amd64" \
@@ -117,18 +114,16 @@ GARMIN_REGISTRY_BUILD="$PWD/.tmp/hass-native-amd64" \
     python -m unittest discover -s infra/python -p test_hass_registry.py -v
 ```
 
-Run in the pinned tooling environment with Skopeo, Syft, `registry`, and `dirspec`. Tests clean their loopback processes
-and temporary image copies.
+Use the pinned tooling environment with Skopeo, Syft, `registry`, and `dirspec`.
 
 ## Inputs
 
-Use a clean detached `vVERSION` source checkout reachable from fetched `origin/main` or local `main`. Versions are
-numeric `MAJOR.MINOR.PATCH`; prerelease/build suffixes need a later version contract. Workspace/app/image versions and
-the receipt's source commit and lockfile hash must agree. Fetch the release tag and main history before assembly.
+Assembly requires a clean detached `vVERSION` checkout reachable from fetched `origin/main` or local `main`. Numeric
+`MAJOR.MINOR.PATCH`, workspace/app/image versions, source commit, and lockfile must agree.
 
-The [assembly schema](hass-release.schema.json) requires source/tag/lock identity, the combined index digest, and native
-platform receipts. Each platform supplies its unchanged OCI archive and nonempty SPDX 2.3 inventory under the names in
-[hass-files.toml](hass-files.toml). Extra entries, links, directories, and empty files are rejected.
+The [schema](hass-release.schema.json) and [inventory](hass-files.toml) require source/tag/lock identity, index digest,
+native receipts, and each platform's OCI archive, SPDX inventory, and dependency source archive/report. Extra entries,
+links, directories, and empty files fail.
 
 ```sh
 just release::assemble \
@@ -140,12 +135,10 @@ just release::assemble \
 
 ## Output and verification
 
-Assembly copies platform bytes, reads notices from committed blobs, and creates the workspace source archive with
-`git archive`. It writes canonical `release.json` and GNU-compatible `SHA256SUMS` with `status: candidate` and no
-acceptance results. Verification checks the complete inventory, hashes, source identity, and image metadata before
-exposing output.
+Assembly preserves platform bytes, reads committed notices, and uses `git archive` for workspace sources. It writes
+canonical `release.json` and `SHA256SUMS` with candidate status and no acceptance claims.
 
-For local verification, obtain the manifest hash independently of the downloaded directory:
+Verify using an independently obtained manifest hash:
 
 ```sh
 just release::verify \
@@ -155,14 +148,14 @@ just release::verify \
     --commit EXPECTED_FULL_SOURCE_COMMIT
 ```
 
-`SHA256SUMS` includes `release.json`; neither file hashes itself. After establishing provenance, run
-`sha256sum --check SHA256SUMS` inside the candidate directory. Local verification does not establish build provenance,
-SBOM completeness, registry availability, or HAOS/USB acceptance.
+`SHA256SUMS` includes `release.json`; neither hashes itself. Authenticate provenance before running
+`sha256sum --check SHA256SUMS`. Content checks do not establish provenance, redistribution compliance, or HAOS/USB
+support.
 
 ## Signed provenance
 
-`verify-provenance` uses `gh attestation verify` to authenticate `SHA256SUMS` first, then the manifest, local inventory,
-payloads, and image digests. Supply an independently trusted version and commit:
+Verification authenticates `SHA256SUMS` first, then the manifest, payload inventory, and image digests. Supply an
+independently trusted version and commit:
 
 ```sh
 just release::verify-provenance \
@@ -172,11 +165,10 @@ just release::verify-provenance \
     --commit EXPECTED_FULL_COMMIT
 ```
 
-Keep bundles outside the release inventory: `checksums.sigstore.jsonl` authenticates the checksum file;
-`artifacts.sigstore.jsonl` covers `release.json` and payloads; `sha256-DIGEST.sigstore.jsonl` covers each index/platform
-manifest. This avoids checksum/signature cycles.
+Keep bundles outside the payload inventory: `checksums.sigstore.jsonl` authenticates `SHA256SUMS`;
+`artifacts.sigstore.jsonl` covers the manifest and payloads; `sha256-DIGEST.sigstore.jsonl` covers index/platform
+manifests.
 
-Policy requires `kubijo/garmin-toolkit/.github/workflows/hass-release.yml`, the exact tag and source/signer commit,
-GitHub's OIDC issuer, SLSA provenance v1, and hosted runners. GitHub CLI needs registry/trust-root access. Actual
-signing workflow issuance remains a [publication gate](../../docs/plans/device-expansion-and-publication.md); local
-policy tests do not prove issuance.
+`gh attestation verify` enforces this repository's `hass-release.yml`, exact tag and source/signer commit, GitHub OIDC,
+SLSA v1, and hosted runners. It needs registry/trust-root access. Live issuance remains a
+[publication gate](../../docs/plans/device-expansion-and-publication.md).

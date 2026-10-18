@@ -109,6 +109,39 @@ class ReleaseTests(unittest.TestCase):
         )
         sbom = self.artifacts / f'garmin-toolkit-hass-0.1.0-{architecture}.spdx.json'
         sbom.write_text(json.dumps({'spdxVersion': 'SPDX-2.3', 'packages': [{'name': 'synthetic-image'}]}))
+        sources = self.artifacts / f'garmin-toolkit-hass-0.1.0-{architecture}-sources.tar.gz'
+        with tarfile.open(sources, 'w:gz') as bundle:
+            member = tarfile.TarInfo('sources/' + '0' * 32 + '-source')
+            member.size = 7
+            bundle.addfile(member, io.BytesIO(b'fixture'))
+            member = tarfile.TarInfo('sources/' + '1' * 32 + '-fixture.drv')
+            member.size = 7
+            bundle.addfile(member, io.BytesIO(b'fixture'))
+        (self.artifacts / f'garmin-toolkit-hass-0.1.0-{architecture}-sources.json').write_bytes(
+            json_bytes(
+                {
+                    'schema_version': 2,
+                    'image_sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
+                    'archive_sha256': hashlib.sha256(sources.read_bytes()).hexdigest(),
+                    'sources': ['/nix/store/' + '0' * 32 + '-source', '/nix/store/' + '1' * 32 + '-fixture.drv'],
+                    'derivations': {
+                        '/nix/store/' + '1' * 32 + '-fixture.drv': {
+                            'inputs': [],
+                            'sources': ['/nix/store/' + '0' * 32 + '-source'],
+                        }
+                    },
+                    'runtime': [
+                        {
+                            'path': '/nix/store/' + '0' * 32 + '-runtime',
+                            'derivation': '/nix/store/' + '1' * 32 + '-fixture.drv',
+                            'resolved': True,
+                            'licenses': [{'id': 'MIT', 'free': True}],
+                        }
+                    ],
+                    'unresolved': [],
+                }
+            )
+        )
         return {
             'architecture': architecture,
             'manifest_digest': inspect_archive(archive).manifest_digest,
@@ -149,13 +182,42 @@ class ReleaseTests(unittest.TestCase):
         manifest = json.loads((self.output / 'release.json').read_text())
         self.assertEqual(manifest['status'], 'candidate')
         self.assertEqual(manifest['acceptance'], [])
-        self.assertEqual(len(manifest['files']), 9)
+        self.assertEqual(len(manifest['files']), 13)
         for path in self.artifacts.iterdir():
             self.assertEqual(path.read_bytes(), (self.output / path.name).read_bytes())
         with tarfile.open(self.output / 'garmin-toolkit-0.1.0-source.tar.gz') as source:
             stream = source.extractfile('garmin-toolkit-0.1.0/Cargo.toml')
             assert stream is not None
             self.assertEqual(stream.read(), (self.source / 'Cargo.toml').read_bytes())
+
+    def split_sources(self, architecture: str = 'amd64') -> Path:
+        source = self.artifacts / f'garmin-toolkit-hass-0.1.0-{architecture}-sources.tar.gz'
+        original = source.read_bytes()
+        second = source.with_name(source.name + '.002')
+        split = len(original) // 2
+        source.write_bytes(original[:split])
+        second.write_bytes(original[split:])
+        report = self.artifacts / f'garmin-toolkit-hass-0.1.0-{architecture}-sources.json'
+        document = json.loads(report.read_bytes())
+        document['parts'] = [
+            {'size': path.stat().st_size, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+            for path in (source, second)
+        ]
+        report.write_bytes(json_bytes(document))
+        self.document.setdefault('source_parts', {row['architecture']: 1 for row in self.document['platforms']})[
+            architecture
+        ] = 2
+        return second
+
+    def test_source_parts_are_inventoried_checksummed_and_stream_verified(self) -> None:
+        second = self.split_sources()
+        digest = assemble(self.options())
+        verified = verify(self.verify_options(digest))
+        self.assertIn(second.name, [entry['name'] for entry in verified['files']])
+        self.assertIn(second.name, (self.output / 'SHA256SUMS').read_text())
+        (self.output / second.name).write_bytes(b'corrupt')
+        with self.assertRaises(ValueError):
+            verify(self.verify_options(digest))
 
     def provenance(self) -> VerifyProvenance:
         assemble(self.options())
@@ -267,11 +329,11 @@ class ReleaseTests(unittest.TestCase):
 
     def test_arm64_only_candidate_uses_home_assistant_and_oci_architecture_names(self) -> None:
         self.document['platforms'] = [self.document['platforms'][1]]
-        for path in self.artifacts.glob('*-amd64.*'):
+        for path in self.artifacts.glob('*-amd64*'):
             path.unlink()
         digest = assemble(self.options())
         verify(self.verify_options(digest))
-        self.assertEqual(len(json.loads((self.output / 'release.json').read_text())['files']), 7)
+        self.assertEqual(len(json.loads((self.output / 'release.json').read_text())['files']), 9)
 
     def test_branch_checkout_and_dirty_or_untracked_source_are_rejected(self) -> None:
         self.git('checkout', 'main')

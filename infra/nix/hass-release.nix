@@ -46,6 +46,8 @@ let
       "hass_release_contract"
       "hass_registry"
       "hass_repository"
+      "hass_sources"
+      "hass_source_parts"
     ])
     ++ (map (name: "infra/release/${name}") [
       "hass-release.schema.json"
@@ -54,12 +56,14 @@ let
       "hass-release.dirspec.toml"
       "hass-native-build.dirspec.toml"
       "hass-registry.dirspec.toml"
+      "hass-sources.dirspec.toml"
       "hass-app-repository.dirspec.toml"
     ])
   );
   repositorySource = source (
     (map (name: "infra/python/${name}.py") [
       "hass_repository"
+      "hass_sources"
       "hass_release_contract"
       "json_data"
     ])

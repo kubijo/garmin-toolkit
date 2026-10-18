@@ -39,6 +39,7 @@ from hass_release_contract import (
 )
 from hass_release_source import admit_source, archive_source, source_bytes
 from hass_repository import Repository, generate_repository
+from hass_sources import BundleSources, bundle_sources, verify_sources
 from json_data import MAX_JSON_BYTES, is_array, is_object, object_value, unique_object
 
 
@@ -73,6 +74,7 @@ class Options:
             | Annotated[PrepareRegistry, tyro.conf.subcommand('prepare-registry', prefix_name=False)]
             | Annotated[VerifyRegistry, tyro.conf.subcommand('verify-registry', prefix_name=False)]
             | Annotated[VerifyProvenance, tyro.conf.subcommand('verify-provenance', prefix_name=False)]
+            | Annotated[BundleSources, tyro.conf.subcommand('bundle-sources', prefix_name=False)]
         ),
         tyro.conf.arg(name=''),
     ]
@@ -107,6 +109,12 @@ def check_payload_metadata(directory: Path, document: Assembly) -> None:
             or not sbom['packages']
         ):
             raise ValueError(f'Expected a nonempty SPDX 2.3 package inventory: {architecture}')
+        verify_sources(
+            by_role['dependency_sources'],
+            by_role['source_inventory'],
+            platform['archive_sha256'],
+            part_count=document.get('source_parts', {}).get(architecture, 1),
+        )
 
 
 def assemble(options: Assemble) -> str:
@@ -230,7 +238,14 @@ def verify_provenance(options: VerifyProvenance) -> None:
 
 
 def main(
-    options: Assemble | Verify | NativeBuild | Repository | PrepareRegistry | VerifyRegistry | VerifyProvenance,
+    options: Assemble
+    | Verify
+    | NativeBuild
+    | Repository
+    | PrepareRegistry
+    | VerifyRegistry
+    | VerifyProvenance
+    | BundleSources,
 ) -> int:
     output = TerminalOutput()
     output.install_tracebacks()
@@ -251,6 +266,10 @@ def main(
         elif isinstance(options, NativeBuild):
             record_build(options)
             output.panel(Text(str(options.output)), title='Native build recorded', style='green')
+            return 0
+        elif isinstance(options, BundleSources):
+            bundle_sources(options)
+            output.panel(Text(str(options.output)), title='Dependency sources bundled', style='green')
             return 0
         elif isinstance(options, Repository):
             generate_repository(options)

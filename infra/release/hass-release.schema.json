@@ -124,6 +124,23 @@
         "$ref": "#/$defs/platform"
       }
     },
+    "source_parts": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "amd64": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "aarch64": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        }
+      }
+    },
     "registry": {
       "type": "object",
       "additionalProperties": false,
@@ -221,6 +238,9 @@
         },
         "platforms": {
           "$ref": "#/$defs/platforms"
+        },
+        "source_parts": {
+          "$ref": "#/$defs/source_parts"
         }
       }
     },
@@ -245,7 +265,10 @@
             "notices",
             "license_bundle",
             "image_archive",
-            "sbom"
+            "sbom",
+            "dependency_sources",
+            "dependency_sources_part",
+            "source_inventory"
           ]
         },
         "architecture": {
@@ -348,14 +371,17 @@
         "platforms": {
           "$ref": "#/$defs/platforms"
         },
+        "source_parts": {
+          "$ref": "#/$defs/source_parts"
+        },
         "acceptance": {
           "type": "array",
           "maxItems": 0
         },
         "files": {
           "type": "array",
-          "minItems": 7,
-          "maxItems": 9,
+          "minItems": 9,
+          "maxItems": 43,
           "items": {
             "$ref": "#/$defs/file"
           }

@@ -144,6 +144,7 @@
                 inherit cargoExtraArgs;
                 pname = "garmin-hass" + lib.optionalString demo "-demo";
                 meta.mainProgram = "garmin-hass";
+                meta.license = lib.licenses.agpl3Plus;
                 inherit cargoArtifacts;
                 nativeBuildInputs = nativeArgs.nativeBuildInputs ++ [
                   dirspec
@@ -177,6 +178,46 @@
               throw "Home Assistant app images require amd64 or aarch64 Linux";
           appVersion =
             (builtins.fromTOML (builtins.readFile (workspaceSrc + "/Cargo.toml"))).workspace.package.version;
+          sourceMetadata = import (workspaceSrc + "/infra/nix/hass-source-metadata.nix") {
+            inherit lib;
+            roots = [
+              # Reviewed ICU metadata; retain the complete LICENSE in its source archive.
+              (
+                assert pkgs.icu.version == "78.3";
+                assert pkgs.icu.src.outputHash == "sha256-Oi56R2BLpwLzRYeDCOb+/sphLuiVz0pfIi55Vfq/4MA=";
+                pkgs.icu.overrideAttrs (previous: {
+                  meta = previous.meta // {
+                    license = lib.licenses.unicode-30;
+                  };
+                })
+              )
+              package
+              pkgs.gvfs
+              pkgs.glib
+              pkgs.cacert
+              # Helpers embedded in upstream patches and wrappers, outside buildInputs.
+              pkgs.btrfs-progs
+              pkgs.dconf
+              pkgs.dejavu_fonts.minimal
+              pkgs.dns-root-data
+              pkgs.exfat
+              pkgs.f2fs-tools
+              pkgs.gnused
+              pkgs.gzip
+              pkgs.liburcu
+              pkgs.mailcap
+              pkgs.mdadm
+              pkgs.ncompress
+              pkgs.nilfs-utils
+              pkgs.ntfs3g
+              pkgs.python3Packages.dbus-python
+              pkgs.shadow
+              pkgs.system-sendmail
+              pkgs.thin-provisioning-tools
+              pkgs.xfsprogs
+              (pkgs.python3.withPackages (packages: [ packages.dbus-python ]))
+            ];
+          };
           appImage = nix-oci.legacyPackages.${system}.buildOCIImage {
             name = "garmin-toolkit-hass.oci.tar";
             format = "archive";
@@ -222,6 +263,7 @@
             demoPackage
             package
             presentation
+            sourceMetadata
             webPackage
             ;
           check = pkgs.runCommandLocal "check-garmin-toolkit-hass" { } ''

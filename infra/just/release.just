@@ -20,6 +20,10 @@ verify-provenance *options:
 record-build *options:
     @just release::in-release record-build "$@"
 
+# Bundle exact dependency sources and report runtime license coverage.
+bundle-sources *options:
+    @just release::in-release bundle-sources "$@"
+
 # Generate a release-only Home Assistant app repository for selected architectures.
 repository *options:
     @just release::in-release repository "$@"

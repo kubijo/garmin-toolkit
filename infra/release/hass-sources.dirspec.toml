@@ -1,0 +1,7 @@
+version = 1
+strict = true
+
+[paths]
+"dependency-sources.tar.gz" = { type = "file", min_size = 1 }
+"dependency-sources.tar.gz.[0-9][0-9][0-9]" = { type = "file", min = 0, max = 15, min_size = 1 }
+"dependency-sources.json" = { type = "file", min_size = 1 }
