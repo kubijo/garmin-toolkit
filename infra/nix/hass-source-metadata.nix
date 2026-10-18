@@ -1,5 +1,6 @@
 { lib, roots }:
 let
+  inherit (builtins) isList;
   packages = lib.genericClosure {
     startSet = map (package: {
       key = package.drvPath;
@@ -19,7 +20,7 @@ let
             ++ (package.nativeBuildInputs or [ ])
             ++ (package.propagatedNativeBuildInputs or [ ])
             ++ (package.runtimeInputs or [ ])
-            ++ lib.optionals (builtins.isList (package.pythonPath or null)) package.pythonPath
+            ++ lib.optionals (isList (package.pythonPath or null)) package.pythonPath
             ++ lib.optionals (package ? stdenv.cc) [ package.stdenv.cc ]
             ++ lib.optionals (package ? libc) [ package.libc ]
             ++ lib.optionals (package ? cc) [ package.cc ]

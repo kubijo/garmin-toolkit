@@ -15,7 +15,7 @@
   ...
 }:
 let
-  inherit (builtins) filter;
+  inherit (builtins) attrNames filter;
 
   systems =
     flake-utils.lib.eachSystem
@@ -279,7 +279,7 @@ let
                   name
                 else
                   "tooling"
-              ) (builtins.attrNames checks);
+              ) (attrNames checks);
             in
             lib.mapAttrs (group: names: pkgs.linkFarm "garmin-ci-${group}" (lib.getAttrs names checks)) groups;
           inherit (tooling) formatter;
