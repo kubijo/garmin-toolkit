@@ -1,0 +1,39 @@
+name: Attest HASS release subject
+description: Issue provenance and retain the verifier's expected bundle name.
+inputs:
+  path:
+    description: Subject file.
+    default: ""
+  checksums:
+    description: Subject checksum inventory.
+    default: ""
+  digest:
+    description: OCI subject digest in the canonical image repository.
+    default: ""
+  name:
+    description: Fully qualified OCI subject repository.
+    default: ""
+  registry:
+    description: Push the attestation to the OCI registry.
+    default: "false"
+  bundle:
+    description: Destination bundle filename.
+    required: true
+runs:
+  using: composite
+  steps:
+    # v4
+    - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+      id: attest
+      with:
+        subject-path: ${{ inputs.path }}
+        subject-checksums: ${{ inputs.checksums }}
+        subject-name: ${{ inputs.name }}
+        subject-digest: ${{ inputs.digest }}
+        push-to-registry: ${{ inputs.registry }}
+        create-storage-record: false
+    - shell: bash
+      env:
+        SOURCE: ${{ steps.attest.outputs.bundle-path }}
+        DESTINATION: ${{ inputs.bundle }}
+      run: cp -- "$SOURCE" "$DESTINATION"

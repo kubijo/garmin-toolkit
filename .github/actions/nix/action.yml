@@ -1,0 +1,34 @@
+name: Bounded Nix
+description: Install cached Nix and cap build workers on disposable GitHub runners.
+inputs:
+  kvm:
+    description: Enable disposable VM tests.
+    default: "false"
+  haos:
+    description: Install host tools for the AMD64 HAOS acceptance harness.
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        KVM: ${{ inputs.kvm }}
+        HAOS: ${{ inputs.haos }}
+      run: bash infra/ci/runner.sh prepare "$KVM" "$HAOS"
+    # v31
+    - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          keep-env-derivations = true
+          keep-outputs = true
+          system-features = nixos-test benchmark big-parallel kvm
+    # v15
+    - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7
+      with:
+        use-gha-cache: enabled
+        use-flakehub: disabled
+        diagnostic-endpoint: ""
+    - name: Cap disposable runner build workers
+      shell: bash
+      run: bash infra/ci/runner.sh limits

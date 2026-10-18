@@ -10,3 +10,5 @@ Keep gallery `.scene.rs` files beside the implementation they demonstrate, using
 `infra/gallery` owns the host, discovery configuration, and capture recipes, not component scenes.
 
 Use the edit tool for file changes. Do not create or rewrite content through shell/Python heredocs.
+
+Keep CI YAML declarative. Put orchestration and branching in checked scripts; pass parameters from the workflow.

@@ -32,6 +32,7 @@ from haos_platform import (
     validate_archive,
 )
 from json_data import object_value
+from processes import ACCEPTANCE_SCOPE, vm_scope
 
 
 class HaosTests(unittest.TestCase):
@@ -387,6 +388,37 @@ class HaosTests(unittest.TestCase):
                 self.assertEqual(command[command.index('-m') + 1], '4096')
                 self.assertIn('user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22222', command)
 
+    def test_acceptance_vm_is_bound_to_its_assigned_owner(self) -> None:
+        owner = 'garmin-acceptance-' + 'a' * 32 + '.scope'
+        unit = vm_scope(owner).removesuffix('.scope')
+        with patch.dict(os.environ, {ACCEPTANCE_SCOPE: owner}):
+            command = vm.qemu_command(
+                self.root / 'disk',
+                self.root / 'config',
+                self.root,
+                unit,
+                2222,
+                900,
+                guest=PLATFORMS['amd64'],
+                overlay_limit=session.OVERLAY_LIMIT,
+            )
+            self.assertIn('--unit=' + unit, command)
+            self.assertIn('BindsTo=' + owner, command)
+            self.assertIn('After=' + owner, command)
+            self.assertIn('MemoryMax=6G', command)
+            self.assertIn('CPUQuota=400%', command)
+            with self.assertRaisesRegex(ValueError, 'assigned owned scope'):
+                vm.qemu_command(
+                    self.root / 'disk',
+                    self.root / 'config',
+                    self.root,
+                    'unrelated',
+                    2222,
+                    900,
+                    guest=PLATFORMS['amd64'],
+                    overlay_limit=session.OVERLAY_LIMIT,
+                )
+
     def test_haos_reboot_waits_for_a_different_boot_id_after_ssh_disconnect(self) -> None:
         before, after = '11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'
         (self.root / 'overlay.qcow2').write_bytes(b'synthetic-overlay')
@@ -446,8 +478,13 @@ class HaosTests(unittest.TestCase):
             kill.assert_not_called()
 
     def test_explicit_stop_waits_for_real_runner_cleanup(self) -> None:
-        directory = self.root / 'haos-session.aabbccddeeff.test'
-        directory.mkdir()
+        for owned in (False, True):
+            with self.subTest(owned=owned):
+                self.check_session_stop(owned=owned)
+
+    def check_session_stop(self, *, owned: bool) -> None:
+        directory = (self.root / 'a.owned' if owned else self.root) / 'haos-session.aabbccddeeff.test'
+        directory.mkdir(parents=True)
         child_code = (
             'import pathlib,signal,shutil,time,sys; root=pathlib.Path(sys.argv[1]); '
             'signal.signal(signal.SIGTERM,lambda *_: (shutil.rmtree(root),sys.exit(0))); '
@@ -495,6 +532,25 @@ class HaosTests(unittest.TestCase):
             session.run_session(options)
         self.assertEqual(list(self.root.glob('haos-session.*')), [])
         self.assertEqual(list(self.root.glob('c.*')), [])
+
+    def test_owned_evidence_cannot_be_written_into_disposable_scratch(self) -> None:
+        scratch = self.root / 'a.owned'
+        scratch.mkdir()
+        options = session.Check(app_archive=Path('unused'), evidence_directory=scratch / 'evidence')
+        with (
+            patch.object(vm, 'SCRATCH_ROOT', self.root),
+            patch.object(vm, 'validate_options', return_value=PLATFORMS['amd64']),
+            patch.dict(
+                os.environ,
+                {
+                    'GARMIN_ACCEPTANCE_SCOPE': 'garmin-acceptance-' + 'a' * 32 + '.scope',
+                    'GARMIN_ACCEPTANCE_SCRATCH': str(scratch),
+                },
+            ),
+            self.assertRaisesRegex(ValueError, 'outside disposable scratch'),
+        ):
+            session.run_session(options)
+        self.assertFalse((scratch / 'evidence').exists())
 
     def test_browser_preflight_failure_stops_child_without_booting_vm(self) -> None:
         options = session.Run(app_archive=Path('not-used'))

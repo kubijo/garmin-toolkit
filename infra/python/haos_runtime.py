@@ -3,13 +3,14 @@
 import contextlib
 import hashlib
 import lzma
+import os
 import shutil
 import subprocess
 import time
 from pathlib import Path
 
 from haos_platform import Platform, machine_arguments
-from processes import stop_group
+from processes import ACCEPTANCE_SCOPE, stop_group, vm_scope
 
 MAX_COMPRESSED_BYTES = 600_000_000
 MAX_MEMORY_BYTES = 6 * 1024**3
@@ -85,7 +86,12 @@ def qemu_command(
     guest: Platform,
     overlay_limit: int,
 ) -> list[str]:
-    command = ['systemd-run', '--user', '--scope', f'--unit={unit}']
+    command = ['systemd-run', '--user', '--scope', '--expand-environment=no', f'--unit={unit}']
+    owner = os.environ.get(ACCEPTANCE_SCOPE)
+    if owner is not None:
+        if unit + '.scope' != vm_scope(owner):
+            raise ValueError('Acceptance VM must use its assigned owned scope')
+        command += ['-p', 'BindsTo=' + owner, '-p', 'After=' + owner, '-p', 'TimeoutStopSec=5s']
     command += ['-p', 'MemoryMax=6G', '-p', f'CPUQuota={MAX_CPUS * 100}%', '-p', f'RuntimeMaxSec={timeout + 60}']
     command += [
         'prlimit',

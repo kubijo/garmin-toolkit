@@ -14,7 +14,7 @@ import yaml
 
 from haos_repository import publish_version, serve_repository
 from hass_release_contract import Architecture
-from hass_repository import Repository, generate_repository
+from hass_repository import Repository, copy_repository, generate_repository
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,6 +33,18 @@ class RepositoryTests(unittest.TestCase):
         for name in ('icon-128.png', 'logo-250x100.png'):
             (self.branding / name).write_bytes(b'synthetic test image: ' + name.encode())
         self.output = self.root / 'repository'
+
+    def test_readonly_nix_store_metadata_is_copied_to_writable_scratch(self) -> None:
+        generate_repository(self.options())
+        for path in (self.output, *self.output.rglob('*')):
+            path.chmod(0o555 if path.is_dir() else 0o444)
+        destination = self.root / 'writable'
+        copy_repository(self.output, destination)
+        (destination / 'garmin_toolkit/config.yaml').write_text('version: fixture\n')
+        (destination / '.git').mkdir()
+        self.assertEqual((self.output / 'garmin_toolkit/config.yaml').stat().st_mode & 0o777, 0o444)
+        for path in (self.output, *self.output.rglob('*')):
+            path.chmod(0o755 if path.is_dir() else 0o644)
 
     def options(self, architectures: tuple[str, ...] = ('amd64',)) -> Repository:
         # Invalid architecture values exercise the runtime boundary as well as Tyro's typed CLI.
