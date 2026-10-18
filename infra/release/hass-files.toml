@@ -31,3 +31,15 @@ name = "garmin-toolkit-hass-{{ version }}-{{ architecture }}.oci.tar"
 [[platform_files]]
 role = "sbom"
 name = "garmin-toolkit-hass-{{ version }}-{{ architecture }}.spdx.json"
+
+[[platform_files]]
+role = "dependency_sources"
+name = "garmin-toolkit-hass-{{ version }}-{{ architecture }}-sources.tar.gz"
+
+[[platform_files]]
+role = "dependency_sources_part"
+name = "garmin-toolkit-hass-{{ version }}-{{ architecture }}-sources.tar.gz.{{ part }}"
+
+[[platform_files]]
+role = "source_inventory"
+name = "garmin-toolkit-hass-{{ version }}-{{ architecture }}-sources.json"

@@ -16,9 +16,8 @@ distribution, application authentication, credential custody, encryption, and Co
   [GitHub's interface](https://cli.github.com/manual/gh_attestation_verify).
 - Exercise [provenance verification](../../infra/release/README.md#signed-provenance) with real workflow-issued bundles
   and registry attestations, including altered payloads/platforms, wrong revisions/signers, and missing inventory.
-- Complete the shipped closure's license/source audit and select a
-  [source delivery approach](../research/publication-readiness.md#dependency-sources); an SBOM alone does not satisfy
-  it.
+- Audit downloaded [sources](../research/publication-readiness.md#dependency-sources), notices, and build instructions
+  against the shipped closure and license report.
 
 ### Lifecycle acceptance
 

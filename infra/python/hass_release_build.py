@@ -171,6 +171,8 @@ def record_build(options: NativeBuild) -> None:
         configured = tomllib.loads((CONTRACT / 'hass-files.toml').read_text())
         inputs = {'image_archive': options.archive, 'sbom': options.sbom}
         for entry in configured['platform_files']:
+            if entry['role'] not in inputs:
+                continue
             name = templates.from_string(entry['name']).render(version=version, architecture=architecture)
             shutil.copyfile(inputs[entry['role']], staged / name, follow_symlinks=False)
             if file_sha256(staged / name) != hashes[entry['role']]:

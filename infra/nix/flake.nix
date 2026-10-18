@@ -209,6 +209,8 @@ let
             hass-reconnect-driver = hassReconnect.driver;
           };
 
+          legacyPackages.hass-source-metadata = hassTarget.sourceMetadata;
+
           apps =
             tooling.apps
             // lib.mapAttrs (_: package: {

@@ -50,6 +50,7 @@ class Assembly(TypedDict):
     source: Source
     image: Image
     platforms: list[Platform]
+    source_parts: NotRequired[dict[str, int]]
 
 
 class FileRecord(TypedDict):
@@ -89,6 +90,8 @@ def validate_identity(document: Assembly) -> None:
     architectures = [platform['architecture'] for platform in document['platforms']]
     if len(architectures) != len(set(architectures)):
         raise ValueError('Duplicate release platform')
+    if 'source_parts' in document and set(document['source_parts']) != set(architectures):
+        raise ValueError('Source part counts differ from the release platforms')
     for platform in document['platforms']:
         expected = 'x86_64-linux' if platform['architecture'] == 'amd64' else 'aarch64-linux'
         if platform['builder_system'] != expected:
@@ -113,18 +116,21 @@ def inventory(document: Assembly) -> list[FileSpec]:
         )
     for platform in document['platforms']:
         for entry in configured['platform_files']:
-            files.append(
-                cast(
-                    FileSpec,
-                    {
-                        **entry,
-                        'architecture': platform['architecture'],
-                        'name': templates.from_string(entry['name']).render(
-                            version=document['version'], architecture=platform['architecture']
-                        ),
-                    },
+            count = document.get('source_parts', {}).get(platform['architecture'], 1)
+            parts = range(2, count + 1) if entry['role'] == 'dependency_sources_part' else (1,)
+            for part in parts:
+                files.append(
+                    cast(
+                        FileSpec,
+                        {
+                            **entry,
+                            'architecture': platform['architecture'],
+                            'name': templates.from_string(entry['name']).render(
+                                version=document['version'], architecture=platform['architecture'], part=f'{part:03}'
+                            ),
+                        },
+                    )
                 )
-            )
     names = [entry['name'] for entry in files]
     if len(names) != len(set(names)) or any(not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', name) for name in names):
         raise ValueError('Release inventory has duplicate or unsafe filenames')

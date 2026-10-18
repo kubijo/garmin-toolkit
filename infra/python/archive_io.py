@@ -49,14 +49,16 @@ class LimitedReader(io.RawIOBase):
 class Archive:
     tar: tarfile.TarFile
     reader: LimitedReader
+    max_bytes: int
+    max_members: int
 
     def __iter__(self) -> Iterator[tarfile.TarInfo]:
         metadata = 0
         for count, member in enumerate(self.tar, 1):
             metadata += member.offset_data - member.offset
-            if count > MAX_MEMBERS or member.offset_data + member.size > MAX_IMAGE_BYTES:
+            if count > self.max_members or member.offset_data + member.size > self.max_bytes:
                 raise ValueError('Image exceeds the archive member or uncompressed size limit')
-            if metadata > 128 * MAX_METADATA_BYTES or member.issparse():
+            if metadata > max(128 * MAX_METADATA_BYTES, self.max_members * 1024) or member.issparse():
                 raise ValueError('Image has excessive metadata or unsupported sparse members')
             self.reader.header_remaining = None
             yield member
@@ -75,7 +77,11 @@ class Archive:
 
 
 @contextmanager
-def open_tar(source: Path | IO[bytes] | gzip.GzipFile, *, max_bytes: int | None = None) -> Generator[Archive]:
+def open_tar(
+    source: Path | IO[bytes] | gzip.GzipFile, *, max_bytes: int | None = None, max_members: int | None = None
+) -> Generator[Archive]:
+    byte_limit = MAX_IMAGE_BYTES if max_bytes is None else max_bytes
+    member_limit = MAX_MEMBERS if max_members is None else max_members
     if isinstance(source, Path):
         check_archive(source)
     with source.open('rb') if isinstance(source, Path) else closing(source) as raw:
@@ -85,12 +91,12 @@ def open_tar(source: Path | IO[bytes] | gzip.GzipFile, *, max_bytes: int | None 
             raw.seek(0)
         with (
             gzip.GzipFile(fileobj=raw) if compressed else nullcontext(raw) as decoded,
-            LimitedReader(decoded, MAX_IMAGE_BYTES if max_bytes is None else max_bytes) as limited,
+            LimitedReader(decoded, byte_limit) as limited,
         ):
             limited.header_remaining = MAX_METADATA_BYTES
             with tarfile.open(fileobj=limited, mode='r|') as archive:
                 archive.stream = True
-                yield Archive(archive, limited)
+                yield Archive(archive, limited, byte_limit, member_limit)
 
 
 def chunks(source: io.Reader[bytes]) -> Iterator[bytes]:
