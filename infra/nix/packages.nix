@@ -9,6 +9,8 @@
   ...
 }:
 let
+  inherit (builtins) fromTOML readFile;
+
   craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
   runtimeLibraries = lib.optionals pkgs.stdenv.hostPlatform.isLinux [
     pkgs.glib
@@ -25,7 +27,7 @@ let
   commonArgs = {
     inherit src;
     pname = "garmin-cli";
-    version = "0.1.0";
+    version = (fromTOML (readFile (workspaceSrc + "/Cargo.toml"))).workspace.package.version;
     cargoExtraArgs = "--locked --package garmin-cli";
     strictDeps = true;
     nativeBuildInputs = [

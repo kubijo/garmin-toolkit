@@ -6,8 +6,11 @@ import shutil
 import signal
 import subprocess
 import sys
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic
 from typing import Annotated, Literal
 
 import tyro
@@ -15,12 +18,14 @@ import tyro
 from hass_publish import (
     IMAGE,
     REMOTE,
+    CleanupStaging,
     PreparePublication,
     PromoteDraft,
     ReleaseEvidence,
     ReleaseGuard,
     RollbackStore,
     StagePublication,
+    cleanup_staging,
     package_evidence,
     prepare_publication,
     promote_draft,
@@ -43,10 +48,29 @@ BUNDLES = Path('.tmp/bundles')
 
 @dataclass(frozen=True, kw_only=True)
 class Options:
-    command: Annotated[Literal['native', 'draft', 'promote'], tyro.conf.Positional]
+    command: Annotated[Literal['native', 'draft', 'promote', 'cleanup'], tyro.conf.Positional]
     system: Literal['x86_64-linux', 'aarch64-linux'] = 'x86_64-linux'
     release: Literal['true', 'false'] = 'false'
     sources: Literal['true', 'false'] = 'false'
+
+
+def progress(message: str) -> None:
+    with suppress(OSError, ValueError):
+        print(message, flush=True)
+
+
+@contextmanager
+def phase(name: str) -> Generator[None]:
+    actions = os.environ.get('GITHUB_ACTIONS') == 'true'
+    started, status = monotonic(), 'failed'
+    progress(f'::group::{name}' if actions else f'=== {name}')
+    try:
+        yield
+        status = 'passed'
+    finally:
+        if actions:
+            progress('::endgroup::')
+        progress(f'{name}: {status} ({monotonic() - started:.1f}s)')
 
 
 def run(*arguments: str, capture: bool = False, secret: str | None = None) -> str:
@@ -70,46 +94,65 @@ def outputs(**values: str) -> None:
 def native(options: Options) -> None:
     source = Path.cwd()
     if options.release == 'true':
-        release_guard(ReleaseGuard(source=source))
+        with phase('Validate release identity'):
+            release_guard(ReleaseGuard(source=source))
     image = f'.#packages.{options.system}.garmin-hass-app-image'
-    archive, sbom = build(image), build(f'.#packages.{options.system}.garmin-hass-app-sbom')
-    derivation = Path(run('nix', 'eval', '--raw', image + '.drvPath', '--no-update-lock-file', capture=True))
-    record_build(
-        NativeBuild(
-            source=source,
-            archive=archive,
-            sbom=sbom,
-            derivation=derivation,
-            workflow_run=f'https://github.com/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}',
-            output=Path('.tmp/hass-native-build'),
+    with phase('Build native OCI image'):
+        archive = build(image)
+    with phase('Build SPDX inventory'):
+        sbom = build(f'.#packages.{options.system}.garmin-hass-app-sbom')
+    with phase('Verify and record native build'):
+        derivation = Path(run('nix', 'eval', '--raw', image + '.drvPath', '--no-update-lock-file', capture=True))
+        record_build(
+            NativeBuild(
+                source=source,
+                archive=archive,
+                sbom=sbom,
+                derivation=derivation,
+                workflow_run=f'https://github.com/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}',
+                output=Path('.tmp/hass-native-build'),
+            )
         )
-    )
     architecture = 'amd64' if options.system == 'x86_64-linux' else 'aarch64'
     sources = options.release == 'true' or (options.sources == 'true' and architecture == 'amd64')
     outputs(architecture=architecture, sources=str(sources).lower())
     if sources:
-        metadata = Path('.tmp/dependency-metadata.json')
-        metadata.write_text(
-            run(
-                'nix',
-                'eval',
-                '--json',
-                f'.#legacyPackages.{options.system}.hass-source-metadata',
-                '--no-update-lock-file',
-                capture=True,
+        with phase('Export dependency sources'):
+            metadata = Path('.tmp/dependency-metadata.json')
+            metadata.write_text(
+                run(
+                    'nix',
+                    'eval',
+                    '--json',
+                    f'.#legacyPackages.{options.system}.hass-source-metadata',
+                    '--no-update-lock-file',
+                    capture=True,
+                )
             )
-        )
-        bundle_sources(
-            BundleSources(
-                archive=archive,
-                metadata=metadata,
-                output=Path('.tmp/hass-native-sources'),
-                realise=True,
+            bundle_sources(
+                BundleSources(
+                    archive=archive,
+                    metadata=metadata,
+                    output=Path('.tmp/hass-native-sources'),
+                    realise=True,
+                )
             )
+
+
+def require_hosted_runner() -> None:
+    if any(
+        os.environ.get(name) != value
+        for name, value in (
+            ('GITHUB_ACTIONS', 'true'),
+            ('RUNNER_ENVIRONMENT', 'github-hosted'),
+            ('RUNNER_OS', 'Linux'),
         )
+    ):
+        raise ValueError('Registry credentials require a disposable GitHub-hosted Linux runner')
 
 
 def login() -> None:
+    require_hosted_runner()
     directory = Path(os.environ['DOCKER_CONFIG'])
     expected = Path.cwd() / '.tmp/docker-auth'
     if directory != expected or directory.is_symlink() or directory.exists():
@@ -132,6 +175,33 @@ def login() -> None:
         )
     finally:
         os.umask(previous)
+    # The pinned actions/attest reader ignores DOCKER_CONFIG and uses this path.
+    default = Path.home() / '.docker/config.json'
+    backup = directory / 'original-config'
+    default.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if default.exists() or default.is_symlink():
+        shutil.move(default, backup)
+    try:
+        default.symlink_to(directory / 'config.json')
+    except BaseException:
+        if backup.exists() or backup.is_symlink():
+            shutil.move(backup, default)
+        raise
+
+
+def cleanup() -> None:
+    require_hosted_runner()
+    directory = Path.cwd() / '.tmp/docker-auth'
+    credentials = directory / 'config.json'
+    try:
+        credentials.unlink(missing_ok=True)
+        default, backup = Path.home() / '.docker/config.json', directory / 'original-config'
+        if default.is_symlink() and default.readlink() == credentials:
+            default.unlink()
+        if (backup.exists() or backup.is_symlink()) and not (default.exists() or default.is_symlink()):
+            shutil.move(backup, default)
+    finally:
+        cleanup_staging(CleanupStaging(directory=PUBLICATION))
 
 
 def acceptance(build_directory: Path, evidence: Path, *arguments: str) -> None:
@@ -154,34 +224,40 @@ def acceptance(build_directory: Path, evidence: Path, *arguments: str) -> None:
 
 def draft() -> None:
     source = Path.cwd()
-    release_guard(ReleaseGuard(source=source))
-    prepare_publication(
-        PreparePublication(
-            source=source,
-            build=NATIVE,
-            sources=SOURCES,
-            repository=build('.#garmin-hass-app-repository'),
-            output=PUBLICATION,
+    with phase('Validate release identity'):
+        release_guard(ReleaseGuard(source=source))
+    with phase('Prepare release candidate'):
+        prepare_publication(
+            PreparePublication(
+                source=source,
+                build=NATIVE,
+                sources=SOURCES,
+                repository=build('.#garmin-hass-app-repository'),
+                output=PUBLICATION,
+            )
         )
-    )
-    login()
-    stage_publication(StagePublication(source=source, directory=PUBLICATION, build=NATIVE))
+    with phase('Stage candidate image and repository'):
+        login()
+        stage_publication(StagePublication(source=source, directory=PUBLICATION, build=NATIVE))
     local, staged = Path('.tmp/lifecycle-acceptance'), Path('.tmp/staged-acceptance')
-    acceptance(NATIVE, local, '--repository', str(PUBLICATION / 'repository'), '--lifecycle')
-    staging = object_value(read_json(PUBLICATION / 'staging.json'))
-    acceptance(
-        NATIVE,
-        staged,
-        '--repository-url',
-        text(staging['repository_url']),
-        '--registry-digest',
-        text(staging['index_digest']),
-        '--registry-tag',
-        text(staging['tag']),
-    )
-    for name in ('workflow.json', 'installation.json'):
-        shutil.copyfile(local / name, staged / ('lifecycle-' + name))
-    package_evidence(ReleaseEvidence(source=source, directory=PUBLICATION, build=NATIVE, evidence=staged))
+    with phase('Test HAOS installation and lifecycle'):
+        acceptance(NATIVE, local, '--repository', str(PUBLICATION / 'repository'), '--lifecycle')
+    with phase('Test staged repository installation in HAOS'):
+        staging = object_value(read_json(PUBLICATION / 'staging.json'))
+        acceptance(
+            NATIVE,
+            staged,
+            '--repository-url',
+            text(staging['repository_url']),
+            '--registry-digest',
+            text(staging['index_digest']),
+            '--registry-tag',
+            text(staging['tag']),
+        )
+    with phase('Package HAOS acceptance evidence'):
+        for name in ('workflow.json', 'installation.json'):
+            shutil.copyfile(local / name, staged / ('lifecycle-' + name))
+        package_evidence(ReleaseEvidence(source=source, directory=PUBLICATION, build=NATIVE, evidence=staged))
     document = object_value(read_json(PUBLICATION / 'candidate/release.json'))
     platforms = object_rows(document['platforms'])
     if len(platforms) != 1:
@@ -201,26 +277,32 @@ def draft() -> None:
 
 
 def promote() -> None:
-    release_guard(ReleaseGuard(source=Path.cwd()))
+    with phase('Validate release identity'):
+        release_guard(ReleaseGuard(source=Path.cwd()))
     if PUBLICATION.exists() or PUBLICATION.is_symlink():
         raise ValueError('Promotion scratch already exists')
-    login()
+    with phase('Authenticate to registry'):
+        login()
     previous_handler = signal.signal(signal.SIGTERM, terminated)
     try:
-        promote_draft(PromoteDraft(source=Path.cwd(), output=PUBLICATION))
-        staging = object_value(read_json(PUBLICATION / 'staging.json'))
-        acceptance(
-            PUBLICATION / 'native',
-            Path('.tmp/final-acceptance'),
-            '--repository-url',
-            REMOTE + '#hass-apps',
-            '--registry-digest',
-            text(staging['index_digest']),
-        )
-        qualify_promotion(PUBLICATION)
+        with phase('Verify and promote signed draft'):
+            promote_draft(PromoteDraft(source=Path.cwd(), output=PUBLICATION))
+        with phase('Test published repository installation in HAOS'):
+            staging = object_value(read_json(PUBLICATION / 'staging.json'))
+            acceptance(
+                PUBLICATION / 'native',
+                Path('.tmp/final-acceptance'),
+                '--repository-url',
+                REMOTE + '#hass-apps',
+                '--registry-digest',
+                text(staging['index_digest']),
+            )
+        with phase('Record successful publication'):
+            qualify_promotion(PUBLICATION)
     except BaseException:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        rollback_store(RollbackStore(directory=PUBLICATION))
+        with phase('Recover unfinished promotion'):
+            rollback_store(RollbackStore(directory=PUBLICATION))
         raise
     finally:
         signal.signal(signal.SIGTERM, previous_handler)
@@ -231,8 +313,10 @@ def main(options: Options) -> None:
         native(options)
     elif options.command == 'draft':
         draft()
-    else:
+    elif options.command == 'promote':
         promote()
+    else:
+        cleanup()
 
 
 if __name__ == '__main__':
