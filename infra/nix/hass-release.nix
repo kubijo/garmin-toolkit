@@ -51,6 +51,7 @@ let
       "hass_source_parts"
       "hass_store"
       "hass_publish"
+      "hass_preflight"
       "hass_ci"
       "processes"
     ])
@@ -59,6 +60,7 @@ let
       "hass-files.toml"
       "SHA256SUMS.j2"
       "hass-release.dirspec.toml"
+      "hass-preflight.dirspec.toml"
       "hass-native-build.dirspec.toml"
       "hass-registry.dirspec.toml"
       "hass-sources.dirspec.toml"

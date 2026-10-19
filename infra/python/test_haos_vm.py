@@ -131,11 +131,13 @@ class HaosTests(unittest.TestCase):
                 worker.join(timeout=3)
 
     def test_http_tunnel_uses_the_guest_reported_core_port(self) -> None:
+        process = Mock(spec=subprocess.Popen)
+        process.poll.return_value = None
         with (
             patch.object(vm, 'guest_data', return_value={'port': 80, 'ssl': False}),
             patch('haos_app_session.subprocess.Popen') as start,
         ):
-            session.launch_tunnel(self.root / 'key', 2222, 18123, self.root, float('inf'))
+            session.launch_tunnel(process, self.root / 'key', 2222, 18123, self.root, float('inf'))
         command = start.call_args.args[0]
         self.assertIn('127.0.0.1:18123:127.0.0.1:80', command)
         self.assertIn('ExitOnForwardFailure=yes', command)
@@ -143,6 +145,8 @@ class HaosTests(unittest.TestCase):
         self.assertTrue(start.call_args.kwargs['start_new_session'])
 
     def test_http_tunnel_waits_for_core_to_replace_landing_page(self) -> None:
+        process = Mock(spec=subprocess.Popen)
+        process.poll.return_value = None
         with (
             patch.object(
                 vm,
@@ -155,8 +159,76 @@ class HaosTests(unittest.TestCase):
             patch('haos_app_session.time.sleep'),
             patch('haos_app_session.subprocess.Popen') as start,
         ):
-            session.launch_tunnel(self.root / 'key', 2222, 18123, self.root, float('inf'))
+            session.launch_tunnel(process, self.root / 'key', 2222, 18123, self.root, float('inf'))
         self.assertIn('127.0.0.1:18123:127.0.0.1:80', start.call_args.args[0])
+
+    def test_http_tunnel_recovers_when_supervisor_restarts_during_core_installation(self) -> None:
+        process = Mock(spec=subprocess.Popen)
+        process.poll.return_value = None
+        with (
+            patch.object(
+                vm,
+                'guest_data',
+                side_effect=[
+                    {'version': 'landingpage', 'port': 8123, 'ssl': False},
+                    RuntimeError('ssh failed (1): supervisor/core/info: connect: connection refused'),
+                    subprocess.TimeoutExpired('ha core info', 30),
+                    {'version': '2026.10.2', 'port': 80, 'ssl': False},
+                ],
+            ) as probe,
+            patch.object(session.time, 'sleep'),
+            patch.object(vm, 'forward_port') as forward,
+        ):
+            tunnel = session.launch_tunnel(process, self.root / 'key', 2222, 18123, self.root, float('inf'))
+        self.assertEqual(probe.call_count, 4)
+        forward.assert_called_once_with(self.root / 'key', 2222, 18123, 80, self.root / 'tunnel.log')
+        self.assertIs(tunnel, forward.return_value)
+
+    def test_http_tunnel_stops_retrying_at_the_existing_deadline(self) -> None:
+        process = Mock(spec=subprocess.Popen)
+        process.poll.return_value = None
+        failure = RuntimeError('ssh failed (1): supervisor/core/info: connect: connection refused')
+        with (
+            patch.object(vm, 'guest_data', side_effect=failure) as probe,
+            patch.object(session.time, 'monotonic', side_effect=[0.0, 0.0, 5.0, 10.0, 10.0]),
+            patch.object(session.time, 'sleep'),
+            patch.object(vm, 'forward_port') as forward,
+            self.assertRaisesRegex(TimeoutError, 'startup window') as stopped,
+        ):
+            session.launch_tunnel(process, self.root / 'key', 2222, 18123, self.root, 10.0)
+        self.assertIs(stopped.exception.__cause__, failure)
+        self.assertGreater(probe.call_count, 0)
+        self.assertLessEqual(probe.call_count, 2)
+        forward.assert_not_called()
+
+    def test_http_tunnel_stops_immediately_when_the_owned_vm_exits(self) -> None:
+        process = Mock(spec=subprocess.Popen)
+        process.poll.side_effect = [None, 1]
+        with (
+            patch.object(vm, 'guest_data', side_effect=RuntimeError('Supervisor unavailable')) as probe,
+            patch.object(session.time, 'sleep'),
+            patch.object(vm, 'forward_port') as forward,
+            self.assertRaisesRegex(RuntimeError, 'HAOS exited'),
+        ):
+            session.launch_tunnel(process, self.root / 'key', 2222, 18123, self.root, float('inf'))
+        probe.assert_called_once()
+        forward.assert_not_called()
+
+    def test_http_tunnel_rejects_invalid_core_settings_without_retrying(self) -> None:
+        process = Mock(spec=subprocess.Popen)
+        process.poll.return_value = None
+        for settings in ({'port': 80, 'ssl': True}, {'port': 0, 'ssl': False}, {'port': 65536, 'ssl': False}):
+            with (
+                self.subTest(settings=settings),
+                patch.object(vm, 'guest_data', return_value={'version': '2026.10.2', **settings}) as probe,
+                patch.object(session.time, 'sleep') as sleep,
+                patch.object(vm, 'forward_port') as forward,
+                self.assertRaisesRegex(RuntimeError, 'valid plain HTTP port'),
+            ):
+                session.launch_tunnel(process, self.root / 'key', 2222, 18123, self.root, float('inf'))
+            probe.assert_called_once()
+            sleep.assert_not_called()
+            forward.assert_not_called()
 
     def test_core_readiness_uses_the_available_api_before_and_after_onboarding(self) -> None:
         process = Mock(spec=subprocess.Popen)

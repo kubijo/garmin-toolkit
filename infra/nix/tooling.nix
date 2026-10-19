@@ -173,6 +173,7 @@ let
               pkgs.bash
               pkgs.coreutils
               pkgs.git
+              pkgs.gh
               pkgs.just
               pkgs.syft
               pkgs.skopeo

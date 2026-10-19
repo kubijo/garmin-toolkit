@@ -15,10 +15,12 @@ from typing import Annotated, Literal
 
 import tyro
 
+import hass_preflight
 from hass_publish import (
     IMAGE,
     REMOTE,
     CleanupStaging,
+    CompletePublication,
     PreparePublication,
     PromoteDraft,
     ReleaseEvidence,
@@ -26,12 +28,14 @@ from hass_publish import (
     RollbackStore,
     StagePublication,
     cleanup_staging,
+    complete_publication,
     package_evidence,
     prepare_publication,
     promote_draft,
     qualify_promotion,
     release_guard,
     rollback_store,
+    stage_image,
     stage_publication,
 )
 from hass_release_build import NativeBuild, record_build
@@ -48,7 +52,10 @@ BUNDLES = Path('.tmp/bundles')
 
 @dataclass(frozen=True, kw_only=True)
 class Options:
-    command: Annotated[Literal['native', 'draft', 'promote', 'cleanup'], tyro.conf.Positional]
+    command: Annotated[
+        Literal['native', 'draft', 'preflight', 'complete', 'verify-preflight', 'promote', 'cleanup'],
+        tyro.conf.Positional,
+    ]
     system: Literal['x86_64-linux', 'aarch64-linux'] = 'x86_64-linux'
     release: Literal['true', 'false'] = 'false'
     sources: Literal['true', 'false'] = 'false'
@@ -222,12 +229,16 @@ def acceptance(build_directory: Path, evidence: Path, *arguments: str) -> None:
     )
 
 
-def draft() -> None:
+def draft(*, preflight: bool = False) -> None:
     source = Path.cwd()
-    with phase('Validate release identity'):
-        release_guard(ReleaseGuard(source=source))
+    with phase('Validate candidate identity'):
+        if preflight:
+            hass_preflight.guard(source)
+        else:
+            release_guard(ReleaseGuard(source=source))
     with phase('Prepare release candidate'):
-        prepare_publication(
+        prepare = hass_preflight.prepare if preflight else prepare_publication
+        prepare(
             PreparePublication(
                 source=source,
                 build=NATIVE,
@@ -238,7 +249,12 @@ def draft() -> None:
         )
     with phase('Stage candidate image and repository'):
         login()
-        stage_publication(StagePublication(source=source, directory=PUBLICATION, build=NATIVE))
+        stage = StagePublication(source=source, directory=PUBLICATION, build=NATIVE)
+        if preflight:
+            document, inputs = hass_preflight.check_candidate(source, PUBLICATION / 'candidate')
+            stage_image(stage, inputs['version'], inputs['image']['index_digest'], '')
+        else:
+            stage_publication(stage)
     local, staged = Path('.tmp/lifecycle-acceptance'), Path('.tmp/staged-acceptance')
     with phase('Test HAOS installation and lifecycle'):
         acceptance(NATIVE, local, '--repository', str(PUBLICATION / 'repository'), '--lifecycle')
@@ -257,8 +273,9 @@ def draft() -> None:
     with phase('Package HAOS acceptance evidence'):
         for name in ('workflow.json', 'installation.json'):
             shutil.copyfile(local / name, staged / ('lifecycle-' + name))
-        package_evidence(ReleaseEvidence(source=source, directory=PUBLICATION, build=NATIVE, evidence=staged))
-    document = object_value(read_json(PUBLICATION / 'candidate/release.json'))
+        package = hass_preflight.package if preflight else package_evidence
+        package(ReleaseEvidence(source=source, directory=PUBLICATION, build=NATIVE, evidence=staged))
+    document = object_value(read_json(PUBLICATION / 'candidate' / ('registry.json' if preflight else 'release.json')))
     platforms = object_rows(document['platforms'])
     if len(platforms) != 1:
         raise ValueError('Experimental publication requires one native platform')
@@ -274,6 +291,25 @@ def draft() -> None:
         index_bundle=str(BUNDLES / (index.replace(':', '-') + '.sigstore.jsonl')),
         manifest_bundle=str(BUNDLES / (manifest.replace(':', '-') + '.sigstore.jsonl')),
     )
+
+
+def complete() -> None:
+    if os.environ.get('GITHUB_REF', '').startswith('refs/heads/'):
+        with phase('Verify signed branch candidate'):
+            hass_preflight.verify(Path.cwd(), PUBLICATION, BUNDLES)
+        with phase('Reject invalid branch provenance'):
+            hass_preflight.qualify_rejections(Path.cwd(), PUBLICATION, BUNDLES)
+    else:
+        with phase('Verify independent draft downloads'):
+            complete_publication(
+                CompletePublication(
+                    source=Path.cwd(),
+                    directory=PUBLICATION,
+                    build=NATIVE,
+                    bundles=BUNDLES,
+                    evidence=Path('.tmp/staged-acceptance'),
+                )
+            )
 
 
 def promote() -> None:
@@ -313,6 +349,13 @@ def main(options: Options) -> None:
         native(options)
     elif options.command == 'draft':
         draft()
+    elif options.command == 'preflight':
+        draft(preflight=True)
+    elif options.command == 'complete':
+        complete()
+    elif options.command == 'verify-preflight':
+        with phase('Verify independently downloaded branch candidate'):
+            hass_preflight.verify(Path.cwd(), PUBLICATION, BUNDLES)
     elif options.command == 'promote':
         promote()
     else:
