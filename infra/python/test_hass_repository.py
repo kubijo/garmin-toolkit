@@ -15,6 +15,7 @@ import yaml
 from haos_repository import publish_version, serve_repository
 from hass_release_contract import Architecture
 from hass_repository import Repository, copy_repository, generate_repository
+from json_data import object_value, text
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -107,6 +108,7 @@ class RepositoryTests(unittest.TestCase):
         runtime = self.root / 'runtime'
         runtime.mkdir()
         original = (self.output / 'garmin_toolkit/config.yaml').read_bytes()
+        version = text(object_value(yaml.safe_load(original))['version'])
         port = 0
         with (
             self.assertRaisesRegex(RuntimeError, 'simulated VM failure'),
@@ -115,7 +117,7 @@ class RepositoryTests(unittest.TestCase):
                 runtime,
                 image='localhost:5000/candidate',
                 architecture='amd64',
-                version='0.1.0',
+                version=version,
                 initial_version='0.0.0',
             ) as url,
         ):
@@ -151,7 +153,7 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual(config['image'], 'localhost:5000/candidate')
             self.assertEqual(config['arch'], ['amd64'])
             self.assertEqual(config['version'], '0.0.0')
-            publish_version(runtime, '0.1.0')
+            publish_version(runtime, version)
             subprocess.run(
                 ['git', '-C', str(cloned), 'pull', '--ff-only', '-q'],
                 env=git_environment,
@@ -159,7 +161,7 @@ class RepositoryTests(unittest.TestCase):
                 capture_output=True,
                 timeout=15,
             )
-            self.assertEqual(yaml.safe_load((cloned / 'garmin_toolkit/config.yaml').read_bytes())['version'], '0.1.0')
+            self.assertEqual(yaml.safe_load((cloned / 'garmin_toolkit/config.yaml').read_bytes())['version'], version)
             raise RuntimeError('simulated VM failure')
         self.assertEqual((self.output / 'garmin_toolkit/config.yaml').read_bytes(), original)
         with socket.socket() as probe:

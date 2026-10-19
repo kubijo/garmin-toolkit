@@ -1,5 +1,6 @@
 """CI orchestration failures must preserve release gates, rollback, and secret cleanup."""
 
+import io
 import os
 import shutil
 import signal
@@ -8,7 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import suppress
+from contextlib import redirect_stdout, suppress
 from itertools import product
 from multiprocessing import get_context
 from pathlib import Path
@@ -127,6 +128,59 @@ def promotion_worker(root: Path, mode: str, previous: str) -> None:
             raise SystemExit(1) from None
 
 
+class PhaseTests(unittest.TestCase):
+    def test_progress_is_live_and_timing_stays_outside_actions_group(self) -> None:
+        for actions in ('true', 'false'):
+            with (
+                self.subTest(actions=actions),
+                patch.dict(os.environ, GITHUB_ACTIONS=actions),
+                patch.object(ci, 'monotonic', side_effect=(100, 102.5)),
+                redirect_stdout(io.StringIO()) as output,
+            ):
+                with ci.phase('Export dependency sources'):
+                    self.assertIn('Export dependency sources', output.getvalue())
+                    self.assertNotIn('passed', output.getvalue())
+                    print('source output')
+                log = output.getvalue()
+                self.assertTrue(log.endswith('Export dependency sources: passed (2.5s)\n'))
+                self.assertIn('source output\n', log)
+                if actions == 'true':
+                    self.assertTrue(log.startswith('::group::Export dependency sources\n'))
+                    self.assertIn('::endgroup::\nExport dependency sources: passed', log)
+                else:
+                    self.assertNotIn('::', log)
+
+    def test_failure_and_cancellation_close_groups_and_preserve_the_exception(self) -> None:
+        for failure in (RuntimeError('export failed'), KeyboardInterrupt(), SystemExit(143)):
+            with (
+                self.subTest(failure=type(failure).__name__),
+                patch.dict(os.environ, GITHUB_ACTIONS='true'),
+                patch.object(ci, 'monotonic', side_effect=(100, 103)),
+                redirect_stdout(io.StringIO()) as output,
+            ):
+                with self.assertRaises(type(failure)) as caught, ci.phase('Export dependency sources'):
+                    raise failure
+                self.assertIs(caught.exception, failure)
+                self.assertTrue(output.getvalue().endswith('::endgroup::\nExport dependency sources: failed (3.0s)\n'))
+                self.assertNotIn('passed', output.getvalue())
+
+    def test_closed_output_cannot_skip_work_or_hide_errors(self) -> None:
+        for output_error in (BrokenPipeError('pipe closed'), ValueError('stream closed')):
+            with (
+                self.subTest(output_error=type(output_error).__name__),
+                patch.dict(os.environ, GITHUB_ACTIONS='true'),
+                patch('builtins.print', side_effect=output_error),
+            ):
+                work: list[str] = []
+                with ci.phase('Export dependency sources'):
+                    work.append('exported')
+                self.assertEqual(work, ['exported'])
+                for failure in (RuntimeError('export failed'), KeyboardInterrupt(), SystemExit(143)):
+                    with self.assertRaises(type(failure)) as caught, ci.phase('Export dependency sources'):
+                        raise failure
+                    self.assertIs(caught.exception, failure)
+
+
 class CITests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory(dir=ROOT / '.tmp')
@@ -148,8 +202,14 @@ class CITests(unittest.TestCase):
                 'REGISTRY_AUTH_FILE': str(self.scratch / 'docker-auth/config.json'),
                 'GITHUB_ACTOR': 'test-actor',
                 'GH_TOKEN': 'synthetic-secret',
+                'GITHUB_ACTIONS': 'true',
+                'RUNNER_ENVIRONMENT': 'github-hosted',
+                'RUNNER_OS': 'Linux',
             },
         ).start()
+        self.home = self.root / 'home'
+        self.home.mkdir()
+        patch.object(Path, 'home', return_value=self.home).start()
 
     def test_cli_and_native_source_selection(self) -> None:
         for system, sources, release, expected in (
@@ -226,6 +286,139 @@ class CITests(unittest.TestCase):
         self.assertEqual((self.scratch / 'docker-auth').stat().st_mode & 0o777, 0o700)
         with self.assertRaisesRegex(ValueError, 'fresh owned'):
             ci.login()
+
+    def test_login_exposes_the_same_credentials_at_the_attestation_readers_path_and_restores_original(self) -> None:
+        default = self.home / '.docker/config.json'
+        default.parent.mkdir()
+        original = b'{"auths":{"other.example":{"auth":"preserved"}}}\n'
+        default.write_bytes(original)
+        previous = default.stat()
+        credentials = self.scratch / 'docker-auth/config.json'
+
+        def logged_in(*_args: str, **_kwargs: object) -> str:
+            credentials.write_bytes(json_bytes({'auths': {'ghcr.io': {'auth': 'synthetic'}}}))
+            return ''
+
+        with patch.object(ci, 'run', side_effect=logged_in):
+            ci.login()
+        self.assertTrue(default.samefile(credentials))
+        self.assertEqual(default.read_bytes(), credentials.read_bytes())
+        with patch.object(ci, 'cleanup_staging') as recover:
+            ci.cleanup()
+        self.assertFalse(credentials.exists())
+        self.assertFalse(default.is_symlink())
+        self.assertEqual(default.read_bytes(), original)
+        self.assertEqual(default.stat().st_ino, previous.st_ino)
+        recover.assert_called_once()
+        with patch.object(ci, 'cleanup_staging'):
+            ci.cleanup()
+        self.assertEqual(default.read_bytes(), original)
+
+    def test_login_restores_an_original_symlink_and_removes_only_its_own_link(self) -> None:
+        default = self.home / '.docker/config.json'
+        default.parent.mkdir()
+        original = self.home / 'original-config'
+        original.write_text('original credentials')
+        default.symlink_to(original)
+        with patch.object(ci, 'run'):
+            ci.login()
+        with (
+            patch.object(ci, 'cleanup_staging', side_effect=RuntimeError('recovery failed')),
+            self.assertRaisesRegex(RuntimeError, 'recovery failed'),
+        ):
+            ci.cleanup()
+        self.assertTrue(default.is_symlink())
+        self.assertEqual(default.readlink(), original)
+        self.assertEqual(default.read_text(), 'original credentials')
+
+    def test_registry_credentials_refuse_local_runners_before_changing_files_or_sending_token(self) -> None:
+        for name, value in (
+            ('GITHUB_ACTIONS', 'false'),
+            ('RUNNER_ENVIRONMENT', 'self-hosted'),
+            ('RUNNER_OS', 'macOS'),
+        ):
+            with (
+                self.subTest(name=name),
+                patch.dict(os.environ, {name: value}),
+                patch.object(ci, 'run') as run,
+                patch.object(ci, 'cleanup_staging') as recover,
+            ):
+                for action in (ci.login, ci.cleanup):
+                    with self.assertRaisesRegex(ValueError, 'disposable GitHub-hosted'):
+                        action()
+            run.assert_not_called()
+            recover.assert_not_called()
+            self.assertFalse((self.scratch / 'docker-auth').exists())
+            self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_login_link_failure_restores_original_config(self) -> None:
+        default = self.home / '.docker/config.json'
+        default.parent.mkdir()
+        default.write_text('original credentials')
+        with (
+            patch.object(ci, 'run'),
+            patch.object(Path, 'symlink_to', side_effect=OSError('link failed')),
+            self.assertRaisesRegex(OSError, 'link failed'),
+        ):
+            ci.login()
+        self.assertFalse(default.is_symlink())
+        self.assertEqual(default.read_text(), 'original credentials')
+
+    def test_cleanup_without_an_original_config_removes_the_attestation_link(self) -> None:
+        with patch.object(ci, 'run'):
+            ci.login()
+        default = self.home / '.docker/config.json'
+        self.assertTrue(default.is_symlink())
+        with patch.object(ci, 'cleanup_staging'):
+            ci.main(tyro.cli(ci.Options, args=['cleanup']))
+        self.assertFalse(default.exists() or default.is_symlink())
+
+    def test_cleanup_retries_config_restoration_without_blocking_publication_recovery(self) -> None:
+        default = self.home / '.docker/config.json'
+        default.parent.mkdir()
+        default.write_text('original credentials')
+        with patch.object(ci, 'run'):
+            ci.login()
+        credentials = self.scratch / 'docker-auth/config.json'
+        credentials.write_text('temporary credentials')
+        backup = credentials.with_name('original-config')
+        with patch.object(ci, 'cleanup_staging') as recover:
+            with (
+                patch.object(ci.shutil, 'move', side_effect=PermissionError('restore failed')),
+                self.assertRaisesRegex(PermissionError, 'restore failed'),
+            ):
+                ci.cleanup()
+            recover.assert_called_once()
+            self.assertFalse(credentials.exists())
+            self.assertFalse(default.exists() or default.is_symlink())
+            self.assertEqual(backup.read_text(), 'original credentials')
+            ci.cleanup()
+            self.assertEqual(recover.call_count, 2)
+        self.assertEqual(default.read_text(), 'original credentials')
+        self.assertFalse(backup.exists())
+
+    def test_cleanup_preserves_an_unrelated_config_while_restoration_is_pending(self) -> None:
+        default = self.home / '.docker/config.json'
+        default.parent.mkdir()
+        default.write_text('original credentials')
+        with patch.object(ci, 'run'):
+            ci.login()
+        default.unlink()
+        default.symlink_to(self.home / 'unrelated-missing-config')
+        with patch.object(ci, 'cleanup_staging') as recover:
+            ci.cleanup()
+        recover.assert_called_once()
+        self.assertEqual(default.readlink(), self.home / 'unrelated-missing-config')
+        self.assertEqual((self.scratch / 'docker-auth/original-config').read_text(), 'original credentials')
+
+    def test_credential_removal_failure_still_attempts_publication_recovery(self) -> None:
+        with (
+            patch.object(Path, 'unlink', side_effect=PermissionError('credentials locked')),
+            patch.object(ci, 'cleanup_staging') as recover,
+            self.assertRaisesRegex(PermissionError, 'credentials locked'),
+        ):
+            ci.cleanup()
+        recover.assert_called_once()
 
     def test_draft_qualifies_both_paths_before_exposing_signing_subjects(self) -> None:
         candidate = ci.PUBLICATION / 'candidate'
@@ -317,6 +510,20 @@ class CITests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'untrusted draft'):
                 ci.promote()
             rollback.assert_called_once()
+
+    def test_closed_output_cannot_prevent_promotion_rollback(self) -> None:
+        failure = RuntimeError('promotion failed')
+        with (
+            patch.object(ci, 'release_guard'),
+            patch.object(ci, 'login'),
+            patch.object(ci, 'promote_draft', side_effect=failure),
+            patch.object(ci, 'rollback_store') as rollback,
+            patch('builtins.print', side_effect=BrokenPipeError('pipe closed')),
+            self.assertRaises(RuntimeError) as caught,
+        ):
+            ci.promote()
+        self.assertIs(caught.exception, failure)
+        rollback.assert_called_once()
 
     def test_reused_scratch_cannot_roll_back_a_previous_successful_promotion(self) -> None:
         ci.PUBLICATION.mkdir()
@@ -586,21 +793,37 @@ class CITests(unittest.TestCase):
             result = subprocess.run(['bash', str(RUNNER), 'require-success', *results], check=False)
             self.assertEqual(result.returncode == 0, success)
 
-    def test_credentials_removed_even_when_nix_cleanup_fails(self) -> None:
-        directory = self.scratch / 'docker-auth'
-        directory.mkdir()
-        credentials = directory / 'config.json'
-        credentials.write_text('synthetic credentials')
+    def test_shell_cleanup_attempts_recovery_and_reports_either_failure(self) -> None:
         binary = self.root / 'nix'
-        binary.write_text('#!/bin/sh\nexit 42\n')
+        binary.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$TEST_RECOVERY_LOG"\nexit "$TEST_RECOVERY_STATUS"\n')
         binary.chmod(0o700)
-        result = subprocess.run(
-            ['bash', str(RUNNER), 'cleanup'],
-            env={**os.environ, 'PATH': str(self.root) + ':' + os.environ['PATH']},
-            check=False,
-        )
-        self.assertEqual(result.returncode, 42)
-        self.assertFalse(credentials.exists())
+        for removal_fails, recovery_status in product((False, True), (0, 42)):
+            with self.subTest(removal_fails=removal_fails, recovery_status=recovery_status):
+                case = self.root / f'{removal_fails}-{recovery_status}'
+                directory = case / '.tmp/docker-auth'
+                directory.mkdir(parents=True)
+                credentials = directory / 'config.json'
+                if removal_fails:
+                    credentials.mkdir()
+                else:
+                    credentials.write_text('synthetic credentials')
+                log = self.root / f'recovery-{removal_fails}-{recovery_status}'
+                result = subprocess.run(
+                    ['bash', str(RUNNER), 'cleanup'],
+                    env={
+                        **os.environ,
+                        'PATH': str(self.root) + ':' + os.environ['PATH'],
+                        'TEST_RECOVERY_LOG': str(log),
+                        'TEST_RECOVERY_STATUS': str(recovery_status),
+                    },
+                    cwd=case,
+                    check=False,
+                    capture_output=True,
+                    timeout=5,
+                )
+                self.assertEqual(result.returncode, recovery_status or int(removal_fails))
+                self.assertEqual(log.read_text(), 'run\n.#hass-ci\n--\ncleanup\n')
+                self.assertFalse(credentials.is_file())
 
 
 if __name__ == '__main__':

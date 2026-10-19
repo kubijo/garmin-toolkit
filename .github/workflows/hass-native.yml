@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/nix
-      - name: Build and record native image
+      - name: Build image, verify inventory, and export requested sources
         id: build
         env:
           BUILD_SYSTEM: ${{ inputs.system }}

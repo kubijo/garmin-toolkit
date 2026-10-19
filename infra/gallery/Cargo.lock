@@ -2498,7 +2498,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-brand"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "resvg",
  "thiserror 2.0.20",
@@ -2506,7 +2506,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-capture"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "har",
  "serde",
@@ -2519,7 +2519,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-cli-tui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "byte-unit",
@@ -2538,7 +2538,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-color"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cint",
  "garmin-macros",
@@ -2549,7 +2549,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-device"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2605,7 +2605,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-i18n"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "formatjs_intl",
  "icu_calendar",
@@ -2620,7 +2620,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-logging"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "garmin-model",
  "garmin-service-api",
@@ -2636,7 +2636,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2645,7 +2645,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-model"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blake3",
  "garmin-color",
@@ -2663,7 +2663,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-progress"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "garmin-model",
  "serde",
@@ -2671,7 +2671,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-service-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "garmin-color",
@@ -2685,7 +2685,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-ui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arc-swap",
  "buffa",
@@ -2725,7 +2725,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-update"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.23.1",
  "byte-unit",

@@ -58,8 +58,10 @@ require-success)
     ;;
 cleanup)
     # Recovery uses GH_TOKEN; remove registry credentials even if Nix cannot start.
-    rm -f -- .tmp/docker-auth/config.json
-    exec nix run .#hass-release -- cleanup-staging --directory .tmp/publication
+    cleanup_status=0
+    rm -f -- .tmp/docker-auth/config.json || cleanup_status=$?
+    nix run .#hass-ci -- cleanup || cleanup_status=$?
+    exit "$cleanup_status"
     ;;
 *)
     printf 'usage: runner.sh {prepare [KVM HAOS]|limits|checks GROUP|require-success RESULT...}\n' >&2
