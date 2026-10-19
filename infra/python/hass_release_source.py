@@ -68,7 +68,7 @@ def admit_source(source: Path, document: Assembly) -> None:
         raise ValueError('Source archives with submodules need an explicit source-closure contract')
 
 
-def archive_source(source: Path, document: Assembly, destination: Path) -> None:
+def archive_source(source: Path, commit: str, version: str, destination: Path) -> None:
     subprocess.run(
         [
             'git',
@@ -76,9 +76,9 @@ def archive_source(source: Path, document: Assembly, destination: Path) -> None:
             str(source),
             'archive',
             '--format=tar.gz',
-            '--prefix=garmin-toolkit-' + document['version'] + '/',
+            '--prefix=garmin-toolkit-' + version + '/',
             '--output=' + str(destination),
-            document['source']['commit'],
+            commit,
         ],
         check=True,
         capture_output=True,

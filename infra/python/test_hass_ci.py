@@ -474,6 +474,66 @@ class CITests(unittest.TestCase):
                 ci.login()
             run.assert_not_called()
 
+    def test_branch_preflight_uses_both_haos_checks_without_release_admission_or_publication(self) -> None:
+        candidate = ci.PUBLICATION / 'candidate'
+        candidate.mkdir(parents=True)
+        index, manifest = 'sha256:' + 'a' * 64, 'sha256:' + 'b' * 64
+        document = {'version': '0.1.1', 'image': {'index_digest': index}, 'platforms': [{'manifest_digest': manifest}]}
+        (candidate / 'registry.json').write_bytes(json_bytes(document))
+        (ci.PUBLICATION / 'staging.json').write_bytes(
+            json_bytes(
+                {
+                    'repository_url': 'https://github.com/kubijo/garmin-toolkit#hass-candidate-123-1',
+                    'index_digest': index,
+                    'tag': '0.1.1-candidate.123.1',
+                }
+            )
+        )
+
+        def acceptance(_: Path, evidence: Path, *arguments: str) -> None:
+            evidence.mkdir()
+            for name in ('workflow.json', 'installation.json'):
+                (evidence / name).write_text('Synthetic branch evidence\n')
+
+        with (
+            patch.object(ci, 'release_guard') as guard,
+            patch.object(ci, 'prepare_publication') as prepare,
+            patch.object(ci, 'stage_publication') as stage,
+            patch.object(ci, 'build', return_value=Path('/repository')),
+            patch.object(ci, 'login'),
+            patch.object(ci.hass_preflight, 'guard'),
+            patch.object(ci.hass_preflight, 'prepare'),
+            patch.object(ci.hass_preflight, 'check_candidate', return_value=(document, document)),
+            patch.object(ci.hass_preflight, 'package') as package,
+            patch.object(ci, 'stage_image') as image,
+            patch.object(ci, 'acceptance', side_effect=acceptance) as check,
+        ):
+            ci.main(tyro.cli(ci.Options, args=['preflight']))
+        guard.assert_not_called()
+        prepare.assert_not_called()
+        stage.assert_not_called()
+        package.assert_called_once()
+        image.assert_called_once()
+        self.assertEqual(image.call_args.args[1:], ('0.1.1', index, ''))
+        self.assertEqual(check.call_count, 2)
+        self.assertIn('--lifecycle', check.call_args_list[0].args)
+        self.assertIn('--repository-url', check.call_args_list[1].args)
+        self.assertFalse((candidate / 'release.json').exists())
+
+    def test_completion_uses_branch_verification_or_tagged_draft_publication(self) -> None:
+        for reference in ('refs/heads/dev', 'refs/tags/v0.1.1'):
+            with (
+                self.subTest(reference=reference),
+                patch.dict(os.environ, GITHUB_REF=reference),
+                patch.object(ci.hass_preflight, 'verify') as verify,
+                patch.object(ci.hass_preflight, 'qualify_rejections') as reject,
+                patch.object(ci, 'complete_publication') as publish,
+            ):
+                ci.main(tyro.cli(ci.Options, args=['complete']))
+            self.assertEqual(verify.called, reference.startswith('refs/heads/'))
+            self.assertEqual(reject.called, verify.called)
+            self.assertEqual(publish.called, not verify.called)
+
     def test_acceptance_requires_exactly_one_archive(self) -> None:
         directory = self.scratch / 'native'
         directory.mkdir()

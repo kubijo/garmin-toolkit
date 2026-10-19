@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 from fixtures.images import write_image
 from haos_platform import inspect_archive
-from hass_attestations import VerifyProvenance
+from hass_attestations import VerifyProvenance, attest_reference
 from hass_release import Assemble, Verify, assemble, verify, verify_provenance
 from hass_release_contract import CONTRACT, Release, checksums, json_bytes
 
@@ -251,17 +251,63 @@ class ReleaseTests(unittest.TestCase):
                 ('--source-ref', 'refs/tags/v0.1.0'),
                 ('--source-digest', options.commit),
                 ('--signer-digest', options.commit),
-                ('--signer-workflow', 'kubijo/garmin-toolkit/.github/workflows/hass-release.yml'),
                 (
                     '--cert-identity',
                     'https://github.com/kubijo/garmin-toolkit/.github/workflows/hass-release.yml@refs/tags/v0.1.0',
                 ),
             ):
                 self.assertEqual(command[command.index(flag) + 1], value)
+            self.assertNotIn('--signer-workflow', command)
         subjects = {command[3] for command in commands}
         manifest = json.loads((self.output / 'release.json').read_bytes())
         self.assertTrue({str(self.output / item['name']) for item in manifest['files']}.issubset(subjects))
         self.assertEqual(sum(subject.startswith('oci://') for subject in subjects), 3)
+
+    def test_provenance_arguments_are_accepted_by_the_real_cli_offline(self) -> None:
+        options = self.provenance()
+        missing_root = self.root / 'missing-trusted-root.jsonl'
+        for reference in ('refs/heads/dev', 'refs/tags/v0.1.0'):
+            with self.subTest(reference=reference):
+                with patch('hass_attestations.subprocess.run', return_value=subprocess.CompletedProcess([], 0)) as run:
+                    attest_reference(
+                        str(self.output / 'SHA256SUMS'),
+                        options.bundles / 'checksums.sigstore.jsonl',
+                        reference,
+                        options.commit,
+                    )
+                result = subprocess.run(
+                    [*run.call_args.args[0], '--custom-trusted-root', str(missing_root)],
+                    env={
+                        **os.environ,
+                        'GH_CONFIG_DIR': str(self.root / 'gh-config'),
+                        'XDG_CACHE_HOME': str(self.root / 'cache'),
+                        'GH_TOKEN': '',
+                        'GITHUB_TOKEN': '',
+                    },
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(str(missing_root), result.stderr)
+
+    def test_failed_attestation_preserves_the_verifier_diagnostic(self) -> None:
+        options = self.provenance()
+        failure = subprocess.CalledProcessError(1, ['gh'], stderr='Certificate identity mismatch\n')
+        with (
+            patch('hass_attestations.subprocess.run', side_effect=failure),
+            patch('sys.stderr', new_callable=io.StringIO) as diagnostics,
+            self.assertRaises(subprocess.CalledProcessError) as stopped,
+        ):
+            attest_reference(
+                str(self.output / 'SHA256SUMS'),
+                options.bundles / 'checksums.sigstore.jsonl',
+                'refs/heads/dev',
+                options.commit,
+            )
+        self.assertIs(stopped.exception, failure)
+        self.assertIn('Certificate identity mismatch', diagnostics.getvalue())
 
     def test_failed_checksum_attestation_stops_before_payload_admission(self) -> None:
         options = self.provenance()

@@ -44,13 +44,16 @@ class Platform(TypedDict):
     workflow_run: str | None
 
 
-class Assembly(TypedDict):
-    schema_version: int
+class Payload(TypedDict):
     version: str
-    source: Source
     image: Image
     platforms: list[Platform]
     source_parts: NotRequired[dict[str, int]]
+
+
+class Assembly(Payload):
+    schema_version: int
+    source: Source
 
 
 class FileRecord(TypedDict):
@@ -104,7 +107,7 @@ def environment() -> Environment:
     )
 
 
-def inventory(document: Assembly) -> list[FileSpec]:
+def inventory(document: Payload) -> list[FileSpec]:
     configured = tomllib.loads((CONTRACT / 'hass-files.toml').read_text())
     if configured['version'] != 1:
         raise ValueError('Unsupported release inventory contract')

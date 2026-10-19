@@ -1,0 +1,16 @@
+version = 1
+strict = true
+
+[paths]
+"registry.json" = { type = "file", min_size = 1 }
+"SHA256SUMS" = { type = "file", min_size = 1 }
+"garmin-toolkit-*-source.tar.gz" = { type = "file", count = 1, min_size = 1 }
+"garmin-toolkit-hass-*-amd64.oci.tar" = { type = "file", count = 1, min_size = 1 }
+"garmin-toolkit-hass-*-amd64.spdx.json" = { type = "file", count = 1, min_size = 1 }
+"garmin-toolkit-hass-*-amd64-sources.tar.gz" = { type = "file", count = 1, min_size = 1 }
+"garmin-toolkit-hass-*-amd64-sources.tar.gz.[0-9][0-9][0-9]" = { type = "file", min = 0, max = 15, min_size = 1 }
+"garmin-toolkit-hass-*-amd64-sources.json" = { type = "file", count = 1, min_size = 1 }
+"LICENSE-AGPL" = { type = "file", min_size = 1 }
+"COPYRIGHT.md" = { type = "file", min_size = 1 }
+"THIRD_PARTY_NOTICES.md" = { type = "file", min_size = 1 }
+"bundle-hass.json" = { type = "file", min_size = 1 }

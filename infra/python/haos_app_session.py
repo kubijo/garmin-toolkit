@@ -233,19 +233,27 @@ def launch_browser(state_path: Path, evidence: Path) -> subprocess.Popen[str]:
         )
 
 
-def launch_tunnel(key: Path, ssh_port: int, http_port: int, evidence: Path, deadline: float) -> subprocess.Popen[str]:
-    while True:
-        core = vm.guest_data(key, ssh_port, 'ha core info')
-        if core.get('version') != 'landingpage':
-            break
-        if time.monotonic() >= deadline:
-            raise TimeoutError('Home Assistant did not replace its landing page within the startup window')
+def launch_tunnel(
+    process: subprocess.Popen[str], key: Path, ssh_port: int, http_port: int, evidence: Path, deadline: float
+) -> subprocess.Popen[str]:
+    last_error: Exception | None = None
+    while (remaining := deadline - time.monotonic()) > 0:
+        if process.poll() is not None:
+            raise RuntimeError('HAOS exited while waiting for Home Assistant Core installation')
+        try:
+            core = vm.guest_data(key, ssh_port, 'ha core info', timeout=max(1, int(min(30, remaining))))
+        except (RuntimeError, subprocess.TimeoutExpired) as error:
+            last_error = error
+        else:
+            last_error = None
+            if core.get('version') != 'landingpage':
+                core_port = int(str(core['port']))
+                if core.get('ssl') is not False or not 1 <= core_port <= 65535:
+                    raise RuntimeError('The disposable Core must expose a valid plain HTTP port')
+                return vm.forward_port(key, ssh_port, http_port, core_port, evidence / 'tunnel.log')
         print('Waiting for Home Assistant Core installation...', flush=True)
-        time.sleep(5)
-    core_port = int(str(core['port']))
-    if core.get('ssl') is not False or not 1 <= core_port <= 65535:
-        raise RuntimeError('The disposable Core must expose a valid plain HTTP port')
-    return vm.forward_port(key, ssh_port, http_port, core_port, evidence / 'tunnel.log')
+        time.sleep(min(5, max(0.0, deadline - time.monotonic())))
+    raise TimeoutError('Home Assistant Core did not become available within the startup window') from last_error
 
 
 def wait_browser(browser: subprocess.Popen[str], evidence: Path, checkpoint: str = 'ready.json') -> None:
@@ -331,7 +339,7 @@ def run_session(options: Run) -> int:
 
         def started(process: subprocess.Popen[str], key: Path, ssh_port: int, app_slug: str) -> None:
             nonlocal browser, tunnel
-            tunnel = launch_tunnel(key, ssh_port, http_port, evidence, deadline)
+            tunnel = launch_tunnel(process, key, ssh_port, http_port, evidence, deadline)
             wait_for_core(process, tunnel, base, deadline, onboarding=True)
             tokens = onboard(base, str(state['password']))
             state['tokens'] = tokens
@@ -354,7 +362,7 @@ def run_session(options: Run) -> int:
                         boot_ids = vm.reboot_guest(
                             process, runtime, key, ssh_port, timeout=300, overlay_limit=OVERLAY_LIMIT
                         )
-                        tunnel = launch_tunnel(key, ssh_port, http_port, evidence, deadline)
+                        tunnel = launch_tunnel(process, key, ssh_port, http_port, evidence, deadline)
                         wait_for_core(process, tunnel, base, deadline, onboarding=False)
                         vm.assert_started(key, ssh_port, app_slug)
                         installed = object_response(json.loads((evidence / 'installation.json').read_bytes()))

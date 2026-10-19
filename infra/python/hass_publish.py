@@ -21,6 +21,8 @@ from hass_registry import PrepareRegistry, VerifyRegistry, prepare_registry, ver
 from hass_release_build import build_source
 from hass_release_contract import (
     Assembly,
+    Payload,
+    Platform,
     Release,
     check_directory,
     check_shape,
@@ -185,28 +187,12 @@ def prepare_publication(options: PreparePublication) -> None:
         document = cast(
             Assembly, {key: registry[key] for key in ('schema_version', 'version', 'source', 'image', 'platforms')}
         )
-        count = source_part_count(object_value(read_json(options.sources / 'dependency-sources.json')))
-        document['source_parts'] = {'amd64': count}
+        document['source_parts'] = {
+            'amd64': source_part_count(object_value(read_json(options.sources / 'dependency-sources.json')))
+        }
         (staged / 'assembly.json').write_bytes(json_bytes(document))
         artifacts = staged / 'artifacts'
-        artifacts.mkdir()
-        check_directory(
-            options.sources,
-            {'dependency-sources.json'}
-            | {part_path(Path('dependency-sources.tar.gz'), number).name for number in range(1, count + 1)},
-        )
-        for spec in inventory(document):
-            if 'architecture' not in spec:
-                continue
-            role = spec['role']
-            origin = options.build / spec['name']
-            if role in ('dependency_sources', 'source_inventory'):
-                origin = options.sources / (
-                    'dependency-sources.tar.gz' if role == 'dependency_sources' else 'dependency-sources.json'
-                )
-            elif role == 'dependency_sources_part':
-                origin = options.sources / ('dependency-sources.tar.gz' + Path(spec['name']).suffix)
-            shutil.copyfile(origin, artifacts / spec['name'], follow_symlinks=False)
+        copy_platform_files(options.build, options.sources, document, artifacts)
         assemble(
             Assemble(
                 source=options.source,
@@ -218,6 +204,28 @@ def prepare_publication(options: PreparePublication) -> None:
         shutil.rmtree(artifacts)
         copy_repository(options.repository, staged / 'repository')
         staged.rename(options.output)
+
+
+def copy_platform_files(build: Path, sources: Path, document: Payload, output: Path) -> None:
+    count = document.get('source_parts', {}).get('amd64', 1)
+    check_directory(
+        sources,
+        {'dependency-sources.json'}
+        | {part_path(Path('dependency-sources.tar.gz'), number).name for number in range(1, count + 1)},
+    )
+    output.mkdir()
+    for spec in inventory(document):
+        if 'architecture' not in spec:
+            continue
+        role = spec['role']
+        origin = build / spec['name']
+        if role in ('dependency_sources', 'source_inventory'):
+            origin = sources / (
+                'dependency-sources.tar.gz' if role == 'dependency_sources' else 'dependency-sources.json'
+            )
+        elif role == 'dependency_sources_part':
+            origin = sources / ('dependency-sources.tar.gz' + Path(spec['name']).suffix)
+        shutil.copyfile(origin, output / spec['name'], follow_symlinks=False)
 
 
 def checked_candidate(source: Path, directory: Path) -> Release:
@@ -340,18 +348,31 @@ def push_metadata(
         return commit
 
 
-def stage_publication(options: StagePublication) -> None:
-    document = checked_candidate(options.source, options.directory)
-    assert_remote_tag(document['version'], document['source']['commit'])
+def staging_target(version: str) -> tuple[str, str]:
     run, attempt = os.environ.get('GITHUB_RUN_ID', ''), os.environ.get('GITHUB_RUN_ATTEMPT', '')
     if not re.fullmatch(r'[1-9][0-9]*', run) or not re.fullmatch(r'[1-9][0-9]*', attempt):
         raise ValueError('Staging requires the actual GitHub workflow run and attempt')
-    tag = f'{document["version"]}-candidate.{run}.{attempt}'
+    tag = f'{version}-candidate.{run}.{attempt}'
     branch = f'hass-candidate-{run}-{attempt}'
     if branch_head(branch):
         raise ValueError('Candidate branch already exists; retain its original bytes')
+    return tag, branch
+
+
+def stage_publication(options: StagePublication) -> None:
+    document = checked_candidate(options.source, options.directory)
+    assert_remote_tag(document['version'], document['source']['commit'])
+    tag, branch = staging_target(document['version'])
     store().reconcile(options.directory)
-    previous = branch_head('hass-apps')
+    _stage_image(options, tag, branch, document['image']['index_digest'], branch_head('hass-apps'))
+
+
+def stage_image(options: StagePublication, version: str, digest: str, previous: str) -> None:
+    tag, branch = staging_target(version)
+    _stage_image(options, tag, branch, digest, previous)
+
+
+def _stage_image(options: StagePublication, tag: str, branch: str, digest: str, previous: str) -> None:
     command(
         'skopeo',
         '--command-timeout',
@@ -364,7 +385,6 @@ def stage_publication(options: StagePublication) -> None:
         'oci:' + str(options.directory / 'registry/oci'),
         'docker://' + IMAGE + ':' + tag,
     )
-    digest = text(document['image']['index_digest'])
     try:
         verify_registry(
             VerifyRegistry(
@@ -394,13 +414,16 @@ def stage_publication(options: StagePublication) -> None:
 
 
 def verify_acceptance(evidence: Path, document: Release, staging: Object) -> None:
+    check_acceptance(evidence, document['platforms'][0], document['source'], document['image']['index_digest'], staging)
+
+
+def check_acceptance(evidence: Path, platform: Platform, source: object, digest: str, staging: Object) -> None:
     workflow = object_value(read_json(evidence / 'workflow.json'))
     installed = object_value(read_json(evidence / 'installation.json'))
     native = object_value(read_json(evidence / 'native-build.json'))
     local = object_value(read_json(evidence / 'lifecycle-workflow.json'))
     local_image = object_value(read_json(evidence / 'lifecycle-installation.json'))
     lifecycle = object_value(local.get('lifecycle'))
-    platform = document['platforms'][0]
     reboot = object_value(workflow.get('haos_reboot'))
     if (
         workflow.get('passed') is not True
@@ -410,12 +433,12 @@ def verify_acceptance(evidence: Path, document: Release, staging: Object) -> Non
         or not reboot.get('before')
         or not reboot.get('after')
         or reboot.get('before') == reboot.get('after')
-        or installed.get('registry_digest') != document['image']['index_digest']
+        or installed.get('registry_digest') != digest
         or installed.get('manifest_digest') != platform['manifest_digest']
         or installed.get('config_digest') != platform['config_digest']
         or installed.get('archive_sha256') != platform['archive_sha256']
         or installed.get('repository_url') != staging['repository_url']
-        or native.get('source') != document['source']
+        or native.get('source') != source
         or native.get('platform') != platform
         or local.get('passed') is not True
         or any(
@@ -427,19 +450,20 @@ def verify_acceptance(evidence: Path, document: Release, staging: Object) -> Non
         raise ValueError('HAOS acceptance does not qualify this staged release index')
 
 
+def require_rejection(action: Callable[[], object]) -> None:
+    try:
+        action()
+    except ValueError, subprocess.CalledProcessError, FileNotFoundError:
+        return
+    raise ValueError('Provenance verifier accepted a deliberately invalid release')
+
+
 def qualify_rejections(options: VerifyProvenance, document: Release) -> None:
     from hass_release import verify_provenance
 
-    def rejected(action: Callable[[], object]) -> None:
-        try:
-            action()
-        except ValueError, subprocess.CalledProcessError, FileNotFoundError:
-            return
-        raise ValueError('Provenance verifier accepted a deliberately invalid release')
-
     wrong_commit = ('0' if options.commit[0] != '0' else '1') + options.commit[1:]
     wrong_identity = REMOTE + '/.github/workflows/untrusted.yml@refs/tags/v' + options.version
-    rejected(
+    require_rejection(
         lambda: verify_provenance(
             VerifyProvenance(
                 directory=options.directory,
@@ -449,7 +473,7 @@ def qualify_rejections(options: VerifyProvenance, document: Release) -> None:
             )
         )
     )
-    rejected(
+    require_rejection(
         lambda: command(
             'gh',
             'attestation',
@@ -472,7 +496,7 @@ def qualify_rejections(options: VerifyProvenance, document: Release) -> None:
         subject = Path(temporary) / 'index.json'
         subject.write_bytes(raw)
         attest(options, str(subject), index.replace(':', '-') + '.sigstore.jsonl')
-        rejected(lambda: attest(options, str(subject), platform.replace(':', '-') + '.sigstore.jsonl'))
+        require_rejection(lambda: attest(options, str(subject), platform.replace(':', '-') + '.sigstore.jsonl'))
     for mode in ('altered-payload', 'missing-checksums', 'missing-manifest', 'altered-platform'):
         with tempfile.TemporaryDirectory(prefix='.hass-rejection.', dir=options.directory.parent) as temporary:
             candidate = Path(temporary)
@@ -491,7 +515,7 @@ def qualify_rejections(options: VerifyProvenance, document: Release) -> None:
                 target.write_bytes(json_bytes(altered))
             elif mode == 'altered-payload':
                 target.write_text('Deliberately altered payload\n')
-            rejected(
+            require_rejection(
                 lambda candidate=candidate: verify_provenance(
                     VerifyProvenance(
                         directory=candidate,
@@ -506,13 +530,38 @@ def qualify_rejections(options: VerifyProvenance, document: Release) -> None:
 def package_evidence(options: ReleaseEvidence) -> None:
     document = checked_candidate(options.source, options.directory)
     verify_acceptance(options.evidence, document, object_value(read_json(options.directory / 'staging.json')))
-    with tarfile.open(options.directory / 'haos-acceptance.tar.gz', 'x:gz') as archive:
+    archive_evidence(options.directory, options.evidence)
+
+
+def archive_evidence(directory: Path, evidence: Path) -> None:
+    with tarfile.open(directory / 'haos-acceptance.tar.gz', 'x:gz') as archive:
         for name in EVIDENCE_FILES:
-            path = options.evidence / name
+            path = evidence / name
             if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= 16 * 1024**2:
                 raise ValueError('Missing or oversized acceptance report/capture: ' + name)
             archive.add(path, arcname=name)
-        archive.add(options.directory / 'staging.json', arcname='staging.json')
+        archive.add(directory / 'staging.json', arcname='staging.json')
+
+
+def extract_evidence(acceptance: Path, evidence: Path) -> Object:
+    evidence.mkdir()
+    seen: set[str] = set()
+    with open_tar(acceptance, max_bytes=160 * 1024**2) as archive:
+        for member in archive:
+            if (
+                member.name not in (*EVIDENCE_FILES, 'staging.json')
+                or member.name in seen
+                or not member.isfile()
+                or not 0 < member.size <= 16 * 1024**2
+            ):
+                raise ValueError('Unexpected, duplicate, or oversized signed acceptance member')
+            seen.add(member.name)
+            with archive.extractfile(member) as source, (evidence / member.name).open('xb') as destination:
+                for chunk in chunks(source):
+                    destination.write(chunk)
+    if seen != {*EVIDENCE_FILES, 'staging.json'}:
+        raise ValueError('Signed acceptance archive is incomplete')
+    return object_value(read_json(evidence / 'staging.json'))
 
 
 def complete_publication(options: CompletePublication) -> None:
@@ -691,24 +740,7 @@ def promote_draft(options: PromoteDraft) -> None:
     (downloaded / acceptance.name).rename(acceptance)
     attest(provenance, str(acceptance), 'acceptance.sigstore.jsonl')
     evidence = options.output / 'evidence'
-    evidence.mkdir()
-    seen: set[str] = set()
-    with open_tar(acceptance, max_bytes=160 * 1024**2) as archive:
-        for member in archive:
-            if (
-                member.name not in (*EVIDENCE_FILES, 'staging.json')
-                or member.name in seen
-                or not member.isfile()
-                or not 0 < member.size <= 16 * 1024**2
-            ):
-                raise ValueError('Unexpected, duplicate, or oversized signed acceptance member')
-            seen.add(member.name)
-            with archive.extractfile(member) as source, (evidence / member.name).open('xb') as destination:
-                for chunk in chunks(source):
-                    destination.write(chunk)
-    if seen != {*EVIDENCE_FILES, 'staging.json'}:
-        raise ValueError('Signed acceptance archive is incomplete')
-    staging = object_value(read_json(evidence / 'staging.json'))
+    staging = extract_evidence(acceptance, evidence)
     if not re.fullmatch(r'(?:[0-9a-f]{40})?', str(staging.get('previous'))):
         raise ValueError('Invalid previous store commit in signed staging evidence')
     (options.output / 'staging.json').write_bytes(json_bytes(staging))

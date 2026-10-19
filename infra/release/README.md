@@ -5,6 +5,18 @@ Build, verify, and publish candidates under the
 
 ## GitHub publication
 
+Before tagging, dispatch [HASS experimental release](../../.github/workflows/hass-release.yml) from a trusted branch
+with **Publish disabled**:
+
+```sh
+gh workflow run hass-release.yml --ref dev -f publish=false
+```
+
+Branch preflight builds AMD64 images and sources, stages candidate references, tests HAOS lifecycle and repository
+installation, and signs files and OCI digests. A fresh read-only job downloads and verifies the artifact inventory,
+branch/commit signatures, and acceptance archive. Invalid payloads, revisions, signers, and platform subjects must fail.
+It creates no GitHub release and does not advance `hass-apps`. Branch evidence cannot qualify a tagged release.
+
 Dispatch [HASS experimental release](../../.github/workflows/hass-release.yml) from a clean `vVERSION` tag reachable
 from `main`, matching workspace/app versions:
 

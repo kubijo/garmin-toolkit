@@ -531,7 +531,7 @@ class PublicationTests(unittest.TestCase):
             self.assertEqual(branch_head('hass-apps'), published)
             self.assertFalse((self.directory / 'promotion.json').exists())
 
-    def test_new_staging_recovers_abandoned_metadata_before_recording_its_baseline(self) -> None:
+    def test_staging_checks_preconditions_before_recovering_and_recording_the_baseline(self) -> None:
         remote, repository = self.fixture.root / 'remote.git', self.directory / 'repository'
         subprocess.run(['git', 'init', '--bare', '-q', str(remote)], check=True)
         config = repository / 'garmin_toolkit/config.yaml'
@@ -545,7 +545,7 @@ class PublicationTests(unittest.TestCase):
         with patch('hass_publish.REMOTE', str(remote)):
             previous = push_metadata(repository, 'hass-apps', '')
             config.write_text('version: 0.2.0\n')
-            push_metadata(
+            advertised = push_metadata(
                 repository,
                 'hass-apps',
                 previous,
@@ -553,8 +553,11 @@ class PublicationTests(unittest.TestCase):
                     checkout, self.directory, current, commit
                 ),
             )
+            occupied = push_metadata(repository, 'hass-candidate-123-2', '')
+            fence = branch_head(hass_publish.FENCE)
             staged = self.fixture.root / 'new-staging'
             shutil.copytree(repository, staged / 'repository')
+            options = StagePublication(source=self.fixture.source, directory=staged, build=self.fixture.artifacts)
             with (
                 patch('hass_publish.checked_candidate', return_value=self.document),
                 patch('hass_publish.verify_registry'),
@@ -562,9 +565,21 @@ class PublicationTests(unittest.TestCase):
                 patch('hass_publish.command', side_effect=command),
                 patch.dict(os.environ, GITHUB_RUN_ID='123', GITHUB_RUN_ATTEMPT='1'),
             ):
-                stage_publication(
-                    StagePublication(source=self.fixture.source, directory=staged, build=self.fixture.artifacts)
-                )
+                for run, attempt, error in (
+                    ('', '1', 'actual GitHub workflow'),
+                    ('123', '', 'actual GitHub workflow'),
+                    ('123', '2', 'Candidate branch already exists'),
+                ):
+                    with self.subTest(run=run, attempt=attempt):
+                        with (
+                            patch.dict(os.environ, GITHUB_RUN_ID=run, GITHUB_RUN_ATTEMPT=attempt),
+                            self.assertRaisesRegex(ValueError, error),
+                        ):
+                            stage_publication(options)
+                        self.assertEqual(branch_head('hass-apps'), advertised)
+                        self.assertEqual(branch_head(hass_publish.FENCE), fence)
+                        self.assertEqual(branch_head('hass-candidate-123-2'), occupied)
+                stage_publication(options)
             self.assertEqual(json.loads((staged / 'staging.json').read_bytes())['previous'], previous)
             self.assertEqual(branch_head('hass-apps'), previous)
 

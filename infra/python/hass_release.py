@@ -42,6 +42,8 @@ from hass_registry import PrepareRegistry, VerifyRegistry, prepare_registry, ver
 from hass_release_build import NativeBuild, record_build
 from hass_release_contract import (
     Assembly,
+    FileRecord,
+    Payload,
     Release,
     check_directory,
     check_shape,
@@ -106,7 +108,7 @@ class Options:
     ]
 
 
-def check_payload_metadata(directory: Path, document: Assembly) -> None:
+def check_payload_metadata(directory: Path, document: Payload, *, require_resolved: bool = False) -> None:
     specs = inventory(document)
     for platform in document['platforms']:
         architecture = platform['architecture']
@@ -139,8 +141,24 @@ def check_payload_metadata(directory: Path, document: Assembly) -> None:
             by_role['dependency_sources'],
             by_role['source_inventory'],
             platform['archive_sha256'],
+            require_resolved=require_resolved,
             part_count=document.get('source_parts', {}).get(architecture, 1),
         )
+
+
+def copy_payload(source: Path, commit: str, document: Payload, artifacts: Path, output: Path) -> list[FileRecord]:
+    specs = inventory(document)
+    check_directory(artifacts, {entry['name'] for entry in specs if 'architecture' in entry})
+    check_payload_metadata(artifacts, document)
+    for entry in specs:
+        destination = output / entry['name']
+        if entry['role'] == 'source':
+            archive_source(source, commit, document['version'], destination.resolve())
+        elif 'source' in entry:
+            destination.write_bytes(source_bytes(source, commit, entry['source']))
+        else:
+            shutil.copyfile(artifacts / entry['name'], destination, follow_symlinks=False)
+    return [describe_file(output, entry) for entry in specs]
 
 
 def assemble(options: Assemble) -> str:
@@ -148,10 +166,6 @@ def assemble(options: Assemble) -> str:
     validate_document(document, 'assembly')
     validate_identity(document)
     admit_source(options.source, document)
-    specs = inventory(document)
-    inputs = {entry['name'] for entry in specs if 'architecture' in entry}
-    check_directory(options.artifacts, inputs)
-    check_payload_metadata(options.artifacts, document)
     if options.output.exists() or options.output.is_symlink():
         raise ValueError('Output already exists; verify it explicitly instead of replacing it')
     if options.output.resolve().is_relative_to(options.artifacts.resolve()):
@@ -160,22 +174,13 @@ def assemble(options: Assemble) -> str:
     with tempfile.TemporaryDirectory(prefix='.hass-release.', dir=options.output.parent) as temporary:
         staged = Path(temporary) / 'candidate'
         staged.mkdir()
-        for entry in specs:
-            destination = staged / entry['name']
-            if entry['role'] == 'source':
-                archive_source(options.source, document, destination.resolve())
-            elif 'source' in entry:
-                destination.write_bytes(source_bytes(options.source, document['source']['commit'], entry['source']))
-            else:
-                origin = options.artifacts / entry['name']
-                # copyfile preserves bytes without inheriting read-only source permissions.
-                shutil.copyfile(origin, destination, follow_symlinks=False)
+        files = copy_payload(options.source, document['source']['commit'], document, options.artifacts, staged)
         release: Release = {
             **document,
             'platforms': sorted(document['platforms'], key=lambda platform: platform['architecture']),
             'status': 'candidate',
             'acceptance': [],
-            'files': [describe_file(staged, entry) for entry in specs],
+            'files': files,
         }
         validate_document(release, 'release')
         manifest = json_bytes(release)
