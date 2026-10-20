@@ -4,11 +4,15 @@ import { spawn } from 'node:child_process';
 import { open, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { populatedWorkflow } from './haos-workflow.mjs';
+import { populatedWorkflow } from './haos-workflow.mts';
+import { verifyInstallLinks } from './haos-install-links.mts';
+import { DevTools } from './haos-devtools.mts';
+import type { Clip, ReadySession, Session } from './haos-types.mts';
 
 const [sessionPath, evidencePath] = process.argv.slice(2);
+assert.ok(sessionPath && evidencePath, 'session and evidence paths are required');
 const probe = process.argv[4] === '--probe';
-let state = JSON.parse(await readFile(sessionPath, 'utf8'));
+const state = JSON.parse(await readFile(sessionPath, 'utf8')) as Session;
 const origin = new URL(state.base_url);
 assert.equal(origin.hostname, '127.0.0.1');
 const profile = resolve(sessionPath, '..', 'browser-profile');
@@ -40,8 +44,8 @@ const chrome = spawn(
     },
 );
 await chromeLog.close();
-let socket;
-let client;
+let socket: WebSocket | undefined;
+let client: DevTools | undefined;
 let ending = false;
 async function stop() {
     if (ending) return;
@@ -55,14 +59,18 @@ async function stop() {
 }
 for (const name of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(name, () => void stop());
 
-async function until(check, label, timeout = 90_000) {
+async function until<T>(
+    check: () => T | Promise<T>,
+    label: string,
+    timeout = 90_000,
+): Promise<NonNullable<Exclude<T, false | 0 | ''>>> {
     const deadline = Date.now() + timeout;
-    let last;
+    let last: unknown;
     while (Date.now() < deadline && !ending) {
         if (chrome.exitCode !== null || chrome.signalCode !== null) throw Error('Owned Chrome exited');
         try {
             const value = await check();
-            if (value) return value;
+            if (value) return value as NonNullable<Exclude<T, false | 0 | ''>>;
         } catch (error) {
             last = error;
         }
@@ -71,119 +79,26 @@ async function until(check, label, timeout = 90_000) {
     throw Error(`Timed out waiting for ${label}: ${last ?? 'not ready'}`);
 }
 
-class DevTools {
-    nextId = 0;
-    pending = new Map();
-    events = [];
-    contexts = new Map();
-    recording = true;
-    constructor(connection) {
-        this.socket = connection;
-        connection.addEventListener('message', event => {
-            const message = JSON.parse(event.data);
-            if (!message.id) {
-                if (message.method === 'Runtime.executionContextCreated')
-                    this.contexts.set(message.params.context.id, message.params.context);
-                if (message.method === 'Runtime.executionContextDestroyed')
-                    this.contexts.delete(message.params.executionContextId);
-                if (message.method === 'Runtime.executionContextsCleared') this.contexts.clear();
-                if (message.method === 'Page.fileChooserOpened') this.events.push(message);
-                else if (this.recording && message.method.startsWith('Network.webSocket'))
-                    this.events.push({
-                        method: message.method,
-                        params: {
-                            requestId: message.params.requestId,
-                            url: message.params.url,
-                        },
-                    });
-                return;
-            }
-            const pending = this.pending.get(message.id);
-            if (!pending) return;
-            this.pending.delete(message.id);
-            clearTimeout(pending.timer);
-            if (message.error) pending.reject(Error(`${pending.method}: ${message.error.message}`));
-            else pending.resolve(message.result);
-        });
-        connection.addEventListener('close', () => {
-            for (const pending of this.pending.values()) {
-                clearTimeout(pending.timer);
-                pending.reject(Error('Owned Chrome disconnected'));
-            }
-            this.pending.clear();
-        });
-    }
-    call(method, params = {}) {
-        const id = ++this.nextId;
-        return new Promise((resolveCall, reject) => {
-            const timer = setTimeout(() => {
-                this.pending.delete(id);
-                reject(Error(`DevTools command timed out: ${method}`));
-            }, 15_000);
-            this.pending.set(id, { resolve: resolveCall, reject, timer, method });
-            this.socket.send(JSON.stringify({ id, method, params }));
-        });
-    }
-    async evaluate(fn, argument, contextId) {
-        const window = await this.call('Runtime.evaluate', {
-            expression: 'window',
-            ...(contextId === undefined ? {} : { contextId }),
-        });
-        if (window.exceptionDetails)
-            throw Error(
-                window.exceptionDetails.exception?.description ??
-                    window.exceptionDetails.exception?.value ??
-                    window.exceptionDetails.text,
-            );
-        assert.ok(window.result.objectId, 'the requested browser window is available');
-        const reply = await this.call('Runtime.callFunctionOn', {
-            objectId: window.result.objectId,
-            functionDeclaration: fn.toString(),
-            arguments: [{ value: argument }],
-            returnByValue: true,
-            awaitPromise: true,
-            userGesture: true,
-        });
-        if (reply.exceptionDetails)
-            throw Error(
-                reply.exceptionDetails.exception?.description ??
-                    reply.exceptionDetails.exception?.value ??
-                    reply.exceptionDetails.text,
-            );
-        return reply.result.value;
-    }
-    async capture(name, clip) {
-        const result = await until(
-            () =>
-                this.call('Page.captureScreenshot', {
-                    format: 'png',
-                    ...(clip ? { clip: { ...clip, scale: 1 } } : {}),
-                }),
-            'active page screenshot',
-            30_000,
-        );
-        await writeFile(resolve(evidencePath, name), Buffer.from(result.data, 'base64'));
-    }
-}
-
 try {
     const port = await until(
         async () => Number((await readFile(`${profile}/DevToolsActivePort`, 'utf8')).split('\n')[0]),
         'debugging port',
     );
-    const page = await (
+    const page = (await (
         await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, {
             method: 'PUT',
         })
-    ).json();
+    ).json()) as { webSocketDebuggerUrl: string };
     assert.ok(page, 'owned Chrome has a page');
-    socket = new WebSocket(page.webSocketDebuggerUrl);
+    const connection = new WebSocket(page.webSocketDebuggerUrl);
+    socket = connection;
     await new Promise((done, fail) => {
-        socket.addEventListener('open', done, { once: true });
-        socket.addEventListener('error', fail, { once: true });
+        connection.addEventListener('open', done, { once: true });
+        connection.addEventListener('error', fail, { once: true });
     });
-    client = new DevTools(socket);
-    await until(() => client.call('Page.enable'), 'active owned Chrome page');
+    const devtools = new DevTools(connection, evidencePath, until);
+    client = devtools;
+    await until(() => devtools.call('Page.enable'), 'active owned Chrome page');
     await client.call('Network.enable');
     await client.call('Emulation.setEmulatedMedia', {
         features: [{ name: 'prefers-color-scheme', value: 'dark' }],
@@ -193,9 +108,9 @@ try {
     if (probe) {
         console.log('Owned Chrome page and application screenshot capture are available.');
     } else {
-        state = await until(
+        const readyState = await until(
             async () => {
-                const current = JSON.parse(await readFile(sessionPath, 'utf8'));
+                const current = JSON.parse(await readFile(sessionPath, 'utf8')) as ReadySession;
                 return current.phase === 'verifying' ? current : null;
             },
             'disposable HAOS onboarding',
@@ -203,33 +118,33 @@ try {
         );
         await client.call('Page.navigate', { url: state.base_url });
         await until(
-            () => client.evaluate(() => document.readyState === 'complete' && location.hostname === '127.0.0.1'),
+            () => devtools.evaluate(() => document.readyState === 'complete' && location.hostname === '127.0.0.1'),
             'HA document',
         );
         await until(
             () =>
-                client.evaluate(tokens => {
+                devtools.evaluate(tokens => {
                     localStorage.setItem('hassTokens', JSON.stringify(tokens));
                     return true;
-                }, state.tokens),
+                }, readyState.tokens),
             'HA authentication storage',
         );
         await client.capture('before-ingress.png');
-        await client.call('Page.navigate', { url: state.url });
+        await client.call('Page.navigate', { url: readyState.url });
         const ready = await until(
             () =>
-                client.evaluate(() => {
-                    function find(root) {
+                devtools.evaluate(() => {
+                    function find(root: Document | ShadowRoot): { viewport: number[]; clip: Clip } | null {
                         for (const element of root.querySelectorAll('*')) {
                             if (
-                                element.tagName === 'IFRAME' &&
+                                element instanceof HTMLIFrameElement &&
                                 element.contentDocument?.querySelector('#garmin-toolkit')
                             ) {
                                 const document = element.contentDocument;
-                                const canvas = document.querySelector('#garmin-toolkit');
-                                const loading = document.querySelector('#loading');
+                                const canvas = document.querySelector<HTMLCanvasElement>('#garmin-toolkit');
+                                const loading = document.querySelector<HTMLElement>('#loading');
                                 const rect = element.getBoundingClientRect();
-                                if (canvas.width && canvas.height && loading?.hidden && rect.width && rect.height) {
+                                if (canvas?.width && canvas.height && loading?.hidden && rect.width && rect.height) {
                                     return {
                                         viewport: [window.innerWidth, window.innerHeight],
                                         clip: {
@@ -256,9 +171,10 @@ try {
             event => event.method === 'Network.webSocketCreated' && event.params.url.includes('/remoc'),
         );
         assert.ok(remoc, 'the app opened its Remoc connection through ingress');
+        assert.equal(remoc.method, 'Network.webSocketCreated');
         await until(
             () =>
-                client.events.some(
+                devtools.events.some(
                     event =>
                         event.method === 'Network.webSocketFrameReceived' &&
                         event.params.requestId === remoc.params.requestId,
@@ -267,8 +183,8 @@ try {
         );
         await client.evaluate(
             () =>
-                new Promise(done => {
-                    requestAnimationFrame(() => requestAnimationFrame(done));
+                new Promise<void>(done => {
+                    requestAnimationFrame(() => requestAnimationFrame(() => done()));
                 }),
         );
         await client.capture('ready.png', ready.clip);
@@ -278,7 +194,7 @@ try {
         await writeFile(
             resolve(evidencePath, 'ready.json'),
             JSON.stringify({
-                url: state.url,
+                url: readyState.url,
                 ingress: true,
                 websocket: true,
                 viewport: ready.viewport,
@@ -286,7 +202,15 @@ try {
             }),
         );
         console.log('Garmin Toolkit rendered through authenticated Home Assistant ingress.');
-        if (state.workflow) await populatedWorkflow(client, state, sessionPath, evidencePath);
+        if (readyState.install_links) {
+            await until(
+                () => readFile(resolve(evidencePath, 'install-links-prepared.json')),
+                'fresh repository installation setup',
+                300_000,
+            );
+            await verifyInstallLinks(client, readyState, evidencePath, until);
+        }
+        if (readyState.workflow) await populatedWorkflow(client, readyState, sessionPath, evidencePath);
         await new Promise(done => chrome.once('exit', done));
     }
 } catch (error) {
@@ -296,7 +220,7 @@ try {
             try {
                 await client.capture('failed.png');
             } catch (captureError) {
-                console.error('Failure screenshot unavailable:', captureError.message);
+                console.error('Failure screenshot unavailable:', captureError);
             }
         }
         process.exitCode = 1;

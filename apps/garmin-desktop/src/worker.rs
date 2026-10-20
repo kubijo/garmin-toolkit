@@ -1229,7 +1229,7 @@ mod tests {
 
         assert_eq!(preview.file_name, "activity.fit");
         assert_eq!(preview.activities.len(), 1);
-        assert!(!preview.activities[0].source.is_empty());
+        assert_ne!(preview.activities[0].source, "");
         Ok(())
     }
 

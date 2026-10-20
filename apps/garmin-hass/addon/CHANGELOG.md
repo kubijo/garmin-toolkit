@@ -11,4 +11,5 @@
 - Persistent private app data and cold Supervisor backup support.
 - USB access for the packaged Garmin adapter; supported device operations require release-specific hardware evidence.
 
-Versions remain release candidates until public installation and verification are qualified and published.
+Version 0.1.1 is the first public experimental AMD64 release. See [the quickstart](DOCS.md) for qualified Home Assistant
+versions and device-operation limits.

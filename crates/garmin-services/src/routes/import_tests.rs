@@ -232,7 +232,10 @@ fn rejected_input_does_not_register_a_source() -> TestResult {
         let mut invalid = request(&fixture)?;
         invalid.bytes = b"invalid GPX";
         assert!(fixture.app.import_route(invalid).await.is_err());
-        assert!(fixture.app.route_plans(fixture.owner).await?.is_empty());
+        assert_eq!(
+            fixture.app.route_plans(fixture.owner).await?,
+            [] as [garmin_storage::StoredRoutePlanSummary; 0]
+        );
         // Reusing the unsaved source ID under another owner proves no orphan source was committed.
         let other = fixture.app.create_profile("Other".parse()?).await?;
         let source = Source::from_parts(

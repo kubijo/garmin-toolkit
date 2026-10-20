@@ -96,6 +96,9 @@ mod tests {
 
         assert_eq!(candidate.key(), fixture::KEY);
         assert_eq!(candidate.inspect().unwrap().name, fixture::NAME);
-        assert!(!candidate.browse().unwrap().storages[0].entries.is_empty());
+        assert_ne!(
+            candidate.browse().unwrap().storages[0].entries,
+            [] as [garmin_device::DeviceCatalogEntry; 0]
+        );
     }
 }

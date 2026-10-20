@@ -257,12 +257,12 @@ fn foreign_profiles_cannot_generate_list_or_download_courses() -> TestResult {
                 )))
             ));
         }
-        assert!(
+        assert_eq!(
             fixture
                 .application
                 .generated_courses(fixture.other, first.revision_id())
-                .await?
-                .is_empty()
+                .await?,
+            [] as [garmin_storage::GeneratedCourse; 0]
         );
         assert!(
             fixture
@@ -332,12 +332,12 @@ fn encoding_failure_leaves_the_route_and_allocations_retryable() -> TestResult {
                 garmin_fit::course::Error::UnresolvedGeometry
             ))
         ));
-        assert!(
+        assert_eq!(
             fixture
                 .application
                 .generated_courses(fixture.owner, fixture.receipt.revision_id())
-                .await?
-                .is_empty()
+                .await?,
+            [] as [garmin_storage::GeneratedCourse; 0]
         );
         let resolved = fixture
             .application

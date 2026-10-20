@@ -186,7 +186,7 @@ mod tests {
             canonical.installed_map_files(),
             interleaved.installed_map_files()
         );
-        assert!(canonical.quirks().is_empty());
+        assert_eq!(canonical.quirks(), []);
         assert_eq!(
             interleaved.quirks(),
             [ManifestQuirk::InterleavedMassStorageEntries]

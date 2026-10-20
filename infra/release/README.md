@@ -212,5 +212,6 @@ manifests. `acceptance.sigstore.jsonl` authenticates `haos-acceptance.tar.gz` be
 dark captures.
 
 `gh attestation verify` enforces this repository's `hass-release.yml`, exact tag and source/signer commit, GitHub OIDC,
-SLSA v1, and hosted runners. It needs registry/trust-root access. Live issuance remains a
-[publication gate](../../docs/plans/device-expansion-and-publication.md).
+SLSA v1, and hosted runners. It needs registry/trust-root access. Tagged issuance and verification passed for
+[v0.1.1](../../docs/research/publication-readiness.md#published-amd64-release); each new candidate must pass the same
+checks.

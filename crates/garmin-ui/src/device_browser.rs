@@ -4653,7 +4653,10 @@ mod tests {
         assert_eq!(browser.current.storage_index, 0);
         assert_eq!(browser.current.path, "Garmin/Activity/History");
         assert_eq!(browser.back_stack.len(), 1);
-        assert!(browser.forward_stack.is_empty());
+        assert_eq!(
+            browser.forward_stack,
+            [] as [crate::device_browser::DirectoryId; 0]
+        );
         assert_eq!(
             browser.current_upload_target(),
             Some(("internal".to_owned(), "Garmin/Activity/History".into()))
@@ -4661,13 +4664,19 @@ mod tests {
 
         browser.navigate_back();
         assert_eq!(browser.current.path, "");
-        assert!(browser.back_stack.is_empty());
+        assert_eq!(
+            browser.back_stack,
+            [] as [crate::device_browser::DirectoryId; 0]
+        );
         assert_eq!(browser.forward_stack.len(), 1);
 
         browser.navigate_forward();
         assert_eq!(browser.current.path, "Garmin/Activity/History");
         assert_eq!(browser.back_stack.len(), 1);
-        assert!(browser.forward_stack.is_empty());
+        assert_eq!(
+            browser.forward_stack,
+            [] as [crate::device_browser::DirectoryId; 0]
+        );
     }
 
     #[test]
@@ -4745,8 +4754,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(browser.current.path, "Garmin");
-        assert!(browser.back_stack.is_empty());
-        assert!(browser.forward_stack.is_empty());
+        assert_eq!(
+            browser.back_stack,
+            [] as [crate::device_browser::DirectoryId; 0]
+        );
+        assert_eq!(
+            browser.forward_stack,
+            [] as [crate::device_browser::DirectoryId; 0]
+        );
     }
 
     #[test]

@@ -9,15 +9,6 @@ explicit input, not an update side effect of the quality gate.
 
 ## Checks and outputs
 
-| Command                | Scope                                                                        |
-| ---------------------- | ---------------------------------------------------------------------------- |
-| `just qa::preflight`   | Formatting, repository policy, Grit; no Rust compilation                     |
-| `just qa::full`        | Preflight, Rust and gallery lint/tests, documentation and generated metadata |
-| `just qa::wasm`        | Actual browser target lint                                                   |
-| `just qa::audit`       | RustSec and Gitleaks history/index/worktree scans                            |
-| `just qa::check`       | Pure Nix checks and application builds                                       |
-| `just qa::trunk-cache` | Isolated real-WASM bindgen-cache acceptance                                  |
-
 Full QA, `qa::test`, and CI run the workspace with all features plus separate desktop and HASS production suites with
 `--no-default-features`. Full QA and CI lint both configurations. All-features builds select demo composition, so the
 production checks exercise startup and device adapters that the demo excludes. Host tests cover application identity,
@@ -32,6 +23,20 @@ nightly target. Never direct another build into a live gallery session's target 
 library and loads replacements without checking compiler compatibility. Restart gallery after changing toolchains or
 dependency configuration. Different toolchains, target triples, profiles, and Cargo features may still produce distinct
 artifacts inside the shared directory. Nix package builds keep their isolated sandbox outputs.
+
+Local Just entrypoints, Nix QA apps, and development shells preserve an explicit `RUSTC_WRAPPER`. When it is unset and
+the host provides `sccache`, they select that executable; hosts without it continue without a wrapper.
+
+Coverage builds and tests `cargo-llvm-cov` with the selected Rust toolchain and uses that toolchain's `llvm-cov` and
+`llvm-profdata` for local and CI reports. Package tests remain enabled.
+
+SQLFluff's dependency build has a temporary test exception for
+[diff-cover 10.5.1](https://github.com/NixOS/nixpkgs/blob/09063bd1f2b36fd9fd793c36dfade7bd40a93dfc/pkgs/development/python-modules/diff-cover/default.nix),
+whose HTML fixtures expect escaped quotes that Pygments 2.21.0 renders literally. The six affected HTML comparison tests
+are deselected by their full test IDs; published dependency sources remain unchanged. All other package tests and
+repository formatting checks stay enabled. A version guard requires review when either dependency changes. Remove the
+exception when nixpkgs supplies compatible released packages, then verify the full dependency test suite, formatting,
+and preflight.
 
 The root and gallery workspaces share development-profile overrides in `.cargo/config.toml`. Ordinary code stays
 unoptimized; rendering dependencies retain their targeted optimizations. A blanket optimization override in either
@@ -62,6 +67,13 @@ currently track target artifacts.
 
 Gallery recipes add pinned FormatJS to the executable path, including hot-reload child builds. They retain the caller's
 Rust toolchain and graphics runtime; entering the full Nix development shell remains explicit.
+
+The standalone gallery pins `gallery`, `gallery-build`, and `gallery-macros` together at rs-gallery 0.14.0. It retains
+egui 0.36.2 and native AccessKit accessibility. Rustup and Nix select Rust 1.99.1; the workspace's declared minimum
+remains 1.98. Upstream's matching development pin does not declare a minimum Rust version. The gallery audit has only
+the three documented AccessKit/AT-SPI exceptions in [the gallery policy](../../infra/gallery/deny.toml), pending zbus 6
+migration. Obsolete exceptions and other advisory findings fail the audit; the application workspace has no such
+exceptions.
 
 Root and gallery apply the same `vendor/` patches: bounded MVT decoding in `fast-mvt`, Wayland activation and a bounded
 control-request redraw override in `winit`. Each has `PATCHES.md`. Nix sources, license checks, and dependency-cache
@@ -138,6 +150,11 @@ Flatpak remain Linux-only. Development support does not establish hardware compa
 Gallery uses Metal on macOS and Vulkan on Linux; override with `WGPU_BACKEND`. For browser automation, control, capture,
 and diagnostics see [developer tools](developer-tools.md). Renderer selection and ownership live in
 [activity map](activity-map.md#rendering-boundary).
+
+Linux development shells expose Mesa's software Vulkan driver alongside the host drivers through `VK_ADD_DRIVER_FILES`.
+Headless QA selects the pinned software driver explicitly through `VK_DRIVER_FILES`. Linux shells and QA use the pinned
+Nix C compiler and native Rust linker so their binaries can load that driver's glibc generation; the target-specific
+Mold settings remain in effect.
 
 ## Desktop packaging
 

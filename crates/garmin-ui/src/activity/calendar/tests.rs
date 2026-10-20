@@ -226,6 +226,9 @@ fn spring_gap_and_skipped_civil_day_use_the_timezone_database() {
         activities[1].local_start.date(),
         jiff::civil::date(2011, 12, 31)
     );
-    assert!(on_day(&activities, jiff::civil::date(2011, 12, 30)).is_empty());
+    assert_eq!(
+        on_day(&activities, jiff::civil::date(2011, 12, 30)),
+        [] as [usize; 0]
+    );
     assert_eq!(chronological(&activities), [0, 1]);
 }

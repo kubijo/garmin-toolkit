@@ -21,7 +21,10 @@ fn alex_routes_preserve_recorded_geometry_and_survive_restore() -> TestResult {
         assert_eq!(corpus.routes().len(), CASES.len());
         assert_eq!(storage.route_plans(owner).await?.len(), CASES.len());
         for other in &corpus.users()[1..] {
-            assert!(storage.route_plans(other.id()).await?.is_empty());
+            assert_eq!(
+                storage.route_plans(other.id()).await?,
+                [] as [garmin_storage::StoredRoutePlanSummary; 0]
+            );
         }
         for (receipt, (case, name, sport)) in corpus.routes().iter().zip(CASES) {
             let route = storage.route_plan(owner, receipt.plan_id()).await?.unwrap();

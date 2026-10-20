@@ -30,6 +30,11 @@ docs *args:
 outdated *args:
     @just in-shell nix run {{ flake }}#outdated -- "$@"
 
+# Update dependencies through cargo & nix flake
+update:
+    cargo update
+    nix flake update
+
 # Update the Czech catalog from source messages.
 i18n-sync:
     just in-shell nix run {{ flake }}#i18n-sync

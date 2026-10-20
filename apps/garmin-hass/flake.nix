@@ -103,7 +103,7 @@
 
               postBuild = ''
                 export GARMIN_TEST_WEB_ROOT="$PWD/apps/garmin-hass/web/dist"
-                for test in infra/javascript/*.test.mjs; do
+                for test in infra/javascript/*.test.mjs infra/javascript/*.test.mts; do
                   ${lib.getExe nodejs} "$test"
                 done
               '';

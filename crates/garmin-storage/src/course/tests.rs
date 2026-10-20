@@ -131,12 +131,12 @@ fn current_encoder_artifact_precedes_newer_history_across_pages() -> TestResult 
                 .await?;
             assert_eq!(page, vec![expected]);
         }
-        assert!(
+        assert_eq!(
             fixture
                 .storage
                 .generated_courses_page(UserId::new_v4(), fixture.revision, &encoder, 0, 1)
-                .await?
-                .is_empty()
+                .await?,
+            [] as [crate::course::GeneratedCourse; 0]
         );
         fixture.storage.close().await;
         Ok(())
@@ -244,11 +244,11 @@ fn deletion_tombstone_survives_snapshot_restore() -> TestResult {
         storage
             .delete_course_generation(fixture.owner, fixture.revision, generated.id())
             .await?;
-        assert!(
+        assert_eq!(
             storage
                 .generated_courses(fixture.owner, fixture.revision)
-                .await?
-                .is_empty()
+                .await?,
+            [] as [crate::course::GeneratedCourse; 0]
         );
         assert!(matches!(
             storage

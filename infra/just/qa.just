@@ -13,6 +13,10 @@ full:
 wasm:
     just in-shell nix run {{ flake }}#wasm-lint
 
+# Run the gallery's full QA gate with pinned native and headless dependencies.
+gallery:
+    just in-shell nix run {{ flake }}#gallery-check
+
 # Evaluate and build every pure Nix flake check.
 check *args:
     @just in-shell nix flake check {{ flake }} --no-update-lock-file "$@"

@@ -50,7 +50,10 @@ fn source_journal_retains_terminal_transitions_and_removes_child_state() {
     closed.removed = true;
     journal.publish(closed);
     let update = journal.since(update.revision);
-    assert!(update.state.is_empty());
+    assert_eq!(
+        update.state,
+        [] as [garmin_model::diagnostics::Observation; 0]
+    );
     assert_eq!(update.changes.len(), 2);
     assert!(update.changes.iter().all(|item| item.removed));
 }
@@ -82,7 +85,10 @@ fn rejected_state_advances_revision_and_marks_snapshots_incomplete() {
     assert!(rejected.incomplete);
     assert!(rejected.revision > full.revision);
     assert_eq!(rejected.state.len(), 128);
-    assert!(rejected.changes.is_empty());
+    assert_eq!(
+        rejected.changes,
+        [] as [garmin_model::diagnostics::Observation; 0]
+    );
     assert!(journal.since(rejected.revision).incomplete);
     journal.publish(item("window", "open"));
     assert_eq!(journal.since(0).revision, rejected.revision);

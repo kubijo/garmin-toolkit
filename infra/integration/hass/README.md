@@ -40,6 +40,13 @@ exclusive.
 The runner uses dark screenshots and retains evidence in `.tmp/haos-evidence/`. Success or failure removes its VM,
 browser, credentials, listeners, and disks. It needs no real HASS instance or USB device.
 
+Add `--install-links` with the public `https://github.com/kubijo/garmin-toolkit#hass-apps` repository and the release's
+independently verified registry digest to test the README/quickstart links. In that disposable guest only, the check
+uninstalls its empty test app and removes the repository, then follows My Home Assistant to add it, install/start the
+app, and reopen the existing repository. Home Assistant/My Home Assistant have no Garmin semantic controls, so this part
+uses the owned DevTools connection; app actions and captures still use the built-in APIs. Dark screenshots and
+`install-links.json` accompany the digest-bound installation and populated lifecycle evidence.
+
 Remaining release gates belong to the [publication plan](../../../docs/plans/device-expansion-and-publication.md).
 
 ## Home Assistant app package

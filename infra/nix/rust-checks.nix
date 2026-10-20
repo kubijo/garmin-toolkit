@@ -2,10 +2,13 @@
   craneLib,
   coverageMinimum,
   formatjsCli,
+  hostSccacheHook,
   galleryRuntimeLibraries,
   inheritanceCheck,
   licenseChecker,
   lib,
+  llvmToolsEnv,
+  nativeCompilerEnv,
   sharedCargoTargetDir,
   pkgs,
   pythonToolsEnv,
@@ -15,7 +18,25 @@
 }:
 
 let
+  inherit (builtins) genericClosure;
+
   cargo = lib.getExe' toolchain "cargo";
+  pkgConfigNode = package: {
+    key = toString (lib.getDev package);
+    inherit package;
+  };
+  pkgConfigLibraries = map (node: node.package) (genericClosure {
+    startSet = map pkgConfigNode (
+      galleryRuntimeLibraries
+      ++ [
+        pkgs.libselinux
+        pkgs.libsysprof-capture
+        pkgs.pcre2
+        pkgs.util-linux
+      ]
+    );
+    operator = node: map pkgConfigNode (node.package.propagatedBuildInputs or [ ]);
+  });
   # Tests need named time zones and GPU upload/readback without host resources.
   testRuntimeEnv = {
     TZDIR = "${pkgs.tzdata}/share/zoneinfo";
@@ -172,13 +193,15 @@ let
     name: runtimeInputs: text:
     pkgs.writeShellApplication {
       inherit name;
-      text = ''
-        ${pythonToolsEnv}/bin/python ${workspaceSrc + "/infra/python/prepare_cargo_target.py"}
-      ''
-      + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
-        export NIX_LDFLAGS="-L${lib.getLib pkgs.libiconv}/lib ''${NIX_LDFLAGS:-}"
-      ''
-      + text;
+      text =
+        hostSccacheHook
+        + ''
+          ${pythonToolsEnv}/bin/python ${workspaceSrc + "/infra/python/prepare_cargo_target.py"}
+        ''
+        + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+          export NIX_LDFLAGS="-L${lib.getLib pkgs.libiconv}/lib ''${NIX_LDFLAGS:-}"
+        ''
+        + text;
       runtimeInputs =
         runtimeInputs
         ++ [ formatjsCli ]
@@ -191,6 +214,8 @@ let
       runtimeEnv = {
         CARGO_TARGET_DIR = sharedCargoTargetDir;
       }
+      // llvmToolsEnv
+      // nativeCompilerEnv
       // testRuntimeEnv
       // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
         CC = lib.getExe' pkgs.stdenv.cc "cc";
@@ -203,6 +228,12 @@ let
       }
       // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
         LD_LIBRARY_PATH = lib.makeLibraryPath galleryRuntimeLibraries;
+        PKG_CONFIG = lib.getExe' pkgs.pkg-config "pkg-config";
+        # Include the rendering stack's propagated inputs and GLib's private requirements.
+        PKG_CONFIG_PATH =
+          lib.makeSearchPathOutput "dev" "lib/pkgconfig" pkgConfigLibraries
+          + ":"
+          + lib.makeSearchPathOutput "dev" "share/pkgconfig" pkgConfigLibraries;
       };
     };
   src = import ./cargo-source.nix {
@@ -333,6 +364,22 @@ let
     ${cargoCommand galleryClippyArgs}
   '';
 
+  galleryCheck =
+    mkApp "gallery-check"
+      [
+        pkgs.cargo-deny
+        pkgs.cargo-nextest
+        toolchain
+      ]
+      ''
+        ${checkOutput "gallery checks"}
+        run_step "gallery clippy" ${lib.getExe galleryLint}
+        run_step "gallery doc" env RUSTDOCFLAGS='-D warnings' ${cargoCommand galleryDocArgs}
+        run_step "gallery nextest" ${cargoCommand galleryTestArgs}
+        run_step "gallery deny" ${cargoCommand galleryDenyArgs}
+        finish_check
+      '';
+
   projectLint =
     mkApp "project-lint"
       [
@@ -363,10 +410,7 @@ let
         run_step "license bundles" ${lib.getExe licenseChecker}
         run_step "cargo deny" ${cargoCommand denyArgs}
         run_step "cargo machete" ${cargoCommand [ "machete" ]}
-        run_step "gallery clippy" ${lib.getExe galleryLint}
-        run_step "gallery doc" env RUSTDOCFLAGS='-D warnings' ${cargoCommand galleryDocArgs}
-        run_step "gallery nextest" ${cargoCommand galleryTestArgs}
-        run_step "gallery deny" ${cargoCommand galleryDenyArgs}
+        run_step "gallery checks" ${lib.getExe galleryCheck}
         finish_check
       '';
 
@@ -443,6 +487,21 @@ in
             cargoCommand [
               "deny"
               "check"
+              "--deny"
+              "warnings"
+              "advisories"
+            ]
+          }
+          run_step "Gallery RustSec advisories" ${
+            cargoCommand [
+              "deny"
+              "--manifest-path"
+              "infra/gallery/Cargo.toml"
+              "--config"
+              "infra/gallery/deny.toml"
+              "check"
+              "--deny"
+              "warnings"
               "advisories"
             ]
           }
@@ -510,6 +569,7 @@ in
     '';
 
     project-lint = projectLint;
+    gallery-check = galleryCheck;
     gallery-lint = galleryLint;
 
     wasm-lint = wasmLint;
@@ -545,6 +605,7 @@ in
 
     rust-coverage = craneLib.cargoNextest (
       commonArgs
+      // llvmToolsEnv
       // testRuntimeEnv
       // {
         inherit cargoArtifacts;

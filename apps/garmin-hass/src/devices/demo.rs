@@ -296,7 +296,10 @@ mod tests {
         assert_eq!(source.snapshot().len(), 1);
 
         std::fs::rename(&root, &detached).unwrap();
-        assert!(source.snapshot().is_empty());
+        assert_eq!(
+            source.snapshot(),
+            [] as [garmin_service_api::DeviceSnapshot; 0]
+        );
 
         std::fs::rename(&detached, &root).unwrap();
         let snapshots = tokio::time::timeout(std::time::Duration::from_secs(5), async {

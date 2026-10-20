@@ -2,35 +2,14 @@
 
 ## HASS experimental release
 
-Qualify the [candidate](../../infra/release/README.md) through the
-[repository-install check](../../infra/integration/hass/README.md#repository-install-acceptance). Application
-authentication, credential custody, encryption, and Connect remain deferred.
+Application authentication, credential custody, encryption, and Connect remain deferred.
 
-### Provenance and redistribution
-
-- Test [provenance verification](../../infra/release/README.md#signed-provenance) with live attestations: altered
-  payloads and platforms, wrong revisions/signers, and missing inventory.
-
-### Lifecycle acceptance
-
-- Qualify staged registry installation, ingress, and lifecycle on each advertised architecture. Release AMD64 first;
-  advertise ARM64 after runtime acceptance.
-- Restrict hardware claims to tested device/firmware/host/operation combinations under the
-  [hardware plan](hass-watch-vertical-slice.md).
-
-### Publication workflow
-
-- Qualify [signed draft creation and promotion](../../.github/workflows/hass-release.yml), anonymous pulls, and public
-  repository installation using the original tested bytes.
-- Test live recovery from version conflicts, incomplete drafts, changed store branches, failed installation, and
-  retries. Verify rollback preserves previous metadata/artifacts; document withdrawal and recovery.
-
-### User documentation
-
-- After public installation passes, add and test README/quickstart My Home Assistant links in disposable HAOS.
-- Record qualified Home Assistant versions and hardware limits in the
-  [quickstart](../../apps/garmin-hass/addon/DOCS.md).
-- Attach digest-bound results, runtime versions, and dark app captures.
+- Qualify ARM64 registry installation, ingress, and lifecycle before advertising support, using the
+  [repository-install check](../../infra/integration/hass/README.md#repository-install-acceptance).
+- Test live [publication recovery](../../infra/release/README.md#github-publication) from version conflicts, incomplete
+  drafts, changed store branches, failed installation, and retries. Verify rollback preserves previous metadata and
+  artifacts.
+- Document release withdrawal.
 
 ## Hardware and other distribution
 

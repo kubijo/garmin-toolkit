@@ -47,6 +47,13 @@ class HaosTests(unittest.TestCase):
         write_image(archive, architecture=architecture, version=version)
         return archive
 
+    def test_installation_link_acceptance_requires_the_public_repository(self) -> None:
+        for repository in (None, 'https://github.com/kubijo/garmin-toolkit#different'):
+            with self.subTest(repository=repository), self.assertRaisesRegex(ValueError, 'public hass-apps'):
+                session.run_session(
+                    session.Check(app_archive=self.root / 'unused', repository_url=repository, install_links=True)
+                )
+
     def test_auto_matches_native_architecture_and_rejects_unknown_host(self) -> None:
         for machine, expected in [('x86_64', 'amd64'), ('aarch64', 'aarch64'), ('arm64', 'aarch64')]:
             with self.subTest(machine=machine), patch('haos_platform.platform.machine', return_value=machine):

@@ -31,7 +31,7 @@ fn gpx_10_track_is_parsed() -> Result<(), Box<dyn Error>> {
         Some("Older walk")
     );
     assert!(document.candidates()[0].shape().is_geometry());
-    assert!(document.rejected().is_empty());
+    assert_eq!(document.rejected(), []);
     Ok(())
 }
 

@@ -3,7 +3,36 @@ all-features = true
 
 [advisories]
 version = 2
-ignore = []
+unused-ignored-advisory = "deny"
+
+[[advisories.ignore]]
+id = "RUSTSEC-2026-0370"
+reason = """
+Native accessibility uses zvariant 5 through AccessKit/AT-SPI and zbus 5.
+No compatible published upgrade preserves that stack yet. Remove this
+gallery-only exception when compatible published AccessKit/AT-SPI releases
+adopt zbus 6's wire types.
+Upstream: https://github.com/z-galaxy/zbus/issues/2043
+"""
+
+[[advisories.ignore]]
+id = "RUSTSEC-2026-0371"
+reason = """
+AccessKit/AT-SPI and zbus 5 require the unmaintained standalone zbus_names.
+Remove this gallery-only exception when compatible published AccessKit/AT-SPI
+releases migrate to zbus 6's names module; retain native accessibility.
+Upstream: https://github.com/z-galaxy/zbus/issues/2043
+"""
+
+[[advisories.ignore]]
+id = "RUSTSEC-2026-0372"
+reason = """
+AccessKit/AT-SPI's zvariant 5 dependency requires zvariant_derive 5.
+An isolated derive upgrade cannot migrate the accessibility stack. Remove
+this gallery-only exception when compatible published AccessKit/AT-SPI
+releases use zbus 6's derive macros.
+Upstream: https://github.com/z-galaxy/zbus/issues/2043
+"""
 
 [licenses]
 version = 2

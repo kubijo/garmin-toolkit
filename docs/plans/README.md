@@ -6,7 +6,7 @@ Unfinished work only. On completion, move lasting contracts/evidence to their ow
 QA and audit, plus package evidence for deployment claims.
 
 Current implementation focus: the
-[installable HASS experimental release](device-expansion-and-publication.md#hass-experimental-release), with
+[HASS publication follow-ups](device-expansion-and-publication.md#hass-experimental-release), with
 [HASS hardware acceptance](hass-watch-vertical-slice.md) tracked separately.
 
 Other active plans: [shared interfaces](shared-interface-workflows.md), [portable data](data-foundation.md),

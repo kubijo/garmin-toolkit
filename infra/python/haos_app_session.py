@@ -4,6 +4,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import signal
 import socket
 import subprocess
@@ -87,6 +88,9 @@ class Check(Run):
 
     lifecycle: bool = False
     """Test fixture-baseline upgrade, backup recovery, and uninstall/reinstall; requires repository and receipt."""
+
+    install_links: bool = False
+    """Verify README/quickstart My Home Assistant links against the public repository in this disposable browser."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -222,7 +226,7 @@ def launch_browser(state_path: Path, evidence: Path) -> subprocess.Popen[str]:
         return subprocess.Popen(
             [
                 'node',
-                str(ROOT / 'infra/javascript/haos-browser.mjs'),
+                str(ROOT / 'infra/javascript/haos-browser.mts'),
                 str(state_path),
                 str(evidence),
             ],
@@ -256,18 +260,26 @@ def launch_tunnel(
     raise TimeoutError('Home Assistant Core did not become available within the startup window') from last_error
 
 
-def wait_browser(browser: subprocess.Popen[str], evidence: Path, checkpoint: str = 'ready.json') -> None:
-    deadline = time.monotonic() + 120
+def wait_browser(
+    browser: subprocess.Popen[str], evidence: Path, checkpoint: str = 'ready.json', *, timeout: int = 120
+) -> None:
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if (evidence / checkpoint).is_file():
             return
         if browser.poll() is not None:
             raise RuntimeError(f'Browser verification failed: {(evidence / "browser.log").read_text()[-3000:]}')
         time.sleep(0.5)
-    raise TimeoutError(f'Browser did not reach {checkpoint} in 120 seconds')
+    raise TimeoutError(f'Browser did not reach {checkpoint} in {timeout} seconds')
 
 
 def run_session(options: Run) -> int:
+    if (
+        isinstance(options, Check)
+        and options.install_links
+        and options.repository_url != 'https://github.com/kubijo/garmin-toolkit#hass-apps'
+    ):
+        raise ValueError('Installation link acceptance requires the public hass-apps repository URL')
     if (
         isinstance(options, Check)
         and options.lifecycle
@@ -328,6 +340,8 @@ def run_session(options: Run) -> int:
             'password': 'admin',
             'browser_temporary': browser_directory,
             'workflow': isinstance(options, Check),
+            'install_links': isinstance(options, Check) and options.install_links,
+            'repository_url': options.repository_url,
         }
         save_state(state_path, state)
         print(f'Session {session_id}: {guest.architecture}, {state["acceleration"]}; runtime {runtime}', flush=True)
@@ -354,6 +368,16 @@ def run_session(options: Run) -> int:
                 assert browser is not None
                 wait_browser(browser, evidence)
                 if isinstance(options, Check):
+                    if options.install_links:
+                        # The link must offer a first install, rather than find an existing repository.
+                        vm.run(vm.ssh_command(key, ssh_port, f'ha apps uninstall {app_slug}'), timeout=180)
+                        repository = shlex.quote(app_slug.partition('_')[0])
+                        vm.run(
+                            vm.ssh_command(key, ssh_port, 'ha store remove ' + repository),
+                            timeout=90,
+                        )
+                        (evidence / 'install-links-prepared.json').write_text('{}\n')
+                        wait_browser(browser, evidence, 'install-links.json', timeout=600)
 
                     def reboot() -> dict[str, str]:
                         nonlocal tunnel

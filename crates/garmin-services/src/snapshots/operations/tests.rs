@@ -96,7 +96,7 @@ async fn server_file_save_restore_reconnect_and_restart() -> Result {
         .map_err(debug_error)?;
     wait(&session, save, State::Completed).await?;
     let original = std::fs::read(&destination)?;
-    assert!(!original.is_empty());
+    assert_ne!(original, [] as [u8; 0]);
     assert!(
         session
             .file(

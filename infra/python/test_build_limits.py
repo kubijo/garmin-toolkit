@@ -116,6 +116,8 @@ class BuildLimitsTests(unittest.TestCase):
         self.assertEqual(
             shlex.split(result.stderr.replace('\\\n', '')),
             [
+                'just',
+                'with-host-sccache',
                 'nix',
                 'shell',
                 f'git+file://{root}#formatjs-cli',
@@ -125,6 +127,13 @@ class BuildLimitsTests(unittest.TestCase):
                 '$@',
             ],
         )
+        location = subprocess.run(
+            ['just', '--justfile', str(root / 'infra/gallery/justfile'), 'with-host-sccache', 'pwd'],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(Path(location.stdout.strip()), root / 'infra/gallery')
 
     @unittest.skipUnless(sys.platform.startswith('linux'), 'Mold is selected only on Linux')
     def test_linker_preflight_rejects_incomplete_installation(self) -> None:

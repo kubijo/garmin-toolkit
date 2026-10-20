@@ -372,7 +372,10 @@ async fn cancelling_catalog_loading_before_it_runs_does_not_contact_the_service(
     session.submit(change(&session, Command::Cancel)).unwrap();
     assert_eq!(settled(&session).await.phase, Phase::Cancelled);
     assert!(!root.path().join("captures").exists());
-    assert!(session.snapshot().components.is_empty());
+    assert_eq!(
+        session.snapshot().components,
+        [] as [garmin_service_api::maps::Component; 0]
+    );
     server.shutdown().await?;
     Ok(())
 }

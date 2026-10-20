@@ -505,7 +505,7 @@ async fn course_deletion_is_profile_scoped_and_revokes_new_downloads() -> TestRe
     else {
         panic!("versions");
     };
-    assert!(items.is_empty());
+    assert_eq!(items, [] as [garmin_service_api::routes::CourseVersion; 0]);
     fixture.operations.deployment.close().await;
     Ok(())
 }

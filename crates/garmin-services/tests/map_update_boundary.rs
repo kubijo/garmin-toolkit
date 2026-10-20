@@ -736,10 +736,9 @@ async fn assert_pristine(fixture: &Fixture) -> Result<()> {
 }
 
 async fn assert_failure_capture(fixture: &Fixture, has_final_state: bool) -> Result<()> {
-    assert!(
-        !tokio::fs::read(fixture.capture.root().join("error.txt"))
-            .await?
-            .is_empty()
+    assert_ne!(
+        tokio::fs::read(fixture.capture.root().join("error.txt")).await?,
+        [] as [u8; 0]
     );
     assert_capacity_evidence(fixture, has_final_state);
     assert!(!fixture.capture.root().join("complete.json").exists());

@@ -272,7 +272,10 @@ async fn contained_preview_confirms_and_generates_saved_course_bytes() -> TestRe
             .await
             .is_err()
     );
-    assert!(app.route_plans(owner).await?.is_empty());
+    assert_eq!(
+        app.route_plans(owner).await?,
+        [] as [garmin_storage::StoredRoutePlanSummary; 0]
+    );
     let receipt = app.import_prepared_route(request(GPX)?, &prepared).await?;
     assert_eq!(
         app.import_prepared_route(request(GPX)?, &prepared).await?,

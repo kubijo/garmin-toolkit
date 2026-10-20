@@ -358,7 +358,7 @@ fn logs_take_the_latest_matching_records_and_advance_past_nonmatches() {
         ..Filter::default()
     };
     let (empty, _) = store.recent(&filter, None, 10);
-    assert!(empty.records.is_empty());
+    assert_eq!(empty.records, [] as [garmin_model::logging::Record; 0]);
     assert_eq!(empty.cursor, batch.cursor);
 }
 
