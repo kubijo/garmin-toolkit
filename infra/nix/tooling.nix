@@ -197,6 +197,7 @@ let
           ${lib.getExe nodejs} infra/javascript/initializer.test.mjs || exit $?
           ${lib.getExe nodejs} infra/javascript/loader-bootstrap.test.mjs || exit $?
           ${lib.getExe nodejs} infra/javascript/haos-install-links.test.mts --documentation || exit $?
+          ${lib.getExe nodejs} infra/javascript/haos-workflow.test.mts || exit $?
           exec ${lib.getExe nodejs} infra/javascript/haos-devtools.test.mts
         '';
         python-lock.command = pkgs.writeShellScript "python-lock-check" ''

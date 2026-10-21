@@ -36,10 +36,12 @@ export type Action = { target: string } & (
     | { kind: 'key'; key: string; modifier?: 'ctrl' | 'shift' | 'alt' }
 );
 
-interface Target {
+export interface Target {
     id: string;
     label: string;
     value?: string;
+    enabled: boolean;
+    bounds: [number, number, number, number] | null;
 }
 
 interface Report {

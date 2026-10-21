@@ -5,7 +5,58 @@ import { dirname, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Protocol } from 'devtools-protocol';
 import type { DevTools } from './haos-devtools.mts';
-import type { Action, BrowserFunction, ReadySession } from './haos-types.mts';
+import type { Action, BrowserFunction, ReadySession, Target, Until } from './haos-types.mts';
+
+export async function findVisibleTarget(
+    targets: () => Promise<Target[] | undefined>,
+    run: (actions: Action[]) => Promise<void>,
+    until: Until,
+    id: string,
+    delta: number,
+): Promise<Target> {
+    const result = await until(async () => {
+        const current = await targets();
+        const target = current?.find(node => node.id === id);
+        if (target?.enabled && target.bounds) return { kind: 'ready' as const, target };
+        const anchor = current?.find(node => node.id.startsWith('routes.') && node.enabled && node.bounds);
+        if (anchor) {
+            try {
+                await run([{ kind: 'scroll', target: anchor.id, delta }]);
+            } catch (error) {
+                // Polling retries transient reads; a failed action must still abort.
+                return { kind: 'failed' as const, error };
+            }
+        }
+        return undefined;
+    }, `visible ${id}`);
+    if (result.kind === 'failed') throw result.error;
+    return result.target;
+}
+
+export async function findCourseTarget(
+    targets: () => Promise<Target[] | undefined>,
+    run: (actions: Action[]) => Promise<void>,
+    until: Until,
+): Promise<Target> {
+    let course = await until(async () => {
+        const current = await targets();
+        return (
+            current?.find(node => node.id.startsWith('routes.download.')) ??
+            current?.find(node => node.id === 'routes.history')
+        );
+    }, 'generated FIT Course or previous FIT files');
+    if (course.id === 'routes.history') {
+        // An encoder version change moves the original Course into collapsed history.
+        // Open it once, then wait for the retained file to enter the semantic tree.
+        await findVisibleTarget(targets, run, until, course.id, -1600);
+        await run([{ kind: 'click', target: course.id }]);
+        course = await until(
+            async () => (await targets())?.find(node => node.id.startsWith('routes.download.')),
+            'stored FIT Course in previous FIT files',
+        );
+    }
+    return findVisibleTarget(targets, run, until, course.id, -1600);
+}
 
 function enableBrowserAutomation() {
     // This changes only this disposable browser's DOM. The production host keeps
@@ -150,20 +201,16 @@ export async function populatedWorkflow(
         await writeFile(resolve(evidencePath, filename), await readFile(path));
     }
 
-    async function courseTarget() {
-        return until(
-            async () => (await targets())?.find(node => node.id.startsWith('routes.download.')),
-            'generated FIT Course',
-        );
-    }
+    const courseTarget = () => findCourseTarget(targets, run, until);
 
     async function exports(prefix: string) {
         const course = await courseTarget();
         await capture(`${prefix}-course`);
         await download(course.id, `${prefix}-course.fit`);
-        await run([scroll(course.id, 1600)]);
+        // Downloading briefly disables generation and changes the history layout.
+        // The Course can leave the viewport; choose a currently visible scroll anchor.
+        await findVisibleTarget(targets, run, until, 'routes.source', 1600);
         await download('routes.source', `${prefix}-source.gpx`);
-        await run([scroll('routes.source', -1600)]);
     }
 
     async function openPopulated() {

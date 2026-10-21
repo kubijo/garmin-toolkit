@@ -130,7 +130,9 @@ directory; fetch its version tag into the local Git history. The check authentic
 image against the canonical release workflow and exact tagged source commit before booting HAOS. It installs the
 unchanged published image, creates the populated data and backup there, then exercises both upgrades and recovery with
 the unchanged candidate. Evidence identifies the published baseline and reports binary migration coverage separately
-from fixture coverage. It covers the synthetic profile, route, and Course data exercised by this workflow.
+from fixture coverage. It covers the synthetic profile, route, and Course data exercised by this workflow. Courses from
+an older encoder remain under "Previous FIT files"; the browser opens that section and downloads the original bytes
+without regenerating the Course.
 
 When both archives declare the same version, pass a greater private `--candidate-version`, such as `0.1.2-dev` when
 testing the published `0.1.1` against another `0.1.1` build. Only the disposable repository metadata and guest registry

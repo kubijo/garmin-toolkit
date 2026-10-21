@@ -104,6 +104,12 @@ jobs:
             .tmp/publication/*.json
             .tmp/publication/haos-acceptance.tar.gz
             .tmp/sources/dependency-sources.json
+            .tmp/lifecycle-acceptance/browser.log
+            .tmp/lifecycle-acceptance/*failed*.png
+            .tmp/lifecycle-acceptance/*failed*.json
+            .tmp/staged-acceptance/browser.log
+            .tmp/staged-acceptance/*failed*.png
+            .tmp/staged-acceptance/*failed*.json
           if-no-files-found: ignore
           retention-days: 7
       - name: Recover unfinished promotion and remove credentials and candidate branch
