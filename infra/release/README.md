@@ -40,8 +40,11 @@ scope cleanup fails, scratch is retained and its path is reported. The VM retain
 acceptance scope uses two CPUs/six GiB.
 
 [Python phases](../python/hass_ci.py) own orchestration; [runner setup](../ci/runner.sh) owns host preparation and
-cleanup. The upgrade fixture changes image metadata only; it qualifies recovery, not migration from older binaries or
-schemas.
+cleanup. Branch and tagged candidates test upgrades from the published v0.1.1 image, authenticated against its signed
+inventory and exact source tag. Both upgrades, backup recovery, and reinstall exercise synthetic profile, route, and
+Course data. Review the pinned baseline in the Python phases when preparing the next release. The standalone
+[lifecycle check](../integration/hass/README.md#populated-haos-workflow) also supports a metadata-only fixture; that
+fixture does not qualify migration from older binaries or schemas.
 
 ## Generated Home Assistant repository
 

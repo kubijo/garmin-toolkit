@@ -1,4 +1,4 @@
-"""Supervisor transitions for a private metadata-only baseline and the unchanged CI candidate."""
+"""Supervisor transitions from a fixture or authenticated published baseline to the unchanged CI candidate."""
 
 import json
 import subprocess
@@ -26,6 +26,27 @@ class Lifecycle:
             raise RuntimeError('Lifecycle acceptance requires different baseline and candidate image configurations')
         (self.evidence / 'lifecycle-images.json').write_bytes(json_bytes(images))
         return object_value(images[name])
+
+    def coverage(self) -> Object:
+        published = self.runtime / 'published-baseline.json'
+        if not published.is_file():
+            return {
+                'baseline': 'metadata-only fixture; candidate filesystem; no previous public release',
+                'migration_compatibility': False,
+            }
+        identity = object_value(json.loads(published.read_bytes()))
+        baseline, candidate = self.image('baseline'), self.image('candidate')
+        if identity.get('signatures_verified') is not True or any(
+            identity.get(key) != baseline.get(key) for key in ('archive_sha256', 'config_digest', 'manifest_digest')
+        ):
+            raise RuntimeError('Published upgrade baseline differs from its authenticated release image')
+        return {
+            'baseline': 'published release ' + text(identity['release']),
+            'published_baseline': identity,
+            'candidate_version': candidate['version'],
+            'candidate_archive_version': candidate['archive_version'],
+            'migration_compatibility': True,
+        }
 
     def assert_image(self, name: str) -> Object:
         expected = self.image(name)

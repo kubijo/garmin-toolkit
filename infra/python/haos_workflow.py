@@ -179,8 +179,7 @@ def exercise(
             'reinstall_empty': True,
             'backup_retained': True,
             'supervisor_restarted_after_restore': True,
-            'baseline': 'metadata-only fixture; candidate filesystem; no previous public release',
-            'migration_compatibility': False,
+            **lifecycle.coverage(),
         }
     (evidence / 'workflow.json').write_text(
         json.dumps(

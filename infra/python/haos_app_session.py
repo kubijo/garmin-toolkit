@@ -27,6 +27,7 @@ import haos_app_vm as vm
 import haos_workflow
 from haos_lifecycle import Lifecycle
 from haos_platform import acceleration, baseline_fixture
+from haos_upgrade import published_baseline
 from hass_release_build import verify_build_inputs
 from processes import ACCEPTANCE_SCRATCH, session_scratch, stop_group
 
@@ -87,7 +88,13 @@ class Check(Run):
     """Fresh evidence directory under repository .tmp; defaults to an owned session directory."""
 
     lifecycle: bool = False
-    """Test fixture-baseline upgrade, backup recovery, and uninstall/reinstall; requires repository and receipt."""
+    """Test upgrade, backup recovery, and uninstall/reinstall; requires repository and receipt."""
+
+    baseline_release: Path | None = None
+    """Published release directory with image, release.json, SHA256SUMS, and their attestation bundles."""
+
+    candidate_version: str | None = None
+    """Private Supervisor candidate version for lifecycle checks; leaves OCI archive bytes unchanged."""
 
     install_links: bool = False
     """Verify README/quickstart My Home Assistant links against the public repository in this disposable browser."""
@@ -276,6 +283,12 @@ def wait_browser(
 def run_session(options: Run) -> int:
     if (
         isinstance(options, Check)
+        and not options.lifecycle
+        and (options.baseline_release is not None or options.candidate_version is not None)
+    ):
+        raise ValueError('Published baseline and private candidate versions require lifecycle acceptance')
+    if (
+        isinstance(options, Check)
         and options.install_links
         and options.repository_url != 'https://github.com/kubijo/garmin-toolkit#hass-apps'
     ):
@@ -296,6 +309,15 @@ def run_session(options: Run) -> int:
         if isinstance(options, Check) and options.build_receipt is not None
         else None
     )
+    previous = (
+        published_baseline(options.baseline_release, ROOT, guest)
+        if isinstance(options, Check) and options.baseline_release is not None
+        else None
+    )
+    if previous is not None:
+        baseline_version = previous[1]['version']
+        if baseline_version == (options.candidate_version or vm.test_config()[1]):
+            raise ValueError('Published baseline and candidate require distinct Supervisor versions')
     vm.SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
     scratch = session_scratch(vm.SCRATCH_ROOT)
     session_id = secrets.token_hex(6)
@@ -323,8 +345,14 @@ def run_session(options: Run) -> int:
         runtime = Path(directory)
         runtime.chmod(0o700)
         if isinstance(options, Check) and options.lifecycle:
-            baseline = runtime / 'baseline-fixture.oci.tar'
-            baseline_fixture(options.app_archive, baseline)
+            if previous is None:
+                baseline = runtime / 'baseline-fixture.oci.tar'
+                baseline_fixture(options.app_archive, baseline)
+            else:
+                baseline, identity = previous
+                encoded = json.dumps(identity, indent=2) + '\n'
+                (runtime / 'published-baseline.json').write_text(encoded)
+                (evidence / 'published-baseline.json').write_text(encoded)
             options = replace(options, baseline_archive=baseline)
         state_path = runtime / 'session.json'
         http_port = options.port or vm.free_port()

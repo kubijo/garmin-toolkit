@@ -26,7 +26,6 @@ from rich.text import Text
 
 from cli_output import TerminalOutput
 from haos_platform import (
-    BASELINE_VERSION,
     Architecture,
     Platform,
     inspect_archive,
@@ -90,6 +89,7 @@ class Options:
     """Staging tag used by remote metadata; the native archive retains its release version."""
 
     baseline_archive: tyro.conf.Suppress[Path | None] = None
+    candidate_version: tyro.conf.Suppress[str | None] = None
 
 
 def run(command: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -497,8 +497,13 @@ def assert_installed_image(
     }
 
 
-def publish_image(archive: Path, version: str, key: Path, port: int, runtime: Path) -> str:
-    print(f'Publishing {version} to the disposable guest registry...', flush=True)
+def publish_image(
+    archive: Path, version: str, key: Path, port: int, runtime: Path, *, registry_tag: str | None = None
+) -> str:
+    destination = registry_tag or version
+    if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}', destination):
+        raise ValueError('Invalid disposable image tag')
+    print(f'Publishing {destination} to the disposable guest registry...', flush=True)
     inspected = inspect_archive(archive)
     if inspected.repository_tags != (f'{PUBLISHED_IMAGE}:{version}',):
         raise ValueError('Archive does not contain the canonical app image and version')
@@ -534,7 +539,7 @@ def publish_image(archive: Path, version: str, key: Path, port: int, runtime: Pa
                     '--dest-no-creds',
                     '--dest-tls-verify=false',
                     'oci:' + str(layout),
-                    f'docker://127.0.0.1:{local_port}/garmin-toolkit-hass:{version}',
+                    f'docker://127.0.0.1:{local_port}/garmin-toolkit-hass:{destination}',
                 ],
                 timeout=330,
             )
@@ -559,6 +564,7 @@ def install_app(
     services: ExitStack,
 ) -> str:
     config_text, version = test_config()
+    candidate_version = options.candidate_version or version
     inspected = inspect_archive(options.app_archive)
     guest = resolve(options.arch)
     # This registry is confined to the disposable guest and also supplies the untrusted ingress probe.
@@ -572,26 +578,37 @@ def install_app(
     )
     image = options.registry_image if options.repository_url else TEST_IMAGE
     expected: Object = {
-        'image_reference': f'{image}:{options.registry_tag or version}',
+        'image_reference': f'{image}:{options.registry_tag or candidate_version}',
         'registry_digest': options.registry_digest,
         'config_digest': inspected.config_digest,
         'manifest_digest': inspected.manifest_digest,
         'architecture': text(inspected.configuration.get('architecture')),
-        'version': version,
+        'version': candidate_version,
+        'archive_version': version,
         'archive_sha256': file_sha256(options.app_archive),
     }
-    initial_version = BASELINE_VERSION if options.baseline_archive is not None else version
+    initial_version = candidate_version
     if not options.repository_url:
-        expected['registry_digest'] = publish_image(options.app_archive, version, key, port, runtime)
+        expected['registry_digest'] = publish_image(
+            options.app_archive, version, key, port, runtime, registry_tag=candidate_version
+        )
         if options.baseline_archive is not None:
             baseline = inspect_archive(options.baseline_archive)
+            baseline_version = text(
+                object_value(object_value(baseline.configuration['config'])['Labels'])['io.hass.version']
+            )
+            validate_archive(options.baseline_archive, guest, baseline_version, inspected=baseline)
+            if baseline_version == candidate_version:
+                raise ValueError('Lifecycle baseline and candidate require distinct Supervisor versions')
+            initial_version = baseline_version
             previous: Object = {
-                'image_reference': f'{image}:{BASELINE_VERSION}',
-                'registry_digest': publish_image(options.baseline_archive, BASELINE_VERSION, key, port, runtime),
+                'image_reference': f'{image}:{baseline_version}',
+                'registry_digest': publish_image(options.baseline_archive, baseline_version, key, port, runtime),
                 'config_digest': baseline.config_digest,
                 'manifest_digest': baseline.manifest_digest,
                 'architecture': text(baseline.configuration['architecture']),
-                'version': BASELINE_VERSION,
+                'version': baseline_version,
+                'archive_version': baseline_version,
                 'archive_sha256': file_sha256(options.baseline_archive),
             }
             (runtime / 'lifecycle-images.json').write_bytes(json_bytes({'baseline': previous, 'candidate': expected}))
@@ -719,6 +736,11 @@ def boot(
 
 
 def validate_options(options: Options) -> Platform:
+    if options.candidate_version is not None and (
+        options.repository is None
+        or re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-.][A-Za-z0-9][A-Za-z0-9.-]*)?', options.candidate_version) is None
+    ):
+        raise ValueError('A private candidate version requires a generated repository and a valid version')
     if options.repository is not None and options.repository_url is not None:
         raise ValueError('Select a generated repository or a remote repository URL, not both')
     if options.repository is not None:

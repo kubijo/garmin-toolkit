@@ -124,6 +124,19 @@ checks its container/private data are gone and its backup remains, and verifies 
 pre-upgrade backup on the fixture must recover the original data; a second upgrade must retain it. Image identities are
 recorded in `lifecycle-images.json`. This qualifies Supervisor lifecycle behavior, not older-binary/schema migration.
 
+To qualify an upgrade from a published binary, also pass `--baseline-release DIRECTORY`. Download that release's
+`release.json`, `SHA256SUMS`, `checksums.sigstore.jsonl`, `artifacts.sigstore.jsonl`, and matching OCI image into the
+directory; fetch its version tag into the local Git history. The check authenticates checksums, release manifest, and
+image against the canonical release workflow and exact tagged source commit before booting HAOS. It installs the
+unchanged published image, creates the populated data and backup there, then exercises both upgrades and recovery with
+the unchanged candidate. Evidence identifies the published baseline and reports binary migration coverage separately
+from fixture coverage. It covers the synthetic profile, route, and Course data exercised by this workflow.
+
+When both archives declare the same version, pass a greater private `--candidate-version`, such as `0.1.2-dev` when
+testing the published `0.1.1` against another `0.1.1` build. Only the disposable repository metadata and guest registry
+tag use that version; OCI configuration, manifests, layers, and original archive versions remain unchanged. Normal
+release qualification must still use the eventual release image and version.
+
 On Supervisor 2026.10.2, recovery restarts Supervisor after restoring a reinstalled app: restore replaces the ingress
 token but leaves the routing map stale, producing HTTP 503. The
 [restore implementation](https://github.com/home-assistant/supervisor/blob/2026.10.2/supervisor/apps/app.py#L1679) and

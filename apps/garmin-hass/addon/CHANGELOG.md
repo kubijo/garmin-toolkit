@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- Refresh application and runtime dependencies after the first public release.
+- Qualify upgrades and backup recovery from the signed v0.1.1 image using populated profile, route, and Course data.
+- Verify public installation links and strengthen release provenance and lifecycle checks.
+
 ## 0.1.1
 
 - Fix registry credentials for signed OCI publication.
