@@ -110,13 +110,15 @@ each recipe to required inputs; verification rejects missing upstream sources an
 retain their Nix store basenames under `sources/`. The workspace archive and `flake.lock` provide build instructions;
 build tools may still need downloading.
 
-`--realise` requests only missing source paths, never recipe builds. Agent/CI callers must cap actual Nix workers. The
-compressed stream splits into at most 16 checksummed parts of up to 1.5 GiB each. The first retains the `.tar.gz` name;
-subsequent parts append `.002`, `.003`, and so on. Verification streams them in order without joining them on disk. The
-whole archive is limited to 32 GiB decoded and 2,000,000 members. A metadata-only preflight reports exact tar size and
-entry count and rejects oversized exports before compression. The writer and verifier enforce the same limits. OCI image
-limits remain 4 GiB / 100,000 members. Unknown/nonfree licenses, missing recipes, or altered archives block publication.
-Audit the downloaded sources and notices against the shipped closure.
+`--realise` fetches missing sources through their recorded fixed-output derivations, with Nix verifying the pinned
+hashes. Other missing source paths require a substitute; compiled package outputs stay outside the request. Agent/CI
+callers must cap actual Nix workers. The compressed stream splits into at most 16 checksummed parts of up to 1.5 GiB
+each. The first retains the `.tar.gz` name; subsequent parts append `.002`, `.003`, and so on. Verification streams them
+in order without joining them on disk. The whole archive is limited to 32 GiB decoded and 2,000,000 members. A
+metadata-only preflight reports exact tar size and entry count and rejects oversized exports before compression. The
+writer and verifier enforce the same limits. OCI image limits remain 4 GiB / 100,000 members. Unknown/nonfree licenses,
+missing recipes, or altered archives block publication. Audit the downloaded sources and notices against the shipped
+closure.
 
 ## Registry identity
 

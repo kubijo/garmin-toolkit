@@ -91,6 +91,23 @@ def source_paths(recipes: Object) -> list[Path]:
     return required_sources(source_graph(recipes))
 
 
+def realisation_targets(recipes: Object, missing: list[Path]) -> list[str]:
+    """Fetch uncached fixed-output sources through their recipes; substitute other source paths."""
+    providers: dict[str, set[str]] = {}
+    for name, value in recipes.items():
+        recipe = object_value(value)
+        outputs = object_value(recipe.get('outputs', {}))
+        if len(outputs) != 1:
+            continue
+        environment = {**object_value(recipe.get('env')), **object_value(recipe.get('structuredAttrs', {}))}
+        output_name, output_value = next(iter(outputs.items()))
+        output = object_value(output_value)
+        if environment.get('outputHash') or 'hash' in output:
+            path = text(output.get('path', environment.get(output_name)))
+            providers.setdefault(path, set()).add(name)
+    return sorted({min(providers.get(str(path), {str(path)})) for path in missing})
+
+
 def resolve_runtime(runtime: Object, metadata: list[Object]) -> Object:
     """Prefer exact evaluated outputs over potentially unavailable cache derivers."""
     providers: dict[str, set[str]] = {}
@@ -228,7 +245,7 @@ def bundle_sources(options: BundleSources) -> None:
         raise ValueError('Source derivation recipes disappeared during the export')
     if options.realise and missing:
         subprocess.run(
-            ['nix-store', '--realise', *map(str, missing)],
+            ['nix-store', '--realise', *realisation_targets(recipes, missing)],
             check=True,
             timeout=1800,
             stdout=subprocess.DEVNULL,

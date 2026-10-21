@@ -16,6 +16,7 @@ from hass_source_parts import part_path
 from hass_sources import (
     BundleSources,
     bundle_sources,
+    realisation_targets,
     resolve_runtime,
     runtime_coverage,
     source_graph,
@@ -311,6 +312,27 @@ class SourceBundleTests(unittest.TestCase):
                 )
             )
         self.assertEqual(commands, [['nix-store', '--realise', str(missing)]])
+
+    def test_uncached_sources_use_fixed_output_fetch_recipes_in_each_nix_json_format(self) -> None:
+        recipes: list[Object] = [
+            {'env': {}, 'outputs': {'out': {'path': SOURCE, 'hash': 'sha256-fixture'}}},
+            {'env': {'out': SOURCE}, 'outputs': {'out': {'hash': 'sha256-fixture', 'method': 'flat'}}},
+            {'env': {'out': SOURCE, 'outputHash': 'fixture'}, 'outputs': {'out': {}}},
+            {'env': {'out': SOURCE}, 'structuredAttrs': {'outputHash': 'fixture'}, 'outputs': {'out': {}}},
+        ]
+        for recipe in recipes:
+            with self.subTest(recipe=recipe):
+                self.assertEqual(realisation_targets({RECIPE: recipe}, [Path(SOURCE)]), [RECIPE])
+
+    def test_source_realisation_cannot_select_compiled_outputs_or_unrelated_fetches(self) -> None:
+        fetch = RECIPE.replace('fixture.drv', 'fetch.drv')
+        untracked = SOURCE + '-untracked'
+        recipes: Object = {
+            RECIPE: {'env': {}, 'outputs': {'out': {'path': SOURCE}}},
+            fetch: {'env': {}, 'outputs': {'out': {'path': untracked, 'hash': 'sha256-fixture'}}},
+        }
+        self.assertEqual(realisation_targets(recipes, [Path(SOURCE)]), [SOURCE])
+        self.assertEqual(realisation_targets(recipes, [Path(untracked), Path(SOURCE)]), sorted([SOURCE, fetch]))
 
     def test_store_links_are_relocated_and_external_links_are_rejected(self) -> None:
         (self.source / 'recipe-link').symlink_to(RECIPE)
