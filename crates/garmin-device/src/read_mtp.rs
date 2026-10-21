@@ -673,7 +673,7 @@ mod tests {
             ));
             let mut retry = Vec::new();
             first.copy_to(&mut retry).await?;
-            assert!(!retry.is_empty());
+            assert_ne!(retry, [] as [u8; 0]);
             Ok(())
         })
     }

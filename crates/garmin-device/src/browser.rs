@@ -1282,27 +1282,62 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn downloads_a_directory_as_a_rooted_zip() {
+    async fn downloads_directories_as_stored_zips() {
         let (_root, device) = fixture().await;
-        let download = prepare_browser_download(
-            &device,
-            &catalog(),
-            &DeviceBrowserTarget {
-                storage_id: "primary".to_owned(),
-                path: "Garmin/Activity".into(),
-                kind: DeviceCatalogEntryKind::Directory,
-            },
-            &ProgressReporter::default(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(download.file_name, "Activity.zip");
-        let mut archive =
-            zip::ZipArchive::new(std::fs::File::open(download.path()).unwrap()).unwrap();
-        let mut file = archive.by_name("Activity/ride.fit").unwrap();
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).unwrap();
-        assert_eq!(bytes, b"ride");
+        for (path, file_name, entries) in [
+            (
+                "Garmin/Activity",
+                "Activity.zip",
+                &["Activity/", "Activity/ride.fit"][..],
+            ),
+            (
+                "",
+                "Mock storage.zip",
+                &[
+                    "GARMIN-TOOLKIT/",
+                    "Garmin/",
+                    "Garmin/Activity/",
+                    "Garmin/Activity/ride.fit",
+                ][..],
+            ),
+            (
+                "GARMIN-TOOLKIT",
+                "GARMIN-TOOLKIT.zip",
+                &["GARMIN-TOOLKIT/"][..],
+            ),
+        ] {
+            let download = prepare_browser_download(
+                &device,
+                &catalog(),
+                &DeviceBrowserTarget {
+                    storage_id: "primary".to_owned(),
+                    path: path.into(),
+                    kind: DeviceCatalogEntryKind::Directory,
+                },
+                &ProgressReporter::default(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(download.file_name, file_name);
+            let file = std::fs::File::open(download.path()).unwrap();
+            assert_eq!(download.size, file.metadata().unwrap().len());
+            let mut archive = zip::ZipArchive::new(file).unwrap();
+            assert_eq!(
+                archive.file_names().collect::<Result<Vec<_>, _>>().unwrap(),
+                entries,
+            );
+            for index in 0..archive.len() {
+                let mut entry = archive.by_index(index).unwrap();
+                assert_eq!(entry.compression(), CompressionMethod::Stored);
+                let permissions = if entry.is_dir() { 0o755 } else { 0o644 };
+                assert_eq!(entry.unix_mode().unwrap() & 0o7777, permissions);
+                if !entry.is_dir() {
+                    let mut bytes = Vec::new();
+                    entry.read_to_end(&mut bytes).unwrap();
+                    assert_eq!(bytes, b"ride");
+                }
+            }
+        }
     }
 
     #[tokio::test]

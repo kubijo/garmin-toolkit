@@ -1,4 +1,13 @@
 // Installed only by the integration browser, before the application loads.
+export function reconnectedAfter(previousConnections) {
+    return (
+        window.integrationSockets.standard > previousConnections &&
+        !!window.garminAutomation
+            ?.targets()
+            .some(target => target.id === 'navigation.1' && target.enabled && target.bounds !== null)
+    );
+}
+
 export function installFaults({ enabled = true, transport = 'auto' } = {}) {
     if (transport === 'standard') delete window.WebSocketStream;
     const connections = { standard: 0, stream: 0 };

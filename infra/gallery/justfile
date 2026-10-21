@@ -7,7 +7,7 @@ gallery_backend := env('WGPU_BACKEND', if os() == 'macos' { 'metal' } else { 'vu
 # Add the catalog compiler without replacing the host graphics runtime.
 [private]
 in-gallery +cmd: require-linker
-    @nix shell {{ quote(flake + "#formatjs-cli") }} --command \
+    @just with-host-sccache nix shell {{ quote(flake + "#formatjs-cli") }} --command \
         env CARGO_TARGET_DIR={{ quote(CARGO_TARGET_DIR) }} "$@"
 
 # Run the gallery; --hot enables scene reload.

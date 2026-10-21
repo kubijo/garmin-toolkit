@@ -959,8 +959,8 @@ mod tests {
             y: 0,
         };
 
-        assert!(service.tile(tile_id).await.unwrap().bytes.is_empty());
-        assert!(service.tile(tile_id).await.unwrap().bytes.is_empty());
+        assert_eq!(service.tile(tile_id).await.unwrap().bytes, [] as [u8; 0]);
+        assert_eq!(service.tile(tile_id).await.unwrap().bytes, [] as [u8; 0]);
         assert_eq!(tile_requests.load(Ordering::SeqCst), 1);
         server.abort();
     }

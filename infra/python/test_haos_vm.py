@@ -47,6 +47,13 @@ class HaosTests(unittest.TestCase):
         write_image(archive, architecture=architecture, version=version)
         return archive
 
+    def test_installation_link_acceptance_requires_the_public_repository(self) -> None:
+        for repository in (None, 'https://github.com/kubijo/garmin-toolkit#different'):
+            with self.subTest(repository=repository), self.assertRaisesRegex(ValueError, 'public hass-apps'):
+                session.run_session(
+                    session.Check(app_archive=self.root / 'unused', repository_url=repository, install_links=True)
+                )
+
     def test_auto_matches_native_architecture_and_rejects_unknown_host(self) -> None:
         for machine, expected in [('x86_64', 'amd64'), ('aarch64', 'aarch64'), ('arm64', 'aarch64')]:
             with self.subTest(machine=machine), patch('haos_platform.platform.machine', return_value=machine):
@@ -107,6 +114,24 @@ class HaosTests(unittest.TestCase):
         self.assertIn('--preserve-digests', command)
         self.assertFalse(any(self.root.glob('image-import.*')))
         stop.assert_called_once_with(tunnel)
+
+    def test_private_supervisor_version_keeps_the_native_archive_unchanged(self) -> None:
+        archive = self.image()
+        before = archive.read_bytes()
+        tunnel = Mock(spec=subprocess.Popen)
+        tunnel.poll.return_value = None
+        with (
+            patch.object(vm, 'forward_port', return_value=tunnel),
+            patch.object(vm.socket, 'socket') as connection,
+            patch.object(vm, 'run', side_effect=RuntimeError('stop after copy')) as copy,
+            patch.object(vm, 'stop_group'),
+        ):
+            connection.return_value.__enter__.return_value.connect_ex.return_value = 0
+            with self.assertRaisesRegex(RuntimeError, 'stop after copy'):
+                vm.publish_image(archive, '0.1.0', self.root / 'key', 2222, self.root, registry_tag='0.1.1-dev')
+        self.assertTrue(copy.call_args.args[0][-1].endswith('/garmin-toolkit-hass:0.1.1-dev'))
+        self.assertIn('--preserve-digests', copy.call_args.args[0])
+        self.assertEqual(archive.read_bytes(), before)
 
     def test_http_redirect_cannot_escape_guest_origin(self) -> None:
         followed: list[str] = []

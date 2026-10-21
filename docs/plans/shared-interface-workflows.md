@@ -8,6 +8,10 @@ and physical-device acceptance. Current contracts live in [application windows](
 
 - Audit keyboard navigation, focus, modal trapping, translation, narrow layouts, and reconnect recovery.
 - Confirm browser Ctrl+wheel page zoom in a headed browser.
+- Remove the gallery-only RUSTSEC-2026-0370/0371/0372 exceptions when compatible published AccessKit/AT-SPI releases
+  complete the [zbus 6 migration](https://github.com/z-galaxy/zbus/issues/2043). Preserve native accessibility; the
+  [gallery audit policy](../../infra/gallery/deny.toml) rejects obsolete exceptions and other findings. AccessKit
+  [defers the migration under its Rust support policy](https://github.com/AccessKit/accesskit/pull/834).
 - Finish the [visual language](../architecture/visual-language.md) across controls, shells, device headers, and
   empty/offline/error states. Review Gray 100/10 layers, keyboard activation, Czech and long copy, narrow overlays, and
   dark/light captures. Decide whether the headless color picker needs separate state before changing its geometry.

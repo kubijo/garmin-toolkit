@@ -117,13 +117,16 @@ fn preserves_parser_rejection_without_projections() -> TestResult {
         let FitImportOutcome::Rejected { receipt, failure } = first else {
             return Err("truncated FIT unexpectedly normalized".into());
         };
-        assert!(!failure.as_str().is_empty());
-        assert!(receipt.observation_ids().is_empty());
+        assert_ne!(failure.as_str(), "");
+        assert_eq!(receipt.observation_ids(), []);
         assert_eq!(
             storage.artifact_bytes(receipt.artifact_id()).await?,
             Some(bytes.to_vec())
         );
-        assert!(storage.activities(user.id()).await?.is_empty());
+        assert_eq!(
+            storage.activities(user.id()).await?,
+            [] as [garmin_storage::StoredActivitySummary; 0]
+        );
 
         storage.close().await;
         Ok(())
@@ -152,7 +155,10 @@ fn rejects_a_source_owned_by_another_actor() -> TestResult {
                 .await,
             Err(ImportError::ActorCannotUseSource)
         ));
-        assert!(storage.activities(user.id()).await?.is_empty());
+        assert_eq!(
+            storage.activities(user.id()).await?,
+            [] as [garmin_storage::StoredActivitySummary; 0]
+        );
 
         storage.close().await;
         Ok(())

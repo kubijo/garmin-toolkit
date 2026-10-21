@@ -27,21 +27,56 @@ let
       (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [
+              (final: prev: {
+                # Coverage fixtures and reports must use the selected compiler's LLVM tools.
+                cargo-llvm-cov =
+                  (prev.cargo-llvm-cov.override {
+                    rustPlatform = final.makeRustPlatform {
+                      cargo = toolchain;
+                      rustc = toolchain;
+                    };
+                  }).overrideAttrs
+                    (old: {
+                      env = (old.env or { }) // llvmToolsEnv;
+                    });
+              })
+            ];
+          };
           inherit (pkgs) lib;
           inherit (nix-tools.lib.packagesFor pkgs) dirspec;
           nodejs = pkgs.nodejs_26;
           # Match the ambient Just entrypoints. Target-scoped flags never reach WASM or Darwin.
           linuxLinkFlags = "-C link-arg=-fuse-ld=mold";
+          hostSccacheHook = ''
+            if [[ -z ''${RUSTC_WRAPPER+x} ]] && host_sccache=$(command -v sccache); then
+              export RUSTC_WRAPPER="$host_sccache"
+            fi
+          '';
+          nativeCompilerEnv = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            CC = lib.getExe' pkgs.stdenv.cc "cc";
+            CXX = lib.getExe' pkgs.stdenv.cc "c++";
+            "CARGO_TARGET_${
+              lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] pkgs.stdenv.hostPlatform.rust.rustcTarget)
+            }_LINKER" =
+              lib.getExe' pkgs.stdenv.cc "cc";
+          };
           withDevLinker =
             shell:
             shell.overrideAttrs (
               old:
-              lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              {
+                shellHook = (old.shellHook or "") + "\n" + hostSccacheHook;
+              }
+              // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
                 nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.mold ];
                 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-C linker-features=-lld ${linuxLinkFlags}";
                 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS = linuxLinkFlags;
+                VK_ADD_DRIVER_FILES = softwareVulkanIcd;
               }
+              // nativeCompilerEnv
             );
           workspaceSrc = ../..;
           toolchain = fenix.packages.${system}.stable.withComponents [
@@ -52,6 +87,12 @@ let
             "rustc"
             "rustfmt"
           ];
+          rustLlvmTools = "${toolchain}/lib/rustlib/${pkgs.stdenv.hostPlatform.rust.rustcTarget}/bin";
+          llvmToolsEnv = {
+            LLVM_COV = "${rustLlvmTools}/llvm-cov";
+            LLVM_PROFDATA = "${rustLlvmTools}/llvm-profdata";
+          };
+          softwareVulkanIcd = "${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.parsed.cpu.name}.json";
           wasmToolchain = fenix.packages.${system}.combine [
             toolchain
             fenix.packages.${system}.targets.wasm32-unknown-unknown.stable.rust-std
@@ -177,8 +218,11 @@ let
             inherit
               coverageMinimum
               formatjsCli
+              hostSccacheHook
               inheritanceCheck
               lib
+              llvmToolsEnv
+              nativeCompilerEnv
               pkgs
               pythonToolsEnv
               toolchain
@@ -287,7 +331,8 @@ let
           devShells = {
             default = withDevLinker (
               pkgs.mkShell (
-                {
+                llvmToolsEnv
+                // {
                   buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.libiconv ];
                   packages =
                     tooling.packages

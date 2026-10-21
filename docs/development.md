@@ -32,6 +32,10 @@ Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands an
 
 ## Tooling choices
 
+Use compatible published dependency releases. Do not add dependency source patches, forks, or unpublished revisions to
+resolve external blockers. Document each blocked finding as a narrowly scoped exception with its upstream blocker and a
+condition for revisiting it; keep unrelated findings fatal.
+
 `GARMIN_TOOLKIT_STATE_DIR` overrides the platform state-directory parent for CLI logs, automatic captures, and the
 legacy map recovery registry. Tests that launch the CLI use a temporary directory through this application-level
 setting; they do not depend on Linux XDG variables or write to the developer's normal state directory.
@@ -55,6 +59,10 @@ Python uses nix-tools' basedpyright and deptry project checks. The basedpyright 
 warnings failing the check. The root `pyrightconfig.json` exposes the same settings to editors. `just qa::preflight` and
 `just qa::full` check types against the pinned Python 3.14 environment and audit declared Python dependencies. Root
 `ruff.toml` configures Python formatting and linting for both editors and QA.
+
+HAOS browser tooling uses `.mts`, run directly by the pinned Node version. QA checks it with strict TypeScript and
+locked Node/CDP types from `infra/javascript/package-lock.json`; no browser bundle is built. For editor types, run
+`npm ci --ignore-scripts --prefix infra/javascript`. Node strips types at runtime but does not check them.
 
 `just dev::outdated` reports Nix inputs, the Python tooling project, and CI actions online. The native Cargo provider
 cannot inspect the patched `vendor/fast-mvt` dependency through cargo-outdated's temporary copy, and the gallery has

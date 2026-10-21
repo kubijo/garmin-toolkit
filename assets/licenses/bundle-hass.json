@@ -11,7 +11,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -29,7 +29,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -51,7 +51,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -69,7 +69,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 147
+          "text_index": 146
         },
         {
           "license": "Apache-2.0",
@@ -87,11 +87,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 338
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 318
         }
       ]
     },
@@ -105,7 +105,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 303
+          "text_index": 302
         },
         {
           "license": "Apache-2.0",
@@ -123,7 +123,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
@@ -141,7 +141,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
@@ -159,7 +159,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
@@ -177,7 +177,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
@@ -195,7 +195,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -227,7 +227,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 134
+          "text_index": 133
         },
         {
           "license": "Apache-2.0",
@@ -245,7 +245,7 @@
       "notices": [
         {
           "license": "BSD-2-Clause",
-          "text_index": 101
+          "text_index": 100
         }
       ]
     },
@@ -259,7 +259,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 217
+          "text_index": 216
         },
         {
           "license": "Apache-2.0",
@@ -277,7 +277,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 138
+          "text_index": 137
         },
         {
           "license": "Apache-2.0",
@@ -299,13 +299,13 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
     {
       "name": "async-compression",
-      "version": "0.4.48",
+      "version": "0.4.51",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -313,7 +313,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 328
+          "text_index": 327
         },
         {
           "license": "Apache-2.0",
@@ -335,7 +335,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -353,7 +353,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -371,7 +371,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -389,7 +389,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -407,7 +407,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -425,7 +425,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -443,7 +443,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -461,7 +461,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -475,7 +475,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 241
+          "text_index": 240
         }
       ]
     },
@@ -493,7 +493,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 117
+          "text_index": 116
         }
       ]
     },
@@ -511,13 +511,13 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
     {
       "name": "aws-lc-rs",
-      "version": "1.18.1",
+      "version": "1.18.2",
       "license": "ISC AND (Apache-2.0 OR ISC)",
       "source": {
         "kind": "cargo"
@@ -525,17 +525,17 @@
       "notices": [
         {
           "license": "ISC",
-          "text_index": 310
+          "text_index": 309
         },
         {
           "license": "Apache-2.0",
-          "text_index": 310
+          "text_index": 309
         }
       ]
     },
     {
       "name": "aws-lc-sys",
-      "version": "0.45.0",
+      "version": "0.46.0",
       "license": "ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)",
       "source": {
         "kind": "cargo"
@@ -573,7 +573,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 172
+          "text_index": 171
         }
       ]
     },
@@ -587,7 +587,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 255
+          "text_index": 254
         }
       ]
     },
@@ -601,7 +601,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 318
+          "text_index": 317
         },
         {
           "license": "Apache-2.0",
@@ -619,7 +619,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 332
+          "text_index": 331
         },
         {
           "license": "Apache-2.0",
@@ -641,7 +641,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 206
+          "text_index": 205
         }
       ]
     },
@@ -659,7 +659,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 194
+          "text_index": 193
         }
       ]
     },
@@ -673,7 +673,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 92
+          "text_index": 91
         },
         {
           "license": "Apache-2.0",
@@ -691,7 +691,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 92
+          "text_index": 91
         },
         {
           "license": "Apache-2.0",
@@ -709,7 +709,7 @@
       "notices": [
         {
           "license": "CC0-1.0",
-          "text_index": 234
+          "text_index": 233
         },
         {
           "license": "Apache-2.0",
@@ -731,7 +731,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 151
+          "text_index": 150
         },
         {
           "license": "Apache-2.0",
@@ -749,7 +749,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 156
+          "text_index": 155
         },
         {
           "license": "Apache-2.0",
@@ -771,7 +771,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -785,7 +785,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -803,7 +803,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 286
+          "text_index": 285
         },
         {
           "license": "Apache-2.0",
@@ -835,7 +835,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 271
+          "text_index": 270
         }
       ]
     },
@@ -849,7 +849,7 @@
       "notices": [
         {
           "license": "Zlib",
-          "text_index": 163
+          "text_index": 162
         },
         {
           "license": "Apache-2.0",
@@ -857,7 +857,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 251
+          "text_index": 250
         }
       ]
     },
@@ -871,11 +871,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 338
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 318
         }
       ]
     },
@@ -889,11 +889,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 338
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 318
         }
       ]
     },
@@ -907,7 +907,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 141
+          "text_index": 140
         }
       ]
     },
@@ -935,7 +935,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -983,7 +983,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 130
+          "text_index": 129
         }
       ]
     },
@@ -997,7 +997,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 88
+          "text_index": 87
         },
         {
           "license": "Apache-2.0",
@@ -1015,7 +1015,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 175
+          "text_index": 174
         },
         {
           "license": "Apache-2.0",
@@ -1033,11 +1033,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 309
+          "text_index": 308
         },
         {
           "license": "Apache-2.0",
-          "text_index": 309
+          "text_index": 308
         }
       ]
     },
@@ -1051,15 +1051,15 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 290
-        },
-        {
-          "license": "Apache-2.0",
           "text_index": 289
         },
         {
+          "license": "Apache-2.0",
+          "text_index": 288
+        },
+        {
           "license": "Zlib",
-          "text_index": 291
+          "text_index": 290
         }
       ]
     },
@@ -1073,7 +1073,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
@@ -1091,7 +1091,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
@@ -1109,7 +1109,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
@@ -1131,7 +1131,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 188
+          "text_index": 187
         }
       ]
     },
@@ -1145,7 +1145,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 105
+          "text_index": 104
         },
         {
           "license": "Apache-2.0",
@@ -1181,7 +1181,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 285
+          "text_index": 284
         }
       ]
     },
@@ -1195,7 +1195,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
@@ -1205,7 +1205,7 @@
     },
     {
       "name": "compression-codecs",
-      "version": "0.4.43",
+      "version": "0.4.46",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -1213,7 +1213,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 328
+          "text_index": 327
         },
         {
           "license": "Apache-2.0",
@@ -1223,7 +1223,7 @@
     },
     {
       "name": "compression-core",
-      "version": "0.4.33",
+      "version": "0.4.34",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -1231,7 +1231,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 328
+          "text_index": 327
         },
         {
           "license": "Apache-2.0",
@@ -1249,7 +1249,7 @@
       "notices": [
         {
           "license": "BSD-2-Clause",
-          "text_index": 140
+          "text_index": 139
         }
       ]
     },
@@ -1267,7 +1267,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -1285,7 +1285,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 180
+          "text_index": 179
         }
       ]
     },
@@ -1299,11 +1299,11 @@
       "notices": [
         {
           "license": "CC0-1.0",
-          "text_index": 234
+          "text_index": 233
         },
         {
           "license": "MIT-0",
-          "text_index": 305
+          "text_index": 304
         },
         {
           "license": "Apache-2.0",
@@ -1321,7 +1321,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 272
+          "text_index": 271
         }
       ]
     },
@@ -1335,7 +1335,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 179
+          "text_index": 178
         },
         {
           "license": "Apache-2.0",
@@ -1353,7 +1353,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 180
+          "text_index": 179
         },
         {
           "license": "Apache-2.0",
@@ -1371,7 +1371,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 244
+          "text_index": 243
         },
         {
           "license": "Apache-2.0",
@@ -1389,7 +1389,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 250
+          "text_index": 249
         },
         {
           "license": "Apache-2.0",
@@ -1407,7 +1407,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 246
+          "text_index": 245
         },
         {
           "license": "Apache-2.0",
@@ -1425,7 +1425,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 331
+          "text_index": 330
         },
         {
           "license": "Apache-2.0",
@@ -1443,7 +1443,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 331
+          "text_index": 330
         },
         {
           "license": "Apache-2.0",
@@ -1461,7 +1461,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 183
+          "text_index": 182
         },
         {
           "license": "Apache-2.0",
@@ -1479,7 +1479,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 184
+          "text_index": 183
         },
         {
           "license": "Apache-2.0",
@@ -1489,7 +1489,7 @@
     },
     {
       "name": "ctutils",
-      "version": "0.4.2",
+      "version": "0.4.3",
       "license": "Apache-2.0 OR MIT",
       "source": {
         "kind": "cargo"
@@ -1501,7 +1501,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 204
+          "text_index": 203
         }
       ]
     },
@@ -1515,7 +1515,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 191
+          "text_index": 190
         },
         {
           "license": "Apache-2.0",
@@ -1523,7 +1523,7 @@
         },
         {
           "license": "Zlib",
-          "text_index": 192
+          "text_index": 191
         }
       ]
     },
@@ -1537,11 +1537,11 @@
       "notices": [
         {
           "license": "Apache-2.0",
-          "text_index": 292
+          "text_index": 291
         },
         {
           "license": "MIT",
-          "text_index": 293
+          "text_index": 292
         }
       ]
     },
@@ -1555,7 +1555,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 323
+          "text_index": 322
         }
       ]
     },
@@ -1569,7 +1569,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 87
+          "text_index": 86
         },
         {
           "license": "Apache-2.0",
@@ -1579,7 +1579,7 @@
     },
     {
       "name": "defmt",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -1587,7 +1587,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 207
+          "text_index": 206
         },
         {
           "license": "Apache-2.0",
@@ -1597,7 +1597,7 @@
     },
     {
       "name": "deranged",
-      "version": "0.5.8",
+      "version": "0.5.9",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -1605,7 +1605,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 198
+          "text_index": 197
         },
         {
           "license": "Apache-2.0",
@@ -1623,7 +1623,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 125
+          "text_index": 124
         },
         {
           "license": "Apache-2.0",
@@ -1641,7 +1641,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 139
+          "text_index": 138
         },
         {
           "license": "Apache-2.0",
@@ -1659,7 +1659,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 152
+          "text_index": 151
         },
         {
           "license": "Apache-2.0",
@@ -1677,7 +1677,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 152
+          "text_index": 151
         },
         {
           "license": "Apache-2.0",
@@ -1727,7 +1727,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -1745,7 +1745,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 153
+          "text_index": 152
         },
         {
           "license": "Apache-2.0",
@@ -1763,7 +1763,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 153
+          "text_index": 152
         },
         {
           "license": "Apache-2.0",
@@ -1781,7 +1781,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 153
+          "text_index": 152
         },
         {
           "license": "Apache-2.0",
@@ -1799,7 +1799,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 205
+          "text_index": 204
         },
         {
           "license": "Apache-2.0",
@@ -1817,7 +1817,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 153
+          "text_index": 152
         },
         {
           "license": "Apache-2.0",
@@ -1835,7 +1835,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 153
+          "text_index": 152
         },
         {
           "license": "Apache-2.0",
@@ -1853,7 +1853,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 153
+          "text_index": 152
         },
         {
           "license": "Apache-2.0",
@@ -1871,7 +1871,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 266
+          "text_index": 265
         }
       ]
     },
@@ -1885,7 +1885,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -1895,7 +1895,7 @@
     },
     {
       "name": "either",
-      "version": "1.18.0",
+      "version": "1.19.0",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -1903,7 +1903,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 100
+          "text_index": 99
         },
         {
           "license": "Apache-2.0",
@@ -1922,7 +1922,7 @@
       "notices": [
         {
           "license": "Bitstream-Vera AND Arev",
-          "text_index": 236
+          "text_index": 235
         }
       ]
     },
@@ -1937,7 +1937,7 @@
       "notices": [
         {
           "license": "ISC AND MIT",
-          "text_index": 237
+          "text_index": 236
         }
       ]
     },
@@ -1951,7 +1951,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 153
+          "text_index": 152
         },
         {
           "license": "Apache-2.0",
@@ -1969,7 +1969,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 186
+          "text_index": 185
         },
         {
           "license": "Apache-2.0",
@@ -1987,7 +1987,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 195
+          "text_index": 194
         },
         {
           "license": "Apache-2.0",
@@ -2005,7 +2005,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 195
+          "text_index": 194
         },
         {
           "license": "Apache-2.0",
@@ -2023,7 +2023,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 195
+          "text_index": 194
         },
         {
           "license": "Apache-2.0",
@@ -2041,7 +2041,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 278
+          "text_index": 277
         },
         {
           "license": "Apache-2.0",
@@ -2059,7 +2059,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 153
+          "text_index": 152
         },
         {
           "license": "Apache-2.0",
@@ -2077,7 +2077,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 153
+          "text_index": 152
         },
         {
           "license": "Apache-2.0",
@@ -2085,7 +2085,7 @@
         },
         {
           "license": "OFL-1.1",
-          "text_index": 338
+          "text_index": 337
         },
         {
           "license": "Ubuntu-font-1.0",
@@ -2095,7 +2095,7 @@
     },
     {
       "name": "equivalent",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "license": "Apache-2.0 OR MIT",
       "source": {
         "kind": "cargo"
@@ -2107,7 +2107,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 119
+          "text_index": 118
         }
       ]
     },
@@ -2121,7 +2121,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 90
+          "text_index": 89
         },
         {
           "license": "Apache-2.0",
@@ -2139,7 +2139,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 84
+          "text_index": 83
         },
         {
           "license": "Apache-2.0",
@@ -2161,7 +2161,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -2179,7 +2179,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -2193,7 +2193,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 277
+          "text_index": 276
         },
         {
           "license": "Apache-2.0",
@@ -2215,7 +2215,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -2229,7 +2229,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 232
+          "text_index": 231
         }
       ]
     },
@@ -2243,7 +2243,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 283
+          "text_index": 282
         },
         {
           "license": "Apache-2.0",
@@ -2265,7 +2265,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 143
+          "text_index": 142
         }
       ]
     },
@@ -2279,7 +2279,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 88
+          "text_index": 87
         },
         {
           "license": "Apache-2.0",
@@ -2297,7 +2297,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -2305,7 +2305,7 @@
         },
         {
           "license": "Unicode-DFS-2016",
-          "text_index": 342
+          "text_index": 341
         }
       ]
     },
@@ -2319,7 +2319,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -2334,7 +2334,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 312
+          "text_index": 311
         }
       ]
     },
@@ -2348,7 +2348,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 97
+          "text_index": 96
         },
         {
           "license": "Apache-2.0",
@@ -2366,7 +2366,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 96
+          "text_index": 95
         }
       ]
     },
@@ -2380,7 +2380,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 257
+          "text_index": 256
         }
       ]
     },
@@ -2394,7 +2394,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 257
+          "text_index": 256
         }
       ]
     },
@@ -2412,7 +2412,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 300
+          "text_index": 299
         }
       ]
     },
@@ -2426,7 +2426,7 @@
       "notices": [
         {
           "license": "Zlib",
-          "text_index": 199
+          "text_index": 198
         }
       ]
     },
@@ -2440,13 +2440,13 @@
       "notices": [
         {
           "license": "Zlib",
-          "text_index": 199
+          "text_index": 198
         }
       ]
     },
     {
       "name": "font-types",
-      "version": "0.12.5",
+      "version": "0.12.7",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -2454,7 +2454,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 166
+          "text_index": 165
         },
         {
           "license": "Apache-2.0",
@@ -2472,7 +2472,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 86
+          "text_index": 85
         },
         {
           "license": "Apache-2.0",
@@ -2490,7 +2490,7 @@
       "notices": [
         {
           "license": "BSD-3-Clause",
-          "text_index": 294
+          "text_index": 293
         }
       ]
     },
@@ -2504,7 +2504,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 295
+          "text_index": 294
         }
       ]
     },
@@ -2518,7 +2518,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 296
+          "text_index": 295
         }
       ]
     },
@@ -2532,7 +2532,7 @@
       "notices": [
         {
           "license": "BSD-3-Clause",
-          "text_index": 297
+          "text_index": 296
         }
       ]
     },
@@ -2546,7 +2546,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 104
+          "text_index": 103
         },
         {
           "license": "Apache-2.0",
@@ -2564,7 +2564,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 111
+          "text_index": 110
         },
         {
           "license": "Apache-2.0",
@@ -2582,7 +2582,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 111
+          "text_index": 110
         },
         {
           "license": "Apache-2.0",
@@ -2600,7 +2600,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 111
+          "text_index": 110
         },
         {
           "license": "Apache-2.0",
@@ -2618,7 +2618,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 111
+          "text_index": 110
         },
         {
           "license": "Apache-2.0",
@@ -2636,7 +2636,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 167
+          "text_index": 166
         },
         {
           "license": "Apache-2.0",
@@ -2654,7 +2654,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 111
+          "text_index": 110
         },
         {
           "license": "Apache-2.0",
@@ -2676,7 +2676,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -2690,7 +2690,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 111
+          "text_index": 110
         },
         {
           "license": "Apache-2.0",
@@ -2708,7 +2708,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 111
+          "text_index": 110
         },
         {
           "license": "Apache-2.0",
@@ -2726,7 +2726,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 88
+          "text_index": 87
         },
         {
           "license": "Apache-2.0",
@@ -2744,7 +2744,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 111
+          "text_index": 110
         },
         {
           "license": "Apache-2.0",
@@ -2762,7 +2762,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 337
+          "text_index": 336
         }
       ]
     },
@@ -2776,7 +2776,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 131
+          "text_index": 130
         },
         {
           "license": "Apache-2.0",
@@ -2794,7 +2794,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 131
+          "text_index": 130
         },
         {
           "license": "Apache-2.0",
@@ -2812,7 +2812,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 249
+          "text_index": 248
         }
       ]
     },
@@ -2826,7 +2826,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 155
+          "text_index": 154
         },
         {
           "license": "Apache-2.0",
@@ -2844,7 +2844,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 157
+          "text_index": 156
         },
         {
           "license": "Apache-2.0",
@@ -2862,7 +2862,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 160
+          "text_index": 159
         },
         {
           "license": "Apache-2.0",
@@ -2880,7 +2880,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 307
+          "text_index": 306
         }
       ]
     },
@@ -2894,7 +2894,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 307
+          "text_index": 306
         }
       ]
     },
@@ -2908,7 +2908,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 307
+          "text_index": 306
         }
       ]
     },
@@ -2922,7 +2922,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 307
+          "text_index": 306
         }
       ]
     },
@@ -2940,7 +2940,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 230
+          "text_index": 229
         }
       ]
     },
@@ -2954,7 +2954,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 302
+          "text_index": 301
         },
         {
           "license": "Apache-2.0",
@@ -2962,7 +2962,7 @@
         },
         {
           "license": "Zlib",
-          "text_index": 340
+          "text_index": 339
         }
       ]
     },
@@ -2976,7 +2976,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 307
+          "text_index": 306
         }
       ]
     },
@@ -2990,7 +2990,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 242
+          "text_index": 241
         }
       ]
     },
@@ -3004,11 +3004,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 329
+          "text_index": 328
         },
         {
           "license": "Apache-2.0",
-          "text_index": 225
+          "text_index": 224
         }
       ]
     },
@@ -3022,7 +3022,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 285
+          "text_index": 284
         },
         {
           "license": "Apache-2.0",
@@ -3040,7 +3040,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 248
+          "text_index": 247
         }
       ]
     },
@@ -3054,7 +3054,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 333
+          "text_index": 332
         }
       ]
     },
@@ -3068,7 +3068,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 142
+          "text_index": 141
         },
         {
           "license": "Apache-2.0",
@@ -3086,7 +3086,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 112
+          "text_index": 111
         },
         {
           "license": "Apache-2.0",
@@ -3104,7 +3104,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 112
+          "text_index": 111
         },
         {
           "license": "Apache-2.0",
@@ -3122,7 +3122,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 112
+          "text_index": 111
         },
         {
           "license": "Apache-2.0",
@@ -3140,7 +3140,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 112
+          "text_index": 111
         },
         {
           "license": "Apache-2.0",
@@ -3158,7 +3158,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 341
+          "text_index": 340
         },
         {
           "license": "Apache-2.0",
@@ -3176,7 +3176,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 127
+          "text_index": 126
         },
         {
           "license": "Apache-2.0",
@@ -3194,7 +3194,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 85
+          "text_index": 84
         },
         {
           "license": "Apache-2.0",
@@ -3212,7 +3212,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 109
+          "text_index": 108
         },
         {
           "license": "Apache-2.0",
@@ -3230,7 +3230,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 125
+          "text_index": 124
         },
         {
           "license": "Apache-2.0",
@@ -3248,7 +3248,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 135
+          "text_index": 134
         },
         {
           "license": "Apache-2.0",
@@ -3266,7 +3266,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 174
+          "text_index": 173
         }
       ]
     },
@@ -3280,7 +3280,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 174
+          "text_index": 173
         }
       ]
     },
@@ -3294,7 +3294,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 260
+          "text_index": 259
         }
       ]
     },
@@ -3308,7 +3308,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 274
+          "text_index": 273
         },
         {
           "license": "Apache-2.0",
@@ -3326,7 +3326,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 110
+          "text_index": 109
         },
         {
           "license": "Apache-2.0",
@@ -3344,7 +3344,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 116
+          "text_index": 115
         },
         {
           "license": "Apache-2.0",
@@ -3362,7 +3362,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 188
+          "text_index": 187
         },
         {
           "license": "Apache-2.0",
@@ -3372,7 +3372,7 @@
     },
     {
       "name": "hyper",
-      "version": "1.11.1",
+      "version": "1.12.0",
       "license": "MIT",
       "source": {
         "kind": "cargo"
@@ -3380,7 +3380,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 98
+          "text_index": 97
         }
       ]
     },
@@ -3398,11 +3398,11 @@
         },
         {
           "license": "ISC",
-          "text_index": 238
+          "text_index": 237
         },
         {
           "license": "MIT",
-          "text_index": 115
+          "text_index": 114
         }
       ]
     },
@@ -3416,7 +3416,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 196
+          "text_index": 195
         }
       ]
     },
@@ -3430,7 +3430,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 270
+          "text_index": 269
         }
       ]
     },
@@ -3444,7 +3444,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 273
+          "text_index": 272
         }
       ]
     },
@@ -3458,7 +3458,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 270
+          "text_index": 269
         },
         {
           "license": "Apache-2.0",
@@ -3476,7 +3476,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 270
+          "text_index": 269
         }
       ]
     },
@@ -3490,7 +3490,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 273
+          "text_index": 272
         }
       ]
     },
@@ -3504,7 +3504,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 177
+          "text_index": 176
         },
         {
           "license": "Apache-2.0",
@@ -3522,7 +3522,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3536,7 +3536,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3550,7 +3550,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3564,7 +3564,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3578,7 +3578,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3592,7 +3592,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3606,7 +3606,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3620,7 +3620,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3634,7 +3634,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3648,7 +3648,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3662,7 +3662,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3676,7 +3676,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3690,7 +3690,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3704,7 +3704,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3718,7 +3718,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3732,7 +3732,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3746,7 +3746,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3760,7 +3760,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3774,7 +3774,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3788,7 +3788,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3802,7 +3802,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3816,7 +3816,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3830,7 +3830,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3844,7 +3844,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3858,7 +3858,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3872,7 +3872,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3886,7 +3886,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3900,7 +3900,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3914,7 +3914,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3928,7 +3928,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3942,7 +3942,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3956,7 +3956,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3970,7 +3970,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -3984,7 +3984,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 87
+          "text_index": 86
         },
         {
           "license": "Apache-2.0",
@@ -4006,7 +4006,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 215
+          "text_index": 214
         }
       ]
     },
@@ -4020,7 +4020,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 283
+          "text_index": 282
         },
         {
           "license": "Apache-2.0",
@@ -4038,7 +4038,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 283
+          "text_index": 282
         },
         {
           "license": "Apache-2.0",
@@ -4056,7 +4056,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 287
+          "text_index": 286
         }
       ]
     },
@@ -4074,7 +4074,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 118
+          "text_index": 117
         }
       ]
     },
@@ -4092,7 +4092,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 118
+          "text_index": 117
         }
       ]
     },
@@ -4106,7 +4106,7 @@
       "notices": [
         {
           "license": "ISC",
-          "text_index": 209
+          "text_index": 208
         }
       ]
     },
@@ -4120,7 +4120,7 @@
       "notices": [
         {
           "license": "ISC",
-          "text_index": 208
+          "text_index": 207
         }
       ]
     },
@@ -4134,7 +4134,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 220
+          "text_index": 219
         },
         {
           "license": "Apache-2.0",
@@ -4152,7 +4152,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
@@ -4170,7 +4170,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 100
+          "text_index": 99
         },
         {
           "license": "Apache-2.0",
@@ -4188,7 +4188,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -4206,7 +4206,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -4220,7 +4220,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 108
+          "text_index": 107
         },
         {
           "license": "Apache-2.0",
@@ -4238,11 +4238,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 338
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 318
         }
       ]
     },
@@ -4256,17 +4256,17 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 338
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 318
         }
       ]
     },
     {
       "name": "jiff-tzdb",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "license": "Unlicense OR MIT",
       "source": {
         "kind": "cargo"
@@ -4274,11 +4274,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 338
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 318
         }
       ]
     },
@@ -4292,11 +4292,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 338
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 318
         }
       ]
     },
@@ -4310,7 +4310,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 88
+          "text_index": 87
         },
         {
           "license": "Apache-2.0",
@@ -4328,7 +4328,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 201
+          "text_index": 200
         },
         {
           "license": "Apache-2.0",
@@ -4350,7 +4350,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 143
+          "text_index": 142
         }
       ]
     },
@@ -4368,13 +4368,13 @@
         },
         {
           "license": "MIT",
-          "text_index": 143
+          "text_index": 142
         }
       ]
     },
     {
       "name": "lazy_static",
-      "version": "1.5.0",
+      "version": "1.5.1",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -4382,7 +4382,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 82
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -4392,7 +4392,7 @@
     },
     {
       "name": "libc",
-      "version": "0.2.189",
+      "version": "0.2.191",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -4400,7 +4400,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 214
+          "text_index": 213
         },
         {
           "license": "Apache-2.0",
@@ -4418,7 +4418,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 345
+          "text_index": 344
         }
       ]
     },
@@ -4432,7 +4432,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 94
+          "text_index": 93
         }
       ]
     },
@@ -4450,7 +4450,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 285
+          "text_index": 284
         }
       ]
     },
@@ -4472,7 +4472,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -4486,7 +4486,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -4500,7 +4500,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 117
+          "text_index": 116
         },
         {
           "license": "Apache-2.0",
@@ -4518,7 +4518,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 92
+          "text_index": 91
         },
         {
           "license": "Apache-2.0",
@@ -4536,7 +4536,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 239
+          "text_index": 238
         }
       ]
     },
@@ -4550,7 +4550,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 202
+          "text_index": 201
         },
         {
           "license": "Apache-2.0",
@@ -4558,13 +4558,13 @@
         },
         {
           "license": "Zlib",
-          "text_index": 203
+          "text_index": 202
         }
       ]
     },
     {
       "name": "lyon_geom",
-      "version": "1.0.19",
+      "version": "1.0.20",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -4572,11 +4572,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 311
+          "text_index": 310
         },
         {
           "license": "Apache-2.0",
-          "text_index": 219
+          "text_index": 218
         }
       ]
     },
@@ -4590,17 +4590,17 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 311
+          "text_index": 310
         },
         {
           "license": "Apache-2.0",
-          "text_index": 219
+          "text_index": 218
         }
       ]
     },
     {
       "name": "lyon_tessellation",
-      "version": "1.0.22",
+      "version": "1.0.23",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -4608,11 +4608,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 311
+          "text_index": 310
         },
         {
           "license": "Apache-2.0",
-          "text_index": 219
+          "text_index": 218
         }
       ]
     },
@@ -4626,7 +4626,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 165
+          "text_index": 164
         }
       ]
     },
@@ -4640,11 +4640,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 264
+          "text_index": 263
         },
         {
           "license": "BSD-3-Clause",
-          "text_index": 264
+          "text_index": 263
         }
       ]
     },
@@ -4658,7 +4658,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 123
+          "text_index": 122
         },
         {
           "license": "Apache-2.0",
@@ -4676,7 +4676,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 265
+          "text_index": 264
         }
       ]
     },
@@ -4690,11 +4690,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 338
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 318
         }
       ]
     },
@@ -4708,7 +4708,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 91
+          "text_index": 90
         },
         {
           "license": "Apache-2.0",
@@ -4726,7 +4726,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 336
+          "text_index": 335
         }
       ]
     },
@@ -4740,7 +4740,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 320
+          "text_index": 319
         }
       ]
     },
@@ -4754,11 +4754,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 282
+          "text_index": 281
         },
         {
           "license": "Zlib",
-          "text_index": 218
+          "text_index": 217
         },
         {
           "license": "Apache-2.0",
@@ -4776,11 +4776,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 282
+          "text_index": 281
         },
         {
           "license": "Zlib",
-          "text_index": 218
+          "text_index": 217
         },
         {
           "license": "Apache-2.0",
@@ -4790,7 +4790,7 @@
     },
     {
       "name": "mio",
-      "version": "1.2.3",
+      "version": "1.2.4",
       "license": "MIT",
       "source": {
         "kind": "cargo"
@@ -4798,7 +4798,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 89
+          "text_index": 88
         }
       ]
     },
@@ -4812,7 +4812,7 @@
       "notices": [
         {
           "license": "BSD-3-Clause",
-          "text_index": 213
+          "text_index": 212
         },
         {
           "license": "Apache-2.0",
@@ -4830,7 +4830,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 276
+          "text_index": 275
         },
         {
           "license": "Apache-2.0",
@@ -4848,7 +4848,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 197
+          "text_index": 196
         }
       ]
     },
@@ -4862,7 +4862,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 274
         },
         {
           "license": "Apache-2.0",
@@ -4880,7 +4880,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 274
         },
         {
           "license": "Apache-2.0",
@@ -4898,7 +4898,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 200
+          "text_index": 199
         },
         {
           "license": "Apache-2.0",
@@ -4920,7 +4920,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 223
+          "text_index": 222
         }
       ]
     },
@@ -4934,7 +4934,7 @@
       "notices": [
         {
           "license": "CC0-1.0",
-          "text_index": 233
+          "text_index": 232
         }
       ]
     },
@@ -4948,7 +4948,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 193
+          "text_index": 192
         },
         {
           "license": "Apache-2.0",
@@ -4967,7 +4967,7 @@
       "notices": [
         {
           "license": "OFL-1.1",
-          "text_index": 228
+          "text_index": 227
         }
       ]
     },
@@ -4982,7 +4982,7 @@
       "notices": [
         {
           "license": "OFL-1.1",
-          "text_index": 224
+          "text_index": 223
         }
       ]
     },
@@ -4997,7 +4997,7 @@
       "notices": [
         {
           "license": "OFL-1.1",
-          "text_index": 224
+          "text_index": 223
         }
       ]
     },
@@ -5011,7 +5011,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 335
+          "text_index": 334
         }
       ]
     },
@@ -5025,7 +5025,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 92
+          "text_index": 91
         },
         {
           "license": "Apache-2.0",
@@ -5043,7 +5043,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 211
+          "text_index": 210
         },
         {
           "license": "Apache-2.0",
@@ -5061,7 +5061,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 92
+          "text_index": 91
         },
         {
           "license": "Apache-2.0",
@@ -5079,7 +5079,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 92
+          "text_index": 91
         },
         {
           "license": "Apache-2.0",
@@ -5097,7 +5097,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 92
+          "text_index": 91
         },
         {
           "license": "Apache-2.0",
@@ -5115,11 +5115,11 @@
       "notices": [
         {
           "license": "BSD-3-Clause",
-          "text_index": 149
+          "text_index": 148
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -5129,7 +5129,7 @@
     },
     {
       "name": "num_threads",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -5137,7 +5137,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 181
+          "text_index": 180
         },
         {
           "license": "Apache-2.0",
@@ -5159,7 +5159,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -5173,7 +5173,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -5191,7 +5191,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 88
+          "text_index": 87
         },
         {
           "license": "Apache-2.0",
@@ -5209,7 +5209,7 @@
       "notices": [
         {
           "license": "MPL-2.0",
-          "text_index": 288
+          "text_index": 287
         }
       ]
     },
@@ -5223,7 +5223,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 102
+          "text_index": 101
         }
       ]
     },
@@ -5237,7 +5237,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 322
+          "text_index": 321
         },
         {
           "license": "Apache-2.0",
@@ -5255,7 +5255,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 322
+          "text_index": 321
         },
         {
           "license": "Apache-2.0",
@@ -5277,7 +5277,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -5291,7 +5291,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 117
+          "text_index": 116
         },
         {
           "license": "Apache-2.0",
@@ -5309,7 +5309,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 117
+          "text_index": 116
         },
         {
           "license": "Apache-2.0",
@@ -5331,7 +5331,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 143
+          "text_index": 142
         }
       ]
     },
@@ -5345,7 +5345,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 87
+          "text_index": 86
         },
         {
           "license": "Apache-2.0",
@@ -5363,7 +5363,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 317
+          "text_index": 316
         }
       ]
     },
@@ -5377,7 +5377,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 317
+          "text_index": 316
         }
       ]
     },
@@ -5392,7 +5392,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 267
+          "text_index": 266
         }
       ]
     },
@@ -5406,7 +5406,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 171
+          "text_index": 170
         }
       ]
     },
@@ -5424,7 +5424,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -5442,7 +5442,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -5456,7 +5456,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -5474,7 +5474,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 107
+          "text_index": 106
         },
         {
           "license": "Apache-2.0",
@@ -5492,7 +5492,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 107
+          "text_index": 106
         },
         {
           "license": "Apache-2.0",
@@ -5514,7 +5514,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -5528,7 +5528,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 143
+          "text_index": 142
         },
         {
           "license": "Apache-2.0",
@@ -5560,7 +5560,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 161
+          "text_index": 160
         },
         {
           "license": "Apache-2.0",
@@ -5578,13 +5578,13 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
     {
       "name": "powerfmt",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -5592,7 +5592,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 190
+          "text_index": 189
         },
         {
           "license": "Apache-2.0",
@@ -5610,7 +5610,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 168
+          "text_index": 167
         },
         {
           "license": "Apache-2.0",
@@ -5628,7 +5628,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 256
+          "text_index": 255
         },
         {
           "license": "Apache-2.0",
@@ -5660,7 +5660,7 @@
       "notices": [
         {
           "license": "BSD-3-Clause",
-          "text_index": 213
+          "text_index": 212
         },
         {
           "license": "Apache-2.0",
@@ -5678,7 +5678,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 106
+          "text_index": 105
         },
         {
           "license": "Apache-2.0",
@@ -5696,7 +5696,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 324
+          "text_index": 323
         }
       ]
     },
@@ -5710,7 +5710,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 145
+          "text_index": 144
         },
         {
           "license": "Apache-2.0",
@@ -5720,7 +5720,7 @@
     },
     {
       "name": "quinn-proto",
-      "version": "0.11.18",
+      "version": "0.11.19",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -5728,7 +5728,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 145
+          "text_index": 144
         },
         {
           "license": "Apache-2.0",
@@ -5738,7 +5738,7 @@
     },
     {
       "name": "quinn-udp",
-      "version": "0.5.15",
+      "version": "0.5.16",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -5746,7 +5746,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 145
+          "text_index": 144
         },
         {
           "license": "Apache-2.0",
@@ -5764,7 +5764,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 222
+          "text_index": 221
         },
         {
           "license": "Apache-2.0",
@@ -5782,7 +5782,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 222
+          "text_index": 221
         },
         {
           "license": "Apache-2.0",
@@ -5800,7 +5800,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 222
+          "text_index": 221
         },
         {
           "license": "Apache-2.0",
@@ -5818,7 +5818,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 222
+          "text_index": 221
         },
         {
           "license": "Apache-2.0",
@@ -5836,7 +5836,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 222
+          "text_index": 221
         },
         {
           "license": "Apache-2.0",
@@ -5854,7 +5854,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 158
+          "text_index": 157
         },
         {
           "license": "Apache-2.0",
@@ -5872,7 +5872,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 222
+          "text_index": 221
         },
         {
           "license": "Apache-2.0",
@@ -5890,7 +5890,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 222
+          "text_index": 221
         },
         {
           "license": "Apache-2.0",
@@ -5908,7 +5908,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 95
+          "text_index": 94
         },
         {
           "license": "Apache-2.0",
@@ -5926,7 +5926,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 254
+          "text_index": 253
         },
         {
           "license": "Apache-2.0",
@@ -5934,7 +5934,7 @@
         },
         {
           "license": "Zlib",
-          "text_index": 178
+          "text_index": 177
         }
       ]
     },
@@ -5948,7 +5948,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 166
+          "text_index": 165
         },
         {
           "license": "Apache-2.0",
@@ -5966,7 +5966,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -5984,7 +5984,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 92
+          "text_index": 91
         },
         {
           "license": "Apache-2.0",
@@ -6002,7 +6002,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 92
+          "text_index": 91
         },
         {
           "license": "Apache-2.0",
@@ -6020,7 +6020,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 92
+          "text_index": 91
         },
         {
           "license": "Apache-2.0",
@@ -6052,7 +6052,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 122
+          "text_index": 121
         },
         {
           "license": "Apache-2.0",
@@ -6070,7 +6070,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 261
+          "text_index": 260
         },
         {
           "license": "Apache-2.0",
@@ -6092,7 +6092,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 221
+          "text_index": 220
         }
       ]
     },
@@ -6106,7 +6106,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 263
+          "text_index": 262
         }
       ]
     },
@@ -6120,7 +6120,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 253
+          "text_index": 252
         }
       ]
     },
@@ -6152,7 +6152,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 132
+          "text_index": 131
         },
         {
           "license": "Apache-2.0",
@@ -6170,7 +6170,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 128
+          "text_index": 127
         },
         {
           "license": "Apache-2.0",
@@ -6188,7 +6188,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 327
+          "text_index": 326
         },
         {
           "license": "Apache-2.0",
@@ -6206,7 +6206,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 146
+          "text_index": 145
         },
         {
           "license": "Apache-2.0",
@@ -6224,7 +6224,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 240
+          "text_index": 239
         }
       ]
     },
@@ -6242,7 +6242,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -6260,7 +6260,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 300
+          "text_index": 299
         }
       ]
     },
@@ -6282,7 +6282,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -6300,17 +6300,17 @@
         },
         {
           "license": "ISC",
-          "text_index": 238
+          "text_index": 237
         },
         {
           "license": "MIT",
-          "text_index": 115
+          "text_index": 114
         }
       ]
     },
     {
       "name": "rustls-native-certs",
-      "version": "0.8.4",
+      "version": "0.8.5",
       "license": "Apache-2.0 OR ISC OR MIT",
       "source": {
         "kind": "cargo"
@@ -6322,11 +6322,11 @@
         },
         {
           "license": "ISC",
-          "text_index": 238
+          "text_index": 237
         },
         {
           "license": "MIT",
-          "text_index": 115
+          "text_index": 114
         }
       ]
     },
@@ -6340,7 +6340,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 189
+          "text_index": 188
         },
         {
           "license": "Apache-2.0",
@@ -6358,7 +6358,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 262
+          "text_index": 261
         },
         {
           "license": "Apache-2.0",
@@ -6368,7 +6368,7 @@
     },
     {
       "name": "rustls-webpki",
-      "version": "0.103.15",
+      "version": "0.103.16",
       "license": "ISC",
       "source": {
         "kind": "cargo"
@@ -6376,7 +6376,7 @@
       "notices": [
         {
           "license": "ISC",
-          "text_index": 235
+          "text_index": 234
         }
       ]
     },
@@ -6422,11 +6422,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 338
         },
         {
           "license": "MIT",
-          "text_index": 325
+          "text_index": 324
         }
       ]
     },
@@ -6440,13 +6440,13 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 252
+          "text_index": 251
         }
       ]
     },
     {
       "name": "schemars",
-      "version": "1.2.2",
+      "version": "1.2.3",
       "license": "MIT",
       "source": {
         "kind": "cargo"
@@ -6454,7 +6454,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 252
+          "text_index": 251
         }
       ]
     },
@@ -6468,7 +6468,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 121
+          "text_index": 120
         },
         {
           "license": "Apache-2.0",
@@ -6504,7 +6504,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -6522,7 +6522,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -6540,7 +6540,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -6558,7 +6558,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -6576,7 +6576,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -6594,7 +6594,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 113
+          "text_index": 112
         },
         {
           "license": "Apache-2.0",
@@ -6612,7 +6612,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 100
+          "text_index": 99
         },
         {
           "license": "Apache-2.0",
@@ -6648,7 +6648,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 123
+          "text_index": 122
         },
         {
           "license": "Apache-2.0",
@@ -6698,7 +6698,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 123
+          "text_index": 122
         },
         {
           "license": "Apache-2.0",
@@ -6716,7 +6716,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 164
+          "text_index": 163
         }
       ]
     },
@@ -6730,7 +6730,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 176
+          "text_index": 175
         },
         {
           "license": "Apache-2.0",
@@ -6748,7 +6748,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 137
+          "text_index": 136
         },
         {
           "license": "Apache-2.0",
@@ -6766,7 +6766,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 280
+          "text_index": 279
         }
       ]
     },
@@ -6780,7 +6780,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 284
+          "text_index": 283
         },
         {
           "license": "Apache-2.0",
@@ -6802,7 +6802,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 326
+          "text_index": 325
         }
       ]
     },
@@ -6816,7 +6816,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 306
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -6834,7 +6834,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 166
+          "text_index": 165
         },
         {
           "license": "Apache-2.0",
@@ -6852,7 +6852,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 162
+          "text_index": 161
         }
       ]
     },
@@ -6866,13 +6866,13 @@
       "notices": [
         {
           "license": "Zlib",
-          "text_index": 182
+          "text_index": 181
         }
       ]
     },
     {
       "name": "smallvec",
-      "version": "1.16.2",
+      "version": "1.16.3",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -6880,7 +6880,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 144
+          "text_index": 143
         },
         {
           "license": "Apache-2.0",
@@ -6902,7 +6902,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -6916,7 +6916,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -6948,7 +6948,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 88
+          "text_index": 87
         },
         {
           "license": "Apache-2.0",
@@ -6966,7 +6966,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 313
+          "text_index": 312
         }
       ]
     },
@@ -7084,7 +7084,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 129
+          "text_index": 128
         },
         {
           "license": "Apache-2.0",
@@ -7102,7 +7102,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 243
+          "text_index": 242
         },
         {
           "license": "Apache-2.0",
@@ -7120,7 +7120,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 187
+          "text_index": 186
         }
       ]
     },
@@ -7134,7 +7134,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 133
+          "text_index": 132
         },
         {
           "license": "Apache-2.0",
@@ -7152,7 +7152,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 321
+          "text_index": 320
         }
       ]
     },
@@ -7166,7 +7166,7 @@
       "notices": [
         {
           "license": "BSD-3-Clause",
-          "text_index": 120
+          "text_index": 119
         }
       ]
     },
@@ -7184,7 +7184,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 148
+          "text_index": 147
         }
       ]
     },
@@ -7212,7 +7212,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 259
+          "text_index": 258
         },
         {
           "license": "Apache-2.0",
@@ -7230,7 +7230,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 216
+          "text_index": 215
         },
         {
           "license": "Apache-2.0",
@@ -7248,7 +7248,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 103
+          "text_index": 102
         },
         {
           "license": "Apache-2.0",
@@ -7266,11 +7266,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 338
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 318
         }
       ]
     },
@@ -7284,7 +7284,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -7302,7 +7302,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -7320,7 +7320,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 117
+          "text_index": 116
         },
         {
           "license": "Apache-2.0",
@@ -7338,7 +7338,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 245
+          "text_index": 244
         }
       ]
     },
@@ -7352,7 +7352,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 212
+          "text_index": 211
         },
         {
           "license": "Apache-2.0",
@@ -7370,7 +7370,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 212
+          "text_index": 211
         },
         {
           "license": "Apache-2.0",
@@ -7388,7 +7388,7 @@
       "notices": [
         {
           "license": "BSD-3-Clause",
-          "text_index": 83
+          "text_index": 82
         }
       ]
     },
@@ -7402,7 +7402,7 @@
       "notices": [
         {
           "license": "BSD-3-Clause",
-          "text_index": 83
+          "text_index": 82
         }
       ]
     },
@@ -7416,7 +7416,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -7430,7 +7430,7 @@
       "notices": [
         {
           "license": "Zlib",
-          "text_index": 163
+          "text_index": 162
         },
         {
           "license": "Apache-2.0",
@@ -7438,7 +7438,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 308
+          "text_index": 307
         }
       ]
     },
@@ -7452,13 +7452,13 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 279
+          "text_index": 278
         }
       ]
     },
     {
       "name": "tokio-rustls",
-      "version": "0.26.5",
+      "version": "0.26.6",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -7466,7 +7466,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 136
+          "text_index": 135
         },
         {
           "license": "Apache-2.0",
@@ -7484,13 +7484,13 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 126
+          "text_index": 125
         }
       ]
     },
     {
       "name": "tokio-util",
-      "version": "0.7.19",
+      "version": "0.7.20",
       "license": "MIT",
       "source": {
         "kind": "cargo"
@@ -7498,13 +7498,13 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 279
+          "text_index": 278
         }
       ]
     },
     {
       "name": "toml_datetime",
-      "version": "1.1.1+spec-1.1.0",
+      "version": "1.1.2+spec-1.1.0",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -7512,11 +7512,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
-          "text_index": 27
+          "text_index": 25
         }
       ]
     },
@@ -7530,7 +7530,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
@@ -7540,6 +7540,24 @@
     },
     {
       "name": "toml_parser",
+      "version": "1.1.5+spec-1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "source": {
+        "kind": "cargo"
+      },
+      "notices": [
+        {
+          "license": "MIT",
+          "text_index": 209
+        },
+        {
+          "license": "Apache-2.0",
+          "text_index": 25
+        }
+      ]
+    },
+    {
+      "name": "toml_writer",
       "version": "1.1.3+spec-1.1.0",
       "license": "MIT OR Apache-2.0",
       "source": {
@@ -7548,29 +7566,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 210
+          "text_index": 209
         },
         {
           "license": "Apache-2.0",
-          "text_index": 27
-        }
-      ]
-    },
-    {
-      "name": "toml_writer",
-      "version": "1.1.2+spec-1.1.0",
-      "license": "MIT OR Apache-2.0",
-      "source": {
-        "kind": "cargo"
-      },
-      "notices": [
-        {
-          "license": "MIT",
-          "text_index": 210
-        },
-        {
-          "license": "Apache-2.0",
-          "text_index": 27
+          "text_index": 25
         }
       ]
     },
@@ -7584,7 +7584,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 170
+          "text_index": 169
         }
       ]
     },
@@ -7598,7 +7598,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 173
+          "text_index": 172
         }
       ]
     },
@@ -7612,7 +7612,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 170
+          "text_index": 169
         }
       ]
     },
@@ -7626,7 +7626,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 170
+          "text_index": 169
         }
       ]
     },
@@ -7640,7 +7640,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 169
+          "text_index": 168
         }
       ]
     },
@@ -7654,7 +7654,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 169
+          "text_index": 168
         }
       ]
     },
@@ -7668,7 +7668,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 169
+          "text_index": 168
         }
       ]
     },
@@ -7682,7 +7682,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 169
+          "text_index": 168
         }
       ]
     },
@@ -7696,7 +7696,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 154
+          "text_index": 153
         }
       ]
     },
@@ -7710,7 +7710,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 124
+          "text_index": 123
         },
         {
           "license": "Apache-2.0",
@@ -7728,7 +7728,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 185
+          "text_index": 184
         },
         {
           "license": "Apache-2.0",
@@ -7746,7 +7746,25 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 247
+          "text_index": 246
+        }
+      ]
+    },
+    {
+      "name": "typed-path",
+      "version": "0.12.4",
+      "license": "MIT OR Apache-2.0",
+      "source": {
+        "kind": "cargo"
+      },
+      "notices": [
+        {
+          "license": "MIT",
+          "text_index": 300
+        },
+        {
+          "license": "Apache-2.0",
+          "text_index": 31
         }
       ]
     },
@@ -7760,7 +7778,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -7778,7 +7796,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 315
+          "text_index": 314
         },
         {
           "license": "Apache-2.0",
@@ -7788,7 +7806,7 @@
     },
     {
       "name": "unicase",
-      "version": "2.9.0",
+      "version": "2.10.0",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -7796,7 +7814,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 99
+          "text_index": 98
         },
         {
           "license": "Apache-2.0",
@@ -7814,7 +7832,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 104
+          "text_index": 103
         },
         {
           "license": "Apache-2.0",
@@ -7838,7 +7856,7 @@
     },
     {
       "name": "unicode-ident",
-      "version": "1.0.26",
+      "version": "1.0.27",
       "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
       "source": {
         "kind": "cargo"
@@ -7846,7 +7864,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -7854,25 +7872,29 @@
         },
         {
           "license": "Unicode-3.0",
-          "text_index": 343
+          "text_index": 342
         }
       ]
     },
     {
       "name": "unicode-normalization",
-      "version": "0.1.25",
-      "license": "MIT OR Apache-2.0",
+      "version": "0.1.26",
+      "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
       "source": {
         "kind": "cargo"
       },
       "notices": [
         {
           "license": "MIT",
-          "text_index": 104
+          "text_index": 103
         },
         {
           "license": "Apache-2.0",
           "text_index": 45
+        },
+        {
+          "license": "Unicode-3.0",
+          "text_index": 342
         }
       ]
     },
@@ -7886,7 +7908,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 104
+          "text_index": 103
         },
         {
           "license": "Apache-2.0",
@@ -7904,7 +7926,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 104
+          "text_index": 103
         },
         {
           "license": "Apache-2.0",
@@ -7922,7 +7944,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 104
+          "text_index": 103
         },
         {
           "license": "Apache-2.0",
@@ -7954,7 +7976,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 87
+          "text_index": 86
         },
         {
           "license": "Apache-2.0",
@@ -7972,11 +7994,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 299
+          "text_index": 298
         },
         {
           "license": "Apache-2.0",
-          "text_index": 298
+          "text_index": 297
         }
       ]
     },
@@ -7994,7 +8016,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 221
+          "text_index": 220
         }
       ]
     },
@@ -8012,7 +8034,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 231
+          "text_index": 230
         }
       ]
     },
@@ -8026,7 +8048,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 258
+          "text_index": 257
         }
       ]
     },
@@ -8044,7 +8066,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 231
+          "text_index": 230
         }
       ]
     },
@@ -8062,7 +8084,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 114
+          "text_index": 113
         }
       ]
     },
@@ -8080,13 +8102,13 @@
         },
         {
           "license": "MIT",
-          "text_index": 93
+          "text_index": 92
         }
       ]
     },
     {
       "name": "uuid-rng-internal",
-      "version": "1.26.1",
+      "version": "1.28.0",
       "license": "Apache-2.0 OR MIT",
       "source": {
         "kind": "cargo"
@@ -8098,7 +8120,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 93
+          "text_index": 92
         }
       ]
     },
@@ -8116,7 +8138,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 227
+          "text_index": 226
         }
       ]
     },
@@ -8134,7 +8156,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 227
+          "text_index": 226
         }
       ]
     },
@@ -8148,11 +8170,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 338
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 318
         }
       ]
     },
@@ -8166,13 +8188,13 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 268
+          "text_index": 267
         }
       ]
     },
     {
       "name": "want",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "license": "MIT",
       "source": {
         "kind": "cargo"
@@ -8180,7 +8202,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 150
+          "text_index": 149
         }
       ]
     },
@@ -8194,7 +8216,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 88
+          "text_index": 87
         },
         {
           "license": "Apache-2.0",
@@ -8212,7 +8234,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 88
+          "text_index": 87
         },
         {
           "license": "Apache-2.0",
@@ -8230,7 +8252,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 88
+          "text_index": 87
         },
         {
           "license": "Apache-2.0",
@@ -8248,7 +8270,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         },
         {
           "license": "Apache-2.0",
@@ -8266,7 +8288,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 88
+          "text_index": 87
         },
         {
           "license": "Apache-2.0",
@@ -8284,7 +8306,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 269
+          "text_index": 268
         },
         {
           "license": "Apache-2.0",
@@ -8316,7 +8338,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 334
+          "text_index": 333
         },
         {
           "license": "Apache-2.0",
@@ -8334,7 +8356,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 274
         },
         {
           "license": "Apache-2.0",
@@ -8352,7 +8374,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 274
         },
         {
           "license": "Apache-2.0",
@@ -8370,7 +8392,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 274
         },
         {
           "license": "Apache-2.0",
@@ -8388,7 +8410,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 274
         },
         {
           "license": "Apache-2.0",
@@ -8406,7 +8428,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 274
         },
         {
           "license": "Apache-2.0",
@@ -8424,7 +8446,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 274
         },
         {
           "license": "Apache-2.0",
@@ -8450,7 +8472,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 285
+          "text_index": 284
         }
       ]
     },
@@ -8478,7 +8500,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 304
+          "text_index": 303
         }
       ]
     },
@@ -8510,7 +8532,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 231
+          "text_index": 230
         }
       ]
     },
@@ -8524,7 +8546,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -8538,7 +8560,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 103
+          "text_index": 102
         },
         {
           "license": "Apache-2.0",
@@ -8556,7 +8578,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 316
+          "text_index": 315
         }
       ]
     },
@@ -8570,7 +8592,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 330
+          "text_index": 329
         }
       ]
     },
@@ -8584,13 +8606,13 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
     {
       "name": "zerocopy",
-      "version": "0.8.59",
+      "version": "0.8.63",
       "license": "BSD-2-Clause OR Apache-2.0 OR MIT",
       "source": {
         "kind": "cargo"
@@ -8598,7 +8620,7 @@
       "notices": [
         {
           "license": "BSD-2-Clause",
-          "text_index": 226
+          "text_index": 225
         },
         {
           "license": "Apache-2.0",
@@ -8606,7 +8628,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 229
+          "text_index": 228
         }
       ]
     },
@@ -8620,13 +8642,13 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
     {
       "name": "zeroize",
-      "version": "1.9.0",
+      "version": "1.9.1",
       "license": "Apache-2.0 OR MIT",
       "source": {
         "kind": "cargo"
@@ -8638,7 +8660,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 159
+          "text_index": 158
         }
       ]
     },
@@ -8652,7 +8674,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
@@ -8666,13 +8688,13 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 343
         }
       ]
     },
     {
       "name": "zip",
-      "version": "4.6.1",
+      "version": "9.0.5",
       "license": "MIT",
       "source": {
         "kind": "cargo"
@@ -8680,7 +8702,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 314
+          "text_index": 313
         }
       ]
     },
@@ -8708,7 +8730,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 300
         }
       ]
     },
@@ -8728,7 +8750,7 @@
     },
     {
       "name": "zstd-safe",
-      "version": "8.0.0",
+      "version": "8.2.0",
       "license": "BSD-3-Clause",
       "source": {
         "kind": "cargo"
@@ -8742,7 +8764,7 @@
     },
     {
       "name": "zstd-sys",
-      "version": "2.1.0+zstd.1.5.7",
+      "version": "2.1.2+zstd.1.5.7",
       "license": "BSD-3-Clause",
       "source": {
         "kind": "cargo"
@@ -8764,7 +8786,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 281
+          "text_index": 280
         },
         {
           "license": "Apache-2.0",
@@ -8772,7 +8794,7 @@
         },
         {
           "license": "Zlib",
-          "text_index": 346
+          "text_index": 345
         }
       ]
     },
@@ -8786,7 +8808,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 281
+          "text_index": 280
         },
         {
           "license": "Apache-2.0",
@@ -8794,7 +8816,7 @@
         },
         {
           "license": "Zlib",
-          "text_index": 346
+          "text_index": 345
         }
       ]
     }
@@ -8882,7 +8904,6 @@
     "Copyright (C) Jonas Schievink <jonasschievink@gmail.com>\n\nPermission to use, copy, modify, and/or distribute this software for\nany purpose with or without fee is hereby granted.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\nWITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\nMERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR\nANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\nWHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN\nAN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT\nOF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.\n",
     "Copyright (C) SQLx Contributors\nPortions of this work Copyright (C) LaunchBadge, LLC\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n",
     "Copyright (c) 2006-2009 Graydon Hoare\nCopyright (c) 2009-2013 Mozilla Foundation\nCopyright (c) 2016 Artyom Pavlov\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n",
-    "Copyright (c) 2010 The Rust Project Developers\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n",
     "Copyright (c) 2011 Google Inc. All rights reserved.\nCopyright (c) 2020 Yevhenii Reizner All rights reserved.\n\nRedistribution and use in source and binary forms, with or without\nmodification, are permitted provided that the following conditions are\nmet:\n\n  * Redistributions of source code must retain the above copyright\n    notice, this list of conditions and the following disclaimer.\n\n  * Redistributions in binary form must reproduce the above copyright\n    notice, this list of conditions and the following disclaimer in\n    the documentation and/or other materials provided with the\n    distribution.\n\n  * Neither the name of the copyright holder nor the names of its\n    contributors may be used to endorse or promote products derived\n    from this software without specific prior written permission.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS\n\"AS IS\" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT\nLIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR\nA PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT\nOWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,\nSPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT\nLIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,\nDATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY\nTHEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT\n(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\nOF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n",
     "Copyright (c) 2012-2013 Mozilla Foundation\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n",
     "Copyright (c) 2013-2014 The Rust Project Developers.\nCopyright (c) 2015-2020 The rust-hex Developers\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
@@ -9114,7 +9135,7 @@
     "The MIT License (MIT)\n\nCopyright (c) 2013 Nicolas Silva\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of\nthis software and associated documentation files (the \"Software\"), to deal in\nthe Software without restriction, including without limitation the rights to\nuse, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software is furnished to do so,\nsubject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS\nFOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR\nCOPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER\nIN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN\nCONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n",
     "The MIT License (MIT)\n\nCopyright (c) 2013 Panayiotis Lipiridis\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of\nthis software and associated documentation files (the \"Software\"), to deal in\nthe Software without restriction, including without limitation the rights to\nuse, copy, modify, merge, publish, distribute, sublicense, and/or sell copies\nof the Software, and to permit persons to whom the Software is furnished to do\nso, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "The MIT License (MIT)\n\nCopyright (c) 2014 Mathijs van de Nes\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.",
-    "The MIT License (MIT)\n\nCopyright (c) 2014 Mathijs van de Nes\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n\nSome files in the \"tests/data\" subdirectory of this repository are under other\nlicences; see files named LICENSE.*.txt for details.",
+    "The MIT License (MIT)\n\nCopyright (c) 2014 Mathijs van de Nes\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "The MIT License (MIT)\n\nCopyright (c) 2014 Paho Lurie-Gregg\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "The MIT License (MIT)\n\nCopyright (c) 2014 Vladimir Matveev\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "The MIT License (MIT)\n\nCopyright (c) 2014-2022 Steven Fackler, Yuki Okushi\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of\nthis software and associated documentation files (the \"Software\"), to deal in\nthe Software without restriction, including without limitation the rights to\nuse, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software is furnished to do so,\nsubject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS\nFOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR\nCOPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER\nIN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN\nCONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n",

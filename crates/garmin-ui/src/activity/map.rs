@@ -1872,7 +1872,10 @@ mod tests {
         );
 
         apply_demand(&mut tiles, [id]);
-        assert!(tiles.requests.is_empty());
+        assert_eq!(
+            tiles.requests,
+            [] as [crate::activity::map_runtime::TileCoordinates; 0]
+        );
         assert!(matches!(
             tiles.entries.get(&id),
             Some(super::TileEntry::Empty)

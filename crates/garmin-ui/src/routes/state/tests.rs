@@ -191,10 +191,16 @@ fn replacing_an_upload_clears_the_previous_candidate_before_inspection() {
     state.begin_upload(next.clone());
     assert!(state.busy);
     assert_eq!(state.upload, Some(next.clone()));
-    assert!(state.candidates.is_empty());
-    assert!(state.rejected.is_empty());
+    assert_eq!(
+        state.candidates,
+        [] as [garmin_service_api::routes::GpxCandidate; 0]
+    );
+    assert_eq!(
+        state.rejected,
+        [] as [garmin_service_api::routes::GpxRejected; 0]
+    );
     assert!(state.candidate.is_none());
-    assert!(state.name.is_empty());
+    assert_eq!(state.name, "");
     assert!(state.sport.is_none());
     assert!(!state.points_ready);
 
@@ -221,7 +227,10 @@ fn replacement_review_reply_discards_stale_candidate_even_without_start_snapshot
     new_upload.file_name = "other.gpx".into();
 
     state.accept(RouteReply::Upload(new_upload));
-    assert!(state.candidates.is_empty());
+    assert_eq!(
+        state.candidates,
+        [] as [garmin_service_api::routes::GpxCandidate; 0]
+    );
     assert!(state.candidate.is_none());
     assert!(matches!(
         state.pending,

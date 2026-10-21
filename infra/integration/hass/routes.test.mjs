@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import {
     click,
     courseVisible,
+    disconnectAndReconnect,
     download,
     eventually,
     fixture,
@@ -302,7 +303,7 @@ for (const interruption of ['profile switch', 'disconnect']) {
             assert.equal((await targets(p)).filter(t => t.id.startsWith('routes.open.')).length, 0);
             await switchProfile(p, 0);
         } else {
-            await p.evaluate(() => window.integrationFault.disconnect());
+            await disconnectAndReconnect(p);
             await run(p, [wait('routes.import')]);
         }
         assert.deepEqual(f.storage.snapshot(), before);
@@ -322,7 +323,7 @@ test('lost committed import and Course replies retry without duplicates', option
     await eventually(() => f.storage.routes(name).length === 1, 'import committed before response');
     const [route] = f.storage.routes(name);
     assert((await p.evaluate(() => window.integrationFault.incoming.length)) > 0);
-    await p.evaluate(() => window.integrationFault.disconnect());
+    await disconnectAndReconnect(p);
     await run(p, [
         wait('routes.name'),
         scroll('routes.name', 1600),
@@ -345,7 +346,7 @@ test('lost committed import and Course replies retry without duplicates', option
     const [course] = f.storage.courses(name);
     assert.equal(course.version, 1);
     assert(!(await targets(p)).some(t => t.id === `routes.download.${course.id}`));
-    await p.evaluate(() => window.integrationFault.disconnect());
+    await disconnectAndReconnect(p);
     await p.mouse.move(800, 400);
     await p.mouse.wheel(0, -1600);
     await run(p, [wait('routes.retry'), click('routes.retry')]);

@@ -1,5 +1,19 @@
 # Publication readiness
 
+## Published AMD64 release
+
+The first public experimental release is [v0.1.1](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.1),
+published on 2026-10-20 from commit `6f300c9`. The
+[tagged candidate run](https://github.com/kubijo/garmin-toolkit/actions/runs/39377755631) passed native image/source
+assembly, HAOS acceptance, signed provenance, and independent draft verification. The
+[promotion run](https://github.com/kubijo/garmin-toolkit/actions/runs/39390440018) passed promotion and public
+repository installation. The release includes signed inventories, dependency sources, acceptance reports, runtime
+versions, and dark app captures.
+
+Qualification covers AMD64. ARM64 runtime acceptance and publication failure recovery remain in the
+[publication plan](../plans/device-expansion-and-publication.md#hass-experimental-release). Published artifacts retain
+their original source and dependency versions; subsequent source changes require a new release to reach installed apps.
+
 ## Dependency sources
 
 The [inventory](../../infra/release/hass-files.toml) includes workspace source, Cargo/asset notices, and image-bound
@@ -7,14 +21,14 @@ dependency sources, including inherited GVfs dependencies despite raw MTP. SBOM 
 redistribution coverage; the build-only OCI writer is not shipped.
 
 Distribute sources, notices, build instructions, checksums, and attestations through GitHub Releases. Verify downloaded
-bundles before clearing the
-[publication gate](../plans/device-expansion-and-publication.md#provenance-and-redistribution).
+bundles against the release's signed inventory before publication.
 
 [AMD64 audit](https://github.com/kubijo/garmin-toolkit/actions/runs/39208332753), commit `7887023`, verified six
 downloaded parts, 10,905 source roots, 6,432 recipes, and exact coverage of the image's 232 runtime outputs. The
 inventory reports no unresolved runtime licenses. Native/WASM dependencies, Cargo/asset notices, and the lockfile
 matched the native receipt and committed source. The archive contains 1,115,421 entries and 21,063,075,840 decoded tar
-bytes. Tagged publication and live provenance remain unqualified.
+bytes. These measurements describe the pre-release audit at `7887023`; the published release has its own signed
+inventory and acceptance evidence.
 
 Source stream SHA-256: `3d584f3a5352333381b3e2162719456b6ebd730b80cf930b3493534b3d3767ff`. Image SHA-256:
 `100641a9ac45978967cb3fa7bc3ec48365b7bb129b1ac35ad6d306c423e10e40`.
@@ -37,10 +51,9 @@ Retain the complete notices and their copyright, attribution, and font naming co
 
 ## Distribution choices
 
-HASS uses GHCR and GitHub Releases for AMD64 experimental releases. ARM64 requires runtime acceptance. After public
-installation is qualified, add a
-[My Home Assistant link](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/) to the repository page,
-prefilling `https://github.com/kubijo/garmin-toolkit#hass-apps`. Users confirm repository addition and installation.
-GitHub is the only project hosting.
+HASS uses GHCR and GitHub Releases for AMD64 experimental releases. ARM64 requires runtime acceptance. The
+[README](../../README.md#home-assistant) and [quickstart](../../apps/garmin-hass/addon/DOCS.md#install-and-open) provide
+My Home Assistant links for `https://github.com/kubijo/garmin-toolkit#hass-apps`. Users confirm repository addition and
+installation. GitHub is the only project hosting.
 
 Desktop publication still needs supported-host, channel, and signing decisions; mobile remains separate.

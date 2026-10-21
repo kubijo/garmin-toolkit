@@ -1820,7 +1820,10 @@ mod tests {
 
         assert_eq!(execution.files_to_remove.len(), 1);
         assert_eq!(execution.bytes_to_remove, 20);
-        assert!(execution.files_already_absent.is_empty());
+        assert_eq!(
+            execution.files_already_absent,
+            [] as [garmin_device::SafeRelativePath; 0]
+        );
     }
 
     #[tokio::test]

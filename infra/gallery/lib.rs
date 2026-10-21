@@ -157,3 +157,38 @@ impl CatalogGlobals for Globals {
 }
 
 gallery::scenes_dylib!(Globals);
+
+#[cfg(test)]
+mod discovery_tests {
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn discovers_colocated_scenes_and_catalog_globals() {
+        let manifest = crate::__gallery_manifest();
+        let keys: BTreeSet<_> = manifest
+            .scenes
+            .iter()
+            .map(|scene| (scene.module_path, scene.name))
+            .collect();
+        assert_eq!(keys.len(), manifest.scenes.len(), "scene keys are unique");
+
+        for expected in [
+            ("garmin_gallery::button", "Playground"),
+            ("garmin_gallery::screens", "Contact Garmin"),
+            ("garmin_gallery::console", "All Variants"),
+        ] {
+            assert!(
+                keys.contains(&expected),
+                "missing colocated scene {expected:?}"
+            );
+        }
+        assert!(
+            manifest.scenes.iter().all(|scene| !scene.source.is_empty()),
+            "discovered scenes retain their source view"
+        );
+        assert!(
+            crate::__gallery_globals().is_some(),
+            "the catalog retains its theme and language controls"
+        );
+    }
+}

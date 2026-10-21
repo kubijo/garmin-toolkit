@@ -4,6 +4,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import signal
 import socket
 import subprocess
@@ -26,6 +27,7 @@ import haos_app_vm as vm
 import haos_workflow
 from haos_lifecycle import Lifecycle
 from haos_platform import acceleration, baseline_fixture
+from haos_upgrade import published_baseline
 from hass_release_build import verify_build_inputs
 from processes import ACCEPTANCE_SCRATCH, session_scratch, stop_group
 
@@ -86,7 +88,16 @@ class Check(Run):
     """Fresh evidence directory under repository .tmp; defaults to an owned session directory."""
 
     lifecycle: bool = False
-    """Test fixture-baseline upgrade, backup recovery, and uninstall/reinstall; requires repository and receipt."""
+    """Test upgrade, backup recovery, and uninstall/reinstall; requires repository and receipt."""
+
+    baseline_release: Path | None = None
+    """Published release directory with image, release.json, SHA256SUMS, and their attestation bundles."""
+
+    candidate_version: str | None = None
+    """Private Supervisor candidate version for lifecycle checks; leaves OCI archive bytes unchanged."""
+
+    install_links: bool = False
+    """Verify README/quickstart My Home Assistant links against the public repository in this disposable browser."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -222,7 +233,7 @@ def launch_browser(state_path: Path, evidence: Path) -> subprocess.Popen[str]:
         return subprocess.Popen(
             [
                 'node',
-                str(ROOT / 'infra/javascript/haos-browser.mjs'),
+                str(ROOT / 'infra/javascript/haos-browser.mts'),
                 str(state_path),
                 str(evidence),
             ],
@@ -256,18 +267,32 @@ def launch_tunnel(
     raise TimeoutError('Home Assistant Core did not become available within the startup window') from last_error
 
 
-def wait_browser(browser: subprocess.Popen[str], evidence: Path, checkpoint: str = 'ready.json') -> None:
-    deadline = time.monotonic() + 120
+def wait_browser(
+    browser: subprocess.Popen[str], evidence: Path, checkpoint: str = 'ready.json', *, timeout: int = 120
+) -> None:
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if (evidence / checkpoint).is_file():
             return
         if browser.poll() is not None:
             raise RuntimeError(f'Browser verification failed: {(evidence / "browser.log").read_text()[-3000:]}')
         time.sleep(0.5)
-    raise TimeoutError(f'Browser did not reach {checkpoint} in 120 seconds')
+    raise TimeoutError(f'Browser did not reach {checkpoint} in {timeout} seconds')
 
 
 def run_session(options: Run) -> int:
+    if (
+        isinstance(options, Check)
+        and not options.lifecycle
+        and (options.baseline_release is not None or options.candidate_version is not None)
+    ):
+        raise ValueError('Published baseline and private candidate versions require lifecycle acceptance')
+    if (
+        isinstance(options, Check)
+        and options.install_links
+        and options.repository_url != 'https://github.com/kubijo/garmin-toolkit#hass-apps'
+    ):
+        raise ValueError('Installation link acceptance requires the public hass-apps repository URL')
     if (
         isinstance(options, Check)
         and options.lifecycle
@@ -284,6 +309,15 @@ def run_session(options: Run) -> int:
         if isinstance(options, Check) and options.build_receipt is not None
         else None
     )
+    previous = (
+        published_baseline(options.baseline_release, ROOT, guest)
+        if isinstance(options, Check) and options.baseline_release is not None
+        else None
+    )
+    if previous is not None:
+        baseline_version = previous[1]['version']
+        if baseline_version == (options.candidate_version or vm.test_config()[1]):
+            raise ValueError('Published baseline and candidate require distinct Supervisor versions')
     vm.SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
     scratch = session_scratch(vm.SCRATCH_ROOT)
     session_id = secrets.token_hex(6)
@@ -311,8 +345,14 @@ def run_session(options: Run) -> int:
         runtime = Path(directory)
         runtime.chmod(0o700)
         if isinstance(options, Check) and options.lifecycle:
-            baseline = runtime / 'baseline-fixture.oci.tar'
-            baseline_fixture(options.app_archive, baseline)
+            if previous is None:
+                baseline = runtime / 'baseline-fixture.oci.tar'
+                baseline_fixture(options.app_archive, baseline)
+            else:
+                baseline, identity = previous
+                encoded = json.dumps(identity, indent=2) + '\n'
+                (runtime / 'published-baseline.json').write_text(encoded)
+                (evidence / 'published-baseline.json').write_text(encoded)
             options = replace(options, baseline_archive=baseline)
         state_path = runtime / 'session.json'
         http_port = options.port or vm.free_port()
@@ -328,6 +368,8 @@ def run_session(options: Run) -> int:
             'password': 'admin',
             'browser_temporary': browser_directory,
             'workflow': isinstance(options, Check),
+            'install_links': isinstance(options, Check) and options.install_links,
+            'repository_url': options.repository_url,
         }
         save_state(state_path, state)
         print(f'Session {session_id}: {guest.architecture}, {state["acceleration"]}; runtime {runtime}', flush=True)
@@ -354,6 +396,16 @@ def run_session(options: Run) -> int:
                 assert browser is not None
                 wait_browser(browser, evidence)
                 if isinstance(options, Check):
+                    if options.install_links:
+                        # The link must offer a first install, rather than find an existing repository.
+                        vm.run(vm.ssh_command(key, ssh_port, f'ha apps uninstall {app_slug}'), timeout=180)
+                        repository = shlex.quote(app_slug.partition('_')[0])
+                        vm.run(
+                            vm.ssh_command(key, ssh_port, 'ha store remove ' + repository),
+                            timeout=90,
+                        )
+                        (evidence / 'install-links-prepared.json').write_text('{}\n')
+                        wait_browser(browser, evidence, 'install-links.json', timeout=600)
 
                     def reboot() -> dict[str, str]:
                         nonlocal tunnel

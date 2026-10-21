@@ -30,6 +30,10 @@ in-shell +cmd:
 
     cd {{ quote(repository_root) }}
 
+    if [[ -z ${RUSTC_WRAPPER+x} ]] && host_sccache=$(command -v sccache); then
+        export RUSTC_WRAPPER="$host_sccache"
+    fi
+
     if command -v python3 >/dev/null 2>&1; then
         python3 infra/python/prepare_cargo_target.py
     fi
@@ -40,3 +44,12 @@ in-shell +cmd:
         exec "$@"
     fi
     exec nix develop {{ quote(flake) }} --command "$@"
+
+# Select optional host caching without changing the caller's working directory.
+[private]
+[script("bash")]
+with-host-sccache +cmd:
+    if [[ -z ${RUSTC_WRAPPER+x} ]] && host_sccache=$(command -v sccache); then
+        export RUSTC_WRAPPER="$host_sccache"
+    fi
+    exec "$@"

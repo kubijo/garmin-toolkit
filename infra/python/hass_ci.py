@@ -48,6 +48,8 @@ PUBLICATION = Path('.tmp/publication')
 NATIVE = Path('.tmp/native')
 SOURCES = Path('.tmp/sources')
 BUNDLES = Path('.tmp/bundles')
+# Review this published baseline when preparing the next release; never resolve a moving "latest" release.
+UPGRADE_BASELINE = '0.1.1'
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -229,6 +231,31 @@ def acceptance(build_directory: Path, evidence: Path, *arguments: str) -> None:
     )
 
 
+def download_upgrade_baseline() -> Path:
+    directory = Path('.tmp/published-baseline')
+    directory.mkdir()
+    arguments = [
+        'gh',
+        'release',
+        'download',
+        'v' + UPGRADE_BASELINE,
+        '--repo',
+        'kubijo/garmin-toolkit',
+        '--dir',
+        str(directory),
+    ]
+    for name in (
+        'release.json',
+        'SHA256SUMS',
+        'checksums.sigstore.jsonl',
+        'artifacts.sigstore.jsonl',
+        f'garmin-toolkit-hass-{UPGRADE_BASELINE}-amd64.oci.tar',
+    ):
+        arguments.extend(('--pattern', name))
+    run(*arguments)
+    return directory
+
+
 def draft(*, preflight: bool = False) -> None:
     source = Path.cwd()
     with phase('Validate candidate identity'):
@@ -256,8 +283,18 @@ def draft(*, preflight: bool = False) -> None:
         else:
             stage_publication(stage)
     local, staged = Path('.tmp/lifecycle-acceptance'), Path('.tmp/staged-acceptance')
+    with phase('Download published upgrade baseline'):
+        baseline = download_upgrade_baseline()
     with phase('Test HAOS installation and lifecycle'):
-        acceptance(NATIVE, local, '--repository', str(PUBLICATION / 'repository'), '--lifecycle')
+        acceptance(
+            NATIVE,
+            local,
+            '--repository',
+            str(PUBLICATION / 'repository'),
+            '--lifecycle',
+            '--baseline-release',
+            str(baseline),
+        )
     with phase('Test staged repository installation in HAOS'):
         staging = object_value(read_json(PUBLICATION / 'staging.json'))
         acceptance(

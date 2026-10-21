@@ -265,15 +265,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arbitrary"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
-dependencies = [
- "derive_arbitrary",
-]
-
-[[package]]
 name = "arboard"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1070,7 +1061,7 @@ checksum = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681"
 dependencies = [
  "serde",
  "termcolor",
- "unicode-width 0.2.2",
+ "unicode-width 0.1.14",
 ]
 
 [[package]]
@@ -1477,17 +1468,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 dependencies = [
  "serde_core",
-]
-
-[[package]]
-name = "derive_arbitrary"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -2432,8 +2412,8 @@ dependencies = [
 
 [[package]]
 name = "gallery"
-version = "0.13.1"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.13.1#b0cf1fc3b73c7ea8d391e8c70b4d006021445c79"
+version = "0.14.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.14.0#73606e297cafeb8b4a1158f90eb456df71de7830"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2475,8 +2455,8 @@ dependencies = [
 
 [[package]]
 name = "gallery-build"
-version = "0.13.1"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.13.1#b0cf1fc3b73c7ea8d391e8c70b4d006021445c79"
+version = "0.14.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.14.0#73606e297cafeb8b4a1158f90eb456df71de7830"
 dependencies = [
  "camino",
  "glob",
@@ -2486,8 +2466,8 @@ dependencies = [
 
 [[package]]
 name = "gallery-macros"
-version = "0.13.1"
-source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.13.1#b0cf1fc3b73c7ea8d391e8c70b4d006021445c79"
+version = "0.14.0"
+source = "git+https://github.com/kubijo/rs-gallery.git?tag=v0.14.0#73606e297cafeb8b4a1158f90eb456df71de7830"
 dependencies = [
  "heck",
  "prettyplease",
@@ -2498,7 +2478,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-brand"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "resvg",
  "thiserror 2.0.20",
@@ -2506,7 +2486,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-capture"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "har",
  "serde",
@@ -2519,7 +2499,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-cli-tui"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "byte-unit",
@@ -2538,7 +2518,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-color"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "cint",
  "garmin-macros",
@@ -2549,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-device"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2605,7 +2585,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-i18n"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "formatjs_intl",
  "icu_calendar",
@@ -2620,7 +2600,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-logging"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "garmin-model",
  "garmin-service-api",
@@ -2636,7 +2616,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-macros"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2645,7 +2625,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-model"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "blake3",
  "garmin-color",
@@ -2663,7 +2643,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-progress"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "garmin-model",
  "serde",
@@ -2671,7 +2651,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-service-api"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "camino",
  "garmin-color",
@@ -2685,7 +2665,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-ui"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "arc-swap",
  "buffa",
@@ -2725,7 +2705,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-update"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64 0.23.1",
  "byte-unit",
@@ -5350,15 +5330,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ordered-float"
-version = "5.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c7c9e0d9b23589f26070720bac724174bfec1083e82f7854cdd0267518343c0"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "ordered-stream"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6626,9 +6597,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -7235,7 +7206,7 @@ version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c2499c2d826531388872b2268718aed907a39bd785ab0dcfe57fab26283f92e"
 dependencies = [
- "skrifa 0.44.0",
+ "skrifa 0.42.1",
  "yazi",
  "zeno",
 ]
@@ -7422,7 +7393,7 @@ dependencies = [
  "nix 0.29.0",
  "num-derive",
  "num-traits",
- "ordered-float 4.6.0",
+ "ordered-float",
  "pest",
  "pest_derive",
  "phf 0.11.3",
@@ -7850,6 +7821,12 @@ checksum = "cb30dbbd9036155e74adad6812e9898d03ec374946234fbcebd5dfc7b9187b90"
 dependencies = [
  "rustc-hash 2.1.3",
 ]
+
+[[package]]
+name = "typed-path"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54ec2755506471f54baf5e4bb5499d8e510cc1caf271270e778a736bd2d7336c"
 
 [[package]]
 name = "typenum"
@@ -8451,18 +8428,18 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
+checksum = "58ec80e73fd8baf57bf0d9615554c75348bda990d6d5bbeab964dd068319fecb"
 dependencies = [
  "rustls-pki-types",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
+checksum = "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -8515,7 +8492,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f2ab60e120fd6eaa68d9567f3226e876684639d22a4219b313ff69ec0ccd5ac"
 dependencies = [
  "log",
- "ordered-float 4.6.0",
+ "ordered-float",
  "strsim",
  "thiserror 1.0.69",
  "wezterm-dynamic-derive",
@@ -8769,7 +8746,7 @@ dependencies = [
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
  "once_cell",
- "ordered-float 5.5.0",
+ "ordered-float",
  "parking_lot",
  "portable-atomic",
  "portable-atomic-util",
@@ -8824,7 +8801,7 @@ dependencies = [
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
  "once_cell",
- "ordered-float 5.5.0",
+ "ordered-float",
  "parking_lot",
  "portable-atomic",
  "portable-atomic-util",
@@ -9615,14 +9592,15 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "4.6.1"
+version = "9.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
+checksum = "6e04976da629d3b04204ba8105b396a193af8ad2583b2c79bfb3ab8af580a11e"
 dependencies = [
- "arbitrary",
  "crc32fast",
  "indexmap 2.14.2",
  "memchr",
+ "nix 0.31.3",
+ "typed-path",
 ]
 
 [[package]]

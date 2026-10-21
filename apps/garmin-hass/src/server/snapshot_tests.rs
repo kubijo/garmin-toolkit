@@ -107,7 +107,10 @@ async fn reloaded_connection_can_discard_an_abandoned_upload() -> anyhow::Result
     else {
         anyhow::bail!("missing operations");
     };
-    assert!(operations.is_empty());
+    assert_eq!(
+        operations,
+        [] as [garmin_service_api::snapshots::SnapshotOperation; 0]
+    );
     Ok(())
 }
 

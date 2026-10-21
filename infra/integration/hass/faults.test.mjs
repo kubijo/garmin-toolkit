@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runInNewContext } from 'node:vm';
-import { installFaults } from './faults.mjs';
+import { installFaults, reconnectedAfter } from './faults.mjs';
 
 function environment() {
     class Socket extends EventTarget {
@@ -50,6 +50,25 @@ async function until(check) {
     }
     assert.fail('Fault boundary was not reached');
 }
+
+test('reconnect waits for a replacement socket and usable application controls', () => {
+    const browser = environment();
+    const node = { id: 'navigation.1', enabled: true, bounds: [0, 0, 100, 40] };
+    browser.garminAutomation = { targets: () => [node] };
+    const ready = runInNewContext(`(${reconnectedAfter.toString()})`, browser);
+    new browser.WebSocket();
+    const previous = browser.integrationSockets.standard;
+    browser.integrationFault.disconnect();
+    assert.equal(ready(previous), false, 'the old enabled UI frame must not satisfy reconnection');
+    node.enabled = false;
+    new browser.WebSocket();
+    assert.equal(ready(previous), false, 'a replacement socket alone does not make the app usable');
+    node.enabled = true;
+    node.bounds = null;
+    assert.equal(ready(previous), false, 'an unavailable navigation target is not ready');
+    node.bounds = [0, 0, 100, 40];
+    assert.equal(ready(previous), true);
+});
 
 test('file-read gate reaches a pending boundary and resumes the original bytes', async () => {
     const browser = environment();

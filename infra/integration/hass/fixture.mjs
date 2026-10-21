@@ -7,7 +7,7 @@ import { connect } from 'node:net';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
-import { installFaults } from './faults.mjs';
+import { installFaults, reconnectedAfter } from './faults.mjs';
 import { Storage } from './storage.mjs';
 
 export const origin = 'http://127.0.0.1:8099/';
@@ -78,6 +78,17 @@ export async function run(page, actions) {
 
 export async function targets(page) {
     return page.evaluate(() => window.garminAutomation.targets());
+}
+
+export async function disconnectAndReconnect(page) {
+    const previous = await page.evaluate(() => {
+        const connections = window.integrationSockets.standard;
+        window.integrationFault.disconnect();
+        return connections;
+    });
+    // The close request returns before the application renders its offline state.
+    // Require a replacement transport and usable UI rather than a stale enabled frame.
+    await page.waitForFunction(reconnectedAfter, previous, { polling: 50, timeout: 30000 });
 }
 
 export async function selectProfile(page, index = 0) {

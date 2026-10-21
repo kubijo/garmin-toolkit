@@ -453,12 +453,15 @@ class CITests(unittest.TestCase):
             patch.object(ci, 'prepare_publication'),
             patch.object(ci, 'login'),
             patch.object(ci, 'stage_publication'),
+            patch.object(ci, 'download_upgrade_baseline', return_value=Path('/published-baseline')),
             patch.object(ci, 'acceptance', side_effect=acceptance) as check,
             patch.object(ci, 'package_evidence') as package,
         ):
             ci.draft()
         self.assertEqual(check.call_count, 2)
         self.assertIn('--lifecycle', check.call_args_list[0].args)
+        self.assertIn('--baseline-release', check.call_args_list[0].args)
+        self.assertIn('/published-baseline', check.call_args_list[0].args)
         self.assertIn('0.1.0-candidate.123.1', check.call_args_list[1].args)
         self.assertIn(index, check.call_args_list[1].args)
         self.assertEqual((self.scratch / 'staged-acceptance/lifecycle-workflow.json').read_text(), 'synthetic evidence')
@@ -506,6 +509,7 @@ class CITests(unittest.TestCase):
             patch.object(ci.hass_preflight, 'check_candidate', return_value=(document, document)),
             patch.object(ci.hass_preflight, 'package') as package,
             patch.object(ci, 'stage_image') as image,
+            patch.object(ci, 'download_upgrade_baseline', return_value=Path('/published-baseline')),
             patch.object(ci, 'acceptance', side_effect=acceptance) as check,
         ):
             ci.main(tyro.cli(ci.Options, args=['preflight']))
@@ -517,8 +521,45 @@ class CITests(unittest.TestCase):
         self.assertEqual(image.call_args.args[1:], ('0.1.1', index, ''))
         self.assertEqual(check.call_count, 2)
         self.assertIn('--lifecycle', check.call_args_list[0].args)
+        self.assertIn('--baseline-release', check.call_args_list[0].args)
+        self.assertIn('/published-baseline', check.call_args_list[0].args)
         self.assertIn('--repository-url', check.call_args_list[1].args)
         self.assertFalse((candidate / 'release.json').exists())
+
+    def test_upgrade_baseline_download_pins_the_release_and_only_required_assets(self) -> None:
+        with patch.object(ci, 'run') as run:
+            directory = ci.download_upgrade_baseline()
+        self.assertEqual(directory, Path('.tmp/published-baseline'))
+        self.assertTrue(directory.is_dir())
+        arguments = run.call_args.args
+        self.assertEqual(arguments[:4], ('gh', 'release', 'download', 'v0.1.1'))
+        self.assertEqual(
+            arguments[9::2],
+            (
+                'release.json',
+                'SHA256SUMS',
+                'checksums.sigstore.jsonl',
+                'artifacts.sigstore.jsonl',
+                'garmin-toolkit-hass-0.1.1-amd64.oci.tar',
+            ),
+        )
+        self.assertNotIn('--clobber', arguments)
+
+    def test_missing_published_baseline_blocks_acceptance_and_signing(self) -> None:
+        with (
+            patch.object(ci, 'release_guard'),
+            patch.object(ci, 'build', return_value=Path('/repository')),
+            patch.object(ci, 'prepare_publication'),
+            patch.object(ci, 'login'),
+            patch.object(ci, 'stage_publication'),
+            patch.object(ci, 'download_upgrade_baseline', side_effect=subprocess.CalledProcessError(1, ['gh'])),
+            patch.object(ci, 'acceptance') as check,
+            patch.object(ci, 'outputs') as outputs,
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
+            ci.draft()
+        check.assert_not_called()
+        outputs.assert_not_called()
 
     def test_completion_uses_branch_verification_or_tagged_draft_publication(self) -> None:
         for reference in ('refs/heads/dev', 'refs/tags/v0.1.1'):

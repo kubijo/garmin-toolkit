@@ -1,5 +1,5 @@
 name: Garmin Toolkit
-version: 0.1.1
+version: 0.1.2
 slug: garmin_toolkit
 description: Manage Garmin routes and devices from Home Assistant.
 url: https://github.com/kubijo/garmin-toolkit

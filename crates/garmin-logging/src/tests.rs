@@ -36,11 +36,9 @@ fn filters_advance_cursors_and_retries_do_not_duplicate_records() {
     let batch = store.history(&filter, None);
     assert_eq!(batch.records.len(), 1);
     assert_eq!(batch.cursor.sequence, 2);
-    assert!(
-        store
-            .history(&filter, Some(batch.cursor))
-            .records
-            .is_empty()
+    assert_eq!(
+        store.history(&filter, Some(batch.cursor)).records,
+        [] as [garmin_model::logging::Record; 0]
     );
     assert!(!store.history(&filter, Some(batch.cursor)).gap);
     drop(store);
@@ -386,7 +384,7 @@ fn reopen_detects_a_stale_cursor_even_after_reusing_its_sequence() {
     );
     let resumed = reopened.history(&Filter::default(), Some(batch.cursor));
     assert!(!resumed.gap);
-    assert!(resumed.records.is_empty());
+    assert_eq!(resumed.records, [] as [garmin_model::logging::Record; 0]);
 }
 
 #[tokio::test]

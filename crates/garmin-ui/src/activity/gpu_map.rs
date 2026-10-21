@@ -480,7 +480,7 @@ impl BrowserTilePacketBuilder {
             return Err("browser tile admission split an index".to_owned());
         }
         let (indices, remainder) = bytes.as_chunks::<{ std::mem::size_of::<u32>() }>();
-        debug_assert!(remainder.is_empty());
+        debug_assert_eq!(remainder, b"");
         if indices
             .iter()
             .map(|bytes| u32::from_le_bytes(*bytes))
@@ -2356,7 +2356,7 @@ mod tests {
         assert_eq!(result.version, LABEL_PROTOCOL_VERSION);
         assert_eq!(result.generation, 7);
         assert!(!result.vertices.is_empty());
-        assert!(!result.indices.is_empty());
+        assert_ne!(result.indices, [] as [u32; 0]);
         assert_eq!(
             result.atlas_pixels.len(),
             result.atlas_size[0] * result.atlas_size[1]
@@ -2533,15 +2533,15 @@ mod tests {
             ..anchor
         };
         assert_eq!(paint(&first, translated), vec![pos2(30.0, 20.0)]);
-        assert!(
+        assert_eq!(
             paint(
                 &first,
                 LabelView {
                     zoom: 1.0,
                     ..anchor
                 }
-            )
-            .is_empty()
+            ),
+            [] as [egui::Pos2; 0]
         );
     }
 

@@ -40,6 +40,13 @@ exclusive.
 The runner uses dark screenshots and retains evidence in `.tmp/haos-evidence/`. Success or failure removes its VM,
 browser, credentials, listeners, and disks. It needs no real HASS instance or USB device.
 
+Add `--install-links` with the public `https://github.com/kubijo/garmin-toolkit#hass-apps` repository and the release's
+independently verified registry digest to test the README/quickstart links. In that disposable guest only, the check
+uninstalls its empty test app and removes the repository, then follows My Home Assistant to add it, install/start the
+app, and reopen the existing repository. Home Assistant/My Home Assistant have no Garmin semantic controls, so this part
+uses the owned DevTools connection; app actions and captures still use the built-in APIs. Dark screenshots and
+`install-links.json` accompany the digest-bound installation and populated lifecycle evidence.
+
 Remaining release gates belong to the [publication plan](../../../docs/plans/device-expansion-and-publication.md).
 
 ## Home Assistant app package
@@ -116,6 +123,21 @@ install the unchanged candidate as an update, preserving state and exact downloa
 checks its container/private data are gone and its backup remains, and verifies an empty reinstall. Restoring the
 pre-upgrade backup on the fixture must recover the original data; a second upgrade must retain it. Image identities are
 recorded in `lifecycle-images.json`. This qualifies Supervisor lifecycle behavior, not older-binary/schema migration.
+
+To qualify an upgrade from a published binary, also pass `--baseline-release DIRECTORY`. Download that release's
+`release.json`, `SHA256SUMS`, `checksums.sigstore.jsonl`, `artifacts.sigstore.jsonl`, and matching OCI image into the
+directory; fetch its version tag into the local Git history. The check authenticates checksums, release manifest, and
+image against the canonical release workflow and exact tagged source commit before booting HAOS. It installs the
+unchanged published image, creates the populated data and backup there, then exercises both upgrades and recovery with
+the unchanged candidate. Evidence identifies the published baseline and reports binary migration coverage separately
+from fixture coverage. It covers the synthetic profile, route, and Course data exercised by this workflow. Courses from
+an older encoder remain under "Previous FIT files"; the browser opens that section and downloads the original bytes
+without regenerating the Course.
+
+When both archives declare the same version, pass a greater private `--candidate-version`, such as `0.1.2-dev` when
+testing the published `0.1.1` against another `0.1.1` build. Only the disposable repository metadata and guest registry
+tag use that version; OCI configuration, manifests, layers, and original archive versions remain unchanged. Normal
+release qualification must still use the eventual release image and version.
 
 On Supervisor 2026.10.2, recovery restarts Supervisor after restoring a reinstalled app: restore replaces the ingress
 token but leaves the routing map stale, producing HTTP 503. The

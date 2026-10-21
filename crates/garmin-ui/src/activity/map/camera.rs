@@ -514,7 +514,7 @@ mod tests {
         )
         .coverage();
 
-        assert!(!coverage.visible.is_empty());
+        assert_ne!(coverage.visible, [] as [walkers::TileId; 0]);
         assert!(coverage.requested.len() > coverage.visible.len());
         assert_eq!(
             coverage

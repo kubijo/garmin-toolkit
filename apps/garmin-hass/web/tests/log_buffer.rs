@@ -26,7 +26,10 @@ fn retries_keep_identity_and_acknowledgement_preserves_new_records() {
     assert_eq!(remaining.records[0].message, "second");
     assert_eq!(remaining.records[0].source_sequence, 2);
     buffer.acknowledge(&remaining);
-    assert!(buffer.pending(46).records.is_empty());
+    assert_eq!(
+        buffer.pending(46).records,
+        [] as [garmin_model::logging::Record; 0]
+    );
 }
 
 #[test]
@@ -123,7 +126,10 @@ fn oversized_unicode_escaped_text_and_fields_do_not_block_following_records() {
         );
     }
     buffer.acknowledge(&batch);
-    assert!(buffer.pending(45).records.is_empty());
+    assert_eq!(
+        buffer.pending(45).records,
+        [] as [garmin_model::logging::Record; 0]
+    );
 }
 
 #[test]
@@ -143,5 +149,8 @@ fn permanent_backend_rejection_is_reported_without_retrying_the_old_batch() {
             .starts_with("1 invalid or oversized")
     );
     buffer.acknowledge(&next);
-    assert!(buffer.pending(45).records.is_empty());
+    assert_eq!(
+        buffer.pending(45).records,
+        [] as [garmin_model::logging::Record; 0]
+    );
 }

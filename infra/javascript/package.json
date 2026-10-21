@@ -1,0 +1,9 @@
+{
+  "name": "garmin-browser-tooling",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "devtools-protocol": "0.0.1721602"
+  }
+}

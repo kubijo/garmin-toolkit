@@ -3,6 +3,60 @@ import assert from 'node:assert/strict';
 import { readFile, readdir, rename, stat, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import type { Protocol } from 'devtools-protocol';
+import type { DevTools } from './haos-devtools.mts';
+import type { Action, BrowserFunction, ReadySession, Target, Until } from './haos-types.mts';
+
+export async function findVisibleTarget(
+    targets: () => Promise<Target[] | undefined>,
+    run: (actions: Action[]) => Promise<void>,
+    until: Until,
+    id: string,
+    delta: number,
+): Promise<Target> {
+    const result = await until(async () => {
+        const current = await targets();
+        const target = current?.find(node => node.id === id);
+        if (target?.enabled && target.bounds) return { kind: 'ready' as const, target };
+        const anchor = current?.find(node => node.id.startsWith('routes.') && node.enabled && node.bounds);
+        if (anchor) {
+            try {
+                await run([{ kind: 'scroll', target: anchor.id, delta }]);
+            } catch (error) {
+                // Polling retries transient reads; a failed action must still abort.
+                return { kind: 'failed' as const, error };
+            }
+        }
+        return undefined;
+    }, `visible ${id}`);
+    if (result.kind === 'failed') throw result.error;
+    return result.target;
+}
+
+export async function findCourseTarget(
+    targets: () => Promise<Target[] | undefined>,
+    run: (actions: Action[]) => Promise<void>,
+    until: Until,
+): Promise<Target> {
+    let course = await until(async () => {
+        const current = await targets();
+        return (
+            current?.find(node => node.id.startsWith('routes.download.')) ??
+            current?.find(node => node.id === 'routes.history')
+        );
+    }, 'generated FIT Course or previous FIT files');
+    if (course.id === 'routes.history') {
+        // An encoder version change moves the original Course into collapsed history.
+        // Open it once, then wait for the retained file to enter the semantic tree.
+        await findVisibleTarget(targets, run, until, course.id, -1600);
+        await run([{ kind: 'click', target: course.id }]);
+        course = await until(
+            async () => (await targets())?.find(node => node.id.startsWith('routes.download.')),
+            'stored FIT Course in previous FIT files',
+        );
+    }
+    return findVisibleTarget(targets, run, until, course.id, -1600);
+}
 
 function enableBrowserAutomation() {
     // This changes only this disposable browser's DOM. The production host keeps
@@ -16,14 +70,21 @@ function enableBrowserAutomation() {
     observer.observe(document, { childList: true, subtree: true });
 }
 
-export async function populatedWorkflow(client, state, sessionPath, evidencePath) {
+export async function populatedWorkflow(
+    client: DevTools,
+    state: ReadySession,
+    sessionPath: string,
+    evidencePath: string,
+) {
     const runtime = dirname(sessionPath);
     const downloads = resolve(runtime, 'downloads');
     const source = resolve('crates/garmin-gpx/tests/fixtures/candidates.gpx');
     const ingress = new URL('/api/hassio_ingress/', state.base_url).href;
     await client.call('Runtime.enable');
-    async function app(fn, argument) {
-        function find(tree) {
+    function app<R>(fn: () => R): Promise<Awaited<R>>;
+    function app<A, R>(fn: BrowserFunction<A, R>, argument: A): Promise<Awaited<R>>;
+    async function app(fn: { toString(): string }, argument?: unknown): Promise<unknown> {
+        function find(tree: Protocol.Page.FrameTree): Protocol.Page.Frame | null {
             if (tree.frame.url.startsWith(ingress)) return tree.frame;
             for (const child of tree.childFrames ?? []) {
                 const frame = find(child);
@@ -38,7 +99,7 @@ export async function populatedWorkflow(client, state, sessionPath, evidencePath
             context => context.auxData?.isDefault && context.auxData.frameId === frame.id,
         );
         assert.ok(context, 'the ingress execution context is available');
-        return client.evaluate(fn, argument, context.id);
+        return client.evaluate(fn as BrowserFunction<unknown, unknown>, argument, context.id);
     }
     await mkdir(downloads);
     // Unique download GUIDs distinguish repeated downloads of the same artifact.
@@ -48,14 +109,18 @@ export async function populatedWorkflow(client, state, sessionPath, evidencePath
         source: `(${enableBrowserAutomation.toString()})()`,
     });
 
-    async function until(check, description, timeout = 45_000) {
+    async function until<T>(
+        check: () => T | Promise<T>,
+        description: string,
+        timeout = 45_000,
+    ): Promise<NonNullable<Exclude<T, false | 0 | ''>>> {
         const deadline = Date.now() + timeout;
-        let last;
+        let last: unknown;
         while (Date.now() < deadline) {
             assert.equal(client.socket.readyState, WebSocket.OPEN, 'the owned browser is connected');
             try {
                 const result = await check();
-                if (result) return result;
+                if (result) return result as NonNullable<Exclude<T, false | 0 | ''>>;
             } catch (error) {
                 last = error;
             }
@@ -65,31 +130,35 @@ export async function populatedWorkflow(client, state, sessionPath, evidencePath
     }
 
     const targets = () => app(() => window.garminAutomation?.targets());
-    const target = id => until(async () => (await targets())?.find(node => node.id === id), id);
-    const click = id => ({ kind: 'click', target: id });
-    const wait = id => ({ kind: 'wait', target: id });
-    const scroll = (id, delta) => ({ kind: 'scroll', target: id, delta });
+    const target = (id: string) => until(async () => (await targets())?.find(node => node.id === id), id);
+    const click = (id: string): Action => ({ kind: 'click', target: id });
+    const wait = (id: string): Action => ({ kind: 'wait', target: id });
+    const scroll = (id: string, delta: number): Action => ({ kind: 'scroll', target: id, delta });
 
-    async function run(actions) {
-        await app(actions => window.garminAutomation.sequence(actions, { run_in_background: true }), actions);
+    async function run(actions: Action[]) {
+        await app(actions => {
+            if (!window.garminAutomation) throw Error('semantic automation is unavailable');
+            return window.garminAutomation.sequence(actions, { run_in_background: true });
+        }, actions);
         const report = await until(async () => {
-            const report = await app(() => window.garminAutomation.status());
+            const report = await app(() => window.garminAutomation?.status());
             return report && !['running', 'paused'].includes(report.state) ? report : null;
         }, 'semantic actions');
         assert.equal(report.state, 'passed', JSON.stringify({ actions, report, targets: await targets() }));
         assert.equal(report.completed, report.total);
-        await until(
-            async () => !(await app(() => window.garminAutomation.status())).needs_background_frames,
-            'semantic input release',
-        );
+        await until(async () => {
+            const report = await app(() => window.garminAutomation?.status());
+            return report && !report.needs_background_frames;
+        }, 'semantic input release');
     }
 
-    async function capture(name) {
+    async function capture(name: string) {
         const result = await until(
             () =>
                 app(async () => {
+                    if (!window.garminWindowControl) throw Error('app capture is unavailable');
                     const [info, bytes] = await window.garminWindowControl.capture(5000);
-                    return { info: JSON.parse(info), png: bytes.toBase64() };
+                    return { info: JSON.parse(info) as unknown, png: bytes.toBase64() };
                 }),
             `stable app-owned ${name} screenshot`,
         );
@@ -99,7 +168,7 @@ export async function populatedWorkflow(client, state, sessionPath, evidencePath
         await writeFile(resolve(evidencePath, `${name}.json`), JSON.stringify(result.info, null, 2));
     }
 
-    async function createProfile(name) {
+    async function createProfile(name: string) {
         await run([wait('profile.create'), click('profile.create'), wait('profile.create.name')]);
         await run([{ kind: 'text', target: 'profile.create.name', text: name }, click('profile.create.submit')]);
         await target('navigation.1');
@@ -112,10 +181,11 @@ export async function populatedWorkflow(client, state, sessionPath, evidencePath
             () => client.events.find(event => event.method === 'Page.fileChooserOpened'),
             'browser file chooser',
         );
+        assert.ok(chooser.params.backendNodeId, 'the file chooser belongs to an input');
         await client.call('DOM.setFileInputFiles', { backendNodeId: chooser.params.backendNodeId, files: [source] });
     }
 
-    async function download(id, filename) {
+    async function download(id: string, filename: string) {
         const existing = new Set(await readdir(downloads));
         await run([wait(id), click(id)]);
         const file = await until(async () => {
@@ -131,20 +201,16 @@ export async function populatedWorkflow(client, state, sessionPath, evidencePath
         await writeFile(resolve(evidencePath, filename), await readFile(path));
     }
 
-    async function courseTarget() {
-        return until(
-            async () => (await targets())?.find(node => node.id.startsWith('routes.download.')),
-            'generated FIT Course',
-        );
-    }
+    const courseTarget = () => findCourseTarget(targets, run, until);
 
-    async function exports(prefix) {
+    async function exports(prefix: string) {
         const course = await courseTarget();
         await capture(`${prefix}-course`);
         await download(course.id, `${prefix}-course.fit`);
-        await run([scroll(course.id, 1600)]);
+        // Downloading briefly disables generation and changes the history layout.
+        // The Course can leave the viewport; choose a currently visible scroll anchor.
+        await findVisibleTarget(targets, run, until, 'routes.source', 1600);
         await download('routes.source', `${prefix}-source.gpx`);
-        await run([scroll('routes.source', -1600)]);
     }
 
     async function openPopulated() {
@@ -191,7 +257,10 @@ export async function populatedWorkflow(client, state, sessionPath, evidencePath
         const course = await courseTarget();
         const id = course.id.replace('routes.download.', 'routes.delete.');
         await run([click(id), wait('routes.delete.confirm'), click('routes.delete.confirm')]);
-        await until(async () => !(await targets()).some(node => node.id === course.id), 'removed FIT Course');
+        await until(async () => {
+            const current = await targets();
+            return current && !current.some(node => node.id === course.id);
+        }, 'removed FIT Course');
         await run([click('profile.toggle'), wait('profile.logout'), click('profile.logout')]);
         await createProfile('After backup');
         await capture('mutated-profile');
@@ -202,10 +271,14 @@ export async function populatedWorkflow(client, state, sessionPath, evidencePath
         const request = await until(
             async () => {
                 try {
-                    const value = JSON.parse(await readFile(resolve(runtime, 'workflow-request.json'), 'utf8'));
+                    const value = JSON.parse(await readFile(resolve(runtime, 'workflow-request.json'), 'utf8')) as {
+                        id: number;
+                        operation: string;
+                    };
                     return value.id > lastId ? value : null;
                 } catch (error) {
-                    if (error.code === 'ENOENT') return null;
+                    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')
+                        return null;
                     throw error;
                 }
             },
@@ -219,7 +292,9 @@ export async function populatedWorkflow(client, state, sessionPath, evidencePath
             else if (request.operation === 'reinstalled') {
                 await client.call('Page.navigate', { url: state.url });
                 await target('profile.create');
-                assert.ok(!(await targets()).some(node => node.id === 'profile.0'), 'reinstall has no old profile');
+                const current = await targets();
+                assert.ok(current, 'the reinstalled app exposes semantic targets');
+                assert.ok(!current.some(node => node.id === 'profile.0'), 'reinstall has no old profile');
                 await capture('reinstalled-empty');
             } else if (
                 ['upgraded', 'restarted', 'rebooted', 'restored', 'recovered', 'recovered-upgraded'].includes(

@@ -149,6 +149,29 @@ class WorkflowTests(unittest.TestCase):
             lifecycle.upgrade()
         run.assert_not_called()
 
+    def test_fixture_cannot_claim_published_binary_migration_coverage(self) -> None:
+        self.assertIs(self.lifecycle().coverage()['migration_compatibility'], False)
+
+    def test_published_coverage_requires_the_authenticated_baseline_identity(self) -> None:
+        baseline = {'config_digest': 'old', 'manifest_digest': 'old-manifest', 'archive_sha256': 'archive'}
+        candidate = {'config_digest': 'new', 'version': '0.1.2-dev', 'archive_version': '0.1.1'}
+        (self.root / 'lifecycle-images.json').write_text(json.dumps({'baseline': baseline, 'candidate': candidate}))
+        identity = {**baseline, 'release': 'v0.1.1', 'signatures_verified': True}
+        path = self.root / 'published-baseline.json'
+        path.write_text(json.dumps(identity))
+        coverage = self.lifecycle().coverage()
+        self.assertIs(coverage['migration_compatibility'], True)
+        self.assertEqual(coverage['candidate_version'], '0.1.2-dev')
+        self.assertEqual(coverage['candidate_archive_version'], '0.1.1')
+        for change in ({'signatures_verified': False}, {'manifest_digest': 'different'}):
+            path.write_text(json.dumps({**identity, **change}))
+            with self.subTest(change=change), self.assertRaisesRegex(RuntimeError, 'authenticated release image'):
+                self.lifecycle().coverage()
+
+    def test_published_baseline_requires_lifecycle_acceptance(self) -> None:
+        with self.assertRaisesRegex(ValueError, 'require lifecycle acceptance'):
+            session.run_session(session.Check(app_archive=Path('unused'), baseline_release=self.root))
+
     def test_reinstall_refuses_retained_private_data(self) -> None:
         lifecycle = self.lifecycle()
         with (

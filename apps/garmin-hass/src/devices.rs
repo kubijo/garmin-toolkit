@@ -2053,8 +2053,8 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert!(!avatar.key.is_empty());
-        assert!(!avatar.thumbnail.is_empty());
+        assert_ne!(avatar.key, "");
+        assert_ne!(avatar.thumbnail, [] as [u8; 0]);
         let profiles = host.profiles().await.unwrap().unwrap();
         let stored = profiles
             .iter()

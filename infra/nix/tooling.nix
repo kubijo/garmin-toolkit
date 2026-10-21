@@ -11,8 +11,38 @@
   toolchain,
 }:
 let
+  browserTypes = pkgs.importNpmLock.buildNodeModules {
+    npmRoot = ../javascript;
+    inherit nodejs;
+    derivationArgs.npmRebuildFlags = [ "--ignore-scripts" ];
+  };
   pythonConfig = ../../ruff.toml;
   sqlFluffConfig = ../sqlfluff/pyproject.toml;
+  sqlfluff = pkgs.sqlfluff.override {
+    python3Packages = pkgs.python3Packages.overrideScope (
+      _final: prev: {
+        diff-cover = prev.diff-cover.overridePythonAttrs (
+          old:
+          assert lib.assertMsg (old.version == "10.5.1" && prev.pygments.version == "2.21.0")
+            "Revisit the diff-cover HTML fixture exception after dependency updates; see docs/architecture/build-system.md";
+          {
+            # Published sources remain unchanged. Only these six HTML fixture comparisons
+            # disagree with Pygments 2.21; all other package tests and SQL checks still run.
+            pytestFlags =
+              (old.pytestFlags or [ ])
+              ++ map (test: "--deselect=tests/test_integration.py::TestDiffQualityIntegration::${test}") [
+                "test_added_file_pycodestyle_html"
+                "test_all_reports"
+                "test_added_file_pyflakes_html"
+                "test_added_file_pylint_html"
+                "test_fail_under_html"
+                "test_fail_under_pass_html"
+              ];
+          }
+        );
+      }
+    );
+  };
   allFormatters = {
     # The pinned formatter set has no WGSL formatter; Naga validates this shader when WGPU builds it.
     exclude = [
@@ -47,6 +77,9 @@ let
 
   project = nix-tools.lib.configure {
     inherit src system;
+    toolPkgs = pkgs // {
+      inherit sqlfluff;
+    };
     exclude = [
       ".python-version"
       "LICENSE-AGPL"
@@ -146,7 +179,9 @@ let
           done
         '';
         hass-types.command = pkgs.writeShellScript "hass-types" ''
-          exec ${pkgs.typescript}/bin/tsc --project infra/integration/hass/tsconfig.json
+          ${pkgs.typescript}/bin/tsc --project infra/integration/hass/tsconfig.json || exit $?
+          exec ${pkgs.bash}/bin/bash infra/just/check-browser-types.sh \
+            ${pkgs.typescript}/bin/tsc ${browserTypes}/node_modules
         '';
         integration-harness-tests.command = pkgs.writeShellScript "integration-harness-tests" ''
           exec ${lib.getExe nodejs} infra/integration/hass/faults.test.mjs
@@ -160,7 +195,10 @@ let
           ${lib.getExe nodejs} infra/javascript/diagnostics-view.test.mjs || exit $?
           ${lib.getExe nodejs} infra/javascript/logging.test.mjs || exit $?
           ${lib.getExe nodejs} infra/javascript/initializer.test.mjs || exit $?
-          exec ${lib.getExe nodejs} infra/javascript/loader-bootstrap.test.mjs
+          ${lib.getExe nodejs} infra/javascript/loader-bootstrap.test.mjs || exit $?
+          ${lib.getExe nodejs} infra/javascript/haos-install-links.test.mts --documentation || exit $?
+          ${lib.getExe nodejs} infra/javascript/haos-workflow.test.mts || exit $?
+          exec ${lib.getExe nodejs} infra/javascript/haos-devtools.test.mts
         '';
         python-lock.command = pkgs.writeShellScript "python-lock-check" ''
           exec ${lib.getExe pkgs.uv} lock --check --offline \

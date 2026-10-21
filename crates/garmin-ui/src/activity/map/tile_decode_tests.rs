@@ -240,7 +240,7 @@ fn browser_decoder_bounds_shared_properties_without_expanding_unused_layers() {
     let error = decode(&bytes, &style(), 14, 512).err().unwrap();
     assert!(error.contains("expanded property limit"), "{error}");
     let DecodedTile { shapes, texts } = decode(&bytes, &Style::default(), 14, 512).unwrap();
-    assert!(shapes.is_empty());
+    assert_eq!(shapes, [] as [egui::Shape; 0]);
     assert!(texts.is_empty());
 }
 
@@ -324,7 +324,7 @@ fn dense_city_tile_keeps_styled_background_under_feature_limit() {
         12_003
     );
     let decoded = decode(&bytes, &style(), 14, 512).unwrap();
-    assert!(!decoded.shapes.is_empty());
+    assert_ne!(decoded.shapes, [] as [egui::Shape; 0]);
     assert_eq!(decoded.texts.len(), 1);
     super::super::gpu_map::encode_browser_tile(decoded).unwrap();
 
