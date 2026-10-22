@@ -10,9 +10,12 @@ Applications compose the reusable crates under `crates/`.
 
 ## Home Assistant
 
-[Add the repository][hass-install], then [open Garmin Toolkit's app page][hass-app] to install and start it. These links
-use your own Home Assistant instance. See the [quickstart](apps/garmin-hass/addon/DOCS.md) for supported versions,
-Course creation, backups, and recovery. Release artifacts and verification instructions are available with
+[![Add the Garmin Toolkit repository to Home Assistant][hass-install-badge]][hass-install]
+[![Open Garmin Toolkit's app page in Home Assistant][hass-app-badge]][hass-app]
+
+Add the repository, then open Garmin Toolkit's app page to install and start it. These buttons use your own Home
+Assistant instance. See the [quickstart](apps/garmin-hass/addon/DOCS.md) for supported versions, Course creation,
+backups, and recovery. Release artifacts and verification instructions are available with
 [v0.1.1](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.1).
 
 ## Run
@@ -81,4 +84,6 @@ Licensed under [AGPL-3.0-or-later](LICENSE-AGPL). Earlier grants and third-party
 [2016]: https://forums.garmin.com/apps-software/mac-windows-software/f/garmin-express/113071/edge-1000-won-t-update-eu-cycle-map
 [2019]: https://forums.garmin.com/apps-software/mac-windows-software/f/garmin-express-windows/167747/garmin-express-v6-15-0-0-cannot-install-map-2020-10-on-a-computer
 [hass-app]: https://my.home-assistant.io/redirect/supervisor_app/?app=af63a031_garmin_toolkit
+[hass-app-badge]: https://my.home-assistant.io/badges/supervisor_app.svg
 [hass-install]: https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fkubijo%2Fgarmin-toolkit%23hass-apps
+[hass-install-badge]: https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg
