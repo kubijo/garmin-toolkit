@@ -1253,7 +1253,7 @@
     },
     {
       "name": "clap",
-      "version": "4.6.6",
+      "version": "4.6.7",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -1265,13 +1265,13 @@
         },
         {
           "license": "Apache-2.0",
-          "text_index": 30
+          "text_index": 28
         }
       ]
     },
     {
       "name": "clap_builder",
-      "version": "4.6.6",
+      "version": "4.6.7",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -1283,7 +1283,7 @@
         },
         {
           "license": "Apache-2.0",
-          "text_index": 30
+          "text_index": 28
         }
       ]
     },
@@ -7690,7 +7690,7 @@
     },
     {
       "name": "serde_json",
-      "version": "1.0.151",
+      "version": "1.0.154",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
