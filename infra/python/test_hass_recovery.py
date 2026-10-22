@@ -6,6 +6,8 @@ import os
 import subprocess
 import tempfile
 import unittest
+from contextlib import chdir
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -48,7 +50,9 @@ class RecoveryTests(unittest.TestCase):
 
         def transport(*arguments: str, cwd: Path | None = None) -> str:
             self.calls.append(arguments)
-            return self.git(*(str(self.remote) if value == REMOTE else value for value in arguments), cwd=cwd)
+            return self.git(
+                *(str(self.remote) if value == REMOTE else value for value in arguments), cwd=cwd or self.source
+            )
 
         self.addCleanup(patch.stopall)
         patch('hass_recovery.git', side_effect=transport).start()
@@ -74,7 +78,11 @@ class RecoveryTests(unittest.TestCase):
         ):
             self.assertIs(result[name], True, name)
         self.assertEqual(self.drill.protected_refs(), self.protected)
-        with patch('hass_recovery.api', return_value=None), patch.object(recovery.Drill, 'release', return_value=None):
+        with (
+            chdir(self.root),
+            patch('hass_recovery.api', return_value=None),
+            patch.object(recovery.Drill, 'release', return_value=None),
+        ):
             self.drill.cleanup()
             self.drill.cleanup()
         self.assertEqual(self.drill.protected_refs(), self.protected)
@@ -100,6 +108,45 @@ class RecoveryTests(unittest.TestCase):
                 self.drill.execute(*arguments)
         self.assertEqual(self.calls, [], 'rejected pushes cannot reach Git')
         self.assertEqual(object_value(read_json(self.evidence / 'refs.json')), {})
+
+    def test_delayed_advertisement_reaches_the_server_when_its_lease_is_refreshed(self) -> None:
+        owner = self.drill.store()
+        prepared = self.evidence / 'store/prepared/promotion.json'
+        refreshed = False
+
+        def refresh_lease(*arguments: str, cwd: Path | None = None) -> str:
+            nonlocal refreshed
+            if 'push' in arguments and prepared.is_file():
+                journal = object_value(read_json(prepared))
+                if str(journal['fence_advertised']) + ':refs/heads/' + owner.fence in arguments:
+                    stale = '--force-with-lease=refs/heads/' + owner.fence + ':' + str(journal['fence_prepared'])
+                    fresh = '--force-with-lease=refs/heads/' + owner.fence + ':' + owner.head(owner.fence)
+                    arguments = tuple(fresh if argument == stale else argument for argument in arguments)
+                    refreshed = True
+            return owner.git(*arguments, cwd=cwd)
+
+        with self.assertRaisesRegex(RuntimeError, 'delayed advertisement bypassed'):
+            StoreDrill(replace(owner, git=refresh_lease), self.evidence / 'store').run()
+        self.assertTrue(refreshed)
+        journal = object_value(read_json(prepared))
+        self.assertEqual(owner.head(owner.branch), journal['published'])
+        self.assertEqual(owner.head(owner.fence), journal['fence_advertised'])
+
+    def test_delayed_advertisement_transport_failure_cannot_pass_as_lease_rejection(self) -> None:
+        owner = self.drill.store()
+        prepared = self.evidence / 'store/prepared/promotion.json'
+        failure = subprocess.CalledProcessError(128, ['git', 'push'], stderr='Synthetic transport failure')
+
+        def fail_transport(*arguments: str, cwd: Path | None = None) -> str:
+            if 'push' in arguments and prepared.is_file():
+                journal = object_value(read_json(prepared))
+                if str(journal['fence_advertised']) + ':refs/heads/' + owner.fence in arguments:
+                    raise failure
+            return owner.git(*arguments, cwd=cwd)
+
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            StoreDrill(replace(owner, git=fail_transport), self.evidence / 'store').run()
+        self.assertIs(raised.exception, failure)
 
     def test_cleanup_retains_unowned_fixture_updates(self) -> None:
         StoreDrill(self.drill.store(), self.evidence / 'store').run()
@@ -244,9 +291,12 @@ class RecoveryTests(unittest.TestCase):
             subprocess.run(
                 [
                     'skopeo',
+                    # Only these unsigned local fixtures bypass host signature policy.
+                    '--insecure-policy',
                     'copy',
                     '--all',
                     '--preserve-digests',
+                    '--dest-no-creds',
                     '--dest-tls-verify=false',
                     'oci:' + str(self.root / 'original'),
                     'docker://' + image + ':0.0.1',
@@ -264,9 +314,11 @@ class RecoveryTests(unittest.TestCase):
             subprocess.run(
                 [
                     'skopeo',
+                    '--insecure-policy',
                     'copy',
                     '--all',
                     '--preserve-digests',
+                    '--dest-no-creds',
                     '--dest-tls-verify=false',
                     'oci:' + str(self.root / 'replacement'),
                     'docker://' + image + ':0.0.2',

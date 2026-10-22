@@ -6,9 +6,8 @@ Application authentication, credential custody, encryption, and Connect remain d
 
 - Qualify ARM64 registry installation, ingress, and lifecycle before advertising support, using the
   [repository-install check](../../infra/integration/hass/README.md#repository-install-acceptance).
-- Run the isolated GitHub/GHCR [recovery drill](../../infra/release/README.md#recovery-drill) and retain hosted evidence
-  for conflicts, incomplete drafts, interrupted pushes, competing updates, and retries. Then qualify signed release
-  recovery from an actual failed Supervisor installation; verify previous metadata and artifacts survive rollback.
+- Qualify signed release recovery after a failed Supervisor installation; verify previous metadata and artifacts survive
+  rollback. The [transport drill](../../infra/release/README.md#recovery-drill) covers injected failures only.
 
 ## Hardware and other distribution
 
