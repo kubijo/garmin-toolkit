@@ -312,7 +312,10 @@ def push_metadata(
     version: str | None = None,
     resume: bool = False,
     before_push: Callable[[str, str, Path], tuple[str, str] | None] | None = None,
+    owner: Store | None = None,
 ) -> str:
+    owner = owner or store()
+    execute, remote = owner.git, owner.remote
     with tempfile.TemporaryDirectory(prefix='.hass-metadata.', dir=directory.parent) as temporary:
         checkout = Path(temporary) / 'repository'
         copy_repository(directory, checkout)
@@ -321,12 +324,12 @@ def push_metadata(
             config = object_value(yaml.safe_load(path.read_text()))
             config['version'] = version
             path.write_text(yaml.safe_dump(config, sort_keys=False))
-        git('init', '-q', '--initial-branch=' + branch, str(checkout))
+        execute('init', '-q', '--initial-branch=' + branch, str(checkout))
         if previous:
-            git('fetch', '--no-tags', '--depth=1', REMOTE, previous, cwd=checkout)
-            git('update-ref', 'HEAD', previous, cwd=checkout)
-        git('add', '.', cwd=checkout)
-        git(
+            execute('fetch', '--no-tags', '--depth=1', remote, previous, cwd=checkout)
+            execute('update-ref', 'HEAD', previous, cwd=checkout)
+        execute('add', '.', cwd=checkout)
+        execute(
             '-c',
             'user.name=Garmin release',
             '-c',
@@ -337,21 +340,21 @@ def push_metadata(
             '--allow-empty',
             cwd=checkout,
         )
-        commit = git('rev-parse', 'HEAD', cwd=checkout)
-        current = branch_head(branch) if resume else previous
+        commit = execute('rev-parse', 'HEAD', cwd=checkout)
+        current = owner.head(branch) if resume else previous
         if current != previous:
-            git('fetch', '--no-tags', '--depth=2', REMOTE, current, cwd=checkout)
-            if git('show', '-s', '--format=%P', current, cwd=checkout) != previous or git(
+            execute('fetch', '--no-tags', '--depth=2', remote, current, cwd=checkout)
+            if execute('show', '-s', '--format=%P', current, cwd=checkout) != previous or execute(
                 'rev-parse', current + '^{tree}', cwd=checkout
-            ) != git('rev-parse', 'HEAD^{tree}', cwd=checkout):
+            ) != execute('rev-parse', 'HEAD^{tree}', cwd=checkout):
                 raise ValueError('Store advertisement changed; refusing to replace unrelated metadata')
             commit = current
         fence = before_push(commit, current, checkout) if before_push is not None else None
-        git(
+        execute(
             'push',
             *(['--atomic', '--force-with-lease=refs/heads/' + FENCE + ':' + fence[0]] if fence else []),
             '--force-with-lease=refs/heads/' + branch + ':' + current,
-            REMOTE,
+            remote,
             commit + ':refs/heads/' + branch,
             *([fence[1] + ':refs/heads/' + FENCE] if fence else []),
             cwd=checkout,
@@ -669,7 +672,7 @@ def store() -> Store:
     return Store(REMOTE, git, branch_head)
 
 
-def withdraw_publication(options: WithdrawPublication) -> None:
+def withdraw_publication(options: WithdrawPublication, *, owner: Store | None = None) -> None:
     previous, before = oid(options.store_commit), oid(options.state_commit)
     if not re.fullmatch(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)', options.version):
         raise ValueError('Withdrawal requires a numeric release version')
@@ -678,11 +681,12 @@ def withdraw_publication(options: WithdrawPublication) -> None:
     if options.output.exists() or options.output.is_symlink():
         raise ValueError('Withdrawal output already exists; retain its original journal')
     options.output.parent.mkdir(parents=True, exist_ok=True)
-    owner = store()
+    owner = owner or store()
+    execute = owner.git
     with tempfile.TemporaryDirectory(prefix='.hass-withdrawal.', dir=options.output.parent) as temporary:
         checkout = Path(temporary)
-        git('init', '-q', str(checkout))
-        current, fence = branch_head('hass-apps'), branch_head(FENCE)
+        execute('init', '-q', str(checkout))
+        current, fence = owner.head('hass-apps'), owner.head(FENCE)
         state = owner.state(checkout, fence) if fence else {}
         if (
             state.get('status') == 'withdrawn'
@@ -690,7 +694,7 @@ def withdraw_publication(options: WithdrawPublication) -> None:
             and state.get('published') == current
             and state.get('version') == options.version
             and state.get('reason') == options.reason
-            and git('show', '-s', '--format=%P', fence, cwd=checkout) == before
+            and execute('show', '-s', '--format=%P', fence, cwd=checkout) == before
         ):
             report: Object = {**state, 'fence_before': before, 'fence_withdrawn': fence, 'completed': True}
         else:
@@ -701,13 +705,15 @@ def withdraw_publication(options: WithdrawPublication) -> None:
                     'Withdrawal requires the current, durably qualified release; recover unfinished work first'
                 )
             owner.fetch(checkout, previous)
-            config = object_value(yaml.safe_load(git('show', previous + ':garmin_toolkit/config.yaml', cwd=checkout)))
+            config = object_value(
+                yaml.safe_load(execute('show', previous + ':garmin_toolkit/config.yaml', cwd=checkout))
+            )
             if config.get('version') != options.version or config.get('slug') != 'garmin_toolkit':
                 raise ValueError('Store app identity/version differs from the requested withdrawal')
-            git('read-tree', previous, cwd=checkout)
-            git('rm', '-r', '--cached', '--', 'garmin_toolkit', cwd=checkout)
-            tree = git('write-tree', cwd=checkout)
-            published = git(
+            execute('read-tree', previous, cwd=checkout)
+            execute('rm', '-r', '--cached', '--', 'garmin_toolkit', cwd=checkout)
+            tree = execute('write-tree', cwd=checkout)
+            published = execute(
                 '-c',
                 'user.name=Garmin release',
                 '-c',

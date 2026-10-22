@@ -8,14 +8,16 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 from urllib.parse import urlsplit
 
 import yaml
 
 from haos_repository import publish_version, serve_repository
+from haos_withdrawal import Withdrawal
 from hass_release_contract import Architecture
 from hass_repository import Repository, copy_repository, generate_repository
-from json_data import object_value, text
+from json_data import object_value, read_json, text
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -167,6 +169,67 @@ class RepositoryTests(unittest.TestCase):
         with socket.socket() as probe:
             probe.settimeout(1)
             self.assertNotEqual(probe.connect_ex(('127.0.0.1', port)), 0)
+
+    def test_withdrawal_and_replacement_reach_a_real_git_http_consumer_without_publication_access(self) -> None:
+        generate_repository(self.options())
+        original = (self.output / 'garmin_toolkit/config.yaml').read_bytes()
+        version = text(object_value(yaml.safe_load(original))['version'])
+        runtime, evidence = self.root / 'runtime', self.root / 'evidence'
+        runtime.mkdir()
+        evidence.mkdir()
+        with (
+            serve_repository(
+                self.output,
+                runtime,
+                image='localhost:5000/candidate',
+                architecture='amd64',
+                version=version,
+                initial_version='0.0.0',
+            ) as url,
+            patch('hass_publish.command', side_effect=AssertionError('Public command invoked')),
+            patch('hass_publish.store', side_effect=AssertionError('Public store accessed')),
+        ):
+            parsed = urlsplit(url)
+            clone_url = parsed._replace(netloc=f'127.0.0.1:{parsed.port}', fragment='').geturl()
+            cloned = self.root / 'consumer'
+            environment = {**os.environ, 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+
+            def consumer(*arguments: str) -> None:
+                subprocess.run(
+                    ['git', '-c', 'http.proxy=', *arguments],
+                    env=environment,
+                    check=True,
+                    capture_output=True,
+                    timeout=15,
+                )
+
+            consumer('clone', '-q', '--depth=1', '--branch', 'hass-apps', clone_url, str(cloned))
+            fixture = Withdrawal(runtime, evidence)
+            fixture.withdraw('0.0.0')
+            consumer('-C', str(cloned), 'pull', '--ff-only', '-q')
+            self.assertFalse((cloned / 'garmin_toolkit').exists())
+            self.assertEqual((cloned / 'repository.yaml').read_bytes(), (self.output / 'repository.yaml').read_bytes())
+            with self.assertRaisesRegex(ValueError, 'greater numeric'):
+                fixture.replace('0.0.0')
+            fixture.replace(version)
+            consumer('-C', str(cloned), 'pull', '--ff-only', '-q')
+            replaced = object_value(yaml.safe_load((cloned / 'garmin_toolkit/config.yaml').read_bytes()))
+            self.assertEqual(replaced['version'], version)
+            self.assertEqual(replaced['image'], 'localhost:5000/candidate')
+            fixture.qualify()
+            self.assertIs(
+                object_value(read_json(evidence / 'withdrawal-replacement/promotion.json'))['qualified'], True
+            )
+        self.assertEqual((self.output / 'garmin_toolkit/config.yaml').read_bytes(), original)
+
+    def test_withdrawal_refuses_a_repository_symlink_outside_its_owned_runtime(self) -> None:
+        runtime = self.root / 'runtime'
+        (runtime / 'repository-http').mkdir(parents=True)
+        other = self.root / 'other.git'
+        other.mkdir()
+        (runtime / 'repository-http/garmin-toolkit.git').symlink_to(other, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'owned local Git repository'):
+            Withdrawal(runtime, self.root).store()
 
 
 if __name__ == '__main__':

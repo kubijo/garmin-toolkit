@@ -10,6 +10,7 @@ from typing import cast
 
 import haos_app_vm as vm
 from haos_lifecycle import Lifecycle
+from haos_withdrawal import Withdrawal
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -98,7 +99,10 @@ def exercise(
     *,
     reboot: Callable[[], dict[str, str]],
     lifecycle: Lifecycle | None = None,
+    withdrawal: bool = False,
 ) -> None:
+    if withdrawal and lifecycle is None:
+        raise ValueError('Withdrawal acceptance requires its disposable lifecycle controller')
     request_id = 0
 
     def command(operation: str, *, timeout: int = 120) -> dict[str, object]:
@@ -141,9 +145,13 @@ def exercise(
     previous_backup = None
     if lifecycle is not None:
         lifecycle.assert_image('baseline')
-        previous_backup = backup(key, port, app_slug)
+        if withdrawal:
+            lifecycle.withdraw()
+            persisted('withdrawn', populated, hashes)
+        else:
+            previous_backup = backup(key, port, app_slug)
         lifecycle.upgrade()
-        persisted('upgraded', populated, hashes)
+        persisted('withdrawal-replaced' if withdrawal else 'upgraded', populated, hashes)
     print('Restarting the disposable app through Supervisor...', flush=True)
     vm.run(vm.ssh_command(key, port, f'ha apps restart {app_slug}'), timeout=120)
     vm.assert_started(key, port, app_slug)
@@ -158,7 +166,7 @@ def exercise(
     restore(key, port, app_slug, slug)
     persisted('restored', populated, hashes)
     lifecycle_result = None
-    if lifecycle is not None:
+    if lifecycle is not None and not withdrawal:
         assert previous_backup is not None
         command('mutate')
         lifecycle.reinstall_baseline(previous_backup)
@@ -196,6 +204,7 @@ def exercise(
                 'post_backup_mutation_reverted': True,
                 'browser_only_automation': True,
                 'lifecycle': lifecycle_result,
+                'withdrawal': Withdrawal(runtime, evidence).qualify() if withdrawal else None,
             },
             indent=2,
         )

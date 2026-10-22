@@ -256,7 +256,9 @@ Supervisor behavior; live failure recovery remains in the
 Withdraw a qualified release when it must stop being offered for new installations. This removes `garmin_toolkit/` from
 `hass-apps` and records `withdrawn` state atomically, retaining repository metadata and both Git histories. It does not
 contact Home Assistant instances, stop installed apps, restore their data, or downgrade them. Store clients must refresh
-their cached repository metadata. Runtime acceptance of that refresh remains outstanding.
+their cached repository metadata. The
+[disposable withdrawal check](../integration/hass/README.md#withdrawal-and-replacement) covers Supervisor refresh,
+installed data, and replacement upgrades; public GitHub/GHCR recovery remains separate.
 
 First ensure no publication run is active or queued. Record the current release version and read both exact heads:
 

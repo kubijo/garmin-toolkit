@@ -208,7 +208,7 @@ def assert_started(key: Path, port: int, slug: str = 'local_garmin_toolkit') -> 
         raise RuntimeError(f'The installed app is not started with ingress: {app!r}')
 
 
-def reload_store(key: Path, port: int, slug: str = 'local_garmin_toolkit') -> None:
+def reload_store(key: Path, port: int, slug: str = 'local_garmin_toolkit', *, present: bool = True) -> None:
     for attempt in range(3):
         try:
             run(ssh_command(key, port, 'ha store reload'), timeout=90)
@@ -217,12 +217,13 @@ def reload_store(key: Path, port: int, slug: str = 'local_garmin_toolkit') -> No
                 raise
             print('Supervisor store refresh is still pending; checking local app discovery...', flush=True)
         info = guest_data(key, port, 'ha store info')
-        if any(app.get('slug') == slug for app in object_rows(info.get('apps', info.get('addons')))):
-            print(f'Supervisor discovered {slug}.', flush=True)
+        found = any(app.get('slug') == slug for app in object_rows(info.get('apps', info.get('addons'))))
+        if found == present:
+            print(f'Supervisor store {slug}: {"present" if present else "withdrawn"}.', flush=True)
             return
         if attempt < 2:
             time.sleep(5)
-    raise RuntimeError('Supervisor store did not discover the local app after bounded refresh retries')
+    raise RuntimeError('Supervisor store did not reach the expected app visibility after bounded refresh retries')
 
 
 def assert_gateway_response(key: Path, port: int, slug: str = 'local_garmin_toolkit') -> None:

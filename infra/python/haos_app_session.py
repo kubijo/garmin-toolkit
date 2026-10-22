@@ -90,6 +90,9 @@ class Check(Run):
     lifecycle: bool = False
     """Test upgrade, backup recovery, and uninstall/reinstall; requires repository and receipt."""
 
+    withdrawal: bool = False
+    """Test withdrawal, installed data preservation, and a greater replacement in the private repository."""
+
     baseline_release: Path | None = None
     """Published release directory with image, release.json, SHA256SUMS, and their attestation bundles."""
 
@@ -281,23 +284,22 @@ def wait_browser(
 
 
 def run_session(options: Run) -> int:
+    transition = isinstance(options, Check) and (options.lifecycle or options.withdrawal)
+    if isinstance(options, Check) and options.lifecycle and options.withdrawal:
+        raise ValueError('Select lifecycle or withdrawal acceptance, not both')
     if (
         isinstance(options, Check)
-        and not options.lifecycle
+        and not transition
         and (options.baseline_release is not None or options.candidate_version is not None)
     ):
-        raise ValueError('Published baseline and private candidate versions require lifecycle acceptance')
+        raise ValueError('Published baseline and private candidate versions require lifecycle acceptance or withdrawal')
     if (
         isinstance(options, Check)
         and options.install_links
         and options.repository_url != 'https://github.com/kubijo/garmin-toolkit#hass-apps'
     ):
         raise ValueError('Installation link acceptance requires the public hass-apps repository URL')
-    if (
-        isinstance(options, Check)
-        and options.lifecycle
-        and (options.repository is None or options.build_receipt is None)
-    ):
+    if isinstance(options, Check) and transition and (options.repository is None or options.build_receipt is None):
         raise ValueError('Lifecycle acceptance requires a generated repository and native build receipt')
     if not 10 <= options.timeout <= 1800 or not 1 <= options.session_timeout <= 7200 or not 0 <= options.port <= 65535:
         raise ValueError('Startup must be 10-1800s, inspection 1-7200s, and port 0-65535')
@@ -344,7 +346,7 @@ def run_session(options: Run) -> int:
     ):
         runtime = Path(directory)
         runtime.chmod(0o700)
-        if isinstance(options, Check) and options.lifecycle:
+        if isinstance(options, Check) and transition:
             if previous is None:
                 baseline = runtime / 'baseline-fixture.oci.tar'
                 baseline_fixture(options.app_archive, baseline)
@@ -431,11 +433,19 @@ def run_session(options: Run) -> int:
 
                     lifecycle = (
                         Lifecycle(runtime, evidence, key, ssh_port, app_slug, process, OVERLAY_LIMIT)
-                        if options.lifecycle
+                        if transition
                         else None
                     )
                     haos_workflow.exercise(
-                        browser, runtime, evidence, key, ssh_port, app_slug, reboot=reboot, lifecycle=lifecycle
+                        browser,
+                        runtime,
+                        evidence,
+                        key,
+                        ssh_port,
+                        app_slug,
+                        reboot=reboot,
+                        lifecycle=lifecycle,
+                        withdrawal=options.withdrawal,
                     )
                     return
             state.update(phase='ready', expires_at=time.time() + options.session_timeout)

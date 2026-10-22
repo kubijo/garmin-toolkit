@@ -125,6 +125,20 @@ class WorkflowTests(unittest.TestCase):
                     )
                 )
 
+    def test_withdrawal_requires_local_metadata_and_receipt_before_starting_any_resources(self) -> None:
+        for repository, receipt in ((None, None), (self.root, None), (None, self.root / 'native-build.json')):
+            with (
+                self.subTest(repository=repository, receipt=receipt),
+                self.assertRaisesRegex(ValueError, 'repository and native build receipt'),
+            ):
+                session.run_session(
+                    session.Check(
+                        app_archive=Path('not-used'), withdrawal=True, repository=repository, build_receipt=receipt
+                    )
+                )
+        with self.assertRaisesRegex(ValueError, 'not both'):
+            session.run_session(session.Check(app_archive=Path('not-used'), withdrawal=True, lifecycle=True))
+
     def test_lifecycle_rejects_identical_baseline_and_candidate_images(self) -> None:
         (self.root / 'lifecycle-images.json').write_text(
             json.dumps(

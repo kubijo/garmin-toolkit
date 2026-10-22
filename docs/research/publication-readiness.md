@@ -14,6 +14,21 @@ Qualification covers AMD64. ARM64 runtime acceptance and publication failure rec
 [publication plan](../plans/device-expansion-and-publication.md#hass-experimental-release). Published artifacts retain
 their original source and dependency versions; subsequent source changes require a new release to reach installed apps.
 
+## Withdrawal acceptance
+
+The [withdrawal check](../../infra/integration/hass/README.md#withdrawal-and-replacement) passed on AMD64 with HAOS
+18.3, Supervisor 2026.10.3, and Core 2026.10.2, using the authenticated published v0.1.2 baseline and the
+[dependency-update CI image](https://github.com/kubijo/garmin-toolkit/actions/runs/39745795968) under private Supervisor
+version `0.1.3`; the candidate's OCI bytes remain unchanged.
+
+Store refresh hid the app while its installed image, running state, populated profile/route/Course, and exact downloads
+survived. Replacement preserved them through restart, HAOS reboot, and cold restore that reversed post-backup mutations.
+Matching withdrawal retries preserved both refs; stale promotions failed before and after replacement qualification. All
+owned scopes, listeners, browser, and VM scratch were removed.
+
+This covers Supervisor and local Git; [public GitHub/GHCR recovery](../plans/device-expansion-and-publication.md) and
+[missing header/sidebar captures](../plans/shared-interface-workflows.md#runtime-acceptance) remain open.
+
 ## Dependency sources
 
 The [inventory](../../infra/release/hass-files.toml) includes workspace source, Cargo/asset notices, and image-bound
