@@ -4,7 +4,7 @@ import { readFile, readdir, rename, stat, writeFile, mkdir } from 'node:fs/promi
 import { dirname, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Protocol } from 'devtools-protocol';
-import type { DevTools } from './haos-devtools.mts';
+import { type DevTools, ingressViewport } from './haos-devtools.mts';
 import type { Action, BrowserFunction, ReadySession, Target, Until } from './haos-types.mts';
 
 export async function findVisibleTarget(
@@ -153,6 +153,8 @@ export async function populatedWorkflow(
     }
 
     async function capture(name: string) {
+        const viewport = await until(() => client.evaluate(ingressViewport), 'visible ingress viewport');
+        await client.capture(`${name}-presented.png`, viewport.clip);
         const result = await until(
             () =>
                 app(async () => {
@@ -166,6 +168,8 @@ export async function populatedWorkflow(
         assert.ok(png.length > 100 && png.length <= 8 * 1024 * 1024);
         await writeFile(resolve(evidencePath, `${name}.png`), png);
         await writeFile(resolve(evidencePath, `${name}.json`), JSON.stringify(result.info, null, 2));
+        await writeFile(resolve(evidencePath, `${name}-targets.json`), JSON.stringify(await targets(), null, 2));
+        await client.capture(`${name}-presented-after.png`, viewport.clip);
     }
 
     async function createProfile(name: string) {

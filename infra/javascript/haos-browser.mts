@@ -6,8 +6,8 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { populatedWorkflow } from './haos-workflow.mts';
 import { verifyInstallLinks } from './haos-install-links.mts';
-import { DevTools } from './haos-devtools.mts';
-import type { Clip, ReadySession, Session } from './haos-types.mts';
+import { DevTools, ingressViewport } from './haos-devtools.mts';
+import type { ReadySession, Session } from './haos-types.mts';
 
 const [sessionPath, evidencePath] = process.argv.slice(2);
 assert.ok(sessionPath && evidencePath, 'session and evidence paths are required');
@@ -131,42 +131,7 @@ try {
         );
         await client.capture('before-ingress.png');
         await client.call('Page.navigate', { url: readyState.url });
-        const ready = await until(
-            () =>
-                devtools.evaluate(() => {
-                    function find(root: Document | ShadowRoot): { viewport: number[]; clip: Clip } | null {
-                        for (const element of root.querySelectorAll('*')) {
-                            if (
-                                element instanceof HTMLIFrameElement &&
-                                element.contentDocument?.querySelector('#garmin-toolkit')
-                            ) {
-                                const document = element.contentDocument;
-                                const canvas = document.querySelector<HTMLCanvasElement>('#garmin-toolkit');
-                                const loading = document.querySelector<HTMLElement>('#loading');
-                                const rect = element.getBoundingClientRect();
-                                if (canvas?.width && canvas.height && loading?.hidden && rect.width && rect.height) {
-                                    return {
-                                        viewport: [window.innerWidth, window.innerHeight],
-                                        clip: {
-                                            x: rect.x,
-                                            y: rect.y,
-                                            width: rect.width,
-                                            height: rect.height,
-                                        },
-                                    };
-                                }
-                            }
-                            if (element.shadowRoot) {
-                                const result = find(element.shadowRoot);
-                                if (result) return result;
-                            }
-                        }
-                        return null;
-                    }
-                    return find(document);
-                }),
-            'Garmin canvas through HA ingress',
-        );
+        const ready = await until(() => devtools.evaluate(ingressViewport), 'Garmin canvas through HA ingress');
         const remoc = client.events.find(
             event => event.method === 'Network.webSocketCreated' && event.params.url.includes('/remoc'),
         );

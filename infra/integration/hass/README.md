@@ -114,8 +114,10 @@ and GPX must match the fixture. Restore must also reverse the post-backup Course
 
 The unmodified production frontend is checked first. The isolated browser then enables the bundled semantic driver
 through its canvas attribute. Actions and screenshots use built-in APIs; DevTools handles file choosers and downloads.
-When ingress has no app canvas, DevTools captures the Home Assistant error page. Evidence includes synthetic downloads
-and `workflow.json`; cleanup follows the runner contract above.
+When ingress has no app canvas, DevTools captures the Home Assistant error page. Evidence includes synthetic downloads,
+`workflow.json`, and each capture's semantic targets (`*-targets.json`). Browser-compositor images immediately before
+(`*-presented.png`) and after (`*-presented-after.png`) app-owned readback use the same ingress viewport, allowing
+visual comparison with the app-owned PNG. Cleanup follows the runner contract above.
 
 Add `--lifecycle` with a generated repository and native receipt to test first-release upgrade/recovery. A private
 `0.0.0` fixture keeps the candidate's filesystem layers and changes only image metadata. Supervisor must discover and

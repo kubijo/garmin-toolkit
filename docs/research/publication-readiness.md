@@ -26,8 +26,11 @@ survived. Replacement preserved them through restart, HAOS reboot, and cold rest
 Matching withdrawal retries preserved both refs; stale promotions failed before and after replacement qualification. All
 owned scopes, listeners, browser, and VM scratch were removed.
 
-This covers Supervisor and local Git; [public GitHub/GHCR recovery](../plans/device-expansion-and-publication.md) and
-[missing header/sidebar captures](../plans/shared-interface-workflows.md#runtime-acceptance) remain open.
+At `1024×873`, header and navigation pixels matched browser-compositor images before and after app-owned readback
+through withdrawal, replacement, restart, reboot, and restore.
+
+This covers Supervisor and local Git; [public GitHub/GHCR recovery](../plans/device-expansion-and-publication.md)
+remains open.
 
 ## Dependency sources
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { DevTools } from './haos-devtools.mts';
+import { DevTools, ingressViewport } from './haos-devtools.mts';
 import type { Until } from './haos-types.mts';
 
 class Connection extends EventTarget {
@@ -103,3 +103,26 @@ try {
     connection.dispatchEvent(new Event('close'));
 }
 console.log('Typed HAOS DevTools transport and stripped browser callbacks: passed');
+
+// The serialized callback must find the current ingress frame through HA's shadow roots.
+let bounds = { x: 256, y: 87, width: 1024, height: 873 };
+let hidden = true;
+class Frame {
+    contentDocument = {
+        querySelector: (selector: string) =>
+            selector === '#garmin-toolkit' ? { width: 1024, height: 873 } : { hidden },
+    };
+    getBoundingClientRect = () => bounds;
+}
+const viewport = () =>
+    runInNewContext(`(${ingressViewport.toString()})()`, {
+        document: { querySelectorAll: () => [{ shadowRoot: { querySelectorAll: () => [new Frame()] } }] },
+        HTMLIFrameElement: Frame,
+        window: { innerWidth: 1280, innerHeight: 960 },
+    }) as unknown;
+assert.deepEqual(JSON.parse(JSON.stringify(viewport())) as unknown, { viewport: [1280, 960], clip: bounds });
+bounds = { x: 0, y: 64, width: 1280, height: 896 };
+assert.deepEqual(JSON.parse(JSON.stringify(viewport())) as unknown, { viewport: [1280, 960], clip: bounds });
+hidden = false;
+assert.equal(viewport(), null, 'loading content cannot supply a ready capture viewport');
+console.log('Current ingress screenshot viewport through shadow roots: passed');

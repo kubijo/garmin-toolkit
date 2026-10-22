@@ -28,6 +28,31 @@ type Pending = {
     timer: ReturnType<typeof setTimeout>;
 };
 
+export function ingressViewport(): { viewport: number[]; clip: Clip } | null {
+    function find(root: Document | ShadowRoot): { viewport: number[]; clip: Clip } | null {
+        for (const element of root.querySelectorAll('*')) {
+            if (element instanceof HTMLIFrameElement && element.contentDocument?.querySelector('#garmin-toolkit')) {
+                const document = element.contentDocument;
+                const canvas = document.querySelector<HTMLCanvasElement>('#garmin-toolkit');
+                const loading = document.querySelector<HTMLElement>('#loading');
+                const rect = element.getBoundingClientRect();
+                if (canvas?.width && canvas.height && loading?.hidden && rect.width && rect.height) {
+                    return {
+                        viewport: [window.innerWidth, window.innerHeight],
+                        clip: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+                    };
+                }
+            }
+            if (element.shadowRoot) {
+                const result = find(element.shadowRoot);
+                if (result) return result;
+            }
+        }
+        return null;
+    }
+    return find(document);
+}
+
 export class DevTools {
     nextId = 0;
     pending = new Map<number, Pending>();
