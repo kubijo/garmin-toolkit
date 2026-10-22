@@ -29,6 +29,7 @@ from hass_publish import (
     ReleaseGuard,
     RollbackStore,
     StagePublication,
+    WithdrawPublication,
     cleanup_staging,
     complete_publication,
     package_evidence,
@@ -37,6 +38,7 @@ from hass_publish import (
     release_guard,
     rollback_store,
     stage_publication,
+    withdraw_publication,
 )
 from hass_registry import PrepareRegistry, VerifyRegistry, prepare_registry, verify_registry
 from hass_release_build import NativeBuild, record_build
@@ -103,6 +105,7 @@ class Options:
             | Annotated[RollbackStore, tyro.conf.subcommand('rollback-store', prefix_name=False)]
             | Annotated[PromoteDraft, tyro.conf.subcommand('promote-draft', prefix_name=False)]
             | Annotated[CleanupStaging, tyro.conf.subcommand('cleanup-staging', prefix_name=False)]
+            | Annotated[WithdrawPublication, tyro.conf.subcommand('withdraw', prefix_name=False)]
         ),
         tyro.conf.arg(name=''),
     ]
@@ -284,11 +287,18 @@ def main(
     | CompletePublication
     | RollbackStore
     | CleanupStaging
-    | PromoteDraft,
+    | PromoteDraft
+    | WithdrawPublication,
 ) -> int:
     output = TerminalOutput()
     output.install_tracebacks()
     try:
+        if isinstance(options, WithdrawPublication):
+            withdraw_publication(options)
+            output.panel(
+                Text(str(options.output / 'withdrawal.json')), title='Release withdrawn from the app repository'
+            )
+            return 0
         if isinstance(options, ReleaseGuard):
             release_guard(options)
             return 0

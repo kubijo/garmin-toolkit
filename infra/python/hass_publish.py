@@ -34,7 +34,7 @@ from hass_release_source import admit_source
 from hass_repository import copy_repository
 from hass_source_parts import part_path
 from hass_sources import source_part_count, verify_sources
-from hass_store import FENCE, Store
+from hass_store import FENCE, Store, oid, write_journal
 from json_data import Object, json_bytes, object_rows, object_value, read_json, text
 
 REPOSITORY = 'kubijo/garmin-toolkit'
@@ -101,6 +101,17 @@ class PromoteDraft:
     """Authenticate existing release assets, then promote their original tested bytes."""
 
     source: Path
+    output: Path
+
+
+@dataclass(frozen=True, kw_only=True)
+class WithdrawPublication:
+    """Remove a qualified release from the store using exact store/state leases; retain all release artifacts."""
+
+    version: str
+    store_commit: str
+    state_commit: str
+    reason: str
     output: Path
 
 
@@ -656,6 +667,75 @@ def complete_publication(options: CompletePublication) -> None:
 
 def store() -> Store:
     return Store(REMOTE, git, branch_head)
+
+
+def withdraw_publication(options: WithdrawPublication) -> None:
+    previous, before = oid(options.store_commit), oid(options.state_commit)
+    if not re.fullmatch(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)', options.version):
+        raise ValueError('Withdrawal requires a numeric release version')
+    if not options.reason.strip() or len(options.reason) > 2000:
+        raise ValueError('Withdrawal requires a nonempty reason of at most 2000 characters')
+    if options.output.exists() or options.output.is_symlink():
+        raise ValueError('Withdrawal output already exists; retain its original journal')
+    options.output.parent.mkdir(parents=True, exist_ok=True)
+    owner = store()
+    with tempfile.TemporaryDirectory(prefix='.hass-withdrawal.', dir=options.output.parent) as temporary:
+        checkout = Path(temporary)
+        git('init', '-q', str(checkout))
+        current, fence = branch_head('hass-apps'), branch_head(FENCE)
+        state = owner.state(checkout, fence) if fence else {}
+        if (
+            state.get('status') == 'withdrawn'
+            and state.get('previous') == previous
+            and state.get('published') == current
+            and state.get('version') == options.version
+            and state.get('reason') == options.reason
+            and git('show', '-s', '--format=%P', fence, cwd=checkout) == before
+        ):
+            report: Object = {**state, 'fence_before': before, 'fence_withdrawn': fence, 'completed': True}
+        else:
+            if (current, fence) != (previous, before):
+                raise ValueError('Store or publication state changed; review fresh heads before withdrawal')
+            if state.get('status') != 'qualified' or state.get('published') != previous:
+                raise ValueError(
+                    'Withdrawal requires the current, durably qualified release; recover unfinished work first'
+                )
+            owner.fetch(checkout, previous)
+            config = object_value(yaml.safe_load(git('show', previous + ':garmin_toolkit/config.yaml', cwd=checkout)))
+            if config.get('version') != options.version or config.get('slug') != 'garmin_toolkit':
+                raise ValueError('Store app identity/version differs from the requested withdrawal')
+            git('read-tree', previous, cwd=checkout)
+            git('rm', '-r', '--cached', '--', 'garmin_toolkit', cwd=checkout)
+            tree = git('write-tree', cwd=checkout)
+            published = git(
+                '-c',
+                'user.name=Garmin release',
+                '-c',
+                'user.email=release@users.noreply.github.com',
+                'commit-tree',
+                tree,
+                '-p',
+                previous,
+                '-m',
+                'Withdraw HASS release ' + options.version,
+                cwd=checkout,
+            )
+            withdrawal: Object = {
+                'status': 'withdrawn',
+                'previous': previous,
+                'published': published,
+                'version': options.version,
+                'reason': options.reason,
+            }
+            withdrawn = owner.commit(checkout, withdrawal, before)
+            report = {**withdrawal, 'fence_before': before, 'fence_withdrawn': withdrawn, 'completed': False}
+            options.output.mkdir()
+            write_journal(options.output, report, name='withdrawal.json')
+            owner.push(checkout, before, withdrawn, advertisement=(previous, published))
+            write_journal(options.output, {**report, 'completed': True}, replace=True, name='withdrawal.json')
+            return
+        options.output.mkdir()
+        write_journal(options.output, report, name='withdrawal.json')
 
 
 def qualify_promotion(directory: Path) -> None:

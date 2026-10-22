@@ -220,3 +220,72 @@ dark captures.
 SLSA v1, and hosted runners. It needs registry/trust-root access. Tagged issuance and verification passed for
 [v0.1.1](../../docs/research/publication-readiness.md#published-amd64-release); each new candidate must pass the same
 checks.
+
+## Publication recovery
+
+Keep the workflow run, tag, source commit, release asset inventory, image digest, and both branch heads with the
+incident. The workflow's publication/promotion evidence contains its staging and promotion journals. A timeout can
+follow a successful remote write; inspect the durable `hass-publication` state before deciding whether an operation
+failed.
+
+- **Version conflict:** retain the existing tag, release assets, and image bytes. A different image under the same
+  version is fatal. Prepare a greater version from the corrected source and run its full release qualification.
+- **Incomplete draft:** promotion rejects missing or unexpected assets before changing the registry or store. Inspect
+  the draft and its original run; do not fill gaps with bytes from another build or use `--clobber`. If the original
+  signed candidate cannot be recovered intact, explicitly delete only the unpublished draft after checking `isDraft`
+  with `gh release view vVERSION --json isDraft,assets`. Retain the source tag and run evidence, then dispatch that tag
+  with **Publish disabled** to assemble and independently verify a fresh draft. A public release requires withdrawal or
+  a new version, rather than this draft cleanup.
+- **Failed installation:** the promotion workflow restores the previous store head and marks the attempt aborted. Its
+  release and versioned image may already be public; rollback preserves those artifacts. Fix the installation problem,
+  then dispatch the same tag with **Publish enabled**. The retry authenticates the original signed downloads and repeats
+  installation qualification without uploading replacement assets or rebuilding the image.
+- **Interrupted attempt:** a fresh promotion reconciles unfinished durable state before advertising metadata. Failed
+  retries preserve a previously qualified store head. Recovery also fences a delayed push whose caller already exited.
+- **Changed store or state branch:** retain the new heads and stop. Recovery refuses unrelated metadata rather than
+  force-pushing over it. Establish which publication owns the change before retrying; keep both state histories.
+
+The disposable-Git tests in [publication](../python/test_hass_publish.py),
+[CI orchestration](../python/test_hass_ci.py), and [withdrawal](../python/test_hass_withdraw.py) cover leases, atomic
+updates, interrupted pushes, failed acceptance, retries, and stale recovery. They do not qualify GitHub/GHCR outages or
+Supervisor behavior; live failure recovery remains in the
+[publication plan](../../docs/plans/device-expansion-and-publication.md#hass-experimental-release).
+
+## Release withdrawal
+
+Withdraw a qualified release when it must stop being offered for new installations. This removes `garmin_toolkit/` from
+`hass-apps` and records `withdrawn` state atomically, retaining repository metadata and both Git histories. It does not
+contact Home Assistant instances, stop installed apps, restore their data, or downgrade them. Store clients must refresh
+their cached repository metadata. Runtime acceptance of that refresh remains outstanding.
+
+First ensure no publication run is active or queued. Record the current release version and read both exact heads:
+
+```sh
+gh api repos/kubijo/garmin-toolkit/git/ref/heads/hass-apps --jq .object.sha
+gh api repos/kubijo/garmin-toolkit/git/ref/heads/hass-publication --jq .object.sha
+```
+
+Review those commits and the durable state's `qualified` status. After explicit authorization for the affected release:
+
+```sh
+just release::withdraw \
+    --version VERSION \
+    --store-commit EXACT_HASS_APPS_COMMIT \
+    --state-commit EXACT_HASS_PUBLICATION_COMMIT \
+    --reason 'Describe the defect and recovery guidance' \
+    --output .tmp/withdrawal-VERSION
+```
+
+The command requires the currently qualified app identity/version and both unchanged heads. A concurrent update rejects
+the entire push. Keep `withdrawal.json`; if the response is lost, read the remote heads and rerun the exact request with
+a fresh output directory. An already completed matching withdrawal succeeds without another remote write. Changed heads,
+a different reason, or unfinished publication state require review.
+
+Mark the GitHub release title as withdrawn and prepend the reason, affected users, backup/recovery guidance, and any
+replacement version to its existing notes. Keep the original notes and prerelease status. Use
+[`gh release edit --notes-file`](https://cli.github.com/manual/gh_release_edit) with a reviewed file. Retain the release
+tag, checksums, attestations, image tags/digests, source bundles, and acceptance evidence. Do not reuse the withdrawn
+version or rewind `hass-publication`. Stale promotion and rollback attempts cannot replace the withdrawal metadata.
+
+Publish a greater, fully qualified version to restore the app to the store. Users already affected need explicit
+recovery guidance and, where applicable, their own backup restore; withdrawing metadata performs neither action.
