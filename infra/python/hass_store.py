@@ -25,9 +25,9 @@ class Git(Protocol):
     def __call__(self, *arguments: str, cwd: Path | None = None) -> str: ...
 
 
-def write_journal(directory: Path, data: Object, *, replace: bool = False) -> None:
+def write_journal(directory: Path, data: Object, *, replace: bool = False, name: str = 'promotion.json') -> None:
     with tempfile.TemporaryDirectory(prefix='.promotion.', dir=directory) as temporary:
-        staged, journal = Path(temporary) / 'promotion.json', directory / 'promotion.json'
+        staged, journal = Path(temporary) / name, directory / name
         with staged.open('xb') as stream:
             stream.write(json_bytes(data))
             stream.flush()
@@ -56,7 +56,7 @@ class Store:
     def state(self, checkout: Path, commit: str) -> Object:
         self.fetch(checkout, commit)
         data = object_value(json.loads(self.git('show', '-s', '--format=%B', commit, cwd=checkout)))
-        if data.get('status') not in ('prepared', 'advertised', 'qualified', 'aborted'):
+        if data.get('status') not in ('prepared', 'advertised', 'qualified', 'aborted', 'withdrawn'):
             raise ValueError('Invalid durable store promotion state')
         oid(data['previous'], empty=True)
         oid(data['published'])

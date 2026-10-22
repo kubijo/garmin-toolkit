@@ -6,10 +6,11 @@ Application authentication, credential custody, encryption, and Connect remain d
 
 - Qualify ARM64 registry installation, ingress, and lifecycle before advertising support, using the
   [repository-install check](../../infra/integration/hass/README.md#repository-install-acceptance).
-- Test live [publication recovery](../../infra/release/README.md#github-publication) from version conflicts, incomplete
-  drafts, changed store branches, failed installation, and retries. Verify rollback preserves previous metadata and
-  artifacts.
-- Document release withdrawal.
+- Test live [publication recovery](../../infra/release/README.md#publication-recovery) from version conflicts,
+  incomplete drafts, changed store branches, failed installation, and retries. Verify rollback preserves previous
+  metadata and artifacts.
+- Qualify [release withdrawal](../../infra/release/README.md#release-withdrawal) against a disposable Supervisor:
+  refreshed store visibility, installed-app/data preservation, retry rejection, and a greater replacement version.
 
 ## Hardware and other distribution
 

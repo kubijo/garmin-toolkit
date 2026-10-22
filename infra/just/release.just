@@ -28,6 +28,10 @@ bundle-sources *options:
 repository *options:
     @just release::in-release repository "$@"
 
+# Withdraw the current qualified release using exact store and publication-state leases.
+withdraw *options:
+    @just release::in-release withdraw "$@"
+
 # Prepare annotated OCI manifests from verified native image exports; no registry access.
 prepare-registry *options:
     @just release::in-release prepare-registry "$@"

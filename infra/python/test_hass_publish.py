@@ -358,7 +358,7 @@ class PublicationTests(unittest.TestCase):
             qualify_rejections(options, self.document)
         attest.assert_not_called()
 
-    def test_existing_signed_draft_is_promoted_without_building_an_image_or_replacing_assets(self) -> None:
+    def signed_draft(self) -> Path:
         draft = self.fixture.root / 'draft'
         shutil.copytree(self.directory / 'candidate', draft)
         for name in (
@@ -376,6 +376,42 @@ class PublicationTests(unittest.TestCase):
                     path.write_bytes(b'Synthetic public evidence')
                 archive.add(path, arcname=name)
             archive.add(self.directory / 'staging.json', arcname='staging.json')
+        return draft
+
+    def test_incomplete_drafts_fail_before_any_registry_or_store_mutation(self) -> None:
+        draft = self.signed_draft()
+        original = {path.name: file_sha256(path) for path in draft.iterdir()}
+
+        for missing in sorted(original):
+            with self.subTest(missing=missing):
+
+                def download(*args: str, cwd: Path | None = None, omitted: str = missing) -> str:
+                    del cwd
+                    if args[:3] == ('gh', 'release', 'view'):
+                        return '{"isDraft":true}'
+                    if args[:3] != ('gh', 'release', 'download'):
+                        raise AssertionError('Incomplete draft reached an external mutation: ' + str(args))
+                    destination = Path(args[args.index('--dir') + 1])
+                    for path in draft.iterdir():
+                        if path.name != omitted:
+                            shutil.copyfile(path, destination / path.name)
+                    return ''
+
+                with (
+                    patch('hass_publish.command', side_effect=download),
+                    patch('hass_release.verify_provenance') as verified,
+                    patch('hass_publish.promote_candidate') as promote,
+                    self.assertRaises((ValueError, FileNotFoundError)),
+                ):
+                    promote_draft(
+                        PromoteDraft(source=self.fixture.source, output=self.fixture.root / ('missing-' + missing))
+                    )
+                verified.assert_not_called()
+                promote.assert_not_called()
+        self.assertEqual({path.name: file_sha256(path) for path in draft.iterdir()}, original)
+
+    def test_existing_signed_draft_is_promoted_without_building_an_image_or_replacing_assets(self) -> None:
+        draft = self.signed_draft()
         repository = self.fixture.root / 'repository'
         repository.mkdir()
         (repository / 'repository.yaml').write_text('Synthetic repository\n')
