@@ -177,6 +177,44 @@ Only the private registry tag and Supervisor version change; candidate OCI bytes
 `--baseline-release`, the baseline is the metadata-only `0.0.0` fixture above. Public GitHub/GHCR refs remain untouched;
 their failure recovery is separate.
 
+### Signed installation recovery
+
+Use `--recovery` with two already published, signed releases to test an actual Supervisor update failure and retry:
+
+```bash
+just hass::haos-app-check \
+    --app-archive .tmp/recovery-candidate/garmin-toolkit-hass-0.1.2-amd64.oci.tar \
+    --repository /nix/store/REPOSITORY-garmin-hass-app-repository \
+    --baseline-release .tmp/recovery-baseline \
+    --candidate-release .tmp/recovery-candidate \
+    --recovery
+```
+
+Populate the baseline directory with v0.1.1 and the candidate with v0.1.2, using the signed inputs described above. Both
+images are authenticated before boot; the candidate must be newer, match the current app version, and use the exact
+selected archive. Private version aliases and other lifecycle modes are rejected. Signed published inputs replace the
+unsigned native receipt for this mode.
+
+The runner populates and qualifies the private baseline, advertises the candidate with production leases, then stops
+only the guest's fixture registry and verifies its Docker state. Supervisor must attempt an uncached update and return
+`app_unknown_error` with the target app in `extra_fields`. The CLI must deliver that raw JSON successfully; transport
+failures, other error keys or apps, malformed responses, timeouts, and unexpected update success fail the check.
+Registry restoration and metadata rollback run even when the request fails unexpectedly.
+
+This uses Supervisor's
+[structured error contract](https://contributors.home-assistant.io/apps/supervisor-api/#responses). Supervisor wraps
+image-pull errors as `app_unknown_error`; it exposes no distinct connection-refused key. The evidence therefore records
+an update failure during the injected registry outage and retains the human message as diagnostics.
+
+Supervisor must rediscover the exact baseline metadata while its installed image, data, and downloads survive. The
+unchanged candidate is retried, then checked through app restart, HAOS reboot, and cold restore. Only after those checks
+and retained-input hashes pass is the retry qualified; stale rollback and matching retry must preserve both Git refs.
+`workflow.json` records the signed identities and failure response alongside the publication journals and captures.
+
+This covers signed image installation and production store recovery using a private Git repository. It authenticates the
+selected images, manifests, checksums, and signature bundles; dependency source bundles are outside this check. Public
+GitHub/GHCR refs remain unchanged. Live qualification of this mode is still outstanding.
+
 ## HAOS app smoke
 
 Build `.#packages.x86_64-linux.garmin-hass-app-image` with a memory-capped Nix builder, then run:

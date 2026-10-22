@@ -27,8 +27,10 @@ import haos_app_vm as vm
 import haos_workflow
 from haos_lifecycle import Lifecycle
 from haos_platform import acceleration, baseline_fixture
+from haos_recovery import release_assets
 from haos_upgrade import published_baseline
 from hass_release_build import verify_build_inputs
+from json_data import json_bytes, text
 from processes import ACCEPTANCE_SCRATCH, session_scratch, stop_group
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -92,6 +94,12 @@ class Check(Run):
 
     withdrawal: bool = False
     """Test withdrawal, installed data preservation, and a greater replacement in the private repository."""
+
+    recovery: bool = False
+    """Test a failed signed-image update, private store rollback, and an unchanged retry."""
+
+    candidate_release: Path | None = None
+    """Published signed candidate directory; required with recovery and a published baseline."""
 
     baseline_release: Path | None = None
     """Published release directory with image, release.json, SHA256SUMS, and their attestation bundles."""
@@ -284,9 +292,17 @@ def wait_browser(
 
 
 def run_session(options: Run) -> int:
-    transition = isinstance(options, Check) and (options.lifecycle or options.withdrawal)
-    if isinstance(options, Check) and options.lifecycle and options.withdrawal:
-        raise ValueError('Select lifecycle or withdrawal acceptance, not both')
+    transition = isinstance(options, Check) and (options.lifecycle or options.withdrawal or options.recovery)
+    if isinstance(options, Check):
+        if sum((options.lifecycle, options.withdrawal, options.recovery)) > 1:
+            raise ValueError('Select one acceptance mode: lifecycle, withdrawal, or recovery')
+        if options.recovery:
+            if options.repository is None or options.baseline_release is None or options.candidate_release is None:
+                raise ValueError('Recovery requires local repository metadata and both signed published releases')
+            if options.candidate_version is not None:
+                raise ValueError('Signed recovery cannot use a private candidate version alias')
+        elif options.candidate_release is not None:
+            raise ValueError('A signed candidate release requires recovery acceptance')
     if (
         isinstance(options, Check)
         and not transition
@@ -299,7 +315,12 @@ def run_session(options: Run) -> int:
         and options.repository_url != 'https://github.com/kubijo/garmin-toolkit#hass-apps'
     ):
         raise ValueError('Installation link acceptance requires the public hass-apps repository URL')
-    if isinstance(options, Check) and transition and (options.repository is None or options.build_receipt is None):
+    if (
+        isinstance(options, Check)
+        and transition
+        and not options.recovery
+        and (options.repository is None or options.build_receipt is None)
+    ):
         raise ValueError('Lifecycle acceptance requires a generated repository and native build receipt')
     if not 10 <= options.timeout <= 1800 or not 1 <= options.session_timeout <= 7200 or not 0 <= options.port <= 65535:
         raise ValueError('Startup must be 10-1800s, inspection 1-7200s, and port 0-65535')
@@ -316,6 +337,24 @@ def run_session(options: Run) -> int:
         if isinstance(options, Check) and options.baseline_release is not None
         else None
     )
+    candidate = (
+        published_baseline(options.candidate_release, ROOT, guest)
+        if isinstance(options, Check) and options.recovery and options.candidate_release is not None
+        else None
+    )
+    assets: tuple[tuple[Path, str], ...] = ()
+    if candidate is not None:
+        assert isinstance(options, Check) and options.baseline_release is not None and previous is not None
+        assert options.candidate_release is not None
+        if candidate[0].resolve() != options.app_archive.resolve():
+            raise ValueError('Recovery must install the exact authenticated candidate archive')
+        if tuple(map(int, text(previous[1]['version']).split('.'))) >= tuple(
+            map(int, text(candidate[1]['version']).split('.'))
+        ):
+            raise ValueError('Recovery requires a greater signed candidate release')
+        assets = release_assets(options.baseline_release, previous[0]) + release_assets(
+            options.candidate_release, candidate[0]
+        )
     if previous is not None:
         baseline_version = previous[1]['version']
         if baseline_version == (options.candidate_version or vm.test_config()[1]):
@@ -356,6 +395,9 @@ def run_session(options: Run) -> int:
                 (runtime / 'published-baseline.json').write_text(encoded)
                 (evidence / 'published-baseline.json').write_text(encoded)
             options = replace(options, baseline_archive=baseline)
+            if candidate is not None:
+                for path in (runtime / 'published-candidate.json', evidence / 'published-candidate.json'):
+                    path.write_bytes(json_bytes(candidate[1]))
         state_path = runtime / 'session.json'
         http_port = options.port or vm.free_port()
         base = f'http://127.0.0.1:{http_port}'
@@ -432,7 +474,7 @@ def run_session(options: Run) -> int:
                         return boot_ids
 
                     lifecycle = (
-                        Lifecycle(runtime, evidence, key, ssh_port, app_slug, process, OVERLAY_LIMIT)
+                        Lifecycle(runtime, evidence, key, ssh_port, app_slug, process, OVERLAY_LIMIT, assets)
                         if transition
                         else None
                     )
@@ -446,6 +488,7 @@ def run_session(options: Run) -> int:
                         reboot=reboot,
                         lifecycle=lifecycle,
                         withdrawal=options.withdrawal,
+                        recovery=options.recovery,
                     )
                     return
             state.update(phase='ready', expires_at=time.time() + options.session_timeout)

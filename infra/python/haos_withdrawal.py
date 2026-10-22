@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from haos_repository import git
+from haos_repository import local_store
 from hass_publish import WithdrawPublication, push_metadata, withdraw_publication
 from hass_store import FENCE, Store, oid
 from json_data import Object, json_bytes, object_value, read_json, text
@@ -19,23 +19,7 @@ class Withdrawal:
     evidence: Path
 
     def store(self) -> Store:
-        remote = self.runtime / 'repository-http/garmin-toolkit.git'
-        if remote.is_symlink() or not remote.is_dir() or not remote.resolve().is_relative_to(self.runtime.resolve()):
-            raise ValueError('Withdrawal acceptance requires its owned local Git repository')
-
-        def execute(*arguments: str, cwd: Path | None = None) -> str:
-            return git(self.runtime, *arguments, cwd=cwd)
-
-        def head(branch: str) -> str:
-            result = execute('ls-remote', '--refs', str(remote), 'refs/heads/' + branch)
-            if not result:
-                return ''
-            commit, _, reference = result.partition('\t')
-            if reference != 'refs/heads/' + branch:
-                raise ValueError('Unexpected disposable publication ref')
-            return oid(commit)
-
-        return Store(str(remote), execute, head)
+        return local_store(self.runtime)
 
     def withdraw(self, version: str) -> None:
         owner = self.store()
