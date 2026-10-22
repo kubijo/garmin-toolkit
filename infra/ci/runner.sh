@@ -63,8 +63,14 @@ cleanup)
     nix run .#hass-ci -- cleanup || cleanup_status=$?
     exit "$cleanup_status"
     ;;
+recovery-cleanup)
+    cleanup_status=0
+    rm -f -- .tmp/recovery-auth/config.json || cleanup_status=$?
+    nix run .#hass-recovery -- cleanup || cleanup_status=$?
+    exit "$cleanup_status"
+    ;;
 *)
-    printf 'usage: runner.sh {prepare [KVM HAOS]|limits|checks GROUP|require-success RESULT...}\n' >&2
+    printf 'usage: runner.sh {prepare [KVM HAOS]|limits|checks GROUP|require-success RESULT...|cleanup|recovery-cleanup}\n' >&2
     exit 64
     ;;
 esac

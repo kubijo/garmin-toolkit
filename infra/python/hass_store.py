@@ -48,6 +48,8 @@ class Store:
     remote: str
     git: Git
     head: Callable[[str], str]
+    branch: str = 'hass-apps'
+    fence: str = FENCE
 
     def fetch(self, checkout: Path, commit: str) -> None:
         if commit:
@@ -81,18 +83,18 @@ class Store:
         self.git(
             'push',
             '--atomic',
-            '--force-with-lease=refs/heads/' + FENCE + ':' + before,
-            *(['--force-with-lease=refs/heads/hass-apps:' + advertisement[0]] if advertisement else []),
+            '--force-with-lease=refs/heads/' + self.fence + ':' + before,
+            *(['--force-with-lease=refs/heads/' + self.branch + ':' + advertisement[0]] if advertisement else []),
             self.remote,
-            after + ':refs/heads/' + FENCE,
-            *([advertisement[1] + ':refs/heads/hass-apps'] if advertisement else []),
+            after + ':refs/heads/' + self.fence,
+            *([advertisement[1] + ':refs/heads/' + self.branch] if advertisement else []),
             cwd=checkout,
         )
 
     def prepare(self, checkout: Path, directory: Path, previous: str, published: str) -> tuple[str, str] | None:
         oid(previous, empty=True)
         oid(published)
-        before = self.head(FENCE)
+        before = self.head(self.fence)
         state = self.state(checkout, before) if before else {}
         if previous == published:
             if state.get('status') != 'qualified' or state.get('published') != published:
@@ -121,7 +123,7 @@ class Store:
     def recover(self, checkout: Path, data: Object, allowed: set[str]) -> None:
         previous, published = oid(data['previous'], empty=True), oid(data['published'])
         for _ in range(3):
-            fence = self.head(FENCE)
+            fence = self.head(self.fence)
             state = self.state(checkout, fence) if fence else {}
             same = state.get('previous') == previous and state.get('published') == published
             if same and state.get('status') in ('aborted', 'qualified'):
@@ -129,7 +131,7 @@ class Store:
             parent = self.git('show', '-s', '--format=%P', fence, cwd=checkout) if fence else ''
             if fence not in allowed and not (same and state.get('status') == 'advertised' and parent in allowed):
                 raise ValueError('Store promotion state changed; refusing unrelated recovery')
-            current = self.head('hass-apps')
+            current = self.head(self.branch)
             if current not in (previous, published):
                 raise ValueError('Store advertisement changed; refusing to roll back unrelated metadata')
             self.fetch(checkout, current)
@@ -138,7 +140,7 @@ class Store:
                 self.push(checkout, fence, aborted, advertisement=(current, previous) if current != previous else None)
                 return
             except subprocess.CalledProcessError:
-                if self.head(FENCE) == fence:
+                if self.head(self.fence) == fence:
                     raise
         raise ValueError('Store promotion kept changing during recovery')
 
@@ -146,7 +148,7 @@ class Store:
         with tempfile.TemporaryDirectory(prefix='.hass-recovery.', dir=directory) as temporary:
             checkout = Path(temporary)
             self.git('init', '-q', str(checkout))
-            fence = self.head(FENCE)
+            fence = self.head(self.fence)
             state = self.state(checkout, fence) if fence else {}
             if state.get('status') in ('prepared', 'advertised'):
                 self.recover(checkout, state, {fence})
@@ -173,7 +175,7 @@ class Store:
             self.git('init', '-q', str(checkout))
             advertised = text(data['fence_advertised'])
             state = self.state(checkout, advertised)
-            if self.head('hass-apps') != data['published']:
+            if self.head(self.branch) != data['published']:
                 raise ValueError('Store advertisement changed during qualification')
             qualified = self.commit(checkout, {**state, 'status': 'qualified'}, advertised)
             self.push(checkout, advertised, qualified)
