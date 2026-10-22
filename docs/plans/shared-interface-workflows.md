@@ -30,6 +30,10 @@ Use `just hass::control check` against a running demo where semantic control is 
 - **Decorations:** native title-bar actions, window menu, resizing, borders/shadows, maximized appearance, and both
   themes.
 - **Diagnostics:** file-export error recovery.
+- **Captures:** investigate static header/sidebar content missing after navigation in the
+  [HAOS withdrawal check](../../infra/integration/hass/README.md#withdrawal-and-replacement). Compare its
+  `populated-course`, `withdrawn-course`, and `withdrawal-replaced-course` app-owned captures; distinguish on-screen
+  rendering from readback before using them as visual baselines.
 - **Localization:** use the FormatJS `en-XA` pseudo-locale and deliberately long or untranslated copy; catalog parity
   alone does not establish readable native, gallery, or browser layouts.
 

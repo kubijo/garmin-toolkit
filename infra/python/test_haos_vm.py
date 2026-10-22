@@ -464,6 +464,23 @@ class HaosTests(unittest.TestCase):
                 vm.reload_store(self.root / 'key', 2222, slug)
             self.assertEqual(run.call_count, 4)
 
+    def test_withdrawal_refresh_waits_until_the_app_leaves_the_store(self) -> None:
+        slug = '12345678_garmin_toolkit'
+        with (
+            patch.object(vm, 'run'),
+            patch.object(vm, 'guest_data', side_effect=[{'apps': [{'slug': slug}]}, {'apps': []}]) as info,
+            patch('haos_app_vm.time.sleep'),
+        ):
+            vm.reload_store(self.root / 'key', 2222, slug, present=False)
+        self.assertEqual(info.call_count, 2)
+        with (
+            patch.object(vm, 'run'),
+            patch.object(vm, 'guest_data', return_value={'apps': [{'slug': slug}]}),
+            patch('haos_app_vm.time.sleep'),
+            self.assertRaisesRegex(RuntimeError, 'expected app visibility'),
+        ):
+            vm.reload_store(self.root / 'key', 2222, slug, present=False)
+
     def test_browser_forwarding_is_loopback_and_vm_resources_are_bounded(self) -> None:
         for architecture, binary in [('amd64', 'qemu-system-x86_64'), ('aarch64', 'qemu-system-aarch64')]:
             with self.subTest(architecture=architecture):

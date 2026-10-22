@@ -17,10 +17,10 @@ from hass_repository import copy_repository
 from json_data import object_value, strings
 
 
-def git(runtime: Path, *arguments: str) -> None:
+def git(runtime: Path, *arguments: str, cwd: Path | None = None) -> str:
     environment = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
     environment.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
-    subprocess.run(
+    return subprocess.run(
         [
             'git',
             '-c',
@@ -34,11 +34,12 @@ def git(runtime: Path, *arguments: str) -> None:
             *arguments,
         ],
         env=environment,
+        cwd=cwd,
         check=True,
         capture_output=True,
         text=True,
         timeout=30,
-    )
+    ).stdout.strip()
 
 
 def publish_version(runtime: Path, version: str) -> None:

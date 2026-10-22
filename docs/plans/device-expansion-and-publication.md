@@ -9,8 +9,6 @@ Application authentication, credential custody, encryption, and Connect remain d
 - Test live [publication recovery](../../infra/release/README.md#publication-recovery) from version conflicts,
   incomplete drafts, changed store branches, failed installation, and retries. Verify rollback preserves previous
   metadata and artifacts.
-- Qualify [release withdrawal](../../infra/release/README.md#release-withdrawal) against a disposable Supervisor:
-  refreshed store visibility, installed-app/data preservation, retry rejection, and a greater replacement version.
 
 ## Hardware and other distribution
 

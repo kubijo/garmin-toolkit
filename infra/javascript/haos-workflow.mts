@@ -297,9 +297,16 @@ export async function populatedWorkflow(
                 assert.ok(!current.some(node => node.id === 'profile.0'), 'reinstall has no old profile');
                 await capture('reinstalled-empty');
             } else if (
-                ['upgraded', 'restarted', 'rebooted', 'restored', 'recovered', 'recovered-upgraded'].includes(
-                    request.operation,
-                )
+                [
+                    'upgraded',
+                    'restarted',
+                    'rebooted',
+                    'restored',
+                    'recovered',
+                    'recovered-upgraded',
+                    'withdrawn',
+                    'withdrawal-replaced',
+                ].includes(request.operation)
             ) {
                 await openPopulated();
                 await exports(request.operation);

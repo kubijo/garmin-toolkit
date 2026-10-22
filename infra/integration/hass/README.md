@@ -145,6 +145,36 @@ token but leaves the routing map stale, producing HTTP 503. The
 [ingress map](https://github.com/home-assistant/supervisor/blob/2026.10.2/supervisor/ingress.py#L125) identify the
 upstream limitation. The app image and stored data need no changes.
 
+### Withdrawal and replacement
+
+Use `--withdrawal` instead of `--lifecycle` to test the
+[withdrawal protocol](../../release/README.md#release-withdrawal) in the guest's private Git repository. Supply
+generated repository metadata, a native receipt, and a greater numeric candidate version:
+
+```bash
+just hass::haos-app-check \
+    --app-archive .tmp/hass-native-build/garmin-toolkit-hass-0.1.2-amd64.oci.tar \
+    --build-receipt .tmp/hass-native-build/native-build.json \
+    --repository /nix/store/REPOSITORY-garmin-hass-app-repository \
+    --baseline-release .tmp/published-baseline \
+    --candidate-version 0.1.3 \
+    --withdrawal
+```
+
+The runner populates the baseline through ingress, qualifies its private publication, then withdraws it using production
+code. Supervisor refresh must hide the app while its installed image, running state, profile/route/Course data, and
+exact downloads survive. Matching retries must preserve both Git refs; stale promotions must fail before and after
+replacement qualification.
+
+Production leases advertise the greater candidate. Upgrade, restart, HAOS reboot, and cold restore must preserve data
+and downloads; restore must reverse post-backup mutations. Only then is the replacement qualified. `workflow.json`
+records coverage alongside store/app responses, journals, image identities, and app-owned captures. The
+[HTTP consumer test](../../python/test_hass_repository.py) guards private-store isolation and branch continuity.
+
+Only the private registry tag and Supervisor version change; candidate OCI bytes stay unchanged. Without
+`--baseline-release`, the baseline is the metadata-only `0.0.0` fixture above. Public GitHub/GHCR refs remain untouched;
+their failure recovery is separate.
+
 ## HAOS app smoke
 
 Build `.#packages.x86_64-linux.garmin-hass-app-image` with a memory-capped Nix builder, then run:

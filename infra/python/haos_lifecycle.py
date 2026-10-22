@@ -7,6 +7,7 @@ from pathlib import Path
 
 import haos_app_vm as vm
 from haos_repository import publish_version
+from haos_withdrawal import Withdrawal
 from json_data import Object, json_bytes, object_value, text
 
 
@@ -79,11 +80,26 @@ class Lifecycle:
 
     def advertise(self, name: str) -> None:
         version = text(self.image(name)['version'])
-        publish_version(self.runtime, version)
+        if (self.runtime / 'withdrawal-state.json').is_file():
+            Withdrawal(self.runtime, self.evidence).replace(version)
+        else:
+            publish_version(self.runtime, version)
         vm.reload_store(self.key, self.port, self.app_slug)
         info = vm.guest_data(self.key, self.port, f'ha apps info {self.app_slug}')
         if info.get('version_latest') != version:
             raise RuntimeError('Supervisor did not discover the advertised lifecycle version')
+
+    def withdraw(self) -> None:
+        version = text(self.image('baseline')['version'])
+        self.assert_image('baseline')
+        Withdrawal(self.runtime, self.evidence).withdraw(version)
+        vm.reload_store(self.key, self.port, self.app_slug, present=False)
+        self.assert_image('baseline')
+        for name, command in (
+            ('withdrawn-store', 'ha store info'),
+            ('withdrawn-app', f'ha apps info {self.app_slug}'),
+        ):
+            (self.evidence / (name + '.json')).write_bytes(json_bytes(vm.guest_data(self.key, self.port, command)))
 
     def upgrade(self) -> None:
         self.advertise('candidate')
