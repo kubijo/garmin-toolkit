@@ -62,14 +62,15 @@ class StoreDrill:
         baseline = self.advertise('baseline', '')
         self.owner.qualify(self.root / 'baseline')
 
-        # Preserve the candidate locally so a delayed, real push can be attempted after recovery.
+        # Retain both push sources after the temporary publication checkout disappears.
         self.metadata('0.0.1')
         prepared = self.root / 'prepared'
         prepared.mkdir()
 
         def interrupt(commit: str, current: str, working: Path) -> tuple[str, str] | None:
             self.owner.prepare(working, prepared, current, commit)
-            self.owner.git('fetch', str(working), commit, cwd=checkout)
+            journal = object_value(read_json(prepared / 'promotion.json'))
+            self.owner.git('fetch', str(working), commit, text(journal['fence_advertised']), cwd=checkout)
             raise InterruptedClient('Injected interruption after prepare, before advertisement')
 
         try:
@@ -83,6 +84,8 @@ class StoreDrill:
         self.owner.reconcile(self.root)
         recovered = self.heads()
         journal = object_value(read_json(prepared / 'promotion.json'))
+        for name in ('published', 'fence_advertised'):
+            self.owner.git('cat-file', '-e', text(journal[name]) + '^{commit}', cwd=checkout)
         try:
             self.owner.push(
                 checkout,
@@ -90,8 +93,12 @@ class StoreDrill:
                 text(journal['fence_advertised']),
                 advertisement=(baseline, text(journal['published'])),
             )
-        except subprocess.CalledProcessError:
-            pass
+        except subprocess.CalledProcessError as error:
+            if not any(
+                '[rejected]' in line and line.endswith(' -> ' + self.owner.fence + ' (stale info)')
+                for line in (error.stderr or '').splitlines()
+            ):
+                raise
         else:
             raise RuntimeError('A delayed advertisement bypassed the recovery fence')
         self.assert_heads(recovered)

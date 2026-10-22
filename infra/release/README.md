@@ -253,28 +253,26 @@ Supervisor behavior; live failure recovery remains in the
 
 ### Recovery drill
 
-The release workflow's **Recovery** input runs synthetic GitHub/GHCR fixtures instead of building or promoting an app.
-After pushing the tested revision:
+The release workflow's **Recovery** mode tests production guards against synthetic GitHub/GHCR fixtures: image
+conflicts, incomplete drafts, interrupted preparation, lost atomic-push replies, failed qualification, retries, and
+competing updates. Dispatch after pushing the tested revision:
 
 ```sh
 gh workflow run hass-release.yml --repo kubijo/garmin-toolkit --ref dev -f recovery=true -f publish=false
 ```
 
-It uses the workflow run ID and attempt to isolate two `hass-recovery-RUN-ATTEMPT-{apps,state}` branches, a
-`hass-recovery-RUN-ATTEMPT` draft tag, and the `ghcr.io/kubijo/garmin-toolkit-recovery-RUN-ATTEMPT` package. Pushes
-outside those refs are rejected; versioned app images are never destinations. The drill shares publication concurrency
-and requires the exact checkout on a GitHub-hosted Linux runner with its repository-scoped token.
+Run/attempt IDs scope two `hass-recovery-RUN-ATTEMPT-{apps,state}` branches, a `hass-recovery-RUN-ATTEMPT` tag and draft
+release, and the `ghcr.io/kubijo/garmin-toolkit-recovery-RUN-ATTEMPT` package. The drill requires the exact checkout on
+a GitHub-hosted Linux runner with its repository token and shares publication concurrency. Pushes outside owned refs are
+rejected; public store/release refs must stay unchanged.
 
-The production store protocol and version/inventory guards check conflicting image bytes, incomplete draft downloads,
-interrupted preparation, a discarded reply after an accepted atomic push, failed qualification, retries, and competing
-metadata/state updates. Tiny, layer-free OCI images and JSON assets are fixtures. Installation failure is an injected
-qualification result; this does not qualify a real Supervisor installation failure, signed release recovery, or a
-GitHub/GHCR service outage.
+Cleanup checks recorded commits, exact leases, asset bytes, and package versions, retaining unexpected changes.
+Credentials are removed even if Nix cannot start. Both `result.json` and `cleanup.json` must pass in the seven-day
+`hass-recovery-evidence` artifact; cleanup failure fails the job.
 
-Cleanup uses recorded commits and exact leases, verifies draft asset bytes and package versions, and retains unexpected
-changes for review. Credentials are removed even if Nix cannot start. Public store/release refs must remain unchanged.
-Both `result.json` and `cleanup.json` must pass in the seven-day `hass-recovery-evidence` artifact; cleanup failure
-fails the job. Hosted drill results remain outstanding until this mode has run successfully.
+[Hosted validation](https://github.com/kubijo/garmin-toolkit/actions/runs/39778681047) on `cadc189` passed, preserving
+public refs and removing all fixtures. Tiny OCI images, JSON assets, and an injected qualification failure do not
+qualify real Supervisor installation failure, signed release recovery, or service outages.
 
 ## Release withdrawal
 
