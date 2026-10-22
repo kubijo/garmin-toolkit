@@ -251,6 +251,31 @@ updates, interrupted pushes, failed acceptance, retries, and stale recovery. The
 Supervisor behavior; live failure recovery remains in the
 [publication plan](../../docs/plans/device-expansion-and-publication.md#hass-experimental-release).
 
+### Recovery drill
+
+The release workflow's **Recovery** input runs synthetic GitHub/GHCR fixtures instead of building or promoting an app.
+After pushing the tested revision:
+
+```sh
+gh workflow run hass-release.yml --repo kubijo/garmin-toolkit --ref dev -f recovery=true -f publish=false
+```
+
+It uses the workflow run ID and attempt to isolate two `hass-recovery-RUN-ATTEMPT-{apps,state}` branches, a
+`hass-recovery-RUN-ATTEMPT` draft tag, and the `ghcr.io/kubijo/garmin-toolkit-recovery-RUN-ATTEMPT` package. Pushes
+outside those refs are rejected; versioned app images are never destinations. The drill shares publication concurrency
+and requires the exact checkout on a GitHub-hosted Linux runner with its repository-scoped token.
+
+The production store protocol and version/inventory guards check conflicting image bytes, incomplete draft downloads,
+interrupted preparation, a discarded reply after an accepted atomic push, failed qualification, retries, and competing
+metadata/state updates. Tiny, layer-free OCI images and JSON assets are fixtures. Installation failure is an injected
+qualification result; this does not qualify a real Supervisor installation failure, signed release recovery, or a
+GitHub/GHCR service outage.
+
+Cleanup uses recorded commits and exact leases, verifies draft asset bytes and package versions, and retains unexpected
+changes for review. Credentials are removed even if Nix cannot start. Public store/release refs must remain unchanged.
+Both `result.json` and `cleanup.json` must pass in the seven-day `hass-recovery-evidence` artifact; cleanup failure
+fails the job. Hosted drill results remain outstanding until this mode has run successfully.
+
 ## Release withdrawal
 
 Withdraw a qualified release when it must stop being offered for new installations. This removes `garmin_toolkit/` from

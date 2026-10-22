@@ -246,6 +246,7 @@ let
             formatjs-cli = formatjsCli;
             hass-release = releaseAutomation.app;
             hass-ci = releaseAutomation.ci;
+            hass-recovery = releaseAutomation.recovery;
             default = build.garminCli;
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
@@ -275,6 +276,7 @@ let
               garmin-cli = flake-utils.lib.mkApp { drv = build.garminCli; };
               hass-release = flake-utils.lib.mkApp { drv = releaseAutomation.app; };
               hass-ci = flake-utils.lib.mkApp { drv = releaseAutomation.ci; };
+              hass-recovery = flake-utils.lib.mkApp { drv = releaseAutomation.recovery; };
               default = self.apps.${system}.garmin-cli;
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

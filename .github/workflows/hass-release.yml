@@ -6,6 +6,10 @@ on:
         description: Promote a signed tag draft; false tests a branch or builds a tag draft.
         type: boolean
         default: false
+      recovery:
+        description: Run isolated synthetic recovery fixtures instead of publication.
+        type: boolean
+        default: false
 concurrency:
   group: hass-publication
   cancel-in-progress: false
@@ -13,7 +17,7 @@ permissions:
   contents: read
 jobs:
   native:
-    if: github.repository == 'kubijo/garmin-toolkit' && !inputs.publish
+    if: github.repository == 'kubijo/garmin-toolkit' && !inputs.publish && !inputs.recovery
     uses: ./.github/workflows/hass-native.yml
     with:
       release: ${{ github.ref_type == 'tag' }}
@@ -149,7 +153,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   promote:
-    if: github.repository == 'kubijo/garmin-toolkit' && inputs.publish
+    if: github.repository == 'kubijo/garmin-toolkit' && inputs.publish && !inputs.recovery
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -187,3 +191,35 @@ jobs:
       - name: Recover unfinished promotion and remove credentials and candidate branch
         if: always()
         run: bash infra/ci/runner.sh cleanup
+  recovery:
+    if: github.repository == 'kubijo/garmin-toolkit' && inputs.recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/nix
+      - name: Exercise isolated GitHub and GHCR recovery fixtures
+        run: nix run .#hass-recovery -- run
+      - name: Remove owned fixtures and credentials
+        if: always()
+        run: bash infra/ci/runner.sh recovery-cleanup
+      # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: hass-recovery-evidence
+          path: |
+            .tmp/recovery/*.json
+            .tmp/recovery/store/result.json
+            .tmp/recovery/store/*/promotion.json
+          if-no-files-found: ignore
+          retention-days: 7

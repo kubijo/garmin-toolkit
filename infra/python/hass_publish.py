@@ -35,7 +35,7 @@ from hass_repository import copy_repository
 from hass_source_parts import part_path
 from hass_sources import source_part_count, verify_sources
 from hass_store import FENCE, Store, oid, write_journal
-from json_data import Object, json_bytes, object_rows, object_value, read_json, text
+from json_data import Object, json_bytes, object_rows, object_value, read_json, strings, text
 
 REPOSITORY = 'kubijo/garmin-toolkit'
 REMOTE = 'https://github.com/' + REPOSITORY
@@ -152,6 +152,12 @@ def image_manifest(reference: str) -> bytes:
 
 def image_digest(reference: str) -> str:
     return 'sha256:' + hashlib.sha256(image_manifest(reference)).hexdigest()
+
+
+def check_image_version(version: str, expected: str, tags: set[str], digest: Callable[[str], str]) -> None:
+    """Reject conflicting version bytes before any publication write."""
+    if version in tags and digest(version) != expected:
+        raise ValueError('Published image version already exists; refusing to replace it')
 
 
 def release_guard(options: ReleaseGuard) -> tuple[str, Object]:
@@ -352,11 +358,11 @@ def push_metadata(
         fence = before_push(commit, current, checkout) if before_push is not None else None
         execute(
             'push',
-            *(['--atomic', '--force-with-lease=refs/heads/' + FENCE + ':' + fence[0]] if fence else []),
+            *(['--atomic', '--force-with-lease=refs/heads/' + owner.fence + ':' + fence[0]] if fence else []),
             '--force-with-lease=refs/heads/' + branch + ':' + current,
             remote,
             commit + ':refs/heads/' + branch,
-            *([fence[1] + ':refs/heads/' + FENCE] if fence else []),
+            *([fence[1] + ':refs/heads/' + owner.fence] if fence else []),
             cwd=checkout,
         )
         return commit
@@ -614,11 +620,12 @@ def complete_publication(options: CompletePublication) -> None:
     acceptance = options.directory / 'haos-acceptance.tar.gz'
     attest(provenance, str(acceptance), 'acceptance.sigstore.jsonl')
     tags = object_value(json.loads(command('skopeo', 'list-tags', 'docker://' + IMAGE)))
-    if (
-        document['version'] in cast(list[str], tags.get('Tags', []))
-        and image_digest(IMAGE + ':' + document['version']) != document['image']['index_digest']
-    ):
-        raise ValueError('Published image version already exists; refusing to replace it')
+    check_image_version(
+        document['version'],
+        document['image']['index_digest'],
+        set(strings(tags.get('Tags', []))),
+        lambda version: image_digest(IMAGE + ':' + version),
+    )
     tag = document['source']['tag']
     notes = (
         f'AMD64 experimental Home Assistant release. '
@@ -752,11 +759,12 @@ def promote_candidate(options: StagePublication, document: Release, staging: Obj
     assert_remote_tag(document['version'], document['source']['commit'])
     store().reconcile(options.directory)
     tags = object_value(json.loads(command('skopeo', 'list-tags', 'docker://' + IMAGE)))
-    if (
-        document['version'] in cast(list[str], tags.get('Tags', []))
-        and image_digest(IMAGE + ':' + document['version']) != document['image']['index_digest']
-    ):
-        raise ValueError('Published image version already exists; refusing to replace it')
+    check_image_version(
+        document['version'],
+        document['image']['index_digest'],
+        set(strings(tags.get('Tags', []))),
+        lambda version: image_digest(IMAGE + ':' + version),
+    )
 
     def publish(commit: str, current: str, checkout: Path) -> tuple[str, str] | None:
         fence = store().prepare(checkout, options.directory, current, commit)

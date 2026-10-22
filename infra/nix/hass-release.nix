@@ -53,6 +53,8 @@ let
       "hass_publish"
       "hass_preflight"
       "hass_ci"
+      "hass_recovery"
+      "hass_recovery_git"
       "processes"
     ])
     ++ (map (name: "infra/release/${name}") [
@@ -139,4 +141,5 @@ in
   inherit repository sbom;
   app = releaseApp "hass-release" "hass_release" [ ];
   ci = releaseApp "hass-ci" "hass_ci" [ nodejs ];
+  recovery = releaseApp "hass-recovery" "hass_recovery" [ ];
 }
