@@ -6,8 +6,9 @@ Application authentication, credential custody, encryption, and Connect remain d
 
 - Qualify ARM64 registry installation, ingress, and lifecycle before advertising support, using the
   [repository-install check](../../infra/integration/hass/README.md#repository-install-acceptance).
-- Qualify signed release recovery after a failed Supervisor installation; verify previous metadata and artifacts survive
-  rollback. The [transport drill](../../infra/release/README.md#recovery-drill) covers injected failures only.
+- Run [signed installation recovery](../../infra/integration/hass/README.md#signed-installation-recovery); verify prior
+  metadata, images, data, and downloads survive the failed update and rollback. The
+  [transport drill](../../infra/release/README.md#recovery-drill) covers injected failures only.
 
 ## Hardware and other distribution
 

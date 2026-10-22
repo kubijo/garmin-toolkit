@@ -13,7 +13,8 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from haos_repository import publish_version, serve_repository
+from haos_recovery import Recovery
+from haos_repository import local_store, publish_version, serve_repository
 from haos_withdrawal import Withdrawal
 from hass_release_contract import Architecture
 from hass_repository import Repository, copy_repository, generate_repository
@@ -230,6 +231,72 @@ class RepositoryTests(unittest.TestCase):
         (runtime / 'repository-http/garmin-toolkit.git').symlink_to(other, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, 'owned local Git repository'):
             Withdrawal(runtime, self.root).store()
+
+    def test_failed_acceptance_rolls_back_the_exact_private_head_and_preserves_qualified_retry(self) -> None:
+        generate_repository(self.options())
+        original = (self.output / 'garmin_toolkit/config.yaml').read_bytes()
+        version = text(object_value(yaml.safe_load(original))['version'])
+        runtime, evidence = self.root / 'runtime', self.root / 'evidence'
+        runtime.mkdir()
+        evidence.mkdir()
+        with (
+            serve_repository(
+                self.output,
+                runtime,
+                image='localhost:5000/candidate',
+                architecture='amd64',
+                version=version,
+                initial_version='0.0.0',
+            ) as url,
+            patch('hass_publish.command', side_effect=AssertionError('Public command invoked')),
+            patch('hass_publish.store', side_effect=AssertionError('Public store accessed')),
+        ):
+            parsed = urlsplit(url)
+            clone_url = parsed._replace(netloc=f'127.0.0.1:{parsed.port}', fragment='').geturl()
+            environment = {**os.environ, 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+
+            def discovered(name: str) -> str:
+                cloned = self.root / name
+                subprocess.run(
+                    [
+                        'git',
+                        '-c',
+                        'http.proxy=',
+                        'clone',
+                        '-q',
+                        '--depth=1',
+                        '--branch',
+                        'hass-apps',
+                        clone_url,
+                        str(cloned),
+                    ],
+                    env=environment,
+                    check=True,
+                    capture_output=True,
+                    timeout=15,
+                )
+                return text(
+                    object_value(yaml.safe_load((cloned / 'garmin_toolkit/config.yaml').read_bytes()))['version']
+                )
+
+            fixture = Recovery(runtime, evidence)
+            owner = local_store(runtime)
+            before = owner.head(owner.branch)
+            fixture.prepare(version)
+            self.assertEqual(discovered('baseline-consumer'), '0.0.0')
+            with self.assertRaises(FileNotFoundError):
+                fixture.advertise('retry')
+            fixture.advertise('failed')
+            self.assertEqual(discovered('failed-consumer'), version)
+            fixture.rollback()
+            self.assertEqual(owner.head(owner.branch), before)
+            self.assertEqual(discovered('recovered-consumer'), '0.0.0')
+            fixture.advertise('retry')
+            self.assertEqual(discovered('retry-consumer'), version)
+            result = fixture.qualify()
+            self.assertIs(result['retry_qualified'], True)
+            self.assertIs(result['qualified_retry_preserved'], True)
+        self.assertEqual((self.output / 'garmin_toolkit/config.yaml').read_bytes(), original)
 
 
 if __name__ == '__main__':

@@ -310,6 +310,8 @@ export async function populatedWorkflow(
                     'recovered-upgraded',
                     'withdrawn',
                     'withdrawal-replaced',
+                    'recovery-rolled-back',
+                    'recovery-upgraded',
                 ].includes(request.operation)
             ) {
                 await openPopulated();

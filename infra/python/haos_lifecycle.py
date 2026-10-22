@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import haos_app_vm as vm
+from haos_recovery import Recovery, update_failure
 from haos_repository import publish_version
 from haos_withdrawal import Withdrawal
-from json_data import Object, json_bytes, object_value, text
+from json_data import Object, file_sha256, json_bytes, object_rows, object_value, read_json, text
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class Lifecycle:
     app_slug: str
     process: subprocess.Popen[str]
     overlay_limit: int
+    release_assets: tuple[tuple[Path, str], ...] = ()
 
     def image(self, name: str) -> Object:
         images = object_value(json.loads((self.runtime / 'lifecycle-images.json').read_bytes()))
@@ -78,10 +80,42 @@ class Lifecycle:
             path.write_bytes(encoded)
         return identity
 
+    def recovery_images(self) -> Object:
+        coverage = self.coverage()
+        if coverage.get('migration_compatibility') is not True:
+            raise RuntimeError('Installation recovery requires an authenticated published baseline')
+        identity = object_value(read_json(self.runtime / 'published-candidate.json'))
+        candidate = self.image('candidate')
+        if (
+            identity.get('signatures_verified') is not True
+            or candidate['version'] != candidate['archive_version']
+            or identity.get('version') != candidate['version']
+            or any(
+                identity.get(key) != candidate.get(key)
+                for key in ('archive_sha256', 'config_digest', 'manifest_digest')
+            )
+        ):
+            raise RuntimeError('Recovery candidate differs from its authenticated published image')
+        if not self.release_assets or any(file_sha256(path) != digest for path, digest in self.release_assets):
+            raise RuntimeError('Recovery changed or lost authenticated release inputs')
+        return {
+            **coverage,
+            'published_candidate': identity,
+            'release_assets_preserved': True,
+        }
+
+    def recovery_coverage(self) -> Object:
+        return {
+            **self.recovery_images(),
+            'supervisor_update_failure': object_value(read_json(self.evidence / 'recovery-update-failure.json')),
+        }
+
     def advertise(self, name: str) -> None:
         version = text(self.image(name)['version'])
         if (self.runtime / 'withdrawal-state.json').is_file():
             Withdrawal(self.runtime, self.evidence).replace(version)
+        elif (self.runtime / 'recovery-state.json').is_file():
+            Recovery(self.runtime, self.evidence).advertise('retry')
         else:
             publish_version(self.runtime, version)
         vm.reload_store(self.key, self.port, self.app_slug)
@@ -108,6 +142,63 @@ class Lifecycle:
             raise RuntimeError('Supervisor must offer a real version update before acceptance')
         vm.run(vm.ssh_command(self.key, self.port, f'ha apps update {self.app_slug}'), timeout=600)
         self.assert_image('candidate')
+
+    def recover_installation(self) -> None:
+        self.recovery_images()
+        fixture = Recovery(self.runtime, self.evidence)
+        image = text(self.image('candidate')['image_reference'])
+        # A cached candidate would bypass the registry failure.
+        vm.run(vm.ssh_command(self.key, self.port, '! docker image inspect ' + image + ' >/dev/null 2>&1'))
+        fixture.prepare(text(self.image('candidate')['version']))
+        try:
+            fixture.advertise('failed')
+            vm.reload_store(self.key, self.port, self.app_slug)
+            info = vm.guest_data(self.key, self.port, f'ha apps info {self.app_slug}')
+            if (
+                info.get('version_latest') != self.image('candidate')['version']
+                or info.get('update_available') is not True
+            ):
+                raise RuntimeError('Supervisor did not offer the recovery candidate before failure injection')
+            try:
+                vm.run(vm.ssh_command(self.key, self.port, 'docker stop garmin-test-registry'), timeout=30)
+                registries = object_rows(
+                    json.loads(
+                        vm.run(
+                            vm.ssh_command(self.key, self.port, 'docker container inspect garmin-test-registry')
+                        ).stdout
+                    )
+                )
+                if len(registries) != 1:
+                    raise RuntimeError('Recovery requires exactly one fixture registry')
+                registry_state = object_value(registries[0]['State'])
+                (self.evidence / 'recovery-registry-state.json').write_bytes(json_bytes(registry_state))
+                if registry_state.get('Running') is not False or registry_state.get('Status') != 'exited':
+                    raise RuntimeError('Recovery fixture registry did not stop before the update')
+                result = subprocess.run(
+                    vm.ssh_command(self.key, self.port, f'ha apps update {self.app_slug} --raw-json'),
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+                (self.evidence / 'recovery-update.json').write_bytes(
+                    json_bytes({'returncode': result.returncode, 'stdout': result.stdout, 'stderr': result.stderr})
+                )
+                failure = {
+                    **update_failure(result, self.app_slug),
+                    'candidate_image': image,
+                    'registry_state': registry_state,
+                }
+                (self.evidence / 'recovery-update-failure.json').write_bytes(json_bytes(failure))
+            finally:
+                vm.run(vm.ssh_command(self.key, self.port, 'docker start garmin-test-registry'), timeout=30)
+        finally:
+            fixture.rollback()
+        vm.reload_store(self.key, self.port, self.app_slug)
+        info = vm.guest_data(self.key, self.port, f'ha apps info {self.app_slug}')
+        if info.get('version_latest') != self.image('baseline')['version'] or info.get('update_available') is not False:
+            raise RuntimeError('Supervisor did not refresh the recovered baseline advertisement')
+        self.assert_image('baseline')
 
     def reinstall_baseline(self, backup: str) -> None:
         vm.run(vm.ssh_command(self.key, self.port, f'ha apps uninstall {self.app_slug}'), timeout=180)

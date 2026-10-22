@@ -274,6 +274,9 @@ Credentials are removed even if Nix cannot start. Both `result.json` and `cleanu
 public refs and removing all fixtures. Tiny OCI images, JSON assets, and an injected qualification failure do not
 qualify real Supervisor installation failure, signed release recovery, or service outages.
 
+The [signed installation check](../integration/hass/README.md#signed-installation-recovery) uses authenticated public
+images with a private store to exercise a real Supervisor pull failure and retry. Its live qualification remains open.
+
 ## Release withdrawal
 
 Withdraw a qualified release when it must stop being offered for new installations. This removes `garmin_toolkit/` from

@@ -10,6 +10,7 @@ from typing import cast
 
 import haos_app_vm as vm
 from haos_lifecycle import Lifecycle
+from haos_recovery import Recovery
 from haos_withdrawal import Withdrawal
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -100,9 +101,10 @@ def exercise(
     reboot: Callable[[], dict[str, str]],
     lifecycle: Lifecycle | None = None,
     withdrawal: bool = False,
+    recovery: bool = False,
 ) -> None:
-    if withdrawal and lifecycle is None:
-        raise ValueError('Withdrawal acceptance requires its disposable lifecycle controller')
+    if (withdrawal or recovery) and lifecycle is None:
+        raise ValueError('Withdrawal and recovery acceptance require a disposable lifecycle controller')
     request_id = 0
 
     def command(operation: str, *, timeout: int = 120) -> dict[str, object]:
@@ -145,13 +147,18 @@ def exercise(
     previous_backup = None
     if lifecycle is not None:
         lifecycle.assert_image('baseline')
-        if withdrawal:
+        if recovery:
+            lifecycle.recover_installation()
+            persisted('recovery-rolled-back', populated, hashes)
+        elif withdrawal:
             lifecycle.withdraw()
             persisted('withdrawn', populated, hashes)
         else:
             previous_backup = backup(key, port, app_slug)
         lifecycle.upgrade()
-        persisted('withdrawal-replaced' if withdrawal else 'upgraded', populated, hashes)
+        persisted(
+            'recovery-upgraded' if recovery else 'withdrawal-replaced' if withdrawal else 'upgraded', populated, hashes
+        )
     print('Restarting the disposable app through Supervisor...', flush=True)
     vm.run(vm.ssh_command(key, port, f'ha apps restart {app_slug}'), timeout=120)
     vm.assert_started(key, port, app_slug)
@@ -166,7 +173,7 @@ def exercise(
     restore(key, port, app_slug, slug)
     persisted('restored', populated, hashes)
     lifecycle_result = None
-    if lifecycle is not None and not withdrawal:
+    if lifecycle is not None and not withdrawal and not recovery:
         assert previous_backup is not None
         command('mutate')
         lifecycle.reinstall_baseline(previous_backup)
@@ -189,6 +196,18 @@ def exercise(
             'supervisor_restarted_after_restore': True,
             **lifecycle.coverage(),
         }
+    recovery_result = None
+    if recovery:
+        assert lifecycle is not None
+        coverage = lifecycle.recovery_coverage()
+        recovery_result = {
+            **Recovery(runtime, evidence).qualify(),
+            **coverage,
+            'baseline_image_preserved': True,
+            'populated_data_preserved': True,
+            'downloads_preserved': True,
+            'scope': 'signed published images, disposable Supervisor and local Git; public refs untouched',
+        }
     (evidence / 'workflow.json').write_text(
         json.dumps(
             {
@@ -205,6 +224,7 @@ def exercise(
                 'browser_only_automation': True,
                 'lifecycle': lifecycle_result,
                 'withdrawal': Withdrawal(runtime, evidence).qualify() if withdrawal else None,
+                'installation_recovery': recovery_result,
             },
             indent=2,
         )

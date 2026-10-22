@@ -14,6 +14,7 @@ import yaml
 
 from hass_release_contract import check_shape
 from hass_repository import copy_repository
+from hass_store import Store, oid
 from json_data import object_value, strings
 
 
@@ -40,6 +41,27 @@ def git(runtime: Path, *arguments: str, cwd: Path | None = None) -> str:
         text=True,
         timeout=30,
     ).stdout.strip()
+
+
+def local_store(runtime: Path) -> Store:
+    """Confine production publication operations to the disposable repository."""
+    remote = runtime / 'repository-http/garmin-toolkit.git'
+    if remote.is_symlink() or not remote.is_dir() or not remote.resolve().is_relative_to(runtime.resolve()):
+        raise ValueError('Acceptance requires its owned local Git repository')
+
+    def execute(*arguments: str, cwd: Path | None = None) -> str:
+        return git(runtime, *arguments, cwd=cwd or runtime / 'repository-work')
+
+    def head(branch: str) -> str:
+        result = execute('ls-remote', '--refs', str(remote), 'refs/heads/' + branch)
+        if not result:
+            return ''
+        commit, _, reference = result.partition('\t')
+        if reference != 'refs/heads/' + branch:
+            raise ValueError('Unexpected disposable publication ref')
+        return oid(commit)
+
+    return Store(str(remote), execute, head)
 
 
 def publish_version(runtime: Path, version: str) -> None:

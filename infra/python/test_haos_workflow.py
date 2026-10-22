@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 from contextlib import closing
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 from uuid import uuid4
@@ -15,6 +16,9 @@ import haos_app_vm as vm
 import haos_storage_probe as probe
 import haos_workflow as workflow
 from haos_lifecycle import Lifecycle
+from haos_platform import PLATFORMS
+from haos_recovery import update_failure
+from json_data import file_sha256
 
 
 class WorkflowTests(unittest.TestCase):
@@ -136,7 +140,7 @@ class WorkflowTests(unittest.TestCase):
                         app_archive=Path('not-used'), withdrawal=True, repository=repository, build_receipt=receipt
                     )
                 )
-        with self.assertRaisesRegex(ValueError, 'not both'):
+        with self.assertRaisesRegex(ValueError, 'Select one acceptance mode'):
             session.run_session(session.Check(app_archive=Path('not-used'), withdrawal=True, lifecycle=True))
 
     def test_lifecycle_rejects_identical_baseline_and_candidate_images(self) -> None:
@@ -201,6 +205,195 @@ class WorkflowTests(unittest.TestCase):
     def test_interrupted_acceptance_cannot_report_success(self) -> None:
         with patch('haos_app_session.run_session', side_effect=session.SessionStopped):
             self.assertEqual(session.main(session.Check(app_archive=Path('not-used'))), 143)
+
+    def test_recovery_requires_two_published_releases_and_disallows_version_aliases_and_other_modes(self) -> None:
+        for baseline, candidate, repository in (
+            (None, self.root, self.root),
+            (self.root, None, self.root),
+            (self.root, self.root, None),
+        ):
+            with (
+                self.subTest(baseline=baseline, candidate=candidate, repository=repository),
+                self.assertRaisesRegex(ValueError, 'both signed published releases'),
+            ):
+                session.run_session(
+                    session.Check(
+                        app_archive=Path('unused'),
+                        recovery=True,
+                        baseline_release=baseline,
+                        candidate_release=candidate,
+                        repository=repository,
+                    )
+                )
+        complete = session.Check(
+            app_archive=Path('unused'),
+            recovery=True,
+            baseline_release=self.root,
+            candidate_release=self.root,
+            repository=self.root,
+        )
+        for change in ({'lifecycle': True}, {'withdrawal': True}, {'candidate_version': '0.1.3'}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                session.run_session(replace(complete, **change))
+        with self.assertRaisesRegex(ValueError, 'requires recovery acceptance'):
+            session.run_session(session.Check(app_archive=Path('unused'), candidate_release=self.root))
+
+    def test_update_failure_uses_structured_fields_and_rejects_transport_errors(self) -> None:
+        slug = 'test_garmin_toolkit'
+        response = {
+            'result': 'error',
+            'error_key': 'app_unknown_error',
+            'extra_fields': {'app': slug},
+            'message': 'An unknown error occurred with the app',
+        }
+        for message in ('An unknown error occurred with the app', 'Aktualizace aplikace selhala.'):
+            body = {**response, 'message': message}
+            self.assertEqual(
+                update_failure(subprocess.CompletedProcess([], 0, json.dumps(body)), slug)['response'], body
+            )
+        for code, body in (
+            (1, response),
+            (-15, response),
+            (2, response),
+            (255, response),
+            (0, {**response, 'result': 'ok'}),
+            (0, {**response, 'error_key': 'system_not_ready_error'}),
+            (0, {**response, 'error_key': 'docker_no_space_on_device'}),
+            (0, {**response, 'error_key': None}),
+            (0, {**response, 'extra_fields': {'app': 'another_app'}}),
+        ):
+            with self.subTest(code=code, body=body), self.assertRaises(RuntimeError):
+                update_failure(subprocess.CompletedProcess([], code, json.dumps(body)), slug)
+        for raw in (
+            'not a Supervisor response',
+            '[]',
+            '{"result":"error","result":"ok"}',
+            json.dumps({**response, 'extra_fields': None}),
+            json.dumps({**response, 'message': None}),
+        ):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                update_failure(subprocess.CompletedProcess([], 0, raw), slug)
+
+    def test_signed_recovery_rejects_another_archive_and_nonincreasing_releases_before_startup(self) -> None:
+        archive = self.root / 'candidate.oci.tar'
+        for selected, version in ((self.root / 'another.oci.tar', '0.1.2'), (archive, '0.1.0')):
+            with (
+                self.subTest(selected=selected, version=version),
+                patch.object(vm, 'validate_options', return_value=PLATFORMS['amd64']),
+                patch(
+                    'haos_app_session.published_baseline',
+                    side_effect=[
+                        (self.root / 'baseline.oci.tar', {'version': '0.1.1'}),
+                        (selected, {'version': version}),
+                    ],
+                ),
+                patch('haos_app_session.session_scratch') as scratch,
+                self.assertRaises(ValueError),
+            ):
+                session.run_session(
+                    session.Check(
+                        app_archive=archive,
+                        recovery=True,
+                        repository=self.root,
+                        baseline_release=self.root / 'baseline',
+                        candidate_release=self.root / 'candidate',
+                    )
+                )
+            scratch.assert_not_called()
+
+    def test_failed_supervisor_requests_restore_registry_and_roll_back_metadata(self) -> None:
+        lifecycle = self.lifecycle()
+        image = {'version': '0.1.2', 'image_reference': 'localhost:5000/garmin-toolkit-hass:0.1.2'}
+        for failure in (
+            subprocess.TimeoutExpired('owned Supervisor update', 600),
+            subprocess.CompletedProcess([], 0, '{"result":"error","message":"unrelated error"}'),
+        ):
+            with (
+                self.subTest(failure=failure),
+                patch.object(Lifecycle, 'recovery_images'),
+                patch.object(Lifecycle, 'image', return_value=image),
+                patch('haos_lifecycle.Recovery', autospec=True) as fixture,
+                patch.object(vm, 'reload_store'),
+                patch.object(vm, 'guest_data', return_value={'version_latest': '0.1.2', 'update_available': True}),
+                patch.object(
+                    vm,
+                    'run',
+                    return_value=subprocess.CompletedProcess([], 0, '[{"State":{"Running":false,"Status":"exited"}}]'),
+                ) as run,
+                patch('haos_lifecycle.subprocess.run') as update,
+            ):
+                if isinstance(failure, subprocess.TimeoutExpired):
+                    update.side_effect = failure
+                else:
+                    update.return_value = failure
+                with self.assertRaises((RuntimeError, subprocess.TimeoutExpired)):
+                    lifecycle.recover_installation()
+                self.assertEqual(run.call_args.args[0][-1], 'docker start garmin-test-registry')
+                fixture.return_value.rollback.assert_called_once()
+                self.assertFalse((self.root / 'recovery-update-failure.json').exists())
+                if isinstance(failure, subprocess.CompletedProcess):
+                    self.assertEqual(
+                        json.loads((self.root / 'recovery-update.json').read_text())['stdout'], failure.stdout
+                    )
+
+    def test_recovery_rejects_a_registry_that_did_not_stop(self) -> None:
+        with (
+            patch.object(Lifecycle, 'recovery_images'),
+            patch.object(
+                Lifecycle,
+                'image',
+                return_value={'version': '0.1.2', 'image_reference': 'localhost:5000/garmin-toolkit-hass:0.1.2'},
+            ),
+            patch('haos_lifecycle.Recovery', autospec=True) as fixture,
+            patch.object(vm, 'reload_store'),
+            patch.object(vm, 'guest_data', return_value={'version_latest': '0.1.2', 'update_available': True}),
+            patch.object(
+                vm,
+                'run',
+                return_value=subprocess.CompletedProcess([], 0, '[{"State":{"Running":true,"Status":"running"}}]'),
+            ) as run,
+            patch('haos_lifecycle.subprocess.run') as update,
+            self.assertRaisesRegex(RuntimeError, 'did not stop'),
+        ):
+            self.lifecycle().recover_installation()
+        update.assert_not_called()
+        fixture.return_value.rollback.assert_called_once()
+        self.assertEqual(run.call_args.args[0][-1], 'docker start garmin-test-registry')
+        self.assertFalse((self.root / 'recovery-update-failure.json').exists())
+
+    def test_signed_recovery_rejects_changed_candidate_identity_and_retained_input_bytes(self) -> None:
+        baseline = {
+            'version': '0.1.1',
+            'config_digest': 'old',
+            'manifest_digest': 'old-manifest',
+            'archive_sha256': 'old-archive',
+        }
+        candidate = {
+            'version': '0.1.2',
+            'archive_version': '0.1.2',
+            'config_digest': 'new',
+            'manifest_digest': 'new-manifest',
+            'archive_sha256': 'new-archive',
+        }
+        (self.root / 'lifecycle-images.json').write_text(json.dumps({'baseline': baseline, 'candidate': candidate}))
+        (self.root / 'published-baseline.json').write_text(
+            json.dumps({**baseline, 'release': 'v0.1.1', 'signatures_verified': True})
+        )
+        identity = {**candidate, 'release': 'v0.1.2', 'signatures_verified': True}
+        path = self.root / 'published-candidate.json'
+        path.write_text(json.dumps(identity))
+        retained = self.root / 'authenticated-input'
+        retained.write_bytes(b'Synthetic authenticated release input')
+        lifecycle = replace(self.lifecycle(), release_assets=((retained, file_sha256(retained)),))
+        self.assertIs(lifecycle.recovery_images()['release_assets_preserved'], True)
+        for change in ({'signatures_verified': False}, {'manifest_digest': 'different'}):
+            path.write_text(json.dumps({**identity, **change}))
+            with self.subTest(change=change), self.assertRaisesRegex(RuntimeError, 'authenticated published image'):
+                lifecycle.recovery_images()
+        path.write_text(json.dumps(identity))
+        retained.write_bytes(b'Changed release input')
+        with self.assertRaisesRegex(RuntimeError, 'authenticated release inputs'):
+            lifecycle.recovery_images()
 
 
 if __name__ == '__main__':
