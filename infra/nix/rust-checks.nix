@@ -641,7 +641,7 @@ in
       }
     );
 
-    rust-inheritance = projectCheck "rust-workspace-inheritance" [ inheritanceCheck ] ''
+    rust-inheritance = projectCheck "rust-workspace-inheritance" [ inheritanceCheck toolchain ] ''
       ${lib.getExe inheritanceCheck} --path .
     '';
 
