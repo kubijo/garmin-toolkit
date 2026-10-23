@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Add experimental ARM64 images alongside AMD64.
+- Qualify restart, reboot, backup/restore, and reinstall on both architectures.
+- Strengthen signed release verification, interrupted-publication recovery, and withdrawal checks.
+- Refresh application and runtime dependencies.
+
 ## 0.1.2
 
 - Refresh application and runtime dependencies after the first public release.
