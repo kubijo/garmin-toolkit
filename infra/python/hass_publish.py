@@ -418,19 +418,22 @@ def _stage_image(options: StagePublication, tag: str, branch: str, digest: str, 
         raise ValueError('Anonymous staged verification failed. The GHCR package must allow public pulls.') from error
     if image_digest(IMAGE + ':' + tag) != digest:
         raise ValueError('Staged tag differs from the verified index')
-    staged_commit = push_metadata(options.directory / 'repository', branch, '', version=tag)
-    (options.directory / 'staging.json').write_bytes(
-        json_bytes(
+
+    def record_candidate(commit: str, _current: str, _checkout: Path) -> None:
+        write_journal(
+            options.directory,
             {
                 'tag': tag,
                 'branch': branch,
                 'previous': previous,
                 'index_digest': digest,
                 'repository_url': REMOTE + '#' + branch,
-                'commit': staged_commit,
-            }
+                'commit': commit,
+            },
+            name='staging.json',
         )
-    )
+
+    push_metadata(options.directory / 'repository', branch, '', version=tag, before_push=record_candidate)
 
 
 def verify_acceptance(evidence: Path, document: Release, staging: Object) -> None:

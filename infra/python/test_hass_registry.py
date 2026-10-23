@@ -347,6 +347,14 @@ class RegistryTests(unittest.TestCase):
         result = bind_acceptance((self.case,), self.document)
         self.assertEqual(result[0]['scope'], 'native-image-content')
         self.assertNotEqual(result[0]['runtime_registry_digest'], result[0]['manifest_digest'])
+        staged = {**installed, 'version': '0.1.0-candidate.123.1', 'archive_version': native['version']}
+        (self.case / 'installation.json').write_bytes(json_bytes(staged))
+        self.assertEqual(bind_acceptance((self.case,), self.document)[0]['scope'], 'native-image-content')
+        for wrong_version in (None, 'substituted'):
+            wrong = {**installed, 'archive_version': wrong_version}
+            (self.case / 'installation.json').write_bytes(json_bytes(wrong))
+            with self.subTest(archive_version=wrong_version), self.assertRaisesRegex(ValueError, 'Acceptance'):
+                bind_acceptance((self.case,), self.document)
         for field in ('config_digest', 'manifest_digest', 'archive_sha256', 'version', 'architecture'):
             wrong = {**installed, field: 'substituted'}
             (self.case / 'installation.json').write_bytes(json_bytes(wrong))

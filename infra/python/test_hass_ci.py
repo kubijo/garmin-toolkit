@@ -1,6 +1,7 @@
 """CI orchestration failures must preserve release gates, rollback, and secret cleanup."""
 
 import io
+import json
 import os
 import shutil
 import signal
@@ -9,7 +10,8 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stdout, suppress
+from contextlib import ExitStack, redirect_stdout, suppress
+from copy import deepcopy
 from itertools import product
 from multiprocessing import get_context
 from pathlib import Path
@@ -17,11 +19,14 @@ from unittest.mock import patch
 
 import tyro
 
+import haos_app_vm as vm
 import hass_ci as ci
 import hass_publish as publication
 import hass_store
+from fixtures.images import write_image
+from hass_registry import bind_acceptance
 from hass_release_contract import Release
-from json_data import Object, json_bytes, object_value, read_json
+from json_data import Object, file_sha256, json_bytes, object_value, read_json
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / 'infra/ci/runner.sh'
@@ -43,6 +48,32 @@ def user_manager_available() -> bool:
 
 
 USER_MANAGER = user_manager_available()
+
+
+def delivery_inputs() -> tuple[Object, Object]:
+    return (
+        {
+            'id': 456,
+            'path': '.github/workflows/ci.yml',
+            'event': 'pull_request',
+            'status': 'completed',
+            'conclusion': 'success',
+            'head_sha': 'a' * 40,
+            'repository': {'full_name': 'kubijo/garmin-toolkit'},
+            'head_repository': {'full_name': 'kubijo/garmin-toolkit'},
+        },
+        {
+            'version': '0.1.2',
+            'source': {'commit': 'b' * 40},
+            'platform': {
+                'architecture': 'aarch64',
+                'archive_sha256': 'c' * 64,
+                'manifest_digest': 'sha256:' + 'd' * 64,
+                'config_digest': 'sha256:' + 'e' * 64,
+                'workflow_run': 'https://github.com/kubijo/garmin-toolkit/actions/runs/456',
+            },
+        },
+    )
 
 
 def promotion_worker(root: Path, mode: str, previous: str) -> None:
@@ -659,6 +690,356 @@ class CITests(unittest.TestCase):
             build.assert_not_called()
             run.assert_not_called()
 
+    def test_delivery_download_binds_a_trusted_ci_head_or_pr_merge_to_verified_native_inputs(self) -> None:
+        for merge in (False, True):
+            document, receipt = delivery_inputs()
+            if merge:
+                document['head_repository'] = {'full_name': 'contributor/fork'}
+            else:
+                document['event'] = 'push'
+                object_value(receipt['source'])['commit'] = document['head_sha']
+            directory = self.scratch / str(merge)
+
+            def execute(
+                *arguments: str,
+                document: Object = document,
+                receipt: Object = receipt,
+                directory: Path = directory,
+                **_keywords: object,
+            ) -> str:
+                if arguments[:2] == ('gh', 'api'):
+                    return json_bytes(document).decode()
+                if arguments[:3] == ('gh', 'run', 'download'):
+                    directory.mkdir()
+                    (directory / 'native-build.json').write_bytes(json_bytes(receipt))
+                    (directory / 'image.oci.tar').touch()
+                if arguments[:2] == ('git', 'show'):
+                    return 'f' * 40 + ' ' + 'a' * 40
+                return ''
+
+            with (
+                self.subTest(merge=merge),
+                patch.object(ci, 'run', side_effect=execute) as run,
+                patch.object(ci, 'verify_build_inputs', return_value=receipt) as verify,
+            ):
+                result = ci.download_delivery_build(
+                    ci.Options(command='delivery', source_run=456, build_directory=directory)
+                )
+            self.assertEqual(result, receipt)
+            verify.assert_called_once_with(directory / 'image.oci.tar', directory / 'native-build.json', self.root)
+            self.assertIn(
+                (
+                    'gh',
+                    'run',
+                    'download',
+                    '456',
+                    '--repo',
+                    'kubijo/garmin-toolkit',
+                    '--name',
+                    'garmin-hass-native-aarch64',
+                    '--dir',
+                    str(directory),
+                ),
+                [call.args for call in run.call_args_list],
+            )
+
+    def test_delivery_rejects_untrusted_failed_or_unrelated_runs_before_downloading(self) -> None:
+        for field, invalid in (
+            ('id', 457),
+            ('path', '.github/workflows/untrusted.yml'),
+            ('event', 'pull_request_target'),
+            ('status', 'in_progress'),
+            ('conclusion', 'failure'),
+            ('head_sha', 'not-a-commit'),
+            ('repository', {'full_name': 'someone/other'}),
+        ):
+            document, _receipt = delivery_inputs()
+            document[field] = invalid
+            with (
+                self.subTest(field=field),
+                patch.object(ci, 'run', return_value=json_bytes(document).decode()) as run,
+                self.assertRaises(ValueError),
+            ):
+                ci.download_delivery_build(
+                    ci.Options(command='delivery', source_run=456, build_directory=self.scratch / 'native')
+                )
+            self.assertEqual(run.call_count, 1)
+        document, _receipt = delivery_inputs()
+        with (
+            patch.object(
+                ci, 'run', side_effect=[json_bytes(document).decode(), subprocess.CalledProcessError(1, 'git')]
+            ) as run,
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
+            ci.download_delivery_build(
+                ci.Options(command='delivery', source_run=456, build_directory=self.scratch / 'native')
+            )
+        self.assertEqual(run.call_count, 2)
+        for run_id in (None, 0, -1):
+            with patch.object(ci, 'run') as run, self.assertRaises(ValueError):
+                ci.download_delivery_build(
+                    ci.Options(command='delivery', source_run=run_id, build_directory=self.scratch / 'native')
+                )
+            run.assert_not_called()
+
+    def test_delivery_rejects_misattributed_receipts_before_payload_admission(self) -> None:
+        for case in ('workflow', 'architecture', 'commit', 'merge'):
+            document, receipt = delivery_inputs()
+            platform = object_value(receipt['platform'])
+            if case == 'workflow':
+                platform['workflow_run'] = 'https://github.com/kubijo/garmin-toolkit/actions/runs/457'
+            elif case == 'architecture':
+                platform['architecture'] = 'amd64'
+            elif case == 'commit':
+                object_value(receipt['source'])['commit'] = 'invalid'
+            directory = self.scratch / case
+
+            def execute(
+                *arguments: str,
+                document: Object = document,
+                receipt: Object = receipt,
+                directory: Path = directory,
+                **_keywords: object,
+            ) -> str:
+                if arguments[:2] == ('gh', 'api'):
+                    return json_bytes(document).decode()
+                if arguments[:3] == ('gh', 'run', 'download'):
+                    directory.mkdir()
+                    (directory / 'native-build.json').write_bytes(json_bytes(receipt))
+                    (directory / 'image.oci.tar').touch()
+                if arguments[:2] == ('git', 'show'):
+                    return 'f' * 40 + ' ' + 'c' * 40
+                return ''
+
+            with (
+                self.subTest(case=case),
+                patch.object(ci, 'run', side_effect=execute),
+                patch.object(ci, 'verify_build_inputs') as verify,
+                self.assertRaises(ValueError),
+            ):
+                ci.download_delivery_build(ci.Options(command='delivery', source_run=456, build_directory=directory))
+            verify.assert_not_called()
+
+    def test_delivery_evidence_requires_the_staged_image_and_complete_runtime_oracles(self) -> None:
+        _document, receipt = delivery_inputs()
+        platform = object_value(receipt['platform'])
+        staging: Object = {
+            'tag': '0.1.2-candidate.123.1',
+            'repository_url': publication.REMOTE + '#hass-candidate-123-1',
+            'index_digest': 'sha256:' + 'f' * 64,
+        }
+        installed: Object = {
+            **{key: platform[key] for key in ('archive_sha256', 'manifest_digest', 'config_digest')},
+            'architecture': 'arm64',
+            'archive_version': '0.1.2',
+            'version': staging['tag'],
+            'repository_url': staging['repository_url'],
+            'registry_digest': staging['index_digest'],
+        }
+        workflow: Object = {
+            **{key: True for key in ('passed', 'restart', 'cold_restore', 'post_backup_mutation_reverted')},
+            'haos_reboot': {'before': 'old-boot', 'after': 'new-boot'},
+        }
+        evidence = self.scratch / 'evidence'
+        evidence.mkdir()
+        inputs = {'workflow.json': workflow, 'installation.json': installed, 'native-build.json': receipt}
+        for name, contents in inputs.items():
+            (evidence / name).write_bytes(json_bytes(contents))
+        ci.verify_delivery(evidence, receipt, staging)
+        mutations: list[tuple[str, str, object]] = [
+            *[
+                ('workflow.json', key, False)
+                for key in ('passed', 'restart', 'cold_restore', 'post_backup_mutation_reverted')
+            ],
+            ('workflow.json', 'haos_reboot', {'before': 'same', 'after': 'same'}),
+            *[('installation.json', key, 'wrong') for key in installed],
+            ('native-build.json', 'source', {'commit': 'f' * 40}),
+        ]
+        for name, key, value in mutations:
+            changed = deepcopy(inputs[name])
+            changed[key] = value
+            (evidence / name).write_bytes(json_bytes(changed))
+            with self.subTest(name=name, key=key), self.assertRaises(ValueError):
+                ci.verify_delivery(evidence, receipt, staging)
+            (evidence / name).write_bytes(json_bytes(inputs[name]))
+
+    def test_delivery_verifier_accepts_actual_remote_installation_reports_and_rejects_wrong_supervisor_versions(
+        self,
+    ) -> None:
+        archive = self.scratch / 'image.oci.tar'
+        write_image(archive, architecture='arm64', version='0.1.2')
+        inspected = vm.inspect_archive(archive)
+        _document, receipt = delivery_inputs()
+        object_value(receipt['platform']).update(
+            archive_sha256=file_sha256(archive),
+            manifest_digest=inspected.manifest_digest,
+            config_digest=inspected.config_digest,
+        )
+        for case in ('candidate-tag', 'release-tag', 'wrong-supervisor-version'):
+            tag = '0.1.2' if case == 'release-tag' else '0.1.2-candidate.123.1'
+            staging: Object = {
+                'tag': tag,
+                'repository_url': publication.REMOTE + '#hass-candidate-123-1',
+                'index_digest': 'sha256:' + 'f' * 64,
+            }
+            reference = publication.IMAGE + ':' + tag
+            evidence = self.scratch / case
+            evidence.mkdir()
+
+            def guest(
+                command: list[str],
+                *,
+                reference: str = reference,
+                timeout: int = 30,
+            ) -> subprocess.CompletedProcess[str]:
+                if command[-1].startswith('docker inspect '):
+                    response: Object = {'Image': inspected.manifest_digest, 'Config': {'Image': reference}}
+                elif command[-1].startswith('docker image inspect '):
+                    response = {
+                        'Id': inspected.manifest_digest,
+                        'Architecture': 'arm64',
+                        'Os': 'linux',
+                        'RepoDigests': [publication.IMAGE + '@sha256:' + 'f' * 64],
+                    }
+                else:
+                    response = {}
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps(response))
+
+            with (
+                self.subTest(case=case),
+                ExitStack() as services,
+                patch.object(vm, 'test_config', return_value=('', '0.1.2')),
+                patch.object(vm, 'registry_manifest', return_value=inspected.manifest_digest),
+                patch.object(vm, 'reload_store'),
+                patch.object(vm, 'run', side_effect=guest),
+                patch.object(
+                    vm, 'guest_data', return_value={'version': 'wrong' if case == 'wrong-supervisor-version' else tag}
+                ),
+            ):
+                options = vm.Options(
+                    app_archive=archive,
+                    arch='aarch64',
+                    repository_url=str(staging['repository_url']),
+                    registry_digest=str(staging['index_digest']),
+                    registry_tag=None if case == 'release-tag' else tag,
+                )
+                if case == 'wrong-supervisor-version':
+                    with self.assertRaisesRegex(RuntimeError, 'expected app version'):
+                        vm.install_app(options, evidence, self.root / 'key', 2222, services)
+                    self.assertFalse((evidence / 'installation.json').exists())
+                    continue
+                vm.install_app(options, evidence, self.root / 'key', 2222, services)
+            (evidence / 'native-build.json').write_bytes(json_bytes(receipt))
+            (evidence / 'workflow.json').write_bytes(
+                json_bytes(
+                    {
+                        'passed': True,
+                        'restart': True,
+                        'cold_restore': True,
+                        'post_backup_mutation_reverted': True,
+                        'haos_reboot': {'before': 'old', 'after': 'new'},
+                    }
+                )
+            )
+            ci.verify_delivery(evidence, receipt, staging)
+            bound = bind_acceptance(
+                (evidence,),
+                {'source': receipt['source'], 'version': receipt['version'], 'platforms': [receipt['platform']]},
+            )
+            self.assertEqual(bound[0]['scope'], 'native-image-content')
+
+    def test_delivery_uses_only_the_retained_arm64_image_and_remote_acceptance(self) -> None:
+        _document, receipt = delivery_inputs()
+        staging: Object = {
+            'tag': '0.1.2-candidate.123.1',
+            'repository_url': publication.REMOTE + '#hass-candidate-123-1',
+            'index_digest': 'sha256:' + 'f' * 64,
+        }
+        options = ci.Options(
+            command='delivery',
+            system='aarch64-linux',
+            source_run=456,
+            build_directory=self.scratch / 'native',
+            evidence_directory=self.scratch / 'evidence',
+        )
+        options.evidence_directory.mkdir()
+        for name in ('workflow.json', 'installation.json'):
+            (options.evidence_directory / name).write_bytes(b'{}\n')
+        publication_root = self.scratch / 'publication'
+
+        def prepare(_options: object) -> Object:
+            publication_root.mkdir()
+            (publication_root / 'staging.json').write_bytes(json_bytes(staging))
+            return {'image': {'index_digest': staging['index_digest']}}
+
+        with (
+            patch.dict(
+                os.environ,
+                GITHUB_EVENT_NAME='workflow_dispatch',
+                GITHUB_SHA='a' * 40,
+                PUBLISH='false',
+                RECOVERY='false',
+                GITHUB_REPOSITORY='someone/fork',
+            ),
+            patch.object(ci, 'PUBLICATION', publication_root),
+            patch.object(ci, 'build_source', return_value=('0.1.2', {'commit': 'a' * 40})),
+            patch.object(ci, 'download_delivery_build', return_value=receipt),
+            patch.object(ci, 'run', return_value='unchanged public refs'),
+            patch.object(ci, 'prepare_registry', side_effect=prepare),
+            patch.object(ci, 'copy_repository'),
+            patch.object(ci, 'build', return_value=self.root / 'metadata') as build,
+            patch.object(ci, 'login') as login,
+            patch.object(ci, 'stage_image') as stage,
+            patch.object(ci, 'acceptance') as accept,
+            patch.object(ci, 'verify_delivery') as verify,
+            patch.object(ci, 'native') as native,
+            patch.object(ci, 'promote') as promote,
+        ):
+            ci.main(options)
+        build.assert_called_once_with('.#garmin-hass-arm64-test-repository')
+        login.assert_called_once()
+        stage.assert_called_once()
+        arguments = accept.call_args.args
+        self.assertEqual(arguments[:2], (options.build_directory, options.evidence_directory))
+        self.assertEqual(arguments[arguments.index('--arch') + 1], 'aarch64')
+        self.assertEqual(arguments[arguments.index('--repository-url') + 1], staging['repository_url'])
+        self.assertEqual(arguments[arguments.index('--registry-digest') + 1], staging['index_digest'])
+        self.assertEqual(arguments[arguments.index('--registry-tag') + 1], staging['tag'])
+        self.assertNotIn('--lifecycle', arguments)
+        self.assertEqual(accept.call_args.kwargs['timeout'], 1900)
+        verify.assert_called_once_with(options.evidence_directory, receipt, staging)
+        native.assert_not_called()
+        promote.assert_not_called()
+        self.assertTrue(object_value(read_json(publication_root / 'delivery.json'))['published_refs_unchanged'])
+
+    def test_delivery_rejects_wrong_modes_or_checkout_identity_before_downloading(self) -> None:
+        for overrides in (
+            {'PUBLISH': 'true'},
+            {'RECOVERY': 'true'},
+            {'GITHUB_SHA': 'b' * 40},
+            {'GITHUB_EVENT_NAME': 'push'},
+        ):
+            with (
+                self.subTest(overrides=overrides),
+                patch.dict(
+                    os.environ,
+                    {
+                        'PUBLISH': 'false',
+                        'RECOVERY': 'false',
+                        'GITHUB_SHA': 'a' * 40,
+                        'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                        **overrides,
+                    },
+                ),
+                patch.object(ci, 'build_source', return_value=('0.1.2', {'commit': 'a' * 40})),
+                patch.object(ci, 'download_delivery_build') as download,
+                patch.object(ci, 'login') as login,
+                self.assertRaises(ValueError),
+            ):
+                ci.delivery(ci.Options(command='delivery', system='aarch64-linux', source_run=456))
+            download.assert_not_called()
+            login.assert_not_called()
+
     def test_promotion_and_final_install_failures_both_attempt_safe_rollback(self) -> None:
         def promoted(_options: object) -> None:
             ci.PUBLICATION.mkdir()
@@ -964,7 +1345,10 @@ class CITests(unittest.TestCase):
         for selected, expected in (
             ('true', 'qemu-system-x86 qemu-utils ovmf'),
             ('x86_64-linux', 'qemu-system-x86 qemu-utils ovmf'),
-            ('aarch64-linux', 'qemu-system-arm qemu-efi-aarch64 qemu-utils'),
+            (
+                'aarch64-linux',
+                'qemu-system-arm qemu-efi-aarch64 qemu-utils ipxe-qemu ipxe-qemu-256k-compat-efi-roms seabios',
+            ),
         ):
             with self.subTest(selected=selected):
                 log.unlink(missing_ok=True)
