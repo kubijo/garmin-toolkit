@@ -2,9 +2,9 @@
 
 ## Install and open
 
-The experimental [v0.1.1 release](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.1) supports AMD64. It was
-qualified on Home Assistant OS 18.3 with Core and Supervisor 2026.10.2: repository installation, authenticated ingress,
-Course downloads, app/host restarts, and backup/restore.
+Choose an experimental release whose signed inventory lists your architecture: AMD64 or ARM64. Per-architecture
+acceptance reports accompany the release. Runtime checks cover repository installation, authenticated ingress, Course
+downloads, app/host restarts, and backup/restore on Home Assistant OS 18.3, Core 2026.10.2, and Supervisor 2026.10.3.
 
 1. Add the repository to your Home Assistant instance. Confirm the repository URL in its app store.
 

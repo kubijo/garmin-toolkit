@@ -4,9 +4,8 @@
 
 Application authentication, credential custody, encryption, and Connect remain deferred.
 
-- Qualify the combined AMD64/ARM64 branch preflight, then the first signed two-platform release and public
-  installations. [Staged ARM64 delivery](../../infra/integration/hass/README.md#staged-arm64-delivery) has passed
-  independently.
+- Qualify the first signed AMD64/ARM64 release and public installations after the successful
+  [combined branch preflight](../research/publication-readiness.md#combined-amd64arm64-preflight).
 - After the first ARM64 publication, pin its authenticated image as an upgrade baseline and retire the metadata-only
   lifecycle fixture exception. Keep older-binary/schema migration unclaimed until that check passes.
 

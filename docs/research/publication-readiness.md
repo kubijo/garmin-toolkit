@@ -10,9 +10,20 @@ assembly, HAOS acceptance, signed provenance, and independent draft verification
 repository installation. The release includes signed inventories, dependency sources, acceptance reports, runtime
 versions, and dark app captures.
 
-Qualification covers AMD64. ARM64 runtime acceptance and publication failure recovery remain in the
-[publication plan](../plans/device-expansion-and-publication.md#hass-experimental-release). Published artifacts retain
-their original source and dependency versions; subsequent source changes require a new release to reach installed apps.
+Published release qualification covers AMD64. Published artifacts retain their original source and dependency versions;
+subsequent source changes require a new release to reach installed apps.
+
+## Combined AMD64/ARM64 preflight
+
+The [combined branch preflight](https://github.com/kubijo/garmin-toolkit/actions/runs/39947173057) at `e31c4e3b` passed
+native image/source assembly, signed provenance, and independent download verification for both architectures. Each
+passed local lifecycle and staged Git/GHCR installation checks, including restart, HAOS reboot, cold restore, reinstall,
+and exact downloads. Restored captures at `1024×873` matched apart from generation time. Cleanup removed the candidate
+branch and owned guest scratch; public refs remained unchanged.
+
+AMD64 tested migration from authenticated v0.1.1. ARM64 used the documented metadata-only fixture and reported
+`migration_compatibility: false`. A signed two-platform release and public installation checks remain in the
+[publication plan](../plans/device-expansion-and-publication.md#hass-experimental-release).
 
 ## Withdrawal acceptance
 
@@ -69,9 +80,10 @@ Retain the complete notices and their copyright, attribution, and font naming co
 
 ## Distribution choices
 
-HASS uses GHCR and GitHub Releases for AMD64 experimental releases. ARM64 requires runtime acceptance. The
-[README](../../README.md#home-assistant) and [quickstart](../../apps/garmin-hass/addon/DOCS.md#install-and-open) provide
-My Home Assistant links for `https://github.com/kubijo/garmin-toolkit#hass-apps`. Users confirm repository addition and
-installation. GitHub is the only project hosting.
+HASS uses GHCR and GitHub Releases for AMD64 experimental releases. ARM64 has branch runtime evidence; public
+qualification requires its first signed release. The [README](../../README.md#home-assistant) and
+[quickstart](../../apps/garmin-hass/addon/DOCS.md#install-and-open) provide My Home Assistant links for
+`https://github.com/kubijo/garmin-toolkit#hass-apps`. Users confirm repository addition and installation. GitHub is the
+only project hosting.
 
 Desktop publication still needs supported-host, channel, and signing decisions; mobile remains separate.
