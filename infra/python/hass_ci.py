@@ -28,9 +28,11 @@ from hass_publish import (
     ReleaseGuard,
     RollbackStore,
     StagePublication,
+    build_directories,
     cleanup_staging,
     complete_publication,
     package_evidence,
+    platform_directory,
     prepare_publication,
     promote_draft,
     qualify_promotion,
@@ -115,7 +117,9 @@ def build(attribute: str) -> Path:
 
 
 def outputs(**values: str) -> None:
-    if any(not re.fullmatch(r'[a-z_]+', key) or '\n' in value or '\r' in value for key, value in values.items()):
+    if any(
+        not re.fullmatch(r'[a-z_][a-z0-9_]*', key) or '\n' in value or '\r' in value for key, value in values.items()
+    ):
         raise ValueError('Invalid single-line GitHub output')
     with Path(os.environ['GITHUB_OUTPUT']).open('a') as destination:
         destination.writelines(f'{key}={value}\n' for key, value in values.items())
@@ -144,7 +148,7 @@ def native(options: Options) -> None:
             )
         )
     architecture = 'amd64' if options.system == 'x86_64-linux' else 'aarch64'
-    sources = options.release == 'true' or (options.sources == 'true' and architecture == 'amd64')
+    sources = options.release == 'true' or options.sources == 'true'
     outputs(architecture=architecture, sources=str(sources).lower())
     if sources:
         with phase('Export dependency sources'):
@@ -441,6 +445,19 @@ def download_upgrade_baseline() -> Path:
     return directory
 
 
+def publication_acceptance(directory: Path, evidence: Path, architecture: str, *arguments: str) -> None:
+    budget = ('--timeout', '1800') if architecture == 'aarch64' else ()
+    acceptance(
+        directory,
+        evidence,
+        '--arch',
+        architecture,
+        *arguments,
+        *budget,
+        timeout=1900 if architecture == 'aarch64' else 7200,
+    )
+
+
 def draft(*, preflight: bool = False) -> None:
     source = Path.cwd()
     with phase('Validate candidate identity'):
@@ -470,48 +487,57 @@ def draft(*, preflight: bool = False) -> None:
     local, staged = Path('.tmp/lifecycle-acceptance'), Path('.tmp/staged-acceptance')
     with phase('Download published upgrade baseline'):
         baseline = download_upgrade_baseline()
-    with phase('Test HAOS installation and lifecycle'):
-        acceptance(
-            NATIVE,
-            local,
-            '--repository',
-            str(PUBLICATION / 'repository'),
-            '--lifecycle',
-            '--baseline-release',
-            str(baseline),
-        )
-    with phase('Test staged repository installation in HAOS'):
-        staging = object_value(read_json(PUBLICATION / 'staging.json'))
-        acceptance(
-            NATIVE,
-            staged,
-            '--repository-url',
-            text(staging['repository_url']),
-            '--registry-digest',
-            text(staging['index_digest']),
-            '--registry-tag',
-            text(staging['tag']),
-        )
-    with phase('Package HAOS acceptance evidence'):
-        for name in ('workflow.json', 'installation.json'):
-            shutil.copyfile(local / name, staged / ('lifecycle-' + name))
-        package = hass_preflight.package if preflight else package_evidence
-        package(ReleaseEvidence(source=source, directory=PUBLICATION, build=NATIVE, evidence=staged))
     document = object_value(read_json(PUBLICATION / 'candidate' / ('registry.json' if preflight else 'release.json')))
     platforms = object_rows(document['platforms'])
-    if len(platforms) != 1:
-        raise ValueError('Experimental publication requires one native platform')
+    if sorted(text(platform['architecture']) for platform in platforms) != ['aarch64', 'amd64']:
+        raise ValueError('New publication requires both qualified native platforms')
+    staging = object_value(read_json(PUBLICATION / 'staging.json'))
+    for platform in platforms:
+        architecture = text(platform['architecture'])
+        native = platform_directory(NATIVE, architecture)
+        local_evidence, staged_evidence = local / architecture, staged / architecture
+        # No published ARM64 baseline exists yet. Its fixture reports migration_compatibility=false.
+        upgrade = ('--baseline-release', str(baseline)) if architecture == 'amd64' else ()
+        with phase('Test ' + architecture + ' HAOS installation and lifecycle'):
+            publication_acceptance(
+                native,
+                local_evidence,
+                architecture,
+                '--repository',
+                str(PUBLICATION / 'repository'),
+                '--lifecycle',
+                *upgrade,
+            )
+        with phase('Test ' + architecture + ' staged repository installation in HAOS'):
+            publication_acceptance(
+                native,
+                staged_evidence,
+                architecture,
+                '--repository-url',
+                text(staging['repository_url']),
+                '--registry-digest',
+                text(staging['index_digest']),
+                '--registry-tag',
+                text(staging['tag']),
+            )
+        for name in ('workflow.json', 'installation.json'):
+            shutil.copyfile(local_evidence / name, staged_evidence / ('lifecycle-' + name))
+    with phase('Package HAOS acceptance evidence'):
+        package = hass_preflight.package if preflight else package_evidence
+        package(ReleaseEvidence(source=source, directory=PUBLICATION, build=NATIVE, evidence=staged))
     index = text(object_value(document['image'])['index_digest'])
-    manifest = text(platforms[0]['manifest_digest'])
-    if any(not re.fullmatch(r'sha256:[0-9a-f]{64}', value) for value in (index, manifest)):
+    manifests = {text(platform['architecture']): text(platform['manifest_digest']) for platform in platforms}
+    if any(not re.fullmatch(r'sha256:[0-9a-f]{64}', value) for value in (index, *manifests.values())):
         raise ValueError('Invalid OCI attestation subject')
     BUNDLES.mkdir()
     outputs(
         image=IMAGE,
         index=index,
-        manifest=manifest,
+        manifest=manifests['amd64'],
         index_bundle=str(BUNDLES / (index.replace(':', '-') + '.sigstore.jsonl')),
-        manifest_bundle=str(BUNDLES / (manifest.replace(':', '-') + '.sigstore.jsonl')),
+        manifest_bundle=str(BUNDLES / (manifests['amd64'].replace(':', '-') + '.sigstore.jsonl')),
+        arm64_manifest=manifests['aarch64'],
+        arm64_manifest_bundle=str(BUNDLES / (manifests['aarch64'].replace(':', '-') + '.sigstore.jsonl')),
     )
 
 
@@ -547,14 +573,19 @@ def promote() -> None:
             promote_draft(PromoteDraft(source=Path.cwd(), output=PUBLICATION))
         with phase('Test published repository installation in HAOS'):
             staging = object_value(read_json(PUBLICATION / 'staging.json'))
-            acceptance(
-                PUBLICATION / 'native',
-                Path('.tmp/final-acceptance'),
-                '--repository-url',
-                REMOTE + '#hass-apps',
-                '--registry-digest',
-                text(staging['index_digest']),
-            )
+            directories = build_directories(PUBLICATION / 'native')
+            for native in directories:
+                architecture = 'aarch64' if native.name == 'aarch64' else 'amd64'
+                evidence = Path('.tmp/final-acceptance')
+                publication_acceptance(
+                    native,
+                    evidence / architecture if len(directories) > 1 else evidence,
+                    architecture,
+                    '--repository-url',
+                    REMOTE + '#hass-apps',
+                    '--registry-digest',
+                    text(staging['index_digest']),
+                )
         with phase('Record successful publication'):
             qualify_promotion(PUBLICATION)
     except BaseException:

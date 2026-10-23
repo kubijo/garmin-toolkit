@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
+import yaml
+
 import hass_publish
 import test_hass_release as release_fixtures
 import test_hass_repository as repository_fixtures
@@ -416,6 +418,8 @@ class PublicationTests(unittest.TestCase):
         repository = self.fixture.root / 'repository'
         repository.mkdir()
         (repository / 'repository.yaml').write_text('Synthetic repository\n')
+        (repository / 'garmin_toolkit').mkdir()
+        (repository / 'garmin_toolkit/config.yaml').write_text('arch: [amd64, aarch64]\n')
         calls: list[tuple[str, ...]] = []
 
         def downloaded(*args: str, cwd: Path | None = None) -> str:
@@ -445,6 +449,9 @@ class PublicationTests(unittest.TestCase):
                     promote_draft(PromoteDraft(source=self.fixture.source, output=promoted))
                 verified.assert_called_once()
                 promote.assert_called_once()
+                self.assertEqual(
+                    yaml.safe_load((promoted / 'repository/garmin_toolkit/config.yaml').read_text())['arch'], ['amd64']
+                )
                 self.assertFalse(
                     any(args[:3] in (('gh', 'release', 'create'), ('gh', 'release', 'upload')) for args in calls)
                 )

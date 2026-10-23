@@ -103,7 +103,10 @@ let
           --architectures ${lib.escapeShellArgs architectures} \
           --output "$out"
       '';
-  repository = repositoryFor [ "amd64" ];
+  repository = repositoryFor [
+    "amd64"
+    "aarch64"
+  ];
   arm64TestRepository = repositoryFor [ "aarch64" ];
   sbom =
     pkgs.runCommand "garmin-hass-image.spdx.json"

@@ -13,12 +13,16 @@ from hass_publish import (
     REMOTE,
     PreparePublication,
     ReleaseEvidence,
+    acceptance_directory,
     archive_evidence,
+    build_directories,
     check_acceptance,
+    check_platforms,
     copy_platform_files,
     extract_evidence,
     image_manifest,
     require_rejection,
+    source_parts,
 )
 from hass_registry import PrepareRegistry, prepare_registry
 from hass_release import check_payload_metadata, copy_payload
@@ -33,7 +37,6 @@ from hass_release_contract import (
     validate_document,
 )
 from hass_repository import copy_repository
-from hass_sources import source_part_count
 from json_data import Object, file_sha256, json_bytes, object_rows, object_value, read_json, regular_file, text
 
 
@@ -52,16 +55,13 @@ def guard(source: Path) -> tuple[str, Object]:
     return version, identity
 
 
-def payload(document: Object, sources: Path) -> Payload:
+def payload(document: Object, sources: Path, *, candidate: bool = False) -> Payload:
     validate_document(document, 'registry')
-    if (
-        [row['architecture'] for row in object_rows(document['platforms'])] != ['amd64']
-        or document['registry_reference'] is not None
-        or document['acceptance'] != []
-    ):
-        raise ValueError('Preflight requires one freshly prepared native AMD64 image')
+    if document['registry_reference'] is not None or document['acceptance'] != []:
+        raise ValueError('Preflight requires freshly prepared native images')
     result = cast(Payload, {key: document[key] for key in ('version', 'image', 'platforms')})
-    result['source_parts'] = {'amd64': source_part_count(object_value(read_json(sources)))}
+    check_platforms(result['platforms'])
+    result['source_parts'] = source_parts(result, sources, candidate=candidate)
     return result
 
 
@@ -81,11 +81,11 @@ def prepare(options: PreparePublication) -> None:
         staged = Path(temporary) / 'publication'
         staged.mkdir()
         document = prepare_registry(
-            PrepareRegistry(source=options.source, builds=[options.build], output=staged / 'registry')
+            PrepareRegistry(source=options.source, builds=build_directories(options.build), output=staged / 'registry')
         )
         if document['source'] != identity or document['version'] != version:
             raise ValueError('Native preflight receipt differs from the dispatched source')
-        inputs = payload(document, options.sources / 'dependency-sources.json')
+        inputs = payload(document, options.sources)
         artifacts, candidate = staged / 'artifacts', staged / 'candidate'
         copy_platform_files(options.build, options.sources, inputs, artifacts)
         candidate.mkdir()
@@ -94,14 +94,18 @@ def prepare(options: PreparePublication) -> None:
         (candidate / 'registry.json').write_bytes(json_bytes(document))
         (candidate / 'SHA256SUMS').write_bytes(checksum_bytes(candidate, inputs))
         check_candidate(options.source, candidate)
-        copy_repository(options.repository, staged / 'repository')
+        copy_repository(
+            options.repository,
+            staged / 'repository',
+            architectures=tuple(platform['architecture'] for platform in inputs['platforms']),
+        )
         staged.rename(options.output)
 
 
 def check_candidate(source: Path, candidate: Path, authenticated: bytes | None = None) -> tuple[Object, Payload]:
     version, identity = guard(source)
     document = object_value(read_json(candidate / 'registry.json'))
-    inputs = payload(document, next(candidate.glob('*-amd64-sources.json')))
+    inputs = payload(document, candidate, candidate=True)
     if document['version'] != version or document['source'] != identity:
         raise ValueError('Preflight inventory differs from the dispatched source')
     check_directory(candidate, {spec['name'] for spec in inventory(inputs)} | {'registry.json', 'SHA256SUMS'})
@@ -115,14 +119,16 @@ def check_candidate(source: Path, candidate: Path, authenticated: bytes | None =
 
 def package(options: ReleaseEvidence) -> None:
     document, inputs = check_candidate(options.source, options.directory / 'candidate')
-    check_acceptance(
-        options.evidence,
-        inputs['platforms'][0],
-        document['source'],
-        inputs['image']['index_digest'],
-        object_value(read_json(options.directory / 'staging.json')),
-    )
-    archive_evidence(options.directory, options.evidence)
+    for platform in inputs['platforms']:
+        check_acceptance(
+            acceptance_directory(options.evidence, inputs['platforms'], platform),
+            platform,
+            document['source'],
+            inputs['image']['index_digest'],
+            object_value(read_json(options.directory / 'staging.json')),
+            version=inputs['version'] if len(inputs['platforms']) > 1 else None,
+        )
+    archive_evidence(options.directory, options.evidence, inputs['platforms'])
 
 
 def verify(source: Path, directory: Path, bundles: Path) -> None:
@@ -146,7 +152,7 @@ def verify(source: Path, directory: Path, bundles: Path) -> None:
         document, inputs = check_candidate(source, candidate, authenticated)
         if sums.read_bytes() != authenticated:
             raise ValueError('Authenticated preflight inventory changed during verification')
-        digests = {inputs['image']['index_digest'], inputs['platforms'][0]['manifest_digest']}
+        digests = {inputs['image']['index_digest'], *(platform['manifest_digest'] for platform in inputs['platforms'])}
         check_directory(
             bundles,
             {'artifacts.sigstore.jsonl', 'checksums.sigstore.jsonl', 'acceptance.sigstore.jsonl'}
@@ -164,8 +170,16 @@ def verify(source: Path, directory: Path, bundles: Path) -> None:
         acceptance = directory / 'haos-acceptance.tar.gz'
         attest_reference(str(acceptance), bundles / 'acceptance.sigstore.jsonl', reference, commit)
         evidence = scratch / 'evidence'
-        staging = extract_evidence(acceptance, evidence)
-        check_acceptance(evidence, inputs['platforms'][0], document['source'], inputs['image']['index_digest'], staging)
+        staging = extract_evidence(acceptance, evidence, inputs['platforms'])
+        for platform in inputs['platforms']:
+            check_acceptance(
+                acceptance_directory(evidence, inputs['platforms'], platform),
+                platform,
+                document['source'],
+                inputs['image']['index_digest'],
+                staging,
+                version=inputs['version'] if len(inputs['platforms']) > 1 else None,
+            )
         branch = text(staging.get('branch'))
         if (
             not re.fullmatch(r'hass-candidate-[1-9][0-9]*-[1-9][0-9]*', branch)

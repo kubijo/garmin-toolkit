@@ -4,7 +4,6 @@ import errno
 import hashlib
 import json
 import re
-import shutil
 import subprocess
 import sys
 import tarfile
@@ -50,6 +49,7 @@ from hass_release_contract import (
     check_directory,
     check_shape,
     checksums,
+    copy_payload_file,
     describe_file,
     file_sha256,
     inventory,
@@ -160,7 +160,7 @@ def copy_payload(source: Path, commit: str, document: Payload, artifacts: Path, 
         elif 'source' in entry:
             destination.write_bytes(source_bytes(source, commit, entry['source']))
         else:
-            shutil.copyfile(artifacts / entry['name'], destination, follow_symlinks=False)
+            copy_payload_file(artifacts / entry['name'], destination)
     return [describe_file(output, entry) for entry in specs]
 
 

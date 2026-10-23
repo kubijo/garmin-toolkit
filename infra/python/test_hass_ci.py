@@ -134,7 +134,7 @@ def promotion_worker(root: Path, mode: str, previous: str) -> None:
             publication.StagePublication(source=root, directory=ci.PUBLICATION, build=root), document, staging
         )
 
-    def accept(*_args: object) -> None:
+    def accept(*_args: object, **_kwargs: object) -> None:
         if mode == 'child-accept':
             ci.run_owned(sys.executable, str(root / 'acceptance.py'))
         if mode.endswith('-accept'):
@@ -245,7 +245,7 @@ class CITests(unittest.TestCase):
     def test_cli_and_native_source_selection(self) -> None:
         for system, sources, release, expected in (
             ('x86_64-linux', True, False, True),
-            ('aarch64-linux', True, False, False),
+            ('aarch64-linux', True, False, True),
             ('x86_64-linux', False, False, False),
             ('x86_64-linux', False, True, True),
         ):
@@ -468,13 +468,16 @@ class CITests(unittest.TestCase):
             json_bytes(
                 {
                     'image': {'index_digest': index},
-                    'platforms': [{'manifest_digest': manifest}],
+                    'platforms': [
+                        {'architecture': 'amd64', 'manifest_digest': manifest},
+                        {'architecture': 'aarch64', 'manifest_digest': 'sha256:' + 'c' * 64},
+                    ],
                 }
             )
         )
 
-        def acceptance(_: Path, evidence: Path, *arguments: str) -> None:
-            evidence.mkdir()
+        def acceptance(_: Path, evidence: Path, *arguments: str, **_kwargs: object) -> None:
+            evidence.mkdir(parents=True)
             for name in ('workflow.json', 'installation.json'):
                 (evidence / name).write_text('synthetic evidence')
 
@@ -489,13 +492,19 @@ class CITests(unittest.TestCase):
             patch.object(ci, 'package_evidence') as package,
         ):
             ci.draft()
-        self.assertEqual(check.call_count, 2)
+        self.assertEqual(check.call_count, 4)
         self.assertIn('--lifecycle', check.call_args_list[0].args)
         self.assertIn('--baseline-release', check.call_args_list[0].args)
         self.assertIn('/published-baseline', check.call_args_list[0].args)
         self.assertIn('0.1.0-candidate.123.1', check.call_args_list[1].args)
         self.assertIn(index, check.call_args_list[1].args)
-        self.assertEqual((self.scratch / 'staged-acceptance/lifecycle-workflow.json').read_text(), 'synthetic evidence')
+        self.assertEqual(
+            (self.scratch / 'staged-acceptance/amd64/lifecycle-workflow.json').read_text(), 'synthetic evidence'
+        )
+        self.assertNotIn('--baseline-release', check.call_args_list[2].args)
+        self.assertIn('aarch64', check.call_args_list[2].args)
+        self.assertEqual(check.call_args_list[2].kwargs['timeout'], 1900)
+        self.assertIn('--timeout', check.call_args_list[2].args)
         package.assert_called_once()
         self.assertIn(f'index={index}\n', (self.root / 'outputs').read_text())
         self.assertIn(
@@ -512,7 +521,14 @@ class CITests(unittest.TestCase):
         candidate = ci.PUBLICATION / 'candidate'
         candidate.mkdir(parents=True)
         index, manifest = 'sha256:' + 'a' * 64, 'sha256:' + 'b' * 64
-        document = {'version': '0.1.1', 'image': {'index_digest': index}, 'platforms': [{'manifest_digest': manifest}]}
+        document = {
+            'version': '0.1.1',
+            'image': {'index_digest': index},
+            'platforms': [
+                {'architecture': 'amd64', 'manifest_digest': manifest},
+                {'architecture': 'aarch64', 'manifest_digest': 'sha256:' + 'c' * 64},
+            ],
+        }
         (candidate / 'registry.json').write_bytes(json_bytes(document))
         (ci.PUBLICATION / 'staging.json').write_bytes(
             json_bytes(
@@ -524,8 +540,8 @@ class CITests(unittest.TestCase):
             )
         )
 
-        def acceptance(_: Path, evidence: Path, *arguments: str) -> None:
-            evidence.mkdir()
+        def acceptance(_: Path, evidence: Path, *arguments: str, **_kwargs: object) -> None:
+            evidence.mkdir(parents=True)
             for name in ('workflow.json', 'installation.json'):
                 (evidence / name).write_text('Synthetic branch evidence\n')
 
@@ -550,7 +566,7 @@ class CITests(unittest.TestCase):
         package.assert_called_once()
         image.assert_called_once()
         self.assertEqual(image.call_args.args[1:], ('0.1.1', index, ''))
-        self.assertEqual(check.call_count, 2)
+        self.assertEqual(check.call_count, 4)
         self.assertIn('--lifecycle', check.call_args_list[0].args)
         self.assertIn('--baseline-release', check.call_args_list[0].args)
         self.assertIn('/published-baseline', check.call_args_list[0].args)
@@ -1348,6 +1364,11 @@ class CITests(unittest.TestCase):
             (
                 'aarch64-linux',
                 'qemu-system-arm qemu-efi-aarch64 qemu-utils ipxe-qemu ipxe-qemu-256k-compat-efi-roms seabios',
+            ),
+            (
+                'all',
+                'qemu-system-x86 qemu-system-arm qemu-efi-aarch64 qemu-utils ovmf '
+                'ipxe-qemu ipxe-qemu-256k-compat-efi-roms seabios',
             ),
         ):
             with self.subTest(selected=selected):

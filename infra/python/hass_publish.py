@@ -26,6 +26,7 @@ from hass_release_contract import (
     Release,
     check_directory,
     check_shape,
+    copy_payload_file,
     file_sha256,
     inventory,
     validate_document,
@@ -35,7 +36,7 @@ from hass_repository import copy_repository
 from hass_source_parts import part_path
 from hass_sources import source_part_count, verify_sources
 from hass_store import FENCE, Store, oid, write_journal
-from json_data import Object, json_bytes, object_rows, object_value, read_json, strings, text
+from json_data import Object, json_bytes, object_value, read_json, strings, text
 
 REPOSITORY = 'kubijo/garmin-toolkit'
 REMOTE = 'https://github.com/' + REPOSITORY
@@ -51,7 +52,7 @@ class ReleaseGuard:
 
 @dataclass(frozen=True, kw_only=True)
 class PreparePublication:
-    """Assemble an AMD64 candidate and its unchanged OCI index; publish nothing."""
+    """Assemble native candidates and their unchanged OCI index; publish nothing."""
 
     source: Path
     build: Path
@@ -128,6 +129,50 @@ EVIDENCE_FILES = (
     'lifecycle-installation.json',
 )
 
+ARCHITECTURES = ('aarch64', 'amd64')
+
+
+def platform_directory(root: Path, architecture: str) -> Path:
+    """Accept legacy flat AMD64 inputs or architecture-separated publication inputs."""
+    return root / architecture if any((root / name).exists() for name in ARCHITECTURES) else root
+
+
+def build_directories(root: Path) -> list[Path]:
+    directories = [platform_directory(root, name) for name in ARCHITECTURES]
+    if directories[0] == root:
+        return [root]
+    if (
+        root.is_symlink()
+        or {path.name for path in root.iterdir()} != set(ARCHITECTURES)
+        or any(path.is_symlink() or not path.is_dir() for path in directories)
+    ):
+        raise ValueError('Publication requires both native architecture directories')
+    return directories
+
+
+def source_parts(document: Payload, sources: Path, *, candidate: bool = False) -> dict[str, int]:
+    return {
+        platform['architecture']: source_part_count(
+            object_value(
+                read_json(
+                    sources / f'garmin-toolkit-hass-{document["version"]}-{platform["architecture"]}-sources.json'
+                    if candidate
+                    else platform_directory(sources, platform['architecture']) / 'dependency-sources.json'
+                )
+            )
+        )
+        for platform in document['platforms']
+    }
+
+
+def check_platforms(platforms: list[Platform]) -> None:
+    if sorted(row['architecture'] for row in platforms) not in (['amd64'], list(ARCHITECTURES)):
+        raise ValueError('Publication requires AMD64 or both qualified native platforms')
+
+
+def acceptance_directory(evidence: Path, platforms: list[Platform], platform: Platform) -> Path:
+    return evidence / platform['architecture'] if len(platforms) > 1 else evidence
+
 
 def command(*arguments: str, cwd: Path | None = None) -> str:
     return subprocess.run(
@@ -197,16 +242,13 @@ def prepare_publication(options: PreparePublication) -> None:
         staged = Path(temporary) / 'publication'
         staged.mkdir()
         registry = prepare_registry(
-            PrepareRegistry(source=options.source, builds=[options.build], output=staged / 'registry')
+            PrepareRegistry(source=options.source, builds=build_directories(options.build), output=staged / 'registry')
         )
-        if [row.get('architecture') for row in object_rows(registry['platforms'])] != ['amd64']:
-            raise ValueError('Only AMD64 has experimental release runtime qualification')
         document = cast(
             Assembly, {key: registry[key] for key in ('schema_version', 'version', 'source', 'image', 'platforms')}
         )
-        document['source_parts'] = {
-            'amd64': source_part_count(object_value(read_json(options.sources / 'dependency-sources.json')))
-        }
+        check_platforms(document['platforms'])
+        document['source_parts'] = source_parts(document, options.sources)
         (staged / 'assembly.json').write_bytes(json_bytes(document))
         artifacts = staged / 'artifacts'
         copy_platform_files(options.build, options.sources, document, artifacts)
@@ -219,30 +261,37 @@ def prepare_publication(options: PreparePublication) -> None:
             )
         )
         shutil.rmtree(artifacts)
-        copy_repository(options.repository, staged / 'repository')
+        copy_repository(
+            options.repository,
+            staged / 'repository',
+            architectures=tuple(platform['architecture'] for platform in document['platforms']),
+        )
         staged.rename(options.output)
 
 
 def copy_platform_files(build: Path, sources: Path, document: Payload, output: Path) -> None:
-    count = document.get('source_parts', {}).get('amd64', 1)
-    check_directory(
-        sources,
-        {'dependency-sources.json'}
-        | {part_path(Path('dependency-sources.tar.gz'), number).name for number in range(1, count + 1)},
-    )
+    for platform in document['platforms']:
+        count = document.get('source_parts', {}).get(platform['architecture'], 1)
+        check_directory(
+            platform_directory(sources, platform['architecture']),
+            {'dependency-sources.json'}
+            | {part_path(Path('dependency-sources.tar.gz'), number).name for number in range(1, count + 1)},
+        )
     output.mkdir()
     for spec in inventory(document):
         if 'architecture' not in spec:
             continue
+        architecture = spec['architecture']
         role = spec['role']
-        origin = build / spec['name']
+        origin = platform_directory(build, architecture) / spec['name']
+        platform_sources = platform_directory(sources, architecture)
         if role in ('dependency_sources', 'source_inventory'):
-            origin = sources / (
+            origin = platform_sources / (
                 'dependency-sources.tar.gz' if role == 'dependency_sources' else 'dependency-sources.json'
             )
         elif role == 'dependency_sources_part':
-            origin = sources / ('dependency-sources.tar.gz' + Path(spec['name']).suffix)
-        shutil.copyfile(origin, output / spec['name'], follow_symlinks=False)
+            origin = platform_sources / ('dependency-sources.tar.gz' + Path(spec['name']).suffix)
+        copy_payload_file(origin, output / spec['name'])
 
 
 def checked_candidate(source: Path, directory: Path) -> Release:
@@ -258,16 +307,21 @@ def checked_candidate(source: Path, directory: Path) -> Release:
             commit=text(identity['commit']),
         )
     )
-    if [row['architecture'] for row in document['platforms']] != ['amd64']:
-        raise ValueError('Only qualified AMD64 releases may be published')
-    roles = {entry['role']: candidate / entry['name'] for entry in document['files']}
-    verify_sources(
-        roles['dependency_sources'],
-        roles['source_inventory'],
-        document['platforms'][0]['archive_sha256'],
-        require_resolved=True,
-        part_count=document.get('source_parts', {}).get('amd64', 1),
-    )
+    check_platforms(document['platforms'])
+    for platform in document['platforms']:
+        architecture = platform['architecture']
+        roles = {
+            entry['role']: candidate / entry['name']
+            for entry in document['files']
+            if entry.get('architecture') == architecture
+        }
+        verify_sources(
+            roles['dependency_sources'],
+            roles['source_inventory'],
+            platform['archive_sha256'],
+            require_resolved=True,
+            part_count=document.get('source_parts', {}).get(architecture, 1),
+        )
     return document
 
 
@@ -409,7 +463,7 @@ def _stage_image(options: StagePublication, tag: str, branch: str, digest: str, 
         verify_registry(
             VerifyRegistry(
                 source=options.source,
-                builds=[options.build],
+                builds=build_directories(options.build),
                 reference=IMAGE + '@' + digest,
                 output=options.directory / 'staged-registry',
             )
@@ -437,10 +491,21 @@ def _stage_image(options: StagePublication, tag: str, branch: str, digest: str, 
 
 
 def verify_acceptance(evidence: Path, document: Release, staging: Object) -> None:
-    check_acceptance(evidence, document['platforms'][0], document['source'], document['image']['index_digest'], staging)
+    check_platforms(document['platforms'])
+    for platform in document['platforms']:
+        check_acceptance(
+            acceptance_directory(evidence, document['platforms'], platform),
+            platform,
+            document['source'],
+            document['image']['index_digest'],
+            staging,
+            version=document['version'] if len(document['platforms']) > 1 else None,
+        )
 
 
-def check_acceptance(evidence: Path, platform: Platform, source: object, digest: str, staging: Object) -> None:
+def check_acceptance(
+    evidence: Path, platform: Platform, source: object, digest: str, staging: Object, *, version: str | None = None
+) -> None:
     workflow = object_value(read_json(evidence / 'workflow.json'))
     installed = object_value(read_json(evidence / 'installation.json'))
     native = object_value(read_json(evidence / 'native-build.json'))
@@ -471,6 +536,22 @@ def check_acceptance(evidence: Path, platform: Platform, source: object, digest:
         or any(local_image.get(key) != platform[key] for key in ('manifest_digest', 'config_digest', 'archive_sha256'))
     ):
         raise ValueError('HAOS acceptance does not qualify this staged release index')
+    architecture = 'arm64' if platform['architecture'] == 'aarch64' else 'amd64'
+    if version is not None and (
+        any(
+            image.get('architecture') != architecture or image.get('archive_version') != version
+            for image in (installed, local_image)
+        )
+        or installed.get('version') != staging.get('tag')
+        or local_image.get('version') != version
+        or native.get('version') != version
+    ):
+        raise ValueError('HAOS acceptance versions or architecture differ from the selected native platform')
+    if platform['architecture'] == 'aarch64' and (
+        lifecycle.get('migration_compatibility') is not False
+        or lifecycle.get('baseline') != 'metadata-only fixture; candidate filesystem; no previous public release'
+    ):
+        raise ValueError('First ARM64 release must explicitly report its fixture baseline and migration limit')
 
 
 def require_rejection(action: Callable[[], object]) -> None:
@@ -553,12 +634,20 @@ def qualify_rejections(options: VerifyProvenance, document: Release) -> None:
 def package_evidence(options: ReleaseEvidence) -> None:
     document = checked_candidate(options.source, options.directory)
     verify_acceptance(options.evidence, document, object_value(read_json(options.directory / 'staging.json')))
-    archive_evidence(options.directory, options.evidence)
+    archive_evidence(options.directory, options.evidence, document['platforms'])
 
 
-def archive_evidence(directory: Path, evidence: Path) -> None:
+def evidence_names(platforms: list[Platform] | None) -> list[str]:
+    return (
+        [architecture + '/' + name for architecture in ARCHITECTURES for name in EVIDENCE_FILES]
+        if platforms is not None and len(platforms) > 1
+        else list(EVIDENCE_FILES)
+    )
+
+
+def archive_evidence(directory: Path, evidence: Path, platforms: list[Platform] | None = None) -> None:
     with tarfile.open(directory / 'haos-acceptance.tar.gz', 'x:gz') as archive:
-        for name in EVIDENCE_FILES:
+        for name in evidence_names(platforms):
             path = evidence / name
             if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= 16 * 1024**2:
                 raise ValueError('Missing or oversized acceptance report/capture: ' + name)
@@ -566,23 +655,27 @@ def archive_evidence(directory: Path, evidence: Path) -> None:
         archive.add(directory / 'staging.json', arcname='staging.json')
 
 
-def extract_evidence(acceptance: Path, evidence: Path) -> Object:
+def extract_evidence(acceptance: Path, evidence: Path, platforms: list[Platform] | None = None) -> Object:
     evidence.mkdir()
     seen: set[str] = set()
-    with open_tar(acceptance, max_bytes=160 * 1024**2) as archive:
+    expected = {*evidence_names(platforms), 'staging.json'}
+    limit = 384 if platforms is not None and len(platforms) > 1 else 160
+    with open_tar(acceptance, max_bytes=limit * 1024**2) as archive:
         for member in archive:
             if (
-                member.name not in (*EVIDENCE_FILES, 'staging.json')
+                member.name not in expected
                 or member.name in seen
                 or not member.isfile()
                 or not 0 < member.size <= 16 * 1024**2
             ):
                 raise ValueError('Unexpected, duplicate, or oversized signed acceptance member')
             seen.add(member.name)
-            with archive.extractfile(member) as source, (evidence / member.name).open('xb') as destination:
+            path = evidence / member.name
+            path.parent.mkdir(exist_ok=True)
+            with archive.extractfile(member) as source, path.open('xb') as destination:
                 for chunk in chunks(source):
                     destination.write(chunk)
-    if seen != {*EVIDENCE_FILES, 'staging.json'}:
+    if seen != expected:
         raise ValueError('Signed acceptance archive is incomplete')
     return object_value(read_json(evidence / 'staging.json'))
 
@@ -631,7 +724,7 @@ def complete_publication(options: CompletePublication) -> None:
     )
     tag = document['source']['tag']
     notes = (
-        f'AMD64 experimental Home Assistant release. '
+        f'Experimental Home Assistant release for {", ".join(row["architecture"] for row in document["platforms"])}. '
         f'[Installation and recovery]({REMOTE}/blob/{tag}/apps/garmin-hass/addon/DOCS.md).\n\n'
         'Verify the signed release inventory before installation. '
         'Runtime versions, acceptance reports, and dark app captures are in haos-acceptance.tar.gz. '
@@ -837,28 +930,30 @@ def promote_draft(options: PromoteDraft) -> None:
     (downloaded / acceptance.name).rename(acceptance)
     attest(provenance, str(acceptance), 'acceptance.sigstore.jsonl')
     evidence = options.output / 'evidence'
-    staging = extract_evidence(acceptance, evidence)
+    staging = extract_evidence(acceptance, evidence, document['platforms'])
     if not re.fullmatch(r'(?:[0-9a-f]{40})?', str(staging.get('previous'))):
         raise ValueError('Invalid previous store commit in signed staging evidence')
     (options.output / 'staging.json').write_bytes(json_bytes(staging))
     verify_acceptance(evidence, document, staging)
     checked_candidate(options.source, options.output)
     native = options.output / 'native'
-    native.mkdir()
-    for entry in document['files']:
-        if entry['role'] in ('image_archive', 'sbom'):
-            os.link(candidate / entry['name'], native / entry['name'])
-    (native / 'native-build.json').write_bytes(
-        json_bytes(
-            {
-                'schema_version': 1,
-                'version': version,
-                'source': document['source'],
-                'image_repository': IMAGE,
-                'platform': document['platforms'][0],
-            }
+    for platform in document['platforms']:
+        selected = acceptance_directory(native, document['platforms'], platform)
+        selected.mkdir(parents=True)
+        for entry in document['files']:
+            if entry['role'] in ('image_archive', 'sbom') and entry.get('architecture') == platform['architecture']:
+                os.link(candidate / entry['name'], selected / entry['name'])
+        (selected / 'native-build.json').write_bytes(
+            json_bytes(
+                {
+                    'schema_version': 1,
+                    'version': version,
+                    'source': document['source'],
+                    'image_repository': IMAGE,
+                    'platform': platform,
+                }
+            )
         )
-    )
     repository = Path(
         command(
             'nix',
@@ -869,7 +964,11 @@ def promote_draft(options: PromoteDraft) -> None:
             '--no-update-lock-file',
         )
     )
-    copy_repository(repository, options.output / 'repository')
+    copy_repository(
+        repository,
+        options.output / 'repository',
+        architectures=tuple(platform['architecture'] for platform in document['platforms']),
+    )
     promote_candidate(
         StagePublication(source=options.source, directory=options.output, build=native), document, staging
     )

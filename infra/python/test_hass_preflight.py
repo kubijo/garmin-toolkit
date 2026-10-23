@@ -59,7 +59,7 @@ class PreflightTests(unittest.TestCase):
             'acceptance': [],
         }
         (self.candidate / 'registry.json').write_bytes(json_bytes(self.registry))
-        self.inputs = preflight.payload(self.registry, next(self.candidate.glob('*-amd64-sources.json')))
+        self.inputs = preflight.payload(self.registry, self.candidate, candidate=True)
         (self.candidate / 'SHA256SUMS').write_bytes(preflight.checksum_bytes(self.candidate, self.inputs))
         fixture.save_evidence()
         native = object_value(read_json(fixture.evidence / 'native-build.json'))
