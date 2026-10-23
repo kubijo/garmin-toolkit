@@ -17,7 +17,7 @@ prepare)
     runner_kvm=${2:-false}
     runner_haos=${3:-false}
     case "$runner_kvm" in true | false) ;; *) exit 64 ;; esac
-    case "$runner_haos" in false | true | x86_64-linux | aarch64-linux) ;; *) exit 64 ;; esac
+    case "$runner_haos" in false | true | x86_64-linux | aarch64-linux | all) ;; *) exit 64 ;; esac
     if [[ $runner_kvm == true ]]; then
         test -c /dev/kvm
         sudo chmod a+rw /dev/kvm
@@ -39,6 +39,12 @@ prepare)
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
             qemu-system-arm qemu-efi-aarch64 qemu-utils \
+            ipxe-qemu ipxe-qemu-256k-compat-efi-roms seabios mtools parted
+        ;;
+    all)
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 qemu-system-arm qemu-efi-aarch64 qemu-utils ovmf \
             ipxe-qemu ipxe-qemu-256k-compat-efi-roms seabios mtools parted
         ;;
     false) ;;

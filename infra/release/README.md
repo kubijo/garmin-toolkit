@@ -12,18 +12,20 @@ with **Publish disabled**:
 gh workflow run hass-release.yml --ref dev -f publish=false
 ```
 
-Branch preflight builds AMD64 images and sources, stages candidate references, tests HAOS lifecycle and repository
-installation, and signs files and OCI digests. A fresh read-only job downloads and verifies the artifact inventory,
-branch/commit signatures, and acceptance archive. Invalid payloads, revisions, signers, and platform subjects must fail.
-It creates no GitHub release and does not advance `hass-apps`. Branch evidence cannot qualify a tagged release.
+Branch preflight builds AMD64 and ARM64 images and sources, stages one combined index, tests HAOS lifecycle and
+repository installation on each architecture, and signs files and OCI digests. A fresh read-only job verifies the
+artifact inventory, branch/commit signatures, and acceptance archive. Invalid payloads, revisions, signers, and platform
+subjects must fail. It creates no GitHub release and does not advance `hass-apps`. Branch evidence cannot qualify a
+tagged release.
 
 Dispatch [HASS experimental release](../../.github/workflows/hass-release.yml) from a clean `vVERSION` tag reachable
 from `main`, matching workspace/app versions:
 
-- **Publish disabled:** build AMD64 images and sources, stage unique references, run HAOS and provenance rejection
-  checks, sign artifacts, and independently verify draft downloads.
+- **Publish disabled:** build both native images and source bundles, stage unique references, run HAOS and provenance
+  rejection checks, sign artifacts, and independently verify draft downloads.
 - **Publish enabled:** authenticate and promote the original tested bytes, publish the release, advance `hass-apps` with
-  a branch lease, and verify public installation. Failure restores the previous store metadata.
+  a branch lease, and verify public installation on both architectures. Either failure restores the previous store
+  metadata.
 
 CI is read-only. Publication is manual, serialized, and restricted to this repository. GHCR must allow anonymous pulls;
 the package's first creation may require a visibility change. Conflicts and incomplete drafts fail without replacing
@@ -43,16 +45,25 @@ scope cleanup fails, scratch is retained and its path is reported. The VM retain
 acceptance scope uses two CPUs/six GiB.
 
 [Python phases](../python/hass_ci.py) own orchestration; [runner setup](../ci/runner.sh) owns host preparation and
-cleanup. Branch and tagged candidates test upgrades from the published v0.1.1 image, authenticated against its signed
-inventory and exact source tag. Both upgrades, backup recovery, and reinstall exercise synthetic profile, route, and
-Course data. Review the pinned baseline in the Python phases when preparing the next release. The standalone
-[lifecycle check](../integration/hass/README.md#populated-haos-workflow) also supports a metadata-only fixture; that
-fixture does not qualify migration from older binaries or schemas.
+cleanup. AMD64 candidates test upgrades from published v0.1.1, authenticated against its signed inventory and exact
+source tag. ARM64 uses the metadata-only fixture because no older ARM64 image has been published; its report must
+explicitly set `migration_compatibility: false`. Both architectures exercise upgrades, backup recovery, and reinstall
+with synthetic profile, route, and Course data. After the first ARM64 publication, pin that signed baseline and replace
+this fixture exception with authenticated older-binary/schema migration checks.
+
+Native inputs and sources use `amd64/` and `aarch64/` directories. The signed acceptance archive contains both
+directories, each with runtime versions, reports, and dark captures, plus one shared staging journal. Verification
+requires both platform manifests and guest reports. Existing signed AMD64 releases retain their flat evidence layout and
+AMD64-only Store metadata when retried.
+
+Assembly shares immutable payload files through hardlinks within scratch, avoiding extra copies of both large source
+bundles. Cross-filesystem inputs fall back to copying; content and provenance checks still verify every platform.
 
 ## Generated Home Assistant repository
 
-`garmin-hass-app-repository` builds an AMD64 store tree from canonical app metadata and branding, checked by
-[dirspec](hass-app-repository.dirspec.toml). ARM64 requires runtime acceptance before advertisement.
+`garmin-hass-app-repository` builds an AMD64/ARM64 Store tree from canonical metadata and branding, checked by
+[dirspec](hass-app-repository.dirspec.toml). Publication selects the signed inventory's architectures and qualifies
+every platform before recording success.
 
 ```sh
 nix build .#garmin-hass-app-repository \
@@ -97,7 +108,7 @@ supply their actual `--workflow-run`; local builds omit it.
 
 ## Dependency source bundles
 
-Dispatch read-only CI with **sources enabled** for an AMD64 audit before tagging. For local export, evaluate
+Dispatch read-only CI with **sources enabled** to audit both architectures before tagging. For local export, evaluate
 `legacyPackages.SYSTEM.hass-source-metadata` into a JSON file, then run:
 
 ```sh

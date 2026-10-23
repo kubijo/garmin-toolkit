@@ -1,7 +1,9 @@
 """Filesystem-backed contracts and content checks for local HASS release candidates."""
 
 import hashlib
+import os
 import re
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
@@ -151,6 +153,15 @@ def describe_file(directory: Path, spec: FileSpec) -> FileRecord:
     if 'architecture' in spec:
         result['architecture'] = spec['architecture']
     return result
+
+
+def copy_payload_file(source: Path, destination: Path) -> None:
+    """Share immutable exports within publication scratch; copy across filesystems or unsupported mounts."""
+    regular_file(source)
+    try:
+        os.link(source, destination)
+    except OSError:
+        shutil.copyfile(source, destination, follow_symlinks=False)
 
 
 def checksums(document: Release, manifest: bytes) -> bytes:

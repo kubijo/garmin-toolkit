@@ -12,13 +12,20 @@ from hass_release_contract import Architecture, check_shape
 from json_data import object_value, regular_file, strings, text
 
 
-def copy_repository(source: Path, destination: Path) -> None:
+def copy_repository(source: Path, destination: Path, *, architectures: tuple[Architecture, ...] | None = None) -> None:
     """Copy generated metadata into writable owned scratch, including Nix store inputs."""
     if source.is_symlink() or any(path.is_symlink() for path in source.rglob('*')):
         raise ValueError('Repository metadata must contain regular files and directories')
     shutil.copytree(source, destination, copy_function=shutil.copyfile)
     for path in (destination, *(path for path in destination.rglob('*') if path.is_dir())):
         path.chmod(0o755)
+    if architectures is not None:
+        path = destination / 'garmin_toolkit/config.yaml'
+        config = object_value(yaml.safe_load(path.read_text()))
+        if not architectures or not set(architectures).issubset(strings(config.get('arch'))):
+            raise ValueError('Release platforms must be supported by the generated repository')
+        config['arch'] = sorted(architectures)
+        path.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True))
 
 
 @dataclass(frozen=True, kw_only=True)

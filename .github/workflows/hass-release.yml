@@ -22,8 +22,17 @@ permissions:
 jobs:
   native:
     if: github.repository == 'kubijo/garmin-toolkit' && !inputs.publish && !inputs.recovery && inputs.arm64_run == ''
+    strategy:
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
     uses: ./.github/workflows/hass-native.yml
     with:
+      system: ${{ matrix.system }}
+      runner: ${{ matrix.runner }}
       release: ${{ github.ref_type == 'tag' }}
       sources: true
   release:
@@ -49,17 +58,27 @@ jobs:
       - uses: ./.github/actions/nix
         with:
           kvm: "true"
-          haos: "true"
+          haos: all
       # v8
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: garmin-hass-native-amd64
-          path: .tmp/native
+          path: .tmp/native/amd64
+      # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: garmin-hass-native-aarch64
+          path: .tmp/native/aarch64
       # v8
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: garmin-hass-sources-amd64
-          path: .tmp/sources
+          path: .tmp/sources/amd64
+      # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: garmin-hass-sources-aarch64
+          path: .tmp/sources/aarch64
       - name: Stage and qualify the candidate in HAOS
         id: identity
         env:
@@ -87,6 +106,12 @@ jobs:
           bundle: ${{ steps.identity.outputs.manifest_bundle }}
       - uses: ./.github/actions/attest
         with:
+          name: ${{ steps.identity.outputs.image }}
+          digest: ${{ steps.identity.outputs.arm64_manifest }}
+          registry: "true"
+          bundle: ${{ steps.identity.outputs.arm64_manifest_bundle }}
+      - uses: ./.github/actions/attest
+        with:
           path: .tmp/publication/haos-acceptance.tar.gz
           bundle: .tmp/bundles/acceptance.sigstore.jsonl
       - name: Verify signed candidate
@@ -111,13 +136,13 @@ jobs:
           path: |
             .tmp/publication/*.json
             .tmp/publication/haos-acceptance.tar.gz
-            .tmp/sources/dependency-sources.json
-            .tmp/lifecycle-acceptance/browser.log
-            .tmp/lifecycle-acceptance/*failed*.png
-            .tmp/lifecycle-acceptance/*failed*.json
-            .tmp/staged-acceptance/browser.log
-            .tmp/staged-acceptance/*failed*.png
-            .tmp/staged-acceptance/*failed*.json
+            .tmp/sources/**/dependency-sources.json
+            .tmp/lifecycle-acceptance/**/browser.log
+            .tmp/lifecycle-acceptance/**/*failed*.png
+            .tmp/lifecycle-acceptance/**/*failed*.json
+            .tmp/staged-acceptance/**/browser.log
+            .tmp/staged-acceptance/**/*failed*.png
+            .tmp/staged-acceptance/**/*failed*.json
           if-no-files-found: ignore
           retention-days: 7
       - name: Recover unfinished promotion and remove credentials and candidate branch
@@ -177,7 +202,7 @@ jobs:
       - uses: ./.github/actions/nix
         with:
           kvm: "true"
-          haos: "true"
+          haos: all
       - name: Promote the signed draft and verify advertised installation
         run: nix run .#hass-ci -- promote
       # v7
@@ -187,9 +212,9 @@ jobs:
           name: hass-promotion-evidence
           path: |
             .tmp/publication/*.json
-            .tmp/final-acceptance/installation.json
-            .tmp/final-acceptance/workflow.json
-            .tmp/final-acceptance/*.png
+            .tmp/final-acceptance/**/installation.json
+            .tmp/final-acceptance/**/workflow.json
+            .tmp/final-acceptance/**/*.png
           if-no-files-found: ignore
           retention-days: 7
       - name: Recover unfinished promotion and remove credentials and candidate branch

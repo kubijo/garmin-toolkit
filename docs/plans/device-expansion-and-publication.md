@@ -4,8 +4,11 @@
 
 Application authentication, credential custody, encryption, and Connect remain deferred.
 
-- Qualify [staged ARM64 delivery](../../infra/integration/hass/README.md#staged-arm64-delivery) using a retained native
-  build before advertising support.
+- Qualify the combined AMD64/ARM64 branch preflight, then the first signed two-platform release and public
+  installations. [Staged ARM64 delivery](../../infra/integration/hass/README.md#staged-arm64-delivery) has passed
+  independently.
+- After the first ARM64 publication, pin its authenticated image as an upgrade baseline and retire the metadata-only
+  lifecycle fixture exception. Keep older-binary/schema migration unclaimed until that check passes.
 
 ## Hardware and other distribution
 

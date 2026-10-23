@@ -251,8 +251,9 @@ nix run "git+file://$PWD#hass-ci" -- acceptance \
 
 The receipt's source commit must be available in the local Git history, including the CI merge commit for a PR build.
 The command verifies the archive, inventory, source, and selected architecture before starting a VM. It generates an
-ARM64-only private Store using `garmin-hass-arm64-test-repository`; the published repository package remains AMD64-only.
-The workflow has a 30-minute deadline, followed by owned-process cleanup. Omit `--image` to download pinned HAOS 18.3.
+ARM64-only private Store using `garmin-hass-arm64-test-repository`; release candidates qualify both architectures
+separately. The workflow has a 30-minute deadline, followed by owned-process cleanup. Omit `--image` to download pinned
+HAOS 18.3.
 
 Installation, populated ingress, restart, HAOS reboot, cold restore, reinstall recovery, and both upgrades passed
 locally under ARM64 software emulation with the
@@ -280,6 +281,11 @@ This mode skips native builds, the full CI matrix, signing, and promotion. Accep
 owned-process cleanup. Credentials and the unchanged candidate branch are removed; the candidate image tag remains. The
 `hass-arm64-delivery` evidence artifact retains reports and screenshots for seven days. Public Store metadata and
 release tags must remain unchanged.
+
+Staged Git installation, anonymous GHCR pulls, populated ingress, restart, reboot, cold restore, and exact downloads
+passed in the [hosted ARM64 delivery run](https://github.com/kubijo/garmin-toolkit/actions/runs/39937684917) with HAOS
+18.3, Supervisor 2026.10.3, and Core 2026.10.2. This qualifies the retained ARM64 image; each combined release index
+requires its own acceptance on both architectures.
 
 ## ARM64 HAOS boot smoke
 

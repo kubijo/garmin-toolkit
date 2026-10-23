@@ -5,7 +5,7 @@ inputs:
     description: Enable disposable VM tests.
     default: "false"
   haos:
-    description: Install HAOS tools for x86_64-linux (also true) or aarch64-linux; false disables them.
+    description: Install HAOS tools for x86_64-linux (also true), aarch64-linux, or all; false disables them.
     default: "false"
 runs:
   using: composite
