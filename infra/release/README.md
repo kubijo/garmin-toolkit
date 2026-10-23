@@ -29,6 +29,9 @@ CI is read-only. Publication is manual, serialized, and restricted to this repos
 the package's first creation may require a visibility change. Conflicts and incomplete drafts fail without replacing
 published bytes. Cleanup removes candidate branches and credentials.
 
+For [focused ARM64 delivery acceptance](../integration/hass/README.md#staged-arm64-delivery), set `arm64_run` to a
+successful CI run ID with Publish and Recovery disabled. This reuses its native image without builds or promotion.
+
 Promotion journals intent before publication. The durable `hass-publication` state branch advances atomically with
 `hass-apps`; recovery advances that state even if the store still shows its previous head, blocking delayed pushes.
 Installation success records qualification remotely. Fresh retries recover unfinished attempts and preserve qualified
@@ -148,7 +151,7 @@ References pin the canonical GHCR repository or literal loopback registry. Pulls
 supplied; HTTP is loopback-only. Verification rejects external blob URLs, altered identities, platforms, descriptors,
 annotations, and layer hashes. Decoded layers share a 4 GiB budget; only `registry.json` survives cleanup.
 
-Optional `--acceptance` binds successful evidence to source, native receipt, archive, installed manifest/config,
+Optional `--acceptance` binds successful evidence to source, native receipt, archive, installed manifest/config, archive
 version, and architecture. Its `native-image-content` scope does not qualify combined-index installation.
 
 QA exercises a disposable Distribution registry with synthetic AMD64/ARM64 images. To test a retained CI export:

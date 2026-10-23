@@ -1,5 +1,6 @@
 """Executable CI phases; Actions owns permissions, dependencies, signing, and artifact transport."""
 
+import json
 import os
 import re
 import shutil
@@ -38,9 +39,11 @@ from hass_publish import (
     stage_image,
     stage_publication,
 )
-from hass_release_build import NativeBuild, record_build, verify_build_inputs
+from hass_registry import PrepareRegistry, prepare_registry
+from hass_release_build import NativeBuild, build_source, record_build, verify_build_inputs
+from hass_repository import copy_repository
 from hass_sources import BundleSources, bundle_sources
-from json_data import object_rows, object_value, read_json, text
+from json_data import Object, file_sha256, json_bytes, object_rows, object_value, read_json, text, unique_object
 from processes import run_owned, terminated
 
 NIX_LIMITS = ('--max-jobs', '1', '--cores', '2', '--no-update-lock-file')
@@ -55,7 +58,17 @@ UPGRADE_BASELINE = '0.1.1'
 @dataclass(frozen=True, kw_only=True)
 class Options:
     command: Annotated[
-        Literal['native', 'acceptance', 'draft', 'preflight', 'complete', 'verify-preflight', 'promote', 'cleanup'],
+        Literal[
+            'native',
+            'acceptance',
+            'delivery',
+            'draft',
+            'preflight',
+            'complete',
+            'verify-preflight',
+            'promote',
+            'cleanup',
+        ],
         tyro.conf.Positional,
     ]
     system: Literal['x86_64-linux', 'aarch64-linux'] = 'x86_64-linux'
@@ -67,6 +80,8 @@ class Options:
     """Fresh native acceptance evidence under repository .tmp."""
     image: Path | None = None
     """Cached pinned HAOS image for native acceptance; download when omitted."""
+    source_run: int | None = None
+    """Successful canonical CI run supplying the retained ARM64 delivery artifact."""
 
 
 def progress(message: str) -> None:
@@ -258,6 +273,149 @@ def native_acceptance(options: Options) -> None:
         acceptance(options.build_directory, options.evidence_directory, *arguments, timeout=1900)
 
 
+def download_delivery_build(options: Options) -> Object:
+    if options.source_run is None or options.source_run <= 0:
+        raise ValueError('Delivery requires a positive source CI run ID')
+    if options.build_directory.exists() or options.build_directory.is_symlink():
+        raise ValueError('Delivery requires a fresh native artifact directory')
+    run_id = str(options.source_run)
+    document = object_value(
+        json.loads(
+            run('gh', 'api', 'repos/kubijo/garmin-toolkit/actions/runs/' + run_id, capture=True),
+            object_pairs_hook=unique_object,
+        )
+    )
+    head = text(document.get('head_sha'))
+    if (
+        document.get('id') != options.source_run
+        or document.get('path') != '.github/workflows/ci.yml'
+        or document.get('event') not in ('push', 'pull_request', 'workflow_dispatch')
+        or document.get('status') != 'completed'
+        or document.get('conclusion') != 'success'
+        or object_value(document.get('repository')).get('full_name') != 'kubijo/garmin-toolkit'
+        or not re.fullmatch(r'[0-9a-f]{40}', head)
+    ):
+        raise ValueError('Delivery requires a successful canonical CI run from this repository')
+    run('git', 'merge-base', '--is-ancestor', head, 'HEAD')
+    run(
+        'gh',
+        'run',
+        'download',
+        run_id,
+        '--repo',
+        'kubijo/garmin-toolkit',
+        '--name',
+        'garmin-hass-native-aarch64',
+        '--dir',
+        str(options.build_directory),
+    )
+    receipt = object_value(read_json(options.build_directory / 'native-build.json'))
+    platform = object_value(receipt.get('platform'))
+    commit = text(object_value(receipt.get('source')).get('commit'))
+    if (
+        platform.get('workflow_run') != REMOTE + '/actions/runs/' + run_id
+        or platform.get('architecture') != 'aarch64'
+        or not re.fullmatch(r'[0-9a-f]{40}', commit)
+    ):
+        raise ValueError('Native receipt differs from the selected ARM64 CI run')
+    run('git', 'fetch', '--no-tags', '--no-write-fetch-head', REMOTE, commit)
+    if commit != head:
+        parents = run('git', 'show', '-s', '--format=%P', commit, capture=True).split()
+        if document['event'] != 'pull_request' or len(parents) != 2 or parents[1] != head:
+            raise ValueError('Native receipt source is not the selected CI head or its tested PR merge')
+    archives = list(options.build_directory.glob('*.oci.tar'))
+    if len(archives) != 1:
+        raise ValueError('Delivery requires exactly one exported native OCI archive')
+    return verify_build_inputs(archives[0], options.build_directory / 'native-build.json', Path.cwd())
+
+
+def verify_delivery(evidence: Path, receipt: Object, staging: Object) -> None:
+    workflow = object_value(read_json(evidence / 'workflow.json'))
+    installed = object_value(read_json(evidence / 'installation.json'))
+    platform = object_value(receipt['platform'])
+    reboot = object_value(workflow.get('haos_reboot'))
+    if (
+        any(
+            workflow.get(key) is not True
+            for key in ('passed', 'restart', 'cold_restore', 'post_backup_mutation_reverted')
+        )
+        or not reboot.get('before')
+        or not reboot.get('after')
+        or reboot['before'] == reboot['after']
+        or read_json(evidence / 'native-build.json') != receipt
+        or any(installed.get(key) != platform[key] for key in ('manifest_digest', 'config_digest', 'archive_sha256'))
+        or installed.get('architecture') != 'arm64'
+        or installed.get('archive_version') != receipt['version']
+        or installed.get('version') != staging['tag']
+        or installed.get('repository_url') != staging['repository_url']
+        or installed.get('registry_digest') != staging['index_digest']
+    ):
+        raise ValueError('HAOS delivery evidence differs from the staged ARM64 image or retained native build')
+
+
+def delivery(options: Options) -> None:
+    require_hosted_runner()
+    version, identity = build_source(Path.cwd())
+    if os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch' or os.environ.get('GITHUB_SHA') != identity['commit']:
+        raise ValueError('Delivery requires a manual workflow run at its exact clean checkout commit')
+    if options.system != 'aarch64-linux' or any(os.environ.get(name) != 'false' for name in ('PUBLISH', 'RECOVERY')):
+        raise ValueError('ARM64 delivery is separate from publication and recovery modes')
+    with phase('Admit retained ARM64 CI artifact'):
+        receipt = download_delivery_build(options)
+        if receipt['version'] != version:
+            raise ValueError('Retained native image version differs from the dispatched source')
+    protected = ('refs/heads/hass-apps', 'refs/heads/hass-publication', 'refs/tags/v*')
+    before = run('git', 'ls-remote', '--refs', REMOTE, *protected, capture=True)
+    with phase('Prepare and stage ARM64 delivery candidate'):
+        if PUBLICATION.exists() or PUBLICATION.is_symlink():
+            raise ValueError('Delivery requires a fresh publication directory')
+        document = prepare_registry(
+            PrepareRegistry(source=Path.cwd(), builds=[options.build_directory], output=PUBLICATION / 'registry')
+        )
+        copy_repository(build('.#garmin-hass-arm64-test-repository'), PUBLICATION / 'repository')
+        login()
+        stage_image(
+            StagePublication(source=Path.cwd(), directory=PUBLICATION, build=options.build_directory),
+            version,
+            text(object_value(document['image'])['index_digest']),
+            '',
+        )
+    staging = object_value(read_json(PUBLICATION / 'staging.json'))
+    arguments = [
+        '--arch',
+        'aarch64',
+        '--repository-url',
+        text(staging['repository_url']),
+        '--registry-digest',
+        text(staging['index_digest']),
+        '--registry-tag',
+        text(staging['tag']),
+        '--timeout',
+        '1800',
+    ]
+    if options.image is not None:
+        arguments.extend(('--image', str(options.image)))
+    with phase('Verify staged ARM64 Git and GHCR installation in HAOS'):
+        acceptance(options.build_directory, options.evidence_directory, *arguments, timeout=1900)
+        verify_delivery(options.evidence_directory, receipt, staging)
+    if run('git', 'ls-remote', '--refs', REMOTE, *protected, capture=True) != before:
+        raise RuntimeError('Published HASS refs changed during ARM64 delivery qualification')
+    (PUBLICATION / 'delivery.json').write_bytes(
+        json_bytes(
+            {
+                'passed': True,
+                'source_run': options.source_run,
+                'source': receipt['source'],
+                'platform': receipt['platform'],
+                'staging': staging,
+                'published_refs_unchanged': True,
+                'workflow_sha256': file_sha256(options.evidence_directory / 'workflow.json'),
+                'installation_sha256': file_sha256(options.evidence_directory / 'installation.json'),
+            }
+        )
+    )
+
+
 def download_upgrade_baseline() -> Path:
     directory = Path('.tmp/published-baseline')
     directory.mkdir()
@@ -413,6 +571,8 @@ def main(options: Options) -> None:
         native(options)
     elif options.command == 'acceptance':
         native_acceptance(options)
+    elif options.command == 'delivery':
+        delivery(options)
     elif options.command == 'draft':
         draft()
     elif options.command == 'preflight':

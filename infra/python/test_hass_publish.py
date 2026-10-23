@@ -8,6 +8,7 @@ import subprocess
 import tarfile
 import unittest
 from collections.abc import Callable
+from contextlib import chdir
 from itertools import product
 from pathlib import Path
 from typing import cast
@@ -627,3 +628,64 @@ class PublicationTests(unittest.TestCase):
         ):
             cleanup_staging(CleanupStaging(directory=self.directory))
         cleanup.assert_called_once()
+
+    def test_candidate_cleanup_survives_interruption_around_the_push_and_requires_a_durable_journal(self) -> None:
+        remote = self.fixture.root / 'candidate-remote.git'
+        subprocess.run(['git', 'init', '--bare', '-q', str(remote)], check=True)
+        real_command, real_journal = hass_publish.command, hass_publish.write_journal
+        for mode in ('before-push', 'lost-reply', 'journal-failure'):
+            staged = self.fixture.root / mode
+            config = staged / 'repository/garmin_toolkit/config.yaml'
+            config.parent.mkdir(parents=True)
+            config.write_text('version: 0.1.0\n')
+
+            def journal(
+                directory: Path,
+                data: Object,
+                *,
+                replace: bool = False,
+                name: str = 'promotion.json',
+                mode: str = mode,
+            ) -> None:
+                if mode == 'journal-failure':
+                    raise RuntimeError('journal unavailable')
+                real_journal(directory, data, replace=replace, name=name)
+
+            def command(*args: str, cwd: Path | None = None, mode: str = mode, staged: Path = staged) -> str:
+                if args[0] != 'git':
+                    return ''
+                if 'push' not in args:
+                    return real_command(*args, cwd=cwd)
+                record = json.loads((staged / 'staging.json').read_bytes())
+                self.assertIn(record['commit'] + ':refs/heads/' + record['branch'], args)
+                if mode == 'before-push':
+                    raise RuntimeError('interrupted before push')
+                result = real_command(*args, cwd=cwd)
+                if mode == 'lost-reply':
+                    raise RuntimeError('interrupted after server accepted push')
+                return result
+
+            with (
+                self.subTest(mode=mode),
+                patch('hass_publish.REMOTE', str(remote)),
+                patch('hass_publish.command', side_effect=command),
+                patch('hass_publish.write_journal', side_effect=journal),
+                patch('hass_publish.verify_registry'),
+                patch('hass_publish.image_digest', return_value=self.document['image']['index_digest']),
+                patch.dict(os.environ, GITHUB_RUN_ID='456', GITHUB_RUN_ATTEMPT='1'),
+                self.assertRaisesRegex(RuntimeError, 'journal unavailable|interrupted'),
+            ):
+                hass_publish.stage_image(
+                    StagePublication(source=self.fixture.source, directory=staged, build=self.fixture.artifacts),
+                    '0.1.0',
+                    self.document['image']['index_digest'],
+                    '',
+                )
+            with patch('hass_publish.REMOTE', str(remote)), chdir(self.fixture.source):
+                current = branch_head('hass-candidate-456-1')
+                if mode == 'lost-reply':
+                    self.assertTrue(current)
+                else:
+                    self.assertFalse(current)
+                hass_publish.cleanup_candidate_branch(CleanupStaging(directory=staged))
+                self.assertEqual(branch_head('hass-candidate-456-1'), '')

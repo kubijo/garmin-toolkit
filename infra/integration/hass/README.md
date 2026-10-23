@@ -238,12 +238,8 @@ acceptance.
 
 ## ARM64 candidate acceptance
 
-The native ARM64 CI build exports an OCI image, SPDX inventory, and `native-build.json`. Enable `arm64_acceptance` when
-dispatching CI to test that same run's artifact through the populated HAOS lifecycle check. The acceptance job runs on
-x86 Linux with ARM64 QEMU emulation; it initializes its systemd user manager without requiring KVM and retains runtime
-evidence on failure as well as success.
-
-To reuse a downloaded `garmin-hass-native-aarch64` artifact locally:
+Run the populated lifecycle check locally using a downloaded `garmin-hass-native-aarch64` CI artifact, containing the
+OCI image, SPDX inventory, and `native-build.json`:
 
 ```bash
 nix run "git+file://$PWD#hass-ci" -- acceptance \
@@ -263,8 +259,27 @@ locally under ARM64 software emulation with the
 [native CI image](https://github.com/kubijo/garmin-toolkit/actions/runs/39812583065), HAOS 18.3, Supervisor 2026.10.3,
 and Core 2026.10.2.
 
-This uses the `0.0.0` metadata fixture to qualify Supervisor lifecycle behavior. Hosted CI execution, published ARM64
-binary migration, staged GHCR delivery, and public ARM64 publication need separate qualification.
+The `0.0.0` metadata fixture qualifies Supervisor lifecycle behavior; it does not exercise older-binary/schema migration
+or remote delivery.
+
+### Staged ARM64 delivery
+
+The [release workflow](../../../.github/workflows/hass-release.yml) reuses a retained ARM64 artifact from a successful
+CI run:
+
+```bash
+gh workflow run hass-release.yml --ref dev -f arm64_run=SOURCE_CI_RUN_ID
+```
+
+The run's head must be an ancestor of the dispatched checkout; artifacts expire after one day. Before registry login,
+checks bind the source run, head or PR merge, receipt, archive, and SPDX inventory. Fresh emulated ARM64 HAOS installs
+through a temporary Git branch and anonymous GHCR pulls. Populated ingress, restart, reboot, cold restore, and exact
+downloads must pass; evidence binds the installed index/manifest/config to the retained build.
+
+This mode skips native builds, the full CI matrix, signing, and promotion. Acceptance has a 30-minute deadline and
+owned-process cleanup. Credentials and the unchanged candidate branch are removed; the candidate image tag remains. The
+`hass-arm64-delivery` evidence artifact retains reports and screenshots for seven days. Public Store metadata and
+release tags must remain unchanged.
 
 ## ARM64 HAOS boot smoke
 

@@ -578,7 +578,7 @@ def install_app(
     services: ExitStack,
 ) -> str:
     config_text, version = test_config()
-    candidate_version = options.candidate_version or version
+    candidate_version = options.candidate_version or options.registry_tag or version
     inspected = inspect_archive(options.app_archive)
     guest = resolve(options.arch)
     # This registry is confined to the disposable guest and also supplies the untrusted ingress probe.
@@ -663,7 +663,15 @@ def install_app(
     )
     if identity['manifest_digest'] != expected['manifest_digest']:
         raise RuntimeError('Installed app manifest differs from the native OCI archive')
-    identity.update(repository_url=repository_url, version=initial_version, archive_sha256=expected['archive_sha256'])
+    installed_version = guest_data(key, port, f'ha apps info {slug}').get('version')
+    if installed_version != initial_version:
+        raise RuntimeError('Supervisor did not install the expected app version')
+    identity.update(
+        repository_url=repository_url,
+        version=installed_version,
+        archive_version=expected['archive_version'],
+        archive_sha256=expected['archive_sha256'],
+    )
     (runtime / 'installation.json').write_bytes(json_bytes(identity))
     return slug
 

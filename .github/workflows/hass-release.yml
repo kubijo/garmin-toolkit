@@ -10,6 +10,10 @@ on:
         description: Run isolated synthetic recovery fixtures instead of publication.
         type: boolean
         default: false
+      arm64_run:
+        description: Qualify a retained ARM64 artifact from this successful CI run; skips builds and publication.
+        type: string
+        default: ""
 concurrency:
   group: hass-publication
   cancel-in-progress: false
@@ -17,7 +21,7 @@ permissions:
   contents: read
 jobs:
   native:
-    if: github.repository == 'kubijo/garmin-toolkit' && !inputs.publish && !inputs.recovery
+    if: github.repository == 'kubijo/garmin-toolkit' && !inputs.publish && !inputs.recovery && inputs.arm64_run == ''
     uses: ./.github/workflows/hass-native.yml
     with:
       release: ${{ github.ref_type == 'tag' }}
@@ -153,7 +157,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   promote:
-    if: github.repository == 'kubijo/garmin-toolkit' && inputs.publish && !inputs.recovery
+    if: github.repository == 'kubijo/garmin-toolkit' && inputs.publish && !inputs.recovery && inputs.arm64_run == ''
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -192,7 +196,7 @@ jobs:
         if: always()
         run: bash infra/ci/runner.sh cleanup
   recovery:
-    if: github.repository == 'kubijo/garmin-toolkit' && inputs.recovery
+    if: github.repository == 'kubijo/garmin-toolkit' && inputs.recovery && inputs.arm64_run == ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -223,3 +227,48 @@ jobs:
             .tmp/recovery/store/*/promotion.json
           if-no-files-found: ignore
           retention-days: 7
+  arm64-delivery:
+    if: inputs.arm64_run != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DOCKER_CONFIG: ${{ github.workspace }}/.tmp/docker-auth
+      REGISTRY_AUTH_FILE: ${{ github.workspace }}/.tmp/docker-auth/config.json
+      TMPDIR: ${{ github.workspace }}/.tmp/runner-tmp
+    steps:
+      # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/nix
+        with:
+          haos: aarch64-linux
+      - name: Qualify retained ARM64 image through staged Git and GHCR delivery
+        env:
+          SOURCE_RUN: ${{ inputs.arm64_run }}
+          PUBLISH: ${{ inputs.publish }}
+          RECOVERY: ${{ inputs.recovery }}
+        run: nix run .#hass-ci -- delivery --system aarch64-linux --source-run "$SOURCE_RUN"
+      - name: Remove credentials and owned candidate branch
+        if: always()
+        run: bash infra/ci/runner.sh cleanup
+      # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: hass-arm64-delivery
+          path: |
+            .tmp/publication/registry/registry.json
+            .tmp/publication/staged-registry/registry.json
+            .tmp/publication/staging.json
+            .tmp/publication/delivery.json
+            .tmp/native-acceptance/
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0

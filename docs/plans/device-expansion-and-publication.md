@@ -4,8 +4,8 @@
 
 Application authentication, credential custody, encryption, and Connect remain deferred.
 
-- Run [ARM64 candidate acceptance](../../infra/integration/hass/README.md#arm64-candidate-acceptance) in CI, then verify
-  staged GHCR and Git repository installation before advertising support.
+- Qualify [staged ARM64 delivery](../../infra/integration/hass/README.md#staged-arm64-delivery) using a retained native
+  build before advertising support.
 
 ## Hardware and other distribution
 

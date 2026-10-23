@@ -395,7 +395,7 @@ def bind_acceptance(directories: tuple[Path, ...], document: Object) -> list[Obj
             or installed.get('manifest_digest') != expected['manifest_digest']
             or installed.get('archive_sha256') != expected['archive_sha256']
             or installed.get('architecture') != ('arm64' if architecture == 'aarch64' else architecture)
-            or installed.get('version') != document['version']
+            or installed.get('archive_version', installed.get('version')) != document['version']
             or workflow.get('passed') is not True
         ):
             raise ValueError('Acceptance did not pass for the verified native image')

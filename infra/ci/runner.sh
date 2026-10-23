@@ -37,7 +37,9 @@ prepare)
         ;;
     aarch64-linux)
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-efi-aarch64 qemu-utils mtools parted
+        sudo apt-get install -y --no-install-recommends \
+            qemu-system-arm qemu-efi-aarch64 qemu-utils \
+            ipxe-qemu ipxe-qemu-256k-compat-efi-roms seabios mtools parted
         ;;
     false) ;;
     esac
