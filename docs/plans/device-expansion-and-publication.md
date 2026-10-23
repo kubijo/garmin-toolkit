@@ -4,11 +4,8 @@
 
 Application authentication, credential custody, encryption, and Connect remain deferred.
 
-- Qualify ARM64 registry installation, ingress, and lifecycle before advertising support, using the
-  [repository-install check](../../infra/integration/hass/README.md#repository-install-acceptance).
-- Run [signed installation recovery](../../infra/integration/hass/README.md#signed-installation-recovery); verify prior
-  metadata, images, data, and downloads survive the failed update and rollback. The
-  [transport drill](../../infra/release/README.md#recovery-drill) covers injected failures only.
+- Run [ARM64 candidate acceptance](../../infra/integration/hass/README.md#arm64-candidate-acceptance) in CI, then verify
+  staged GHCR and Git repository installation before advertising support.
 
 ## Hardware and other distribution
 

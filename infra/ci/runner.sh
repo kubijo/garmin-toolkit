@@ -14,27 +14,32 @@ esac
 case "${1:-}" in
 prepare)
     if [[ -n ${TMPDIR:-} ]]; then mkdir -p -- "$TMPDIR"; fi
-    case "${2:-false}" in
-    true)
+    runner_kvm=${2:-false}
+    runner_haos=${3:-false}
+    case "$runner_kvm" in true | false) ;; *) exit 64 ;; esac
+    case "$runner_haos" in false | true | x86_64-linux | aarch64-linux) ;; *) exit 64 ;; esac
+    if [[ $runner_kvm == true ]]; then
         test -c /dev/kvm
         sudo chmod a+rw /dev/kvm
+    fi
+    if [[ $runner_kvm == true || $runner_haos != false ]]; then
         sudo loginctl enable-linger "$(id -un)"
         sudo systemctl start "user@$(id -u).service"
         XDG_RUNTIME_DIR="/run/user/$(id -u)"
         export XDG_RUNTIME_DIR
         systemctl --user show-environment >/dev/null
         printf 'XDG_RUNTIME_DIR=%s\n' "$XDG_RUNTIME_DIR" >>"$GITHUB_ENV"
-        ;;
-    false) ;;
-    *) exit 64 ;;
-    esac
-    case "${3:-false}" in
-    true)
+    fi
+    case "$runner_haos" in
+    true | x86_64-linux)
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf mtools parted
         ;;
+    aarch64-linux)
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-efi-aarch64 qemu-utils mtools parted
+        ;;
     false) ;;
-    *) exit 64 ;;
     esac
     ;;
 limits)

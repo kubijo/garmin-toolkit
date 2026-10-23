@@ -38,7 +38,7 @@ from hass_publish import (
     stage_image,
     stage_publication,
 )
-from hass_release_build import NativeBuild, record_build
+from hass_release_build import NativeBuild, record_build, verify_build_inputs
 from hass_sources import BundleSources, bundle_sources
 from json_data import object_rows, object_value, read_json, text
 from processes import run_owned, terminated
@@ -55,12 +55,18 @@ UPGRADE_BASELINE = '0.1.1'
 @dataclass(frozen=True, kw_only=True)
 class Options:
     command: Annotated[
-        Literal['native', 'draft', 'preflight', 'complete', 'verify-preflight', 'promote', 'cleanup'],
+        Literal['native', 'acceptance', 'draft', 'preflight', 'complete', 'verify-preflight', 'promote', 'cleanup'],
         tyro.conf.Positional,
     ]
     system: Literal['x86_64-linux', 'aarch64-linux'] = 'x86_64-linux'
     release: Literal['true', 'false'] = 'false'
     sources: Literal['true', 'false'] = 'false'
+    build_directory: Path = NATIVE
+    """Native acceptance inputs exported by the build job."""
+    evidence_directory: Path = Path('.tmp/native-acceptance')
+    """Fresh native acceptance evidence under repository .tmp."""
+    image: Path | None = None
+    """Cached pinned HAOS image for native acceptance; download when omitted."""
 
 
 def progress(message: str) -> None:
@@ -213,7 +219,7 @@ def cleanup() -> None:
         cleanup_staging(CleanupStaging(directory=PUBLICATION))
 
 
-def acceptance(build_directory: Path, evidence: Path, *arguments: str) -> None:
+def acceptance(build_directory: Path, evidence: Path, *arguments: str, timeout: float = 7200) -> None:
     archives = list(build_directory.glob('*.oci.tar'))
     if len(archives) != 1:
         raise ValueError('Acceptance requires exactly one native OCI archive')
@@ -228,7 +234,28 @@ def acceptance(build_directory: Path, evidence: Path, *arguments: str) -> None:
         '--evidence-directory',
         str(evidence),
         *arguments,
+        timeout=timeout,
     )
+
+
+def native_acceptance(options: Options) -> None:
+    architecture = 'aarch64' if options.system == 'aarch64-linux' else 'amd64'
+    archives = list(options.build_directory.glob('*.oci.tar'))
+    if len(archives) != 1:
+        raise ValueError('Native acceptance requires exactly one exported OCI archive')
+    with phase('Verify native acceptance inputs'):
+        receipt = verify_build_inputs(archives[0], options.build_directory / 'native-build.json', Path.cwd())
+        if object_value(receipt['platform']).get('architecture') != architecture:
+            raise ValueError('Native acceptance platform differs from the selected guest architecture')
+    with phase('Prepare private acceptance metadata'):
+        repository = build(
+            '.#garmin-hass-arm64-test-repository' if architecture == 'aarch64' else '.#garmin-hass-app-repository'
+        )
+    arguments = ['--arch', architecture, '--repository', str(repository), '--lifecycle', '--timeout', '1800']
+    if options.image is not None:
+        arguments.extend(('--image', str(options.image)))
+    with phase('Test native image installation and lifecycle in HAOS'):
+        acceptance(options.build_directory, options.evidence_directory, *arguments, timeout=1900)
 
 
 def download_upgrade_baseline() -> Path:
@@ -384,6 +411,8 @@ def promote() -> None:
 def main(options: Options) -> None:
     if options.command == 'native':
         native(options)
+    elif options.command == 'acceptance':
+        native_acceptance(options)
     elif options.command == 'draft':
         draft()
     elif options.command == 'preflight':

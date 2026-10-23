@@ -208,7 +208,11 @@ def assert_started(key: Path, port: int, slug: str = 'local_garmin_toolkit') -> 
         raise RuntimeError(f'The installed app is not started with ingress: {app!r}')
 
 
-def reload_store(key: Path, port: int, slug: str = 'local_garmin_toolkit', *, present: bool = True) -> None:
+def reload_store(
+    key: Path, port: int, slug: str = 'local_garmin_toolkit', *, present: bool = True, version: str | None = None
+) -> None:
+    if version is not None and not present:
+        raise ValueError('A Store version expectation requires a visible app')
     for attempt in range(3):
         try:
             run(ssh_command(key, port, 'ha store reload'), timeout=90)
@@ -217,13 +221,22 @@ def reload_store(key: Path, port: int, slug: str = 'local_garmin_toolkit', *, pr
                 raise
             print('Supervisor store refresh is still pending; checking local app discovery...', flush=True)
         info = guest_data(key, port, 'ha store info')
-        found = any(app.get('slug') == slug for app in object_rows(info.get('apps', info.get('addons'))))
-        if found == present:
+        app = next((app for app in object_rows(info.get('apps', info.get('addons'))) if app.get('slug') == slug), None)
+        if (app is not None) == present and (
+            version is None or app is not None and app.get('version_latest') == version
+        ):
             print(f'Supervisor store {slug}: {"present" if present else "withdrawn"}.', flush=True)
             return
+        if app is not None and version is not None:
+            print(
+                f'Supervisor store {slug}: waiting for version {version}; found {app.get("version_latest")!r}.',
+                flush=True,
+            )
         if attempt < 2:
             time.sleep(5)
-    raise RuntimeError('Supervisor store did not reach the expected app visibility after bounded refresh retries')
+    raise RuntimeError(
+        'Supervisor store did not reach the expected app visibility or version after bounded refresh retries'
+    )
 
 
 def assert_gateway_response(key: Path, port: int, slug: str = 'local_garmin_toolkit') -> None:

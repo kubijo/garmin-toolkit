@@ -253,6 +253,7 @@ let
             garmin-hass-app-image = hassTarget.appImage;
             garmin-hass-app-sbom = releaseAutomation.sbom;
             garmin-hass-app-repository = releaseAutomation.repository;
+            garmin-hass-arm64-test-repository = releaseAutomation.arm64TestRepository;
             hass-reconnect-driver = hassReconnect.driver;
           };
 

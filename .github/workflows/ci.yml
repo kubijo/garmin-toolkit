@@ -11,6 +11,10 @@ on:
         description: Export AMD64 dependency sources for pre-release audit.
         type: boolean
         default: false
+      arm64_acceptance:
+        description: Run bounded ARM64 HAOS installation, ingress, and lifecycle acceptance through QEMU emulation.
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
@@ -48,6 +52,7 @@ jobs:
     with:
       system: aarch64-linux
       runner: ubuntu-24.04-arm
+      acceptance: ${{ github.event_name == 'workflow_dispatch' && inputs.arm64_acceptance }}
   check:
     needs: [checks, hass-amd64, hass-arm64]
     if: always()
