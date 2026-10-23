@@ -275,7 +275,7 @@ public refs and removing all fixtures. Tiny OCI images, JSON assets, and an inje
 qualify real Supervisor installation failure, signed release recovery, or service outages.
 
 The [signed installation check](../integration/hass/README.md#signed-installation-recovery) uses authenticated public
-images with a private store to exercise a real Supervisor pull failure and retry. Its live qualification remains open.
+images with a private store to exercise a Supervisor update failure, rollback, and retry.
 
 ## Release withdrawal
 

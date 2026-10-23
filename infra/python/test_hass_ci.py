@@ -590,6 +590,75 @@ class CITests(unittest.TestCase):
                         ci.acceptance(directory, self.scratch / 'evidence')
             self.assertEqual(run.call_count, 1)
 
+    def test_native_acceptance_selects_guest_metadata_and_retains_bounded_lifecycle_checks(self) -> None:
+        directory = self.scratch / 'native'
+        directory.mkdir()
+        archive = directory / 'image.oci.tar'
+        archive.touch()
+        evidence = self.scratch / 'evidence'
+        image = self.scratch / 'pinned-haos.qcow2.xz'
+        for system, architecture, attribute in (
+            ('x86_64-linux', 'amd64', '.#garmin-hass-app-repository'),
+            ('aarch64-linux', 'aarch64', '.#garmin-hass-arm64-test-repository'),
+        ):
+            with (
+                self.subTest(system=system),
+                patch.object(
+                    ci, 'verify_build_inputs', return_value={'platform': {'architecture': architecture}}
+                ) as verify,
+                patch.object(ci, 'build', return_value=Path('/private-metadata')) as build,
+                patch.object(ci, 'run_owned') as run,
+            ):
+                ci.main(
+                    tyro.cli(
+                        ci.Options,
+                        args=[
+                            'acceptance',
+                            '--system',
+                            system,
+                            '--build-directory',
+                            str(directory),
+                            '--evidence-directory',
+                            str(evidence),
+                            '--image',
+                            str(image),
+                        ],
+                    )
+                )
+            verify.assert_called_once_with(archive, directory / 'native-build.json', self.root)
+            build.assert_called_once_with(attribute)
+            arguments = run.call_args.args
+            self.assertIn(str(archive), arguments)
+            self.assertIn(str(evidence), arguments)
+            self.assertEqual(arguments[arguments.index('--arch') + 1], architecture)
+            self.assertEqual(arguments[arguments.index('--repository') + 1], '/private-metadata')
+            self.assertEqual(arguments[arguments.index('--image') + 1], str(image))
+            self.assertEqual(arguments[arguments.index('--timeout') + 1], '1800')
+            self.assertIn('--lifecycle', arguments)
+            self.assertNotIn('--baseline-release', arguments)
+            self.assertNotIn('--repository-url', arguments)
+            self.assertEqual(run.call_args.kwargs['timeout'], 1900)
+
+    def test_native_acceptance_rejects_invalid_inputs_before_metadata_or_vm_start(self) -> None:
+        directory = self.scratch / 'native'
+        directory.mkdir()
+        options = ci.Options(command='acceptance', system='aarch64-linux', build_directory=directory)
+        with patch.object(ci, 'build') as build, patch.object(ci, 'run_owned') as run:
+            for count in range(3):
+                if count:
+                    (directory / f'{count}.oci.tar').touch()
+                if count == 1:
+                    with (
+                        patch.object(ci, 'verify_build_inputs', return_value={'platform': {'architecture': 'amd64'}}),
+                        self.assertRaisesRegex(ValueError, 'platform differs'),
+                    ):
+                        ci.native_acceptance(options)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'exactly one'):
+                        ci.native_acceptance(options)
+            build.assert_not_called()
+            run.assert_not_called()
+
     def test_promotion_and_final_install_failures_both_attempt_safe_rollback(self) -> None:
         def promoted(_options: object) -> None:
             ci.PUBLICATION.mkdir()
@@ -882,6 +951,49 @@ class CITests(unittest.TestCase):
                 },
             )
             self.assertEqual(result.returncode == 0, success)
+
+    def test_emulated_haos_setup_starts_user_manager_and_installs_selected_firmware(self) -> None:
+        log = self.root / 'setup.log'
+        for name, script in {
+            'sudo': '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_SETUP_LOG"\n',
+            'systemctl': '#!/bin/sh\nexit 0\n',
+        }.items():
+            binary = self.root / name
+            binary.write_text(script)
+            binary.chmod(0o700)
+        for selected, expected in (
+            ('true', 'qemu-system-x86 qemu-utils ovmf'),
+            ('x86_64-linux', 'qemu-system-x86 qemu-utils ovmf'),
+            ('aarch64-linux', 'qemu-system-arm qemu-efi-aarch64 qemu-utils'),
+        ):
+            with self.subTest(selected=selected):
+                log.unlink(missing_ok=True)
+                result = subprocess.run(
+                    ['bash', str(RUNNER), 'prepare', 'false', selected],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env={
+                        **os.environ,
+                        'PATH': str(self.root) + ':' + os.environ['PATH'],
+                        'GITHUB_ENV': str(self.root / 'github-env'),
+                        'TEST_SETUP_LOG': str(log),
+                    },
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                actions = log.read_text()
+                self.assertIn('loginctl enable-linger', actions)
+                self.assertIn('systemctl start user@', actions)
+                self.assertIn(expected, actions)
+                self.assertNotIn('/dev/kvm', actions)
+        log.unlink()
+        result = subprocess.run(
+            ['bash', str(RUNNER), 'prepare', 'false', 'unsupported-guest'],
+            check=False,
+            env={**os.environ, 'PATH': str(self.root) + ':' + os.environ['PATH'], 'TEST_SETUP_LOG': str(log)},
+        )
+        self.assertEqual(result.returncode, 64)
+        self.assertFalse(log.exists())
 
     def test_aggregation_requires_every_job_success(self) -> None:
         for results, success in (

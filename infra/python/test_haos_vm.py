@@ -481,6 +481,46 @@ class HaosTests(unittest.TestCase):
         ):
             vm.reload_store(self.root / 'key', 2222, slug, present=False)
 
+    def test_store_refresh_waits_for_the_advertised_version_even_when_the_installed_version_matches(self) -> None:
+        slug = '12345678_garmin_toolkit'
+        for collection in ('apps', 'addons'):
+            with (
+                self.subTest(collection=collection),
+                patch.object(vm, 'run', side_effect=[RuntimeError('context deadline exceeded'), None]) as reload,
+                patch.object(
+                    vm,
+                    'guest_data',
+                    side_effect=[
+                        {collection: [{'slug': slug, 'version': '0.1.2', 'version_latest': '0.0.0'}]},
+                        {collection: [{'slug': slug, 'version': '0.0.0', 'version_latest': '0.1.2'}]},
+                    ],
+                ) as info,
+                patch('haos_app_vm.time.sleep'),
+            ):
+                vm.reload_store(self.root / 'key', 2222, slug, version='0.1.2')
+            self.assertEqual(reload.call_count, 2)
+            self.assertEqual(info.call_count, 2)
+
+    def test_store_refresh_keeps_wrong_or_missing_versions_fatal_within_the_existing_budget(self) -> None:
+        slug = '12345678_garmin_toolkit'
+        for latest in ('0.0.0', None):
+            with (
+                self.subTest(latest=latest),
+                patch.object(vm, 'run') as reload,
+                patch.object(
+                    vm,
+                    'guest_data',
+                    return_value={'apps': [{'slug': slug, 'version': '0.1.2', 'version_latest': latest}]},
+                ),
+                patch('haos_app_vm.time.sleep'),
+                self.assertRaisesRegex(RuntimeError, 'expected app visibility or version'),
+            ):
+                vm.reload_store(self.root / 'key', 2222, slug, version='0.1.2')
+            self.assertEqual(reload.call_count, 3)
+        with patch.object(vm, 'run') as reload, self.assertRaises(ValueError):
+            vm.reload_store(self.root / 'key', 2222, slug, present=False, version='0.1.2')
+        reload.assert_not_called()
+
     def test_browser_forwarding_is_loopback_and_vm_resources_are_bounded(self) -> None:
         for architecture, binary in [('amd64', 'qemu-system-x86_64'), ('aarch64', 'qemu-system-aarch64')]:
             with self.subTest(architecture=architecture):

@@ -17,9 +17,10 @@ Replace the placeholders with actual paths. Starting with fresh HAOS and empty a
 host loopback, reachable from QEMU at `10.0.2.2`, with no LAN exposure.
 
 The runner pushes OCI through an owned SSH tunnel without changing image digests. Supervisor pulls and installs the app;
-checks bind the running reference, architecture, manifest/config, and registry digest to expected inputs.
-`installation.json` records these identities and the repository URL. The archive hash, config digest, and registry
-manifest/index digest remain distinct.
+checks bind the running reference, architecture, manifest/config, and registry digest to expected inputs. The lifecycle
+driver waits for the expected Store `version_latest`, including after a reload request times out. `installation.json`
+records these identities and the repository URL. The archive hash, config digest, and registry manifest/index digest
+remain distinct.
 
 Without a repository option, the runner uses Supervisor's local-app directory. For a staged remote candidate, supply its
 branch URL, image repository, and independently obtained pull digest:
@@ -213,7 +214,11 @@ and retained-input hashes pass is the retry qualified; stale rollback and matchi
 
 This covers signed image installation and production store recovery using a private Git repository. It authenticates the
 selected images, manifests, checksums, and signature bundles; dependency source bundles are outside this check. Public
-GitHub/GHCR refs remain unchanged. Live qualification of this mode is still outstanding.
+GitHub/GHCR refs remain unchanged.
+
+Qualified on amd64 with HAOS 18.3, Supervisor 2026.10.3, and Home Assistant Core 2026.10.2, using signed
+[v0.1.1](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.1) →
+[v0.1.2](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.2).
 
 ## HAOS app smoke
 
@@ -230,6 +235,36 @@ Supervisor cold backup/restore of that selection.
 The VM has four CPUs, a six-GiB memory cap, and an eight-GiB overlay under repository `.tmp`; cleanup removes the VM and
 disks. It uses the landing page without Core onboarding. Use the populated workflow for authenticated ingress
 acceptance.
+
+## ARM64 candidate acceptance
+
+The native ARM64 CI build exports an OCI image, SPDX inventory, and `native-build.json`. Enable `arm64_acceptance` when
+dispatching CI to test that same run's artifact through the populated HAOS lifecycle check. The acceptance job runs on
+x86 Linux with ARM64 QEMU emulation; it initializes its systemd user manager without requiring KVM and retains runtime
+evidence on failure as well as success.
+
+To reuse a downloaded `garmin-hass-native-aarch64` artifact locally:
+
+```bash
+nix run "git+file://$PWD#hass-ci" -- acceptance \
+    --system aarch64-linux \
+    --build-directory .tmp/arm64-native \
+    --evidence-directory .tmp/arm64-acceptance \
+    --image .tmp/haos_generic-aarch64-18.3.qcow2.xz
+```
+
+The receipt's source commit must be available in the local Git history, including the CI merge commit for a PR build.
+The command verifies the archive, inventory, source, and selected architecture before starting a VM. It generates an
+ARM64-only private Store using `garmin-hass-arm64-test-repository`; the published repository package remains AMD64-only.
+The workflow has a 30-minute deadline, followed by owned-process cleanup. Omit `--image` to download pinned HAOS 18.3.
+
+Installation, populated ingress, restart, HAOS reboot, cold restore, reinstall recovery, and both upgrades passed
+locally under ARM64 software emulation with the
+[native CI image](https://github.com/kubijo/garmin-toolkit/actions/runs/39812583065), HAOS 18.3, Supervisor 2026.10.3,
+and Core 2026.10.2.
+
+This uses the `0.0.0` metadata fixture to qualify Supervisor lifecycle behavior. Hosted CI execution, published ARM64
+binary migration, staged GHCR delivery, and public ARM64 publication need separate qualification.
 
 ## ARM64 HAOS boot smoke
 

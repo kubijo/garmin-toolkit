@@ -14,12 +14,17 @@ on:
       sources:
         type: boolean
         default: false
+      acceptance:
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   native:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 120
+    outputs:
+      architecture: ${{ steps.build.outputs.architecture }}
     steps:
       # v7
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -51,4 +56,37 @@ jobs:
           path: .tmp/hass-native-sources
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0
+  acceptance:
+    if: inputs.acceptance
+    needs: native
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/nix
+        with:
+          kvm: ${{ inputs.system == 'x86_64-linux' }}
+          haos: ${{ inputs.system }}
+      # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: garmin-hass-native-${{ needs.native.outputs.architecture }}
+          path: .tmp/native
+      - name: Verify installation, ingress, and lifecycle in HAOS
+        env:
+          BUILD_SYSTEM: ${{ inputs.system }}
+        run: nix run .#hass-ci -- acceptance --system "$BUILD_SYSTEM"
+      # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: garmin-hass-acceptance-${{ needs.native.outputs.architecture }}
+          path: .tmp/native-acceptance
+          if-no-files-found: warn
+          retention-days: 7
           compression-level: 0

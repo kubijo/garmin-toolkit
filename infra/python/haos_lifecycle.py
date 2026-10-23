@@ -118,7 +118,7 @@ class Lifecycle:
             Recovery(self.runtime, self.evidence).advertise('retry')
         else:
             publish_version(self.runtime, version)
-        vm.reload_store(self.key, self.port, self.app_slug)
+        vm.reload_store(self.key, self.port, self.app_slug, version=version)
         info = vm.guest_data(self.key, self.port, f'ha apps info {self.app_slug}')
         if info.get('version_latest') != version:
             raise RuntimeError('Supervisor did not discover the advertised lifecycle version')
@@ -152,7 +152,7 @@ class Lifecycle:
         fixture.prepare(text(self.image('candidate')['version']))
         try:
             fixture.advertise('failed')
-            vm.reload_store(self.key, self.port, self.app_slug)
+            vm.reload_store(self.key, self.port, self.app_slug, version=text(self.image('candidate')['version']))
             info = vm.guest_data(self.key, self.port, f'ha apps info {self.app_slug}')
             if (
                 info.get('version_latest') != self.image('candidate')['version']
@@ -194,7 +194,7 @@ class Lifecycle:
                 vm.run(vm.ssh_command(self.key, self.port, 'docker start garmin-test-registry'), timeout=30)
         finally:
             fixture.rollback()
-        vm.reload_store(self.key, self.port, self.app_slug)
+        vm.reload_store(self.key, self.port, self.app_slug, version=text(self.image('baseline')['version']))
         info = vm.guest_data(self.key, self.port, f'ha apps info {self.app_slug}')
         if info.get('version_latest') != self.image('baseline')['version'] or info.get('update_available') is not False:
             raise RuntimeError('Supervisor did not refresh the recovered baseline advertisement')

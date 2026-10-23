@@ -87,7 +87,8 @@ let
       "CHANGELOG.md"
     ])
   );
-  repository =
+  repositoryFor =
+    architectures:
     pkgs.runCommand "garmin-hass-app-repository"
       {
         nativeBuildInputs = [
@@ -99,9 +100,11 @@ let
         python ${repositorySource}/infra/python/hass_repository.py \
           --source ${repositorySource} \
           --branding ${brandAssets} \
-          --architectures amd64 \
+          --architectures ${lib.escapeShellArgs architectures} \
           --output "$out"
       '';
+  repository = repositoryFor [ "amd64" ];
+  arm64TestRepository = repositoryFor [ "aarch64" ];
   sbom =
     pkgs.runCommand "garmin-hass-image.spdx.json"
       {
@@ -138,7 +141,7 @@ let
     };
 in
 {
-  inherit repository sbom;
+  inherit repository arm64TestRepository sbom;
   app = releaseApp "hass-release" "hass_release" [ ];
   ci = releaseApp "hass-ci" "hass_ci" [ nodejs ];
   recovery = releaseApp "hass-recovery" "hass_recovery" [ ];
