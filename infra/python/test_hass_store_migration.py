@@ -216,6 +216,31 @@ class StoreMigrationTests(unittest.TestCase):
             self.assertEqual(self.heads(), (self.published, self.legacy))
             self.assertFalse(self.options.output.exists())
 
+    def test_a_matching_retry_bundle_cannot_substitute_a_legacy_json_root(self) -> None:
+        def fail(*arguments: str, cwd: Path | None = None) -> str:
+            if 'push' in arguments:
+                raise subprocess.TimeoutExpired(arguments, 30)
+            return self.git(*arguments, cwd=cwd)
+
+        with self.assertRaises(subprocess.TimeoutExpired):
+            migration.checkpoint_publication(self.options, owner=replace(self.owner, git=fail))
+        journal = self.options.output / 'checkpoint.json'
+        report = object_value(read_json(journal))
+        bundle = self.options.output / 'checkpoint.bundle'
+        self.git('fetch', str(bundle), 'refs/heads/after-store', 'refs/heads/after-state')
+        state = self.owner.state(self.checkout, str(report['after_state']), fetch=False)
+        forged = self.legacy_commit(state)
+        report['after_state'] = forged
+        for name, commit in migration.checkpoint_refs(report).items():
+            self.git('update-ref', 'refs/heads/' + name, commit)
+        substituted = self.options.output / 'substituted.bundle'
+        self.git('bundle', 'create', str(substituted), *('refs/heads/' + name for name in migration.REFS))
+        substituted.replace(bundle)
+        journal.write_bytes(json_bytes(report))
+        with self.assertRaisesRegex(ValueError, 'Checkpoint differs'):
+            migration.checkpoint_publication(self.options, owner=self.owner)
+        self.assertEqual(self.heads(), (self.published, self.legacy))
+
     def test_unqualified_state_or_stale_expected_heads_cannot_be_checkpointed(self) -> None:
         for status in ('prepared', 'advertised', 'aborted', 'withdrawn'):
             with self.subTest(status=status):

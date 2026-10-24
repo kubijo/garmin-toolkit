@@ -44,6 +44,7 @@ from hass_publish import (
 from hass_release import Verify, assemble, verify
 from hass_release_contract import Release
 from hass_repository import generate_repository
+from hass_store import FENCE
 from json_data import Object, file_sha256, json_bytes
 
 
@@ -598,7 +599,7 @@ class PublicationTests(unittest.TestCase):
                 ),
             )
             occupied = push_metadata(repository, 'hass-candidate-123-2', '')
-            fence = branch_head(hass_publish.FENCE)
+            fence = branch_head(FENCE)
             staged = self.fixture.root / 'new-staging'
             shutil.copytree(repository, staged / 'repository')
             options = StagePublication(source=self.fixture.source, directory=staged, build=self.fixture.artifacts)
@@ -621,7 +622,7 @@ class PublicationTests(unittest.TestCase):
                         ):
                             stage_publication(options)
                         self.assertEqual(branch_head('hass-apps'), advertised)
-                        self.assertEqual(branch_head(hass_publish.FENCE), fence)
+                        self.assertEqual(branch_head(FENCE), fence)
                         self.assertEqual(branch_head('hass-candidate-123-2'), occupied)
                 stage_publication(options)
             self.assertEqual(json.loads((staged / 'staging.json').read_bytes())['previous'], previous)

@@ -3,13 +3,117 @@
 import subprocess
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import haos_upgrade as upgrade
 from fixtures.images import write_image
 from haos_platform import PLATFORMS, inspect_archive
+from hass_release_contract import Platform as NativePlatform
 from json_data import Object, file_sha256, json_bytes, object_rows
+
+
+class UpgradeCoverageTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.platform: NativePlatform = {
+            'architecture': 'aarch64',
+            'config_digest': 'sha256:' + 'a' * 64,
+            'manifest_digest': 'sha256:' + 'b' * 64,
+            'archive_sha256': 'c' * 64,
+            'sbom_sha256': 'd' * 64,
+            'builder_system': 'aarch64-linux',
+            'derivation': '/nix/store/' + 'a' * 32 + '-image.drv',
+            'workflow_run': None,
+        }
+        self.baseline: Object = {
+            'architecture': 'aarch64',
+            'release': 'v0.1.3',
+            'version': '0.1.3',
+            'source_commit': '1' * 40,
+            'archive_sha256': '2' * 64,
+            'manifest_digest': 'sha256:' + '3' * 64,
+            'config_digest': 'sha256:' + '4' * 64,
+            'registry_index_digest': 'sha256:' + '5' * 64,
+            'release_manifest_sha256': '6' * 64,
+            'signatures_verified': True,
+        }
+        self.coverage: Object = {
+            'baseline': 'published release v0.1.3',
+            'published_baseline': self.baseline,
+            'candidate_version': '0.1.4',
+            'candidate_archive_version': '0.1.4',
+            'migration_compatibility': True,
+        }
+        self.source: Object = {'commit': '7' * 40}
+
+    def verify(self, coverage: Object, *, version: str = '0.1.4') -> None:
+        upgrade.check_upgrade_coverage(coverage, self.platform, self.source, version)
+
+    def test_authenticated_older_release_is_required_for_each_architecture(self) -> None:
+        for architecture, system in (('aarch64', 'aarch64-linux'), ('amd64', 'x86_64-linux')):
+            self.baseline['architecture'] = architecture
+            platform = {**self.platform, 'architecture': architecture, 'builder_system': system}
+            upgrade.check_upgrade_coverage(self.coverage, cast(NativePlatform, platform), self.source, '0.1.4')
+
+    def test_legacy_fixture_evidence_cannot_qualify_a_new_release(self) -> None:
+        fixture: Object = {
+            'baseline': 'metadata-only fixture; candidate filesystem; no previous public release',
+            'migration_compatibility': False,
+        }
+        self.verify(fixture, version='0.1.3')
+        with self.assertRaises(ValueError):
+            self.verify(fixture)
+        with self.assertRaises(ValueError):
+            self.verify({**fixture, 'migration_compatibility': True}, version='0.1.3')
+
+    def test_baseline_identity_authentication_versions_and_architecture_cannot_be_substituted(self) -> None:
+        for key, value in (
+            ('signatures_verified', False),
+            ('architecture', 'amd64'),
+            ('release', 'v0.1.2'),
+            ('version', '0.1.4'),
+            ('source_commit', self.source['commit']),
+            ('config_digest', self.platform['config_digest']),
+            ('archive_sha256', self.platform['archive_sha256']),
+        ):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self.verify({**self.coverage, 'published_baseline': {**self.baseline, key: value}})
+        for key in self.baseline:
+            identity = deepcopy(self.baseline)
+            del identity[key]
+            with self.subTest(missing=key), self.assertRaises(ValueError):
+                self.verify({**self.coverage, 'published_baseline': identity})
+        for version in ('0.1.4', '0.1.5', '01.1.3'):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                self.verify(
+                    {
+                        **self.coverage,
+                        'baseline': 'published release v' + version,
+                        'published_baseline': {**self.baseline, 'release': 'v' + version, 'version': version},
+                    }
+                )
+
+    def test_forged_coverage_private_aliases_and_malformed_digests_are_rejected(self) -> None:
+        for key, value in (
+            ('candidate_version', '0.1.4-test'),
+            ('candidate_archive_version', '0.1.3'),
+            ('baseline', 'metadata-only fixture'),
+            ('migration_compatibility', False),
+        ):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self.verify({**self.coverage, key: value})
+        for key in (
+            'source_commit',
+            'archive_sha256',
+            'manifest_digest',
+            'config_digest',
+            'registry_index_digest',
+            'release_manifest_sha256',
+        ):
+            with self.subTest(digest=key), self.assertRaises(ValueError):
+                self.verify({**self.coverage, 'published_baseline': {**self.baseline, key: 'invalid'}})
 
 
 class PublishedUpgradeTests(unittest.TestCase):
@@ -101,6 +205,7 @@ class PublishedUpgradeTests(unittest.TestCase):
         archive, identity = self.verify()
         self.assertEqual(archive, self.archive)
         self.assertEqual(identity['release'], 'v0.1.0')
+        self.assertEqual(identity['architecture'], 'amd64')
         self.assertEqual(identity['source_commit'], '1' * 40)
         self.assertIs(identity['signatures_verified'], True)
         self.assertEqual(self.archive.read_bytes(), before)

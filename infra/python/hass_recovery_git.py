@@ -6,8 +6,9 @@ from pathlib import Path
 
 import yaml
 
-from hass_publish import push_metadata
-from hass_store import Store
+from hass_publish import WithdrawPublication, push_metadata, withdraw_publication
+from hass_store import STATE_FILE, Store
+from hass_store_migration import CheckpointPublication, checkpoint_store
 from json_data import Object, json_bytes, object_value, read_json, text
 
 
@@ -30,6 +31,7 @@ class StoreDrill:
         path = self.root / 'metadata'
         app = path / 'garmin_toolkit'
         app.mkdir(parents=True, exist_ok=True)
+        (path / 'repository.yaml').write_text('name: Synthetic recovery fixture\n')
         (app / 'config.yaml').write_text(
             yaml.safe_dump({'slug': 'garmin_toolkit', 'version': version, 'description': 'Synthetic recovery fixture'})
         )
@@ -52,6 +54,93 @@ class StoreDrill:
         if self.heads() != expected:
             raise RuntimeError('Recovery changed unrelated or already qualified fixture refs')
 
+    def checkpoint(self) -> Object:
+        checkout = self.root / 'checkout'
+        before, fence = self.heads()
+        self.owner.fetch(checkout, fence)
+        empty = self.owner.git('hash-object', '-t', 'tree', '-w', '/dev/null', cwd=checkout)
+        legacy = self.owner.commit_tree(checkout, empty, fence, json_bytes(self.state()).decode())
+        self.owner.push(checkout, fence, legacy)
+        options = CheckpointPublication(store_commit=before, state_commit=legacy, output=self.root / 'checkpoint')
+
+        def lost_reply(*arguments: str, cwd: Path | None = None) -> str:
+            result = self.owner.git(*arguments, cwd=cwd)
+            if 'push' in arguments:
+                raise InterruptedClient('Injected lost reply after the server accepted the checkpoint')
+            return result
+
+        try:
+            checkpoint_store(options, owner=replace(self.owner, git=lost_reply))
+        except InterruptedClient:
+            pass
+        else:
+            raise RuntimeError('The checkpoint reply was not discarded')
+        after = self.heads()
+        checkpoint_store(options, owner=self.owner)
+        self.assert_heads(after)
+        self.owner.fetch(checkout, after[0])
+        state = self.state()
+        if (
+            before == after[0]
+            or legacy == after[1]
+            or state.get('status') != 'qualified'
+            or state.get('published') != after[0]
+            or state.get('checkpoint_of') != legacy
+            or self.owner.git('show', '-s', '--format=%P', after[1], cwd=checkout)
+            or self.owner.git('ls-tree', '--name-only', after[1], cwd=checkout) != STATE_FILE
+            or self.owner.git('rev-parse', before + '^{tree}', cwd=checkout)
+            != self.owner.git('rev-parse', after[0] + '^{tree}', cwd=checkout)
+        ):
+            raise RuntimeError('Checkpoint failed to retain qualified metadata with a fresh state-file history')
+        return {'history_replaced': True, 'metadata_preserved': True, 'lost_reply_retried': True}
+
+    def withdrawal(self) -> Object:
+        before, fence = self.heads()
+        options = WithdrawPublication(
+            version='0.0.3',
+            store_commit=before,
+            state_commit=fence,
+            reason='Synthetic post-checkpoint withdrawal',
+            output=self.root / 'withdrawal',
+        )
+        withdraw_publication(options, owner=self.owner)
+        withdrawn = self.heads()
+        withdraw_publication(replace(options, output=self.root / 'withdrawal-retry'), owner=self.owner)
+        self.assert_heads(withdrawn)
+        checkout = self.root / 'checkout'
+        state = self.state()
+        self.owner.fetch(checkout, withdrawn[0])
+        if (
+            state.get('status') != 'withdrawn'
+            or self.owner.git('ls-tree', '--name-only', withdrawn[0], cwd=checkout) != 'repository.yaml'
+            or self.owner.git('rev-parse', before + ':repository.yaml', cwd=checkout)
+            != self.owner.git('rev-parse', withdrawn[0] + ':repository.yaml', cwd=checkout)
+        ):
+            raise RuntimeError('Withdrawal failed to remove only the app and preserve repository metadata')
+        try:
+            self.advertise('withdrawal-stale', before)
+        except ValueError as error:
+            if 'unrelated metadata' not in str(error):
+                raise
+        else:
+            raise RuntimeError('A stale promotion restored withdrawn fixture metadata')
+        self.assert_heads(withdrawn)
+        self.metadata('0.0.4')
+        self.advertise('withdrawal-replacement', withdrawn[0])
+        self.owner.qualify(self.root / 'withdrawal-replacement')
+        replacement = self.heads()
+        self.advertise('withdrawal-replacement-retry', withdrawn[0])
+        self.owner.qualify(self.root / 'withdrawal-replacement-retry')
+        self.assert_heads(replacement)
+        if self.state().get('status') != 'qualified':
+            raise RuntimeError('Post-withdrawal replacement failed qualification')
+        return {
+            'app_removed': True,
+            'retry_preserved': True,
+            'stale_promotion_rejected': True,
+            'replacement_qualified': True,
+        }
+
     def run(self) -> Object:
         self.root.mkdir()
         checkout = self.root / 'checkout'
@@ -59,8 +148,10 @@ class StoreDrill:
         if self.heads() != ('', ''):
             raise ValueError('Store recovery requires fresh fixture refs')
         self.metadata('0.0.0')
-        baseline = self.advertise('baseline', '')
+        self.advertise('baseline', '')
         self.owner.qualify(self.root / 'baseline')
+        checkpoint = self.checkpoint()
+        baseline = self.heads()[0]
 
         # Retain both push sources after the temporary publication checkout disappears.
         self.metadata('0.0.1')
@@ -177,7 +268,11 @@ class StoreDrill:
         else:
             raise RuntimeError('Recovery replaced competing fixture state')
         self.assert_heads(before)
+        withdrawal = self.withdrawal()
+        before = self.heads()
         result: Object = {
+            'checkpoint': checkpoint,
+            'withdrawal': withdrawal,
             'prepared_interruption': True,
             'delayed_advertisement_rejected': True,
             'lost_atomic_reply': True,

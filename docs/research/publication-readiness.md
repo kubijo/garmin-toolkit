@@ -12,15 +12,16 @@ versions, and dark app captures.
 
 That release's qualification covers AMD64.
 
-## Combined AMD64/ARM64 preflight
+## Published AMD64/ARM64 release
 
-The [combined branch preflight](https://github.com/kubijo/garmin-toolkit/actions/runs/39947173057) at `e31c4e3b` passed
-native image/source assembly, signed provenance, and independent download verification for both architectures. Each
-passed local lifecycle and staged Git/GHCR installation checks, including restart, HAOS reboot, cold restore, reinstall,
-and exact downloads. Restored captures at `1024×873` matched apart from generation time. Cleanup removed the candidate
-branch and owned guest scratch; public refs remained unchanged.
+Signed [v0.1.3](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.3), source `abcbebd`, qualified both
+architectures. Its [candidate run](https://github.com/kubijo/garmin-toolkit/actions/runs/39993142258) passed native
+image/source assembly, staged installation, lifecycle checks, signed provenance, and independent draft verification. The
+[promotion run](https://github.com/kubijo/garmin-toolkit/actions/runs/40083126056) verified public installation,
+populated ingress, restart, HAOS reboot, cold restore, and exact downloads on both architectures. Cleanup passed; source
+branches and release tags were preserved.
 
-AMD64 tested migration from authenticated v0.1.1. ARM64 used the metadata-only fixture and reported
+AMD64 tested upgrades from authenticated v0.1.1. ARM64 used the metadata-only fixture and reported
 `migration_compatibility: false`; these results do not establish older-binary or schema migration compatibility on
 ARM64.
 

@@ -16,6 +16,7 @@ from typing import cast
 import yaml
 
 from archive_io import chunks, open_tar
+from haos_upgrade import check_upgrade_coverage
 from hass_attestations import VerifyProvenance, attest
 from hass_registry import PrepareRegistry, VerifyRegistry, prepare_registry, verify_registry
 from hass_release_build import build_source
@@ -35,7 +36,7 @@ from hass_release_source import admit_source
 from hass_repository import copy_repository
 from hass_source_parts import part_path
 from hass_sources import source_part_count, verify_sources
-from hass_store import FENCE, Store, oid, write_journal
+from hass_store import Store, oid, write_journal
 from json_data import Object, json_bytes, object_value, read_json, strings, text
 
 REPOSITORY = 'kubijo/garmin-toolkit'
@@ -499,12 +500,20 @@ def verify_acceptance(evidence: Path, document: Release, staging: Object) -> Non
             document['source'],
             document['image']['index_digest'],
             staging,
+            release_version=document['version'],
             version=document['version'] if len(document['platforms']) > 1 else None,
         )
 
 
 def check_acceptance(
-    evidence: Path, platform: Platform, source: object, digest: str, staging: Object, *, version: str | None = None
+    evidence: Path,
+    platform: Platform,
+    source: object,
+    digest: str,
+    staging: Object,
+    *,
+    release_version: str,
+    version: str | None = None,
 ) -> None:
     workflow = object_value(read_json(evidence / 'workflow.json'))
     installed = object_value(read_json(evidence / 'installation.json'))
@@ -547,11 +556,7 @@ def check_acceptance(
         or native.get('version') != version
     ):
         raise ValueError('HAOS acceptance versions or architecture differ from the selected native platform')
-    if platform['architecture'] == 'aarch64' and (
-        lifecycle.get('migration_compatibility') is not False
-        or lifecycle.get('baseline') != 'metadata-only fixture; candidate filesystem; no previous public release'
-    ):
-        raise ValueError('First ARM64 release must explicitly report its fixture baseline and migration limit')
+    check_upgrade_coverage(lifecycle, platform, source, release_version)
 
 
 def require_rejection(action: Callable[[], object]) -> None:
@@ -789,7 +794,7 @@ def withdraw_publication(options: WithdrawPublication, *, owner: Store | None = 
     with tempfile.TemporaryDirectory(prefix='.hass-withdrawal.', dir=options.output.parent) as temporary:
         checkout = Path(temporary)
         execute('init', '-q', str(checkout))
-        current, fence = owner.head('hass-apps'), owner.head(FENCE)
+        current, fence = owner.head(owner.branch), owner.head(owner.fence)
         state = owner.state(checkout, fence) if fence else {}
         if (
             state.get('status') == 'withdrawn'

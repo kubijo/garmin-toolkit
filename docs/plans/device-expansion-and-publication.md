@@ -4,9 +4,7 @@
 
 Application authentication, credential custody, encryption, and Connect remain deferred.
 
-- Publish a signed AMD64/ARM64 release and qualify public installation on both architectures.
-- Replace the ARM64 metadata-only lifecycle fixture with an authenticated published baseline and qualify older-binary
-  and schema migrations.
+- Qualify older-binary upgrades and data recovery on both architectures using authenticated published baselines.
 - [Checkpoint legacy publication history](../../infra/release/README.md#publication-history-checkpoint).
 
 ## Hardware and other distribution

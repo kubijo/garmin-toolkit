@@ -126,6 +126,7 @@ def package(options: ReleaseEvidence) -> None:
             document['source'],
             inputs['image']['index_digest'],
             object_value(read_json(options.directory / 'staging.json')),
+            release_version=inputs['version'],
             version=inputs['version'] if len(inputs['platforms']) > 1 else None,
         )
     archive_evidence(options.directory, options.evidence, inputs['platforms'])
@@ -178,6 +179,7 @@ def verify(source: Path, directory: Path, bundles: Path) -> None:
                 document['source'],
                 inputs['image']['index_digest'],
                 staging,
+                release_version=inputs['version'],
                 version=inputs['version'] if len(inputs['platforms']) > 1 else None,
             )
         branch = text(staging.get('branch'))
