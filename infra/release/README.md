@@ -45,8 +45,12 @@ scopes are empty; cleanup failure retains it and reports its path. Evidence rema
 
 [Python phases](../python/hass_ci.py) own orchestration; [runner setup](../ci/runner.sh) owns host preparation and
 cleanup. Lifecycle checks exercise upgrades, backup recovery, and reinstall with synthetic profile, route, and Course
-data. Published baselines are authenticated against their signed inventory and source tag. Metadata-only fixtures must
-report `migration_compatibility: false`; they do not establish older-binary or schema migration compatibility.
+data. Candidates require published baselines on both architectures, authenticated against their signed inventory and
+source tag. Legacy signed acceptance retains its metadata-fixture limits; fixtures do not establish older-binary or
+schema migration compatibility.
+
+Upgrade evidence covers the synthetic data and schema versions exercised. A schema-change migration claim requires an
+older-schema baseline.
 
 Native inputs and sources use `amd64/` and `aarch64/` directories. The signed acceptance archive contains both
 directories, each with runtime versions, reports, and dark captures, plus one shared staging journal. Verification
@@ -284,9 +288,9 @@ the completed update; competing changes stop the operation. This guarded checkpo
 
 ### Recovery drill
 
-The release workflow's **Recovery** mode tests production guards against synthetic GitHub/GHCR fixtures: image
-conflicts, incomplete drafts, interrupted preparation, lost atomic-push replies, failed qualification, retries, and
-competing updates. Dispatch after pushing the tested revision:
+The release workflow's **Recovery** mode exercises production guards on synthetic GitHub/GHCR fixtures: history
+checkpoints, lost push replies, interrupted preparation, failed qualification, retries, competing updates, withdrawal,
+and replacement. It also checks image conflicts and incomplete drafts. Dispatch after pushing the tested revision:
 
 ```sh
 gh workflow run hass-release.yml --repo kubijo/garmin-toolkit --ref BRANCH -f recovery=true -f publish=false

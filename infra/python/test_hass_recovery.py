@@ -66,6 +66,19 @@ class RecoveryTests(unittest.TestCase):
 
     def test_real_git_recovery_and_cleanup_preserve_all_public_refs(self) -> None:
         result = StoreDrill(self.drill.store(), self.evidence / 'store').run()
+        self.assertEqual(
+            object_value(result['checkpoint']),
+            {'history_replaced': True, 'metadata_preserved': True, 'lost_reply_retried': True},
+        )
+        self.assertEqual(
+            object_value(result['withdrawal']),
+            {
+                'app_removed': True,
+                'retry_preserved': True,
+                'stale_promotion_rejected': True,
+                'replacement_qualified': True,
+            },
+        )
         for name in (
             'prepared_interruption',
             'delayed_advertisement_rejected',

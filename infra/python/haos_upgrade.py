@@ -2,17 +2,65 @@
 
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 
 from haos_platform import Platform, inspect_archive, validate_archive
 from hass_attestations import VerifyProvenance, attest
+from hass_release_contract import Platform as NativePlatform
 from hass_release_contract import validate_document
 from hass_release_source import git, source_metadata
 from json_data import Object, file_sha256, object_rows, object_value, read_json, regular_file, text
 
 REPOSITORY = 'https://github.com/kubijo/garmin-toolkit'
 IMAGE = 'ghcr.io/kubijo/garmin-toolkit-hass'
+# Releases through v0.1.3 used the ARM64 fixture; later releases require published baselines on both architectures.
+LEGACY_BASELINE_EVIDENCE_MAX_VERSION = (0, 1, 3)
+
+
+def numeric_version(value: object) -> tuple[int, ...]:
+    version = text(value)
+    if re.fullmatch(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)', version) is None:
+        raise ValueError('Upgrade evidence requires a numeric release version')
+    return tuple(map(int, version.split('.')))
+
+
+def check_upgrade_coverage(lifecycle: Object, platform: NativePlatform, source: object, version: str) -> None:
+    """Retain legacy evidence; later releases require authenticated older images on every architecture."""
+    if numeric_version(version) <= LEGACY_BASELINE_EVIDENCE_MAX_VERSION:
+        if platform['architecture'] == 'aarch64' and (
+            lifecycle.get('migration_compatibility') is not False
+            or lifecycle.get('baseline') != 'metadata-only fixture; candidate filesystem; no previous public release'
+        ):
+            raise ValueError('Legacy ARM64 evidence must report its fixture baseline and migration limit')
+        return
+    baseline = object_value(lifecycle.get('published_baseline'))
+    baseline_version = text(baseline.get('version'))
+    if (
+        lifecycle.get('migration_compatibility') is not True
+        or baseline.get('signatures_verified') is not True
+        or baseline.get('architecture') != platform['architecture']
+        or baseline.get('release') != 'v' + baseline_version
+        or lifecycle.get('baseline') != 'published release v' + baseline_version
+        or numeric_version(baseline_version) >= numeric_version(version)
+        or lifecycle.get('candidate_version') != version
+        or lifecycle.get('candidate_archive_version') != version
+        or baseline.get('config_digest') == platform['config_digest']
+        or baseline.get('archive_sha256') == platform['archive_sha256']
+        or baseline.get('source_commit') == object_value(source).get('commit')
+    ):
+        raise ValueError('Upgrade evidence must identify an authenticated older release for this architecture')
+    for name, pattern in (
+        ('source_commit', r'[0-9a-f]{40}'),
+        ('archive_sha256', r'[0-9a-f]{64}'),
+        ('release_manifest_sha256', r'[0-9a-f]{64}'),
+        ('manifest_digest', r'sha256:[0-9a-f]{64}'),
+        ('config_digest', r'sha256:[0-9a-f]{64}'),
+        ('registry_index_digest', r'sha256:[0-9a-f]{64}'),
+    ):
+        if re.fullmatch(pattern, text(baseline.get(name))) is None:
+            raise ValueError('Upgrade evidence contains an invalid baseline identity')
 
 
 def published_baseline(directory: Path, source: Path, guest: Platform) -> tuple[Path, Object]:
@@ -89,6 +137,7 @@ def published_baseline(directory: Path, source: Path, guest: Platform) -> tuple[
     ):
         raise ValueError('Published baseline OCI identity differs from its signed platform receipt')
     return archive, {
+        'architecture': guest.architecture,
         'release': tag,
         'version': version,
         'source_commit': commit,

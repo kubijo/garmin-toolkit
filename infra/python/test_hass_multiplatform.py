@@ -195,6 +195,60 @@ class MultiplatformTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'fixture baseline'):
             publication.verify_acceptance(self.evidence, self.document, self.staging)
 
+    def test_new_releases_require_matching_published_baseline_evidence_on_both_architectures(self) -> None:
+        self.document['version'] = '0.1.4'
+        self.document['source']['tag'] = 'v0.1.4'
+        self.staging['tag'] = '0.1.4-candidate.123.1'
+        for platform in self.document['platforms']:
+            architecture = platform['architecture']
+            evidence = self.evidence / architecture
+            native = object_value(read_json(evidence / 'native-build.json'))
+            native.update(version='0.1.4', source=self.document['source'])
+            (evidence / 'native-build.json').write_bytes(json_bytes(native))
+            for name in ('installation.json', 'lifecycle-installation.json'):
+                image = object_value(read_json(evidence / name))
+                image.update(
+                    archive_version='0.1.4',
+                    version=self.staging['tag'] if name == 'installation.json' else '0.1.4',
+                )
+                (evidence / name).write_bytes(json_bytes(image))
+            path = evidence / 'lifecycle-workflow.json'
+            workflow = object_value(read_json(path))
+            object_value(workflow['lifecycle']).update(
+                migration_compatibility=True,
+                baseline='published release v0.1.3',
+                candidate_version='0.1.4',
+                candidate_archive_version='0.1.4',
+                published_baseline={
+                    'architecture': architecture,
+                    'version': '0.1.3',
+                    'release': 'v0.1.3',
+                    'source_commit': '1' * 40,
+                    'archive_sha256': '2' * 64,
+                    'manifest_digest': 'sha256:' + '3' * 64,
+                    'config_digest': 'sha256:' + '4' * 64,
+                    'registry_index_digest': 'sha256:' + '5' * 64,
+                    'release_manifest_sha256': '6' * 64,
+                    'signatures_verified': True,
+                },
+            )
+            path.write_bytes(json_bytes(workflow))
+        publication.verify_acceptance(self.evidence, self.document, self.staging)
+        for architecture in publication.ARCHITECTURES:
+            path = self.evidence / architecture / 'lifecycle-workflow.json'
+            original = path.read_bytes()
+            workflow = object_value(read_json(path))
+            baseline = object_value(object_value(workflow['lifecycle'])['published_baseline'])
+            baseline['architecture'] = 'amd64' if architecture == 'aarch64' else 'aarch64'
+            path.write_bytes(json_bytes(workflow))
+            with self.subTest(crossed=architecture), self.assertRaisesRegex(ValueError, 'authenticated older release'):
+                publication.verify_acceptance(self.evidence, self.document, self.staging)
+            object_value(workflow['lifecycle']).pop('published_baseline')
+            path.write_bytes(json_bytes(workflow))
+            with self.subTest(missing=architecture), self.assertRaises(ValueError):
+                publication.verify_acceptance(self.evidence, self.document, self.staging)
+            path.write_bytes(original)
+
     def test_final_installation_of_each_architecture_must_pass_before_qualification(self) -> None:
         for failed in ('aarch64', 'amd64', None):
             output = self.fixture.root / ('final-' + str(failed))

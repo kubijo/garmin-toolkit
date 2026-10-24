@@ -487,7 +487,11 @@ class CITests(unittest.TestCase):
             patch.object(ci, 'prepare_publication'),
             patch.object(ci, 'login'),
             patch.object(ci, 'stage_publication'),
-            patch.object(ci, 'download_upgrade_baseline', return_value=Path('/published-baseline')),
+            patch.object(
+                ci,
+                'download_upgrade_baseline',
+                side_effect=[Path('/published-baseline/amd64'), Path('/published-baseline/aarch64')],
+            ),
             patch.object(ci, 'acceptance', side_effect=acceptance) as check,
             patch.object(ci, 'package_evidence') as package,
         ):
@@ -495,13 +499,14 @@ class CITests(unittest.TestCase):
         self.assertEqual(check.call_count, 4)
         self.assertIn('--lifecycle', check.call_args_list[0].args)
         self.assertIn('--baseline-release', check.call_args_list[0].args)
-        self.assertIn('/published-baseline', check.call_args_list[0].args)
+        self.assertIn('/published-baseline/amd64', check.call_args_list[0].args)
         self.assertIn('0.1.0-candidate.123.1', check.call_args_list[1].args)
         self.assertIn(index, check.call_args_list[1].args)
         self.assertEqual(
             (self.scratch / 'staged-acceptance/amd64/lifecycle-workflow.json').read_text(), 'synthetic evidence'
         )
-        self.assertNotIn('--baseline-release', check.call_args_list[2].args)
+        self.assertIn('--baseline-release', check.call_args_list[2].args)
+        self.assertIn('/published-baseline/aarch64', check.call_args_list[2].args)
         self.assertIn('aarch64', check.call_args_list[2].args)
         self.assertEqual(check.call_args_list[2].kwargs['timeout'], 1900)
         self.assertIn('--timeout', check.call_args_list[2].args)
@@ -556,7 +561,11 @@ class CITests(unittest.TestCase):
             patch.object(ci.hass_preflight, 'check_candidate', return_value=(document, document)),
             patch.object(ci.hass_preflight, 'package') as package,
             patch.object(ci, 'stage_image') as image,
-            patch.object(ci, 'download_upgrade_baseline', return_value=Path('/published-baseline')),
+            patch.object(
+                ci,
+                'download_upgrade_baseline',
+                side_effect=[Path('/published-baseline/amd64'), Path('/published-baseline/aarch64')],
+            ),
             patch.object(ci, 'acceptance', side_effect=acceptance) as check,
         ):
             ci.main(tyro.cli(ci.Options, args=['preflight']))
@@ -569,28 +578,33 @@ class CITests(unittest.TestCase):
         self.assertEqual(check.call_count, 4)
         self.assertIn('--lifecycle', check.call_args_list[0].args)
         self.assertIn('--baseline-release', check.call_args_list[0].args)
-        self.assertIn('/published-baseline', check.call_args_list[0].args)
+        self.assertIn('/published-baseline/amd64', check.call_args_list[0].args)
+        self.assertIn('/published-baseline/aarch64', check.call_args_list[2].args)
         self.assertIn('--repository-url', check.call_args_list[1].args)
         self.assertFalse((candidate / 'release.json').exists())
 
     def test_upgrade_baseline_download_pins_the_release_and_only_required_assets(self) -> None:
-        with patch.object(ci, 'run') as run:
-            directory = ci.download_upgrade_baseline()
-        self.assertEqual(directory, Path('.tmp/published-baseline'))
-        self.assertTrue(directory.is_dir())
-        arguments = run.call_args.args
-        self.assertEqual(arguments[:4], ('gh', 'release', 'download', 'v0.1.1'))
-        self.assertEqual(
-            arguments[9::2],
-            (
-                'release.json',
-                'SHA256SUMS',
-                'checksums.sigstore.jsonl',
-                'artifacts.sigstore.jsonl',
-                'garmin-toolkit-hass-0.1.1-amd64.oci.tar',
-            ),
-        )
-        self.assertNotIn('--clobber', arguments)
+        for architecture, version in (('amd64', '0.1.1'), ('aarch64', '0.1.3')):
+            with self.subTest(architecture=architecture), patch.object(ci, 'run') as run:
+                directory = ci.download_upgrade_baseline(architecture)
+            self.assertEqual(directory, Path('.tmp/published-baseline') / architecture)
+            self.assertTrue(directory.is_dir())
+            arguments = run.call_args.args
+            self.assertEqual(arguments[:4], ('gh', 'release', 'download', 'v' + version))
+            self.assertEqual(
+                arguments[9::2],
+                (
+                    'release.json',
+                    'SHA256SUMS',
+                    'checksums.sigstore.jsonl',
+                    'artifacts.sigstore.jsonl',
+                    f'garmin-toolkit-hass-{version}-{architecture}.oci.tar',
+                ),
+            )
+            self.assertNotIn('--clobber', arguments)
+        with patch.object(ci, 'run') as run, self.assertRaises(ValueError):
+            ci.download_upgrade_baseline('unknown')
+        run.assert_not_called()
 
     def test_missing_published_baseline_blocks_acceptance_and_signing(self) -> None:
         with (
@@ -599,7 +613,11 @@ class CITests(unittest.TestCase):
             patch.object(ci, 'prepare_publication'),
             patch.object(ci, 'login'),
             patch.object(ci, 'stage_publication'),
-            patch.object(ci, 'download_upgrade_baseline', side_effect=subprocess.CalledProcessError(1, ['gh'])),
+            patch.object(
+                ci,
+                'download_upgrade_baseline',
+                side_effect=[Path('/published-amd64'), subprocess.CalledProcessError(1, ['gh'])],
+            ),
             patch.object(ci, 'acceptance') as check,
             patch.object(ci, 'outputs') as outputs,
             self.assertRaises(subprocess.CalledProcessError),

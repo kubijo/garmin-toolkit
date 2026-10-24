@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hass_publish import REPOSITORY, command, store
-from hass_store import Store, oid, write_journal
+from hass_store import STATE_FILE, Store, oid, write_journal
 from json_data import Object, object_rows, object_value, read_json, regular_file
 
 REFS = ('before-store', 'before-state', 'after-store', 'after-state')
@@ -55,14 +55,21 @@ def verify_checkpoint(owner: Store, checkout: Path, report: Object) -> None:
         or owner.git('rev-parse', refs['after-store'] + '^{tree}', cwd=checkout) != tree
         or owner.git('show', '-s', '--format=%P', refs['after-store'], cwd=checkout) != refs['before-store']
         or owner.git('show', '-s', '--format=%P', refs['after-state'], cwd=checkout)
+        or owner.git('ls-tree', '--name-only', refs['after-state'], cwd=checkout) != STATE_FILE
     ):
         raise ValueError('Checkpoint differs from the qualified state or changes Store contents')
 
 
 def checkpoint_publication(options: CheckpointPublication, *, owner: Store | None = None) -> None:
-    owner = owner or store()
-    before_store, before_state = oid(options.store_commit), oid(options.state_commit)
+    oid(options.store_commit)
+    oid(options.state_commit)
     require_idle_publication()
+    checkpoint_store(options, owner=owner or store())
+
+
+def checkpoint_store(options: CheckpointPublication, *, owner: Store) -> None:
+    """Checkpoint explicit refs; production callers enforce idle publication, drills supply a guarded transport."""
+    before_store, before_state = oid(options.store_commit), oid(options.state_commit)
     identity: Object = {
         'remote': owner.remote,
         'branch': owner.branch,

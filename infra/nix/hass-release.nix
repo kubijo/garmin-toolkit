@@ -40,6 +40,7 @@ let
     inventoryModules
     ++ (map (name: "infra/python/${name}.py") [
       "cli_output"
+      "haos_upgrade"
       "hass_release"
       "hass_attestations"
       "hass_release_build"

@@ -53,8 +53,8 @@ PUBLICATION = Path('.tmp/publication')
 NATIVE = Path('.tmp/native')
 SOURCES = Path('.tmp/sources')
 BUNDLES = Path('.tmp/bundles')
-# Review this published baseline when preparing the next release; never resolve a moving "latest" release.
-UPGRADE_BASELINE = '0.1.1'
+# Pin published baselines per architecture; never resolve a moving "latest" release.
+UPGRADE_BASELINES = {'amd64': '0.1.1', 'aarch64': '0.1.3'}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -420,14 +420,17 @@ def delivery(options: Options) -> None:
     )
 
 
-def download_upgrade_baseline() -> Path:
-    directory = Path('.tmp/published-baseline')
-    directory.mkdir()
+def download_upgrade_baseline(architecture: str) -> Path:
+    if architecture not in UPGRADE_BASELINES:
+        raise ValueError('Unsupported published upgrade baseline architecture')
+    version = UPGRADE_BASELINES[architecture]
+    directory = Path('.tmp/published-baseline') / architecture
+    directory.mkdir(parents=True)
     arguments = [
         'gh',
         'release',
         'download',
-        'v' + UPGRADE_BASELINE,
+        'v' + version,
         '--repo',
         'kubijo/garmin-toolkit',
         '--dir',
@@ -438,7 +441,7 @@ def download_upgrade_baseline() -> Path:
         'SHA256SUMS',
         'checksums.sigstore.jsonl',
         'artifacts.sigstore.jsonl',
-        f'garmin-toolkit-hass-{UPGRADE_BASELINE}-amd64.oci.tar',
+        f'garmin-toolkit-hass-{version}-{architecture}.oci.tar',
     ):
         arguments.extend(('--pattern', name))
     run(*arguments)
@@ -486,7 +489,7 @@ def draft(*, preflight: bool = False) -> None:
             stage_publication(stage)
     local, staged = Path('.tmp/lifecycle-acceptance'), Path('.tmp/staged-acceptance')
     with phase('Download published upgrade baseline'):
-        baseline = download_upgrade_baseline()
+        baselines = {architecture: download_upgrade_baseline(architecture) for architecture in UPGRADE_BASELINES}
     document = object_value(read_json(PUBLICATION / 'candidate' / ('registry.json' if preflight else 'release.json')))
     platforms = object_rows(document['platforms'])
     if sorted(text(platform['architecture']) for platform in platforms) != ['aarch64', 'amd64']:
@@ -496,8 +499,6 @@ def draft(*, preflight: bool = False) -> None:
         architecture = text(platform['architecture'])
         native = platform_directory(NATIVE, architecture)
         local_evidence, staged_evidence = local / architecture, staged / architecture
-        # No published ARM64 baseline exists yet. Its fixture reports migration_compatibility=false.
-        upgrade = ('--baseline-release', str(baseline)) if architecture == 'amd64' else ()
         with phase('Test ' + architecture + ' HAOS installation and lifecycle'):
             publication_acceptance(
                 native,
@@ -506,7 +507,8 @@ def draft(*, preflight: bool = False) -> None:
                 '--repository',
                 str(PUBLICATION / 'repository'),
                 '--lifecycle',
-                *upgrade,
+                '--baseline-release',
+                str(baselines[architecture]),
             )
         with phase('Test ' + architecture + ' staged repository installation in HAOS'):
             publication_acceptance(

@@ -271,7 +271,7 @@ This mode skips native builds, the full CI matrix, signing, and promotion. Clean
 and the unchanged candidate branch; the candidate image tag remains. Reports and screenshots are uploaded as
 `hass-arm64-delivery`. Public Store metadata and release tags must remain unchanged. Each combined release index needs
 its own acceptance on both architectures; see
-[preflight evidence](../../../docs/research/publication-readiness.md#combined-amd64arm64-preflight).
+[release evidence](../../../docs/research/publication-readiness.md#published-amd64arm64-release).
 
 ## ARM64 HAOS boot smoke
 
