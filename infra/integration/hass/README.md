@@ -137,10 +137,9 @@ from fixture coverage. It covers the synthetic profile, route, and Course data e
 an older encoder remain under "Previous FIT files"; the browser opens that section and downloads the original bytes
 without regenerating the Course.
 
-When both archives declare the same version, pass a greater private `--candidate-version`, such as `0.1.2-dev` when
-testing the published `0.1.1` against another `0.1.1` build. Only the disposable repository metadata and guest registry
-tag use that version; OCI configuration, manifests, layers, and original archive versions remain unchanged. Normal
-release qualification must still use the eventual release image and version.
+When both archives declare the same version, pass a greater private `--candidate-version`. Only the disposable
+repository metadata and guest registry tag use that version; OCI configuration, manifests, layers, and original archive
+versions remain unchanged. Release qualification requires the eventual release image and version.
 
 On Supervisor 2026.10.2, recovery restarts Supervisor after restoring a reinstalled app: restore replaces the ingress
 token but leaves the routing map stale, producing HTTP 503. The
@@ -156,11 +155,11 @@ generated repository metadata, a native receipt, and a greater numeric candidate
 
 ```bash
 just hass::haos-app-check \
-    --app-archive .tmp/hass-native-build/garmin-toolkit-hass-0.1.2-amd64.oci.tar \
+    --app-archive .tmp/hass-native-build/garmin-toolkit-hass-VERSION-amd64.oci.tar \
     --build-receipt .tmp/hass-native-build/native-build.json \
     --repository /nix/store/REPOSITORY-garmin-hass-app-repository \
     --baseline-release .tmp/published-baseline \
-    --candidate-version 0.1.3 \
+    --candidate-version NEWER_VERSION \
     --withdrawal
 ```
 
@@ -184,17 +183,16 @@ Use `--recovery` with two already published, signed releases to test an actual S
 
 ```bash
 just hass::haos-app-check \
-    --app-archive .tmp/recovery-candidate/garmin-toolkit-hass-0.1.2-amd64.oci.tar \
+    --app-archive .tmp/recovery-candidate/garmin-toolkit-hass-VERSION-amd64.oci.tar \
     --repository /nix/store/REPOSITORY-garmin-hass-app-repository \
     --baseline-release .tmp/recovery-baseline \
     --candidate-release .tmp/recovery-candidate \
     --recovery
 ```
 
-Populate the baseline directory with v0.1.1 and the candidate with v0.1.2, using the signed inputs described above. Both
-images are authenticated before boot; the candidate must be newer, match the current app version, and use the exact
-selected archive. Private version aliases and other lifecycle modes are rejected. Signed published inputs replace the
-unsigned native receipt for this mode.
+Populate both directories with the signed inputs described above. Images are authenticated before boot; the candidate
+must be newer than the baseline, match the checkout's app version, and use the selected archive. Private version aliases
+and other lifecycle modes are rejected. Signed published inputs replace the unsigned native receipt for this mode.
 
 The runner populates and qualifies the private baseline, advertises the candidate with production leases, then stops
 only the guest's fixture registry and verifies its Docker state. Supervisor must attempt an uncached update and return
@@ -216,9 +214,7 @@ This covers signed image installation and production store recovery using a priv
 selected images, manifests, checksums, and signature bundles; dependency source bundles are outside this check. Public
 GitHub/GHCR refs remain unchanged.
 
-Qualified on amd64 with HAOS 18.3, Supervisor 2026.10.3, and Home Assistant Core 2026.10.2, using signed
-[v0.1.1](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.1) →
-[v0.1.2](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.2).
+See [recovery evidence](../../../docs/research/publication-readiness.md#recovery-checks) for tested inputs and scope.
 
 ## HAOS app smoke
 
@@ -228,8 +224,8 @@ Build `.#packages.x86_64-linux.garmin-hass-app-image` with a memory-capped Nix b
 just hass::haos-app-smoke --app-archive /nix/store/...-garmin-toolkit-hass.oci.tar --timeout 1200
 ```
 
-The runner installs the unchanged OCI image in pinned HAOS 18.3. It checks gateway HTTP 200, non-gateway HTTP 403, and
-no published host port. It also opens an alternate storage generation with the original database absent, then verifies
+The runner installs the unchanged OCI image in pinned HAOS. It checks gateway HTTP 200, non-gateway HTTP 403, and no
+published host port. It also opens an alternate storage generation with the original database absent, then verifies
 Supervisor cold backup/restore of that selection.
 
 The VM has four CPUs, a six-GiB memory cap, and an eight-GiB overlay under repository `.tmp`; cleanup removes the VM and
@@ -246,19 +242,13 @@ nix run "git+file://$PWD#hass-ci" -- acceptance \
     --system aarch64-linux \
     --build-directory .tmp/arm64-native \
     --evidence-directory .tmp/arm64-acceptance \
-    --image .tmp/haos_generic-aarch64-18.3.qcow2.xz
+    --image .tmp/haos-aarch64.qcow2.xz
 ```
 
 The receipt's source commit must be available in the local Git history, including the CI merge commit for a PR build.
 The command verifies the archive, inventory, source, and selected architecture before starting a VM. It generates an
 ARM64-only private Store using `garmin-hass-arm64-test-repository`; release candidates qualify both architectures
-separately. The workflow has a 30-minute deadline, followed by owned-process cleanup. Omit `--image` to download pinned
-HAOS 18.3.
-
-Installation, populated ingress, restart, HAOS reboot, cold restore, reinstall recovery, and both upgrades passed
-locally under ARM64 software emulation with the
-[native CI image](https://github.com/kubijo/garmin-toolkit/actions/runs/39812583065), HAOS 18.3, Supervisor 2026.10.3,
-and Core 2026.10.2.
+separately. Omit `--image` to download the pinned HAOS image. Owned-process cleanup follows the acceptance deadline.
 
 The `0.0.0` metadata fixture qualifies Supervisor lifecycle behavior; it does not exercise older-binary/schema migration
 or remote delivery.
@@ -269,23 +259,19 @@ The [release workflow](../../../.github/workflows/hass-release.yml) reuses a ret
 CI run:
 
 ```bash
-gh workflow run hass-release.yml --ref dev -f arm64_run=SOURCE_CI_RUN_ID
+gh workflow run hass-release.yml --ref BRANCH -f arm64_run=SOURCE_CI_RUN_ID
 ```
 
-The run's head must be an ancestor of the dispatched checkout; artifacts expire after one day. Before registry login,
-checks bind the source run, head or PR merge, receipt, archive, and SPDX inventory. Fresh emulated ARM64 HAOS installs
-through a temporary Git branch and anonymous GHCR pulls. Populated ingress, restart, reboot, cold restore, and exact
-downloads must pass; evidence binds the installed index/manifest/config to the retained build.
+The run's head must be an ancestor of the dispatched checkout and its native artifact must remain available. Before
+registry login, checks bind the source run, head or PR merge, receipt, archive, and SPDX inventory. Fresh emulated ARM64
+HAOS installs through a temporary Git branch and anonymous GHCR pulls. Populated ingress, restart, reboot, cold restore,
+and exact downloads must pass; evidence binds the installed index/manifest/config to the retained build.
 
-This mode skips native builds, the full CI matrix, signing, and promotion. Acceptance has a 30-minute deadline and
-owned-process cleanup. Credentials and the unchanged candidate branch are removed; the candidate image tag remains. The
-`hass-arm64-delivery` evidence artifact retains reports and screenshots for seven days. Public Store metadata and
-release tags must remain unchanged.
-
-Staged Git installation, anonymous GHCR pulls, populated ingress, restart, reboot, cold restore, and exact downloads
-passed in the [hosted ARM64 delivery run](https://github.com/kubijo/garmin-toolkit/actions/runs/39937684917) with HAOS
-18.3, Supervisor 2026.10.3, and Core 2026.10.2. This qualifies the retained ARM64 image; each combined release index
-requires its own acceptance on both architectures.
+This mode skips native builds, the full CI matrix, signing, and promotion. Cleanup removes owned processes, credentials,
+and the unchanged candidate branch; the candidate image tag remains. Reports and screenshots are uploaded as
+`hass-arm64-delivery`. Public Store metadata and release tags must remain unchanged. Each combined release index needs
+its own acceptance on both architectures; see
+[preflight evidence](../../../docs/research/publication-readiness.md#combined-amd64arm64-preflight).
 
 ## ARM64 HAOS boot smoke
 
@@ -295,9 +281,8 @@ Run a fresh, networkless Home Assistant OS ARM64 guest on an x86 Linux host with
 just hass::haos-arm64-smoke
 ```
 
-The runner verifies the SHA-256 of pinned
-[HAOS 18.3 AArch64](https://github.com/home-assistant/operating-system/releases/tag/18.3), then checks GRUB Slot A and
-the mounted data partition. Reuse a download with `--image /path/to/haos_generic-aarch64-18.3.qcow2.xz`.
+The runner verifies the [pinned HAOS image](../../python/haos_platform.py) SHA-256, then checks GRUB Slot A and the
+mounted data partition. Reuse a download with `--image /path/to/haos-aarch64.qcow2.xz`.
 
 The networkless guest has no USB access, verified four-CPU/six-GiB limits, and a two-GiB overlay. Runtime files stay
 under repository `.tmp` and are removed afterward. This checks OS boot only; app installation, ingress, and hardware

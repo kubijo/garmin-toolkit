@@ -14,9 +14,9 @@ Applications compose the reusable crates under `crates/`.
 [![Open Garmin Toolkit's app page in Home Assistant][hass-app-badge]][hass-app]
 
 Add the repository, then open Garmin Toolkit's app page to install and start it. These buttons use your own Home
-Assistant instance. See the [quickstart](apps/garmin-hass/addon/DOCS.md) for supported versions, Course creation,
-backups, and recovery. Release artifacts and verification instructions are available with
-[v0.1.1](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.1).
+Assistant instance. See the [quickstart](apps/garmin-hass/addon/DOCS.md) for compatibility, Course creation, backups,
+and recovery. [Releases](https://github.com/kubijo/garmin-toolkit/releases) include artifacts and verification
+instructions.
 
 ## Run
 

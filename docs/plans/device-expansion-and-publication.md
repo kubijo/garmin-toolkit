@@ -4,10 +4,10 @@
 
 Application authentication, credential custody, encryption, and Connect remain deferred.
 
-- Qualify the first signed AMD64/ARM64 release and public installations after the successful
-  [combined branch preflight](../research/publication-readiness.md#combined-amd64arm64-preflight).
-- After the first ARM64 publication, pin its authenticated image as an upgrade baseline and retire the metadata-only
-  lifecycle fixture exception. Keep older-binary/schema migration unclaimed until that check passes.
+- Publish a signed AMD64/ARM64 release and qualify public installation on both architectures.
+- Replace the ARM64 metadata-only lifecycle fixture with an authenticated published baseline and qualify older-binary
+  and schema migrations.
+- [Checkpoint legacy publication history](../../infra/release/README.md#publication-history-checkpoint).
 
 ## Hardware and other distribution
 

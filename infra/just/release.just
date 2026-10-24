@@ -32,6 +32,10 @@ repository *options:
 withdraw *options:
     @just release::in-release withdraw "$@"
 
+# Checkpoint qualified publication history after deploying the state-file publisher.
+checkpoint-publication *options:
+    @just release::in-release checkpoint-publication "$@"
+
 # Prepare annotated OCI manifests from verified native image exports; no registry access.
 prepare-registry *options:
     @just release::in-release prepare-registry "$@"

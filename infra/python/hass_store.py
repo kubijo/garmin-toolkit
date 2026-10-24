@@ -13,6 +13,14 @@ from typing import Protocol
 from json_data import Object, json_bytes, object_value, read_json, text
 
 FENCE = 'hass-publication'
+STATE_FILE = 'publication.json'
+STATE_SUBJECTS = {
+    'prepared': 'Prepare HASS publication',
+    'advertised': 'Advertise HASS release',
+    'qualified': 'Qualify HASS release',
+    'aborted': 'Abort HASS publication',
+    'withdrawn': 'Withdraw HASS release',
+}
 
 
 def oid(value: object, *, empty: bool = False) -> str:
@@ -55,17 +63,42 @@ class Store:
         if commit:
             self.git('fetch', '--no-tags', '--depth=2', self.remote, commit, cwd=checkout)
 
-    def state(self, checkout: Path, commit: str) -> Object:
-        self.fetch(checkout, commit)
-        data = object_value(json.loads(self.git('show', '-s', '--format=%B', commit, cwd=checkout)))
-        if data.get('status') not in ('prepared', 'advertised', 'qualified', 'aborted', 'withdrawn'):
+    def state(self, checkout: Path, commit: str, *, fetch: bool = True) -> Object:
+        if fetch:
+            self.fetch(checkout, commit)
+        tree = self.git('ls-tree', commit, cwd=checkout)
+        if re.fullmatch(r'100644 blob [0-9a-f]{40}\tpublication\.json', tree):
+            payload = self.git('show', commit + ':' + STATE_FILE, cwd=checkout)
+        elif not tree:
+            payload = self.git('show', '-s', '--format=%B', commit, cwd=checkout)
+        else:
+            raise ValueError('Expected publication.json or a legacy empty publication tree')
+        data = object_value(json.loads(payload))
+        if text(data.get('status')) not in STATE_SUBJECTS:
             raise ValueError('Invalid durable store promotion state')
         oid(data['previous'], empty=True)
         oid(data['published'])
         return data
 
-    def commit(self, checkout: Path, data: Object, parent: str) -> str:
-        tree = self.git('hash-object', '-t', 'tree', '-w', '/dev/null', cwd=checkout)
+    def commit(self, checkout: Path, data: Object, parent: str, *, subject: str | None = None) -> str:
+        status = text(data.get('status'))
+        if status not in STATE_SUBJECTS:
+            raise ValueError('Invalid durable store promotion state')
+        oid(data['previous'], empty=True)
+        oid(data['published'])
+        with tempfile.TemporaryDirectory(prefix='.hass-state.', dir=checkout) as temporary:
+            path = Path(temporary).resolve() / STATE_FILE
+            path.write_bytes(json_bytes(data))
+            blob = oid(self.git('hash-object', '-w', str(path), cwd=checkout))
+            # A single regular-file tree avoids changing the metadata checkout's index.
+            tree_path = path.parent / 'tree'
+            tree_path.write_bytes(b'100644 ' + STATE_FILE.encode() + b'\0' + bytes.fromhex(blob))
+            tree = self.git('hash-object', '-t', 'tree', '-w', str(tree_path), cwd=checkout)
+        return self.commit_tree(checkout, tree, parent, subject or STATE_SUBJECTS[status])
+
+    def commit_tree(self, checkout: Path, tree: str, parent: str, subject: str) -> str:
+        oid(tree)
+        oid(parent, empty=True)
         return self.git(
             '-c',
             'user.name=Garmin release',
@@ -75,7 +108,7 @@ class Store:
             tree,
             *(['-p', parent] if parent else []),
             '-m',
-            json_bytes(data).decode(),
+            subject,
             cwd=checkout,
         )
 
