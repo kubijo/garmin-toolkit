@@ -13,10 +13,12 @@ import tarfile
 import tempfile
 import threading
 import unittest
+import urllib.request
+from collections.abc import Callable
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import haos_app_session as session
 import haos_app_vm as vm
@@ -273,6 +275,64 @@ class HaosTests(unittest.TestCase):
             ):
                 session.wait_for_core(process, process, 'http://127.0.0.1:18123', float('inf'), onboarding=onboarding)
             request.assert_called_once_with('http://127.0.0.1:18123', path)
+
+    def test_onboarding_allows_slow_user_creation_without_repeating_mutations(self) -> None:
+        paths: list[str] = []
+        budgets: list[float] = []
+
+        def respond(request: urllib.request.Request, *, timeout: float) -> io.BytesIO:
+            path = request.selector
+            paths.append(path)
+            budgets.append(timeout)
+            if path == '/api/onboarding/users':
+                if timeout < 45:
+                    raise TimeoutError('User creation needs 45 seconds')
+                response: dict[str, object] = {'auth_code': 'disposable-code'}
+            elif path == '/auth/token':
+                response = {'access_token': 'disposable-token', 'expires_in': 1800}
+            else:
+                response = {}
+            return io.BytesIO(json.dumps(response).encode())
+
+        with (
+            patch.object(session.HTTP, 'open', side_effect=respond),
+            patch.object(session.time, 'monotonic', side_effect=[0.0, 45.0, 46.0, 47.0, 48.0]),
+        ):
+            tokens = session.onboard('http://127.0.0.1:18123', 'admin', deadline=120.0)
+        self.assertEqual(tokens['access_token'], 'disposable-token')
+        self.assertEqual(
+            paths,
+            [
+                '/api/onboarding/users',
+                '/auth/token',
+                '/api/onboarding/core_config',
+                '/api/onboarding/analytics',
+                '/api/onboarding/integration',
+            ],
+        )
+        self.assertEqual(budgets, [120.0, 75.0, 74.0, 73.0, 72.0])
+
+    def test_onboarding_stops_at_the_shared_deadline_without_repeating_user_creation(self) -> None:
+        response = io.BytesIO(json.dumps({'auth_code': 'disposable-code'}).encode())
+        with (
+            patch.object(session.HTTP, 'open', return_value=response) as request,
+            patch.object(session.time, 'monotonic', side_effect=[0.0, 120.0]),
+            self.assertRaisesRegex(TimeoutError, '/auth/token exceeded the startup window'),
+        ):
+            session.onboard('http://127.0.0.1:18123', 'admin', deadline=120.0)
+        request.assert_called_once()
+        self.assertEqual(request.call_args.args[0].selector, '/api/onboarding/users')
+
+    def test_onboarding_timeout_identifies_the_request_without_repeating_it(self) -> None:
+        failure = TimeoutError('timed out')
+        with (
+            patch.object(session.HTTP, 'open', side_effect=failure) as request,
+            patch.object(session.time, 'monotonic', return_value=0.0),
+            self.assertRaisesRegex(TimeoutError, '/api/onboarding/users timed out') as stopped,
+        ):
+            session.onboard('http://127.0.0.1:18123', 'admin', deadline=120.0)
+        request.assert_called_once()
+        self.assertIs(stopped.exception.__cause__, failure)
 
     def test_image_admission_rejects_wrong_architecture_and_metadata(self) -> None:
         archive = self.image()
@@ -674,6 +734,86 @@ class HaosTests(unittest.TestCase):
         with patch('haos_app_session.run_session', side_effect=subprocess.TimeoutExpired('owned', 1)):
             self.assertEqual(session.main(options), 124)
         self.assertEqual(signal.getsignal(signal.SIGTERM), previous)
+
+    def test_populated_workflow_has_one_bounded_deadline_after_ingress_and_cleans_up_on_expiry(self) -> None:
+        for expire in (False, True):
+            with self.subTest(expire=expire):
+                self.check_workflow_deadline(expire=expire)
+
+    def check_workflow_deadline(self, *, expire: bool) -> None:
+        clock = [0.0]
+        lifetimes: list[int] = []
+        process, browser, tunnel = (Mock(spec=subprocess.Popen) for _ in range(3))
+        options = session.Check(app_archive=Path('not-used'), evidence_directory=self.root / str(expire), timeout=60)
+
+        def boot(
+            _options: vm.Options,
+            runtime: Path,
+            _image: Path,
+            *,
+            on_started: Callable[[subprocess.Popen[str], Path, int, str], None],
+            on_boot: object,
+            lifetime: int,
+            overlay_limit: int,
+        ) -> None:
+            lifetimes.append(lifetime)
+            (runtime / 'installation.json').write_text(
+                json.dumps(
+                    {
+                        'image_reference': 'disposable',
+                        'registry_digest': 'sha256:' + 'a' * 64,
+                        'config_digest': 'sha256:' + 'b' * 64,
+                        'architecture': 'amd64',
+                    }
+                )
+            )
+            on_started(process, runtime / 'key', 2222, 'local_garmin_toolkit')
+
+        def ready(_browser: object, _evidence: Path, checkpoint: str = 'ready.json') -> None:
+            if checkpoint == 'ready.json':
+                self.assertEqual(timer.call_args_list, [call(signal.ITIMER_REAL, 60)])
+                clock[0] = 55.0
+
+        def exercise(*_args: object, reboot: Callable[[], dict[str, str]], **_kwargs: object) -> None:
+            self.assertEqual(timer.call_args_list, [call(signal.ITIMER_REAL, 60), call(signal.ITIMER_REAL, 60)])
+            for elapsed in (70.0, 90.0):
+                clock[0] = elapsed
+                reboot()
+                self.assertEqual(core.call_args.args[3], 115.0)
+            self.assertEqual(timer.call_args_list, [call(signal.ITIMER_REAL, 60), call(signal.ITIMER_REAL, 60)])
+            if expire:
+                session.workflow_expired(signal.SIGALRM, None)
+
+        with (
+            patch.object(vm, 'SCRATCH_ROOT', self.root),
+            patch.object(vm, 'validate_options', return_value=PLATFORMS['amd64']),
+            patch.object(vm, 'prepare_runtime', return_value=self.root / 'image'),
+            patch.object(vm, 'boot', side_effect=boot),
+            patch.object(vm, 'guest_data', return_value={}),
+            patch.object(vm, 'reboot_guest', return_value={'before': 'one', 'after': 'two'}),
+            patch.object(vm, 'assert_started'),
+            patch.object(vm, 'assert_installed_image'),
+            patch.object(session, 'launch_browser', return_value=browser),
+            patch.object(session, 'launch_tunnel', return_value=tunnel),
+            patch.object(session, 'wait_browser', side_effect=ready),
+            patch.object(session, 'wait_for_core') as core,
+            patch.object(session, 'onboard', return_value={}),
+            patch.object(session, 'stop_group') as stop,
+            patch.object(session.haos_workflow, 'exercise', side_effect=exercise),
+            patch.object(session.time, 'monotonic', side_effect=lambda: clock[0]),
+            patch.object(session.signal, 'signal', return_value=signal.SIG_DFL),
+            patch.object(session.signal, 'setitimer') as timer,
+        ):
+            self.assertEqual(session.main(options), 124 if expire else 0)
+        self.assertEqual(lifetimes, [150])
+        self.assertEqual(
+            timer.call_args_list,
+            [call(signal.ITIMER_REAL, 60), call(signal.ITIMER_REAL, 60), call(signal.ITIMER_REAL, 0)],
+        )
+        stop.assert_any_call(browser)
+        stop.assert_any_call(tunnel)
+        self.assertEqual(list(self.root.glob('haos-session.*')), [])
+        self.assertEqual(list(self.root.glob('c.*')), [])
 
     def test_startup_failure_removes_session_scratch(self) -> None:
         options = session.Run(app_archive=Path('not-used'), verify_browser=False)

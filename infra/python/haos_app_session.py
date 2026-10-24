@@ -78,7 +78,7 @@ class Check(Run):
     """Verify populated ingress, app/HAOS restarts, and cold backup/restore, then clean up."""
 
     timeout: int = 1800
-    """Maximum startup and workflow time in seconds."""
+    """Maximum time for each of startup and the populated workflow, in seconds."""
 
     session_timeout: tyro.conf.Suppress[int] = 7200
     verify_browser: tyro.conf.Suppress[bool] = True
@@ -145,7 +145,11 @@ def request_json(
     *,
     token: str | None = None,
     form: bool = False,
+    deadline: float | None = None,
 ) -> object:
+    timeout = 30.0 if deadline is None else deadline - time.monotonic()
+    if timeout <= 0:
+        raise TimeoutError(f'Home Assistant {path} exceeded the startup window')
     headers = {'Content-Type': 'application/x-www-form-urlencoded' if form else 'application/json'}
     if token is not None:
         headers['Authorization'] = f'Bearer {token}'
@@ -156,8 +160,10 @@ def request_json(
     )
     request = urllib.request.Request(base + path, data=body, headers=headers)
     try:
-        with HTTP.open(request, timeout=30) as response:
+        with HTTP.open(request, timeout=timeout) as response:
             return json.loads(response.read())
+    except TimeoutError as error:
+        raise TimeoutError(f'Home Assistant {path} timed out') from error
     except urllib.error.HTTPError as error:
         with error:
             details = error.read(1000).decode(errors='replace')
@@ -194,7 +200,8 @@ def wait_for_core(
     raise TimeoutError('Home Assistant Core did not become ready within the startup window')
 
 
-def onboard(base: str, password: str) -> dict[str, object]:
+def onboard(base: str, password: str, *, deadline: float) -> dict[str, object]:
+    """Complete onboarding once, within the existing session deadline."""
     client_id = base + '/'
     user = object_response(
         request_json(
@@ -207,6 +214,7 @@ def onboard(base: str, password: str) -> dict[str, object]:
                 'client_id': client_id,
                 'language': 'en',
             },
+            deadline=deadline,
         )
     )
     tokens = object_response(
@@ -219,11 +227,12 @@ def onboard(base: str, password: str) -> dict[str, object]:
                 'client_id': client_id,
             },
             form=True,
+            deadline=deadline,
         )
     )
     access = str(tokens['access_token'])
-    request_json(base, '/api/onboarding/core_config', {}, token=access)
-    request_json(base, '/api/onboarding/analytics', {}, token=access)
+    request_json(base, '/api/onboarding/core_config', {}, token=access, deadline=deadline)
+    request_json(base, '/api/onboarding/analytics', {}, token=access, deadline=deadline)
     request_json(
         base,
         '/api/onboarding/integration',
@@ -232,6 +241,7 @@ def onboard(base: str, password: str) -> dict[str, object]:
             'redirect_uri': client_id + '?auth_callback=1',
         },
         token=access,
+        deadline=deadline,
     )
     tokens.update(
         hassUrl=base, clientId=client_id, expires=int(time.time() * 1000) + int(str(tokens['expires_in'])) * 1000
@@ -424,10 +434,10 @@ def run_session(options: Run) -> int:
             save_state(state_path, state)
 
         def started(process: subprocess.Popen[str], key: Path, ssh_port: int, app_slug: str) -> None:
-            nonlocal browser, tunnel
+            nonlocal browser, tunnel, deadline
             tunnel = launch_tunnel(process, key, ssh_port, http_port, evidence, deadline)
             wait_for_core(process, tunnel, base, deadline, onboarding=True)
-            tokens = onboard(base, str(state['password']))
+            tokens = onboard(base, str(state['password']), deadline=deadline)
             state['tokens'] = tokens
             state['url'] = base + '/app/' + app_slug
             state['app_slug'] = app_slug
@@ -440,6 +450,10 @@ def run_session(options: Run) -> int:
                 assert browser is not None
                 wait_browser(browser, evidence)
                 if isinstance(options, Check):
+                    deadline = time.monotonic() + options.timeout
+                    signal.signal(signal.SIGALRM, workflow_expired)
+                    signal.setitimer(signal.ITIMER_REAL, options.timeout)
+                    print(f'Authenticated ingress ready; populated workflow budget: {options.timeout}s.', flush=True)
                     if options.install_links:
                         # The link must offer a first install, rather than find an existing repository.
                         vm.run(vm.ssh_command(key, ssh_port, f'ha apps uninstall {app_slug}'), timeout=180)
@@ -516,7 +530,9 @@ def run_session(options: Run) -> int:
                 image,
                 on_started=started,
                 on_boot=booted,
-                lifetime=options.timeout + (0 if isinstance(options, Check) else options.session_timeout) + 30,
+                lifetime=(
+                    options.timeout + (options.timeout if isinstance(options, Check) else options.session_timeout) + 30
+                ),
                 overlay_limit=OVERLAY_LIMIT,
             )
         except BaseException:
@@ -569,6 +585,10 @@ def interrupted(_signal: int, _frame: object) -> None:
 
 def startup_expired(_signal: int, _frame: object) -> None:
     raise TimeoutError('The HAOS session exceeded its startup time limit')
+
+
+def workflow_expired(_signal: int, _frame: object) -> None:
+    raise TimeoutError('The populated HAOS workflow exceeded its time limit')
 
 
 def main(command: Run | Stop) -> int:

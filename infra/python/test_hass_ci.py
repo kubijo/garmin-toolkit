@@ -508,7 +508,7 @@ class CITests(unittest.TestCase):
         self.assertIn('--baseline-release', check.call_args_list[2].args)
         self.assertIn('/published-baseline/aarch64', check.call_args_list[2].args)
         self.assertIn('aarch64', check.call_args_list[2].args)
-        self.assertEqual(check.call_args_list[2].kwargs['timeout'], 1900)
+        self.assertEqual(check.call_args_list[2].kwargs['timeout'], 3700)
         self.assertIn('--timeout', check.call_args_list[2].args)
         package.assert_called_once()
         self.assertIn(f'index={index}\n', (self.root / 'outputs').read_text())
@@ -702,7 +702,7 @@ class CITests(unittest.TestCase):
             self.assertIn('--lifecycle', arguments)
             self.assertNotIn('--baseline-release', arguments)
             self.assertNotIn('--repository-url', arguments)
-            self.assertEqual(run.call_args.kwargs['timeout'], 1900)
+            self.assertEqual(run.call_args.kwargs['timeout'], 3700)
 
     def test_native_acceptance_rejects_invalid_inputs_before_metadata_or_vm_start(self) -> None:
         directory = self.scratch / 'native'
@@ -1040,7 +1040,7 @@ class CITests(unittest.TestCase):
         self.assertEqual(arguments[arguments.index('--registry-digest') + 1], staging['index_digest'])
         self.assertEqual(arguments[arguments.index('--registry-tag') + 1], staging['tag'])
         self.assertNotIn('--lifecycle', arguments)
-        self.assertEqual(accept.call_args.kwargs['timeout'], 1900)
+        self.assertEqual(accept.call_args.kwargs['timeout'], 3700)
         verify.assert_called_once_with(options.evidence_directory, receipt, staging)
         native.assert_not_called()
         promote.assert_not_called()
