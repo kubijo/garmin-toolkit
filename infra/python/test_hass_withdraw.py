@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import hass_publish as publication
 from hass_release_contract import Release
-from hass_store import FENCE, Store
+from hass_store import FENCE, STATE_FILE, Store
 from json_data import Object, object_value, read_json
 
 
@@ -67,7 +67,7 @@ class WithdrawalTests(unittest.TestCase):
         return object_value(
             json.loads(
                 publication.git(
-                    '--git-dir=' + str(self.remote), 'show', '-s', '--format=%B', publication.branch_head(FENCE)
+                    '--git-dir=' + str(self.remote), 'show', publication.branch_head(FENCE) + ':' + STATE_FILE
                 )
             )
         )

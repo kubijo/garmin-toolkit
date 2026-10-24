@@ -10,8 +10,7 @@ assembly, HAOS acceptance, signed provenance, and independent draft verification
 repository installation. The release includes signed inventories, dependency sources, acceptance reports, runtime
 versions, and dark app captures.
 
-Published release qualification covers AMD64. Published artifacts retain their original source and dependency versions;
-subsequent source changes require a new release to reach installed apps.
+That release's qualification covers AMD64.
 
 ## Combined AMD64/ARM64 preflight
 
@@ -21,9 +20,9 @@ passed local lifecycle and staged Git/GHCR installation checks, including restar
 and exact downloads. Restored captures at `1024×873` matched apart from generation time. Cleanup removed the candidate
 branch and owned guest scratch; public refs remained unchanged.
 
-AMD64 tested migration from authenticated v0.1.1. ARM64 used the documented metadata-only fixture and reported
-`migration_compatibility: false`. A signed two-platform release and public installation checks remain in the
-[publication plan](../plans/device-expansion-and-publication.md#hass-experimental-release).
+AMD64 tested migration from authenticated v0.1.1. ARM64 used the metadata-only fixture and reported
+`migration_compatibility: false`; these results do not establish older-binary or schema migration compatibility on
+ARM64.
 
 ## Withdrawal acceptance
 
@@ -40,8 +39,20 @@ owned scopes, listeners, browser, and VM scratch were removed.
 At `1024×873`, header and navigation pixels matched browser-compositor images before and after app-owned readback
 through withdrawal, replacement, restart, reboot, and restore.
 
-This covers Supervisor and local Git; [public GitHub/GHCR recovery](../plans/device-expansion-and-publication.md)
-remains open.
+This check used Supervisor and a private local Git Store.
+
+## Recovery checks
+
+The [hosted recovery drill](https://github.com/kubijo/garmin-toolkit/actions/runs/39778681047) at `cadc189` preserved
+public refs and removed its fixtures. Tiny OCI images, JSON assets, and an injected qualification failure exercised
+publication coordination and cleanup; they did not exercise Supervisor installation failure, signed release recovery, or
+service outages.
+
+The [signed installation check](../../infra/integration/hass/README.md#signed-installation-recovery) passed on AMD64
+with HAOS 18.3, Supervisor 2026.10.3, and Core 2026.10.2, using signed
+[v0.1.1](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.1) →
+[v0.1.2](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.2). It exercised a Supervisor update failure,
+metadata rollback, and retry with a private Git Store; public GitHub/GHCR refs remained unchanged.
 
 ## Dependency sources
 
@@ -80,10 +91,11 @@ Retain the complete notices and their copyright, attribution, and font naming co
 
 ## Distribution choices
 
-HASS uses GHCR and GitHub Releases for AMD64 experimental releases. ARM64 has branch runtime evidence; public
-qualification requires its first signed release. The [README](../../README.md#home-assistant) and
+HASS distribution uses GHCR and GitHub Releases. Each release's signed inventory and acceptance evidence define its
+qualified architectures and runtime versions. The [README](../../README.md#home-assistant) and
 [quickstart](../../apps/garmin-hass/addon/DOCS.md#install-and-open) provide My Home Assistant links for
 `https://github.com/kubijo/garmin-toolkit#hass-apps`. Users confirm repository addition and installation. GitHub is the
 only project hosting.
 
-Desktop publication still needs supported-host, channel, and signing decisions; mobile remains separate.
+Desktop and mobile distribution decisions belong to the
+[publication plan](../plans/device-expansion-and-publication.md#hardware-and-other-distribution).

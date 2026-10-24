@@ -62,6 +62,7 @@ from hass_release_contract import (
 from hass_release_source import admit_source, archive_source, source_bytes
 from hass_repository import Repository, generate_repository
 from hass_sources import BundleSources, bundle_sources, verify_sources
+from hass_store_migration import CheckpointPublication, checkpoint_publication
 from json_data import MAX_JSON_BYTES, is_array, is_object, object_value, unique_object
 
 
@@ -106,6 +107,7 @@ class Options:
             | Annotated[PromoteDraft, tyro.conf.subcommand('promote-draft', prefix_name=False)]
             | Annotated[CleanupStaging, tyro.conf.subcommand('cleanup-staging', prefix_name=False)]
             | Annotated[WithdrawPublication, tyro.conf.subcommand('withdraw', prefix_name=False)]
+            | Annotated[CheckpointPublication, tyro.conf.subcommand('checkpoint-publication', prefix_name=False)]
         ),
         tyro.conf.arg(name=''),
     ]
@@ -288,11 +290,16 @@ def main(
     | RollbackStore
     | CleanupStaging
     | PromoteDraft
-    | WithdrawPublication,
+    | WithdrawPublication
+    | CheckpointPublication,
 ) -> int:
     output = TerminalOutput()
     output.install_tracebacks()
     try:
+        if isinstance(options, CheckpointPublication):
+            checkpoint_publication(options)
+            output.panel(Text(str(options.output / 'checkpoint.json')), title='Publication history checkpointed')
+            return 0
         if isinstance(options, WithdrawPublication):
             withdraw_publication(options)
             output.panel(

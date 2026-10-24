@@ -50,6 +50,7 @@ let
       "hass_sources"
       "hass_source_parts"
       "hass_store"
+      "hass_store_migration"
       "hass_publish"
       "hass_preflight"
       "hass_ci"

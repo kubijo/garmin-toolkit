@@ -1,7 +1,8 @@
 # HASS release candidates
 
 Build, verify, and publish candidates under the
-[publication plan](../../docs/plans/device-expansion-and-publication.md). Commands reject existing output directories.
+[publication plan](../../docs/plans/device-expansion-and-publication.md). Candidate commands reject existing output
+directories.
 
 ## GitHub publication
 
@@ -9,7 +10,7 @@ Before tagging, dispatch [HASS experimental release](../../.github/workflows/has
 with **Publish disabled**:
 
 ```sh
-gh workflow run hass-release.yml --ref dev -f publish=false
+gh workflow run hass-release.yml --ref BRANCH -f publish=false
 ```
 
 Branch preflight builds AMD64 and ARM64 images and sources, stages one combined index, tests HAOS lifecycle and
@@ -27,29 +28,25 @@ from `main`, matching workspace/app versions:
   a branch lease, and verify public installation on both architectures. Either failure restores the previous store
   metadata.
 
-CI is read-only. Publication is manual, serialized, and restricted to this repository. GHCR must allow anonymous pulls;
-the package's first creation may require a visibility change. Conflicts and incomplete drafts fail without replacing
-published bytes. Cleanup removes candidate branches and credentials.
+CI is read-only. Publication is manual, serialized, and restricted to this repository. GHCR must allow anonymous pulls.
+Conflicts and incomplete drafts fail without replacing published bytes. Cleanup removes candidate branches and
+credentials.
 
 For [focused ARM64 delivery acceptance](../integration/hass/README.md#staged-arm64-delivery), set `arm64_run` to a
 successful CI run ID with Publish and Recovery disabled. This reuses its native image without builds or promotion.
 
-Promotion journals intent before publication. The durable `hass-publication` state branch advances atomically with
-`hass-apps`; recovery advances that state even if the store still shows its previous head, blocking delayed pushes.
-Installation success records qualification remotely. Fresh retries recover unfinished attempts and preserve qualified
-metadata; unrelated changes stop recovery. Keep the state branch. To retry, dispatch the same tag with **Publish
-enabled**. Signed assets are reverified even for public releases; published bytes remain unchanged. Cancellation allows
-graceful cleanup, then reclaims the acceptance scope and its bound VM scope, including detached descendants. Cleanup
-verifies both cgroups are empty before removing their private runtime and browser scratch; evidence remains separate. If
-scope cleanup fails, scratch is retained and its path is reported. The VM retains its four-CPU/six-GiB limit; the
-acceptance scope uses two CPUs/six GiB.
+The `hass-publication` branch records intent and qualification in `publication.json` with readable commit subjects.
+Readers also accept legacy state JSON in empty-tree commit messages. State advances atomically with `hass-apps`;
+recovery advances it even when Store metadata is unchanged to fence delayed pushes. Keep the state branch and follow
+[publication recovery](#publication-recovery) for retries.
+
+Cancellation reclaims owned acceptance and VM scopes, including detached descendants. Scratch is removed only after both
+scopes are empty; cleanup failure retains it and reports its path. Evidence remains outside disposable scratch.
 
 [Python phases](../python/hass_ci.py) own orchestration; [runner setup](../ci/runner.sh) owns host preparation and
-cleanup. AMD64 candidates test upgrades from published v0.1.1, authenticated against its signed inventory and exact
-source tag. ARM64 uses the metadata-only fixture because no older ARM64 image has been published; its report must
-explicitly set `migration_compatibility: false`. Both architectures exercise upgrades, backup recovery, and reinstall
-with synthetic profile, route, and Course data. After the first ARM64 publication, pin that signed baseline and replace
-this fixture exception with authenticated older-binary/schema migration checks.
+cleanup. Lifecycle checks exercise upgrades, backup recovery, and reinstall with synthetic profile, route, and Course
+data. Published baselines are authenticated against their signed inventory and source tag. Metadata-only fixtures must
+report `migration_compatibility: false`; they do not establish older-binary or schema migration compatibility.
 
 Native inputs and sources use `amd64/` and `aarch64/` directories. The signed acceptance archive contains both
 directories, each with runtime versions, reports, and dark captures, plus one shared staging journal. Verification
@@ -103,8 +100,8 @@ Get the derivation with `nix eval --raw .#garmin-hass-app-image.drvPath`. Record
 runtime configuration, and SBOM, then exports the archive, SPDX file, and `native-build.json`. Receipts bind source,
 lockfile, archive/SBOM hashes, and config/manifest digests. Branch builds use `source.tag: null`.
 
-CI exports `garmin-hass-native-ARCH` from native AMD64/ARM64 builders capped at two CPUs / six GiB. Producing jobs
-supply their actual `--workflow-run`; local builds omit it.
+CI exports `garmin-hass-native-ARCH` from native AMD64/ARM64 builders. Producing jobs supply their actual
+`--workflow-run`; local builds omit it.
 
 ## Dependency source bundles
 
@@ -204,7 +201,7 @@ Verify using an independently obtained manifest hash:
 just release::verify \
     --directory .tmp/hass-release-candidate \
     --manifest-sha256 EXPECTED_RELEASE_JSON_SHA256 \
-    --version 0.1.0 \
+    --version VERSION \
     --commit EXPECTED_FULL_SOURCE_COMMIT
 ```
 
@@ -221,7 +218,7 @@ independently trusted version and commit:
 just release::verify-provenance \
     --directory .tmp/hass-release-candidate \
     --bundles .tmp/hass-release-attestations \
-    --version 0.1.0 \
+    --version VERSION \
     --commit EXPECTED_FULL_COMMIT
 ```
 
@@ -231,9 +228,7 @@ manifests. `acceptance.sigstore.jsonl` authenticates `haos-acceptance.tar.gz` be
 dark captures.
 
 `gh attestation verify` enforces this repository's `hass-release.yml`, exact tag and source/signer commit, GitHub OIDC,
-SLSA v1, and hosted runners. It needs registry/trust-root access. Tagged issuance and verification passed for
-[v0.1.1](../../docs/research/publication-readiness.md#published-amd64-release); each new candidate must pass the same
-checks.
+SLSA v1, and hosted runners. It needs registry/trust-root access. Every candidate must pass these checks.
 
 ## Publication recovery
 
@@ -262,8 +257,30 @@ failed.
 The disposable-Git tests in [publication](../python/test_hass_publish.py),
 [CI orchestration](../python/test_hass_ci.py), and [withdrawal](../python/test_hass_withdraw.py) cover leases, atomic
 updates, interrupted pushes, failed acceptance, retries, and stale recovery. They do not qualify GitHub/GHCR outages or
-Supervisor behavior; live failure recovery remains in the
-[publication plan](../../docs/plans/device-expansion-and-publication.md#hass-experimental-release).
+Supervisor behavior.
+
+### Publication history checkpoint
+
+Home Assistant installation URLs require `hass-apps`. Before checkpointing `hass-publication`, deploy a compatible
+publisher and finish active or queued release runs. The first state-file write makes legacy tagged publishers
+incompatible; finish releases using them before writing the new format. Subsequent publication requires compatible tags.
+
+Inspect the current qualified state and read both exact heads as in [withdrawal](#release-withdrawal), then run:
+
+```sh
+just release::checkpoint-publication \
+    --store-commit EXACT_HASS_APPS_COMMIT \
+    --state-commit EXACT_HASS_PUBLICATION_COMMIT \
+    --output .tmp/publication-checkpoint
+```
+
+The command rejects unfinished or unqualified state and active or queued publication workflows. It atomically replaces
+the state branch with one root commit and appends a Store commit with identical files. Both refs must move to enforce
+both exact leases on the server. Source history and release tags remain untouched.
+
+Keep `checkpoint.bundle` and `checkpoint.json` together: they preserve the old history and exact replacement objects. If
+a push response is lost, rerun the same command with the same output directory. It retries those objects or recognizes
+the completed update; competing changes stop the operation. This guarded checkpoint is the sole history-rewrite path.
 
 ### Recovery drill
 
@@ -272,7 +289,7 @@ conflicts, incomplete drafts, interrupted preparation, lost atomic-push replies,
 competing updates. Dispatch after pushing the tested revision:
 
 ```sh
-gh workflow run hass-release.yml --repo kubijo/garmin-toolkit --ref dev -f recovery=true -f publish=false
+gh workflow run hass-release.yml --repo kubijo/garmin-toolkit --ref BRANCH -f recovery=true -f publish=false
 ```
 
 Run/attempt IDs scope two `hass-recovery-RUN-ATTEMPT-{apps,state}` branches, a `hass-recovery-RUN-ATTEMPT` tag and draft
@@ -281,15 +298,12 @@ a GitHub-hosted Linux runner with its repository token and shares publication co
 rejected; public store/release refs must stay unchanged.
 
 Cleanup checks recorded commits, exact leases, asset bytes, and package versions, retaining unexpected changes.
-Credentials are removed even if Nix cannot start. Both `result.json` and `cleanup.json` must pass in the seven-day
+Credentials are removed even if Nix cannot start. Both `result.json` and `cleanup.json` must pass in the
 `hass-recovery-evidence` artifact; cleanup failure fails the job.
 
-[Hosted validation](https://github.com/kubijo/garmin-toolkit/actions/runs/39778681047) on `cadc189` passed, preserving
-public refs and removing all fixtures. Tiny OCI images, JSON assets, and an injected qualification failure do not
-qualify real Supervisor installation failure, signed release recovery, or service outages.
-
 The [signed installation check](../integration/hass/README.md#signed-installation-recovery) uses authenticated public
-images with a private store to exercise a Supervisor update failure, rollback, and retry.
+images with a private store to exercise a Supervisor update failure, rollback, and retry. Validation scope is recorded
+in [recovery evidence](../../docs/research/publication-readiness.md#recovery-checks).
 
 ## Release withdrawal
 
