@@ -2,12 +2,18 @@
 
 ## Install and open
 
-The experimental [v0.1.1 release](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.1) supports AMD64. It was
-qualified on Home Assistant OS 18.3 with Core and Supervisor 2026.10.2: repository installation, authenticated ingress,
-Course downloads, app/host restarts, and backup/restore.
+Choose an experimental release whose signed inventory lists your architecture: AMD64 or ARM64. Per-architecture
+acceptance reports accompany the release. Runtime checks cover repository installation, authenticated ingress, Course
+downloads, app/host restarts, and backup/restore on Home Assistant OS 18.3, Core 2026.10.2, and Supervisor 2026.10.3.
 
-1. [Add the repository][hass-install] to your Home Assistant instance. Confirm the repository URL in its app store.
-2. [Open Garmin Toolkit's app page][hass-app], then install and start it.
+1. Add the repository to your Home Assistant instance. Confirm the repository URL in its app store.
+
+   [![Add the Garmin Toolkit repository to Home Assistant][hass-install-badge]][hass-install]
+
+2. Open Garmin Toolkit's app page, then install and start it.
+
+   [![Open Garmin Toolkit's app page in Home Assistant][hass-app-badge]][hass-app]
+
 3. Open its web interface through Home Assistant ingress.
 
 My Home Assistant asks for your instance address. To add the repository manually, use
@@ -60,4 +66,6 @@ operation, and a short redacted log. Exclude tokens, names, device identifiers, 
 and backups.
 
 [hass-app]: https://my.home-assistant.io/redirect/supervisor_app/?app=af63a031_garmin_toolkit
+[hass-app-badge]: https://my.home-assistant.io/badges/supervisor_app.svg
 [hass-install]: https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fkubijo%2Fgarmin-toolkit%23hass-apps
+[hass-install-badge]: https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg
