@@ -274,7 +274,7 @@ def native_acceptance(options: Options) -> None:
     if options.image is not None:
         arguments.extend(('--image', str(options.image)))
     with phase('Test native image installation and lifecycle in HAOS'):
-        acceptance(options.build_directory, options.evidence_directory, *arguments, timeout=1900)
+        acceptance(options.build_directory, options.evidence_directory, *arguments, timeout=3700)
 
 
 def download_delivery_build(options: Options) -> Object:
@@ -400,7 +400,7 @@ def delivery(options: Options) -> None:
     if options.image is not None:
         arguments.extend(('--image', str(options.image)))
     with phase('Verify staged ARM64 Git and GHCR installation in HAOS'):
-        acceptance(options.build_directory, options.evidence_directory, *arguments, timeout=1900)
+        acceptance(options.build_directory, options.evidence_directory, *arguments, timeout=3700)
         verify_delivery(options.evidence_directory, receipt, staging)
     if run('git', 'ls-remote', '--refs', REMOTE, *protected, capture=True) != before:
         raise RuntimeError('Published HASS refs changed during ARM64 delivery qualification')
@@ -457,7 +457,7 @@ def publication_acceptance(directory: Path, evidence: Path, architecture: str, *
         architecture,
         *arguments,
         *budget,
-        timeout=1900 if architecture == 'aarch64' else 7200,
+        timeout=3700 if architecture == 'aarch64' else 7200,
     )
 
 

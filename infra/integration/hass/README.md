@@ -107,6 +107,11 @@ Keep the receipt, archive, and SBOM together. `--build-receipt` verifies their f
 architecture/config digest, and SBOM against committed source version, lockfile, and notices. Fetch the recorded commit
 first: PR builds record GitHub's tested merge commit. The retained receipt is unsigned; local images can omit it.
 
+`--timeout` bounds startup and the populated workflow separately, defaulting to thirty minutes each. The workflow
+deadline starts after authenticated ingress is verified and includes all restarts, reboots, and recovery checks;
+individual operations do not reset it. Onboarding requests use the remaining startup budget without retrying mutations.
+The VM and host controller have independent lifetime limits and retain evidence outside disposable scratch.
+
 The test creates a profile, imports the [GPX fixture](../../../crates/garmin-gpx/tests/fixtures/candidates.gpx),
 generates a FIT Course, and downloads both artifacts. It repeats state/download checks after app restart, HAOS reboot,
 and cold backup/restore. Reboot must change the kernel boot ID and automatically start the same image before ingress
