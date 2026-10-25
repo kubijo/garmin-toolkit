@@ -1,14 +1,12 @@
 # Home Assistant add-on and hardware acceptance
 
-The [HASS experimental release](device-expansion-and-publication.md#hass-experimental-release) owns release artifacts,
-hashes/provenance, the installable app repository, and registry-based acceptance. This plan owns physical-device and
-platform qualification.
+The [release pipeline](../../infra/release/README.md) owns artifacts, provenance, the installable app repository, and
+registry-based acceptance. [Publication readiness](../research/publication-readiness.md) records HAOS guest evidence.
+This plan owns physical-device and platform qualification.
 
-1. Run the [populated HAOS check](../../infra/integration/hass/README.md#populated-haos-workflow) with the CI-built
-   ARM64 image on ARM64 HAOS.
-2. On Raspberry Pi 5, verify USB permissions and ownership, device disconnects, and the complete workflow. Do not assume
+1. On Raspberry Pi 5, verify USB permissions and ownership, device disconnects, and the complete workflow. Do not assume
    desktop GIO mounts exist in the app.
-3. Complete owned-hardware FIT Course transfer checks: cancellation, interrupted and partial writes, disconnect and
+2. Complete owned-hardware FIT Course transfer checks: cancellation, interrupted and partial writes, disconnect and
    recovery, readback, and firmware discovery after recovery. The
    [single successful Edge 1050 transfer](../research/usb-sync.md#course-transfer-evidence) establishes only the happy
    path. Verify initial profile pairing and reassociation on physical media separately from Course transfer.

@@ -1,12 +1,5 @@
 # Device expansion and publication
 
-## HASS experimental release
-
-Application authentication, credential custody, encryption, and Connect remain deferred.
-
-- Qualify older-binary upgrades and data recovery on both architectures using authenticated published baselines.
-- [Checkpoint legacy publication history](../../infra/release/README.md#publication-history-checkpoint).
-
 ## Hardware and other distribution
 
 1. Extend [map evidence](../research/usb-sync.md#map-maintenance-evidence) to full fēnix 8 Solar and Edge 1050
@@ -20,9 +13,9 @@ Application authentication, credential custody, encryption, and Connect remain d
    fields supported by adapter and hardware evidence.
 4. Run the local Connect IQ probe after HASS HTTPS exists.
 5. Choose desktop channels, signing, and attestations using [CLI evidence](distribution.md). Extend
-   [NVIDIA/software-Mesa checks](../architecture/build-system.md#desktop-packaging) to other non-Nix hosts and aarch64.
-   Verify user namespaces, file dialogs, production USB/GVfs, and launcher metadata. With the main window covered, test
-   Developer tools cursor changes, selection, scrolling, clicks, folder navigation, and close/reopen. Keep driver
-   integration independent of the build host; track the AMD-to-NVIDIA failure reproduced in `vkcube` separately.
+   [packaging checks](../research/desktop-packaging.md) to other non-Nix hosts and aarch64. Verify user namespaces, file
+   dialogs, production USB/GVfs, and launcher metadata. With the main window covered, test Developer tools cursor
+   changes, selection, scrolling, clicks, folder navigation, and close/reopen. Keep driver integration independent of
+   the build host; track the AMD-to-NVIDIA failure reproduced in `vkcube` separately.
 6. Audit configuration, fixtures, identities, URLs, images, notices, and provenance.
 7. Publish the support matrix and adaptation guide. Mobile requires a separate decision.
