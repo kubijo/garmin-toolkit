@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4
+
+- Require signed release baselines for AMD64 and ARM64 upgrade qualification.
+- Add recoverable publication-history checkpoints and checks for recovery, withdrawal, and replacement after cutover.
+- Clarify release-specific compatibility and recovery guidance.
+
 ## 0.1.3
 
 - Add experimental ARM64 images alongside AMD64.
