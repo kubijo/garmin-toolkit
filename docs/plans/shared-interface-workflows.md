@@ -41,9 +41,11 @@ tool gaps are optional improvements for unattended checks.
 
 ### Deferred gallery hot reload
 
-Gallery hot reload is parked and does not block desktop or HASS work. The Linux measurements and intermittent reload
-pause are recorded in [build performance](../research/build-performance.md). If desktop hot reload becomes a priority,
-isolate the missed wake, verify workspace interaction and first-visible-frame timing, and repeat the checks on macOS.
+Desktop hot reload is deferred. Before reusing the gallery loader, recheck the
+[historical reload pauses](../research/build-performance.md#gallery-reload-measurement) on the selected version and
+diagnose any recurrence. Prove callback and `tracing` lifetimes, retained profile/map/scroll/window state, compile-error
+recovery, visible-frame latency, and memory across repeated Linux/macOS reloads. Incompatible type edits require
+restart.
 
 ### Deferred Wayland activation work
 

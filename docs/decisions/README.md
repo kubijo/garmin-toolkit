@@ -1,7 +1,6 @@
 # Decisions
 
-These records explain durable choices whose tradeoffs are still relevant. [Architecture](../architecture/README.md)
-describes current behavior, [plans](../plans/README.md) own unfinished work, and Git retains retired decisions.
+Rationale and tradeoffs for lasting choices.
 
 ## Boundaries and safety
 

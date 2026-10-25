@@ -72,11 +72,9 @@ Manifest, USB, MTP, and FIT IDs are diagnostic; none identifies an application p
 
 ### Demo pairing acceptance
 
-On 2026-10-04, the Nix-packaged HASS demo reassigned the mock watch from Alex Rider to Sam Runner through the
-confirmation dialog, then back to Alex. The host created `pairing-000001.toml` and `pairing-000002.toml` with revisions
-one and two and the same device UUID. The original `pairing.toml` kept its SHA-256 hash, and the refreshed UI showed
-each effective profile while hiding the pairing action for that profile. The browser tab initially ran an older bundle;
-reloading it exposed the current pairing action. This verifies the demo flow, not the HASS add-on or physical media.
+The Nix-packaged HASS demo verified confirmed profile reassignment and reversal: numbered revisions retained the device
+UUID, the original marker's SHA-256 stayed unchanged, and refreshed UI showed the effective profile. This qualifies the
+demo flow only; app-image and physical-media acceptance are separate.
 
 ## Existing adapters
 

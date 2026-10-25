@@ -6,8 +6,6 @@ Experimental, unofficial Linux tools for Garmin devices and data:
 - `garmin-desktop`: local activity and route management;
 - `garmin-hass`: experimental Home Assistant app.
 
-Applications compose the reusable crates under `crates/`.
-
 ## Home Assistant
 
 [![Add the Garmin Toolkit repository to Home Assistant][hass-install-badge]][hass-install]
@@ -66,14 +64,8 @@ observed service and download-authorization behavior behind a replaceable adapte
 
 ## Development
 
-```sh
-just qa::preflight
-just qa::full
-just qa::audit
-```
-
-See the [documentation index](docs/README.md) and [development safeguards](docs/development.md). The gallery renders
-terminal and desktop states without entering a shipped binary.
+See the [documentation index](docs/README.md) and [development workflow](docs/development.md). Just lists the available
+commands.
 
 ## License
 

@@ -1,17 +1,8 @@
 # Research records
 
-Each record preserves the applicable evidence needed to reproduce or delimit its claims:
-
-- question, date, source URL, and exact revision/version;
-- hardware, firmware, host, adapter, tools, and method;
-- license findings, observed results, failures, and uncertainty;
-- treatment: reuse, adapt, depend, reference, or reject;
-- links to decisions, fixtures, or implementation.
-
-One device tuple proves no family. Preserve materially different results.
-
-Keep traces, real FIT, identifiers, secrets, and locations private. Public fixtures need origin, license, sanitization,
-expectations, and review; prefer synthetic data.
+Records identify sources, versions, device/host tuples, methods, license findings, results, and limits needed to
+reproduce their claims. Preserve counterexamples; one device tuple proves no family. Follow the
+[fixture rules](../development.md#fixtures).
 
 ## Devices and transport
 
@@ -29,9 +20,10 @@ expectations, and review; prefer synthetic data.
 - [Garmin Connect](garmin-connect.md)
 - [GPX route plans](gpx-route-plans.md)
 - [Security hardening options (parked)](security-hardening.md)
-- [Publication readiness and source delivery options](publication-readiness.md)
+- [HASS publication qualification](publication-readiness.md)
 
 ## Interface and performance
 
 - [Build performance](build-performance.md)
 - [Browser map evidence](browser-map.md)
+- [Desktop packaging evidence](desktop-packaging.md)

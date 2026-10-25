@@ -21,10 +21,11 @@ Discovery exposes transport candidates. Attaching or mounting a recognizable Gar
 file transfers, network contact, and mutation remain explicit actions. Automatic deletion is forbidden. Cloud connectors
 stop on authentication or rate limits until explicit recovery.
 
-HASS targets Linux `aarch64`, with `x86_64` for development. Mobile, Bluetooth, and new device tuples require separate
-evidence. Connect IQ remains optional, source-only, and locally built. HASS serves the application UI and operational
-health, without publishing Garmin Toolkit data as entities, events, recorder entries, or external statistics. Domain
-publication needs a concrete automation use case and reviewed public contract.
+HASS targets Linux `aarch64` and `x86_64`; [release evidence](../research/publication-readiness.md) defines qualified
+versions and scope. Mobile, Bluetooth, and new device tuples require separate evidence. Connect IQ is optional,
+source-only, and locally built. HASS serves application UI and operational health, without publishing Garmin Toolkit
+data as entities, events, recorder entries, or external statistics. Domain publication needs a concrete automation use
+case and reviewed public contract.
 
 ## Crate ownership
 
