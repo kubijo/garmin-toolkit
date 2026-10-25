@@ -83,8 +83,7 @@ For the source HTML's pre-WASM failure surface, run the demo with `GARMIN_TOOLKI
 [runtime safeguards](../development.md#interface-validation). Optional arguments are the loopback URL, module path,
 viewport width, and viewport height. The helper uses a temporary Chrome profile, consumes a one-shot module failure, and
 saves loading, failure, and reload captures under `.tmp/hass-loader-capture/<width>x<height>/`. It removes its Chrome
-profile and process. This source-loader check does not establish that a packaged WASM bundle loads or recovers under
-ingress.
+profile and process. Packaged ingress requires the separate check below.
 
 For packaged acceptance, build the demo host and Trunk bundle into `.tmp`, run the host with
 `GARMIN_TOOLKIT_HASS_WEB_ROOT` pointing to that bundle and both `--control-server --ui-automation`, then run the
@@ -100,12 +99,8 @@ forwards only the nested browser path and WebSocket; its control routes return 4
 download, WASM and module failures with recovery, a browser-cache reload, and unused preload warnings. The app's control
 API supplies the ready-state PNGs; Chrome captures only pre-app loader screens. Results are saved under
 `.tmp/hass-loader-capture/packaged-ingress-<width>x<height>/`, and the Chrome profile is removed. Stop the host and
-proxy after the check. The bundled WASM and scripts have Brotli and gzip variants; the host serves them with
-`Vary: Accept-Encoding` and immutable caching while the entrypoint remains `no-store`. The packaged loader capture
-covers delayed WASM, failed WASM and module recovery, a warm browser-cache reload without preload warnings, and mobile
-and desktop viewports. Brotli, gzip, identity, `Vary`, and immutable asset caching passed through the nested proxy. A
-one-shot unknown-size Brotli response was chunked through ingress, but Trunk embeds the original WASM byte count in its
-bootstrap, so download progress remains determinate once bytes arrive.
+proxy after the check. [Asset compression and caching](build-system.md#browser-asset-graph) apply through ingress. An
+unknown-size WASM response can still show determinate progress because Trunk embeds its original byte count.
 
 For a redeploy check, keep the packaged bundle at `.tmp/hass-packaged-web` and the demo host executable at
 `.tmp/cargo-target/debug/garmin-hass`. Run `node infra/javascript/hass-redeploy-capture.mjs` under the same two-CPU,
@@ -201,9 +196,6 @@ On Wayland, pending control requests and opted-in background runs can redraw a c
 at up to 30 requests per second. Background permission expires after five seconds without a root frame. Cancellation can
 leave one redraw queued. Minimized windows and hidden child windows are not covered by this guarantee.
 
-Debug-desktop and AppImage acceptance passed covered navigation without polling, cancellation, capture, and Import GPX
-through the status overlay. At 720×480, `stationary-arrival` fails because `map.fit` is clipped.
-
 The runner removes AccessKit's root pixel-scale transform before ordinary egui input injection. Assertions read fresh
 layout after delivery. Deadlines, renderer errors, and readiness failures fail runs. Reports retain target bounds,
 pointer position, viewport/DPR, renderer, readiness, pauses and input/tree CPU. The target/crosshair overlay has no
@@ -230,8 +222,6 @@ timings and readiness do not establish presentation FPS or end-to-end input late
 just desktop::profile build demo
 just desktop::profile record demo NAME -- --gfx
 just desktop::profile analyze NAME
-just desktop::profile compare BEFORE AFTER
-just desktop::profile load NAME
 ```
 
 Reports: `.tmp/profiles/NAME`; `finalize NAME` rebuilds derived output. Recording is explicitly interactive. Targets on

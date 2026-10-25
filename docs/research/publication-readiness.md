@@ -1,53 +1,38 @@
-# Publication readiness
+# HASS publication qualification
 
-## Published AMD64 release
-
-The first public experimental release is [v0.1.1](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.1),
-published on 2026-10-20 from commit `6f300c9`. The
-[tagged candidate run](https://github.com/kubijo/garmin-toolkit/actions/runs/39377755631) passed native image/source
-assembly, HAOS acceptance, signed provenance, and independent draft verification. The
-[promotion run](https://github.com/kubijo/garmin-toolkit/actions/runs/39390440018) passed promotion and public
-repository installation. The release includes signed inventories, dependency sources, acceptance reports, runtime
-versions, and dark app captures.
-
-That release's qualification covers AMD64.
+Installation belongs to the [quickstart](../../apps/garmin-hass/addon/DOCS.md); publication, verification, and recovery
+procedures belong to the [release pipeline](../../infra/release/README.md).
 
 ## Published AMD64/ARM64 release
 
-Signed [v0.1.3](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.3), source `abcbebd`, qualified both
-architectures. Its [candidate run](https://github.com/kubijo/garmin-toolkit/actions/runs/39993142258) passed native
-image/source assembly, staged installation, lifecycle checks, signed provenance, and independent draft verification. The
-[promotion run](https://github.com/kubijo/garmin-toolkit/actions/runs/40083126056) verified public installation,
-populated ingress, restart, HAOS reboot, cold restore, and exact downloads on both architectures. Cleanup passed; source
-branches and release tags were preserved.
+Signed [v0.1.5](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.5), source `28a1bb2`, qualified both
+architectures. The [candidate run](https://github.com/kubijo/garmin-toolkit/actions/runs/40118061032) verified native
+images/sources and staged lifecycle behavior, rejected invalid provenance, and independently authenticated draft
+downloads. The [promotion run](https://github.com/kubijo/garmin-toolkit/actions/runs/40178263044) passed public
+installation, populated ingress, restart, HAOS reboot, cold restore, exact downloads, and cleanup. Anonymous GHCR pulls
+matched the signed index.
 
-AMD64 tested upgrades from authenticated v0.1.1. ARM64 used the metadata-only fixture and reported
-`migration_compatibility: false`; these results do not establish older-binary or schema migration compatibility on
-ARM64.
+Lifecycle checks upgraded authenticated published [v0.1.1](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.1)
+on AMD64 and [v0.1.3](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.3) on ARM64. Populated synthetic
+profiles, routes, Courses, and original downloads survived upgrade, restart, HAOS reboot, and cold restore. The checks
+also verified app-data removal, empty reinstall, backup retention, and recovery followed by another upgrade. The schema
+remained unchanged; future schema migrations and physical USB hardware require separate qualification.
 
 ## Withdrawal acceptance
 
-The [withdrawal check](../../infra/integration/hass/README.md#withdrawal-and-replacement) passed on AMD64 with HAOS
-18.3, Supervisor 2026.10.3, and Core 2026.10.2, using the authenticated published v0.1.2 baseline and the
-[dependency-update CI image](https://github.com/kubijo/garmin-toolkit/actions/runs/39745795968) under private Supervisor
-version `0.1.3`; the candidate's OCI bytes remain unchanged.
-
-Store refresh hid the app while its installed image, running state, populated profile/route/Course, and exact downloads
-survived. Replacement preserved them through restart, HAOS reboot, and cold restore that reversed post-backup mutations.
-Matching withdrawal retries preserved both refs; stale promotions failed before and after replacement qualification. All
-owned scopes, listeners, browser, and VM scratch were removed.
-
-At `1024×873`, header and navigation pixels matched browser-compositor images before and after app-owned readback
-through withdrawal, replacement, restart, reboot, and restore.
-
-This check used Supervisor and a private local Git Store.
+The AMD64 [private-Store check](../../infra/integration/hass/README.md#withdrawal-and-replacement) used signed v0.1.2
+and the [CI image](https://github.com/kubijo/garmin-toolkit/actions/runs/39745795968) under private version `0.1.3`,
+with unchanged OCI bytes, HAOS 18.3, Supervisor 2026.10.3, and Core 2026.10.2. Store withdrawal preserved the installed
+app, populated data, and downloads; replacement passed restart, reboot, and cold restore. Matching retries preserved
+refs; stale promotions failed. At `1024×873`, app-owned header/navigation pixels matched browser captures across these
+operations. Cleanup passed; public GitHub/GHCR refs were outside this check.
 
 ## Recovery checks
 
-The [hosted recovery drill](https://github.com/kubijo/garmin-toolkit/actions/runs/39778681047) at `cadc189` preserved
-public refs and removed its fixtures. Tiny OCI images, JSON assets, and an injected qualification failure exercised
-publication coordination and cleanup; they did not exercise Supervisor installation failure, signed release recovery, or
-service outages.
+The [hosted recovery drill](https://github.com/kubijo/garmin-toolkit/actions/runs/40087044019) exercised publication
+coordination, legacy history checkpoints, lost push replies, rollback, competing updates, withdrawal, and replacement.
+Public refs were preserved and fixture cleanup passed. Its tiny OCI images, JSON assets, and injected qualification
+failure did not exercise Supervisor installation failure, signed release recovery, or service outages.
 
 The [signed installation check](../../infra/integration/hass/README.md#signed-installation-recovery) passed on AMD64
 with HAOS 18.3, Supervisor 2026.10.3, and Core 2026.10.2, using signed
@@ -57,25 +42,11 @@ metadata rollback, and retry with a private Git Store; public GitHub/GHCR refs r
 
 ## Dependency sources
 
-The [inventory](../../infra/release/hass-files.toml) includes workspace source, Cargo/asset notices, and image-bound
-dependency sources, including inherited GVfs dependencies despite raw MTP. SBOM `NOASSERTION` records do not establish
-redistribution coverage; the build-only OCI writer is not shipped.
+Each release's signed inventory binds sources and notices to its shipped image, including inherited GVfs dependencies.
+See the [source report contract](../../infra/release/README.md#dependency-source-bundles). SBOM `NOASSERTION` alone does
+not establish redistribution coverage.
 
-Distribute sources, notices, build instructions, checksums, and attestations through GitHub Releases. Verify downloaded
-bundles against the release's signed inventory before publication.
-
-[AMD64 audit](https://github.com/kubijo/garmin-toolkit/actions/runs/39208332753), commit `7887023`, verified six
-downloaded parts, 10,905 source roots, 6,432 recipes, and exact coverage of the image's 232 runtime outputs. The
-inventory reports no unresolved runtime licenses. Native/WASM dependencies, Cargo/asset notices, and the lockfile
-matched the native receipt and committed source. The archive contains 1,115,421 entries and 21,063,075,840 decoded tar
-bytes. These measurements describe the pre-release audit at `7887023`; the published release has its own signed
-inventory and acceptance evidence.
-
-Source stream SHA-256: `3d584f3a5352333381b3e2162719456b6ebd730b80cf930b3493534b3d3767ff`. Image SHA-256:
-`100641a9ac45978967cb3fa7bc3ec48365b7bb129b1ac35ad6d306c423e10e40`.
-
-ICU 78.3's metadata-only license correction is guarded by its version and source SHA-256
-`3a2e7a47604ba702f345878308e6fefeca612ee895cf4a5f222e7955fabfe0c0`. Its
+The reviewed ICU 78.3 source SHA-256 is `3a2e7a47604ba702f345878308e6fefeca612ee895cf4a5f222e7955fabfe0c0`. Its
 [complete notice](https://github.com/unicode-org/icu/blob/release-78.3/LICENSE) declares Unicode-3.0 and additional
 third-party terms; preserve it inside the original source archive. The notice SHA-256 is
 `e55522d81edc687a341a4411e0776e54ca654e90147f354a90458aaced4116af`.
@@ -89,14 +60,3 @@ copies:
   `005f4b6b0141d1bd11d371bbf7d4f67947f85a4906b7f5465f942204cf918ba3`.
 
 Retain the complete notices and their copyright, attribution, and font naming conditions with distributed artifacts.
-
-## Distribution choices
-
-HASS distribution uses GHCR and GitHub Releases. Each release's signed inventory and acceptance evidence define its
-qualified architectures and runtime versions. The [README](../../README.md#home-assistant) and
-[quickstart](../../apps/garmin-hass/addon/DOCS.md#install-and-open) provide My Home Assistant links for
-`https://github.com/kubijo/garmin-toolkit#hass-apps`. Users confirm repository addition and installation. GitHub is the
-only project hosting.
-
-Desktop and mobile distribution decisions belong to the
-[publication plan](../plans/device-expansion-and-publication.md#hardware-and-other-distribution).

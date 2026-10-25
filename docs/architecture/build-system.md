@@ -46,10 +46,6 @@ Workspace Nix quality checks use the development profile for both dependency cac
 compile test dependencies too, so each check can reuse them. This avoids release-profile LTO for test executables;
 production package builds retain the release profile.
 
-Local QA prints elapsed time per stage. Manual Just commands inherit the caller's resource settings. Agent builds opt
-into `infra/just/memory-capped.sh`: two CPUs, memory throttling above 4 GiB, a 6 GiB hard limit, and 1 GiB swap. Nix
-daemon workers run outside that client scope.
-
 The CLI package and its dependency cache share the same locked package selection. Building the entire workspace in that
 cache would compile unused packages and unify dependency features differently from the final CLI build.
 
@@ -61,19 +57,16 @@ preparation, their next rebuild cannot overwrite those files. Preparation preser
 it after builds have stopped. The other accepted names are `gallery-live`, `nightly`, and `legacy`; `legacy` covers the
 old Nix-shell, gallery-check, web-profile, and temporary HASS target directories. This command only removes the named
 repository target cache. It does not prune Nix store outputs, Cargo's global cache, or build-profile reports.
-[Git maintenance](https://git-scm.com/docs/git-maintenance) manages Git objects and does not clean ignored build
-artifacts. [Cargo's global cache cleanup](https://doc.rust-lang.org/cargo/reference/config.html#cache) likewise does not
-currently track target artifacts.
 
 Gallery recipes add pinned FormatJS to the executable path, including hot-reload child builds. They retain the caller's
 Rust toolchain and graphics runtime; entering the full Nix development shell remains explicit.
 
-The standalone gallery pins `gallery`, `gallery-build`, and `gallery-macros` together at rs-gallery 0.14.0. It retains
-egui 0.36.2 and native AccessKit accessibility. Rustup and Nix select Rust 1.99.1; the workspace's declared minimum
-remains 1.98. Upstream's matching development pin does not declare a minimum Rust version. The gallery audit has only
-the three documented AccessKit/AT-SPI exceptions in [the gallery policy](../../infra/gallery/deny.toml), pending zbus 6
-migration. Obsolete exceptions and other advisory findings fail the audit; the application workspace has no such
-exceptions.
+The [standalone gallery](../../infra/gallery/Cargo.toml) pins `gallery`, `gallery-build`, and `gallery-macros` together,
+keeps egui compatible with upstream, and retains native AccessKit accessibility. Toolchain selection lives in
+[`rust-toolchain.toml`](../../rust-toolchain.toml); the workspace minimum lives in [`Cargo.toml`](../../Cargo.toml).
+Upstream's development pin does not declare a minimum Rust version. The
+[gallery audit policy](../../infra/gallery/deny.toml) has three AccessKit/AT-SPI exceptions pending zbus 6 migration;
+obsolete exceptions and other findings fail. The application workspace has no such exceptions.
 
 Root and gallery apply the same `vendor/` patches: bounded MVT decoding in `fast-mvt`, Wayland activation and a bounded
 control-request redraw override in `winit`. Each has `PATCHES.md`. Nix sources, license checks, and dependency-cache
@@ -87,22 +80,18 @@ full flake. The final `check` job requires every group and both native HASS imag
 
 CI uses [Magic Nix Cache](https://github.com/DeterminateSystems/magic-nix-cache-action) to cache individual Nix store
 paths in GitHub Actions storage. Completed builds can be saved even when later checks fail; unfinished derivations
-cannot. FlakeHub caching and diagnostic uploads are disabled. Cache population and speed must be verified in CI.
+cannot. FlakeHub caching and diagnostic uploads are disabled.
 
 ## Development build timing
 
 ```sh
 just dev::build-profile desktop LABEL
-just dev::build-profile web LABEL
 just dev::compiler-profile ui LABEL
-just dev::compiler-profile desktop LABEL
-just gallery::run --hot
 ```
 
-Build profiling accepts `web`, `desktop`, `hass`, `gallery`, `cli`, and `ui`; labels must be unique. Reports in
-`.tmp/build-profile/LABEL` contain HTML/Perfetto timelines, Cargo timings, commands, versions, and exit status.
-`--incremental 0` and `--config` support controlled comparisons. The wrapper preserves Cargo jobserver descriptors and
-forwards termination signals to the build process group.
+Use unique labels. Reports in `.tmp/build-profile/LABEL` contain HTML/Perfetto timelines, Cargo timings, commands,
+versions, and exit status. `--incremental 0` and `--config` support controlled comparisons. The wrapper preserves Cargo
+jobserver descriptors and forwards termination signals to the build process group.
 
 Compiler profiling uses the pinned nightly, [measureme](https://github.com/rust-lang/measureme), and the separate
 `.tmp/build-profile/nightly-target` cache. Only the selected library receives profiling flags. Reports include raw data,
@@ -136,9 +125,10 @@ static files, and minifies releases. HTML publishes `garmin-module`, `garmin-was
 `garmin-map-render-worker` paths. Hosts/workers consume those paths, never guessed filenames. Bindgen's implicit WASM
 URL becomes a file-loader import; an unrecognized generated shape fails the build. No unhashed aliases are published.
 
-HASS caches recognized fingerprinted assets immutably; HTML/errors use `no-store`. Deploy the whole bundle and restart
-HASS. `fingerprint-web.test.mjs` checks graph invalidation and emitted inventory; `GARMIN_TEST_WEB_ROOT` selects a built
-bundle for emitted tests, including `map-worker.test.mjs`.
+HASS serves Brotli/gzip asset variants with `Vary: Accept-Encoding` and caches recognized fingerprinted assets
+immutably; HTML/errors use `no-store`. Deploy the whole bundle and restart HASS. `fingerprint-web.test.mjs` checks graph
+invalidation and emitted inventory; `GARMIN_TEST_WEB_ROOT` selects a built bundle for emitted tests, including
+`map-worker.test.mjs`.
 
 ## Platforms and browser runs
 
@@ -158,9 +148,8 @@ Mold settings remain in effect.
 
 ## Desktop packaging
 
-AppImage and Flatpak target Linux `x86_64` and `aarch64`. The x86_64 demo AppImage has passed a packaged NVIDIA/Vulkan
-smoke run; neither format has completed release validation. Production and demo have separate application IDs and
-platform data:
+AppImage and Flatpak target Linux `x86_64` and `aarch64`. Production and demo have separate application IDs and platform
+data:
 
 | Mode       | Application ID                 | AppImage                                 |
 | ---------- | ------------------------------ | ---------------------------------------- |
@@ -187,33 +176,8 @@ The AppImage launcher requires unprivileged user namespaces. Bundling the closur
 host graphics drivers or desktop services: release validation must cover WGPU rendering, file dialogs, and USB/GVfs
 access on non-Nix systems. See [publication work](../plans/device-expansion-and-publication.md).
 
-Host graphics integration is explicitly outside
-[nix-appimage's scope](https://github.com/ralismark/nix-appimage#caveats). On 2026-10-05, the x86_64 demo AppImage using
-the automatic wrapper reported Vulkan on an NVIDIA GeForce RTX 4090. Process mappings confirmed bundled libc and Vulkan
-loader with the host NVIDIA 595.91.07 driver. The packaged `activity-smoke` scenario passed all 55 actions in 20.65
-seconds, covering map interaction, playback, laps, scrubbing, and activity replacement/restoration. On the same Ubuntu
-26.04 host, Mesa 26.0.3 llvmpipe Vulkan passed all 60 actions with two worker threads and functional/background timing;
-the normal timing run failed an interaction deadline. This is software-renderer functionality evidence, not performance
-evidence. Forcing the AMD GPU failed: Wayland rejected imported DMA buffers and XWayland reported an invalid surface.
-AMD hardware presentation remains unresolved. The connected display is on NVIDIA; all AMD display outputs are
-disconnected. The forced-AMD test therefore exercises cross-GPU presentation. Mutter emits the observed Wayland error
-when importing the client buffer fails; egui's surface-configuration panic follows that rejection. Adapter selection
-already requests a compatible surface. Running the same host-graphics-wrapped executable outside the AppImage reproduced
-the Wayland buffer-import rejection and surface-loss panic (exit 101). AppImage mounting and namespace isolation are
-therefore not required to reproduce it; the same DMA-buffer import error also occurred with Homebrew's
-`vkcube --wsi wayland`, forced to the host Radeon ICD. That reproduction selected the AMD integrated GPU without our
-application or its Nix/AppImage libraries, establishing a host cross-GPU presentation failure independently of this
-package. It does not establish a failure on systems where AMD drives the display or prove the package's library
-compatibility on other hosts. On the same host, the locally built
-[headless probe](../development.md#headless-hardware-rendering-probe) selected the AMD integrated GPU through RADV/Mesa
-26.0.3 with 4x MSAA. Activity and responsive-layout scenarios passed, and captured wide/narrow frames showed maps,
-routes, charts, text, and controls. This verifies those rendering paths without presentation; it does not validate the
-AppImage library mix or the AMD-to-NVIDIA buffer transfer. The rebuilt demo also passed manual backup saving and
-file-dialog cancellation on this host. Opening the log folder launched the host file manager. Developer tools now uses
-an independent deferred viewport to remain interactive when the main window is covered; the user reported the fix
-working on this host. Regression tests cover child-only cursor updates, section toggling, scrolling, close/reopen, and
-control-server lifecycle with the root marked occluded. Library discovery cannot guarantee ABI compatibility with every
-host driver; other hosts, aarch64, and production USB/GVfs remain unverified.
+Host graphics integration is outside [nix-appimage's scope](https://github.com/ralismark/nix-appimage#caveats).
+[Packaging evidence](../research/desktop-packaging.md) records tested hosts, renderer failures, and remaining limits.
 
 Flatpak builds offline from Nix-vendored Cargo sources on Freedesktop 25.08. Its current permissions are development
 inputs; release requires verifying the narrowest working USB and GVfs permissions.

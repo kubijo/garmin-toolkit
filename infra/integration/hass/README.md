@@ -48,7 +48,8 @@ app, and reopen the existing repository. Home Assistant/My Home Assistant have n
 uses the owned DevTools connection; app actions and captures still use the built-in APIs. Dark screenshots and
 `install-links.json` accompany the digest-bound installation and populated lifecycle evidence.
 
-Remaining release gates belong to the [publication plan](../../../docs/plans/device-expansion-and-publication.md).
+Release qualification is recorded in [publication evidence](../../../docs/research/publication-readiness.md);
+[physical-device acceptance](../../../docs/plans/hass-watch-vertical-slice.md) is separate.
 
 ## Home Assistant app package
 
@@ -98,7 +99,7 @@ For a populated workflow through authenticated ingress, run:
 
 ```bash
 just hass::haos-app-check \
-    --app-archive .tmp/hass-native-build/garmin-toolkit-hass-0.1.0-amd64.oci.tar \
+    --app-archive .tmp/hass-native-build/garmin-toolkit-hass-VERSION-amd64.oci.tar \
     --build-receipt .tmp/hass-native-build/native-build.json \
     --repository /nix/store/REPOSITORY-garmin-hass-app-repository
 ```
@@ -223,7 +224,7 @@ See [recovery evidence](../../../docs/research/publication-readiness.md#recovery
 
 ## HAOS app smoke
 
-Build `.#packages.x86_64-linux.garmin-hass-app-image` with a memory-capped Nix builder, then run:
+Build the matching `.#garmin-hass-app-image` with a memory-capped Nix builder, then run:
 
 ```bash
 just hass::haos-app-smoke --app-archive /nix/store/...-garmin-toolkit-hass.oci.tar --timeout 1200
@@ -308,9 +309,9 @@ just hass::integration --suite reconnect
 ```
 
 This exercises both bare WebSocket APIs and application reconnects with WebSocketStream available or absent, fault hooks
-enabled or disabled, and tracing enabled or disabled. Each of the 16 cases alternates eight abrupt/graceful host
-restarts, then verifies process and state cleanup. Constructor counters assert that the application always selects
-standard WebSocket. It is an explicit diagnostic target, separate from the route workflow check in CI.
+enabled or disabled, and tracing enabled or disabled. Cases alternate abrupt/graceful host restarts and verify process
+and state cleanup. Constructor counters assert standard WebSocket selection. This diagnostic is separate from CI's route
+workflow check.
 
 The application selects `websocket-web`'s standard interface to avoid a Chromium 153.0.8010.12 native reconnect crash
 with automatic WebSocketStream selection, reproducible without fault hooks or tracing. Bare sockets did not reproduce
@@ -319,10 +320,9 @@ it. Preserve the library's buffering and transport semantics when changing this 
 Both suites build the packaged demo and run a disposable NixOS VM with two CPUs and 4 GiB RAM. The route suite is also a
 Linux flake check, so CI's `nix flake check` runs it; ordinary `qa::full` does not boot a VM. The local recipe runs the
 Nix-built driver as your user so it can use your KVM access; CI runs it in the Nix builder. Both require hardware
-acceleration and refuse to fall back to CPU emulation. The local Python runner uses Tyro and Rich for its CLI and
-progress output. Build and VM output go to separate log files in the printed diagnostics directory; cancellation stops
-the owned process group before removing temporary VM state. New files must be Git-tracked for the repository's
-Git-backed flake to include them.
+acceleration and refuse CPU emulation. Build and VM output go to separate logs in the printed diagnostics directory;
+cancellation stops the owned process group before removing temporary VM state. New files must be Git-tracked for the
+repository's Git-backed flake to include them.
 
 Host-user KVM access does not imply that a sandboxed Nix build user can open `/dev/kvm`. If the flake check fails before
 the QEMU monitor connects with a KVM permission error, use `just hass::integration` to run the same suite under your
