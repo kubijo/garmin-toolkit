@@ -1194,11 +1194,14 @@ impl App {
                         .find(|device| device.key == catalog.device_key)
                         .map(|device| device.name.clone());
                     if let Some(device_name) = device_name {
-                        match device_browser::Browser::open(catalog, &self.intl, &device_name) {
-                            Ok(browser) => self.device_browser = Some(browser),
-                            Err(error) => {
-                                self.files.catalog_error = Some(error);
-                            }
+                        let result = if let Some(browser) = &mut self.device_browser {
+                            browser.refresh(catalog)
+                        } else {
+                            device_browser::Browser::open(catalog, &self.intl, &device_name)
+                                .map(|browser| self.device_browser = Some(browser))
+                        };
+                        if let Err(error) = result {
+                            self.files.catalog_error = Some(error);
                         }
                     }
                 }

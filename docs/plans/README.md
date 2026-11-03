@@ -3,8 +3,8 @@
 Follow the [development workflow](../development.md) and
 [single-path execution](../decisions/0037-single-execution-path.md).
 
-[HASS hardware acceptance](hass-watch-vertical-slice.md) covers physical devices. Signed releases and HAOS guest
-qualification are recorded in [publication readiness](../research/publication-readiness.md).
+Physical-device evidence is recorded in [device capabilities](../research/device-capabilities.md). Signed releases and
+HAOS guest qualification are recorded in [publication readiness](../research/publication-readiness.md).
 
 Other active plans: [shared interfaces](shared-interface-workflows.md), [portable data](data-foundation.md),
 [Garmin Connect and sharing](garmin-connect-and-sharing.md),

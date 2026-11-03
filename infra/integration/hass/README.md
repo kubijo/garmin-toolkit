@@ -71,7 +71,7 @@ uses the owned DevTools connection; app actions and captures still use the built
 `install-links.json` accompany the digest-bound installation and populated lifecycle evidence.
 
 Release qualification is recorded in [publication evidence](../../../docs/research/publication-readiness.md);
-[physical-device acceptance](../../../docs/plans/hass-watch-vertical-slice.md) is separate.
+physical-device evidence is recorded in [device capabilities](../../../docs/research/device-capabilities.md).
 
 ## Home Assistant app package
 
