@@ -17,6 +17,8 @@ pub mod popup;
 pub struct Host {
     window: BrowserWindow<Command, Snapshot>,
     pub device_key: Option<String>,
+    pub catalog_error: Option<String>,
+    pub fit_error: Option<String>,
     owner: Option<UserId>,
     view: Option<device_browser::ViewState>,
 }
@@ -55,6 +57,8 @@ impl crate::App {
         if self.files.device_key.as_ref() != Some(&key) {
             self.device_browser = None;
             self.files.view = None;
+            self.files.catalog_error = None;
+            self.files.fit_error = None;
         }
         self.files.device_key = Some(key.clone());
         self.files.owner = Some(owner);
@@ -84,7 +88,12 @@ impl crate::App {
                 error,
             ));
         }
-        if busy {
+        if busy
+            || self
+                .device_browser
+                .as_ref()
+                .is_some_and(|browser| browser.device_key() == key)
+        {
             return;
         }
         crate::spawn_device_catalog(self.shared.clone(), self.context.clone(), key);
@@ -118,11 +127,16 @@ impl crate::App {
         self.files.owner = None;
         self.files.device_key = None;
         self.files.view = None;
+        self.files.catalog_error = None;
+        self.files.fit_error = None;
         self.device_browser = None;
         self.device_fit_preview = None;
         self.device_fit_plan = None;
         self.device_fit_job = None;
         let mut state = self.shared.borrow_mut();
+        state.device_catalog_request.invalidate();
+        state.device_catalog = None;
+        state.device_browser_refresh = None;
         state.file_toasts = garmin_ui::notification::Toasts::default();
         state.file_progress_toast = None;
     }
@@ -156,10 +170,16 @@ impl crate::App {
         );
         self.files.window = window;
         for event in events {
-            if let Event::Command { id, command } = event {
-                let snapshot = self.file_snapshot().expect("file window has a device");
-                let result = self.file_command(command, &snapshot);
-                self.files.window.reply(id, result.err());
+            match event {
+                Event::Closed => {
+                    self.close_file_window();
+                    break;
+                }
+                Event::Command { id, command } => {
+                    let snapshot = self.file_snapshot().expect("file window has a device");
+                    let result = self.file_command(command, &snapshot);
+                    self.files.window.reply(id, result.err());
+                }
             }
         }
     }
@@ -173,6 +193,12 @@ impl crate::App {
             &self.intl,
             || unreachable!("inline windows do not publish snapshots"),
             |ui| {
+                device_browser::show_catalog_error(
+                    ui,
+                    &self.intl,
+                    snapshot.catalog_error.as_deref(),
+                );
+                device_browser::show_fit_error(ui, &self.intl, snapshot.fit_error.as_deref());
                 let action = if let Some(browser) = &mut self.device_browser {
                     browser.set_show_hidden_files(snapshot.preferences.show_hidden_files());
                     ui.add_enabled_ui(snapshot.available && !snapshot.busy, |ui| {
@@ -199,13 +225,17 @@ impl crate::App {
         self.files.window = window;
         for event in events {
             match event {
-                Event::Closed => self.files.window.close(&self.context),
+                Event::Closed => {
+                    self.close_file_window();
+                    break;
+                }
                 Event::Command { command, .. } => {
                     if matches!(
                         command.action,
                         Request::Action(device_browser::Action::Close)
                     ) {
-                        self.files.window.close(&self.context);
+                        self.close_file_window();
+                        break;
                     } else if snapshot.available
                         && !snapshot.busy
                         && !crate::device_browser_busy(&self.shared.borrow())
@@ -238,6 +268,8 @@ impl crate::App {
                 profile: profile.map(|profile| profile.user.id()),
             },
             name: device.map_or_else(|| key.clone(), |device| device.name.clone()),
+            catalog_error: self.files.catalog_error.clone(),
+            fit_error: self.files.fit_error.clone(),
             catalog: self
                 .device_browser
                 .as_ref()

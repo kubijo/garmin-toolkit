@@ -29,6 +29,8 @@ class Options:
     config: Path
     check: bool = False
     output: Path = DEFAULT_OUTPUT
+    notice_manifest: Path = NOTICE_MANIFEST
+    sync: bool = False
 
 
 def run_json(arguments: list[str]) -> dict[str, Any]:
@@ -88,7 +90,7 @@ def resolve_linked(metadata: dict[str, Any], package_name: str) -> dict[tuple[st
     return {(packages[key]['name'], packages[key]['version']): packages[key]['source'] is not None for key in linked}
 
 
-def harvested_entries() -> dict[tuple[str, str], dict[str, Any]]:
+def harvested_entries(notice_manifest: Path = NOTICE_MANIFEST) -> dict[tuple[str, str], dict[str, Any]]:
     metadata = run_json(['cargo', 'metadata', '--format-version', '1', '--locked'])
     raw = run_json(['cargo', 'bundle-licenses', '--format', 'json', '--output', '-'])
     entries: dict[tuple[str, str], dict[str, Any]] = {
@@ -108,7 +110,7 @@ def harvested_entries() -> dict[tuple[str, str], dict[str, Any]]:
         for library in raw['third_party_libraries']
     }
     packages = {(package['name'], package['version']): package for package in metadata['packages']}
-    supplements = notice_supplements(packages)
+    supplements = notice_supplements(packages, notice_manifest)
     expected = {(*key, notice['license']) for key, entry in entries.items() for notice in entry['notices']}
     if unused := supplements.keys() - expected:
         raise ValueError(f'stale license supplements: {sorted(unused)}')
@@ -231,8 +233,8 @@ def bundle_document(entries: list[dict[str, Any]]) -> str:
     )
 
 
-def generate(config: dict[str, Any], output: Path) -> None:
-    cargo = harvested_entries()
+def generate(config: dict[str, Any], output: Path, notice_manifest: Path = NOTICE_MANIFEST) -> None:
+    cargo = harvested_entries(notice_manifest)
     assets = [asset_entry(asset) for asset in config['assets']]
     documents: dict[str, str] = {}
     for target in config['targets']:
@@ -262,10 +264,10 @@ def generate(config: dict[str, Any], output: Path) -> None:
         (output / name).write_text(document)
 
 
-def check(config: dict[str, Any], output: Path) -> bool:
+def check(config: dict[str, Any], output: Path, notice_manifest: Path = NOTICE_MANIFEST) -> bool:
     with tempfile.TemporaryDirectory() as directory:
         fresh = Path(directory)
-        generate(config, fresh)
+        generate(config, fresh, notice_manifest)
         expected = {f'bundle-{target["name"]}.json' for target in config['targets']}
         present = {path.name for path in output.glob('bundle-*.json')}
         stale = expected.symmetric_difference(present)
@@ -303,9 +305,17 @@ def main() -> int:
     arguments = tyro.cli(Options)
     config = json.loads(arguments.config.read_text())
     try:
+        if arguments.sync:
+            if arguments.check:
+                raise ValueError('--sync cannot be combined with --check')
+            from sync import synchronize
+
+            metadata = run_json(['cargo', 'metadata', '--format-version', '1', '--locked'])
+            packages = {(package['name'], package['version']): package for package in metadata['packages']}
+            synchronize(packages, arguments.notice_manifest)
         if arguments.check:
-            return 0 if check(config, arguments.output) else 1
-        generate(config, arguments.output)
+            return 0 if check(config, arguments.output, arguments.notice_manifest) else 1
+        generate(config, arguments.output, arguments.notice_manifest)
     except subprocess.CalledProcessError as error:
         print(f'license generation failed: {shlex.join(error.cmd)} (exit {error.returncode})', file=sys.stderr)
         return 1

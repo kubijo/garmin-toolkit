@@ -1,9 +1,9 @@
-//! FIT activity preview opened from a connected-device browser.
+//! Read-only FIT activity and course previews opened from a connected-device browser.
 
 use egui::{Id, Ui};
 use garmin_i18n::{Intl, format_message};
 use garmin_model::identity::UnitSystem;
-use garmin_service_api::{DeviceBrowserTarget, DeviceFitPreview};
+use garmin_service_api::{DeviceBrowserTarget, DeviceFitPreview, DeviceFitPreviewContent};
 
 use crate::{activity, icons, modal};
 
@@ -12,6 +12,8 @@ pub struct Preview {
     data: DeviceFitPreview,
     selected: usize,
     workspace: activity::Workspace,
+    course_map: activity::map::ActivityMap,
+    presentation: modal::Presentation,
 }
 
 pub enum Action {
@@ -31,7 +33,15 @@ impl Preview {
             data,
             selected: 0,
             workspace: activity::Workspace::new(runtime),
+            course_map: activity::map::ActivityMap::new(runtime),
+            presentation: modal::Presentation::Modal,
         }
+    }
+
+    #[must_use]
+    pub const fn with_presentation(mut self, presentation: modal::Presentation) -> Self {
+        self.presentation = presentation;
+        self
     }
 
     pub fn show(
@@ -42,16 +52,21 @@ impl Preview {
         units: UnitSystem,
         today: jiff::civil::Date,
     ) -> Option<Action> {
+        if matches!(&self.data.content, DeviceFitPreviewContent::Course(_)) {
+            return self.show_course(ui, intl, busy);
+        }
         self.selected = self
             .selected
-            .min(self.data.activities.len().saturating_sub(1));
+            .min(self.data.activities().len().saturating_sub(1));
         let output = self.render(ui, intl, busy, units, today);
         if let Some(activity::Action::Select(index)) = output.inner {
             self.selected = index;
         }
         match output.action {
             Some(modal::Action::Cancel) if !busy => Some(Action::Close),
-            Some(modal::Action::Primary) if !busy => Some(Action::Import(self.target.clone())),
+            Some(modal::Action::Primary) if !busy && self.data.supports_activity_import() => {
+                Some(Action::Import(self.target.clone()))
+            }
             Some(_) | None => None,
         }
     }
@@ -66,7 +81,7 @@ impl Preview {
     ) -> modal::Output<Option<activity::Action>> {
         let presentations = self
             .data
-            .activities
+            .activities()
             .iter()
             .map(|activity| {
                 activity::Presentation::from_summary(
@@ -81,7 +96,7 @@ impl Preview {
             .iter()
             .map(activity::Presentation::item_props)
             .collect::<Vec<_>>();
-        let selected = self.data.activities.get(self.selected);
+        let selected = self.data.activities().get(self.selected);
         let recording_key = selected.map(|_| format!("{}:{}", self.data.file_name, self.selected));
         let no_route = format_message!(intl, default_message: "No recorded route");
         let description = format_message!(intl, default_message: "FIT activity preview");
@@ -100,7 +115,7 @@ impl Preview {
                 title: &self.data.file_name,
                 description: Some(&description),
                 size: modal::Size::Large,
-                presentation: modal::Presentation::Modal,
+                presentation: self.presentation,
                 cancel_label: Some(&close),
                 cancel_disabled: None,
                 backdrop_closes: Some(!busy),
@@ -130,5 +145,47 @@ impl Preview {
                 )
             },
         )
+    }
+
+    fn show_course(&mut self, ui: &mut Ui, intl: &Intl, busy: bool) -> Option<Action> {
+        let DeviceFitPreviewContent::Course(course) = &self.data.content else {
+            return None;
+        };
+        let description = format_message!(intl, default_message: "Route preview");
+        let close = format_message!(intl, default_message: "Close");
+        let height = (ui.available_height() - 192.0).clamp(256.0, 640.0);
+        let output = modal::show(
+            ui,
+            Id::new("device-fit-course-preview"),
+            &modal::Props {
+                title: &self.data.file_name,
+                description: Some(&description),
+                size: modal::Size::Large,
+                presentation: self.presentation,
+                cancel_label: Some(&close),
+                cancel_disabled: None,
+                backdrop_closes: Some(!busy),
+                primary: None,
+            },
+            |ui| {
+                if let Some(name) = &course.name {
+                    ui.label(crate::typography::semibold(name));
+                    ui.add_space(8.0);
+                }
+                self.course_map.show(ui, &activity::map::Props {
+                    label: &description,
+                    samples: activity::map::samples::Samples::Planned(&course.points),
+                    selected_coordinate: None,
+                    sample_range: 0..=course.points.len().saturating_sub(1),
+                    highlighted_range: None,
+                    fit_key: &self.data.file_name,
+                    empty: &format_message!(intl, default_message: "No route geometry"),
+                    loading_background: &format_message!(intl, default_message: "Loading map…"),
+                    background_unavailable: &format_message!(intl, default_message: "Map background unavailable"),
+                    height,
+                });
+            },
+        );
+        (output.action == Some(modal::Action::Cancel) && !busy).then_some(Action::Close)
     }
 }

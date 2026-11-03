@@ -1,0 +1,27 @@
+out = "../../../.tmp/gallery/fit-preview"
+size = "1600x1000"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "course-dark"
+scene = "device_fit_preview::Course"
+
+[[shot]]
+name = "course-light"
+scene = "device_fit_preview::Course"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "course-narrow"
+scene = "device_fit_preview::Course"
+[shot.knobs]
+width = 480
+
+[[shot]]
+name = "course-without-geometry"
+scene = "device_fit_preview::Course"
+[shot.knobs]
+empty = true

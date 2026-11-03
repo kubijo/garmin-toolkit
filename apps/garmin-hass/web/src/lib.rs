@@ -754,6 +754,7 @@ impl App {
             }
             device_browser::Action::Open(selection)
             | device_browser::Action::ImportFit(selection) => {
+                self.files.fit_error = None;
                 let Some(user_id) = self
                     .selected_profile
                     .and_then(|index| self.profiles.get(index))
@@ -1185,8 +1186,7 @@ impl App {
         if let Some((requested_key, result)) = device_catalog
             && self.files.device_key.as_deref() == Some(requested_key.as_str())
         {
-            let failure_title =
-                format_message!(&self.intl, default_message: "Could not browse device files");
+            self.files.catalog_error = None;
             match result {
                 Ok(catalog) => {
                     let device_name = devices
@@ -1197,14 +1197,13 @@ impl App {
                         match device_browser::Browser::open(catalog, &self.intl, &device_name) {
                             Ok(browser) => self.device_browser = Some(browser),
                             Err(error) => {
-                                self.shared.borrow_mut().notice =
-                                    Some(Notice::error(failure_title, error));
+                                self.files.catalog_error = Some(error);
                             }
                         }
                     }
                 }
                 Err(error) => {
-                    self.shared.borrow_mut().notice = Some(Notice::error(failure_title, error));
+                    self.files.catalog_error = Some(error);
                 }
             }
             self.context.request_repaint();
@@ -1215,8 +1214,7 @@ impl App {
                 .as_ref()
                 .is_some_and(|browser| browser.device_key() == requested_key)
         {
-            let failure_title =
-                format_message!(&self.intl, default_message: "Could not browse device files");
+            self.files.catalog_error = None;
             match result {
                 Ok(catalog) => {
                     if let Err(error) = self
@@ -1225,11 +1223,11 @@ impl App {
                         .expect("the active browser was checked above")
                         .refresh(catalog)
                     {
-                        self.shared.borrow_mut().notice = Some(Notice::error(failure_title, error));
+                        self.files.catalog_error = Some(error);
                     }
                 }
                 Err(error) => {
-                    self.shared.borrow_mut().notice = Some(Notice::error(failure_title, error));
+                    self.files.catalog_error = Some(error);
                 }
             }
         }
@@ -1253,6 +1251,7 @@ impl App {
                 .as_ref()
                 .is_some_and(|browser| browser.device_key() == requested_key)
         {
+            self.files.fit_error = None;
             match result {
                 Ok(plan) => {
                     let fit_preview =
@@ -1265,9 +1264,7 @@ impl App {
                     self.device_fit_preview = None;
                     self.device_fit_plan = None;
                     self.device_fit_job = None;
-                    let title =
-                        format_message!(&self.intl, default_message: "Could not open FIT file");
-                    self.shared.borrow_mut().notice = Some(Notice::error(title, error));
+                    self.files.fit_error = Some(error);
                 }
             }
         }

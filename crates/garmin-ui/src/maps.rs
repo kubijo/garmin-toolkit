@@ -75,7 +75,9 @@ pub fn show(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Command> {
         let inline_padding = if ui.available_width() < 480.0 { 16 } else { 32 };
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(inline_padding, 24)).show(ui, |ui| {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-            ui.set_max_width(ui.available_width().min(880.0));
+            if state.phase != Phase::Catalog {
+                ui.set_max_width(ui.available_width().min(880.0));
+            }
             ui.heading(format_message!(intl, default_message: "Manage maps"));
             ui.add_space(8.0);
             typography::body(ui, &format_message!(intl, default_message: "This device's map operation is shared across profiles. You can leave this page and return while it runs."));
@@ -148,37 +150,50 @@ fn catalog(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Command> {
             &format_message!(intl, default_message: "The map service returned no components for this device."),
         );
     }
-    for component in &state.components {
-        ui.push_id(component.index, |ui| {
-            ui.set_max_width(ui.available_width().min(480.0));
-            egui::Frame::group(ui.style())
-                .fill(crate::theme::color32(
-                    crate::theme::palette(ui)
-                        .surfaces()
-                        .layer(garmin_color::theme::Level::One),
-                ))
-                .inner_margin(0)
-                .show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    egui::Frame::NONE.inner_margin(16).show(ui, |ui| {
-                        component_details(ui, intl, component);
+    let gap = 16.0;
+    let mut columns = 1;
+    let mut required_width = 320.0;
+    while required_width + 320.0 + gap <= ui.available_width() {
+        columns += 1;
+        required_width += 320.0 + gap;
+    }
+    for row in state.components.chunks(columns) {
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            ui.columns(columns, |uis| {
+                for (component, ui) in row.iter().zip(uis) {
+                    ui.push_id(component.index, |ui| {
+                        egui::Frame::group(ui.style())
+                            .fill(crate::theme::color32(
+                                crate::theme::palette(ui)
+                                    .surfaces()
+                                    .layer(garmin_color::theme::Level::One),
+                            ))
+                            .inner_margin(0)
+                            .show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                egui::Frame::NONE.inner_margin(16).show(ui, |ui| {
+                                    component_details(ui, intl, component);
+                                });
+                                if let Some(choice) = component_actions(
+                                    ui,
+                                    intl,
+                                    component,
+                                    state.actions.contains(&Action::Choose),
+                                    state.dry_run,
+                                ) {
+                                    command = Some(Command::Choose {
+                                        component: component.index,
+                                        choice,
+                                    });
+                                }
+                            });
                     });
-                    if let Some(choice) = component_actions(
-                        ui,
-                        intl,
-                        component,
-                        state.actions.contains(&Action::Choose),
-                        state.dry_run,
-                    ) {
-                        command = Some(Command::Choose {
-                            component: component.index,
-                            choice,
-                        });
-                    }
-                });
-            ui.add_space(8.0);
+                }
+            });
         });
+        ui.add_space(gap);
     }
     ui.add_space(8.0);
     command = preferences(ui, intl, state).or(command);

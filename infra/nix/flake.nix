@@ -15,7 +15,12 @@
   ...
 }:
 let
-  inherit (builtins) attrNames filter;
+  inherit (builtins)
+    attrNames
+    filter
+    fromTOML
+    readFile
+    ;
 
   systems =
     flake-utils.lib.eachSystem
@@ -181,6 +186,35 @@ let
             inherit sharedCargoTargetDir;
             inherit workspaceSrc;
           };
+          mkHassDev =
+            arch: targetSystem: rustTarget:
+            let
+              target = hass.lib.mkTarget {
+                inherit
+                  brandAssets
+                  dirspec
+                  formatjsCli
+                  sharedCargoTargetDir
+                  nodejs
+                  system
+                  wasmToolchain
+                  workspaceSrc
+                  targetSystem
+                  ;
+                sourceRevision = self.rev or self.dirtyRev or "unreleased";
+                toolchain = fenix.packages.${system}.combine [
+                  toolchain
+                  fenix.packages.${system}.targets.${rustTarget}.stable.rust-std
+                ];
+              };
+            in
+            import ./hass-dev.nix {
+              inherit pkgs arch;
+              inherit (target) package;
+              version = "${(fromTOML (readFile ../../Cargo.toml)).workspace.package.version}-dev";
+              sourceRevision = self.rev or self.dirtyRev or "unreleased";
+              configFile = ../../apps/garmin-hass/addon/config.yaml;
+            };
           mkHassIntegration =
             options:
             import ../integration/hass (
@@ -251,6 +285,8 @@ let
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             garmin-hass-app-image = hassTarget.appImage;
+            garmin-hass-dev-amd64 = mkHassDev "amd64" "x86_64-linux" "x86_64-unknown-linux-gnu";
+            garmin-hass-dev-aarch64 = mkHassDev "aarch64" "aarch64-linux" "aarch64-unknown-linux-gnu";
             garmin-hass-app-sbom = releaseAutomation.sbom;
             garmin-hass-app-repository = releaseAutomation.repository;
             garmin-hass-arm64-test-repository = releaseAutomation.arm64TestRepository;

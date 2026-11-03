@@ -651,16 +651,18 @@ fn device_fit_preview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
                     },
                     DeviceFitPreview {
                         file_name: "2026-09-15-ride.fit".to_owned(),
-                        activities: vec![DeviceFitPreviewActivity {
-                            source: "Edge 850".to_owned(),
-                            summary: summary(
-                                ActivitySport::Cycling,
-                                RECORDING_START_MILLISECONDS,
-                                43 * 60 * 1_000,
-                                16_800_000,
-                            ),
-                            recording: sample_recording(RecordingKind::Complete),
-                        }],
+                        content: garmin_service_api::DeviceFitPreviewContent::Activities(vec![
+                            DeviceFitPreviewActivity {
+                                source: "Edge 850".to_owned(),
+                                summary: summary(
+                                    ActivitySport::Cycling,
+                                    RECORDING_START_MILLISECONDS,
+                                    43 * 60 * 1_000,
+                                    16_800_000,
+                                ),
+                                recording: sample_recording(RecordingKind::Complete),
+                            },
+                        ]),
                     },
                     &runtime,
                 )

@@ -26,6 +26,8 @@ fn snapshot() -> Snapshot {
                 entries: vec![],
             }],
         }),
+        catalog_error: None,
+        fit_error: None,
         available: true,
         busy: false,
         preferences: ProfilePreferences::default(),
@@ -45,6 +47,53 @@ fn command(snapshot: &Snapshot) -> Command {
             size: Some(123),
         })),
     }
+}
+
+#[test]
+fn failed_initial_catalogue_is_reported_to_its_window_and_can_be_retried() {
+    let mut view = snapshot();
+    view.catalog = None;
+    view.catalog_error = Some("The synthetic device is busy".into());
+    let encoded = serde_json::to_string(&Message::<Command, Snapshot>::Snapshot(Box::new(view)))
+        .expect("encode failed catalogue");
+    let Message::Snapshot(view) = serde_json::from_str::<Message<Command, Snapshot>>(&encoded)
+        .expect("decode failed catalogue")
+    else {
+        panic!("expected a window snapshot");
+    };
+    assert_eq!(
+        view.catalog_error.as_deref(),
+        Some("The synthetic device is busy")
+    );
+    assert!(view.catalog.is_none());
+    assert!(
+        Command {
+            identity: view.identity.clone(),
+            action: Request::Refresh
+        }
+        .validate(&view, false)
+        .is_ok()
+    );
+    assert!(command(&view).validate(&view, false).is_err());
+}
+
+#[test]
+fn fit_preview_failure_reaches_its_file_window_without_replacing_the_catalogue() {
+    let mut view = snapshot();
+    view.fit_error = Some("The synthetic FIT file is a course".into());
+    let encoded = serde_json::to_string(&Message::<Command, Snapshot>::Snapshot(Box::new(view)))
+        .expect("encode failed FIT preview");
+    let Message::Snapshot(view) = serde_json::from_str::<Message<Command, Snapshot>>(&encoded)
+        .expect("decode failed FIT preview")
+    else {
+        panic!("expected a window snapshot");
+    };
+    assert_eq!(
+        view.fit_error.as_deref(),
+        Some("The synthetic FIT file is a course")
+    );
+    assert!(view.catalog.is_some());
+    assert!(view.catalog_error.is_none());
 }
 
 #[test]
