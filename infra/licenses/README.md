@@ -1,7 +1,8 @@
 # License bundles
 
-`just qa::licenses` checks the distributable desktop and HASS notices. `just in-shell nix run .#licenses` regenerates
-them. Generation selects the normal dependency closure for each shipped component, including the HASS web client.
+`just qa::licenses` checks the distributable desktop and HASS notices. `just dev::licenses` synchronizes the notice
+manifest and regenerates the bundles. Generation selects the normal dependency closure for each shipped component,
+including the HASS web client.
 
 `cargo-bundle-licenses` supplies license identifiers and candidate texts. Its parent-directory search is unbounded; the
 generator only accepts candidate texts that occur in notice files inside the corresponding package. This keeps the

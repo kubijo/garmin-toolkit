@@ -30,13 +30,8 @@ the host provides `sccache`, they select that executable; hosts without it conti
 Coverage builds and tests `cargo-llvm-cov` with the selected Rust toolchain and uses that toolchain's `llvm-cov` and
 `llvm-profdata` for local and CI reports. Package tests remain enabled.
 
-SQLFluff's dependency build has a temporary test exception for
-[diff-cover 10.5.1](https://github.com/NixOS/nixpkgs/blob/09063bd1f2b36fd9fd793c36dfade7bd40a93dfc/pkgs/development/python-modules/diff-cover/default.nix),
-whose HTML fixtures expect escaped quotes that Pygments 2.21.0 renders literally. The six affected HTML comparison tests
-are deselected by their full test IDs; published dependency sources remain unchanged. All other package tests and
-repository formatting checks stay enabled. A version guard requires review when either dependency changes. Remove the
-exception when nixpkgs supplies compatible released packages, then verify the full dependency test suite, formatting,
-and preflight.
+SQLFluff uses the standard pinned nixpkgs package so tooling can reuse upstream binary caches. Package tests remain
+enabled; local dependency overrides would require separate builds and can make initial formatting setup expensive.
 
 The root and gallery workspaces share development-profile overrides in `.cargo/config.toml`. Ordinary code stays
 unoptimized; rendering dependencies retain their targeted optimizations. A blanket optimization override in either

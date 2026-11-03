@@ -261,6 +261,8 @@ pub fn frame(ui: &Ui) -> egui::Frame {
 pub fn surface<R>(ui: &mut Ui, render: impl FnOnce(&mut Ui) -> R) -> R {
     let frame = frame(ui);
     let contents = surface_bounds(ui).shrink(frame.stroke.width);
+    ui.painter()
+        .add(super::ambient_shadow(contents, frame.corner_radius));
     ui.painter().add(frame.paint(contents));
     ui.scope_builder(egui::UiBuilder::new().max_rect(contents), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(contents));

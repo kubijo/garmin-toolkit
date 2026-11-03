@@ -10,6 +10,8 @@ The map workflow models use owned, Postcard-compatible values and fixed-width co
 revision, and approval identities; host captures, transport handles, payloads, and raw progress events stay server-side.
 `DeviceFitImportPlan` carries opaque review/job IDs and the existing owned FIT preview; device bytes stay server-side.
 `DeviceFitImportStatus` carries only a fixed lifecycle state; the host retains the running job and stored acquisition.
+FIT preview content distinguishes activities from read-only courses. Course previews carry owned names, canonical
+geometry, an optional sport, and a fixed-width cue count; they do not authorize activity imports.
 
 Route contracts contain owned metadata, canonical coordinates and sports, opaque operation/artifact IDs, and bounded
 upload or geometry chunks. Sessions bind the profile and database epoch; requests carry no filesystem paths, parser
@@ -99,6 +101,8 @@ or {
     `DeviceBrowserUpload`,
     `DownloadTicket`,
     `DeviceFitPreview`,
+    `DeviceFitPreviewContent`,
+    `DeviceFitPreviewCourse`,
     `DeviceFitImportPlan`,
     `DeviceFitPreviewActivity`,
     `DeviceFitImportOutcome`,

@@ -9,6 +9,12 @@ name = "windowed"
 scene = "device_browser::Windowed"
 
 [[shot]]
+name = "plural-activities-czech"
+scene = "device_browser::Plural Activities"
+[shot.globals]
+Language = "Čeština"
+
+[[shot]]
 name = "windowed-narrow"
 scene = "device_browser::Compact Window"
 
@@ -21,8 +27,39 @@ name = "nested-folder"
 scene = "device_browser::Populated"
 
 [[shot]]
+name = "catalog-error"
+scene = "device_browser::Populated"
+
+[shot.knobs]
+catalog_error = true
+
+[[shot]]
+name = "catalog-error-light"
+scene = "device_browser::Populated"
+
+[shot.globals]
+Theme = "Light"
+
+[shot.knobs]
+catalog_error = true
+
+[[shot]]
 name = "selected-generic-file"
 scene = "device_browser::Selected Generic File"
+
+[[shot]]
+name = "fit-error"
+scene = "device_browser::Populated"
+[shot.knobs]
+fit_error = true
+
+[[shot]]
+name = "fit-error-light"
+scene = "device_browser::Populated"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+fit_error = true
 
 [[shot]]
 name = "selected-generic-file-light"

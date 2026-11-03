@@ -1,5 +1,9 @@
 import '../../infra/just/common.just'
 
+# Cross-build a separate dev app and install it using the caller's SSH agent/config.
+deploy-dev host *options:
+    @just in-shell uv run --frozen --project infra/python python infra/python/hass_deploy_dev.py "$@"
+
 # Run the selected deployment mode against a caller-owned base directory.
 [no-exit-message]
 run mode data_base *options:

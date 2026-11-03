@@ -26,7 +26,7 @@ compiler-profile target label *options:
 docs *args:
     @just in-shell nix run {{ flake }}#docs -- "$@"
 
-# Report outdated Nix inputs, Python dependencies, and CI actions.
+# Report outdated Nix inputs, Python and JavaScript dependencies, and CI actions.
 outdated *args:
     @just in-shell nix run {{ flake }}#outdated -- "$@"
 

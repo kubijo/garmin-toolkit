@@ -46,8 +46,11 @@ impl InlineWindow {
         let mut events = Vec::new();
         let bounds = context.content_rect();
         let mut drag = egui::Vec2::ZERO;
+        let window_id = egui::Id::new(("inline-window", &spec.id));
+        let painter = context.layer_painter(egui::LayerId::new(egui::Order::Middle, window_id));
+        let ambient_shadow = painter.add(egui::Shape::Noop);
         let mut window = egui::Window::new(&spec.title)
-            .id(egui::Id::new(("inline-window", &spec.id)))
+            .id(window_id)
             .default_size(spec.size)
             .default_pos(bounds.center() - egui::Vec2::from(spec.size).min(bounds.size()) / 2.0)
             .max_size(bounds.size())
@@ -76,6 +79,13 @@ impl InlineWindow {
                 events.push(Event::Command { id: 0, command });
             }
         }) {
+            painter.set(
+                ambient_shadow,
+                super::ambient_shadow(
+                    response.response.rect,
+                    context.global_style().visuals.window_corner_radius,
+                ),
+            );
             self.position = Some((response.response.rect.min + drag).clamp(
                 bounds.min,
                 bounds.max - response.response.rect.size().min(bounds.size()),

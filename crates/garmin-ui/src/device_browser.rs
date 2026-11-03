@@ -24,6 +24,38 @@ mod path;
 mod view_state;
 pub use view_state::ViewState;
 
+/// Shows catalogue failures in the file view that owns the request.
+pub fn show_catalog_error(ui: &mut Ui, intl: &Intl, error: Option<&str>) {
+    show_file_error(
+        ui,
+        error,
+        &format_message!(intl, default_message: "Could not browse device files"),
+    );
+}
+
+/// Shows FIT preview failures in the file view that owns the request.
+pub fn show_fit_error(ui: &mut Ui, intl: &Intl, error: Option<&str>) {
+    show_file_error(
+        ui,
+        error,
+        &format_message!(intl, default_message: "Could not open FIT file"),
+    );
+}
+
+fn show_file_error(ui: &mut Ui, error: Option<&str>, title: &str) {
+    if let Some(error) = error {
+        crate::notification::show(
+            ui,
+            &crate::notification::Props {
+                kind: crate::notification::Kind::Error,
+                title,
+                detail: Some(&crate::notification::normalize_error_detail(error)),
+            },
+        );
+        ui.add_space(8.0);
+    }
+}
+
 const TREE_WIDTH: f32 = 200.0;
 const DETAILS_WIDTH: f32 = 248.0;
 const COMPACT_LAYOUT_WIDTH: f32 = 760.0;
@@ -194,7 +226,7 @@ impl BookmarkKind {
 
     const fn candidates(self) -> &'static [&'static str] {
         match self {
-            Self::Activities => &["Garmin/Activity"],
+            Self::Activities => &["Garmin/Activity", "Garmin/Activities"],
             Self::Courses => &["Garmin/Courses"],
             Self::Workouts => &["Garmin/Workouts"],
             Self::Music => &["Music", "Garmin/Music"],
@@ -876,6 +908,8 @@ impl Browser {
         let close_label = format_message!(intl, default_message: "Close");
         let short_title = format_message!(intl, default_message: "Files");
         let window_id = Id::new(("device-explorer-window", self.device_key()));
+        let painter = context.layer_painter(egui::LayerId::new(egui::Order::Foreground, window_id));
+        let ambient_shadow = painter.add(egui::Shape::Noop);
         let drag_delta = Cell::new(egui::Vec2::ZERO);
         let position = self.window_position.unwrap_or(geometry.default_position);
         let mut open = true;
@@ -907,6 +941,10 @@ impl Browser {
                 )
             });
         let result = response.and_then(|response| {
+            painter.set(
+                ambient_shadow,
+                crate::window::ambient_shadow(response.response.rect, egui::CornerRadius::ZERO),
+            );
             self.window_position = Some(constrained_window_position(
                 response.response.rect,
                 bounds,
@@ -5107,6 +5145,27 @@ mod tests {
         assert!(validate_new_directory_name("../escape", &value, &parent).is_some());
         assert!(validate_new_directory_name("C:escape", &value, &parent).is_some());
         assert!(validate_new_directory_name("garmin", &value, &parent).is_some());
+    }
+
+    #[test]
+    fn activity_bookmark_targets_the_existing_plural_directory() {
+        let value = catalog(vec![DeviceCatalogEntry {
+            path: "Garmin/Activities".into(),
+            kind: DeviceCatalogEntryKind::Directory,
+            size: None,
+        }]);
+        let bookmarks = discover_bookmarks(&value);
+        assert_eq!(bookmarks.len(), 1);
+        assert_eq!(bookmarks[0].kind, BookmarkKind::Activities);
+        assert_eq!(bookmarks[0].directory.path.as_str(), "Garmin/Activities");
+        let nested = DirectoryId {
+            storage_index: 0,
+            path: "Garmin/Activities/History".into(),
+        };
+        assert!(bookmark_contains_directory(
+            &bookmarks[0].directory,
+            &nested
+        ));
     }
 
     #[test]

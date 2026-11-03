@@ -4,11 +4,12 @@ import hashlib
 import json
 import re
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 
-def verified_text(directory: Path, source: dict[str, Any]) -> str:
+def verified_text(directory: Path, source: Mapping[str, Any]) -> str:
     """Check stored source bytes before applying any declared template adjustment."""
     if not re.fullmatch(r'https://[^\s]+/[a-f0-9]{40}/[^\s]+', source['source']):
         raise ValueError(f'upstream license source must pin a revision: {source["source"]}')
@@ -25,7 +26,7 @@ def verified_text(directory: Path, source: dict[str, Any]) -> str:
     return data.decode('utf-8')
 
 
-def verified_declaration(package: dict[str, Any], declaration: dict[str, Any]) -> None:
+def verified_declaration(package: dict[str, Any], declaration: Mapping[str, Any]) -> None:
     """Bind a reviewed declaration to the published manifest and its VCS origin."""
     root = Path(package['manifest_path']).resolve().parent
     files = [root / 'Cargo.toml.orig', root / '.cargo_vcs_info.json']

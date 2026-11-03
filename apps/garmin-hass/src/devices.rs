@@ -11,8 +11,8 @@ use garmin_service_api::{
     ActivityDetailSnapshot, ActivitySnapshot, ApplicationService, AvatarUpload,
     DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogEntry,
     DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceCatalogStorage, DeviceFitImportOutcome,
-    DeviceFitImportPlan, DeviceFitImportStatus, DeviceFitPreview, DeviceFitPreviewActivity,
-    DeviceSnapshot, DownloadTicket, ProfileAvatarSnapshot, ProfileSnapshot,
+    DeviceFitImportPlan, DeviceFitImportStatus, DeviceFitPreview, DeviceSnapshot, DownloadTicket,
+    ProfileAvatarSnapshot, ProfileSnapshot,
 };
 use garmin_services::{
     Application, AvatarImportRequest, FitImportRequest, FitImportResult, ImportDisposition,
@@ -795,7 +795,9 @@ impl ApplicationService for Host {
             })
         }
         .await;
-        if let Ok(plan) = &result {
+        if let Ok(plan) = &result
+            && plan.preview.supports_activity_import()
+        {
             self.fit_plans
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -1285,25 +1287,7 @@ async fn receive_browser_upload(
 }
 
 fn device_fit_preview(file_name: String, bytes: &[u8]) -> Result<DeviceFitPreview, String> {
-    let import = garmin_fit::normalize_activities(bytes).map_err(|error| error.to_string())?;
-    let activities = import
-        .normalized_activities()
-        .map(|activity| DeviceFitPreviewActivity {
-            source: activity
-                .creator()
-                .product_name()
-                .map_or_else(|| "FIT".to_owned(), ToString::to_string),
-            summary: activity.activity().summary(),
-            recording: garmin_service_api::ActivityRecordingSnapshot::from(activity.activity()),
-        })
-        .collect::<Vec<_>>();
-    if activities.is_empty() {
-        return Err("the FIT file does not contain an activity".to_owned());
-    }
-    Ok(DeviceFitPreview {
-        file_name,
-        activities,
-    })
+    garmin_services::devices::fit_preview::inspect(file_name, bytes)
 }
 
 fn device_fit_identity(
@@ -2075,6 +2059,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn device_fit_course_preview_does_not_authorize_activity_import()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let storage = crate::prepare_deployment(directory.path()).await?;
+        let host = Host::new(
+            Box::new(FitSource {
+                bytes: Arc::new(Mutex::new(fixture::course()?)),
+            }),
+            storage,
+        );
+        let user = host.create_profile("Mock Rider".to_owned()).await??;
+        let target = fit_target();
+        let preview = host
+            .device_fit_preview(user.id(), "device".to_owned(), target.clone())
+            .await??;
+        assert!(!preview.preview.supports_activity_import());
+        assert!(matches!(
+            preview.preview.content,
+            garmin_service_api::DeviceFitPreviewContent::Course(_)
+        ));
+        let import = host
+            .import_device_fit(user.id(), "device".to_owned(), target, preview.id)
+            .await?;
+        assert!(import.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn device_fit_preview_approval_binds_profile_and_bytes() {
         let directory = tempfile::tempdir().unwrap();
         let storage = crate::prepare_deployment(directory.path()).await.unwrap();
@@ -2099,7 +2111,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(preview.preview.file_name, "activity.fit");
-        assert_eq!(preview.preview.activities.len(), 1);
+        assert_eq!(preview.preview.activities().len(), 1);
         assert_ne!(preview.id, preview.job);
         let other_user = host
             .create_profile("Other Rider".to_owned())

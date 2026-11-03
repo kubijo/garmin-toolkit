@@ -29,6 +29,8 @@ pub struct Snapshot {
     pub identity: Identity,
     pub name: String,
     pub catalog: Option<DeviceCatalogSnapshot>,
+    pub catalog_error: Option<String>,
+    pub fit_error: Option<String>,
     pub available: bool,
     pub busy: bool,
     pub preferences: ProfilePreferences,

@@ -1,5 +1,27 @@
 # HASS integration tests
 
+## Push a development app to an existing HAOS host
+
+After local QA, use an SSH alias from your normal SSH config:
+
+```sh
+just hass::deploy-dev homeassistant
+```
+
+The default target is ARM64; `--arch amd64` selects x86-64. Linux builds cross-compile when the target differs from the
+build host. `--build-only` builds and prints the bundle path without contacting HA. SSH and SCP use the existing agent
+and config with batch authentication; agent forwarding is unnecessary. Local Python handles deployment and JSON; the
+remote account needs `ha`, `tar`, and write access to the local apps directory. Override its location with
+`--apps-dir /addons` on older installations; the default is `/local_apps` as exposed by Terminal & SSH.
+
+The command installs **Garmin Toolkit Dev** (`local_garmin_toolkit-dev`) from a prebuilt root filesystem, then stops the
+stable app and starts Dev. Its data is separate. `--stable-slug` overrides the published repository's default
+`af63a031_garmin_toolkit`. Existing Dev data survives rebuilds. If starting Dev fails, the installer attempts to stop
+Dev and restart stable when stable was previously running. It does not copy profiles or device data.
+
+To switch back, stop Garmin Toolkit Dev and start Garmin Toolkit in Home Assistant. Keep only one running while a Garmin
+is attached. The local bundle contains development code; this flow does not publish a release.
+
 ## Repository-install acceptance
 
 Pass a [generated store tree](../../release/README.md#generated-home-assistant-repository) and matching image to the

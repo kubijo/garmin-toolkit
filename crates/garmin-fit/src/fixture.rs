@@ -226,6 +226,30 @@ const fn fit_sport(sport: Sport) -> typedef::Sport {
     }
 }
 
+/// A synthetic external-style course, with geometry but no activity, laps, or timer events.
+/// # Errors
+/// Returns an error if the synthetic messages cannot be encoded.
+pub fn course() -> Result<Vec<u8>, EncodingError> {
+    let mut file_id = mesgdef::FileId::new();
+    file_id.r#type = typedef::File::COURSE;
+    file_id.manufacturer = typedef::Manufacturer::DEVELOPMENT;
+    let mut course = mesgdef::Course::new();
+    "Synthetic canal loop".clone_into(&mut course.name);
+    course.sport = typedef::Sport::CYCLING;
+    let mut messages = vec![Message::from(file_id), Message::from(course)];
+    for (latitude, longitude) in [(50.0, 14.0), (50.001, 14.002), (50.002, 14.001)] {
+        let mut record = mesgdef::Record::new();
+        record.set_position_lat_degrees(latitude);
+        record.set_position_long_degrees(longitude);
+        record.set_enhanced_altitude_scaled(240.0);
+        messages.push(Message::from(record));
+    }
+    encode(FIT {
+        messages,
+        ..FIT::default()
+    })
+}
+
 pub(crate) fn synthetic_file(file_type: typedef::File) -> Result<Vec<u8>, EncodingError> {
     let mut file_id = mesgdef::FileId::new();
     file_id.r#type = file_type;

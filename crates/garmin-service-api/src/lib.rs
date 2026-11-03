@@ -116,7 +116,36 @@ pub struct DownloadTicket {
 #[garmin_macros::portable]
 pub struct DeviceFitPreview {
     pub file_name: String,
-    pub activities: Vec<DeviceFitPreviewActivity>,
+    pub content: DeviceFitPreviewContent,
+}
+
+#[garmin_macros::portable]
+pub enum DeviceFitPreviewContent {
+    Activities(Vec<DeviceFitPreviewActivity>),
+    Course(DeviceFitPreviewCourse),
+}
+
+#[garmin_macros::portable]
+pub struct DeviceFitPreviewCourse {
+    pub name: Option<String>,
+    pub sport: Option<garmin_model::route::RouteSport>,
+    pub points: Vec<garmin_model::route::RoutePoint>,
+    pub cue_count: u32,
+}
+
+impl DeviceFitPreview {
+    #[must_use]
+    pub fn activities(&self) -> &[DeviceFitPreviewActivity] {
+        match &self.content {
+            DeviceFitPreviewContent::Activities(activities) => activities,
+            DeviceFitPreviewContent::Course(_) => &[],
+        }
+    }
+
+    #[must_use]
+    pub const fn supports_activity_import(&self) -> bool {
+        matches!(self.content, DeviceFitPreviewContent::Activities(_))
+    }
 }
 
 /// A reviewed device FIT file, bound to exact bytes and a profile.

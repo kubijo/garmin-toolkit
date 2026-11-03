@@ -1005,28 +1005,7 @@ fn device_fit_preview(
     file_name: String,
     bytes: &[u8],
 ) -> Result<garmin_service_api::DeviceFitPreview, String> {
-    let import = garmin_fit::normalize_activities(bytes).map_err(|error| error.to_string())?;
-    let activities = import
-        .normalized_activities()
-        .map(|activity| {
-            let source = activity
-                .creator()
-                .product_name()
-                .map_or_else(|| "FIT".to_owned(), ToString::to_string);
-            garmin_service_api::DeviceFitPreviewActivity {
-                source,
-                summary: activity.activity().summary(),
-                recording: garmin_service_api::ActivityRecordingSnapshot::from(activity.activity()),
-            }
-        })
-        .collect::<Vec<_>>();
-    if activities.is_empty() {
-        return Err("the FIT file does not contain an activity".to_owned());
-    }
-    Ok(garmin_service_api::DeviceFitPreview {
-        file_name,
-        activities,
-    })
+    garmin_services::devices::fit_preview::inspect(file_name, bytes)
 }
 
 fn timestamp(time: SystemTime) -> Result<Timestamp, String> {
@@ -1228,8 +1207,8 @@ mod tests {
         let preview = device_fit_preview("activity.fit".to_owned(), &bytes)?;
 
         assert_eq!(preview.file_name, "activity.fit");
-        assert_eq!(preview.activities.len(), 1);
-        assert_ne!(preview.activities[0].source, "");
+        assert_eq!(preview.activities().len(), 1);
+        assert_ne!(preview.activities()[0].source, "");
         Ok(())
     }
 

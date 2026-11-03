@@ -171,7 +171,10 @@ let
       file: file.hasExt "py" || file.hasExt "toml" || file.hasExt "txt"
     ) (workspaceSrc + "/infra/licenses");
   };
-  python = pkgs.python3.withPackages (packages: [ packages.tyro ]);
+  python = pkgs.python3.withPackages (packages: [
+    packages.tyro
+    packages.tomlkit
+  ]);
   testCommand = "${lib.getExe python} -m unittest discover -s infra/licenses -p 'test_*.py'";
   generateCommand =
     arguments: "${lib.getExe python} ${generatorSource}/generate.py --config ${config} ${arguments}";
@@ -184,7 +187,7 @@ let
     name = "licenses";
     inherit runtimeInputs;
     text = ''
-      ${generateCommand ''"$@"''}
+      ${generateCommand ''--sync --notice-manifest infra/licenses/notices.toml "$@"''}
     '';
   };
   checker = pkgs.writeShellApplication {
