@@ -1,43 +1,37 @@
 # Shared interface workflows
 
-Desktop and HASS share application models and actions. The [HASS add-on plan](hass-watch-vertical-slice.md) owns hosting
-and physical-device acceptance. Current contracts live in [application windows](../architecture/application-windows.md),
-[developer tools](../architecture/developer-tools.md), and the [device explorer](../architecture/device-explorer.md).
+Desktop and HASS share application models and actions. Physical-device evidence lives in
+[device capabilities](../research/device-capabilities.md). Current contracts live in
+[application windows](../architecture/application-windows.md), [developer tools](../architecture/developer-tools.md),
+and the [device explorer](../architecture/device-explorer.md).
 
 ## Shared work
 
-- Audit keyboard navigation, focus, modal trapping, translation, narrow layouts, and reconnect recovery.
 - Confirm browser Ctrl+wheel page zoom in a headed browser.
 - Remove the gallery-only RUSTSEC-2026-0370/0371/0372 exceptions when compatible published AccessKit/AT-SPI releases
   complete the [zbus 6 migration](https://github.com/z-galaxy/zbus/issues/2043). Preserve native accessibility; the
   [gallery audit policy](../../infra/gallery/deny.toml) rejects obsolete exceptions and other findings. AccessKit
   [defers the migration under its Rust support policy](https://github.com/AccessKit/accesskit/pull/834).
 - Finish the [visual language](../architecture/visual-language.md) across controls, shells, device headers, and
-  empty/offline/error states. Review Gray 100/10 layers, keyboard activation, Czech and long copy, narrow overlays, and
-  dark/light captures. Decide whether the headless color picker needs separate state before changing its geometry.
+  empty/offline/error states.
 
-## Runtime acceptance
+## Automated regression gaps
 
-Use `just hass::control check` against a running demo where semantic control is available. Open checks:
+Use delayed responses and controlled failures to assert:
 
-- **Files:** desktop FIT import, refresh/error recovery, busy focus, picker cancellation, removal confirmation, and
-  snapshot directory state. Test disconnect after a write commits but before its reply.
-- **Ownership:** profile switch/removal and window closure during operations or pickers; discard late results from old
-  profiles on both clients.
-- **Windows:** before advertising Windows support, test blocked-popup retry/tab fallback, stale popup rejection after
-  parent reload/closure, and foreground focus across keyboard and touch. Pending activation must not recreate closed
-  windows.
-- **Decorations:** native title-bar actions, window menu, resizing, borders/shadows, maximized appearance, and both
-  themes.
-- **Diagnostics:** file-export error recovery.
-- **Localization:** use the FormatJS `en-XA` pseudo-locale and deliberately long or untranslated copy; catalog parity
-  alone does not establish readable native, gallery, or browser layouts.
+- Reopening a busy file browser focuses its existing window without resetting directory state or duplicating requests.
+- Disconnect after a committed write but before its reply reconciles the outcome without repeating the write.
+- Profile switch/removal and window closure during operations or pickers reject late results on both clients.
+- File-export failure leaves the application usable and permits retry.
 
-Extend semantic automation when a runtime check needs hover or CSS cursor state, browser-native Ctrl+wheel input,
-capture while the HASS backend is offline, or native operating-system file-picker inspection. The current wheel action
-injects egui input and cannot check the browser's default zoom behavior. Separate native child viewports advertise no
-screenshot support; use the app's inline file-browser mode for visual checks until native capture is available. These
-tool gaps are optional improvements for unattended checks.
+## Platform qualification
+
+Before advertising Windows support, verify blocked-popup retry/tab fallback, stale popup rejection after parent
+reload/closure, and foreground focus across keyboard and touch. Pending activation must not recreate closed windows.
+
+Use pseudo-localized and long-copy gallery fixtures for layout regressions. Native child viewports do not support
+automated screenshots; use inline windows for captures. Browser Ctrl+wheel requires native browser input because the
+semantic wheel action injects egui input.
 
 ### Deferred gallery hot reload
 

@@ -34,6 +34,14 @@ host for every run.
 Simultaneous Edge 1050 and Venu 3S attachment was observed, but it does not establish complete explorer or write
 acceptance for either device.
 
+On 2026-11-03, the owner verified Edge 1050 discovery, directory browsing, activity and Course FIT previews, and
+explicit activity import through the development HASS app on Raspberry Pi with a direct USB connection. This establishes
+the packaged app's device-read path; firmware was not recorded for this run. The owner also verified the responsive map
+grid and internal-window shadows; full QA passed for commit `45edafc`. After redeployment of the refresh fix, the owner
+confirmed that refreshing retains the navigated directory. Cancelling the HASS upload picker also preserved the
+directory without an error or creating a file. Cancelling removal confirmation retained the selected file and current
+directory.
+
 Index S2 is available but deferred with other devices lacking USB data access. The initial device scope is USB watches
 and bike computers.
 
