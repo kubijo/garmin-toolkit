@@ -456,7 +456,7 @@ fn timestamp(value: i64, field: &'static str) -> Result<Timestamp, crate::Error>
     Timestamp::from_unix_milliseconds(value).map_err(|error| invalid(field, error))
 }
 
-fn parse<T>(value: &str, field: &'static str) -> Result<T, crate::Error>
+pub(super) fn parse<T>(value: &str, field: &'static str) -> Result<T, crate::Error>
 where
     T: std::str::FromStr,
     T::Err: std::fmt::Display,
@@ -484,7 +484,7 @@ fn required<T>(value: Option<T>, field: &'static str) -> Result<T, crate::Error>
     value.ok_or_else(|| invalid(field, "value is missing"))
 }
 
-fn invalid(field: &'static str, error: impl std::fmt::Display) -> crate::Error {
+pub(super) fn invalid(field: &'static str, error: impl std::fmt::Display) -> crate::Error {
     crate::Error::InvalidData {
         field,
         reason: error.to_string(),

@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    position,\n    component_name,\n    component_version\nFROM normalization_transformations\nWHERE normalization_run_id = ?\nORDER BY position;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "position",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "normalization_transformations",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "component_name",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalization_transformations",
+            "name": "component_name"
+          }
+        }
+      },
+      {
+        "name": "component_version",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalization_transformations",
+            "name": "component_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1401d192c4008a98924ae927c3ec6ba7d72a074af916877ab558b97df05a890e"
+}

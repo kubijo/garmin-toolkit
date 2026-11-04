@@ -32,6 +32,9 @@ let
       "infra/python/templates/*.html"
       # The plain-text checksum template is rendered and checked by the release tests.
       "infra/release/*.j2"
+      # Preserve byte-exact upstream compatibility inputs and plain license/dependency text.
+      "crates/datapackage/tests/upstream/**"
+      "crates/datapackage/LICENSE"
     ];
     html = true;
     javascript = true;
@@ -69,6 +72,9 @@ let
       "infra/fixtures/fit/development-activities/recordings/**"
       "old/**"
       "infra/gallery/fonts/**"
+      # Byte-exact upstream fixtures, tests, and licenses are checked by their manifest.
+      "crates/datapackage/tests/upstream/**"
+      "crates/datapackage/LICENSE"
       # Preserve upstream formatting and tooling conventions in vendored dependencies.
       "vendor/**"
     ];
@@ -177,9 +183,12 @@ let
           exec ${lib.getExe nodejs} infra/javascript/haos-devtools.test.mts
         '';
         python-lock.command = pkgs.writeShellScript "python-lock-check" ''
+          ${lib.getExe pkgs.uv} lock --check --offline \
+            --python ${pythonToolsEnv}/bin/python \
+            --project infra/python || exit $?
           exec ${lib.getExe pkgs.uv} lock --check --offline \
             --python ${pythonToolsEnv}/bin/python \
-            --project infra/python
+            --project crates/datapackage/compat
         '';
         python-tests.command = pkgs.writeShellScript "python-tests" ''
           export PATH=${

@@ -119,6 +119,17 @@ let
               uv2nix
               ;
           };
+          datapackagePythonEnv = import ./python-tools.nix {
+            inherit
+              nixpkgs
+              pkgs
+              pyproject-build-systems
+              pyproject-nix
+              uv2nix
+              ;
+            workspaceRoot = ../../crates/datapackage/compat;
+            environmentName = "datapackage-conformance-env";
+          };
           build = import ./packages.nix {
             inherit
               crane
@@ -251,6 +262,7 @@ let
           expandedQuality = import ./rust-checks.nix {
             inherit
               coverageMinimum
+              datapackagePythonEnv
               formatjsCli
               hostSccacheHook
               inheritanceCheck

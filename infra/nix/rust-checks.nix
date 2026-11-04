@@ -1,6 +1,7 @@
 {
   craneLib,
   coverageMinimum,
+  datapackagePythonEnv,
   formatjsCli,
   hostSccacheHook,
   galleryRuntimeLibraries,
@@ -380,6 +381,30 @@ let
         finish_check
       '';
 
+  datapackageCheck = mkApp "datapackage-check" [ toolchain ] ''
+    ${checkOutput "Data Package compatibility"}
+    run_step "Data Package Rust tests" ${
+      cargoCommand [
+        "test"
+        "--locked"
+        "-p"
+        "datapackage"
+      ]
+    }
+    run_step "Data Package compatibility adapter" ${
+      cargoCommand [
+        "build"
+        "--locked"
+        "-p"
+        "datapackage"
+        "--example"
+        "conformance"
+      ]
+    }
+    run_step "upstream Data Package compatibility" env DATAPACKAGE_READER="$CARGO_TARGET_DIR/debug/examples/conformance" ${datapackagePythonEnv}/bin/python -m unittest discover -s crates/datapackage/compat -v
+    finish_check
+  '';
+
   projectLint =
     mkApp "project-lint"
       [
@@ -396,6 +421,9 @@ let
       ''
         mkdir -p .tmp/qa-tmp
         export TMPDIR="$PWD/.tmp/qa-tmp"
+        GARMIN_EXPORT_CONFORMANCE_DIR=$(mktemp -d "$TMPDIR/activity-export.XXXXXXXX")
+        export GARMIN_EXPORT_CONFORMANCE_DIR
+        trap 'rm -rf "$GARMIN_EXPORT_CONFORMANCE_DIR"' EXIT
         ${checkOutput "project lint"}
         run_step "Rust source shape" ${lib.getExe sourceShapeCheck}
         run_step "cargo workspace-inheritance-check" ${lib.getExe inheritanceCheck} --path .
@@ -407,6 +435,16 @@ let
         run_step "cargo doc" env RUSTDOCFLAGS='-D warnings' ${cargoCommand docArgs}
         run_step "cargo nextest" ${cargoCommand testArgs}
         run_step "cargo nextest (production hosts)" ${cargoCommand productionTestArgs}
+        run_step "Data Package compatibility" ${lib.getExe datapackageCheck}
+        run_step "activity export CLI" ${
+          cargoCommand [
+            "build"
+            "--locked"
+            "-p"
+            "garmin-cli"
+          ]
+        }
+        run_step "official activity export conformance" ${pythonToolsEnv}/bin/python infra/python/activity_export_conformance.py --directory "$GARMIN_EXPORT_CONFORMANCE_DIR" --reader "$CARGO_TARGET_DIR/debug/garmin-cli"
         run_step "license bundles" ${lib.getExe licenseChecker}
         run_step "cargo deny" ${cargoCommand denyArgs}
         run_step "cargo machete" ${cargoCommand [ "machete" ]}
@@ -569,6 +607,7 @@ in
     '';
 
     project-lint = projectLint;
+    datapackage-check = datapackageCheck;
     gallery-check = galleryCheck;
     gallery-lint = galleryLint;
 

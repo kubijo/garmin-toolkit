@@ -15,6 +15,7 @@ integration-hooks = []
 workspace = true
 
 [dependencies]
+datapackage.workspace = true
 dirs.workspace = true
 garmin-color.workspace = true
 anyhow.workspace = true
@@ -47,6 +48,7 @@ uuid.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+zip.workspace = true
 postcard.workspace = true
 image.workspace = true
 garmin-fixtures.workspace = true

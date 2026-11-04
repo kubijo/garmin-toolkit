@@ -12,6 +12,8 @@ use garmin_model::route::{Elevation, RouteName, RoutePlanRevision, RoutePoint, R
 use gpx_format::{Gpx, GpxVersion, Route, Track, TrackSegment, Waypoint};
 use thiserror::Error;
 
+pub mod activity;
+
 #[cfg(feature = "worker")]
 pub mod worker;
 
@@ -231,6 +233,8 @@ fn waypoint(point: &RoutePoint) -> Waypoint {
 /// GPX adapter failure.
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("activity timestamp cannot be represented in GPX: {0}")]
+    Timestamp(#[from] time::error::ComponentRange),
     #[error("GPX input exceeds {MAX_BYTES} bytes")]
     TooLarge,
     #[error("GPX input exceeds {MAX_POINTS} route points")]

@@ -4,10 +4,12 @@
   pyproject-build-systems,
   pyproject-nix,
   uv2nix,
+  workspaceRoot ? ../python,
+  environmentName ? "garmin-python-tools-env",
 }:
 let
   python = pkgs.python314;
-  workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = ../python; };
+  workspace = uv2nix.lib.workspace.loadWorkspace { inherit workspaceRoot; };
   overlay = workspace.mkPyprojectOverlay { sourcePreference = "wheel"; };
   pythonSet = (pkgs.callPackage pyproject-nix.build.packages { inherit python; }).overrideScope (
     nixpkgs.lib.composeManyExtensions [
@@ -17,4 +19,4 @@ let
   );
 in
 # Tooling includes development groups so strict checks can load their type stubs.
-pythonSet.mkVirtualEnv "garmin-python-tools-env" workspace.deps.all
+pythonSet.mkVirtualEnv environmentName workspace.deps.all
