@@ -8,7 +8,9 @@ HAOS guest qualification are recorded in [publication readiness](../research/pub
 
 Other active plans: [shared interfaces](shared-interface-workflows.md),
 [Garmin Connect and sharing](garmin-connect-and-sharing.md),
-[device expansion and publication](device-expansion-and-publication.md), and [CLI distribution](distribution.md).
+[device expansion and publication](device-expansion-and-publication.md).
+
+A separate CLI distribution channel is intentionally not currently planned.
 
 Deferred: [security hardening](security-hardening.md).
 

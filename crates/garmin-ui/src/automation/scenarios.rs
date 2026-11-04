@@ -14,6 +14,7 @@ pub(super) enum Action {
         height: f32,
     },
     Available,
+    Reveal,
     Wait,
     Ready,
     Click,
@@ -66,6 +67,7 @@ impl Action {
         match self {
             Self::Resize { .. } => "resize",
             Self::Available => "assert_available",
+            Self::Reveal => "scroll_into_view",
             Self::Wait => "wait",
             Self::Ready => "readiness",
             Self::Click | Self::ClickWith(_) => "click",
@@ -148,7 +150,7 @@ pub(super) fn steps(name: &str) -> Option<Vec<Step>> {
     );
     add("setup", "activity.viewer", Action::Wait, 0.1);
     add("setup", "activity.viewer", Action::Scroll(100_000.0), 0.3);
-    add("setup", "map.fit", Action::Wait, 0.1);
+    add("setup", "map.fit", Action::Reveal, 0.1);
     add("setup", "map.fit", Action::Click, 0.2);
     add("arrival", "map", Action::Ready, 0.2);
     if name == "responsive-layout" {

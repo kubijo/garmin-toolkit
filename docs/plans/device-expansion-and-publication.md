@@ -12,10 +12,12 @@
 3. Assess battery, charging, and transport telemetry for portability, reliability, and sensitivity before exposing
    fields supported by adapter and hardware evidence.
 4. Run the local Connect IQ probe after HASS HTTPS exists.
-5. Choose desktop channels, signing, and attestations using [CLI evidence](distribution.md). Extend
-   [packaging checks](../research/desktop-packaging.md) to other non-Nix hosts and aarch64. Verify user namespaces, file
-   dialogs, production USB/GVfs, and launcher metadata. With the main window covered, test Developer tools cursor
-   changes, selection, scrolling, clicks, folder navigation, and close/reopen. Keep driver integration independent of
-   the build host; track the AMD-to-NVIDIA failure reproduced in `vkcube` separately.
+5. Choose desktop channels, signing, and attestations. Extend [packaging checks](../research/desktop-packaging.md) to
+   other non-Nix hosts and aarch64. Verify user namespaces, file dialogs, production USB/GVfs, and launcher metadata.
+   Keep driver integration independent of the build host; track the AMD-to-NVIDIA failure reproduced in `vkcube`
+   separately.
 6. Audit configuration, fixtures, identities, URLs, images, notices, and provenance.
 7. Publish the support matrix and adaptation guide. Mobile requires a separate decision.
+
+Flathub is excluded. Self-hosted Flatpak remains experimental; qualification requires network, GVfs, mass storage, and
+USB portal checks on GNOME/KDE without `--device=all`, including discovery, read/write, cancellation, and recovery.

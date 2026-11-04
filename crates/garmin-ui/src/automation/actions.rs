@@ -18,6 +18,7 @@ pub(super) fn parse(argument: &Value) -> Result<Vec<Step>, String> {
             height: dimension(argument, "height")?,
         },
         "assert_available" => Action::Available,
+        "scroll_into_view" => Action::Reveal,
         "assert_value" => Action::Value(text(argument, "value")?),
         "wait" => Action::Wait,
         "click" => {

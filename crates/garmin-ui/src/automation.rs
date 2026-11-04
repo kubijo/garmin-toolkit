@@ -108,6 +108,8 @@ mod tests_developer;
 #[cfg(test)]
 mod tests_resize;
 #[cfg(test)]
+mod tests_reveal;
+#[cfg(test)]
 mod tests_stability;
 #[cfg(test)]
 mod tests_workspace;
@@ -312,7 +314,9 @@ impl Run {
 
     fn should_wait_for_target(&self, step: &Step, elapsed: f64) -> bool {
         let missing_for = elapsed - self.waiting_since;
-        if self.recovering_layout || matches!(step.action, Action::Wait | Action::Ready) {
+        if self.recovering_layout
+            || matches!(step.action, Action::Wait | Action::Ready | Action::Reveal)
+        {
             return missing_for <= 30.0;
         }
         step.action.uses_pointer()
@@ -667,9 +671,20 @@ impl Driver {
             );
         }
         let bounds = lookup(self.tree.as_ref(), &step.target, screen)?;
+        if matches!(step.action, Action::Reveal)
+            && !crate::semantics::request_reveal(ctx, input.viewport_id, &step.target)?
+        {
+            if run.should_wait_for_target(&step, elapsed) {
+                return Ok(());
+            }
+            return Err(format!(
+                "could not scroll target into view: {}",
+                step.target
+            ));
+        }
         let waiting = matches!(
             step.action,
-            Action::Wait | Action::Ready | Action::Observe(_)
+            Action::Wait | Action::Ready | Action::Reveal | Action::Observe(_)
         );
         let Some((rect, value)) = bounds else {
             if run.should_wait_for_target(&step, elapsed) {
@@ -804,7 +819,11 @@ impl Step {
     ) -> Result<bool, String> {
         let mut complete = true;
         match &self.action {
-            Action::Wait | Action::Ready | Action::Observe(_) | Action::Available => {}
+            Action::Wait
+            | Action::Ready
+            | Action::Reveal
+            | Action::Observe(_)
+            | Action::Available => {}
             Action::Resize { .. } => unreachable!("resize is handled before semantic input"),
             Action::Click => {
                 input.events.push(Event::PointerMoved(start));
@@ -1114,6 +1133,12 @@ impl egui::plugin::Plugin for Driver {
             && let Err(reason) = self.drive(ctx, input)
         {
             self.finish("failed", Some(reason));
+        }
+        if !self.run.as_ref().is_some_and(|run| {
+            run.report.state == "running"
+                && matches!(run.steps[run.report.completed].action, Action::Reveal)
+        }) {
+            crate::semantics::clear_reveal(ctx, input.viewport_id);
         }
         self.release_input(input);
         self.restore_viewport(ctx);

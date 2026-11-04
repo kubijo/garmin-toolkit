@@ -2985,6 +2985,116 @@ mod tests {
         }
     }
 
+    fn desktop_import_actions(ui: &mut egui::Ui) {
+        ui.add_space(12.0);
+        let _ = crate::file_import::actions(
+            ui,
+            &crate::file_import::Props {
+                title: "Import FIT",
+                description: "Import files or a folder",
+                files_label: "Choose files",
+                folder_label: "Choose a folder",
+                drop_active: false,
+                enabled: true,
+            },
+        );
+    }
+
+    #[test]
+    fn fit_route_remains_reachable_at_the_minimum_desktop_size() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        context.add_plugin(crate::automation::Driver::default());
+        let intl = garmin_i18n::Translations::bundled()
+            .unwrap()
+            .formatter(garmin_i18n::Language::English)
+            .unwrap();
+        let duration = ActivityDuration::from_milliseconds(1_000);
+        let summary = garmin_model::activity::ActivitySummary::from_parts(
+            ActivitySport::Cycling,
+            TimeRange::from_parts(timestamp(0), timestamp(1_000)).unwrap(),
+            ActivityTotals::from_parts(duration, duration, None, None, None, None).unwrap(),
+            ActivityMetrics::default(),
+        );
+        let presentations = [super::Presentation::from_summary(
+            summary,
+            "Test",
+            &intl,
+            UnitSystem::Metric,
+        )];
+        let items = [presentations[0].item_props()];
+        let recording = recording(vec![
+            sample(0, None, None, Some((60.0, 24.0))),
+            sample(1_000, None, None, Some((60.01, 24.01))),
+        ]);
+        let runtime = crate::activity::map_runtime::MapRuntimeHandle::new(
+            TestMapBackend,
+            crate::activity::map_runtime::Renderer::software(),
+        );
+        let mut workspace = super::Workspace::new(&runtime);
+        crate::automation::command(
+            &context,
+            "sequence",
+            &serde_json::json!([
+                {"kind":"wait", "target":"activity.viewer"},
+                {"kind":"scroll", "target":"activity.viewer", "delta":100_000},
+                {"kind":"scroll_into_view", "target":"map.fit"},
+                {"kind":"assert_available", "target":"map.fit"},
+                {"kind":"click", "target":"map.fit"},
+            ]),
+        )
+        .unwrap();
+        for tick in 0..600 {
+            context
+                .run_ui(
+                    egui::RawInput {
+                        time: Some(f64::from(tick) / 60.0),
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(720.0, 480.0),
+                        )),
+                        focused: true,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        // Reserve the desktop header and expanded navigation alongside the workspace.
+                        let bounds =
+                            egui::Rect::from_min_max(egui::pos2(224.0, 32.0), ui.max_rect().max);
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(bounds), |ui| {
+                            ui.set_clip_rect(bounds);
+                            let _ = workspace.show_with_actions(
+                                ui,
+                                &intl,
+                                &super::WorkspaceProps {
+                                    today: jiff::civil::date(2026, 11, 4),
+                                    items: &items,
+                                    presentations: &presentations,
+                                    selected: Some(0),
+                                    recording: Some(&recording),
+                                    recording_key: Some("minimum-size"),
+                                    units: UnitSystem::Metric,
+                                    empty_list: "Empty",
+                                    empty_detail: "Select",
+                                    no_route: "No route",
+                                },
+                                desktop_import_actions,
+                            );
+                        });
+                    },
+                )
+                .drop_without_applying_deltas();
+            let plugin = context.plugin::<crate::automation::Driver>();
+            let driver = plugin.lock();
+            if let Some(report) = driver.report()
+                && report.state != "running"
+            {
+                assert_eq!(report.state, "passed", "{:?}", report.failure);
+                return;
+            }
+        }
+        panic!("minimum-size activity controls did not settle");
+    }
+
     #[test]
     fn nearest_plot_position_reports_original_sample_index() {
         let values = [0.0, 1.0, 2.5, 9.0];

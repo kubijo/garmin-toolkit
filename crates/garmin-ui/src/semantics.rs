@@ -1,5 +1,10 @@
 //! Stable AccessKit target identifiers.
 
+#[cfg(any(test, feature = "automation"))]
+mod reveal;
+#[cfg(any(test, feature = "automation"))]
+pub(crate) use reveal::{clear_reveal, request_reveal};
+
 /// Publish a control's state on its accessibility node.
 pub fn value(response: &egui::Response, value: impl Into<String>) {
     response
@@ -9,10 +14,13 @@ pub fn value(response: &egui::Response, value: impl Into<String>) {
 
 /// Attach a locale-independent identifier and clipped bounds to an accessible response.
 pub fn target(ui: &egui::Ui, response: &egui::Response, name: impl Into<String>) {
+    let name = name.into();
+    #[cfg(any(test, feature = "automation"))]
+    reveal::target(ui, response, &name);
     let clipped = response.rect.intersect(ui.clip_rect());
     let visible = ui.is_visible();
     response.ctx.accesskit_node_builder(response.id, |node| {
-        node.set_author_id(name.into());
+        node.set_author_id(name);
         // AccessKit transforms must not turn an inverted clip into a clickable rectangle.
         let bounds = if visible && clipped.is_positive() && clipped.is_finite() {
             clipped
