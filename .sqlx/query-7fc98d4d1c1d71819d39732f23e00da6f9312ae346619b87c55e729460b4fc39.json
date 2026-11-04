@@ -1,0 +1,254 @@
+{
+  "db_name": "SQLite",
+  "query": "WITH RECURSIVE related (id) AS (\n    SELECT observations.id\n    FROM observations\n    INNER JOIN observations AS selected\n        ON observations.owner_id = selected.owner_id\n    WHERE\n        selected.owner_id = ?1\n        AND selected.id = ?2\n        AND selected.kind = 'activity'\n        AND observations.kind = 'activity'\n        AND observations.fingerprint_schema_name\n        = selected.fingerprint_schema_name\n        AND observations.fingerprint_schema_version\n        = selected.fingerprint_schema_version\n        AND observations.fingerprint_digest = selected.fingerprint_digest\n    UNION\n    SELECT sibling.observation_id\n    FROM related\n    INNER JOIN\n        association_group_members AS member\n        ON related.id = member.observation_id\n    INNER JOIN association_group_members AS sibling\n        ON member.association_group_id = sibling.association_group_id\n    WHERE sibling.owner_id = ?1 AND sibling.kind = 'activity'\n)\n\nSELECT\n    observations.id AS observation_id,\n    observations.normalization_run_id,\n    observations.fingerprint_schema_name,\n    observations.fingerprint_schema_version,\n    observations.fingerprint_digest,\n    normalization_runs.acquisition_id,\n    normalization_runs.artifact_id,\n    normalization_runs.parser_name,\n    normalization_runs.parser_version,\n    normalization_runs.schema_version,\n    acquisitions.operation_id,\n    acquisitions.source_id,\n    acquisitions.source_identity,\n    acquisitions.acquired_at,\n    sources.label AS source_label,\n    sources.device_id,\n    artifacts.media_type,\n    artifact_blobs.digest,\n    artifact_blobs.byte_count,\n    artifact_blobs.bytes\nFROM related\nINNER JOIN observations ON related.id = observations.id\nINNER JOIN\n    normalization_runs\n    ON observations.normalization_run_id = normalization_runs.id\nINNER JOIN acquisitions ON normalization_runs.acquisition_id = acquisitions.id\nINNER JOIN sources ON acquisitions.source_id = sources.id\nINNER JOIN artifacts ON normalization_runs.artifact_id = artifacts.id\nINNER JOIN artifact_blobs ON artifacts.digest = artifact_blobs.digest\nWHERE observations.owner_id = ?1 AND observations.kind = 'activity'\nORDER BY observations.id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "observation_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "observations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "normalization_run_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "observations",
+            "name": "normalization_run_id"
+          }
+        }
+      },
+      {
+        "name": "fingerprint_schema_name",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "observations",
+            "name": "fingerprint_schema_name"
+          }
+        }
+      },
+      {
+        "name": "fingerprint_schema_version",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "observations",
+            "name": "fingerprint_schema_version"
+          }
+        }
+      },
+      {
+        "name": "fingerprint_digest",
+        "ordinal": 4,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "observations",
+            "name": "fingerprint_digest"
+          }
+        }
+      },
+      {
+        "name": "acquisition_id",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalization_runs",
+            "name": "acquisition_id"
+          }
+        }
+      },
+      {
+        "name": "artifact_id",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalization_runs",
+            "name": "artifact_id"
+          }
+        }
+      },
+      {
+        "name": "parser_name",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalization_runs",
+            "name": "parser_name"
+          }
+        }
+      },
+      {
+        "name": "parser_version",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "normalization_runs",
+            "name": "parser_version"
+          }
+        }
+      },
+      {
+        "name": "schema_version",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "normalization_runs",
+            "name": "schema_version"
+          }
+        }
+      },
+      {
+        "name": "operation_id",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "operation_id"
+          }
+        }
+      },
+      {
+        "name": "source_id",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "source_id"
+          }
+        }
+      },
+      {
+        "name": "source_identity",
+        "ordinal": 12,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "source_identity"
+          }
+        }
+      },
+      {
+        "name": "acquired_at",
+        "ordinal": 13,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "acquired_at"
+          }
+        }
+      },
+      {
+        "name": "source_label",
+        "ordinal": 14,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sources",
+            "name": "label"
+          }
+        }
+      },
+      {
+        "name": "device_id",
+        "ordinal": 15,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sources",
+            "name": "device_id"
+          }
+        }
+      },
+      {
+        "name": "media_type",
+        "ordinal": 16,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "artifacts",
+            "name": "media_type"
+          }
+        }
+      },
+      {
+        "name": "digest",
+        "ordinal": 17,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "artifact_blobs",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "name": "byte_count",
+        "ordinal": 18,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "artifact_blobs",
+            "name": "byte_count"
+          }
+        }
+      },
+      {
+        "name": "bytes",
+        "ordinal": 19,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "artifact_blobs",
+            "name": "bytes"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7fc98d4d1c1d71819d39732f23e00da6f9312ae346619b87c55e729460b4fc39"
+}

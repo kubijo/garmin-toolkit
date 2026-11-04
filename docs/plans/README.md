@@ -6,7 +6,7 @@ Follow the [development workflow](../development.md) and
 Physical-device evidence is recorded in [device capabilities](../research/device-capabilities.md). Signed releases and
 HAOS guest qualification are recorded in [publication readiness](../research/publication-readiness.md).
 
-Other active plans: [shared interfaces](shared-interface-workflows.md), [portable data](data-foundation.md),
+Other active plans: [shared interfaces](shared-interface-workflows.md),
 [Garmin Connect and sharing](garmin-connect-and-sharing.md),
 [device expansion and publication](device-expansion-and-publication.md), and [CLI distribution](distribution.md).
 

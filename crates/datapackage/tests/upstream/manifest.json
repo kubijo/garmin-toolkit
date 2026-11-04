@@ -1,0 +1,44 @@
+{
+  "repository": "https://github.com/frictionlessdata/frictionless-py",
+  "release": "v5.21.0",
+  "revision": "c08fa29cb0708427ae65bb689ded8e2691078a82",
+  "files": {
+    "data/package/data.csv": "08b4645fd105c74fbb752c4cf6a1a995452178953bb874697830002474f9538f",
+    "data/package/data2.csv": "c58f34fe7961113baf24fb45f4b9fcfff9ceae6274373fd9d3c84be540075406",
+    "data/package/datapackage.json": "f0cd0a7417e1b18b00d7d786ef2c4d8d941a7211209636b9a9fd84d3a7183f56",
+    "data/invalid/data.csv": "a1b1011a2ae390203033ce3c60af043020fb45e94c2b88055ed13177564b2a15",
+    "data/invalid/data2.csv": "4482ee53e26290f5a80d969aaa3cd907b882a0c675b5948737faab2110ed9868",
+    "data/invalid/datapackage.json": "f0cd0a7417e1b18b00d7d786ef2c4d8d941a7211209636b9a9fd84d3a7183f56",
+    "data/invalid/datapackage_no_foreign_key.json": "87885e7c5bee2a5f802f967f6190b28cdf728eecd3794093824cccea1584413c",
+    "data/table.csv": "a1fd6c5ff3494f697874deeb07f69f8667e903dd94a7bc062dd57550cea26da8",
+    "test_validate.py.upstream": "0f554e2e727f567eda92ff42f97f5c14ec4a30d0c08aa69632346356722f7798",
+    "LICENSE.md": "5f9048803ee2da9e8ab18f365e056a2b0c42ac4afab85381ccf0564e6a6025b1"
+  },
+  "python_test": {
+    "path": "test_validate.py",
+    "reference": "test_validate.py.upstream",
+    "local_changes": "Comment layout only; the executable AST must match the pinned reference."
+  },
+  "tests": [
+    "test_package_validate_from_dict",
+    "test_package_validate_from_dict_invalid",
+    "test_package_validate_from_path",
+    "test_package_validate_from_path_invalid",
+    "test_package_validate_invalid_package_standards_v2_strict",
+    "test_package_validate_composite_primary_key_unique_issue_215",
+    "test_package_validate_composite_primary_key_not_unique_issue_215",
+    "test_package_validate_stats_invalid",
+    "test_package_validate_resource_name_version_gate",
+    "test_package_validate_package_name_version_gate"
+  ],
+  "cases": [
+    "data/package/datapackage.json",
+    "data/invalid/datapackage.json",
+    "data/invalid/datapackage_no_foreign_key.json"
+  ],
+  "inline_cases": [
+    "test_package_validate_composite_primary_key_unique_issue_215",
+    "test_package_validate_composite_primary_key_not_unique_issue_215",
+    "test_package_validate_invalid_package_standards_v2_strict"
+  ]
+}

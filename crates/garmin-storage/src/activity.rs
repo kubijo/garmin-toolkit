@@ -10,8 +10,11 @@ use garmin_model::{
 use sqlx::{Sqlite, Transaction};
 use thiserror::Error;
 
+mod export;
 mod read;
 mod write;
+
+pub use export::{ActivityExport, ActivityExportProvenance, ExportTransformation};
 
 /// One activity observation and its complete normalized projection.
 pub struct ActivityProjection<'a> {

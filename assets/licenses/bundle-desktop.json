@@ -1766,6 +1766,42 @@
       ]
     },
     {
+      "name": "csv",
+      "version": "1.4.0",
+      "license": "Unlicense/MIT",
+      "source": {
+        "kind": "cargo"
+      },
+      "notices": [
+        {
+          "license": "Unlicense",
+          "text_index": 384
+        },
+        {
+          "license": "MIT",
+          "text_index": 361
+        }
+      ]
+    },
+    {
+      "name": "csv-core",
+      "version": "0.1.13",
+      "license": "Unlicense/MIT",
+      "source": {
+        "kind": "cargo"
+      },
+      "notices": [
+        {
+          "license": "Unlicense",
+          "text_index": 384
+        },
+        {
+          "license": "MIT",
+          "text_index": 361
+        }
+      ]
+    },
+    {
       "name": "ctutils",
       "version": "0.4.8",
       "license": "Apache-2.0 OR MIT",

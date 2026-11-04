@@ -29,6 +29,10 @@ audit *args:
 test:
     just in-shell nix run {{ flake }}#test
 
+# Check Data Package compatibility and build its standalone distribution archive.
+datapackage:
+    just in-shell nix run {{ flake }}#datapackage-check
+
 # Format every maintained source type.
 format:
     just in-shell nix run {{ flake }}#format

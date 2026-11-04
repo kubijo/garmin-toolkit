@@ -1,5 +1,6 @@
 //! Target-neutral application services.
 
+pub mod activity_export;
 pub mod course_transfer;
 pub mod deployment;
 pub mod devices;
