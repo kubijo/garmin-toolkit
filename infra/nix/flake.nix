@@ -109,7 +109,6 @@ let
             "rustc"
             "rust-std"
           ];
-          coverageMinimum = 65;
           pythonToolsEnv = import ./python-tools.nix {
             inherit
               nixpkgs
@@ -261,7 +260,6 @@ let
           };
           expandedQuality = import ./rust-checks.nix {
             inherit
-              coverageMinimum
               datapackagePythonEnv
               formatjsCli
               hostSccacheHook

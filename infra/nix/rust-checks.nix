@@ -1,6 +1,5 @@
 {
   craneLib,
-  coverageMinimum,
   datapackagePythonEnv,
   formatjsCli,
   hostSccacheHook,
@@ -19,7 +18,15 @@
 }:
 
 let
-  inherit (builtins) genericClosure;
+  inherit (builtins) genericClosure fromTOML readFile;
+
+  coveragePolicy = workspaceSrc + "/infra/coverage/owners.toml";
+  coveragePolicyData = fromTOML (readFile coveragePolicy);
+  coverageCheck = report: ''
+    ${pythonToolsEnv}/bin/python ${
+      workspaceSrc + "/infra/python/coverage_owners.py"
+    } ${report} --root "$PWD" --policy ${coveragePolicy}
+  '';
 
   cargo = lib.getExe' toolchain "cargo";
   pkgConfigNode = package: {
@@ -51,7 +58,7 @@ let
   # Gallery snapshots exercise immediate-mode rendering outside llvm-cov.
   coverageArgs = [
     "--ignore-filename-regex"
-    "crates/garmin-ui/|apps/garmin-desktop/src/view\\.rs"
+    (lib.concatStringsSep "|" (map lib.escapeRegex coveragePolicyData.measurement.excluded_paths))
   ];
   workspaceArgs = [
     "--locked"
@@ -589,9 +596,8 @@ in
           ]}
           ${coverageReport [
             "--summary-only"
-            "--fail-under-lines"
-            (toString coverageMinimum)
           ]}
+          ${coverageCheck ".tmp/coverage/lcov.info"}
         '';
 
     dedupe = mkApp "dedupe" [ pkgs.cargo-deny ] ''
@@ -649,16 +655,11 @@ in
       // {
         inherit cargoArtifacts;
         cargoExtraArgs = lib.escapeShellArgs (lib.drop 2 testArgs);
-        cargoLlvmCovExtraArgs = lib.escapeShellArgs (
-          coverageArgs
-          ++ [
-            "--summary-only"
-            "--fail-under-lines"
-            (toString coverageMinimum)
-          ]
-        );
+        cargoLlvmCovExtraArgs =
+          lib.escapeShellArgs coverageArgs + " " + ''--lcov --output-path "$out/coverage.lcov"'';
         doCheck = true;
         preCheck = "mkdir -p $out";
+        postCheck = coverageCheck ''"$out/coverage.lcov"'';
         withLlvmCov = true;
       }
     );
