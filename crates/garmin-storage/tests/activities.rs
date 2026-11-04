@@ -20,7 +20,7 @@ use garmin_model::{
     identity::{Device, DeviceId, Profile, Role, Source, SourceId, User, UserId},
     observation::{Observation, ObservationId, ObservationKind},
     route::{Coordinate, Elevation, Latitude, Longitude},
-    value::{ComponentVersion, Timestamp},
+    value::{ComponentVersion, Timestamp, Transformation},
 };
 use garmin_storage::{ActivityProjection, Ingestion, IngestionError, Storage};
 use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
@@ -103,6 +103,55 @@ impl Fixture {
             projections,
         )
     }
+}
+
+#[test]
+fn export_material_preserves_domain_provenance_and_transformations() -> TestResult {
+    block_on(async {
+        let root = tempdir()?;
+        let storage = Storage::open(root.path().join("export-records.sqlite3")).await?;
+        let (user, device, source) = owner_and_source()?;
+        storage.save_user(&user).await?;
+        storage.save_device(&device).await?;
+        storage.save_source(&source).await?;
+        let mut fixture = Fixture::new(&source)?;
+        fixture.normalization = NormalizationRun::from_parts(
+            fixture.normalization.id(),
+            &fixture.acquisition,
+            fixture.normalization.parser().clone(),
+            fixture.normalization.schema(),
+            ["unit-normalization", "clock-correction"]
+                .into_iter()
+                .map(|name| {
+                    Ok(Transformation::from_component(
+                        ComponentVersion::from_parts(name, "1.2.3-beta.1+build.7".parse()?)?,
+                    ))
+                })
+                .collect::<TestResult<Vec<_>>>()?,
+            NormalizationOutcome::Succeeded,
+        );
+        let projections = [fixture.projection()?];
+        storage.ingest(fixture.ingestion(&projections)?).await?;
+        let mut records = storage
+            .activity_export(user.id(), fixture.observation.id())
+            .await?;
+        assert_eq!(records.len(), 1);
+        let record = records.pop().ok_or("missing activity material")?;
+        assert_eq!(record.source, source);
+        assert_eq!(record.acquisition, fixture.acquisition);
+        assert_eq!(record.normalization, fixture.normalization);
+        assert_eq!(record.artifact, fixture.artifact);
+        assert_eq!(&record.fingerprint, fixture.observation.fingerprint());
+        assert_eq!(record.original, fixture.bytes);
+        assert!(
+            storage
+                .activity_export(UserId::new_v4(), fixture.observation.id())
+                .await?
+                .is_empty()
+        );
+        storage.close().await;
+        Ok(())
+    })
 }
 
 #[test]

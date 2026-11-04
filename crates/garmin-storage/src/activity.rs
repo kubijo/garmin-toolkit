@@ -14,7 +14,7 @@ mod export;
 mod read;
 mod write;
 
-pub use export::{ActivityExport, ActivityExportProvenance, ExportTransformation};
+pub use export::ActivityExport;
 
 /// One activity observation and its complete normalized projection.
 pub struct ActivityProjection<'a> {

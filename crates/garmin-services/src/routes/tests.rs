@@ -35,7 +35,7 @@ async fn fixture(geometry: bool) -> TestResult<Fixture> {
         "GPX files".parse()?,
         None,
     );
-    let document = Application::inspect_gpx(GPX)?;
+    let document = garmin_gpx::parse(GPX)?;
     let candidate = document
         .candidates()
         .iter()

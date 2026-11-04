@@ -25,8 +25,8 @@ mod route;
 pub mod snapshot;
 
 pub use activity::{
-    ActivityExport, ActivityExportProvenance, ActivityProjection, ActivityProjectionError,
-    ExportTransformation, StoredActivity, StoredActivitySummary,
+    ActivityExport, ActivityProjection, ActivityProjectionError, StoredActivity,
+    StoredActivitySummary,
 };
 pub use avatar::{AvatarPersistenceError, ProfileAvatar, StoredProfileAvatar};
 pub use course::{

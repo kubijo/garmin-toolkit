@@ -1195,7 +1195,7 @@ impl Desktop {
                             self.activity_detail = Some(ActivityDetailSnapshot {
                                 id: details.observation_id(),
                                 recording: garmin_service_api::ActivityRecordingSnapshot::from(
-                                    details.normalized().activity(),
+                                    details.activity(),
                                 ),
                             });
                         }
@@ -2378,11 +2378,7 @@ fn activity_presentation(
     intl: &Intl,
     units: UnitSystem,
 ) -> activity::Presentation {
-    let source = preview
-        .creator()
-        .product_name()
-        .map_or("FIT", |value| value.as_str());
-    activity::Presentation::from_summary(preview.summary(), source, intl, units)
+    activity::Presentation::from_summary(preview.summary(), preview.source(), intl, units)
 }
 
 #[cfg(test)]

@@ -11,12 +11,14 @@ use garmin_model::{
     activity::{ActivityMetrics, ActivitySport, ActivityTotals, TimeRange, TimerState},
     observation::ObservationId,
 };
-use garmin_storage::{ActivityExport, ActivityExportProvenance, ExportTransformation};
+use garmin_storage::ActivityExport;
 use serde::{Deserialize, Serialize};
 
 use crate::{Application, UserContext};
 
+mod provenance;
 mod read;
+pub use provenance::{ActivityExportProvenance, ExportTransformation};
 pub use read::{Package, Provenance as ParsedProvenance, read};
 
 /// Counts of preserved observations and original FIT artifacts.
@@ -222,15 +224,6 @@ table!(Sample {
 });
 table!(Event { observation_id: ObservationId => "", position: usize => "", timestamp_ms: i64 => "unix millisecond", state: String => "" });
 
-#[derive(Serialize)]
-struct Provenance<'a> {
-    #[serde(flatten)]
-    acquisition: &'a ActivityExportProvenance,
-    transformations: &'a [ExportTransformation],
-    sequence_position: u32,
-    creator: Creator,
-}
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Creator {
     manufacturer: u16,
@@ -341,7 +334,7 @@ fn write_package(
             &gpx,
             None,
         )?;
-        let artifact = recording.provenance.artifact_id;
+        let artifact = recording.artifact.id();
         if originals.insert(artifact) {
             add_resource(
                 &mut writer,
@@ -384,13 +377,8 @@ fn write_package(
     )?;
     let provenance = recordings
         .iter()
-        .map(|recording| Provenance {
-            acquisition: &recording.provenance,
-            transformations: &recording.transformations,
-            sequence_position: recording.activity.sequence_position().as_u32(),
-            creator: Creator::from(recording.activity.normalized().creator()),
-        })
-        .collect::<Vec<_>>();
+        .map(ParsedProvenance::try_from)
+        .collect::<Result<Vec<_>, Error>>()?;
     add_resource(
         &mut writer,
         "provenance".to_owned(),
