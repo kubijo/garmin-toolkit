@@ -54,9 +54,14 @@ if (!bridge.installed) {
 
 export function downloadLogs(text) {
     const url = URL.createObjectURL(new Blob([text], { type: 'application/x-ndjson' }));
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'garmin-logs.jsonl';
-    anchor.click();
+    try {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = 'garmin-logs.jsonl';
+        anchor.click();
+    } catch (error) {
+        URL.revokeObjectURL(url);
+        throw error;
+    }
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

@@ -18,6 +18,7 @@ mod window_client;
 use bytes::Bytes;
 use camino::Utf8PathBuf;
 use eframe::egui::{ColorImage, Id, TextureHandle, TextureOptions, Ui, load::SizedTexture};
+use files::requests::OperationToken as DeviceBrowserOperationToken;
 use futures_util::{SinkExt as _, StreamExt as _, future};
 use garmin_i18n::{Intl, Language, Translations, format_message};
 use garmin_model::identity::{LanguagePreference, ProfilePreferences, ThemePreference, UserId};
@@ -1406,7 +1407,7 @@ impl eframe::App for App {
                 state.notice.clone(),
                 state.activity_detail.as_ref().map(Rc::clone),
                 state.preferences_saving || state.avatar_saving,
-                state.device_catalog_request.loading().map(str::to_owned),
+                state.file_requests.catalog.loading().map(str::to_owned),
                 state.disconnected_since_milliseconds,
                 state.deployment_mode,
             )
@@ -1607,10 +1608,8 @@ struct State {
     avatar_draft: Option<AvatarDraft>,
     avatar_finished: Option<bool>,
     device_catalog: Option<(String, Result<DeviceCatalogSnapshot, String>)>,
-    device_catalog_request: files::catalog::Request,
-    active_device_browser_operation: Option<DeviceBrowserOperationToken>,
+    file_requests: files::requests::Requests,
     device_browser_interrupted: bool,
-    next_device_browser_operation: u64,
     connection_generation: u64,
     device_browser_refresh: Option<(String, Result<DeviceCatalogSnapshot, String>)>,
     device_fit_preview: Option<(
@@ -1649,7 +1648,7 @@ struct FitImportMessages {
 
 impl State {
     fn interrupt_device_browser_operation(&mut self) -> bool {
-        let interrupted = self.active_device_browser_operation.take().is_some();
+        let interrupted = self.file_requests.interrupt();
         if let Some(id) = self.file_progress_toast.take() {
             self.file_toasts.dismiss(id);
         }
@@ -1676,12 +1675,6 @@ impl State {
             );
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct DeviceBrowserOperationToken {
-    connection_generation: u64,
-    operation: u64,
 }
 
 #[derive(Clone)]
@@ -2105,7 +2098,7 @@ fn spawn_device_upload(
             return;
         };
         // A reconnect or changed parent session while the picker was open invalidates it.
-        if shared.borrow().active_device_browser_operation != Some(token) {
+        if shared.borrow().file_requests.active() != Some(token) {
             return;
         }
         if file.inner().size() > MAX_DEVICE_BROWSER_TRANSFER_BYTES {
@@ -2321,7 +2314,7 @@ fn reconcile_pending_fit_import(shared: Rc<RefCell<State>>, context: eframe::egu
             return;
         };
         let generation = state.connection_generation;
-        if state.active_device_browser_operation.is_some()
+        if state.file_requests.active().is_some()
             || state.reconciling_fit_import == Some(generation)
         {
             return;
@@ -2401,12 +2394,8 @@ fn begin_device_browser_request(
         return None;
     }
     let client = state.client.clone()?;
-    let token = DeviceBrowserOperationToken {
-        connection_generation: state.connection_generation,
-        operation: state.next_device_browser_operation,
-    };
-    state.next_device_browser_operation = state.next_device_browser_operation.wrapping_add(1);
-    state.active_device_browser_operation = Some(token);
+    let generation = state.connection_generation;
+    let token = state.file_requests.begin(generation)?;
     state.device_browser_interrupted = false;
     if let Some(progress) = progress {
         state.file_progress_toast = Some(state.file_toasts.push(
@@ -2417,16 +2406,16 @@ fn begin_device_browser_request(
 }
 
 fn device_browser_busy(state: &State) -> bool {
-    state.active_device_browser_operation.is_some() || state.pending_fit_import.is_some()
+    state.file_requests.active().is_some() || state.pending_fit_import.is_some()
 }
 
 fn finish_device_browser_request(state: &mut State, token: DeviceBrowserOperationToken) -> bool {
-    if state.active_device_browser_operation != Some(token)
-        || state.connection_generation != token.connection_generation
+    if !state
+        .file_requests
+        .finish(token, state.connection_generation)
     {
         return false;
     }
-    state.active_device_browser_operation = None;
     if let Some(id) = state.file_progress_toast.take() {
         state.file_toasts.dismiss(id);
     }
@@ -2513,7 +2502,7 @@ fn spawn_device_catalog(
         let Some(client) = state.client.clone() else {
             return;
         };
-        let Some(request) = state.device_catalog_request.begin(&device_key) else {
+        let Some(request) = state.file_requests.catalog.begin(&device_key) else {
             return;
         };
         state.device_catalog = None;
@@ -2529,7 +2518,7 @@ fn spawn_device_catalog(
             .map_err(|error| error.to_string());
         let mut state = shared.borrow_mut();
         if state.connection_generation != connection_generation
-            || !state.device_catalog_request.finish(request)
+            || !state.file_requests.catalog.finish(request)
         {
             return;
         }
@@ -2647,7 +2636,7 @@ fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     state.routes.disconnect();
     state.logs = None;
     state.interrupt_device_browser_operation();
-    state.device_catalog_request.invalidate();
+    state.file_requests.catalog.invalidate();
     state.reconciling_fit_import = None;
     state.connection_generation = state.connection_generation.wrapping_add(1);
     if state.profiles_loaded && state.disconnected_since_milliseconds.is_none() {

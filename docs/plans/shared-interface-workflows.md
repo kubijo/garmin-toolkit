@@ -15,15 +15,6 @@ and the [device explorer](../architecture/device-explorer.md).
 - Finish the [visual language](../architecture/visual-language.md) across controls, shells, device headers, and
   empty/offline/error states.
 
-## Automated regression gaps
-
-Use delayed responses and controlled failures to assert:
-
-- Reopening a busy file browser focuses its existing window without resetting directory state or duplicating requests.
-- Disconnect after a committed write but before its reply reconciles the outcome without repeating the write.
-- Profile switch/removal and window closure during operations or pickers reject late results on both clients.
-- File-export failure leaves the application usable and permits retry.
-
 ## Platform qualification
 
 Before advertising Windows support, verify blocked-popup retry/tab fallback, stale popup rejection after parent

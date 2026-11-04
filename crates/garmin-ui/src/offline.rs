@@ -1,6 +1,6 @@
 use cint::ColorInterop;
 use egui::{Align, Align2, Id, Layout, Order, RichText, Sense, Ui};
-use garmin_color::{swatch, theme};
+use garmin_color::theme;
 
 use crate::{icons, theme as widget_theme, typography};
 
@@ -18,11 +18,7 @@ pub fn show(ui: &Ui, id: Id, props: &Props<'_>) {
     let bounds = ui.max_rect();
     let ctx = ui.ctx();
     let palette = widget_theme::palette(ui);
-    let icon_color = if palette.is_dark() {
-        swatch::orange::G40
-    } else {
-        swatch::orange::G60
-    };
+    let icon_color = palette.support().information();
     let overlay = widget_theme::color32(palette.overlay());
     let style = ui.style().clone();
 
@@ -43,10 +39,9 @@ pub fn show(ui: &Ui, id: Id, props: &Props<'_>) {
         .movable(false)
         .show(ctx, |ui| {
             ui.set_style(style);
-            let width = CARD_WIDTH.min((bounds.width() - VIEWPORT_MARGIN).max(0.0));
             let surfaces = palette.surfaces();
             let content = palette.content();
-            egui::Frame::new()
+            let frame = egui::Frame::new()
                 .fill(widget_theme::color32(surfaces.layer(theme::Level::One)))
                 .corner_radius(widget_theme::FLOATING_RADIUS)
                 .stroke(egui::Stroke::new(
@@ -54,49 +49,51 @@ pub fn show(ui: &Ui, id: Id, props: &Props<'_>) {
                     widget_theme::color32(palette.borders().subtle()),
                 ))
                 .shadow(egui::Shadow {
-                    offset: [0, 12],
+                    offset: [0, 8],
                     blur: 32,
                     spread: 0,
                     color: egui::Color32::from_black_alpha(128),
                 })
-                .inner_margin(egui::Margin::symmetric(32, 28))
-                .show(ui, |ui| {
-                    ui.set_width(width);
-                    ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                        icons::Props {
-                            icon: icons::WIFI_SLASH,
-                            size: 52.0,
-                            color: icon_color,
-                        }
-                        .show(ui);
-                        ui.add_space(20.0);
-                        ui.add(
-                            egui::Label::new(
-                                typography::semibold(props.title)
-                                    .size(22.0)
-                                    .color(content.text_primary().into_cint()),
-                            )
-                            .selectable(false),
-                        );
-                        ui.add_space(8.0);
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(props.message)
-                                    .color(content.text_secondary().into_cint()),
-                            )
-                            .selectable(false)
-                            .wrap(),
-                        );
-                        ui.add_space(20.0);
-                        ui.add(
-                            egui::Label::new(
-                                typography::semibold(props.elapsed)
-                                    .color(content.text_secondary().into_cint()),
-                            )
-                            .selectable(false),
-                        );
-                    });
+                .inner_margin(32);
+            let width = CARD_WIDTH
+                .min((bounds.width() - VIEWPORT_MARGIN - frame.total_margin().sum().x).max(0.0));
+            frame.show(ui, |ui| {
+                ui.set_width(width);
+                ui.with_layout(Layout::top_down(Align::Center), |ui| {
+                    icons::Props {
+                        icon: icons::WIFI_SLASH,
+                        size: 48.0,
+                        color: icon_color,
+                    }
+                    .show(ui);
+                    ui.add_space(24.0);
+                    ui.add(
+                        egui::Label::new(
+                            typography::semibold(props.title)
+                                .size(24.0)
+                                .color(content.text_primary().into_cint()),
+                        )
+                        .selectable(false),
+                    );
+                    ui.add_space(8.0);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(props.message)
+                                .color(content.text_secondary().into_cint()),
+                        )
+                        .selectable(false)
+                        .wrap(),
+                    );
+                    ui.add_space(24.0);
+                    ui.add(
+                        egui::Label::new(
+                            typography::semibold(props.elapsed)
+                                .color(content.text_secondary().into_cint()),
+                        )
+                        .selectable(false),
+                    );
                 });
+            });
         });
 }
 
@@ -115,6 +112,43 @@ pub fn format_duration(seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::format_duration;
+
+    #[test]
+    fn reconnect_card_stays_inside_narrow_viewports_in_both_themes() {
+        for dark in [true, false] {
+            for width in [320.0, 400.0, 960.0] {
+                let context = egui::Context::default();
+                crate::install(&context);
+                context.set_visuals(if dark {
+                    egui::Visuals::dark()
+                } else {
+                    egui::Visuals::light()
+                });
+                let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 600.0));
+                let id = egui::Id::new("synthetic-offline");
+                for tick in 0..4 {
+                    context.run_ui(egui::RawInput {
+                        screen_rect: Some(bounds),
+                        time: Some(f64::from(tick) / 60.0),
+                        ..Default::default()
+                    }, |ui| {
+                        super::show(ui, id, &super::Props {
+                            title: "Spojení s aplikací bylo přerušeno",
+                            message: "Připojení se automaticky obnovuje. Vaše aktivity zůstanou zachovány.",
+                            elapsed: "Offline 01:42",
+                        });
+                    }).drop_without_applying_deltas();
+                }
+                let surface = context
+                    .memory(|memory| memory.area_rect(id.with("surface")))
+                    .expect("reconnect card was drawn");
+                assert!(
+                    bounds.contains_rect(surface),
+                    "card {surface:?} overflows {bounds:?}, dark={dark}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn elapsed_duration_uses_a_stable_clock() {

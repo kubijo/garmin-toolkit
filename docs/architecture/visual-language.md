@@ -15,8 +15,8 @@ Toolkit primitives and roles.
   use neutral fills and text with an accent underline. Profile styling is scoped to the shell's UI tree. Primary
   actions, links, focus, status colors, chart metrics, and route metric gradients retain their semantic colors. Login
   profile cards keep each profile's own accent.
-- Spacing: 2, 4, 8, 12, 16, 24, 32 logical pixels. Rows: 32; controls: 40; prominent controls: 48. Default desktop page
-  inset: 24; dense workspaces: 12/16. Narrow layouts reduce insets deliberately.
+- Spacing uses multiples of 8 logical pixels, with 4 or 2 for compact gaps. Rows: 32; controls: 40; prominent controls:
+  48\. Default desktop page inset: 24; dense workspaces: 16. Narrow layouts reduce insets deliberately.
 - Controls, rows, cards, panes, menus, dialogs, and toasts are square. Radius tokens stay centralized; avatars/status
   circles remain circular. Compound controls may share edges. Select options form a flush list without gaps/insets.
 - Hover, focus, selection, validation, disabled, and loading states preserve geometry. Validation changes the resting

@@ -9,6 +9,7 @@ use garmin_ui::{
 use std::rc::Rc;
 pub(crate) mod catalog;
 mod protocol;
+pub(crate) mod requests;
 use protocol::{Command, Identity, Request, Snapshot};
 
 pub mod popup;
@@ -110,10 +111,8 @@ impl crate::App {
         self.close_file_window();
         let mut state = self.shared.borrow_mut();
         // Late results must not restore another user's catalogue or FIT preview.
-        state.device_catalog_request.invalidate();
         state.device_catalog = None;
         state.device_browser_refresh = None;
-        state.active_device_browser_operation = None;
         state.device_browser_interrupted = false;
         state.device_fit_preview = None;
         state.device_fit_import = None;
@@ -134,7 +133,7 @@ impl crate::App {
         self.device_fit_plan = None;
         self.device_fit_job = None;
         let mut state = self.shared.borrow_mut();
-        state.device_catalog_request.invalidate();
+        state.file_requests.close();
         state.device_catalog = None;
         state.device_browser_refresh = None;
         state.file_toasts = garmin_ui::notification::Toasts::default();
@@ -277,7 +276,7 @@ impl crate::App {
                 .map(|browser| browser.catalog().clone()),
             available: state.client.is_some() && device.is_some() && profile.is_some(),
             busy: crate::device_browser_busy(&state)
-                || state.device_catalog_request.loading().is_some()
+                || state.file_requests.catalog.loading().is_some()
                 || state.preferences_saving,
             preferences: profile
                 .map(|profile| profile.user.profile().preferences())

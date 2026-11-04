@@ -72,40 +72,40 @@ const TREE_ROW_HEIGHT: f32 = 24.0;
 const TREE_ROW_GAP: f32 = 0.0;
 const TREE_INDENT: f32 = 24.0;
 const TREE_EDGE_PADDING: f32 = 8.0;
-const TREE_ICON_SLOT_WIDTH: f32 = 28.0;
+const TREE_ICON_SLOT_WIDTH: f32 = 24.0;
 const TREE_ICON_OPTICAL_OFFSET_Y: f32 = 1.0;
-const BOOKMARK_ROW_HEIGHT: f32 = 28.0;
-const BOOKMARK_INLINE_PADDING: f32 = 12.0;
+const BOOKMARK_ROW_HEIGHT: f32 = 32.0;
+const BOOKMARK_INLINE_PADDING: f32 = 16.0;
 const BOOKMARK_ICON_GAP: f32 = 8.0;
 const SIDEBAR_SEPARATOR_HEIGHT: f32 = 9.0;
 const ICON_SIZE: f32 = 16.0;
 const ENTRY_INLINE_PADDING: f32 = 16.0;
 const ENTRY_ICON_GAP: f32 = 8.0;
-const SIZE_UNIT_SLOT_WIDTH: f32 = 28.0;
+const SIZE_UNIT_SLOT_WIDTH: f32 = 32.0;
 const SIZE_UNIT_GAP: f32 = 4.0;
-const BREADCRUMB_HEIGHT: f32 = 28.0;
+const BREADCRUMB_HEIGHT: f32 = 32.0;
 const BREADCRUMB_CONTENT_PADDING: f32 = 8.0;
 const BREADCRUMB_ITEM_PADDING: f32 = 8.0;
 const BREADCRUMB_ANCESTOR_ALPHA: u8 = 0xA0;
 const PATH_NAVIGATION_GAP: f32 = 8.0;
 const PATH_NAVIGATION_ITEM_GAP: f32 = 2.0;
-const PANE_HEADER_TOP_MARGIN: f32 = 6.0;
-const PANE_HEADER_BOTTOM_MARGIN: f32 = 10.0;
+const PANE_HEADER_TOP_MARGIN: f32 = 8.0;
+const PANE_HEADER_BOTTOM_MARGIN: f32 = 8.0;
 const PANE_HEADER_HEIGHT: f32 =
     PANE_HEADER_TOP_MARGIN + BREADCRUMB_HEIGHT + PANE_HEADER_BOTTOM_MARGIN;
-const PANE_INLINE_PADDING: f32 = 12.0;
+const PANE_INLINE_PADDING: f32 = 16.0;
 const PANE_CLOSE_BUTTON_SIZE: f32 = 32.0;
-const PANE_CONTENT_MARGIN: egui::Margin = egui::Margin::symmetric(12, 0);
+const PANE_CONTENT_MARGIN: egui::Margin = egui::Margin::symmetric(16, 0);
 const TABLE_BORDER_ALPHA: u8 = 0x40;
 const TABLE_STRIPE_CONTRAST_DIVISOR: u8 = 5;
 const TABLE_STRIPE_CONTRAST_MULTIPLIER: u8 = 2;
-const UPLOAD_ACTION_AREA_HEIGHT: f32 = 52.0;
+const UPLOAD_ACTION_AREA_HEIGHT: f32 = 56.0;
 const PANE_ACTION_HEIGHT: f32 = 32.0;
-const PANE_ACTION_BOTTOM_INSET: f32 = 12.0;
+const PANE_ACTION_BOTTOM_INSET: f32 = 16.0;
 const NAVIGATION_HISTORY_LIMIT: usize = 64;
 const CONTEXT_MENU_WIDTH: f32 = 208.0;
-const CONTEXT_MENU_ROW_HEIGHT: f32 = 36.0;
-const CONTEXT_MENU_INLINE_PADDING: f32 = 12.0;
+const CONTEXT_MENU_ROW_HEIGHT: f32 = 32.0;
+const CONTEXT_MENU_INLINE_PADDING: f32 = 16.0;
 const CONTEXT_MENU_ICON_GAP: f32 = 8.0;
 const DETAILS_SUMMARY_ROW_HEIGHT: f32 = 20.0;
 const DETAILS_SUMMARY_GAP: f32 = 8.0;
@@ -3850,13 +3850,13 @@ fn show_drag_preview(ui: &Ui, intl: &Intl, dragged: &DraggedEntries, copy: bool)
                         show_selection_icon(ui, first, 16.0);
                         egui::Frame::NONE
                             .fill(operation_fill)
-                            .corner_radius(2.0)
+                            .corner_radius(crate::theme::CONTROL_RADIUS)
                             .inner_margin(egui::Margin::symmetric(4, 2))
                             .show(ui, |ui| {
                                 ui.spacing_mut().interact_size.y = 16.0;
                                 ui.label(
                                     RichText::new(&operation)
-                                        .size(11.0)
+                                        .size(12.0)
                                         .strong()
                                         .color(operation_color),
                                 );
@@ -4855,11 +4855,11 @@ mod tests {
         let path = pane_header_block_rect(outer);
         let close = pane_close_button_rect(outer);
 
-        assert!((content.top() - 26.0).abs() < f32::EPSILON);
-        assert!((content.bottom() - 54.0).abs() < f32::EPSILON);
+        assert!((content.top() - 28.0).abs() < f32::EPSILON);
+        assert!((content.bottom() - 60.0).abs() < f32::EPSILON);
         assert!((content.height() - BREADCRUMB_HEIGHT).abs() < f32::EPSILON);
-        assert!((content.left() - 22.0).abs() < f32::EPSILON);
-        assert!((content.right() - 198.0).abs() < f32::EPSILON);
+        assert!((content.left() - 26.0).abs() < f32::EPSILON);
+        assert!((content.right() - 194.0).abs() < f32::EPSILON);
         assert_eq!(content.y_range(), path.y_range());
         assert!((path.left() - 10.0).abs() < f32::EPSILON);
         assert!((path.right() - 210.0).abs() < f32::EPSILON);
@@ -4881,7 +4881,7 @@ mod tests {
         let layout = details_content_layout(available, 4);
         let actions = layout.actions.expect("four actions create a footer");
 
-        assert!((actions.bottom() - (available.bottom() - 12.0)).abs() < f32::EPSILON);
+        assert!((actions.bottom() - (available.bottom() - 16.0)).abs() < f32::EPSILON);
         assert!((actions.height() - 32.0).abs() < f32::EPSILON);
         assert!((actions.top() - layout.summary.bottom() - 8.0).abs() < f32::EPSILON);
         assert_eq!(details_content_layout(available, 0).actions, None);

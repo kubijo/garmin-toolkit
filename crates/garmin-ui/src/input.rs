@@ -254,7 +254,7 @@ fn field(
 ) -> Response {
     let app_theme = crate::theme::palette(ui);
     ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.y = 6.0;
+        ui.spacing_mut().item_spacing.y = 8.0;
         let label_color = if props.enabled {
             app_theme.content().text_primary()
         } else {

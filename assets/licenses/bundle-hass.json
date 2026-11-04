@@ -7444,7 +7444,7 @@
     },
     {
       "name": "tokio",
-      "version": "1.53.1",
+      "version": "1.53.3",
       "license": "MIT",
       "source": {
         "kind": "cargo"
@@ -8758,7 +8758,7 @@
     },
     {
       "name": "zstd",
-      "version": "0.14.0",
+      "version": "0.14.3",
       "license": "BSD-3-Clause",
       "source": {
         "kind": "cargo"

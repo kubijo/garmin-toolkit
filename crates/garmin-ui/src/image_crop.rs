@@ -144,7 +144,7 @@ pub fn show(ui: &mut Ui, state: &mut State, props: Props<'_>) -> Output {
         response = response.on_hover_cursor(cursor);
     }
 
-    ui.add_space(12.0);
+    ui.add_space(16.0);
     let slider_width = (available - 96.0).clamp(80.0, 220.0);
     ui.scope(|ui| {
         ui.spacing_mut().slider_width = slider_width;
