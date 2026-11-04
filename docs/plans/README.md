@@ -14,5 +14,5 @@ A separate CLI distribution channel is intentionally not currently planned.
 
 Deferred: [security hardening](security-hardening.md).
 
-Cross-cutting release work: replace the global coverage floor with per-owner behavioral floors. Profile bindgen after
-real WASM edits and recheck the nightly `egui_adapter::Paint: Sync` recursion diagnostic before upgrading Rust.
+Cross-cutting release work: profile bindgen after real WASM edits and recheck the nightly `egui_adapter::Paint: Sync`
+recursion diagnostic before upgrading Rust.

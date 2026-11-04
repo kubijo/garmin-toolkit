@@ -15,14 +15,25 @@ production checks exercise startup and device adapters that the demo excludes. H
 isolated data roots, persisted profiles after restart, and HASS environment overrides using disposable storage and fake
 devices.
 
-Coverage has a 65% global floor; [release work](../plans/README.md) owns per-owner floors. Generated licenses live in
-`assets/licenses`; `crates/garmin-brand/assets/icon.svg` is the sole app-icon source. AppImage/Flatpak exports use
-`dist/`. Ambient builds, Nix development shells, gallery checks and captures, and stable build profiling share
-`.tmp/cargo-target`. Interactive gallery sessions use `.tmp/gallery-target`; compiler profiling keeps its separate
-nightly target. Never direct another build into a live gallery session's target directory: the gallery watches its scene
-library and loads replacements without checking compiler compatibility. Restart gallery after changing toolchains or
-dependency configuration. Different toolchains, target triples, profiles, and Cargo features may still produce distinct
-artifacts inside the shared directory. Nix package builds keep their isolated sandbox outputs.
+Coverage enforces per-owner floors from `infra/coverage/owners.toml` in the Nix coverage app and check.
+`just qa::coverage-owners .tmp/coverage/lcov.info --policy infra/coverage/owners.toml` checks an existing report. Nested
+packages are separate owners; unmeasured owners and unassigned files remain visible. `--output FILE.json` writes the
+per-owner and per-file counts for policy review. Line coverage does not establish behavioral correctness. The native
+collector excludes `crates/garmin-ui/` and `apps/garmin-desktop/src/view.rs`; browser-only WASM code is unmeasured by
+the native run. Owner percentages describe only the files measured by that collector.
+
+Floors are an upward ratchet: raise them when meaningful tests improve coverage. Reports never rewrite policy. Lowering
+a floor or expanding an exclusion requires an explicit reason in the reviewed change. This is a review rule; the gate
+checks the current policy, not its Git history. New owners require a floor or a documented unmeasured reason. Missing
+measurements, stale owners, and newly measured exempt owners fail the gate. Comparisons use exact line counts.
+
+Generated licenses live in `assets/licenses`; `crates/garmin-brand/assets/icon.svg` is the sole app-icon source.
+AppImage/Flatpak exports use `dist/`. Ambient builds, Nix development shells, gallery checks and captures, and stable
+build profiling share `.tmp/cargo-target`. Interactive gallery sessions use `.tmp/gallery-target`; compiler profiling
+keeps its separate nightly target. Never direct another build into a live gallery session's target directory: the
+gallery watches its scene library and loads replacements without checking compiler compatibility. Restart gallery after
+changing toolchains or dependency configuration. Different toolchains, target triples, profiles, and Cargo features may
+still produce distinct artifacts inside the shared directory. Nix package builds keep their isolated sandbox outputs.
 
 Local Just entrypoints, Nix QA apps, and development shells preserve an explicit `RUSTC_WRAPPER`. When it is unset and
 the host provides `sccache`, they select that executable; hosts without it continue without a wrapper.
