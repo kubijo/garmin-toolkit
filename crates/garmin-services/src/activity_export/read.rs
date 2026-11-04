@@ -10,10 +10,11 @@ use garmin_model::{
     artifact::{ArtifactDigest, ArtifactId},
     observation::ObservationId,
 };
-use garmin_storage::{ActivityExportProvenance, ExportTransformation};
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use super::{Aggregate, Creator, Error, Event, Sample, Table};
+use super::{
+    ActivityExportProvenance, Aggregate, Creator, Error, Event, ExportTransformation, Sample, Table,
+};
 
 /// Parsed normalized relations and immutable original data.
 /// Parsing does not import data.
@@ -29,7 +30,7 @@ pub struct Package {
 }
 
 /// Acquisition and normalization metadata for an observation.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Provenance {
     #[serde(flatten)]
     pub acquisition: ActivityExportProvenance,

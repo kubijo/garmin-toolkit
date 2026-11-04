@@ -1121,10 +1121,7 @@ fn activity_snapshot(activity: &garmin_services::ActivityPreview) -> ActivitySna
     let summary = activity.summary();
     ActivitySnapshot {
         id: activity.observation_id(),
-        source: activity
-            .creator()
-            .product_name()
-            .map_or_else(|| "FIT".to_owned(), ToString::to_string),
+        source: activity.source().to_owned(),
         summary,
     }
 }
@@ -1132,9 +1129,7 @@ fn activity_snapshot(activity: &garmin_services::ActivityPreview) -> ActivitySna
 fn activity_detail_snapshot(details: &garmin_services::ActivityDetails) -> ActivityDetailSnapshot {
     ActivityDetailSnapshot {
         id: details.observation_id(),
-        recording: garmin_service_api::ActivityRecordingSnapshot::from(
-            details.normalized().activity(),
-        ),
+        recording: garmin_service_api::ActivityRecordingSnapshot::from(details.activity()),
     }
 }
 

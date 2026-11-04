@@ -11,6 +11,67 @@ use garmin_storage::Storage;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+#[test]
+fn provenance_profile_preserves_ordered_transformation_fields() -> TestResult {
+    block_on(async {
+        use garmin_model::{
+            artifact::{NormalizationOutcome, NormalizationRun},
+            value::{ComponentVersion, Transformation},
+        };
+        let fixture = export_fixture().await?;
+        let storage = Storage::open(fixture.root.path().join("export.sqlite3")).await?;
+        let mut material = storage
+            .activity_export(fixture.owner.user_id(), fixture.observation)
+            .await?
+            .pop()
+            .ok_or("missing export material")?;
+        material.normalization = NormalizationRun::from_parts(
+            material.normalization.id(),
+            &material.acquisition,
+            material.normalization.parser().clone(),
+            material.normalization.schema(),
+            ["units", "clock"]
+                .into_iter()
+                .map(|name| {
+                    Ok(Transformation::from_component(
+                        ComponentVersion::from_parts(name, "1.2.3-beta.1+build.7".parse()?)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?,
+            NormalizationOutcome::Succeeded,
+        );
+        let provenance = garmin_services::activity_export::ParsedProvenance::try_from(&material)?;
+        let json = serde_json::to_value(&provenance)?;
+        let run = material.normalization.id();
+        assert_eq!(
+            json["transformations"],
+            serde_json::json!([
+                {"normalization_run_id":run,"position":0,"component_name":"units","component_version":"1.2.3-beta.1+build.7"},
+                {"normalization_run_id":run,"position":1,"component_name":"clock","component_version":"1.2.3-beta.1+build.7"},
+            ])
+        );
+        assert_eq!(json["source_identity"], "synthetic-original.fit");
+        assert_eq!(
+            json["artifact_blake3"],
+            material.artifact.digest().to_string()
+        );
+        assert!(
+            json.get("acquisition").is_none(),
+            "provenance remains flattened"
+        );
+        let decoded: garmin_services::activity_export::ParsedProvenance =
+            serde_json::from_value(json)?;
+        assert_eq!(
+            decoded.acquisition.source_identity,
+            *material.acquisition.source_identity()
+        );
+        assert_eq!(decoded.transformations[1].position, 1);
+        storage.close().await;
+        fixture.application.close().await;
+        Ok(())
+    })
+}
+
 struct ExportFixture {
     root: tempfile::TempDir,
     application: Application,

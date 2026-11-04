@@ -64,7 +64,9 @@ validator controls exercise strict v2 metadata, types, required values, primary 
 following cases from its
 [upstream package tests](https://github.com/frictionlessdata/frictionless-py/blob/v5.21.0/frictionless/package/__spec__/test_validate.py).
 Rust tests cover round trips, original FIT preservation, profile isolation, restarts, malformed packages, and GPX gaps.
-These activity exports are distinct from deployment snapshots and standalone GPX sharing.
+These activity exports are distinct from deployment snapshots and standalone GPX sharing. Storage returns domain records
+for the source, acquisition, normalization, artifact, and fingerprint. The activity export module owns the portable
+provenance and transformation representations; its writer and reader share those profile types.
 
 Generic descriptors, local/ZIP resources, and supported CSV validation belong to the independent
 [`datapackage` crate](../../crates/datapackage/README.md). Activity schemas, FIT policy, and storage authorization stay
