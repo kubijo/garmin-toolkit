@@ -16,7 +16,13 @@ used the x86_64 demo AppImage on Ubuntu 26.04 with an NVIDIA RTX 4090 driving th
 - Backup saving, file-dialog cancellation, and opening the host log folder passed. Manual covered-window Developer tools
   interaction passed; regressions cover child input and lifecycle while the root is occluded.
 - Debug-desktop and AppImage checks passed covered navigation without polling, cancellation, capture, and Import GPX
-  through the status overlay. At `720×480`, `stationary-arrival` failed because `map.fit` was clipped.
+  through the status overlay.
+- On 2026-11-04, a rebuilt x86_64 demo AppImage passed `stationary-arrival` at `720×480` and `activity-smoke` at
+  `1100×720` on Ubuntu 26.04 with NVIDIA RTX 4090/Vulkan and 4x MSAA. Scenario setup explicitly reveals `map.fit` with
+  `scroll_into_view`; the earlier top-of-workspace assumption clipped that control at minimum size. The
+  [workspace regression](../../crates/garmin-ui/src/activity/workspace.rs) includes host import controls and reproduces
+  the original failure. These packaged runs used isolated demo data and the loopback control API; app-owned captures
+  were inspected and the process/listener stopped afterward.
 - The local [headless probe](../development.md#headless-hardware-rendering-probe) passed activity and responsive-layout
   scenarios on AMD RADV/Mesa with 4x MSAA. Inspected wide/narrow captures contained maps, routes, charts, text, and
   controls. This excludes native presentation and the AppImage library mix.

@@ -166,6 +166,11 @@ string. Resize uses logical `width`/`height` (1–8192), subject to native minim
 resolve at execution; pointer bounds must stabilize across two frames within two seconds. Key/text establishes focus.
 Missing/ambiguous/disabled/clipped targets fail. Each window allows one workload.
 
+`scroll_into_view` asks a rendered semantic target's nearest egui scroll area to reveal it and waits up to 30 seconds
+for the complete control to become visible. It does not discover virtualized rows or reveal an off-screen outer scroll
+container. Requests are scoped to the controlled viewport and cleared on completion, failure, pause, or cancellation.
+Built-in scenario setup uses this action before clicking `map.fit`.
+
 Profile creation exposes `profile.create` and `profile.create.{name,submit,cancel}`. File choosers expose
 `files.chooser.{name,confirm,cancel,replace,keep}`; directory and file rows use `files.entry.<catalog-relative-path>`.
 Select a directory row and send Enter to navigate; selecting a file fills the chooser's filename field. These targets
