@@ -1,0 +1,37 @@
+out = "../../../.tmp/gallery/offline"
+size = "1440x900"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "wide-dark"
+scene = "offline::Disconnected"
+
+[[shot]]
+name = "wide-light"
+scene = "offline::Disconnected"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "narrow-dark"
+scene = "offline::Disconnected"
+[shot.knobs]
+width = 320
+
+[[shot]]
+name = "narrow-light"
+scene = "offline::Disconnected"
+[shot.knobs]
+width = 320
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "narrow-czech"
+scene = "offline::Disconnected"
+[shot.knobs]
+width = 320
+[shot.globals]
+Language = "Čeština"

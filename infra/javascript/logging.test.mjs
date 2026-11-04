@@ -1,6 +1,47 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { recordLog, bindLogs, receiveLog, postLog, installLogs } from '../../apps/garmin-hass/web/logging.js';
+import {
+    recordLog,
+    bindLogs,
+    receiveLog,
+    postLog,
+    installLogs,
+    downloadLogs,
+} from '../../apps/garmin-hass/web/logging.js';
+
+test('failed download releases its object URL and a subsequent export succeeds', t => {
+    const originalDocument = globalThis.document;
+    t.after(() => {
+        if (originalDocument === undefined) delete globalThis.document;
+        else globalThis.document = originalDocument;
+    });
+    const revoked = [];
+
+    let attempt = 0;
+    t.mock.method(URL, 'createObjectURL', () => `blob:export-${++attempt}`);
+    t.mock.method(URL, 'revokeObjectURL', url => revoked.push(url));
+
+    const deferred = [];
+    t.mock.method(globalThis, 'setTimeout', callback => deferred.push(callback));
+    const failure = new Error('synthetic browser download failure');
+    let clicks = 0;
+    globalThis.document = {
+        createElement: () => ({
+            click() {
+                if (++clicks === 1) throw failure;
+            },
+        }),
+    };
+    assert.throws(
+        () => downloadLogs('first export'),
+        error => error === failure,
+    );
+    assert.deepEqual(revoked, ['blob:export-1']);
+    assert.doesNotThrow(() => downloadLogs('second export'));
+    assert.equal(clicks, 2);
+    for (const callback of deferred) callback();
+    assert.deepEqual(revoked, ['blob:export-1', 'blob:export-2']);
+});
 
 test('bootstrap events reach Rust once, then events bypass the bootstrap buffer', async () => {
     recordLog('Error', 'test', 'before WASM');

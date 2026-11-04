@@ -813,7 +813,7 @@ impl Viewer {
         recording: &ActivityRecordingSnapshot,
         map_rect: egui::Rect,
     ) -> Vec<egui::Rect> {
-        const INSET: f32 = 12.0;
+        const INSET: f32 = 16.0;
         const BUTTON: f32 = 32.0;
         const FRAME: f32 = BUTTON + 4.0;
         const GAP: f32 = 2.0;
@@ -867,7 +867,7 @@ impl Viewer {
             format_message!(intl, default_message: "Play")
         };
         let icon = if playing { icons::STOP } else { icons::PLAY };
-        let playback_width = 6.0 + BUTTON + 12.0 + 136.0;
+        let playback_width = 6.0 + BUTTON + 16.0 + 136.0;
         let playback_bounds = egui::Rect::from_min_size(
             egui::pos2(
                 map_rect.center().x - playback_width / 2.0,
@@ -881,9 +881,9 @@ impl Viewer {
             playback_bounds,
             Layout::left_to_right(Align::Center),
             |ui| {
-                ui.spacing_mut().item_spacing.x = GAP;
+                ui.spacing_mut().item_spacing.x = 0.0;
                 let play = floating_icon_button(ui, &play_label, icon, playing, can_play);
-                ui.add_space(10.0);
+                ui.add_space(16.0);
                 let speed = playback_speed_slider(
                     ui,
                     &mut self.interaction.playback_speed,
@@ -1271,6 +1271,7 @@ fn playback_speed_slider(
     enabled: bool,
 ) -> egui::Response {
     ui.add_enabled_ui(enabled, |ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
         let palette = crate::theme::palette(ui);
         let rail = color32(palette.content().icon_secondary());
         let foreground = color32(palette.content().icon_primary());
@@ -1638,7 +1639,7 @@ fn sample_metric_row(ui: &mut Ui, metrics: &[(String, String)]) {
 }
 
 fn viewer_inset() -> egui::Frame {
-    egui::Frame::new().inner_margin(egui::Margin::symmetric(12, 0))
+    egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 0))
 }
 
 fn empty_panel(ui: &mut Ui, message: &str) {
@@ -1848,7 +1849,7 @@ fn analysis_panel<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> egui::I
         .lerp_to_gamma(color32(palette.surfaces().layer(theme::Level::One)), 0.5);
     egui::Frame::new()
         .fill(surface)
-        .inner_margin(egui::Margin::symmetric(8, 6))
+        .inner_margin(egui::Margin::symmetric(8, 4))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = CHART_GAP;
@@ -1867,7 +1868,7 @@ fn chart_panel<R>(
         ui.spacing_mut().interact_size.y = ui.text_style_height(&egui::TextStyle::Body);
         if beside {
             ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
+                ui.spacing_mut().item_spacing.x = 16.0;
                 ui.allocate_ui_with_layout(
                     egui::vec2(CHART_SUMMARY_WIDTH, 0.0),
                     Layout::top_down(Align::Min),
@@ -3607,10 +3608,10 @@ mod tests {
             |ui| {
                 let control = super::floating_control(
                     ui,
-                    egui::Rect::from_min_size(egui::pos2(12.0, 12.0), egui::vec2(186.0, 36.0)),
+                    egui::Rect::from_min_size(egui::pos2(16.0, 16.0), egui::vec2(190.0, 36.0)),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
-                        ui.spacing_mut().item_spacing.x = 2.0;
+                        ui.spacing_mut().item_spacing.x = 0.0;
                         let play = super::floating_icon_button(
                             ui,
                             "Play",
@@ -3618,12 +3619,12 @@ mod tests {
                             false,
                             enabled,
                         );
-                        ui.add_space(10.0);
+                        ui.add_space(16.0);
                         let slider =
                             super::playback_speed_slider(ui, speed, "Playback speed", enabled);
                         assert!(slider.rect.height() <= play.rect.height());
                         assert!((slider.rect.center().y - play.rect.center().y).abs() < 1.0);
-                        assert!(slider.rect.left() - play.rect.right() >= 12.0);
+                        assert!(slider.rect.left() - play.rect.right() >= 16.0);
                         slider
                     },
                 );

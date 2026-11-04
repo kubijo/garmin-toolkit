@@ -7,7 +7,7 @@ use garmin_color::theme;
 use crate::theme::{PANEL_RADIUS, color32};
 
 const DEFAULT_HEIGHT: f32 = 220.0;
-const PADDING: f32 = 18.0;
+const PADDING: f32 = 16.0;
 const PATH_WIDTH: f32 = 3.0;
 const ENDPOINT_RADIUS: f32 = 4.0;
 

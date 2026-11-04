@@ -36,6 +36,8 @@ use crate::{
 use garmin_ui::window::{Event as WindowEvent, NativeWindow, Spec as WindowSpec, WindowHost as _};
 
 mod backup;
+#[cfg(all(test, feature = "demo"))]
+mod file_window_tests;
 mod maps;
 
 pub struct Desktop {
@@ -92,6 +94,26 @@ impl Desktop {
         map_renderer: activity::WgpuMapHandle,
         profiling: profiling::RuntimeMetricsRecorder,
     ) -> Result<Self, Error> {
+        Self::with_map_renderer(
+            deployment,
+            translations,
+            context,
+            device_platform,
+            data_root,
+            activity::map_runtime::Renderer::wgpu(map_renderer),
+            profiling,
+        )
+    }
+
+    fn with_map_renderer(
+        deployment: Arc<Deployment>,
+        translations: Translations,
+        context: Context,
+        device_platform: device_backend::Platform,
+        data_root: &Path,
+        map_renderer: activity::map_runtime::Renderer,
+        profiling: profiling::RuntimeMetricsRecorder,
+    ) -> Result<Self, Error> {
         let intl = translations.formatter_for_client(Language::English)?;
         let maps = maps::Controller::new(Arc::clone(&deployment))?;
         let worker = Worker::spawn(
@@ -107,11 +129,8 @@ impl Desktop {
         )
         .map_err(std::io::Error::other)?;
         let map_worker = crate::map_worker::Worker::spawn(&data_root.join("cache/activity-map"))?;
-        let map_runtime = activity::map_runtime::MapRuntimeHandle::new(
-            map_worker,
-            activity::map_runtime::Renderer::wgpu(map_renderer),
-        )
-        .with_metrics(profiling.clone());
+        let map_runtime = activity::map_runtime::MapRuntimeHandle::new(map_worker, map_renderer)
+            .with_metrics(profiling.clone());
         let activity_workspace = activity::Workspace::new(&map_runtime);
         let routes = crate::routes::Controller::new(
             Arc::clone(&deployment),
@@ -1202,7 +1221,7 @@ impl Desktop {
             return;
         }
         self.device_browser_loading = None;
-        if self.file_window_device.as_deref() != Some(key.as_str()) {
+        if !self.owns_file_window(&key) {
             return;
         }
         let catalog = match result {
@@ -1265,10 +1284,11 @@ impl Desktop {
         ) {
             self.devices.invalidate(&key);
         }
-        if self
-            .device_browser
-            .as_ref()
-            .is_none_or(|browser| browser.device_key() != key)
+        if !self.owns_file_window(&key)
+            || self
+                .device_browser
+                .as_ref()
+                .is_none_or(|browser| browser.device_key() != key)
         {
             return;
         }
@@ -1322,6 +1342,17 @@ impl Desktop {
                     .push(notification::Toast::new(notification::Kind::Error, reason));
             }
         }
+    }
+
+    fn owns_file_window(&self, device_key: &str) -> bool {
+        self.file_window.is_open()
+            && self.file_window_device.as_deref() == Some(device_key)
+            && self.file_window_owner.is_some()
+            && self.file_window_owner
+                == self
+                    .selected_profile
+                    .and_then(|index| self.profiles.get(index))
+                    .map(|profile| profile.user.id())
     }
 
     fn replace_profiles(&mut self, profiles: Vec<worker::ProfileData>, select: Option<UserId>) {
