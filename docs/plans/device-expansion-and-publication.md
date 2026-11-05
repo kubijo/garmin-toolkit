@@ -19,5 +19,5 @@
 6. Audit configuration, fixtures, identities, URLs, images, notices, and provenance.
 7. Publish the support matrix and adaptation guide. Mobile requires a separate decision.
 
-Flathub is excluded. Self-hosted Flatpak remains experimental; qualification requires network, GVfs, mass storage, and
-USB portal checks on GNOME/KDE without `--device=all`, including discovery, read/write, cancellation, and recovery.
+Flatpak is an idea outside the active roadmap. Its experimental build tooling does not establish a planned release
+channel. Flatpak qualification is not a prerequisite for AppImage publication.

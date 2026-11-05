@@ -998,9 +998,11 @@ impl Browser {
                                         );
                                     }
                                 });
-                            if ui.input_mut(|input| {
-                                input.consume_key(egui::Modifiers::NONE, Key::Escape)
-                            }) {
+                            if ui.is_enabled()
+                                && ui.input_mut(|input| {
+                                    input.consume_key(egui::Modifiers::NONE, Key::Escape)
+                                })
+                            {
                                 self.compact_pane = None;
                             }
                             if action.is_none() {
@@ -3394,6 +3396,9 @@ fn entry_table_background(ui: &mut Ui, intl: &Intl, device_key: &str) -> egui::R
 }
 
 fn requested_table_movement(ui: &mut Ui, table_id: Id) -> Option<RowMove> {
+    if !ui.is_enabled() {
+        return None;
+    }
     ui.memory_mut(|memory| {
         memory.set_focus_lock_filter(
             table_id,
@@ -3418,7 +3423,7 @@ fn requested_table_movement(ui: &mut Ui, table_id: Id) -> Option<RowMove> {
 }
 
 fn requested_context_menu(ui: &mut Ui, table_id: Id) -> bool {
-    if !ui.memory(|memory| memory.has_focus(table_id)) {
+    if !ui.is_enabled() || !ui.memory(|memory| memory.has_focus(table_id)) {
         return false;
     }
     ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, Key::F10))
@@ -3452,7 +3457,8 @@ fn show_entry_table_content(
         background,
     } = input;
     let table_id = Id::new(("device-explorer-entry-table", device_key));
-    let activate = ui.memory(|memory| memory.has_focus(table_id))
+    let activate = ui.is_enabled()
+        && ui.memory(|memory| memory.has_focus(table_id))
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Enter));
     let keyboard_index = keyboard_index.or_else(|| {
         activate
@@ -5287,6 +5293,86 @@ mod tests {
             moved_row_index(&rows, Some("Garmin/Courses"), RowMove::Previous),
             0
         );
+    }
+
+    #[test]
+    fn disabled_browser_ignores_focused_table_shortcuts() {
+        let intl = garmin_i18n::Translations::bundled()
+            .expect("catalogs")
+            .formatter(garmin_i18n::Language::English)
+            .expect("English");
+        for (key, modifiers) in [
+            (Key::ArrowDown, egui::Modifiers::NONE),
+            (Key::ArrowUp, egui::Modifiers::NONE),
+            (Key::Enter, egui::Modifiers::NONE),
+            (Key::F10, egui::Modifiers::SHIFT),
+        ] {
+            let mut browser = Browser::open(
+                catalog(vec![
+                    DeviceCatalogEntry {
+                        path: "a.fit".into(),
+                        kind: DeviceCatalogEntryKind::File,
+                        size: Some(1),
+                    },
+                    DeviceCatalogEntry {
+                        path: "b.fit".into(),
+                        kind: DeviceCatalogEntryKind::File,
+                        size: Some(1),
+                    },
+                ]),
+                &intl,
+                "Synthetic device",
+            )
+            .expect("catalog");
+            browser.selected = Some(Selection {
+                storage_id: "internal".into(),
+                storage_label: "Internal storage".into(),
+                path: "a.fit".into(),
+                kind: DeviceCatalogEntryKind::File,
+                size: Some(1),
+            });
+            let context = egui::Context::default();
+            crate::install(&context);
+            let before = serde_json::to_value(browser.view_state()).expect("view state");
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 640.0),
+                )),
+                events: vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }],
+                ..Default::default()
+            };
+            context
+                .run_ui(input, |ui| {
+                    ui.memory_mut(|memory| {
+                        memory.request_focus(Id::new((
+                            "device-explorer-entry-table",
+                            browser.device_key(),
+                        )));
+                    });
+                    let action = ui.add_enabled_ui(false, |ui| browser.show(ui, &intl)).inner;
+                    assert!(
+                        action.is_none(),
+                        "disabled browser emitted an action for {key:?}"
+                    );
+                    assert!(
+                        ui.input(|input| input.key_pressed(key)),
+                        "disabled browser consumed {key:?}"
+                    );
+                })
+                .drop_without_applying_deltas();
+            assert_eq!(
+                serde_json::to_value(browser.view_state()).expect("view state"),
+                before,
+                "{key:?}"
+            );
+        }
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! Exercise delayed file-window completions through the desktop controller without hardware or a GPU.
 use super::*;
+use eframe::egui;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -50,6 +51,16 @@ fn desktop() -> Result<(tempfile::TempDir, Desktop), Box<dyn std::error::Error>>
                         path: "Garmin/Activity".into(),
                         kind: DeviceCatalogEntryKind::Directory,
                         size: None,
+                    },
+                    DeviceCatalogEntry {
+                        path: "Garmin/Activity/synthetic.fit".into(),
+                        kind: DeviceCatalogEntryKind::File,
+                        size: Some(1),
+                    },
+                    DeviceCatalogEntry {
+                        path: "Garmin/Activity/other.fit".into(),
+                        kind: DeviceCatalogEntryKind::File,
+                        size: Some(1),
                     },
                 ],
             }],
@@ -140,6 +151,93 @@ fn a_live_owned_window_receives_its_delayed_fit_preview() -> TestResult {
     deliver_preview(&mut desktop);
     assert!(desktop.device_fit_preview.is_some());
     assert!(!desktop.device_browser_status.is_busy());
+    Ok(())
+}
+
+#[test]
+fn file_window_owns_preview_and_escape_preserves_browser_location() -> TestResult {
+    let (_directory, mut desktop) = desktop()?;
+    let context = desktop.context.clone();
+    garmin_ui::install(&context);
+    desktop
+        .device_browser
+        .as_mut()
+        .expect("browser")
+        .select_paths_for_preview(&["Garmin/Activity/synthetic.fit"])?;
+    let before = serde_json::to_value(
+        desktop
+            .device_browser
+            .as_ref()
+            .expect("browser")
+            .view_state(),
+    )?;
+    deliver_preview(&mut desktop);
+    for key in [
+        None,
+        Some(egui::Key::ArrowDown),
+        Some(egui::Key::ArrowUp),
+        Some(egui::Key::Enter),
+        Some(egui::Key::F10),
+        Some(egui::Key::Escape),
+    ] {
+        let mut input = egui::RawInput::default();
+        if let Some(key) = key {
+            input.events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: if key == egui::Key::F10 {
+                    egui::Modifiers::SHIFT
+                } else {
+                    egui::Modifiers::NONE
+                },
+            });
+        }
+        let mut output = context.run_ui(input, |_| {
+            context.memory_mut(|memory| {
+                memory.request_focus(Id::new((
+                    "device-explorer-entry-table",
+                    garmin_fixtures::device::KEY,
+                )));
+            });
+            desktop.show_file_window();
+        });
+        output.textures_delta.clear();
+        assert_eq!(
+            desktop.device_fit_preview.is_some(),
+            key != Some(egui::Key::Escape)
+        );
+        assert!(
+            !desktop.device_browser_status.is_busy(),
+            "preview input must not start a file operation"
+        );
+        assert_eq!(
+            serde_json::to_value(
+                desktop
+                    .device_browser
+                    .as_ref()
+                    .expect("browser")
+                    .view_state()
+            )?,
+            before
+        );
+    }
+    assert!(
+        desktop.device_fit_preview.is_none(),
+        "Escape must close the preview rendered by the file window"
+    );
+    assert!(desktop.file_window.is_open());
+    assert_eq!(
+        serde_json::to_value(
+            desktop
+                .device_browser
+                .as_ref()
+                .expect("browser")
+                .view_state()
+        )?,
+        before
+    );
     Ok(())
 }
 

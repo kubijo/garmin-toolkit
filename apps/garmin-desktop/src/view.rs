@@ -61,7 +61,7 @@ pub struct Desktop {
     create_profile: Option<profile::CreateState>,
     avatar_editor: Option<AvatarEditor>,
     device_browser: Option<device_browser::Browser>,
-    file_window: NativeWindow<device_browser::Action, ()>,
+    file_window: NativeWindow<FileWindowAction, ()>,
     file_window_wake: Option<crate::developer::RootWakeRequest>,
     file_window_close_pending: bool,
     file_window_device: Option<String>,
@@ -444,6 +444,8 @@ impl Desktop {
             .and_then(|index| self.profiles.get(index))
             .is_some_and(|profile| profile.user.profile().preferences().inline_file_windows());
         self.file_window.set_inline(&self.context, inline);
+        let units = self.selected_unit_system();
+        let preview = &mut self.device_fit_preview;
         let browser = &mut self.device_browser;
         if let Some(browser) = browser {
             browser.set_show_hidden_files(show_hidden);
@@ -459,8 +461,12 @@ impl Desktop {
             &self.intl,
             || (),
             |ui| {
+                let preview_open = preview.is_some();
+                let preview_action = preview.as_mut().and_then(|preview| {
+                    preview.show(ui, intl, busy, units, jiff::Zoned::now().date())
+                });
                 let action = if let Some(browser) = browser {
-                    ui.add_enabled_ui(!busy, |ui| browser.show(ui, intl)).inner
+                    ui.add_enabled_ui(!busy && !preview_open, |ui| browser.show(ui, intl)).inner
                 } else {
                     ui.label(if loading { "Waiting for the device catalogue…" } else { "Device catalogue unavailable. Close this window and choose Browse files to retry." });
                     None
@@ -476,12 +482,30 @@ impl Desktop {
                     toast_bounds,
                     notification::StackMode::Automatic,
                 );
-                action
+                preview_action
+                    .map(FileWindowAction::Preview)
+                    .or_else(|| action.map(FileWindowAction::Browser))
             },
         );
         for event in events {
+            if matches!(event, WindowEvent::Closed) {
+                self.device_fit_preview = None;
+            }
             if let WindowEvent::Command { command, .. } = event {
-                self.handle_device_browser_action(&command);
+                match command {
+                    FileWindowAction::Preview(device_fit_preview::Action::Close) => {
+                        self.device_fit_preview = None;
+                    }
+                    FileWindowAction::Preview(device_fit_preview::Action::Import(target)) => {
+                        self.device_fit_preview = None;
+                        self.handle_device_browser_action(&device_browser::Action::ImportFit(
+                            device_browser_selection(target),
+                        ));
+                    }
+                    FileWindowAction::Browser(action) => {
+                        self.handle_device_browser_action(&action);
+                    }
+                }
             }
         }
         !inline && self.file_window.is_open()
@@ -494,6 +518,7 @@ impl Desktop {
     fn handle_device_browser_action(&mut self, action: &device_browser::Action) {
         if matches!(action, device_browser::Action::Close) {
             self.file_window.close(&self.context);
+            self.device_fit_preview = None;
             self.file_toasts = notification::Toasts::default();
             self.file_progress_toast = None;
             if !self.device_browser_status.is_busy() {
@@ -647,6 +672,7 @@ impl Desktop {
             return;
         }
         if !same_window {
+            self.device_fit_preview = None;
             self.file_toasts = notification::Toasts::default();
             self.file_progress_toast = None;
         }
@@ -1562,29 +1588,6 @@ impl Desktop {
         }
     }
 
-    fn show_device_fit_preview(&mut self, ui: &mut Ui) {
-        let units = self.selected_unit_system();
-        let Some(preview) = self.device_fit_preview.as_mut() else {
-            return;
-        };
-        match preview.show(
-            ui,
-            &self.intl,
-            self.device_browser_status.is_busy(),
-            units,
-            jiff::Zoned::now().date(),
-        ) {
-            Some(device_fit_preview::Action::Close) => self.device_fit_preview = None,
-            Some(device_fit_preview::Action::Import(target)) => {
-                self.device_fit_preview = None;
-                self.handle_device_browser_action(&device_browser::Action::ImportFit(
-                    device_browser_selection(target),
-                ));
-            }
-            None => {}
-        }
-    }
-
     fn selected_unit_system(&self) -> UnitSystem {
         self.selected_profile
             .and_then(|index| self.profiles.get(index))
@@ -1644,7 +1647,6 @@ impl eframe::App for Desktop {
             self.file_window_close_pending = true;
             ui.ctx().request_repaint_of(ViewportId::ROOT);
         }
-        self.show_device_fit_preview(ui);
         self.show_quit_confirmation(ui);
         self.show_toasts(ui.ctx(), toast_bounds);
         garmin_ui::window::resize(ui);
@@ -1652,6 +1654,11 @@ impl eframe::App for Desktop {
         self.profiling
             .record_desktop_frame(started.elapsed().as_secs_f32() * 1_000.0);
     }
+}
+
+enum FileWindowAction {
+    Browser(device_browser::Action),
+    Preview(device_fit_preview::Action),
 }
 
 enum LoadState {
