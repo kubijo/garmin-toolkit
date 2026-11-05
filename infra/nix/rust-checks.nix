@@ -731,6 +731,9 @@ in
 
     rust-source-closure = pkgs.runCommandLocal "rust-source-closure" { } ''
       diff --recursive --brief \
+        ${workspaceSrc}/crates/datapackage/tests/upstream \
+        ${src}/crates/datapackage/tests/upstream
+      diff --recursive --brief \
         ${workspaceSrc}/crates/garmin-brand/assets \
         ${src}/crates/garmin-brand/assets
       diff --recursive --brief \

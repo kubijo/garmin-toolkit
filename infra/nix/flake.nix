@@ -172,6 +172,14 @@ let
             inherit sharedCargoTargetDir;
             inherit workspaceSrc;
           };
+          desktopVm = import ./desktop-vm.nix {
+            inherit
+              lib
+              pkgs
+              pythonToolsEnv
+              workspaceSrc
+              ;
+          };
           galleryTarget = gallery.lib.mkTool {
             inherit
               dirspec
@@ -294,6 +302,7 @@ let
             default = build.garminCli;
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            desktop-appimage = desktopTarget.distribution.appImage;
             garmin-hass-app-image = hassTarget.appImage;
             garmin-hass-dev-amd64 = mkHassDev "amd64" "x86_64-linux" "x86_64-unknown-linux-gnu";
             garmin-hass-dev-aarch64 = mkHassDev "aarch64" "aarch64-linux" "aarch64-unknown-linux-gnu";
@@ -325,6 +334,9 @@ let
               hass-ci = flake-utils.lib.mkApp { drv = releaseAutomation.ci; };
               hass-recovery = flake-utils.lib.mkApp { drv = releaseAutomation.recovery; };
               default = self.apps.${system}.garmin-cli;
+              desktop-vm-test = flake-utils.lib.mkApp {
+                drv = desktopVm.app;
+              };
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               desktop-appimage = {
@@ -347,10 +359,14 @@ let
 
           checks =
             tooling.checks
+            // {
+              desktop-vm-startup = desktopVm.startupCheck;
+            }
             // build.checks
             // (removeAttrs expandedQuality.checks [ "rust-coverage" ])
             // {
               desktop = desktopTarget.check;
+              desktop-launcher-install = desktopTarget.launcherInstallCheck;
               gallery = galleryTarget.check;
               hass = hassTarget.check;
               license-bundles = licenseAutomation.check;

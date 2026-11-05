@@ -989,9 +989,8 @@ impl Desktop {
         let Some(dialog) = crate::native::file_dialog(&self.context) else {
             return;
         };
-        let dialog = dialog.add_filter("FIT activity", &["fit"]);
         let paths = match action {
-            file_import::Action::Files => dialog.pick_files(),
+            file_import::Action::Files => dialog.add_filter("FIT activity", &["fit"]).pick_files(),
             file_import::Action::Folder => dialog.pick_folder().map(|path| vec![path]),
         };
         if let Some(paths) = paths {

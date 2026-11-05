@@ -1,0 +1,72 @@
+# The runner adds the NoCloud header and an ephemeral SSH public key.
+hostname: garmin-desktop-test
+users:
+  - name: tester
+    groups: [sudo, video, render, plugdev]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys: []
+ssh_pwauth: false
+disable_root: true
+package_update: true
+package_upgrade: false
+apt:
+  preserve_sources_list: false
+  sources_list: |
+    Types: deb
+    URIs: http://archive.ubuntu.com/ubuntu
+    Suites: resolute resolute-updates
+    Components: main universe
+    Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+    Snapshot: 20261017T120000Z
+
+    Types: deb
+    URIs: http://security.ubuntu.com/ubuntu
+    Suites: resolute-security
+    Components: main universe
+    Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+    Snapshot: 20261017T120000Z
+packages:
+  - xfce4
+  - lightdm
+  - xserver-xorg
+  - dbus-x11
+  - xauth
+  - x11-utils
+  - wmctrl
+  - mesa-vulkan-drivers
+  - libegl-mesa0
+  - gvfs-backends
+  - gvfs-fuse
+  - xdg-desktop-portal-gtk
+  - usbutils
+  - openssh-server
+write_files:
+  - path: /etc/apparmor.d/garmin-desktop-test
+    content: |
+      abi <abi/4.0>,
+      include <tunables/global>
+      profile garmin-desktop-test /home/tester/garmin-toolkit.AppImage flags=(unconfined) {
+        userns,
+      }
+  - path: /etc/lightdm/lightdm.conf.d/50-garmin-test.conf
+    content: |
+      [Seat:*]
+      autologin-user=tester
+      autologin-user-timeout=0
+      user-session=xfce
+  - path: /home/tester/.config/autostart/garmin-test.desktop
+    owner: tester:tester
+    defer: true
+    content: |
+      [Desktop Entry]
+      Type=Application
+      Name=Garmin AppImage acceptance
+      Exec=/usr/bin/python3 /opt/garmin-test/guest.py
+runcmd:
+  - [apparmor_parser, -r, /etc/apparmor.d/garmin-desktop-test]
+  - [systemctl, disable, --now, apt-daily.timer, apt-daily-upgrade.timer]
+  - [chown, -R, 'tester:tester', /home/tester/.config]
+  - [systemctl, enable, lightdm]
+  - [systemctl, restart, lightdm]

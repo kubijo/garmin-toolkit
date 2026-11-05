@@ -1,5 +1,12 @@
 import '../../infra/just/common.just'
 
+# Build the ARM64 production AppImage and qualify it with a Garmin in disposable Ubuntu.
+vm-test +args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ quote(repository_root) }}
+    exec just in-shell nix run '{{ flake }}#desktop-vm-test' -- "$@"
+
 # Run production data or an isolated, deterministic demo corpus.
 run mode *options:
     #!/usr/bin/env bash

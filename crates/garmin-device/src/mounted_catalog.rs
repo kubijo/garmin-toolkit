@@ -3,10 +3,11 @@
 use std::{
     collections::HashSet,
     fmt,
+    future::Future,
     io::Write,
     path::{Component, Path, PathBuf},
     sync::mpsc::{Receiver, TryRecvError, channel},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use crate::manifest::{
@@ -14,10 +15,11 @@ use crate::manifest::{
     parse_document,
 };
 use gio::{
-    File, FileQueryInfoFlags, FileType, Mount, VolumeMonitor,
+    File, FileQueryInfoFlags, FileType, Mount, MountMountFlags, VolumeMonitor,
     glib::SignalHandlerId,
     prelude::{
-        FileEnumeratorExt, FileExt, InputStreamExtManual, MountExt, ObjectExt, VolumeMonitorExt,
+        FileEnumeratorExt, FileExt, InputStreamExtManual, MountExt, ObjectExt, VolumeExt,
+        VolumeMonitorExt,
     },
 };
 use serde::Serialize;
@@ -26,7 +28,7 @@ use thiserror::Error;
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 const FILE_ATTRIBUTES: &str = "standard::name,standard::type,standard::size,time::modified";
 
-/// A file-manager-visible MTP mount.
+/// A desktop MTP root, including an available volume that is not mounted yet.
 #[derive(Clone, Serialize)]
 pub struct MountedMtpCandidate {
     pub mount_id: String,
@@ -93,6 +95,9 @@ impl crate::attachments::Candidate for MountedMtpCandidate {
     }
 
     fn inspect(&self) -> Result<crate::attachments::Metadata, String> {
+        if self.root.uri_scheme().as_deref() == Some("mtp") {
+            mount_root(&self.root)?;
+        }
         let (devices, storage) =
             super::mounted_mtp::inspect_mounted_attachment_blocking(&self.root, &self.mount_id)
                 .map_err(|error| error.to_string())?;
@@ -152,7 +157,7 @@ impl fmt::Debug for MountedMtpCandidate {
     }
 }
 
-/// GIO mount notifications plus explicit reconciliation snapshots.
+/// GIO mount and volume notifications plus explicit reconciliation snapshots.
 ///
 /// Construct and poll this on the desktop main thread. [`Self::poll_changed`]
 /// dispatches pending `GLib` work; the application should call [`Self::candidates`]
@@ -160,7 +165,7 @@ impl fmt::Debug for MountedMtpCandidate {
 pub struct MountedMtpMonitor {
     inner: VolumeMonitor,
     changes: Receiver<()>,
-    handlers: Option<[SignalHandlerId; 3]>,
+    handlers: Option<[SignalHandlerId; 6]>,
 }
 
 impl MountedMtpMonitor {
@@ -176,13 +181,32 @@ impl MountedMtpMonitor {
         let changed_handler = inner.connect_mount_changed(move |_, _| {
             let _ignored = changed_sender.send(());
         });
+        let removed_sender = sender.clone();
         let removed_handler = inner.connect_mount_removed(move |_, _| {
+            let _ignored = removed_sender.send(());
+        });
+        let volume_added_sender = sender.clone();
+        let volume_added_handler = inner.connect_volume_added(move |_, _| {
+            let _ignored = volume_added_sender.send(());
+        });
+        let volume_changed_sender = sender.clone();
+        let volume_changed_handler = inner.connect_volume_changed(move |_, _| {
+            let _ignored = volume_changed_sender.send(());
+        });
+        let volume_removed_handler = inner.connect_volume_removed(move |_, _| {
             let _ignored = sender.send(());
         });
         Self {
             inner,
             changes,
-            handlers: Some([added_handler, changed_handler, removed_handler]),
+            handlers: Some([
+                added_handler,
+                changed_handler,
+                removed_handler,
+                volume_added_handler,
+                volume_changed_handler,
+                volume_removed_handler,
+            ]),
         }
     }
 
@@ -221,16 +245,33 @@ impl crate::attachments::Backend for MountedMtpMonitor {
 }
 
 pub(crate) fn mounted_candidates() -> Vec<MountedMtpCandidate> {
-    candidates(&VolumeMonitor::get())
+    merge_candidates(
+        VolumeMonitor::get()
+            .mounts()
+            .into_iter()
+            .filter_map(|mount| candidate(&mount)),
+    )
 }
 
 fn candidates(inner: &VolumeMonitor) -> Vec<MountedMtpCandidate> {
-    let mut candidates = Vec::<MountedMtpCandidate>::new();
-    for candidate in inner
+    let mounted = inner
         .mounts()
         .into_iter()
-        .filter_map(|mount| candidate(&mount))
-    {
+        .filter_map(|mount| candidate(&mount));
+    let unmounted = inner.volumes().into_iter().filter_map(|volume| {
+        if volume.get_mount().is_some() || !volume.can_mount() {
+            return None;
+        }
+        activation_candidate(volume.activation_root()?, volume.name().as_str())
+    });
+    merge_candidates(mounted.chain(unmounted))
+}
+
+fn merge_candidates(
+    discovered: impl IntoIterator<Item = MountedMtpCandidate>,
+) -> Vec<MountedMtpCandidate> {
+    let mut candidates = Vec::<MountedMtpCandidate>::new();
+    for candidate in discovered {
         if let Some(existing) = candidates
             .iter_mut()
             .find(|existing| existing.mount_id == candidate.mount_id)
@@ -249,6 +290,44 @@ fn candidates(inner: &VolumeMonitor) -> Vec<MountedMtpCandidate> {
             .then_with(|| left.mount_id.cmp(&right.mount_id))
     });
     candidates
+}
+
+fn activation_candidate(root: File, name: &str) -> Option<MountedMtpCandidate> {
+    (root.uri_scheme().as_deref() == Some("mtp")).then(|| MountedMtpCandidate {
+        mount_id: crate::system::mounted_mtp::mount_id_for_uri(&root.uri()),
+        name: normalize_display_name(name),
+        root,
+    })
+}
+
+fn mount_root(root: &File) -> Result<(), String> {
+    mount_with_timeout(
+        root.mount_enclosing_volume_future(MountMountFlags::NONE, gio::MountOperation::NONE),
+        Duration::from_secs(30),
+    )
+}
+
+fn mount_with_timeout(
+    mount: impl Future<Output = Result<(), gio::glib::Error>>,
+    timeout: Duration,
+) -> Result<(), String> {
+    gio::glib::MainContext::new().block_on(async {
+        let timeout = gio::glib::timeout_future(timeout);
+        match futures_util::future::select(Box::pin(mount), timeout).await {
+            futures_util::future::Either::Left((Ok(()), _)) => Ok(()),
+            futures_util::future::Either::Left((Err(error), _))
+                if error.matches(gio::IOErrorEnum::AlreadyMounted) =>
+            {
+                Ok(())
+            }
+            futures_util::future::Either::Left((Err(error), _)) => {
+                Err(format!("could not mount desktop MTP volume: {error}"))
+            }
+            futures_util::future::Either::Right(_) => {
+                Err("mounting desktop MTP volume timed out".to_owned())
+            }
+        }
+    })
 }
 
 impl Default for MountedMtpMonitor {
@@ -570,18 +649,96 @@ fn file_order(left: &DeviceFile, right: &DeviceFile) -> std::cmp::Ordering {
 
 #[cfg(test)]
 mod tests {
-    use std::{error::Error as StdError, fs, io, io::Write, path::Path};
+    use std::{error::Error as StdError, fs, io, io::Write, path::Path, time::Duration};
 
-    use gio::File;
+    use gio::{File, prelude::FileExt};
     use serde::Serialize;
     use tempfile::tempdir;
 
     use super::{
-        Error, MountedMtpCandidate, normalize_display_name, preferred_name, read_manifest,
-        storage_prefix, validate_component,
+        Error, MountedMtpCandidate, activation_candidate, merge_candidates, mount_with_timeout,
+        normalize_display_name, preferred_name, read_manifest, storage_prefix, validate_component,
     };
 
     const NAMESPACE: &str = "http://www.garmin.com/xmlschemas/GarminDevice/v2";
+
+    #[test]
+    fn mount_accepts_success_and_a_file_manager_winning_the_mount_race() {
+        for result in [
+            Ok(()),
+            Err(gio::glib::Error::new(
+                gio::IOErrorEnum::AlreadyMounted,
+                "mounted by desktop",
+            )),
+        ] {
+            assert!(mount_with_timeout(std::future::ready(result), Duration::from_secs(1)).is_ok());
+        }
+    }
+
+    #[test]
+    fn mount_failure_preserves_the_desktop_error() {
+        let error =
+            gio::glib::Error::new(gio::IOErrorEnum::PermissionDenied, "device access denied");
+        let result = mount_with_timeout(std::future::ready(Err(error)), Duration::from_secs(1));
+        assert_eq!(
+            result,
+            Err("could not mount desktop MTP volume: device access denied".to_owned())
+        );
+    }
+
+    #[test]
+    fn stalled_mount_is_dropped_on_timeout() {
+        let (sender, receiver) = std::sync::mpsc::channel::<()>();
+        let mount = async move {
+            let _sender = sender;
+            std::future::pending::<Result<(), gio::glib::Error>>().await
+        };
+        let result = mount_with_timeout(mount, Duration::from_millis(1));
+        assert_eq!(
+            result,
+            Err("mounting desktop MTP volume timed out".to_owned())
+        );
+        assert_eq!(
+            receiver.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected)
+        );
+    }
+
+    #[test]
+    fn unmounted_mtp_activation_root_is_discoverable_without_reading_device_contents() {
+        let uri = "mtp://Garmin_Edge_1050_000000000001/";
+        let candidate = activation_candidate(File::for_uri(uri), "Edge 1050")
+            .expect("the unmounted MTP volume must be discoverable");
+        assert_eq!(candidate.root.uri(), uri);
+        assert_eq!(candidate.name, "Edge 1050");
+        assert_eq!(
+            candidate.mount_id,
+            crate::system::mounted_mtp::mount_id_for_uri(uri)
+        );
+        for uri in [
+            "file:///media/disk",
+            "gphoto2://camera/",
+            "smb://server/share/",
+        ] {
+            assert!(activation_candidate(File::for_uri(uri), "unrelated volume").is_none());
+        }
+    }
+
+    #[test]
+    fn volume_becoming_mounted_keeps_one_attachment_with_the_same_identity() {
+        let root = File::for_uri("mtp://Garmin_Edge_1050_000000000001/");
+        let unmounted = activation_candidate(root.clone(), "mtp").expect("MTP volume");
+        let mounted = activation_candidate(root, "Edge 1050").expect("MTP mount");
+        assert_eq!(unmounted.attachment_key(), mounted.attachment_key());
+        for snapshot in [
+            vec![unmounted.clone(), mounted.clone()],
+            vec![mounted, unmounted],
+        ] {
+            let merged = merge_candidates(snapshot);
+            assert_eq!(merged.len(), 1);
+            assert_eq!(merged[0].name, "Edge 1050");
+        }
+    }
 
     #[test]
     fn root_display_name_overrides_the_mount_label() {

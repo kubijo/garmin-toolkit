@@ -185,5 +185,18 @@ access on non-Nix systems. See [publication work](../plans/device-expansion-and-
 Host graphics integration is outside [nix-appimage's scope](https://github.com/ralismark/nix-appimage#caveats).
 [Packaging evidence](../research/desktop-packaging.md) records tested hosts, renderer failures, and remaining limits.
 
-The experimental Flatpak tooling builds offline from Nix-vendored Cargo sources on Freedesktop 25.08. Flatpak is an
-idea outside the active roadmap; its current permissions are development inputs.
+`just desktop::vm-test --usb VENDOR:PRODUCT` builds the production ARM64 AppImage and boots a disposable Ubuntu 26.04
+desktop for the complete device acceptance case. On Apple Silicon, Nix's configured Linux builder handles the build;
+QEMU uses HVF for the separate non-Nix test guest. The image checksum, dated package snapshot, cloud-init configuration,
+firmware, and QEMU machine are pinned in `infra/integration/desktop` and `infra/nix/desktop-vm.nix`. The guest grants
+the test AppImage its required user namespaces through a per-application AppArmor profile; the global Ubuntu namespace
+restriction stays enabled.
+
+The runner requires exactly one host USB device matching the hexadecimal selector. It opens macOS Screen Sharing for the
+guest and asks for discovery, Activities browsing, FIT preview, and dismissal checks. Startup alone cannot pass.
+`--appimage PATH` reuses an existing ARM64 artifact. Logs, package inventory, screenshots, and `result.json` remain
+under `.tmp/desktop-vm`; the guest disk and SSH credentials are removed when the session ends. The test guest needs
+network access to install its pinned packages. Physical GPU acceleration is outside this software-rendered VM case.
+
+The experimental Flatpak tooling builds offline from Nix-vendored Cargo sources on Freedesktop 25.08. Flatpak is an idea
+outside the active roadmap; its current permissions are development inputs.
