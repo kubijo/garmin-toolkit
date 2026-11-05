@@ -185,5 +185,5 @@ access on non-Nix systems. See [publication work](../plans/device-expansion-and-
 Host graphics integration is outside [nix-appimage's scope](https://github.com/ralismark/nix-appimage#caveats).
 [Packaging evidence](../research/desktop-packaging.md) records tested hosts, renderer failures, and remaining limits.
 
-Flatpak builds offline from Nix-vendored Cargo sources on Freedesktop 25.08. Its current permissions are development
-inputs; release requires verifying the narrowest working USB and GVfs permissions.
+The experimental Flatpak tooling builds offline from Nix-vendored Cargo sources on Freedesktop 25.08. Flatpak is an
+idea outside the active roadmap; its current permissions are development inputs.

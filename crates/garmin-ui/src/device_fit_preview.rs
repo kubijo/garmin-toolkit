@@ -108,7 +108,7 @@ impl Preview {
         };
         let empty = format_message!(intl, default_message: "No activities in this FIT file");
         let select = format_message!(intl, default_message: "Select an activity");
-        modal::show(
+        modal::show_compact(
             ui,
             Id::new("device-fit-preview"),
             &modal::Props {
@@ -154,7 +154,7 @@ impl Preview {
         let description = format_message!(intl, default_message: "Route preview");
         let close = format_message!(intl, default_message: "Close");
         let height = (ui.available_height() - 192.0).clamp(256.0, 640.0);
-        let output = modal::show(
+        let output = modal::show_compact(
             ui,
             Id::new("device-fit-course-preview"),
             &modal::Props {

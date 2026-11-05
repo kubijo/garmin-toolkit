@@ -11,6 +11,7 @@ Other active plans: [shared interfaces](shared-interface-workflows.md),
 [device expansion and publication](device-expansion-and-publication.md).
 
 A separate CLI distribution channel is intentionally not currently planned.
+Flatpak is an idea outside the active roadmap.
 
 Deferred: [security hardening](security-hardening.md).
 
