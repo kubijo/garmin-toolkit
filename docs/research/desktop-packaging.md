@@ -1,8 +1,8 @@
 # Desktop packaging evidence
 
-Host: Ubuntu 26.04, x86_64, NVIDIA RTX 4090 driving the display, driver 595.91.07, Mesa 26.0.3.
-Build commands: [build system](../architecture/build-system.md#desktop-packaging).
-Earlier results: [host checks](https://github.com/kubijo/garmin-toolkit/blob/28a1bb2bc296b69e8cb8a5471292c0e3a1488234/docs/architecture/build-system.md#desktop-packaging).
+Host: Ubuntu 26.04, x86_64, NVIDIA RTX 4090 driving the display, driver 595.91.07, Mesa 26.0.3. Build commands:
+[build system](../architecture/build-system.md#desktop-packaging). Earlier results:
+[host checks](https://github.com/kubijo/garmin-toolkit/blob/28a1bb2bc296b69e8cb8a5471292c0e3a1488234/docs/architecture/build-system.md#desktop-packaging).
 
 ## Verified scope
 
@@ -15,8 +15,9 @@ Earlier results: [host checks](https://github.com/kubijo/garmin-toolkit/blob/28a
 - Debug-desktop and AppImage checks passed covered navigation without polling, cancellation, capture, and Import GPX
   through the status overlay.
 - On 2026-11-04, the demo AppImage passed `stationary-arrival` at `720×480` and `activity-smoke` at `1100×720`, with
-  NVIDIA/Vulkan and 4x MSAA. Captures were inspected. The [workspace regression](../../crates/garmin-ui/src/activity/workspace.rs)
-  covers scrolling import controls into view at minimum size.
+  NVIDIA/Vulkan and 4x MSAA. Captures were inspected. The
+  [workspace regression](../../crates/garmin-ui/src/activity/workspace.rs) covers scrolling import controls into view at
+  minimum size.
 - The local [headless probe](../development.md#headless-hardware-rendering-probe) passed activity and responsive-layout
   scenarios on AMD RADV/Mesa with 4x MSAA. Inspected wide/narrow captures contained maps, routes, charts, text, and
   controls. This excludes native presentation and the AppImage library mix.
@@ -29,6 +30,19 @@ Earlier results: [host checks](https://github.com/kubijo/garmin-toolkit/blob/28a
 - The rebuilt preview appeared inside the file window. Compact header and edge-to-edge content were accepted.
 - Automated regressions cover Escape dismissal, location/selection preservation, and blocked browser shortcuts beneath
   the preview. Full QA passed with 1,060 workspace tests plus production-host and gallery checks.
+
+## ARM64 non-Nix Ubuntu VM: Edge 1050, 2026-11-05
+
+- The production ARM64 AppImage built on Apple Silicon through Nix's Linux builder and ran in the disposable Ubuntu
+  26.04 XFCE guest under QEMU/HVF, without a guest Nix store and with software rendering.
+- Automatic MTP mounting, discovery, and inspection passed with Thunar closed. The initial run required mounting in
+  Thunar; the rebuilt application resolved that failure.
+- The Activities bookmark, FIT file listing, activity preview with map, and dismissal back to the usable file browser
+  passed. The user completed the acceptance runner.
+- The user accepted file-dialog behavior and observed the running application's icon in the window list. Remaining
+  picker behavior and desktop-menu integration are presumed working unless a concrete defect appears; no further
+  qualification tasks remain for this case. Desktop-menu registration and launch were not directly tested.
+- This establishes ARM64 desktop and USB/GVfs compatibility for this guest. Native GPU presentation was not exercised.
 
 ## Cross-GPU presentation failure
 
