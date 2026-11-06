@@ -471,11 +471,12 @@ fn empty_workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals
 
 #[scene]
 fn archive(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let width = ctx.slider("width", 1_180.0, 320.0, 1_280.0, 1.0);
     show_workspace(
         ctx,
         ui,
         globals,
-        egui::vec2(1_180.0, 760.0),
+        egui::vec2(width, 760.0),
         WorkspaceSlot::Archive,
         WorkspaceScene::COMPLETE,
     );

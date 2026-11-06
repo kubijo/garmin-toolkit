@@ -86,6 +86,25 @@ Theme = "Light"
 Language = "Čeština"
 
 [[shot]]
+name = "archive-narrow-dark"
+scene = "activity::Archive"
+size = "400x960"
+frames = 256
+[shot.knobs]
+width = 320
+
+[[shot]]
+name = "archive-narrow-light-czech"
+scene = "activity::Archive"
+size = "400x960"
+frames = 256
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+width = 320
+
+[[shot]]
 name = "loading"
 scene = "activity::Loading"
 

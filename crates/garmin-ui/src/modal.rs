@@ -168,6 +168,8 @@ fn show_with_layout<R>(
     body: impl FnOnce(&mut Ui) -> R,
 ) -> Output<R> {
     let bounds = ui.max_rect();
+    let style = ui.style().clone();
+    let accent = crate::theme::profile_accent(ui);
     match props.presentation {
         Presentation::Modal => {
             let ctx = ui.ctx().clone();
@@ -176,7 +178,10 @@ fn show_with_layout<R>(
                 .frame(egui::Frame::new())
                 .backdrop_color(egui::Color32::from_black_alpha(BACKDROP_ALPHA))
                 .show(&ctx, |ui| {
-                    render_surface(ui, props, footer, viewport, compact, body)
+                    ui.set_style(style);
+                    crate::theme::with_profile_accent(ui, accent, |ui| {
+                        render_surface(ui, props, footer, viewport, compact, body)
+                    })
                 });
             let mut output = response.inner;
             let close_requested = response.response.should_close()
@@ -203,7 +208,10 @@ fn show_with_layout<R>(
                 .pivot(Align2::CENTER_CENTER)
                 .constrain_to(bounds)
                 .show(ui.ctx(), |ui| {
-                    render_surface(ui, props, footer, bounds.size(), compact, body)
+                    ui.set_style(style);
+                    crate::theme::with_profile_accent(ui, accent, |ui| {
+                        render_surface(ui, props, footer, bounds.size(), compact, body)
+                    })
                 })
                 .inner;
             if output.action.is_none()
@@ -408,6 +416,51 @@ fn primary_activated(_kind: PrimaryKind, response: &Response) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detached_dialog_inherits_the_callers_theme_and_profile_accent() {
+        for presentation in [Presentation::Modal, Presentation::Contained] {
+            for dark in [false, true] {
+                let context = egui::Context::default();
+                crate::install(&context);
+                context.set_visuals(if dark {
+                    egui::Visuals::light()
+                } else {
+                    egui::Visuals::dark()
+                });
+                let accent = garmin_color::swatch::cyan::G40;
+                context
+                    .run_ui(egui::RawInput::default(), |ui| {
+                        *ui.visuals_mut() = if dark {
+                            egui::Visuals::dark()
+                        } else {
+                            egui::Visuals::light()
+                        };
+                        crate::theme::with_profile_accent(ui, accent, |ui| {
+                            let _ = show(
+                                ui,
+                                Id::new("scoped-dialog-style"),
+                                &Props {
+                                    title: "Activities",
+                                    description: None,
+                                    size: Size::Medium,
+                                    presentation,
+                                    cancel_label: Some("Close"),
+                                    cancel_disabled: None,
+                                    backdrop_closes: None,
+                                    primary: None,
+                                },
+                                |ui| {
+                                    assert_eq!(ui.visuals().dark_mode, dark);
+                                    assert_eq!(crate::theme::profile_accent(ui), accent);
+                                },
+                            );
+                        });
+                    })
+                    .drop_without_applying_deltas();
+            }
+        }
+    }
 
     #[test]
     fn danger_primary_accepts_keyboard_activation() {
