@@ -180,6 +180,28 @@ let
               workspaceSrc
               ;
           };
+          desktopReleaseSource = lib.fileset.toSource {
+            root = workspaceSrc;
+            fileset = lib.fileset.unions (
+              map (name: workspaceSrc + "/infra/python/${name}.py") [
+                "desktop_release"
+                "github_releases"
+                "json_data"
+              ]
+            );
+          };
+          desktopRelease = pkgs.writeShellApplication {
+            name = "garmin-desktop-release";
+            runtimeInputs = [
+              pkgs.git
+              pkgs.gh
+              pkgs.nix
+              pkgs.zsync
+            ];
+            text = ''
+              exec ${pythonToolsEnv}/bin/python ${desktopReleaseSource}/infra/python/desktop_release.py "$@"
+            '';
+          };
           galleryTarget = gallery.lib.mkTool {
             inherit
               dirspec
@@ -303,6 +325,7 @@ let
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             desktop-appimage = desktopTarget.distribution.appImage;
+            desktop-release-assets = desktopTarget.distribution.releaseAssets;
             garmin-hass-app-image = hassTarget.appImage;
             garmin-hass-dev-amd64 = mkHassDev "amd64" "x86_64-linux" "x86_64-unknown-linux-gnu";
             garmin-hass-dev-aarch64 = mkHassDev "aarch64" "aarch64-linux" "aarch64-unknown-linux-gnu";
@@ -337,6 +360,7 @@ let
               desktop-vm-test = flake-utils.lib.mkApp {
                 drv = desktopVm.app;
               };
+              desktop-release = flake-utils.lib.mkApp { drv = desktopRelease; };
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               desktop-appimage = {
@@ -373,6 +397,7 @@ let
               hass-app-repository = releaseAutomation.repository;
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              desktop-update-metadata = desktopTarget.distribution.updateMetadataCheck;
               hass-integration = hassIntegration;
             };
           legacyPackages.ci =

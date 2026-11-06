@@ -1,9 +1,40 @@
-# HASS release candidates
+# Release publication
 
-Build, verify, and publish signed HASS candidates. Candidate commands reject existing output directories.
-[Qualification evidence](../../docs/research/publication-readiness.md) records tested releases and limits.
+Publish desktop AppImage assets and build, verify, and publish signed HASS candidates. Candidate commands reject
+existing output directories. [Qualification evidence](../../docs/research/publication-readiness.md) records tested
+releases and limits.
 
 ## GitHub publication
+
+### Desktop AppImages
+
+[Desktop release assets](../../.github/workflows/desktop-release.yml) attaches production and demo AppImages for x86_64
+and aarch64, their `.zsync` update controls, and `DESKTOP-SHA256SUMS` to an existing published GitHub release. The tag
+must match the Cargo workspace version. It runs when a release is published, or after successful HASS promotion through
+a reusable workflow call; the latter also covers releases created with `GITHUB_TOKEN`, whose events do not start another
+workflow. To retry publication for a tag containing this workflow:
+
+```sh
+gh workflow run desktop-release.yml -f tag=vVERSION
+```
+
+The source job resolves the tag once and pins every native and publication checkout to that commit. Release events and
+HASS callers also bind admission to the triggering commit. Native builds record their source and exact asset hashes in
+internal manifests; staging rejects mismatched commits, changed files, and missing or duplicate systems. Publication
+rechecks the remote tag immediately before upload. These manifests are not GitHub Release assets.
+
+Native jobs build both architectures through Nix. Before upload, the publisher verifies architecture, embedded update
+channel, and each `.zsync` file's filename, final AppImage hash, and tagged download URL. Retries preserve identical
+assets and reject conflicting published bytes. These desktop files have their own checksum inventory and are outside the
+signed HASS image inventory.
+
+Gear Lever reads the embedded `gh-releases-zsync` information automatically. Production and demo use separate filenames
+for each architecture and use Gear Lever's `latest-all` policy, including experimental/prerelease releases. The
+updater's target release must contain the matching AppImage and `.zsync` assets. Publication regenerates the complete
+control file with the pinned `zsyncmake` and compares its headers and checksum table, ignoring only transport-modified
+mtime.
+
+### HASS candidates
 
 Before tagging, dispatch [HASS experimental release](../../.github/workflows/hass-release.yml) from a trusted branch
 with **Publish disabled**:

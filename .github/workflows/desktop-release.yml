@@ -1,0 +1,113 @@
+name: Desktop release assets
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published release tag.
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      commit:
+        description: Commit already admitted by the calling release workflow.
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  group: desktop-release-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      commit: ${{ steps.identity.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || (github.event_name == 'release' && github.sha) || inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/nix
+      - name: Resolve and admit the release source
+        id: identity
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          EXPECTED_COMMIT: ${{ inputs.commit || (github.event_name == 'release' && github.sha) || '' }}
+        run: |
+          nix run .#desktop-release -- resolve --tag "$RELEASE_TAG" \
+            --expected-commit "$EXPECTED_COMMIT" --output "$GITHUB_OUTPUT"
+  native:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/nix
+      - name: Build AppImages and update controls
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          RELEASE_COMMIT: ${{ needs.source.outputs.commit }}
+          BUILD_SYSTEM: ${{ matrix.system }}
+        run: |
+          nix run .#desktop-release -- build --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" \
+            --system "$BUILD_SYSTEM" --output .tmp/desktop-release/native
+      - uses: actions/upload-artifact@v7
+        with:
+          name: garmin-desktop-native-${{ matrix.system }}
+          path: .tmp/desktop-release/native/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+  publish:
+    needs: [source, native]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      RELEASE_COMMIT: ${{ needs.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/nix
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: garmin-desktop-native-*
+          path: .tmp/desktop-release/downloads
+      - name: Verify and checksum desktop assets
+        run: |
+          nix run .#desktop-release -- stage --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" \
+            --inputs .tmp/desktop-release/downloads --output .tmp/desktop-release/publish
+      - name: Attach desktop assets to the published release
+        run: |
+          nix run .#desktop-release -- publish --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" \
+            --directory .tmp/desktop-release/publish

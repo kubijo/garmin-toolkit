@@ -201,6 +201,7 @@
               src
               ;
             mkAppImage = nix-appimage.lib.${system}.mkAppImage;
+            appImageRuntime = nix-appimage.packages.${system}.appimage-runtimes.appimage-type2-runtime;
             withHostGraphics = import (workspaceSrc + "/infra/nix/host-graphics") { inherit pkgs; };
           };
           launcherCheck =

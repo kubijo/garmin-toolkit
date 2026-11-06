@@ -201,6 +201,7 @@ let
               pkgs.syft
               pkgs.skopeo
               pkgs.distribution
+              pkgs.zsync
               nixOci
               dirspec
             ]

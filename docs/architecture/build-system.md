@@ -200,3 +200,9 @@ network access to install its pinned packages. Physical GPU acceleration is outs
 
 The experimental Flatpak tooling builds offline from Nix-vendored Cargo sources on Freedesktop 25.08. Flatpak is an idea
 outside the active roadmap; its current permissions are development inputs.
+
+Production and demo AppImages for x86_64 and aarch64 are distributed as GitHub Release assets with matching `.zsync`
+files and `DESKTOP-SHA256SUMS`. Each AppImage embeds an architecture- and mode-specific `gh-releases-zsync` channel for
+the latest published release of `kubijo/garmin-toolkit`, including prereleases, through Gear Lever's `latest-all`
+policy. Gear Lever discovers updates without manual setup. Local AppImage exports include the matching `.zsync` file.
+See [desktop release publication](../../infra/release/README.md#desktop-appimages).

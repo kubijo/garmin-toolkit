@@ -21,8 +21,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 120
     steps:
-      # v7
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -34,8 +33,7 @@ jobs:
           RELEASE: ${{ inputs.release }}
           SOURCES: ${{ inputs.sources }}
         run: nix run .#hass-ci -- native --system "$BUILD_SYSTEM" --release "$RELEASE" --sources "$SOURCES"
-      # v7
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() && steps.build.outputs.architecture != '' }}
         with:
           name: garmin-hass-native-${{ steps.build.outputs.architecture }}
@@ -43,8 +41,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
-      # v7
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      - uses: actions/upload-artifact@v7
         if: steps.build.outputs.sources == 'true'
         with:
           name: garmin-hass-sources-${{ steps.build.outputs.architecture }}
