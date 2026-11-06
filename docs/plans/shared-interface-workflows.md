@@ -7,7 +7,6 @@ and the [device explorer](../architecture/device-explorer.md).
 
 ## Shared work
 
-- Confirm browser Ctrl+wheel page zoom in a headed browser.
 - Remove the gallery-only RUSTSEC-2026-0370/0371/0372 exceptions when compatible published AccessKit/AT-SPI releases
   complete the [zbus 6 migration](https://github.com/z-galaxy/zbus/issues/2043). Preserve native accessibility; the
   [gallery audit policy](../../infra/gallery/deny.toml) rejects obsolete exceptions and other findings. AccessKit
@@ -21,8 +20,7 @@ Before advertising Windows support, verify blocked-popup retry/tab fallback, sta
 reload/closure, and foreground focus across keyboard and touch. Pending activation must not recreate closed windows.
 
 Use pseudo-localized and long-copy gallery fixtures for layout regressions. Native child viewports do not support
-automated screenshots; use inline windows for captures. Browser Ctrl+wheel requires native browser input because the
-semantic wheel action injects egui input.
+automated screenshots; use inline windows for captures.
 
 ### Deferred gallery hot reload
 
