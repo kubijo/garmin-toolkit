@@ -19,6 +19,7 @@ import yaml
 import hass_publish
 import test_hass_release as release_fixtures
 import test_hass_repository as repository_fixtures
+from github_release_fixtures import ReleaseFixture
 from hass_attestations import VerifyProvenance
 from hass_publish import (
     EVIDENCE_FILES,
@@ -414,6 +415,23 @@ class PublicationTests(unittest.TestCase):
                 promote.assert_not_called()
         self.assertEqual({path.name: file_sha256(path) for path in draft.iterdir()}, original)
 
+    def test_desktop_assets_are_rejected_in_the_unpublished_hass_draft(self) -> None:
+        draft = self.signed_draft()
+        (draft / 'garmin-toolkit-x86_64.AppImage').write_bytes(b'Synthetic premature desktop asset')
+
+        releases = ReleaseFixture(directory=draft, draft=True)
+        with (
+            patch('hass_release.verify_provenance') as verified,
+            self.assertRaisesRegex(ValueError, 'extra='),
+        ):
+            promote_draft(
+                PromoteDraft(source=self.fixture.source, output=self.fixture.root / 'premature-desktop'),
+                releases=releases,
+            )
+        verified.assert_not_called()
+        self.assertEqual(len(releases.downloads), 1)
+        self.assertEqual(releases.uploads, [])
+
     def test_existing_signed_draft_is_promoted_without_building_an_image_or_replacing_assets(self) -> None:
         draft = self.signed_draft()
         repository = self.fixture.root / 'repository'
@@ -421,40 +439,34 @@ class PublicationTests(unittest.TestCase):
         (repository / 'repository.yaml').write_text('Synthetic repository\n')
         (repository / 'garmin_toolkit').mkdir()
         (repository / 'garmin_toolkit/config.yaml').write_text('arch: [amd64, aarch64]\n')
-        calls: list[tuple[str, ...]] = []
-
-        def downloaded(*args: str, cwd: Path | None = None) -> str:
-            del cwd
-            calls.append(args)
-            if args[:3] == ('gh', 'release', 'view'):
-                return json.dumps({'isDraft': is_draft})
-            if args[:3] == ('gh', 'release', 'download'):
-                destination = Path(args[args.index('--dir') + 1])
-                for path in draft.iterdir():
-                    shutil.copyfile(path, destination / path.name)
-                return ''
-            if args[:2] == ('nix', 'build'):
-                self.assertTrue(args[2].endswith('#garmin-hass-app-repository'))
-                return str(repository)
-            raise AssertionError('Unexpected external action: ' + str(args))
-
         for is_draft in (True, False):
             with self.subTest(is_draft=is_draft):
+                if not is_draft:
+                    (draft / 'garmin-toolkit-x86_64.AppImage').write_bytes(b'Synthetic desktop AppImage')
+                    (draft / 'DESKTOP-SHA256SUMS').write_text('Synthetic separate desktop checksums\n')
                 promoted = self.fixture.root / f'promoted-{is_draft}'
+                releases = ReleaseFixture(directory=draft, draft=is_draft)
                 with (
-                    patch('hass_publish.command', side_effect=downloaded),
+                    patch('hass_publish.command', return_value=str(repository)) as build,
                     patch('hass_release.verify_provenance') as verified,
                     patch('hass_publish.attest'),
                     patch('hass_publish.promote_candidate') as promote,
                 ):
-                    promote_draft(PromoteDraft(source=self.fixture.source, output=promoted))
+                    promote_draft(PromoteDraft(source=self.fixture.source, output=promoted), releases=releases)
                 verified.assert_called_once()
                 promote.assert_called_once()
                 self.assertEqual(
                     yaml.safe_load((promoted / 'repository/garmin_toolkit/config.yaml').read_text())['arch'], ['amd64']
                 )
-                self.assertFalse(
-                    any(args[:3] in (('gh', 'release', 'create'), ('gh', 'release', 'upload')) for args in calls)
+                self.assertEqual(releases.uploads, [])
+                self.assertEqual(len(releases.downloads), 1)
+                build.assert_called_once_with(
+                    'nix',
+                    'build',
+                    str(self.fixture.source) + '#garmin-hass-app-repository',
+                    '--no-link',
+                    '--print-out-paths',
+                    '--no-update-lock-file',
                 )
                 for entry in self.document['files']:
                     if entry['role'] in ('image_archive', 'sbom'):

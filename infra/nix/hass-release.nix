@@ -53,6 +53,7 @@ let
       "hass_store"
       "hass_store_migration"
       "hass_publish"
+      "github_releases"
       "hass_preflight"
       "hass_ci"
       "hass_recovery"

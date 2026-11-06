@@ -16,6 +16,7 @@ from typing import cast
 import yaml
 
 from archive_io import chunks, open_tar
+from github_releases import GitHubReleases, Releases
 from haos_upgrade import check_upgrade_coverage
 from hass_attestations import VerifyProvenance, attest
 from hass_registry import PrepareRegistry, VerifyRegistry, prepare_registry, verify_registry
@@ -897,21 +898,18 @@ def promote_candidate(options: StagePublication, document: Release, staging: Obj
     )
 
 
-def promote_draft(options: PromoteDraft) -> None:
+def promote_draft(options: PromoteDraft, *, releases: Releases | None = None) -> None:
     from hass_release import verify_provenance
 
     version, identity = release_guard(ReleaseGuard(source=options.source))
     if options.output.exists() or options.output.is_symlink():
         raise ValueError('Promotion scratch already exists')
-    state = object_value(
-        json.loads(command('gh', 'release', 'view', 'v' + version, '--repo', REPOSITORY, '--json', 'isDraft'))
-    )
-    if not isinstance(state.get('isDraft'), bool):
-        raise ValueError('Promotion requires an existing release with a known draft state')
+    releases = releases or GitHubReleases(REPOSITORY, command)
+    is_draft = releases.is_draft('v' + version)
     options.output.mkdir(parents=True)
     downloaded = options.output / 'downloads'
     downloaded.mkdir()
-    command('gh', 'release', 'download', 'v' + version, '--repo', REPOSITORY, '--dir', str(downloaded))
+    releases.download('v' + version, downloaded)
     document = cast(Release, read_json(downloaded / 'release.json'))
     validate_document(document, 'release')
     candidate, bundles = options.output / 'candidate', options.output / 'bundles'
@@ -922,7 +920,17 @@ def promote_draft(options: PromoteDraft) -> None:
         digest.replace(':', '-') + '.sigstore.jsonl'
         for digest in {document['image']['index_digest'], *(row['manifest_digest'] for row in document['platforms'])}
     }
-    check_directory(downloaded, payload | signatures | {'haos-acceptance.tar.gz'})
+    desktop_assets = set[str]()
+    if not is_draft:
+        desktop_assets = {
+            path.name
+            for path in downloaded.iterdir()
+            if re.fullmatch(
+                r'garmin-toolkit(?:-demo)?-(?:x86_64|aarch64)\.AppImage(?:\.zsync)?|DESKTOP-SHA256SUMS',
+                path.name,
+            )
+        }
+    check_directory(downloaded, payload | signatures | {'haos-acceptance.tar.gz'} | desktop_assets)
     for name in payload:
         (downloaded / name).rename(candidate / name)
     for name in signatures:
