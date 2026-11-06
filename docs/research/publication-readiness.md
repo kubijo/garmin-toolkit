@@ -1,9 +1,21 @@
-# HASS publication qualification
+# Publication qualification
 
 Installation belongs to the [quickstart](../../apps/garmin-hass/addon/DOCS.md); publication, verification, and recovery
 procedures belong to the [release pipeline](../../infra/release/README.md).
 
-## Published AMD64/ARM64 release
+## Desktop AppImage publication and updates
+
+The [v0.1.6 desktop run](https://github.com/kubijo/garmin-toolkit/actions/runs/42196408883) published production and
+demo AppImages for x86_64 and ARM64, matching zsync controls, and desktop checksums to the
+[GitHub prerelease](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.6).
+
+On 2026-11-06, Gear Lever automatically discovered the update source in the x86_64 demo built from `6fc8f11`, offered an
+update, and installed the published build. User screenshots confirmed the launched app changed from version 0.1.5 to
+0.1.6. This exercises discovery, download, replacement, and launch through Gear Lever. ARM64 and production asset
+selection passed upstream updater method checks against the live release API; their Gear Lever UI update paths were not
+exercised.
+
+## Published HASS AMD64/ARM64 release
 
 Signed [v0.1.5](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.5), source `28a1bb2`, qualified both
 architectures. The [candidate run](https://github.com/kubijo/garmin-toolkit/actions/runs/40118061032) verified native
