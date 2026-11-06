@@ -2441,7 +2441,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-brand"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "resvg",
  "thiserror 2.0.20",
@@ -2449,7 +2449,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-capture"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "har",
  "serde",
@@ -2463,7 +2463,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "byte-unit",
@@ -2501,7 +2501,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-cli-tui"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "byte-unit",
@@ -2520,7 +2520,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-color"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "cint",
  "garmin-macros",
@@ -2531,7 +2531,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-desktop"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "axum",
  "blake3",
@@ -2572,7 +2572,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-device"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2602,7 +2602,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-diagnostics"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "askama",
  "axum",
@@ -2622,7 +2622,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-fit"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "embedded-io-adapters",
  "flate2",
@@ -2634,7 +2634,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-fixtures"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "futures-lite",
  "garmin-device",
@@ -2649,7 +2649,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-gpx"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "garmin-macros",
  "garmin-model",
@@ -2666,7 +2666,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-gpx-worker"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "garmin-fit",
  "garmin-gpx",
@@ -2680,7 +2680,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-hass"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -2721,7 +2721,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-hass-web"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "bytes",
  "camino",
@@ -2752,7 +2752,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-i18n"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "formatjs_intl",
  "icu_calendar",
@@ -2767,7 +2767,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-importer"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "futures-lite",
  "garmin-fit",
@@ -2783,7 +2783,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-logging"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "garmin-model",
  "garmin-service-api",
@@ -2800,7 +2800,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-macros"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2809,7 +2809,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-map-service"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "axum",
  "bytes",
@@ -2832,7 +2832,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-map-tiles"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "axum",
  "blake3",
@@ -2849,7 +2849,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-model"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "blake3",
  "garmin-color",
@@ -2867,7 +2867,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-progress"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "garmin-model",
  "serde",
@@ -2875,7 +2875,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-route"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "garmin-model",
  "semver",
@@ -2884,7 +2884,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-service-api"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "camino",
  "garmin-color",
@@ -2899,7 +2899,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-services"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2941,7 +2941,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-simulator"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2972,7 +2972,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-storage"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "blake3",
  "futures-lite",
@@ -2994,7 +2994,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-ui"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "arc-swap",
  "buffa",
@@ -3037,7 +3037,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-update"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
