@@ -33,13 +33,15 @@ class DeployTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / 'bundle.tar.gz'
             archive.touch()
+            (Path(directory) / 'Cargo.toml').write_text('[workspace.package]\nversion = "9.8.7"\n')
             with (
+                patch.object(dev, 'ROOT', Path(directory)),
                 patch.object(dev.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, str(archive))),
                 patch.object(dev.Installer, 'install', side_effect=ValueError('SSH failed')) as install,
                 self.assertRaisesRegex(ValueError, 'SSH failed'),
             ):
                 dev.deploy(dev.Options(host='ha-test'))
-            install.assert_called_once_with(archive, '/local_apps', 'af63a031_garmin_toolkit', '0.1.5-dev')
+            install.assert_called_once_with(archive, '/local_apps', 'af63a031_garmin_toolkit', '9.8.7-dev')
 
 
 if __name__ == '__main__':
