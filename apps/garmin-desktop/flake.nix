@@ -137,6 +137,11 @@
             '';
           launcher = mkLauncher productionIdentity;
           demoLauncher = mkLauncher demoIdentity;
+          installLauncher = launcher: destination: ''
+            cp -r ${launcher}/share ${destination}/
+            # Avoid cp --no-preserve=mode: its ACL updates fail on macOS builder virtiofs.
+            chmod -R u+w ${destination}/share
+          '';
           mkPackage =
             { launcher, demo }:
             let
@@ -166,9 +171,9 @@
                     --prefix GIO_EXTRA_MODULES : ${lib.escapeShellArg linuxRuntimeEnvironment.GIO_EXTRA_MODULES}
                   )
                 '';
-                postInstall = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-                  cp -r --no-preserve=mode ${launcher}/share "$out/"
-                '';
+                postInstall = lib.optionalString pkgs.stdenv.hostPlatform.isLinux (
+                  installLauncher launcher ''"$out"''
+                );
                 postFixup = ''
                   dirspec "$out" --spec ${packageSpec}
                 '';
@@ -196,6 +201,7 @@
               src
               ;
             mkAppImage = nix-appimage.lib.${system}.mkAppImage;
+            appImageRuntime = nix-appimage.packages.${system}.appimage-runtimes.appimage-type2-runtime;
             withHostGraphics = import (workspaceSrc + "/infra/nix/host-graphics") { inherit pkgs; };
           };
           launcherCheck =
@@ -213,6 +219,16 @@
                 appstreamcli validate --no-net ${demoLauncher}/share/metainfo/${demoIdentity.id}.metainfo.xml
                 touch "$out"
               '';
+          launcherInstallCheck = pkgs.runCommandLocal "check-desktop-launcher-install" { } ''
+            mkdir -p "$TMPDIR/production" "$TMPDIR/demo"
+            ${installLauncher launcher ''"$TMPDIR/production"''}
+            ${installLauncher demoLauncher ''"$TMPDIR/demo"''}
+            diff --recursive --brief ${launcher}/share "$TMPDIR/production/share"
+            diff --recursive --brief ${demoLauncher}/share "$TMPDIR/demo/share"
+            test -w "$TMPDIR/production/share/applications/${productionIdentity.id}.desktop"
+            test -w "$TMPDIR/demo/share/applications/${demoIdentity.id}.desktop"
+            touch "$out"
+          '';
         in
         {
           inherit
@@ -220,6 +236,7 @@
             launcher
             demoLauncher
             demoPackage
+            launcherInstallCheck
             package
             ;
           check =

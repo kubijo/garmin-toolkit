@@ -1,5 +1,6 @@
 //! Target-neutral application services.
 
+pub mod activity_export;
 pub mod course_transfer;
 pub mod deployment;
 pub mod devices;
@@ -8,14 +9,13 @@ pub mod paths;
 pub mod routes;
 pub mod snapshots;
 
-use garmin_fit::{CreatorDiagnostics, NormalizedActivity};
 use garmin_importer::{
     AvatarCrop, AvatarImportReceipt, AvatarImportRequest as ImporterAvatarRequest, AvatarImporter,
     FitImportOutcome, FitImportRequest as ImporterRequest, FitImporter, RouteImportReceipt,
     RouteImportRequest as ImporterRouteRequest, RouteImporter,
 };
 use garmin_model::{
-    activity::ActivitySummary,
+    activity::{Activity, ActivitySummary},
     artifact::{AcquisitionOperationId, ArtifactId, NormalizationFailure, SourceIdentity},
     identity::{DisplayName, Profile, ProfilePreferences, Role, Source, User, UserId},
     observation::ObservationId,
@@ -104,7 +104,7 @@ impl UserContext {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActivityPreview {
     observation_id: ObservationId,
-    creator: CreatorDiagnostics,
+    source: String,
     summary: ActivitySummary,
 }
 
@@ -115,8 +115,8 @@ impl ActivityPreview {
     }
 
     #[must_use]
-    pub const fn creator(&self) -> &CreatorDiagnostics {
-        &self.creator
+    pub fn source(&self) -> &str {
+        &self.source
     }
 
     #[must_use]
@@ -131,7 +131,10 @@ impl From<StoredActivitySummary> for ActivityPreview {
         let summary = stored.summary();
         Self {
             observation_id,
-            creator: stored.into_creator(),
+            source: stored
+                .creator()
+                .product_name()
+                .map_or_else(|| "FIT".to_owned(), ToString::to_string),
             summary,
         }
     }
@@ -141,7 +144,7 @@ impl From<StoredActivitySummary> for ActivityPreview {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActivityDetails {
     observation_id: ObservationId,
-    normalized: NormalizedActivity,
+    activity: Activity,
 }
 
 impl ActivityDetails {
@@ -151,8 +154,8 @@ impl ActivityDetails {
     }
 
     #[must_use]
-    pub const fn normalized(&self) -> &NormalizedActivity {
-        &self.normalized
+    pub const fn activity(&self) -> &Activity {
+        &self.activity
     }
 }
 
@@ -161,7 +164,7 @@ impl From<StoredActivity> for ActivityDetails {
         let observation_id = stored.observation_id();
         Self {
             observation_id,
-            normalized: stored.into_normalized(),
+            activity: stored.into_normalized().into_parts().1,
         }
     }
 }
@@ -357,13 +360,6 @@ impl Application {
             .acquisition_time(user.user_id(), operation)
             .await?
             .is_some())
-    }
-
-    /// Inspects GPX bytes without storing them.
-    /// # Errors
-    /// [`enum@Error`] when the GPX document cannot be parsed.
-    pub fn inspect_gpx(bytes: &[u8]) -> Result<garmin_gpx::Document, Error> {
-        Ok(garmin_gpx::parse(bytes)?)
     }
 
     /// Imports one explicitly selected GPX route candidate.
@@ -735,11 +731,12 @@ mod tests {
                     })
                 }));
                 for preview in previews {
+                    assert_eq!(preview.source(), "Demo Track Recorder");
                     let details = application
                         .activity(context, preview.observation_id())
                         .await?
                         .ok_or("listed activity could not be loaded")?;
-                    assert_eq!(details.normalized().activity().summary(), preview.summary());
+                    assert_eq!(details.activity().summary(), preview.summary());
 
                     for other in corpus
                         .users()
@@ -1047,7 +1044,7 @@ mod tests {
                 "Selected files".parse()?,
                 None,
             );
-            let document = Application::inspect_gpx(GPX_FIXTURE)?;
+            let document = garmin_gpx::parse(GPX_FIXTURE)?;
             let candidate = document
                 .candidates()
                 .first()

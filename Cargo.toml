@@ -2,6 +2,7 @@
 resolver = "3"
 exclude = ["vendor/fast-mvt", "vendor/winit"]
 members = [
+    "crates/datapackage",
     "apps/garmin-cli",
     "apps/garmin-cli/tui",
     "apps/garmin-desktop",
@@ -34,7 +35,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 rust-version = "1.98"
 license = "AGPL-3.0-or-later"
@@ -55,6 +56,8 @@ bytes = "=1.12.1"
 camino = { version = "=1.2.5", features = ["serde1"] }
 cint = "=0.3.1"
 clap = { version = "=4.6.7", features = ["derive"] }
+csv = "=1.4.0"
+datapackage = { path = "crates/datapackage" }
 comrak = { version = "=0.54.0", default-features = false }
 crossterm = { version = "=0.29.0", features = ["event-stream"] }
 dirs = "=6.0.0"
@@ -150,8 +153,8 @@ termcolor = "=1.4.1"
 termcolor-json = "=1.0.0"
 thiserror = "=2.0.20"
 time = { version = "=0.3.55", features = ["formatting"] }
-tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
-tokio-wasm-io = { package = "tokio", version = "=1.53.1", default-features = false, features = ["io-util"] }
+tokio = { version = "=1.53.3", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-wasm-io = { package = "tokio", version = "=1.53.3", default-features = false, features = ["io-util"] }
 tokio-tungstenite = "=0.29.0"
 toml_edit = "=0.25.13"
 tower-http = "=0.6.11"
@@ -171,7 +174,7 @@ websocket-web = "=0.1.9"
 winit = { version = "=0.30.13", default-features = false }
 wgpu = "=30.0.0"
 zip = { version = "=9.0.5", default-features = false }
-zstd = { version = "=0.14.0", default-features = false }
+zstd = { version = "=0.14.3", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

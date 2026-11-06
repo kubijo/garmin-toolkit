@@ -1,0 +1,40 @@
+# Reviewed floors: raise with improved coverage; never regenerate from a report.
+version = 1
+
+[measurement]
+# Existing collector exclusions, retained rather than expanded by this proposal.
+excluded_paths = ["crates/garmin-ui/", "apps/garmin-desktop/src/view.rs"]
+
+[floors]
+garmin-cli = 35
+garmin-cli-tui = 40
+garmin-desktop = 45
+garmin-device = 60
+garmin-map-service = 80
+garmin-update = 80
+garmin-hass = 80
+garmin-importer = 85
+datapackage = 85
+garmin-fixtures = 85
+garmin-simulator = 85
+garmin-services = 85
+garmin-storage = 85
+garmin-map-tiles = 90
+garmin-capture = 90
+garmin-fit = 90
+garmin-macros = 90
+garmin-gpx = 90
+garmin-color = 90
+garmin-diagnostics = 90
+garmin-logging = 90
+garmin-service-api = 95
+garmin-i18n = 95
+garmin-model = 95
+garmin-route = 95
+garmin-progress = 95
+garmin-brand = 100
+garmin-gpx-worker = 100
+
+[unmeasured]
+garmin-ui = "Excluded from native line coverage; production behavior is exercised through UI and gallery tests."
+garmin-hass-web = "WASM-only code has no executable lines in the native coverage run."

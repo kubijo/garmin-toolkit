@@ -9,6 +9,3 @@
 | [Development](development.md)          | Execution safeguards and documentation maintenance |
 
 Desktop and HASS users: [backup and restore](backup-restore.md).
-
-Architecture changes with the system. Retire decisions when current documentation owns their useful content; Git keeps
-the history. Delete completed plans after their lasting results move into code, architecture, or user documentation.

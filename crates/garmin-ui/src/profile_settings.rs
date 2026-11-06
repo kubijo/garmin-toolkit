@@ -77,7 +77,7 @@ fn show_picture(ui: &mut Ui, props: &Props<'_>) -> bool {
             size: 64.0,
         }
         .show(ui);
-        ui.add_space(12.0);
+        ui.add_space(16.0);
         (button::Props {
             label: &choose_picture,
             icon: Some(icons::CAMERA),

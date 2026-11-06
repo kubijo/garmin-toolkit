@@ -250,6 +250,20 @@ impl eframe::App for Files {
         if let Some(notice) = notice {
             notification::show(ui, &notice.props());
         }
+        device_browser::show_catalog_error(
+            ui,
+            &self.intl,
+            self.snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.catalog_error.as_deref()),
+        );
+        device_browser::show_fit_error(
+            ui,
+            &self.intl,
+            self.snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.fit_error.as_deref()),
+        );
         let available = self
             .snapshot
             .as_ref()

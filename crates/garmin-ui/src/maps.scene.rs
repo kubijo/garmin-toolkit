@@ -25,9 +25,12 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         ],
         2,
     );
-    let width = ctx.slider("width", 880.0, 320.0, 1120.0, 1.0);
+    let width = ctx.slider("width", 880.0, 320.0, 1600.0, 1.0);
     let height = ctx.slider("height", 920.0, 320.0, 1200.0, 1.0);
     let mut state = fixture();
+    if ctx.toggle("many maps", false) {
+        add_regional_maps(&mut state);
+    }
     state.dry_run = ctx.toggle("simulation", false);
     state.phase = match variant {
         0 => Phase::Consent,
@@ -102,6 +105,19 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             .rect_filled(ui.max_rect(), 0.0, ui.visuals().panel_fill);
         let _command = garmin_ui::maps::show(ui, &globals.intl(), &state);
     });
+}
+
+fn add_regional_maps(state: &mut State) {
+    for name in [
+        "TopoActive Eastern Europe",
+        "TopoActive Western Europe",
+        "TopoActive Northern Europe — extended regional map coverage",
+    ] {
+        let mut component = state.components[0].clone();
+        component.index = u32::try_from(state.components.len()).expect("small synthetic catalogue");
+        name.clone_into(&mut component.name);
+        state.components.push(component);
+    }
 }
 
 fn recovery_review(state: &mut State) {

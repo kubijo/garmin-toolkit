@@ -43,10 +43,8 @@ disconnect also remain visible; a lost reply does not establish whether a write 
 
 ## Composition rationale
 
-The original comparison selected composable tree/table primitives over `egui-file-dialog` 0.15 and `egui_file` 0.28:
-their picker lifecycle and local-filesystem UI would require invasive adaptation to opaque device-relative RPC.
-`egui-table-kit` 0.6 added unnecessary state for the bounded catalog; complete native file managers were observational
-references only. Versions describe that comparison, not an instruction to pin old dependencies.
+Composable tree/table primitives support opaque device-relative RPC and bounded catalog state. Local-filesystem picker
+lifecycle and complete file-manager state would add adaptation without serving that boundary.
 
 Maintained capture sets live under [`infra/gallery/captures`](../../infra/gallery/captures/). Follow
 [interface validation](../development.md#interface-validation);

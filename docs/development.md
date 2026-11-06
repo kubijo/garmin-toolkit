@@ -3,6 +3,9 @@
 Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands and build ownership are described in
 [the build system](architecture/build-system.md). UI changes require rendered and inspected gallery previews.
 
+Close implementation slices with full QA and audit; deployment claims also require packaged behavioral evidence. Just
+lists the available commands.
+
 ## Execution safeguards
 
 - Do not commit, stage, unstage, reset, or otherwise alter the Git index unless explicitly requested. Existing staged
@@ -54,20 +57,17 @@ panel, and preserve subprocess exit codes (124 for timeout, 126/127 for permissi
 interruption). Unexpected failures use Rich tracebacks. Use a known language lexer when displaying code or structured
 data.
 
-Python uses nix-tools' basedpyright and deptry project checks. The basedpyright configuration in
-`infra/python/pyproject.toml` covers Python tooling under `infra`, including tests and generators, in strict mode with
-warnings failing the check. The root `pyrightconfig.json` exposes the same settings to editors. `just qa::preflight` and
-`just qa::full` check types against the pinned Python 3.14 environment and audit declared Python dependencies. Root
-`ruff.toml` configures Python formatting and linting for both editors and QA.
+Python tooling uses strict basedpyright, deptry, and Ruff through nix-tools. Configuration lives in
+`infra/python/pyproject.toml` and root `ruff.toml`; warnings fail QA. Root and nested `pyrightconfig.json` expose the
+same settings to editors. Preflight and full QA use the pinned Python environment.
 
 HAOS browser tooling uses `.mts`, run directly by the pinned Node version. QA checks it with strict TypeScript and
 locked Node/CDP types from `infra/javascript/package-lock.json`; no browser bundle is built. For editor types, run
 `npm ci --ignore-scripts --prefix infra/javascript`. Node strips types at runtime but does not check them.
 
-`just dev::outdated` reports Nix inputs, the Python tooling project, and CI actions online. The native Cargo provider
-cannot inspect the patched `vendor/fast-mvt` dependency through cargo-outdated's temporary copy, and the gallery has
-path dependencies outside its own project root, so neither Rust workspace is included in that report. Local Nix inputs
-and UV packages without a reported latest version remain visible as unresolved findings.
+The online `just dev::outdated` report excludes both Rust workspaces: cargo-outdated's temporary copy cannot resolve
+patched `vendor/fast-mvt`, and gallery path dependencies leave its project root. Local Nix inputs and UV packages
+without a reported latest version stay visible as unresolved findings.
 
 For editor import resolution, populate `infra/python/.venv` from the locked tooling dependencies:
 
@@ -81,16 +81,13 @@ that start the language server at the nested Python project. In Zed, select its 
 
 ## Documentation ownership
 
-Keep current contracts in architecture, consequential rationale in a small set of decisions, reproducible results and
-uncertainty in research, and unresolved work in its owning plan. Retire superseded decisions after moving unique current
-rules to their owners; Git retains the history. Do not create a second session checklist. After a review, preserve its
-unique evidence, update incoming links, and remove the temporary review file. Keep session narratives, routine test
-counts, command logs, and resolved checklists out of persistent documentation. Explain current behavior and design
-constraints directly; keep open questions concrete and remove them when answered. Retain empirical measurements and
-reproduction methods when they inform unresolved work.
+Architecture owns current contracts, decisions consequential rationale, research reproducible evidence and limits, and
+plans unresolved work. Move unique content and update incoming links before deleting superseded decisions, completed
+plans, or temporary reviews; Git retains history.
 
-Cite tracked fixtures, maintained reproduction commands, or durable published artifacts. Do not cite ignored local files
-as evidence in committed documentation.
+Exclude session narratives, routine test counts, command logs, and resolved checklists. Keep open questions concrete;
+remove them when answered. Retain measurements and methods that inform unresolved work. Cite tracked fixtures,
+maintained commands, or durable published artifacts, never ignored local files.
 
 ## Interface validation
 
@@ -101,12 +98,11 @@ content. Check wrapping, clipping, contrast, focus, controls, and interaction in
 revision, viewport, font, locale, and capture results with the change. Reproducible capture recipes live in the repo;
 rendered captures belong in local or CI artifacts. Runtime tests cover behavior but do not replace visual inspection.
 
-For authorized runtime UI checks, keep app data and browser profiles under `.tmp`; bind control and debugging listeners
-to loopback. Cap Linux builds at two CPUs and 6 GiB with a verified cgroup, including the actual build workers rather
-than only a Nix client. Stop the processes started for the check and verify their listeners are gone. Prefer the app's
-semantic control API for actions and screenshots; use browser tools only for missing capabilities and record the gap in
-the owning plan. Capture before and after at the same viewport for visual fixes. Link the app-owned images in the review
-and explain the visible change. Do not substitute a full-desktop capture for an app screenshot.
+For authorized runtime UI checks, keep app data and browser profiles under `.tmp`, bind control/debugging listeners to
+loopback, and apply the execution limits above to actual workers. Stop owned processes and verify their listeners are
+gone. Prefer the app's semantic control API; record missing capabilities in the owning plan. Capture visual fixes before
+and after at the same viewport, link the app-owned images, and explain the change. A full-desktop capture cannot replace
+an app screenshot.
 
 ## Headless hardware rendering probe
 

@@ -2,6 +2,18 @@
 mod catalog;
 
 #[test]
+fn closing_and_reopening_the_same_device_rejects_the_closed_windows_reply() {
+    let mut request = catalog::Request::default();
+    let closed = request.begin("watch").expect("open files");
+    request.invalidate();
+    let reopened = request.begin("watch").expect("reopen files");
+    assert!(!request.finish(closed));
+    assert_eq!(request.loading(), Some("watch"));
+    assert!(request.finish(reopened));
+    assert!(!request.finish(closed));
+}
+
+#[test]
 fn switching_devices_supersedes_pending_catalogues_in_either_completion_order() {
     for old_first in [true, false] {
         let mut request = catalog::Request::default();

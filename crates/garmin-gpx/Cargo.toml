@@ -23,6 +23,7 @@ geo-types.workspace = true
 gpx-format.workspace = true
 garmin-model.workspace = true
 thiserror.workspace = true
+time.workspace = true
 serde.workspace = true
 garmin-macros.workspace = true
 postcard = { workspace = true, optional = true }

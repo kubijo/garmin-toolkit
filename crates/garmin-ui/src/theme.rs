@@ -24,9 +24,9 @@ pub fn apply_palette(style: &mut Style, palette: &theme::Theme) {
     let support = palette.support();
     let borders = palette.borders();
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-    style.spacing.button_padding = egui::vec2(12.0, 8.0);
+    style.spacing.button_padding = egui::vec2(16.0, 8.0);
     style.spacing.interact_size = egui::vec2(40.0, 40.0);
-    style.spacing.menu_margin = egui::Margin::same(6);
+    style.spacing.menu_margin = egui::Margin::same(8);
     apply_layer_with(style, palette, theme::Level::One);
 
     let visuals = &mut style.visuals;

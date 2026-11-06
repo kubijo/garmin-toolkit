@@ -19,6 +19,3 @@
 - [Developer tools and logs](developer-tools.md)
 - [Visual language](visual-language.md)
 - [Activity workspace and map rendering](activity-map.md)
-
-These documents describe current contracts. [Plans](../plans/README.md) own unfinished work;
-[research](../research/README.md) records validation and its limits.

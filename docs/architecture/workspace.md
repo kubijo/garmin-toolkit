@@ -21,10 +21,11 @@ Discovery exposes transport candidates. Attaching or mounting a recognizable Gar
 file transfers, network contact, and mutation remain explicit actions. Automatic deletion is forbidden. Cloud connectors
 stop on authentication or rate limits until explicit recovery.
 
-HASS targets Linux `aarch64`, with `x86_64` for development. Mobile, Bluetooth, and new device tuples require separate
-evidence. Connect IQ remains optional, source-only, and locally built. HASS serves the application UI and operational
-health, without publishing Garmin Toolkit data as entities, events, recorder entries, or external statistics. Domain
-publication needs a concrete automation use case and reviewed public contract.
+HASS targets Linux `aarch64` and `x86_64`; [release evidence](../research/publication-readiness.md) defines qualified
+versions and scope. Mobile, Bluetooth, and new device tuples require separate evidence. Connect IQ is optional,
+source-only, and locally built. HASS serves application UI and operational health, without publishing Garmin Toolkit
+data as entities, events, recorder entries, or external statistics. Domain publication needs a concrete automation use
+case and reviewed public contract.
 
 ## Crate ownership
 
@@ -35,28 +36,29 @@ publication needs a concrete automation use case and reviewed public contract.
 | `apps/garmin-hass`       | Home Assistant native-process host              |
 | `apps/garmin-gpx-worker` | Resource-limited native GPX parser helper       |
 
-| Crate                | Responsibility                                                  |
-| -------------------- | --------------------------------------------------------------- |
-| `garmin-brand`       | Canonical visual assets and rasterization                       |
-| `garmin-capture`     | Session evidence, logs, and HTTP exchanges                      |
-| `garmin-color`       | Renderer-neutral colors and semantic themes                     |
-| `garmin-device`      | Discovery, manifests, transports, capacity, and file operations |
-| `garmin-fit`         | FIT decoding, normalization, and course encoding                |
-| `garmin-fixtures`    | Inert publishable demo and test data                            |
-| `garmin-gpx`         | GPX parsing and writing behind route types                      |
-| `garmin-i18n`        | ICU MessageFormat catalogs                                      |
-| `garmin-importer`    | Provenance-aware FIT, GPX, and avatar import                    |
-| `garmin-map-service` | Garmin map catalog and authorization service adapter            |
-| `garmin-map-tiles`   | OpenFreeMap tile validation, transport, and HTTP-aware cache    |
-| `garmin-model`       | Source-neutral user, activity, route, and map models            |
-| `garmin-progress`    | Operation observation and cancellation contracts                |
-| `garmin-route`       | Route-plan transformations                                      |
-| `garmin-service-api` | Host/client service contracts without host-only dependencies    |
-| `garmin-services`    | User-scoped application use cases                               |
-| `garmin-simulator`   | Fake device and map-service adapters                            |
-| `garmin-storage`     | SQLite persistence and migrations                               |
-| `garmin-ui`          | Shared egui components and colocated scenes                     |
-| `garmin-update`      | Planning, download, backup, install, removal, and recovery      |
+| Crate                | Responsibility                                                      |
+| -------------------- | ------------------------------------------------------------------- |
+| `datapackage`        | Application-independent local Data Package transport and validation |
+| `garmin-brand`       | Canonical visual assets and rasterization                           |
+| `garmin-capture`     | Session evidence, logs, and HTTP exchanges                          |
+| `garmin-color`       | Renderer-neutral colors and semantic themes                         |
+| `garmin-device`      | Discovery, manifests, transports, capacity, and file operations     |
+| `garmin-fit`         | FIT decoding, normalization, and course encoding                    |
+| `garmin-fixtures`    | Inert publishable demo and test data                                |
+| `garmin-gpx`         | GPX parsing and writing behind route types                          |
+| `garmin-i18n`        | ICU MessageFormat catalogs                                          |
+| `garmin-importer`    | Provenance-aware FIT, GPX, and avatar import                        |
+| `garmin-map-service` | Garmin map catalog and authorization service adapter                |
+| `garmin-map-tiles`   | OpenFreeMap tile validation, transport, and HTTP-aware cache        |
+| `garmin-model`       | Source-neutral user, activity, route, and map models                |
+| `garmin-progress`    | Operation observation and cancellation contracts                    |
+| `garmin-route`       | Route-plan transformations                                          |
+| `garmin-service-api` | Host/client service contracts without host-only dependencies        |
+| `garmin-services`    | User-scoped application use cases                                   |
+| `garmin-simulator`   | Fake device and map-service adapters                                |
+| `garmin-storage`     | SQLite persistence and migrations                                   |
+| `garmin-ui`          | Shared egui components and colocated scenes                         |
+| `garmin-update`      | Planning, download, backup, install, removal, and recovery          |
 
 Apps may depend on crates; crates never depend on apps. Format and connector vocabulary stays behind its owning crate.
 Dependencies use their full package names in manifests and Rust. There is no generic core, common, shared, or utilities
@@ -67,6 +69,9 @@ non-self-describing Postcard on native and WASM targets, so enums use the defaul
 contracts embed these values instead of declaring transport copies. Source-shape rules reject incompatible enum tags and
 unreviewed public types in `garmin-service-api`; round-trip and host/client tests guard the actual wire behavior. See
 [ADR 0040](../decisions/0040-canonical-models-across-service-boundaries.md).
+
+Application activity reads expose `garmin-model::Activity`, summaries, and source labels. FIT normalization wrappers and
+creator diagnostics stay behind the import and persistence boundaries; desktop and HASS do not interpret them.
 
 A small crate still needs an independent dependency boundary. `garmin-progress` is the leaf contract through which
 device I/O, update transactions, services, and clients exchange operation state without depending on one another. It

@@ -24,6 +24,38 @@ mod path;
 mod view_state;
 pub use view_state::ViewState;
 
+/// Shows catalogue failures in the file view that owns the request.
+pub fn show_catalog_error(ui: &mut Ui, intl: &Intl, error: Option<&str>) {
+    show_file_error(
+        ui,
+        error,
+        &format_message!(intl, default_message: "Could not browse device files"),
+    );
+}
+
+/// Shows FIT preview failures in the file view that owns the request.
+pub fn show_fit_error(ui: &mut Ui, intl: &Intl, error: Option<&str>) {
+    show_file_error(
+        ui,
+        error,
+        &format_message!(intl, default_message: "Could not open FIT file"),
+    );
+}
+
+fn show_file_error(ui: &mut Ui, error: Option<&str>, title: &str) {
+    if let Some(error) = error {
+        crate::notification::show(
+            ui,
+            &crate::notification::Props {
+                kind: crate::notification::Kind::Error,
+                title,
+                detail: Some(&crate::notification::normalize_error_detail(error)),
+            },
+        );
+        ui.add_space(8.0);
+    }
+}
+
 const TREE_WIDTH: f32 = 200.0;
 const DETAILS_WIDTH: f32 = 248.0;
 const COMPACT_LAYOUT_WIDTH: f32 = 760.0;
@@ -40,40 +72,40 @@ const TREE_ROW_HEIGHT: f32 = 24.0;
 const TREE_ROW_GAP: f32 = 0.0;
 const TREE_INDENT: f32 = 24.0;
 const TREE_EDGE_PADDING: f32 = 8.0;
-const TREE_ICON_SLOT_WIDTH: f32 = 28.0;
+const TREE_ICON_SLOT_WIDTH: f32 = 24.0;
 const TREE_ICON_OPTICAL_OFFSET_Y: f32 = 1.0;
-const BOOKMARK_ROW_HEIGHT: f32 = 28.0;
-const BOOKMARK_INLINE_PADDING: f32 = 12.0;
+const BOOKMARK_ROW_HEIGHT: f32 = 32.0;
+const BOOKMARK_INLINE_PADDING: f32 = 16.0;
 const BOOKMARK_ICON_GAP: f32 = 8.0;
 const SIDEBAR_SEPARATOR_HEIGHT: f32 = 9.0;
 const ICON_SIZE: f32 = 16.0;
 const ENTRY_INLINE_PADDING: f32 = 16.0;
 const ENTRY_ICON_GAP: f32 = 8.0;
-const SIZE_UNIT_SLOT_WIDTH: f32 = 28.0;
+const SIZE_UNIT_SLOT_WIDTH: f32 = 32.0;
 const SIZE_UNIT_GAP: f32 = 4.0;
-const BREADCRUMB_HEIGHT: f32 = 28.0;
+const BREADCRUMB_HEIGHT: f32 = 32.0;
 const BREADCRUMB_CONTENT_PADDING: f32 = 8.0;
 const BREADCRUMB_ITEM_PADDING: f32 = 8.0;
 const BREADCRUMB_ANCESTOR_ALPHA: u8 = 0xA0;
 const PATH_NAVIGATION_GAP: f32 = 8.0;
 const PATH_NAVIGATION_ITEM_GAP: f32 = 2.0;
-const PANE_HEADER_TOP_MARGIN: f32 = 6.0;
-const PANE_HEADER_BOTTOM_MARGIN: f32 = 10.0;
+const PANE_HEADER_TOP_MARGIN: f32 = 8.0;
+const PANE_HEADER_BOTTOM_MARGIN: f32 = 8.0;
 const PANE_HEADER_HEIGHT: f32 =
     PANE_HEADER_TOP_MARGIN + BREADCRUMB_HEIGHT + PANE_HEADER_BOTTOM_MARGIN;
-const PANE_INLINE_PADDING: f32 = 12.0;
+const PANE_INLINE_PADDING: f32 = 16.0;
 const PANE_CLOSE_BUTTON_SIZE: f32 = 32.0;
-const PANE_CONTENT_MARGIN: egui::Margin = egui::Margin::symmetric(12, 0);
+const PANE_CONTENT_MARGIN: egui::Margin = egui::Margin::symmetric(16, 0);
 const TABLE_BORDER_ALPHA: u8 = 0x40;
 const TABLE_STRIPE_CONTRAST_DIVISOR: u8 = 5;
 const TABLE_STRIPE_CONTRAST_MULTIPLIER: u8 = 2;
-const UPLOAD_ACTION_AREA_HEIGHT: f32 = 52.0;
+const UPLOAD_ACTION_AREA_HEIGHT: f32 = 56.0;
 const PANE_ACTION_HEIGHT: f32 = 32.0;
-const PANE_ACTION_BOTTOM_INSET: f32 = 12.0;
+const PANE_ACTION_BOTTOM_INSET: f32 = 16.0;
 const NAVIGATION_HISTORY_LIMIT: usize = 64;
 const CONTEXT_MENU_WIDTH: f32 = 208.0;
-const CONTEXT_MENU_ROW_HEIGHT: f32 = 36.0;
-const CONTEXT_MENU_INLINE_PADDING: f32 = 12.0;
+const CONTEXT_MENU_ROW_HEIGHT: f32 = 32.0;
+const CONTEXT_MENU_INLINE_PADDING: f32 = 16.0;
 const CONTEXT_MENU_ICON_GAP: f32 = 8.0;
 const DETAILS_SUMMARY_ROW_HEIGHT: f32 = 20.0;
 const DETAILS_SUMMARY_GAP: f32 = 8.0;
@@ -194,7 +226,7 @@ impl BookmarkKind {
 
     const fn candidates(self) -> &'static [&'static str] {
         match self {
-            Self::Activities => &["Garmin/Activity"],
+            Self::Activities => &["Garmin/Activity", "Garmin/Activities"],
             Self::Courses => &["Garmin/Courses"],
             Self::Workouts => &["Garmin/Workouts"],
             Self::Music => &["Music", "Garmin/Music"],
@@ -876,6 +908,8 @@ impl Browser {
         let close_label = format_message!(intl, default_message: "Close");
         let short_title = format_message!(intl, default_message: "Files");
         let window_id = Id::new(("device-explorer-window", self.device_key()));
+        let painter = context.layer_painter(egui::LayerId::new(egui::Order::Foreground, window_id));
+        let ambient_shadow = painter.add(egui::Shape::Noop);
         let drag_delta = Cell::new(egui::Vec2::ZERO);
         let position = self.window_position.unwrap_or(geometry.default_position);
         let mut open = true;
@@ -907,6 +941,10 @@ impl Browser {
                 )
             });
         let result = response.and_then(|response| {
+            painter.set(
+                ambient_shadow,
+                crate::window::ambient_shadow(response.response.rect, egui::CornerRadius::ZERO),
+            );
             self.window_position = Some(constrained_window_position(
                 response.response.rect,
                 bounds,
@@ -960,9 +998,11 @@ impl Browser {
                                         );
                                     }
                                 });
-                            if ui.input_mut(|input| {
-                                input.consume_key(egui::Modifiers::NONE, Key::Escape)
-                            }) {
+                            if ui.is_enabled()
+                                && ui.input_mut(|input| {
+                                    input.consume_key(egui::Modifiers::NONE, Key::Escape)
+                                })
+                            {
                                 self.compact_pane = None;
                             }
                             if action.is_none() {
@@ -3356,6 +3396,9 @@ fn entry_table_background(ui: &mut Ui, intl: &Intl, device_key: &str) -> egui::R
 }
 
 fn requested_table_movement(ui: &mut Ui, table_id: Id) -> Option<RowMove> {
+    if !ui.is_enabled() {
+        return None;
+    }
     ui.memory_mut(|memory| {
         memory.set_focus_lock_filter(
             table_id,
@@ -3380,7 +3423,7 @@ fn requested_table_movement(ui: &mut Ui, table_id: Id) -> Option<RowMove> {
 }
 
 fn requested_context_menu(ui: &mut Ui, table_id: Id) -> bool {
-    if !ui.memory(|memory| memory.has_focus(table_id)) {
+    if !ui.is_enabled() || !ui.memory(|memory| memory.has_focus(table_id)) {
         return false;
     }
     ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, Key::F10))
@@ -3414,7 +3457,8 @@ fn show_entry_table_content(
         background,
     } = input;
     let table_id = Id::new(("device-explorer-entry-table", device_key));
-    let activate = ui.memory(|memory| memory.has_focus(table_id))
+    let activate = ui.is_enabled()
+        && ui.memory(|memory| memory.has_focus(table_id))
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Enter));
     let keyboard_index = keyboard_index.or_else(|| {
         activate
@@ -3812,13 +3856,13 @@ fn show_drag_preview(ui: &Ui, intl: &Intl, dragged: &DraggedEntries, copy: bool)
                         show_selection_icon(ui, first, 16.0);
                         egui::Frame::NONE
                             .fill(operation_fill)
-                            .corner_radius(2.0)
+                            .corner_radius(crate::theme::CONTROL_RADIUS)
                             .inner_margin(egui::Margin::symmetric(4, 2))
                             .show(ui, |ui| {
                                 ui.spacing_mut().interact_size.y = 16.0;
                                 ui.label(
                                     RichText::new(&operation)
-                                        .size(11.0)
+                                        .size(12.0)
                                         .strong()
                                         .color(operation_color),
                                 );
@@ -4817,11 +4861,11 @@ mod tests {
         let path = pane_header_block_rect(outer);
         let close = pane_close_button_rect(outer);
 
-        assert!((content.top() - 26.0).abs() < f32::EPSILON);
-        assert!((content.bottom() - 54.0).abs() < f32::EPSILON);
+        assert!((content.top() - 28.0).abs() < f32::EPSILON);
+        assert!((content.bottom() - 60.0).abs() < f32::EPSILON);
         assert!((content.height() - BREADCRUMB_HEIGHT).abs() < f32::EPSILON);
-        assert!((content.left() - 22.0).abs() < f32::EPSILON);
-        assert!((content.right() - 198.0).abs() < f32::EPSILON);
+        assert!((content.left() - 26.0).abs() < f32::EPSILON);
+        assert!((content.right() - 194.0).abs() < f32::EPSILON);
         assert_eq!(content.y_range(), path.y_range());
         assert!((path.left() - 10.0).abs() < f32::EPSILON);
         assert!((path.right() - 210.0).abs() < f32::EPSILON);
@@ -4843,7 +4887,7 @@ mod tests {
         let layout = details_content_layout(available, 4);
         let actions = layout.actions.expect("four actions create a footer");
 
-        assert!((actions.bottom() - (available.bottom() - 12.0)).abs() < f32::EPSILON);
+        assert!((actions.bottom() - (available.bottom() - 16.0)).abs() < f32::EPSILON);
         assert!((actions.height() - 32.0).abs() < f32::EPSILON);
         assert!((actions.top() - layout.summary.bottom() - 8.0).abs() < f32::EPSILON);
         assert_eq!(details_content_layout(available, 0).actions, None);
@@ -5110,6 +5154,27 @@ mod tests {
     }
 
     #[test]
+    fn activity_bookmark_targets_the_existing_plural_directory() {
+        let value = catalog(vec![DeviceCatalogEntry {
+            path: "Garmin/Activities".into(),
+            kind: DeviceCatalogEntryKind::Directory,
+            size: None,
+        }]);
+        let bookmarks = discover_bookmarks(&value);
+        assert_eq!(bookmarks.len(), 1);
+        assert_eq!(bookmarks[0].kind, BookmarkKind::Activities);
+        assert_eq!(bookmarks[0].directory.path.as_str(), "Garmin/Activities");
+        let nested = DirectoryId {
+            storage_index: 0,
+            path: "Garmin/Activities/History".into(),
+        };
+        assert!(bookmark_contains_directory(
+            &bookmarks[0].directory,
+            &nested
+        ));
+    }
+
+    #[test]
     fn bookmarks_are_discovered_only_for_known_directories_that_exist() {
         let value = catalog(vec![
             DeviceCatalogEntry {
@@ -5228,6 +5293,86 @@ mod tests {
             moved_row_index(&rows, Some("Garmin/Courses"), RowMove::Previous),
             0
         );
+    }
+
+    #[test]
+    fn disabled_browser_ignores_focused_table_shortcuts() {
+        let intl = garmin_i18n::Translations::bundled()
+            .expect("catalogs")
+            .formatter(garmin_i18n::Language::English)
+            .expect("English");
+        for (key, modifiers) in [
+            (Key::ArrowDown, egui::Modifiers::NONE),
+            (Key::ArrowUp, egui::Modifiers::NONE),
+            (Key::Enter, egui::Modifiers::NONE),
+            (Key::F10, egui::Modifiers::SHIFT),
+        ] {
+            let mut browser = Browser::open(
+                catalog(vec![
+                    DeviceCatalogEntry {
+                        path: "a.fit".into(),
+                        kind: DeviceCatalogEntryKind::File,
+                        size: Some(1),
+                    },
+                    DeviceCatalogEntry {
+                        path: "b.fit".into(),
+                        kind: DeviceCatalogEntryKind::File,
+                        size: Some(1),
+                    },
+                ]),
+                &intl,
+                "Synthetic device",
+            )
+            .expect("catalog");
+            browser.selected = Some(Selection {
+                storage_id: "internal".into(),
+                storage_label: "Internal storage".into(),
+                path: "a.fit".into(),
+                kind: DeviceCatalogEntryKind::File,
+                size: Some(1),
+            });
+            let context = egui::Context::default();
+            crate::install(&context);
+            let before = serde_json::to_value(browser.view_state()).expect("view state");
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 640.0),
+                )),
+                events: vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }],
+                ..Default::default()
+            };
+            context
+                .run_ui(input, |ui| {
+                    ui.memory_mut(|memory| {
+                        memory.request_focus(Id::new((
+                            "device-explorer-entry-table",
+                            browser.device_key(),
+                        )));
+                    });
+                    let action = ui.add_enabled_ui(false, |ui| browser.show(ui, &intl)).inner;
+                    assert!(
+                        action.is_none(),
+                        "disabled browser emitted an action for {key:?}"
+                    );
+                    assert!(
+                        ui.input(|input| input.key_pressed(key)),
+                        "disabled browser consumed {key:?}"
+                    );
+                })
+                .drop_without_applying_deltas();
+            assert_eq!(
+                serde_json::to_value(browser.view_state()).expect("view state"),
+                before,
+                "{key:?}"
+            );
+        }
     }
 
     #[test]

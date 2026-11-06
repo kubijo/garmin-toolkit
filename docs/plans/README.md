@@ -1,22 +1,19 @@
 # Plans
 
-Unfinished work only. On completion, move lasting contracts/evidence to their owners and delete the plan. Follow
-[development safeguards and interface validation](../development.md) and
-[single-path execution](../decisions/0037-single-execution-path.md). Close each working slice before advancing; run full
-QA and audit, plus package evidence for deployment claims.
+Follow the [development workflow](../development.md) and
+[single-path execution](../decisions/0037-single-execution-path.md).
 
-Current implementation focus: the
-[HASS publication follow-ups](device-expansion-and-publication.md#hass-experimental-release), with
-[HASS hardware acceptance](hass-watch-vertical-slice.md) tracked separately.
+Physical-device evidence is recorded in [device capabilities](../research/device-capabilities.md). Signed releases and
+HAOS guest qualification are recorded in [publication readiness](../research/publication-readiness.md).
 
-Other active plans: [shared interfaces](shared-interface-workflows.md), [portable data](data-foundation.md),
+Other active plans: [shared interfaces](shared-interface-workflows.md),
 [Garmin Connect and sharing](garmin-connect-and-sharing.md),
-[device expansion and publication](device-expansion-and-publication.md), and [CLI distribution](distribution.md).
+[device expansion and publication](device-expansion-and-publication.md).
 
-Deferred stage: [security hardening](security-hardening.md). Keep its future options possible without requiring
-decisions or implementation during current work.
+A separate CLI distribution channel is intentionally not currently planned. Flatpak is an idea outside the active
+roadmap.
 
-Cross-cutting release work: replace the global coverage floor with per-owner behavioral floors and audit crate
-boundaries after transaction work. Profile bindgen after real WASM edits and recheck the nightly
-`egui_adapter::Paint: Sync` recursion diagnostic before upgrading Rust. Close release claims with packaged artifacts,
-audit results, and behavioral evidence.
+Deferred: [security hardening](security-hardening.md).
+
+Cross-cutting release work: profile bindgen after real WASM edits and recheck the nightly `egui_adapter::Paint: Sync`
+recursion diagnostic before upgrading Rust.

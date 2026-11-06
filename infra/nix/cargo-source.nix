@@ -15,6 +15,7 @@ lib.fileset.toSource {
   fileset = lib.fileset.unions (
     [
       workspaceCargoSources
+      (workspaceSrc + "/crates/datapackage/tests/upstream")
       (workspaceSrc + "/vendor/fast-mvt")
       (workspaceSrc + "/vendor/winit")
       (workspaceSrc + "/crates/garmin-brand/assets")

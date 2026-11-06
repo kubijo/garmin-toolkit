@@ -1,10 +1,40 @@
-# HASS release candidates
+# Release publication
 
-Build, verify, and publish candidates under the
-[publication plan](../../docs/plans/device-expansion-and-publication.md). Candidate commands reject existing output
-directories.
+Publish desktop AppImage assets and build, verify, and publish signed HASS candidates. Candidate commands reject
+existing output directories. [Qualification evidence](../../docs/research/publication-readiness.md) records tested
+releases and limits.
 
 ## GitHub publication
+
+### Desktop AppImages
+
+[Desktop release assets](../../.github/workflows/desktop-release.yml) attaches production and demo AppImages for x86_64
+and aarch64, their `.zsync` update controls, and `DESKTOP-SHA256SUMS` to an existing published GitHub release. The tag
+must match the Cargo workspace version. It runs when a release is published, or after successful HASS promotion through
+a reusable workflow call; the latter also covers releases created with `GITHUB_TOKEN`, whose events do not start another
+workflow. To retry publication for a tag containing this workflow:
+
+```sh
+gh workflow run desktop-release.yml -f tag=vVERSION
+```
+
+The source job resolves the tag once and pins every native and publication checkout to that commit. Release events and
+HASS callers also bind admission to the triggering commit. Native builds record their source and exact asset hashes in
+internal manifests; staging rejects mismatched commits, changed files, and missing or duplicate systems. Publication
+rechecks the remote tag immediately before upload. These manifests are not GitHub Release assets.
+
+Native jobs build both architectures through Nix. Before upload, the publisher verifies architecture, embedded update
+channel, and each `.zsync` file's filename, final AppImage hash, and tagged download URL. Retries preserve identical
+assets and reject conflicting published bytes. These desktop files have their own checksum inventory and are outside the
+signed HASS image inventory.
+
+Gear Lever reads the embedded `gh-releases-zsync` information automatically. Production and demo use separate filenames
+for each architecture and use Gear Lever's `latest-all` policy, including experimental/prerelease releases. The
+updater's target release must contain the matching AppImage and `.zsync` assets. Publication regenerates the complete
+control file with the pinned `zsyncmake` and compares its headers and checksum table, ignoring only transport-modified
+mtime.
+
+### HASS candidates
 
 Before tagging, dispatch [HASS experimental release](../../.github/workflows/hass-release.yml) from a trusted branch
 with **Publish disabled**:
@@ -46,19 +76,13 @@ scopes are empty; cleanup failure retains it and reports its path. Evidence rema
 [Python phases](../python/hass_ci.py) own orchestration; [runner setup](../ci/runner.sh) owns host preparation and
 cleanup. Lifecycle checks exercise upgrades, backup recovery, and reinstall with synthetic profile, route, and Course
 data. Candidates require published baselines on both architectures, authenticated against their signed inventory and
-source tag. Legacy signed acceptance retains its metadata-fixture limits; fixtures do not establish older-binary or
-schema migration compatibility.
-
-Upgrade evidence covers the synthetic data and schema versions exercised. A schema-change migration claim requires an
-older-schema baseline.
+source tag. Schema-migration claims require an older-schema baseline. Legacy signed acceptance retains its
+metadata-fixture limits; fixtures do not establish older-binary or schema migration compatibility.
 
 Native inputs and sources use `amd64/` and `aarch64/` directories. The signed acceptance archive contains both
 directories, each with runtime versions, reports, and dark captures, plus one shared staging journal. Verification
 requires both platform manifests and guest reports. Existing signed AMD64 releases retain their flat evidence layout and
 AMD64-only Store metadata when retried.
-
-Assembly shares immutable payload files through hardlinks within scratch, avoiding extra copies of both large source
-bundles. Cross-filesystem inputs fall back to copying; content and provenance checks still verify every platform.
 
 ## Generated Home Assistant repository
 
@@ -131,9 +155,8 @@ callers must cap actual Nix workers. The compressed stream splits into at most 1
 each. The first retains the `.tar.gz` name; subsequent parts append `.002`, `.003`, and so on. Verification streams them
 in order without joining them on disk. The whole archive is limited to 32 GiB decoded and 2,000,000 members. A
 metadata-only preflight reports exact tar size and entry count and rejects oversized exports before compression. The
-writer and verifier enforce the same limits. OCI image limits remain 4 GiB / 100,000 members. Unknown/nonfree licenses,
-missing recipes, or altered archives block publication. Audit the downloaded sources and notices against the shipped
-closure.
+writer and verifier enforce the same limits. Unknown/nonfree licenses, missing recipes, or altered archives block
+publication. Audit the downloaded sources and notices against the shipped closure.
 
 ## Registry identity
 
@@ -258,16 +281,11 @@ failed.
 - **Changed store or state branch:** retain the new heads and stop. Recovery refuses unrelated metadata rather than
   force-pushing over it. Establish which publication owns the change before retrying; keep both state histories.
 
-The disposable-Git tests in [publication](../python/test_hass_publish.py),
-[CI orchestration](../python/test_hass_ci.py), and [withdrawal](../python/test_hass_withdraw.py) cover leases, atomic
-updates, interrupted pushes, failed acceptance, retries, and stale recovery. They do not qualify GitHub/GHCR outages or
-Supervisor behavior.
-
 ### Publication history checkpoint
 
-Home Assistant installation URLs require `hass-apps`. Before checkpointing `hass-publication`, deploy a compatible
-publisher and finish active or queued release runs. The first state-file write makes legacy tagged publishers
-incompatible; finish releases using them before writing the new format. Subsequent publication requires compatible tags.
+Home Assistant installation URLs require `hass-apps`. Checkpoint `hass-publication` only with a compatible state-file
+publisher and no active or queued release runs. Legacy tagged publishers cannot write the state-file format; subsequent
+releases require compatible tags.
 
 Inspect the current qualified state and read both exact heads as in [withdrawal](#release-withdrawal), then run:
 

@@ -346,9 +346,9 @@ dependencies = [
 
 [[package]]
 name = "async-executor"
-version = "1.14.0"
+version = "1.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c96bf972d85afc50bf5ab8fe2d54d1586b4e0b46c97c50a0c9e71e2f7bcd812a"
+checksum = "f426a31126c735126297bc5ea7a521263c9faff4f63ca415267ee625651c4f37"
 dependencies = [
  "async-task",
  "concurrent-queue",
@@ -1028,9 +1028,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "clipboard-win"
-version = "5.4.1"
+version = "5.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bde03770d3df201d4fb868f2c9c59e66a3e4e2bd06692a0fe701e7103c7e84d4"
+checksum = "052af7878466feccda12ba7a6a67d019d712f296809559b47c12c8cc196d3a9a"
 dependencies = [
  "error-code",
 ]
@@ -1061,7 +1061,7 @@ checksum = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681"
 dependencies = [
  "serde",
  "termcolor",
- "unicode-width 0.1.14",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -2478,7 +2478,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-brand"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "resvg",
  "thiserror 2.0.20",
@@ -2486,7 +2486,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-capture"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "har",
  "serde",
@@ -2499,7 +2499,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-cli-tui"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "byte-unit",
@@ -2518,7 +2518,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-color"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "cint",
  "garmin-macros",
@@ -2529,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-device"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2585,7 +2585,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-i18n"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "formatjs_intl",
  "icu_calendar",
@@ -2600,7 +2600,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-logging"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "garmin-model",
  "garmin-service-api",
@@ -2616,7 +2616,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-macros"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2625,7 +2625,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-model"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "blake3",
  "garmin-color",
@@ -2643,7 +2643,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-progress"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "garmin-model",
  "serde",
@@ -2651,7 +2651,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-service-api"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "camino",
  "garmin-color",
@@ -2665,7 +2665,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-ui"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "arc-swap",
  "buffa",
@@ -2705,7 +2705,7 @@ dependencies = [
 
 [[package]]
 name = "garmin-update"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.23.1",
  "byte-unit",
@@ -7206,7 +7206,7 @@ version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c2499c2d826531388872b2268718aed907a39bd785ab0dcfe57fab26283f92e"
 dependencies = [
- "skrifa 0.42.1",
+ "skrifa 0.44.0",
  "yazi",
  "zeno",
 ]
@@ -7588,9 +7588,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",

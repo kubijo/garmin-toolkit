@@ -8,6 +8,18 @@ pub use inline::InlineWindow;
 pub use native::{NativeWindow, frame, surface};
 mod resize;
 pub use resize::resize;
+
+/// Ambient separation around every edge, beneath the directional window shadow.
+pub(crate) fn ambient_shadow(rect: egui::Rect, corner_radius: egui::CornerRadius) -> egui::Shape {
+    egui::Shadow {
+        offset: [0, 0],
+        blur: 32,
+        spread: 4,
+        color: egui::Color32::from_black_alpha(96),
+    }
+    .as_shape(rect, corner_radius)
+    .into()
+}
 #[cfg(any(feature = "automation", test))]
 pub mod control;
 pub mod protocol;

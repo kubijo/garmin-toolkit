@@ -13,8 +13,8 @@ pub use host::Host;
 
 #[wasm_bindgen(module = "/logging.js")]
 extern "C" {
-    #[wasm_bindgen(js_name = downloadLogs)]
-    fn download_logs(text: &str);
+    #[wasm_bindgen(catch, js_name = downloadLogs)]
+    fn download_logs(text: &str) -> Result<(), JsValue>;
     #[wasm_bindgen(js_name = receiveLog)]
     pub(super) fn receive_log(data: &JsValue) -> bool;
 }
@@ -33,13 +33,23 @@ pub fn update_logs(context: &Context, client: Option<LogServiceClient>) {
             ));
         }
     }
-    if let Some(export) = garmin_ui::developer::state(context)
+    let handle = garmin_ui::developer::state(context);
+    let export = handle
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .export
-        .take()
+        .take();
+    if let Some(export) = export
+        && let Err(error) = download_logs(&export)
     {
-        download_logs(&export);
+        handle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .export_error = Some(format!(
+            "Could not download diagnostics: {}",
+            crate::js_reason(&error)
+        ));
+        context.request_repaint();
     }
 }
 

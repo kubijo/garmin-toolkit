@@ -25,6 +25,7 @@
           sharedCargoTargetDir,
           nodejs,
           system,
+          targetSystem ? system,
           toolchain,
           wasmToolchain,
           workspaceSrc,
@@ -32,14 +33,23 @@
         }:
         let
           inherit (builtins) fromTOML readFile;
-          pkgs = import nixpkgs {
+          buildPkgs = import nixpkgs {
             inherit system;
             overlays = [ rust-overlay.overlays.default ];
           };
+          pkgs =
+            if targetSystem == system then
+              buildPkgs
+            else
+              import nixpkgs {
+                localSystem = system;
+                crossSystem = targetSystem;
+                overlays = [ rust-overlay.overlays.default ];
+              };
           inherit (pkgs) lib;
           craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
-          wasmCraneLib = (crane.mkLib pkgs).overrideToolchain wasmToolchain;
-          auditableCargo = pkgs.writeShellScriptBin "cargo" ''
+          wasmCraneLib = (crane.mkLib buildPkgs).overrideToolchain wasmToolchain;
+          auditableCargo = buildPkgs.writeShellScriptBin "cargo" ''
             exec ${lib.getExe' wasmToolchain "cargo"} auditable "$@"
           '';
           enableAuditMetadata = ''
@@ -58,11 +68,17 @@
             doCheck = false;
             strictDeps = true;
           };
-          nativeArgs = commonArgs // {
-            buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.glib ];
-            nativeBuildInputs =
-              commonArgs.nativeBuildInputs ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
-          };
+          nativeArgs =
+            commonArgs
+            // {
+              buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.glib ];
+              nativeBuildInputs =
+                commonArgs.nativeBuildInputs
+                ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ buildPkgs.pkg-config ];
+            }
+            // lib.optionalAttrs (targetSystem != system) {
+              CARGO_BUILD_TARGET = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+            };
           cargoArtifacts = craneLib.buildDepsOnly (
             nativeArgs
             // import (workspaceSrc + "/infra/nix/cargo-deps.nix") { inherit lib workspaceSrc; }
@@ -92,8 +108,8 @@
               nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
                 dirspec
                 nodejs
-                pkgs.cargo-auditable
-                pkgs.esbuild
+                buildPkgs.cargo-auditable
+                buildPkgs.esbuild
               ];
               preBuild = enableAuditMetadata;
 
@@ -116,7 +132,7 @@
               '';
             }
           );
-          presentation = pkgs.runCommandLocal "garmin-hass-presentation" { } ''
+          presentation = buildPkgs.runCommandLocal "garmin-hass-presentation" { } ''
             install -Dm444 ${brandAssets}/icon-128.png "$out/icon.png"
             install -Dm444 ${brandAssets}/logo-250x100.png "$out/logo.png"
           '';
@@ -149,9 +165,9 @@
                 inherit cargoArtifacts;
                 nativeBuildInputs = nativeArgs.nativeBuildInputs ++ [
                   dirspec
-                  pkgs.cargo-auditable
-                  pkgs.makeWrapper
-                  pkgs.pkg-config
+                  buildPkgs.cargo-auditable
+                  pkgs.buildPackages.makeWrapper
+                  buildPkgs.pkg-config
                 ];
                 preBuild = enableAuditMetadata;
                 postInstall = ''

@@ -29,6 +29,10 @@ audit *args:
 test:
     just in-shell nix run {{ flake }}#test
 
+# Check Data Package compatibility and build its standalone distribution archive.
+datapackage:
+    just in-shell nix run {{ flake }}#datapackage-check
+
 # Format every maintained source type.
 format:
     just in-shell nix run {{ flake }}#format
@@ -36,6 +40,10 @@ format:
 # Measure workspace line coverage and enforce the configured floor.
 coverage *args:
     @just in-shell nix run {{ flake }}#coverage -- "$@"
+
+# Summarize an existing LCOV report by Cargo owner without changing coverage gates.
+coverage-owners +args:
+    @just in-shell uv run --frozen --project infra/python python infra/python/coverage_owners.py "$@"
 
 # Validate extracted and translated ICU messages.
 i18n:

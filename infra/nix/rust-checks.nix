@@ -1,6 +1,6 @@
 {
   craneLib,
-  coverageMinimum,
+  datapackagePythonEnv,
   formatjsCli,
   hostSccacheHook,
   galleryRuntimeLibraries,
@@ -18,7 +18,15 @@
 }:
 
 let
-  inherit (builtins) genericClosure;
+  inherit (builtins) genericClosure fromTOML readFile;
+
+  coveragePolicy = workspaceSrc + "/infra/coverage/owners.toml";
+  coveragePolicyData = fromTOML (readFile coveragePolicy);
+  coverageCheck = report: ''
+    ${pythonToolsEnv}/bin/python ${
+      workspaceSrc + "/infra/python/coverage_owners.py"
+    } ${report} --root "$PWD" --policy ${coveragePolicy}
+  '';
 
   cargo = lib.getExe' toolchain "cargo";
   pkgConfigNode = package: {
@@ -50,7 +58,7 @@ let
   # Gallery snapshots exercise immediate-mode rendering outside llvm-cov.
   coverageArgs = [
     "--ignore-filename-regex"
-    "crates/garmin-ui/|apps/garmin-desktop/src/view\\.rs"
+    (lib.concatStringsSep "|" (map lib.escapeRegex coveragePolicyData.measurement.excluded_paths))
   ];
   workspaceArgs = [
     "--locked"
@@ -380,6 +388,30 @@ let
         finish_check
       '';
 
+  datapackageCheck = mkApp "datapackage-check" [ toolchain ] ''
+    ${checkOutput "Data Package compatibility"}
+    run_step "Data Package Rust tests" ${
+      cargoCommand [
+        "test"
+        "--locked"
+        "-p"
+        "datapackage"
+      ]
+    }
+    run_step "Data Package compatibility adapter" ${
+      cargoCommand [
+        "build"
+        "--locked"
+        "-p"
+        "datapackage"
+        "--example"
+        "conformance"
+      ]
+    }
+    run_step "upstream Data Package compatibility" env DATAPACKAGE_READER="$CARGO_TARGET_DIR/debug/examples/conformance" ${datapackagePythonEnv}/bin/python -m unittest discover -s crates/datapackage/compat -v
+    finish_check
+  '';
+
   projectLint =
     mkApp "project-lint"
       [
@@ -396,6 +428,9 @@ let
       ''
         mkdir -p .tmp/qa-tmp
         export TMPDIR="$PWD/.tmp/qa-tmp"
+        GARMIN_EXPORT_CONFORMANCE_DIR=$(mktemp -d "$TMPDIR/activity-export.XXXXXXXX")
+        export GARMIN_EXPORT_CONFORMANCE_DIR
+        trap 'rm -rf "$GARMIN_EXPORT_CONFORMANCE_DIR"' EXIT
         ${checkOutput "project lint"}
         run_step "Rust source shape" ${lib.getExe sourceShapeCheck}
         run_step "cargo workspace-inheritance-check" ${lib.getExe inheritanceCheck} --path .
@@ -407,6 +442,16 @@ let
         run_step "cargo doc" env RUSTDOCFLAGS='-D warnings' ${cargoCommand docArgs}
         run_step "cargo nextest" ${cargoCommand testArgs}
         run_step "cargo nextest (production hosts)" ${cargoCommand productionTestArgs}
+        run_step "Data Package compatibility" ${lib.getExe datapackageCheck}
+        run_step "activity export CLI" ${
+          cargoCommand [
+            "build"
+            "--locked"
+            "-p"
+            "garmin-cli"
+          ]
+        }
+        run_step "official activity export conformance" ${pythonToolsEnv}/bin/python infra/python/activity_export_conformance.py --directory "$GARMIN_EXPORT_CONFORMANCE_DIR" --reader "$CARGO_TARGET_DIR/debug/garmin-cli"
         run_step "license bundles" ${lib.getExe licenseChecker}
         run_step "cargo deny" ${cargoCommand denyArgs}
         run_step "cargo machete" ${cargoCommand [ "machete" ]}
@@ -551,9 +596,8 @@ in
           ]}
           ${coverageReport [
             "--summary-only"
-            "--fail-under-lines"
-            (toString coverageMinimum)
           ]}
+          ${coverageCheck ".tmp/coverage/lcov.info"}
         '';
 
     dedupe = mkApp "dedupe" [ pkgs.cargo-deny ] ''
@@ -569,6 +613,7 @@ in
     '';
 
     project-lint = projectLint;
+    datapackage-check = datapackageCheck;
     gallery-check = galleryCheck;
     gallery-lint = galleryLint;
 
@@ -610,16 +655,11 @@ in
       // {
         inherit cargoArtifacts;
         cargoExtraArgs = lib.escapeShellArgs (lib.drop 2 testArgs);
-        cargoLlvmCovExtraArgs = lib.escapeShellArgs (
-          coverageArgs
-          ++ [
-            "--summary-only"
-            "--fail-under-lines"
-            (toString coverageMinimum)
-          ]
-        );
+        cargoLlvmCovExtraArgs =
+          lib.escapeShellArgs coverageArgs + " " + ''--lcov --output-path "$out/coverage.lcov"'';
         doCheck = true;
         preCheck = "mkdir -p $out";
+        postCheck = coverageCheck ''"$out/coverage.lcov"'';
         withLlvmCov = true;
       }
     );
@@ -690,6 +730,9 @@ in
     rust-source-shape = projectCheck "rust-source-shape" [ pkgs.ripgrep ] sourceShapeCommands;
 
     rust-source-closure = pkgs.runCommandLocal "rust-source-closure" { } ''
+      diff --recursive --brief \
+        ${workspaceSrc}/crates/datapackage/tests/upstream \
+        ${src}/crates/datapackage/tests/upstream
       diff --recursive --brief \
         ${workspaceSrc}/crates/garmin-brand/assets \
         ${src}/crates/garmin-brand/assets
