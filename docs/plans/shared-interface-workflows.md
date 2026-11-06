@@ -11,8 +11,6 @@ and the [device explorer](../architecture/device-explorer.md).
   complete the [zbus 6 migration](https://github.com/z-galaxy/zbus/issues/2043). Preserve native accessibility; the
   [gallery audit policy](../../infra/gallery/deny.toml) rejects obsolete exceptions and other findings. AccessKit
   [defers the migration under its Rust support policy](https://github.com/AccessKit/accesskit/pull/834).
-- Finish the [visual language](../architecture/visual-language.md) across controls, shells, device headers, and
-  empty/offline/error states.
 
 ## Platform qualification
 
