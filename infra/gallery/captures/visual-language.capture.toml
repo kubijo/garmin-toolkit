@@ -20,12 +20,34 @@ name = "shell-profile-menu"
 scene = "shell::Profile Menu"
 
 [[shot]]
+name = "shell-profile-menu-light"
+scene = "shell::Profile Menu"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
 name = "shell-rail"
 scene = "shell::Rail"
 
 [[shot]]
 name = "shell-narrow"
-scene = "shell::Narrow"
+scene = "shell::Narrow$"
+
+[[shot]]
+name = "shell-narrow-light"
+scene = "shell::Narrow$"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "shell-narrow-open"
+scene = "shell::Narrow Navigation Open$"
+
+[[shot]]
+name = "shell-narrow-open-light"
+scene = "shell::Narrow Navigation Open$"
+[shot.globals]
+Theme = "Light"
 
 [[shot]]
 name = "button-states"
