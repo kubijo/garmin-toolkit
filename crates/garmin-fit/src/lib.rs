@@ -22,6 +22,8 @@ use thiserror::Error;
 pub mod course;
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod fixture;
+#[cfg(test)]
+mod integrity_tests;
 
 /// Persisted normalizer name.
 pub const NORMALIZER_NAME: &str = "garmin-fit";
@@ -719,15 +721,43 @@ fn decode_raw(bytes: &[u8]) -> Result<Vec<FIT>, DecodeError> {
     let mut input = FromStd::new(Cursor::new(bytes));
     let mut sequences = Vec::new();
     loop {
-        match decoder
-            .decode(&mut input)
-            .map_err(|error| DecodeError::Rejected(error.to_string()))?
-        {
+        match decode_sequence(&mut decoder, &mut input)? {
             Some(fit) => sequences.push(fit),
             None if sequences.is_empty() => return Err(DecodeError::Incomplete),
             None => return Ok(sequences),
         }
     }
+}
+
+fn decode_sequence(
+    decoder: &mut Decoder,
+    input: &mut FromStd<Cursor<&[u8]>>,
+) -> Result<Option<FIT>, DecodeError> {
+    let start = input.inner().position();
+    let Some(fit) = decoder
+        .decode(&mut *input)
+        .map_err(|error| DecodeError::Rejected(error.to_string()))?
+    else {
+        return Ok(None);
+    };
+    let end = input.inner().position();
+    let expected = u64::from(fit.file_header.size) + u64::from(fit.file_header.data_size) + 2;
+    if end.checked_sub(start) != Some(expected) {
+        return Err(DecodeError::Rejected(
+            "sequence length disagrees with its header".to_owned(),
+        ));
+    }
+    let start = usize::try_from(start).map_err(|_| DecodeError::Incomplete)?;
+    let end = usize::try_from(end).map_err(|_| DecodeError::Incomplete)?;
+    let sequence = input
+        .inner()
+        .get_ref()
+        .get(start..end)
+        .ok_or(DecodeError::Incomplete)?;
+    if crc::Crc::<u16>::new(&crc::CRC_16_ARC).checksum(sequence) != 0 {
+        return Err(DecodeError::Rejected("sequence CRC mismatch".to_owned()));
+    }
+    Ok(Some(fit))
 }
 
 fn normalize_summary(session: &mesgdef::Session) -> Result<ActivitySummary, ActivityError> {

@@ -2624,6 +2624,7 @@ dependencies = [
 name = "garmin-fit"
 version = "0.1.6"
 dependencies = [
+ "crc",
  "embedded-io-adapters",
  "flate2",
  "garmin-model",

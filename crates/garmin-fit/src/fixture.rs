@@ -10,6 +10,7 @@ use rustyfit::{
 };
 use thiserror::Error;
 
+pub mod integrity;
 mod source;
 
 pub(crate) const START: i64 = 1_780_000_000;

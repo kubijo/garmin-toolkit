@@ -304,12 +304,10 @@ pub fn encode(revision: &RoutePlanRevision, serial: SerialNumber) -> Result<Vec<
 pub fn decode(bytes: &[u8]) -> Result<DecodedCourse, Error> {
     let mut input = FromStd::new(Cursor::new(bytes));
     let mut decoder = Decoder::new();
-    let fit = decoder
-        .decode(&mut input)
+    let fit = super::decode_sequence(&mut decoder, &mut input)
         .map_err(|error| Error::Decoding(error.to_string()))?
         .ok_or(Error::NotCourse)?;
-    if decoder
-        .decode(&mut input)
+    if super::decode_sequence(&mut decoder, &mut input)
         .map_err(|error| Error::Decoding(error.to_string()))?
         .is_some()
     {
@@ -716,6 +714,22 @@ mod tests {
         )?;
         bytes.truncate(bytes.len() / 2);
         assert!(matches!(decode(&bytes), Err(Error::Decoding(_))));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_a_misdeclared_length_even_with_repaired_checksums() -> TestResult {
+        let bytes = encode(
+            &revision(RouteShape::from_geometry(points())?)?,
+            SerialNumber::from_u32(1)?,
+        )?;
+        for delta in [-1, 1] {
+            let corrupt = crate::fixture::integrity::misdeclared_length(&bytes, delta);
+            assert!(
+                matches!(decode(&corrupt), Err(Error::Decoding(_))),
+                "data length {delta:+}"
+            );
+        }
         Ok(())
     }
 

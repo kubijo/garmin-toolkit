@@ -12,11 +12,21 @@ The [importer tests](../../crates/garmin-importer/tests/fit_import.rs) check ori
 retries, and failed normalization. Current normalization supports single-session activities; settings are
 preservation-only. The [data contract](../architecture/data.md) owns those invariants.
 
+Independent [wire fixtures](../../crates/garmin-fit/src/fixture/integrity.rs) cover 12- and 14-byte headers, every
+proper prefix and single-bit mutation, isolated header/file CRC failures, and declared-length mismatches.
+[Boundary tests](../../crates/garmin-fit/src/integrity_tests.rs) include corrupt chained tails; importer tests preserve
+each rejected input byte-for-byte, keep retries stable, and prevent partial projections. Course decoding shares the same
+length and whole-sequence CRC checks.
+
+`rustyfit` 0.10.2 rejects valid 14-byte files with an omitted (zero) header CRC when their file CRC covers the complete
+sequence, as required by the [protocol](https://developer.garmin.com/fit/articles/fit-protocol/fit_protocol.html). Those
+inputs remain preserved parser rejections; this coverage does not add support for normalizing them.
+
 ## Coverage gaps
 
-Independent synthetic multisession, wellness, sleep/HRV, workout, described/undescribed developer-field, and systematic
-truncation/checksum cases remain absent. They are tracked under [local work](../plans/README.md#local-work); this does
-not claim support for normalizing them.
+Independent synthetic multisession, wellness, sleep/HRV, workout, and described/undescribed developer-field cases remain
+absent. They are tracked under [local work](../plans/README.md#local-work); this does not claim support for normalizing
+them.
 
 Expectations must come from the synthetic definition, not parser output or Garmin SDK fixtures. Real device files stay
 ignored; durable regressions need synthetic replacements or approved public fixtures.
