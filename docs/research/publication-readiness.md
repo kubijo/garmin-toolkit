@@ -9,11 +9,9 @@ The [v0.1.6 desktop run](https://github.com/kubijo/garmin-toolkit/actions/runs/4
 demo AppImages for x86_64 and ARM64, matching zsync controls, and desktop checksums to the
 [GitHub prerelease](https://github.com/kubijo/garmin-toolkit/releases/tag/v0.1.6).
 
-On 2026-11-06, Gear Lever automatically discovered the update source in the x86_64 demo built from `6fc8f11`, offered an
-update, and installed the published build. User screenshots confirmed the launched app changed from version 0.1.5 to
-0.1.6. This exercises discovery, download, replacement, and launch through Gear Lever. ARM64 and production asset
-selection passed upstream updater method checks against the live release API; their Gear Lever UI update paths were not
-exercised.
+On 2026-11-06, Gear Lever automatically discovered, installed, and launched the x86_64 demo update from `6fc8f11`
+(0.1.5) to published 0.1.6. ARM64 and production asset selection passed upstream updater method checks against the live
+release API; their Gear Lever UI update paths were not exercised.
 
 ## Published HASS AMD64/ARM64 release
 

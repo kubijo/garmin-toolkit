@@ -2,14 +2,18 @@
 
 ## Support policy
 
-Garmin Connect is built-in, opt-in, unofficial, and independent of USB. Reuse tokens; stop on authentication/rate-limit
-failures; never evade controls. Reads need evidence; writes are explicit; destructive changes need separate validation.
+No Garmin Connect adapter is implemented. The deferred integration follows
+[ADR 0008](../decisions/0008-unofficial-garmin-connect-boundary.md): built-in, opt-in, unofficial, and independent of
+USB. Reuse tokens, stop on authentication/rate-limit failures, and never evade controls. Reads need evidence; writes are
+explicit; destructive changes need separate validation.
 
 Garmin's [Terms of Use](https://www.garmin.com/en-US/legal/terms-of-use/), reviewed 2026-09-04, prohibited automated or
 manual access, copying, or scraping through unexposed means. Warn about blocking and recheck terms/authentication before
 implementation and release.
 
-## Existing implementations
+## Historical upstream audit
+
+These revisions are audit evidence, not current dependency pins.
 
 - [`python-garminconnect` 0.3.12][gc-audit]: The pinned MIT-licensed audit covers broad reads and writes. Adapt only
   provenance-recorded material consistent with [ADR 0008](../decisions/0008-unofficial-garmin-connect-boundary.md).
@@ -23,7 +27,5 @@ implementation and release.
   Garmin offers a suitable personal/public agreement; it is not the baseline for this project.
 
 Before enabling an operation, record region, purpose, response/mutation, retries, and date.
-
-These revisions are historical audit evidence, not current dependency pins.
 
 [gc-audit]: https://github.com/cyberjunky/python-garminconnect/commit/981d150caeda7d632224a75f3895c08df27a2a34

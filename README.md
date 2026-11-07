@@ -6,6 +6,13 @@ Experimental, unofficial Linux tools for Garmin devices and data:
 - `garmin-desktop`: local activity and route management;
 - `garmin-hass`: experimental Home Assistant app.
 
+## Desktop
+
+Download `garmin-toolkit-ARCH.AppImage` from [GitHub Releases](https://github.com/kubijo/garmin-toolkit/releases),
+choosing `x86_64` or `aarch64` for your Linux host. Make it executable and launch it, or integrate it with Gear Lever
+for automatic GitHub update discovery. The `garmin-toolkit-demo-ARCH.AppImage` variant uses separate demo data.
+[Device support](docs/research/device-capabilities.md#usb-operations) is recorded per tested host and adapter.
+
 ## Home Assistant
 
 [![Add the Garmin Toolkit repository to Home Assistant][hass-install-badge]][hass-install]
@@ -64,8 +71,8 @@ observed service and download-authorization behavior behind a replaceable adapte
 
 ## Development
 
-See the [documentation index](docs/README.md) and [development workflow](docs/development.md). Just lists the available
-commands.
+See the [documentation index](docs/README.md), [development workflow](docs/development.md), and
+[remaining work](docs/plans/README.md). Just lists the available commands.
 
 ## License
 

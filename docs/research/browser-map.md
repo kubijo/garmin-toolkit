@@ -58,12 +58,12 @@ This closes the agreed default-renderer performance smoke check. Frame intervals
 UI CPU; CPU sums omit missing samples and boundary tasks. Worker-GL lacked correlated upload lifecycles, preventing
 upload-latency comparison.
 
-## Deferred acceptance coverage
+## Measurement limits
 
-Unmeasured: presentation/input latency, telemetry overhead, exact GPU/cache retention, native monitor scaling,
-deterministic hiding during tile preparation, rebuilt rural-view seams, and exhaustive chart/theme/window/reconnect
-permutations. Further renderer A/B profiling was dropped from the closing gate. Hidden or resized runs establish
-functional recovery only. Child capture/control checks do not establish teardown or deadline behavior in flight.
+These runs do not measure presentation/input latency, telemetry overhead, exact GPU/cache retention, or native monitor
+scaling. They do not exercise deterministic hiding during tile preparation or rebuilt rural-view seams. Further renderer
+A/B profiling and exhaustive UI permutations are not closing gates. Hidden/resized runs establish functional recovery
+only; child capture/control checks do not establish teardown or deadline behavior in flight.
 
 ## Browser rendering constraints
 
