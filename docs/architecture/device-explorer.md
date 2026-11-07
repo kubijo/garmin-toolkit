@@ -29,7 +29,7 @@ inside their platform window.
 One bounded host operation layer handles file download, directory ZIP, upload, folder creation, and recursive removal.
 FIT Open uses that checked boundary for the shared activity preview; Import uses the duplicate-aware importer. Removal
 requires an explicit primary-pointer confirmation; Enter, Space, and accessibility-synthesized activation do not confirm
-it. The [shared workflow plan](../plans/shared-interface-workflows.md) retains the broader keyboard audit.
+it.
 
 Browser downloads stage bounded results behind random one-use tickets lasting at most 60 seconds. A relative
 `<a download>` retrieves an attachment-only, `no-store`, MIME-sniffing-disabled response; file bytes do not travel

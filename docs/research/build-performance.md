@@ -92,7 +92,7 @@ stores their vtables and drop code. Its scene-manifest API would need desktop in
 memory and do not migrate changed state layouts.
 
 These reviews did not establish transparent desktop reload. Further trials belong to the
-[shared interface plan](../plans/shared-interface-workflows.md#deferred-gallery-hot-reload).
+[deferred work list](../plans/README.md#deferred).
 
 ## Gallery reload measurement
 

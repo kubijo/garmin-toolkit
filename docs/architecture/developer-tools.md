@@ -277,4 +277,3 @@ Retries retain record IDs; permanent rejections count/drop, unacknowledged recor
 history retention; overflow/resume gaps are explicit. Store epochs distinguish restarts. Persistence failure stops disk
 writes until reopening while live collection continues. Concurrent writers lock separate `writer-N` stores; drop drains.
 Desktop/HASS export filtered JSONL over fixed cursor ranges; gaps/storage errors fail visibly until another attempt.
-[Remaining runtime checks](../plans/shared-interface-workflows.md#runtime-acceptance).

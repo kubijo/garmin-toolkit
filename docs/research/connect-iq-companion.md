@@ -1,6 +1,9 @@
 # Connect IQ companion
 
-## Feasible role
+## Proposed role
+
+The companion and local SDK/key tooling are not implemented. Their work and owner-supplied prerequisites are tracked in
+[the work list](../plans/README.md).
 
 A signed Connect IQ app can send HTTPS through phone or device Wi-Fi to a configured endpoint.
 
@@ -13,13 +16,13 @@ Sources: [communications](https://developer.garmin.com/connect-iq/api-docs/Toybo
 [signing](https://developer.garmin.com/connect-iq/core-topics/security/), and
 [activity recording](https://developer.garmin.com/connect-iq/core-topics/activity-recording/).
 
-## Toolchain boundary
+## Tooling to implement
 
 Publish only project-owned source, manifest, and docs. Users supply the SDK path and private key.
 
 Compilation stays local and outside packages, caches, releases, and CI. Outputs and keys stay under ignored `.tmp`.
 
-The local workflow needs:
+Under [ADR 0009](../decisions/0009-local-only-connect-iq-builds.md), the local workflow needs:
 
 1. `bootstrap`: check prerequisites and start interactive setup without accepting agreements or authenticating.
 2. `keygen`: create or reuse an owner-readable external key.

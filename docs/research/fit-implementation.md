@@ -2,8 +2,10 @@
 
 ## Boundary
 
-Preserve imports, keep parser types inside `garmin-fit`, and encode only courses/workouts. Tests use publishable data
-with independent expectations.
+`garmin-fit` normalizes supported single-session activities and encodes Courses. Workouts and wellness are not
+normalized or encoded by the application. Original imports remain preserved; parser types stay private. Tests use
+publishable data with independent expectations; [corpus coverage](fit-corpus.md) distinguishes implemented cases from
+gaps.
 
 ## Treatment
 

@@ -57,8 +57,8 @@ objects into a durable quarantine with an approval manifest before removing them
 verified rollback. The recovered outcome retains the quarantine location. Back, refresh, stale approvals, cancellation,
 and changed evidence cannot bypass the review. Simulation recovery operates on the retained copy and preserves the
 source device. Desktop and packaged-HASS demo acceptance covered reviewed update/removal, cancellation, reconnect,
-retained outcomes, exclusion of concurrent device writes, and recovery after a process stop; owned-hardware acceptance
-remains open.
+retained outcomes, exclusion of concurrent device writes, and recovery after a process stop. These demo runs do not
+qualify zero-byte quarantine on physical media.
 
 These checks do not qualify every desktop-MTP adapter or real cable-disconnect recovery. Physical fēnix and Edge
 mounted-MTP update, firmware-restart, and process-interruption evidence lives in

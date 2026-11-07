@@ -4,8 +4,8 @@ The root flake pins toolchains, dependencies, checks, and filtered workspace sou
 re-exports `garmin-cli` (default), `desktop`, `desktop-demo`, `garmin-hass`, `garmin-hass-demo`, and `gallery`. Follow
 [development safeguards](../development.md). Just commands use `namespace::recipe`.
 
-CI builds the sandboxed source-closure check and runs `nix flake check -L --no-update-lock-file`. The lockfile is an
-explicit input, not an update side effect of the quality gate.
+The lockfile is an explicit check input, not an update side effect. CI check groups and native image jobs are described
+below.
 
 ## Checks and outputs
 
@@ -179,11 +179,10 @@ Host folder launches restore those values, including the distinction between uns
 inherit bundled libc or GIO modules. New native process launches must use the same environment boundary.
 
 The AppImage launcher requires unprivileged user namespaces. Bundling the closure does not establish compatibility with
-host graphics drivers or desktop services: release validation must cover WGPU rendering, file dialogs, and USB/GVfs
-access on non-Nix systems. See [publication work](../plans/device-expansion-and-publication.md).
+host graphics drivers or desktop services; supported rendering, file-dialog, and USB/GVfs tuples are recorded in
+[packaging evidence](../research/desktop-packaging.md).
 
 Host graphics integration is outside [nix-appimage's scope](https://github.com/ralismark/nix-appimage#caveats).
-[Packaging evidence](../research/desktop-packaging.md) records tested hosts, renderer failures, and remaining limits.
 
 `just desktop::vm-test --usb VENDOR:PRODUCT` builds the production ARM64 AppImage and boots a disposable Ubuntu 26.04
 desktop for the complete device acceptance case. On Apple Silicon, Nix's configured Linux builder handles the build;

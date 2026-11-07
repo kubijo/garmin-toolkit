@@ -29,7 +29,7 @@ Host: Ubuntu 26.04, x86_64, NVIDIA RTX 4090 driving the display, driver 595.91.0
 - FIT activity preview loaded date, sport, distance, duration, and ascent, with an explicit Import FIT action.
 - The rebuilt preview appeared inside the file window. Compact header and edge-to-edge content were accepted.
 - Automated regressions cover Escape dismissal, location/selection preservation, and blocked browser shortcuts beneath
-  the preview. Full QA passed with 1,060 workspace tests plus production-host and gallery checks.
+  the preview.
 
 ## ARM64 non-Nix Ubuntu VM: Edge 1050, 2026-11-05
 
@@ -39,9 +39,8 @@ Host: Ubuntu 26.04, x86_64, NVIDIA RTX 4090 driving the display, driver 595.91.0
   Thunar; the rebuilt application resolved that failure.
 - The Activities bookmark, FIT file listing, activity preview with map, and dismissal back to the usable file browser
   passed. The user completed the acceptance runner.
-- The user accepted file-dialog behavior and observed the running application's icon in the window list. Remaining
-  picker behavior and desktop-menu integration are presumed working unless a concrete defect appears; no further
-  qualification tasks remain for this case. Desktop-menu registration and launch were not directly tested.
+- File-dialog behavior was accepted and the running window's icon observed. Other picker behavior and desktop-menu
+  integration are presumed working unless a concrete defect appears; they are not open qualification tasks.
 - This establishes ARM64 desktop and USB/GVfs compatibility for this guest. Native GPU presentation was not exercised.
 
 ## Cross-GPU presentation failure

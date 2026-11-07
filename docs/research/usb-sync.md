@@ -140,8 +140,9 @@ This does not prove Garmin compatibility.
 
 Keep `mtp-rs` types private; expose only owned identity, lifecycle, capability, I/O, and diagnostic types.
 
-HASS/Linux use `nusb` and `mtp-rs`; Windows uses WPD. macOS remains unproven because `ptpcamerad` may own the device.
-Mass storage may use an existing mount but never mounts block devices.
+Targets select raw MTP or mounted GIO according to the [connectivity contract](../architecture/connectivity.md). The
+upstream Windows backend uses WPD; native macOS device access remains unproven because `ptpcamerad` may own it. Mass
+storage may use an existing mount but never mounts block devices.
 
 ## Observed desktop attachment
 
@@ -179,9 +180,10 @@ repeated the two-file read while GVFS owned the watch. Raw MTP reported `DeviceB
 explicit release. Tests cover capability filtering, size, cancellation, unrelated files, unsafe paths, and source
 changes.
 
-This read-access baseline proves attachment identity, enumeration, manifest discovery, raw and mounted complete FIT
-reads, decoding, initial watch delivery, and generic GVFS create/read/delete. It does not prove later hotplug,
-reconnect, HASS permissions, or device acceptance of written Garmin content.
+This initial read-access baseline establishes attachment identity, enumeration, manifest discovery, raw and mounted
+complete FIT reads, decoding, initial watch delivery, and generic GVFS create/read/delete. Later packaged-host
+acceptance is recorded in [device capabilities](device-capabilities.md#usb-operations); Course and map firmware
+acceptance are recorded below. Live reconnect/deduplication remains unqualified.
 
 ## Course transfer evidence
 

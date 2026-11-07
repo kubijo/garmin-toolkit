@@ -3,11 +3,7 @@
 Parked research from 2026-10-15 against the application boundaries at `6818d1c`. These are unaccepted options for a
 future stage, not defaults, implementation commitments, or current protection claims.
 [ADR 0023](../decisions/0023-deferred-security-hardening.md) remains the accepted contract;
-[the deferred plan](../plans/security-hardening.md) owns future work.
-
-The entire security stage is postponed: authentication, credential custody, database protection, and snapshot
-encryption. The options, experiments, and policy choices below stay parked during current work. Current development
-preserves compatible boundaries and trusted passwordless operation without implementing this stage.
+[the work list](../plans/README.md#deferred) owns its deferred status.
 
 ## Assets and boundaries
 
@@ -53,10 +49,8 @@ data. Authenticated access would isolate ordinary members; it would not establis
 
 ## Future design options
 
-Keep the existing trusted, passwordless deployment. Evaluate encrypted storage and encrypted snapshots independently,
-with distinct protection claims. Storage unlock provides encryption keys; it does not authenticate an application
-profile. A later authentication feature would be independent of these storage choices and would need to remove
-unrestricted profile selection throughout an authenticated deployment.
+Encrypted storage, snapshots, and authentication are independent choices with separate protection claims. Storage unlock
+would provide keys, not authenticate a profile. Authentication would need to remove unrestricted profile selection.
 
 ### Deferred authentication design
 
@@ -148,13 +142,3 @@ deployment-operator approval and a plaintext export/migration; older builds must
 Portable snapshots continue to exclude connector credentials and target key-store entries. If application authentication
 is added later, restored identity mappings and authentication state need a policy that prevents account takeover on
 another deployment.
-
-## Questions for the future stage
-
-1. Choose key custody and unattended HASS startup behavior against an agreed copied-storage/backup threat model. Manual
-   unlock and a separately protected external provider remain options, not selected policies.
-2. Choose snapshot encryption and recovery material, including recipient keys versus passphrases, distribution,
-   replacement, and loss. No recovery method has been selected.
-
-When this stage resumes, revisit these options before recording accepted contracts or running compatibility work.
-Key-store, SQLCipher, and snapshot-envelope experiments are also postponed. These questions do not block current work.

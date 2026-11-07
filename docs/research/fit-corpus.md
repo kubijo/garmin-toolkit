@@ -1,40 +1,25 @@
 # FIT corpus
 
-## Initial cases
+## Implemented coverage
 
-The data foundation creates these deterministic synthetic fixtures:
+[`garmin-fit` fixtures](../../crates/garmin-fit/src/fixture.rs) generate activities, chained activity/settings
+sequences, and a Course. [`garmin-fit` tests](../../crates/garmin-fit/src/lib.rs) cover activity normalization,
+independently absent sensor values, creator/envelope/timestamp validation, separate chained activities, preserved
+settings, and rejected unsupported or corrupt sequences. [Course tests](../../crates/garmin-fit/src/course.rs) check
+semantic round trips, message anatomy, corruption, and unresolved geometry.
 
-| Case                    | Required content                                                          |
-| ----------------------- | ------------------------------------------------------------------------- |
-| `activity-basic`        | File/device identity, one session/lap, timestamped GPS and sensors        |
-| `activity-multisport`   | Multiple sessions and laps with distinct sports                           |
-| `wellness`              | Timestamped monitoring and body measurements; some optional values absent |
-| `sleep-hrv`             | Interval sleep data and HRV samples spanning a synthetic day boundary     |
-| `course`                | Route points and course metadata                                          |
-| `workout`               | Nested steps, targets, repetitions, and rest                              |
-| `developer-unknown`     | Described developer fields plus an unknown message/field                  |
-| `developer-undescribed` | A developer field without its required description                        |
-| `truncated`             | A valid case cut at defined offsets                                       |
-| `bad-checksum`          | A valid case with one controlled mutation                                 |
+The [importer tests](../../crates/garmin-importer/tests/fit_import.rs) check original-byte preservation, provenance,
+retries, and failed normalization. Current normalization supports single-session activities; settings are
+preservation-only. The [data contract](../architecture/data.md) owns those invariants.
 
-Basic activity normalization must match the synthetic definition exactly; multisport hierarchy and ordering must
-survive. Absent wellness values stay absent. Unknown fields preserve supported values and original bytes; undescribed
-developer fields fail cleanly. Every truncation returns an error without panic or committed partial data; checksum
-failure is reported without a commit.
+## Coverage gaps
 
-Course and workout cases compare semantics, not bytes. Expectations come from the synthetic definition, never Garmin SDK
-fixtures or parser output.
+Independent synthetic multisession, wellness, sleep/HRV, workout, described/undescribed developer-field, and systematic
+truncation/checksum cases remain absent. They are tracked under [local work](../plans/README.md#local-work); this does
+not claim support for normalizing them.
 
-## Shared invariants
-
-- Imported bytes and their SHA-256 hash remain unchanged.
-- Parser types stay in `fit`; normalization is deterministic.
-- Reimport is idempotent; similar artifacts remain separate until reconciled.
-- Unknown or unsupported data cannot block preservation of a valid source artifact.
-- Interrupted reads leave only discardable staging data; retry is deterministic.
-- Corruption produces classified errors without panics, partial database state, or fabricated normalized values.
-
-Real device files stay ignored. They extend support only through a synthetic regression or approved public fixture.
+Expectations must come from the synthetic definition, not parser output or Garmin SDK fixtures. Real device files stay
+ignored; durable regressions need synthetic replacements or approved public fixtures.
 
 ## Development corpus
 
