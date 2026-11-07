@@ -5,6 +5,10 @@
 }:
 let
   inherit (pkgs) lib;
+  launchScript = pkgs.runCommand "garmin-toolkit-host-graphics-launcher" {
+    src = ./launch.sh;
+    meta.license = lib.licenses.agpl3Plus;
+  } ''cp "$src" "$out"'';
   closure = pkgs.closureInfo { rootPaths = [ package ]; };
   libraryManifest =
     pkgs.runCommand "${package.name}-library-directories" { meta.license = lib.licenses.agpl3Plus; }
@@ -25,6 +29,7 @@ pkgs.runCommand "${package.name}-host-graphics"
     passthru.runtimeInputs = [
       package
       libraryManifest
+      launchScript
       pkgs.glibc
     ];
     meta = (package.meta or { }) // {
@@ -37,7 +42,7 @@ pkgs.runCommand "${package.name}-host-graphics"
       --add-flags ${
         lib.escapeShellArg (
           lib.escapeShellArgs [
-            ./launch.sh
+            launchScript
             libraryManifest
             "${lib.getBin pkgs.glibc}/bin/ldconfig"
             "/etc/ld.so.cache"
