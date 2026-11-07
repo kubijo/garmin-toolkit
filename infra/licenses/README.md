@@ -4,6 +4,12 @@
 manifest and regenerates the bundles. Generation selects the normal dependency closure for each shipped component,
 including the HASS web client.
 
+The desktop bundle covers production, demo fixtures, and the GPX worker on Linux x86_64/ARM64 and macOS ARM64. Desktop
+packages install it under `share/doc/garmin-toolkit/assets/licenses/`, alongside project licenses, attribution, and the
+demo recording sources and generator. These Cargo and asset notices do not inventory the AppImage's bundled system
+libraries; the separate [desktop release export](../release/README.md#desktop-appimages) covers their sources and
+upstream notices, the leading runtime, and `AppRun`.
+
 `cargo-bundle-licenses` supplies license identifiers and candidate texts. Its parent-directory search is unbounded; the
 generator only accepts candidate texts that occur in notice files inside the corresponding package. This keeps the
 application's own notices out of dependencies when Cargo home lives under this checkout. Package paths and symlinks

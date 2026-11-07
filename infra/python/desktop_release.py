@@ -14,6 +14,7 @@ from pathlib import Path
 from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
+import desktop_sources
 from github_releases import GitHubReleases, Releases
 from json_data import object_rows, object_value, read_json, text
 
@@ -65,19 +66,26 @@ def assert_remote_source(source: ReleaseSource, releases: Releases) -> None:
         raise ValueError('Remote release tag differs from the pinned commit')
 
 
-def asset_names() -> set[str]:
-    return {
+def asset_names(directory: Path) -> set[str]:
+    images = {
         f'{mode}-{architecture}.AppImage{suffix}'
         for mode in MODES
         for architecture in ARCHITECTURES
         for suffix in ('', '.zsync')
     }
+    return images | set().union(
+        *(desktop_sources.asset_names(directory, architecture) for architecture in ARCHITECTURES)
+    )
 
 
-def native_asset_names(system: str) -> set[str]:
+def native_image_names(system: str) -> set[str]:
     if system not in SYSTEMS:
         raise ValueError('Unsupported desktop release system')
     return {f'{mode}-{SYSTEMS[system]}.AppImage{suffix}' for mode in MODES for suffix in ('', '.zsync')}
+
+
+def native_asset_names(system: str, directory: Path) -> set[str]:
+    return native_image_names(system) | desktop_sources.asset_names(directory, SYSTEMS[system])
 
 
 def build_manifest(directory: Path, source: ReleaseSource, system: str) -> dict[str, object]:
@@ -86,7 +94,7 @@ def build_manifest(directory: Path, source: ReleaseSource, system: str) -> dict[
         'tag': source.tag,
         'commit': source.commit,
         'system': system,
-        'assets': {name: digest(directory / name) for name in sorted(native_asset_names(system))},
+        'assets': {name: digest(directory / name) for name in sorted(native_asset_names(system, directory))},
     }
 
 
@@ -98,7 +106,7 @@ def verify_build_manifest(document: object, directory: Path, source: ReleaseSour
         raise ValueError('Desktop artifacts differ from the pinned source')
     system = text(manifest['system'])
     assets = object_value(manifest['assets'])
-    if set(assets) != native_asset_names(system):
+    if set(assets) != native_asset_names(system, directory):
         raise ValueError('Desktop native manifest has an invalid asset inventory')
     for name, expected in assets.items():
         if expected != digest(directory / name):
@@ -144,8 +152,8 @@ def update_information(path: Path, architecture: str) -> str:
             raise ValueError(f'Invalid {architecture} type-2 AppImage: {path.name}') from error
 
 
-def validate_assets(directory: Path, tag: str) -> list[Path]:
-    expected = asset_names()
+def validate_assets(directory: Path, tag: str, commit: str | None = None) -> list[Path]:
+    expected = asset_names(directory)
     actual = {path.name for path in directory.iterdir()} - {CHECKSUMS, STAGED_MANIFEST}
     if actual != expected:
         raise ValueError(f'Desktop asset inventory differs: missing={expected - actual}, extra={actual - expected}')
@@ -157,6 +165,7 @@ def validate_assets(directory: Path, tag: str) -> list[Path]:
             if update_information(image, architecture) != expected_info:
                 raise ValueError(f'Wrong update channel or architecture: {name}')
             validate_control(image, directory / (name + '.zsync'), tag)
+        desktop_sources.verify(directory, architecture, tag, commit)
     return [directory / name for name in sorted(expected)]
 
 
@@ -199,7 +208,7 @@ def checksums(paths: list[Path]) -> str:
 
 def build(source: ReleaseSource, system: str, output: Path) -> None:
     source_identity(source)
-    names = native_asset_names(system)
+    names = native_image_names(system)
     if output.exists() or output.is_symlink():
         raise ValueError('Desktop native output already exists')
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -222,6 +231,8 @@ def build(source: ReleaseSource, system: str, output: Path) -> None:
     output.mkdir(exist_ok=False)
     for name in sorted(names):
         shutil.copyfile(link / name, output / name)
+    desktop_sources.export(output, system, source.tag, source.commit)
+    source_identity(source)
     (output / NATIVE_MANIFEST).write_text(json.dumps(build_manifest(output, source, system), sort_keys=True) + '\n')
 
 
@@ -236,7 +247,7 @@ def stage(source: ReleaseSource, inputs: Path, output: Path) -> None:
         if system in systems:
             raise ValueError('Duplicate desktop native system')
         systems.add(system)
-        names = native_asset_names(system)
+        names = native_asset_names(system, native)
         if {path.name for path in native.iterdir()} != names | {NATIVE_MANIFEST}:
             raise ValueError('Unexpected desktop build artifact')
         manifests.append(object_value(manifest))
@@ -249,13 +260,13 @@ def stage(source: ReleaseSource, inputs: Path, output: Path) -> None:
     if systems != set(SYSTEMS):
         raise ValueError('Desktop builds must cover both native systems')
     (output / STAGED_MANIFEST).write_text(json.dumps(manifests, sort_keys=True) + '\n')
-    paths = validate_assets(output, source.tag)
+    paths = validate_assets(output, source.tag, source.commit)
     (output / CHECKSUMS).write_text(checksums(paths))
 
 
 def publish(source: ReleaseSource, directory: Path, *, releases: Releases | None = None) -> None:
     source_identity(source)
-    paths = validate_assets(directory, source.tag)
+    paths = validate_assets(directory, source.tag, source.commit)
     verify_staged_manifests(directory, source)
     checksum_file = directory / CHECKSUMS
     if checksum_file.read_text() != checksums(paths):

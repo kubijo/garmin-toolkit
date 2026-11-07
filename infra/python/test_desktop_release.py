@@ -12,6 +12,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import desktop_release as release
+import desktop_sources
+from desktop_source_fixtures import STORE_PATH, source_assets
 from github_release_fixtures import FIXTURE_COMMIT, ReleaseFixture
 from github_releases import ReleaseAsset
 from json_data import object_rows, object_value, read_json, text
@@ -61,6 +63,7 @@ def assets(directory: Path) -> None:
                 check=True,
                 capture_output=True,
             )
+    source_assets(directory, TAG, FIXTURE_COMMIT)
     paths = release.validate_assets(directory, TAG)
     manifests = [
         {
@@ -68,7 +71,9 @@ def assets(directory: Path) -> None:
             'tag': TAG,
             'commit': FIXTURE_COMMIT,
             'system': system,
-            'assets': {name: release.digest(directory / name) for name in sorted(release.native_asset_names(system))},
+            'assets': {
+                name: release.digest(directory / name) for name in sorted(release.native_asset_names(system, directory))
+            },
         }
         for system in release.SYSTEMS
     ]
@@ -121,6 +126,23 @@ def source_checkout(directory: Path) -> release.ReleaseSource:
 
 
 class DesktopReleaseTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.enterContext(patch.object(desktop_sources, 'measured_store_paths', return_value={STORE_PATH}))
+        self.enterContext(patch.object(desktop_sources, 'app_run_hash', return_value='a' * 64))
+
+    def test_tampered_dependency_sources_fail_before_github_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets(root)
+            archive = root / desktop_sources.names('aarch64')[2]
+            with archive.open('ab') as stream:
+                stream.write(b'synthetic corruption')
+            client = ReleaseFixture(directory=root, draft=False)
+            with patch.object(release, 'source_identity'), self.assertRaisesRegex(ValueError, 'source part'):
+                release.publish(SOURCE, root, releases=client)
+            self.assertEqual(client.tag_lookups, [])
+            self.assertEqual(client.uploads, [])
+
     def test_source_resolution_pins_the_trigger_and_rejects_later_local_tag_moves(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             checkout = Path(temporary) / 'checkout'
@@ -179,15 +201,24 @@ class DesktopReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             inputs = root / 'inputs'
-            native_builds(inputs)
+            fixtures = native_builds(inputs)
             system = 'x86_64-linux'
             store = root / 'store'
             store.mkdir()
-            for name in release.native_asset_names(system):
+            for name in release.native_image_names(system):
                 (store / name).write_bytes((inputs / system / name).read_bytes())
             output = root / 'native'
             output.with_name(output.name + '.nix').symlink_to(store)
-            with patch.object(release, 'source_identity'), patch.object(release.subprocess, 'run') as build:
+
+            def export(directory: Path, system: str, tag: str, commit: str) -> None:
+                for name in desktop_sources.asset_names(fixtures, release.SYSTEMS[system]):
+                    (directory / name).write_bytes((fixtures / name).read_bytes())
+
+            with (
+                patch.object(release, 'source_identity'),
+                patch.object(release.subprocess, 'run') as build,
+                patch.object(desktop_sources, 'export', side_effect=export),
+            ):
                 release.build(SOURCE, system, output)
             build.assert_called_once()
             manifest = object_value(read_json(output / release.NATIVE_MANIFEST))
@@ -228,7 +259,7 @@ class DesktopReleaseTests(unittest.TestCase):
             assets(root)
             for image in root.glob('*.AppImage'):
                 os.utime(image, (1, 1))
-            self.assertEqual(len(release.validate_assets(root, TAG)), 8)
+            self.assertEqual(len(release.validate_assets(root, TAG)), 14)
 
     def test_workspace_version_mismatch_fails_before_git_or_nix(self) -> None:
         with patch.object(release, 'command') as command, self.assertRaisesRegex(ValueError, 'workspace version'):
@@ -249,7 +280,7 @@ class DesktopReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             assets(root)
-            self.assertEqual(len(release.validate_assets(root, TAG)), 8)
+            self.assertEqual(len(release.validate_assets(root, TAG)), 14)
 
     def test_wrong_architecture_and_missing_update_metadata_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -369,7 +400,7 @@ class DesktopReleaseTests(unittest.TestCase):
             root = Path(temporary)
             assets(root)
             lines = (root / release.CHECKSUMS).read_text().splitlines()
-            self.assertEqual([line.split('  ')[1] for line in lines], sorted(release.asset_names()))
+            self.assertEqual([line.split('  ')[1] for line in lines], sorted(release.asset_names(root)))
             for line in lines:
                 expected, name = line.split('  ')
                 self.assertEqual(expected, hashlib.sha256((root / name).read_bytes()).hexdigest())

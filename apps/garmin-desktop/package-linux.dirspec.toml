@@ -1,6 +1,15 @@
 version = 1
 
 [paths]
+"share/doc/garmin-toolkit/LICENSE-AGPL" = { type = "file", min_size = 1 }
+"share/doc/garmin-toolkit/LICENSE-MIT" = { type = "file", min_size = 1 }
+"share/doc/garmin-toolkit/LICENSE-APACHE" = { type = "file", min_size = 1 }
+"share/doc/garmin-toolkit/COPYRIGHT.md" = { type = "file", min_size = 1 }
+"share/doc/garmin-toolkit/THIRD_PARTY_NOTICES.md" = { type = "file", min_size = 1 }
+"share/doc/garmin-toolkit/assets/licenses/bundle-desktop.json" = { type = "file", min_size = 1 }
+"share/doc/garmin-toolkit/infra/fixtures/fit/development-activities/fixture.toml" = { type = "file", min_size = 1 }
+"share/doc/garmin-toolkit/infra/fixtures/fit/development-activities/LICENSE" = { type = "file", min_size = 1 }
+"share/doc/garmin-toolkit/infra/fixtures/fit/development-activities/LICENSE-DogWalkGPS" = { type = "file", min_size = 1 }
 "bin/garmin-desktop" = { type = "file", mode_required = 0o100, min_size = 1 }
 "bin/garmin-gpx-worker" = { type = "file", mode_required = 0o100, min_size = 1 }
 "share/applications/io.kubijo.GarminToolkit.desktop" = { type = "file", min_size = 1 }

@@ -149,7 +149,26 @@ let
         package = "garmin-desktop";
         triples = [
           "aarch64-apple-darwin"
+          "aarch64-unknown-linux-gnu"
           "x86_64-unknown-linux-gnu"
+        ];
+        bundled = [
+          {
+            package = "garmin-gpx-worker";
+            triples = [
+              "aarch64-apple-darwin"
+              "aarch64-unknown-linux-gnu"
+              "x86_64-unknown-linux-gnu"
+            ];
+          }
+          {
+            package = "garmin-fixtures";
+            triples = [
+              "aarch64-apple-darwin"
+              "aarch64-unknown-linux-gnu"
+              "x86_64-unknown-linux-gnu"
+            ];
+          }
         ];
       }
       {
