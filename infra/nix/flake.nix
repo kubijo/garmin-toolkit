@@ -183,8 +183,16 @@ let
           desktopReleaseSource = lib.fileset.toSource {
             root = workspaceSrc;
             fileset = lib.fileset.unions (
-              map (name: workspaceSrc + "/infra/python/${name}.py") [
+              [ (workspaceSrc + "/infra/release/hass-sources.dirspec.toml") ]
+              ++ map (name: workspaceSrc + "/infra/python/${name}.py") [
                 "desktop_release"
+                "desktop_sources"
+                "archive_io"
+                "haos_platform"
+                "hass_image_inventory"
+                "hass_release_contract"
+                "hass_source_parts"
+                "hass_sources"
                 "github_releases"
                 "json_data"
               ]
@@ -197,6 +205,8 @@ let
               pkgs.gh
               pkgs.nix
               pkgs.zsync
+              pkgs.squashfsTools
+              dirspec
             ];
             text = ''
               exec ${pythonToolsEnv}/bin/python ${desktopReleaseSource}/infra/python/desktop_release.py "$@"
@@ -335,7 +345,11 @@ let
             hass-reconnect-driver = hassReconnect.driver;
           };
 
-          legacyPackages.hass-source-metadata = hassTarget.sourceMetadata;
+          legacyPackages = {
+            hass-source-metadata = hassTarget.sourceMetadata;
+            desktop-source-metadata = desktopTarget.distribution.sourceMetadata ++ hassTarget.sourceMetadata;
+            desktop-source-components = desktopTarget.distribution.sourceComponents;
+          };
 
           apps =
             tooling.apps
@@ -398,6 +412,7 @@ let
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               desktop-update-metadata = desktopTarget.distribution.updateMetadataCheck;
+              desktop-source-metadata = desktopTarget.distribution.sourceMetadataCheck;
               hass-integration = hassIntegration;
             };
           legacyPackages.ci =

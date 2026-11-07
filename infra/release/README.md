@@ -28,6 +28,14 @@ channel, and each `.zsync` file's filename, final AppImage hash, and tagged down
 assets and reject conflicting published bytes. These desktop files have their own checksum inventory and are outside the
 signed HASS image inventory.
 
+Each architecture also attaches `garmin-toolkit-ARCH-runtime.json`, `garmin-toolkit-ARCH-sources.json`, and
+`garmin-toolkit-ARCH-sources.tar.gz` (with numbered continuation parts when needed). The runtime inventory binds both
+AppImage hashes, their measured store contents, leading runtimes, static link inputs, and `AppRun` binaries to the
+release commit. The source report binds the complete archive to that inventory. Sources retain upstream notices,
+patches, vendored Cargo inputs, and Nix build recipes. Native export, staging, and publication reject missing sources,
+altered parts, and unresolved runtime license metadata. These assets are included in `DESKTOP-SHA256SUMS`; the Cargo and
+asset notice bundle also travels inside each desktop package under `share/doc/garmin-toolkit/`.
+
 Gear Lever reads the embedded `gh-releases-zsync` information automatically. Production and demo use separate filenames
 for each architecture and use Gear Lever's `latest-all` policy, including experimental/prerelease releases. The
 updater's target release must contain the matching AppImage and `.zsync` assets. Publication regenerates the complete

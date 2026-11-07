@@ -7,8 +7,9 @@ limit is not automatically scheduled work.
 
 ## Local work
 
-- Audit distribution configuration, fixtures, identities, URLs, images, notices, and provenance. Resolve findings in
-  shipped artifacts as well as source; use the [license workflow](../../infra/licenses/README.md).
+- Qualify the [desktop dependency-source export](../../infra/release/README.md#desktop-appimages) with a complete x86_64
+  build and export. Verify the archives and resolve missing runtime metadata. Presume ARM64 behaves the same unless a
+  concrete defect appears; a separate ARM64 qualification run is not required.
 - Close the missing [FIT corpus cases](../research/fit-corpus.md#coverage-gaps): multisession, wellness/sleep/HRV,
   workouts, developer fields, and systematic truncation/checksum mutations. Test current acceptance, rejection, and
   original-byte preservation; broader normalization is a separate scope decision.

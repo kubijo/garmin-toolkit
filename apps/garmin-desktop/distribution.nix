@@ -1,5 +1,6 @@
 {
   appImageRuntime,
+  appRun,
   craneLib,
   launcher,
   lib,
@@ -12,9 +13,11 @@
   productionIdentity,
   src,
   withHostGraphics,
+  workspaceSrc,
 }:
 
 let
+  inherit (builtins) length;
   flatpakRuntimeVersion = "25.08";
 
   arch =
@@ -33,6 +36,8 @@ let
     identity:
     pkgs.runCommand "${identity.slug}-update-runtime"
       {
+        meta.license = appImageRuntime.meta.license;
+        passthru.runtimeInputs = [ appImageRuntime ];
         nativeBuildInputs = [ pkgs.binutils ];
       }
       ''
@@ -47,20 +52,78 @@ let
       '';
   productionRuntime = updateRuntime productionIdentity;
   demoRuntime = updateRuntime demoIdentity;
-
-  appImage = (mkAppImage.override { mkappimage-runtime = productionRuntime; }) {
-    program = lib.getExe (withHostGraphics {
-      inherit package;
-    });
-    name = "${productionIdentity.slug}-${arch}.AppImage";
+  productionProgram = withHostGraphics { inherit package; };
+  demoProgram = withHostGraphics { package = demoPackage; };
+  sourceMetadata = import (workspaceSrc + "/infra/nix/hass-source-metadata.nix") {
+    inherit lib;
+    roots = [
+      productionProgram
+      demoProgram
+      productionRuntime
+      demoRuntime
+      appRun
+      pkgs.pkgsStatic.stdenv.cc.libc
+    ];
+  };
+  sourceComponents = {
+    production = {
+      runtime = productionRuntime.outPath;
+      appRun = "${appRun}/AppRun";
+      staticLibraries =
+        let
+          libraries = map (library: (lib.getLib library).outPath) (
+            appImageRuntime.buildInputs
+            ++ appImageRuntime.propagatedBuildInputs
+            ++ [ pkgs.pkgsStatic.stdenv.cc.libc ]
+          );
+        in
+        assert length libraries >= 8;
+        libraries;
+    };
+    demo = {
+      runtime = demoRuntime.outPath;
+      appRun = "${appRun}/AppRun";
+      staticLibraries = sourceComponents.production.staticLibraries;
+    };
   };
 
-  demoAppImage = (mkAppImage.override { mkappimage-runtime = demoRuntime; }) {
-    program = lib.getExe (withHostGraphics {
-      package = demoPackage;
-    });
-    name = "${demoIdentity.slug}-${arch}.AppImage";
-  };
+  sourceMetadataCheck =
+    let
+      libraries = sourceComponents.production.staticLibraries;
+      covered =
+        path:
+        lib.any (
+          provider:
+          lib.elem path provider.outputs
+          && provider.licenses != [ ]
+          && lib.all (license: license.free && license.id != "NOASSERTION") provider.licenses
+        ) sourceMetadata;
+    in
+    # The pinned runtime links seven libraries plus musl. pkgsStatic moves its
+    # buildInputs into propagatedBuildInputs; inspecting only the former loses them.
+    assert length libraries >= 8;
+    assert lib.all covered libraries;
+    pkgs.runCommandLocal "check-desktop-source-metadata" { } ''touch "$out"'';
+
+  appImage =
+    (mkAppImage.override {
+      mkappimage-runtime = productionRuntime;
+      mkappimage-apprun = appRun;
+    })
+      {
+        program = lib.getExe productionProgram;
+        name = "${productionIdentity.slug}-${arch}.AppImage";
+      };
+
+  demoAppImage =
+    (mkAppImage.override {
+      mkappimage-runtime = demoRuntime;
+      mkappimage-apprun = appRun;
+    })
+      {
+        program = lib.getExe demoProgram;
+        name = "${demoIdentity.slug}-${arch}.AppImage";
+      };
 
   mkZsync =
     identity: image:
@@ -286,6 +349,9 @@ in
 {
   inherit
     appImage
+    sourceComponents
+    sourceMetadata
+    sourceMetadataCheck
     appImageExporter
     appImageZsync
     demoAppImageZsync

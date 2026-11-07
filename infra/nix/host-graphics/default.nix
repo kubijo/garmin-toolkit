@@ -6,20 +6,27 @@
 let
   inherit (pkgs) lib;
   closure = pkgs.closureInfo { rootPaths = [ package ]; };
-  libraryManifest = pkgs.runCommand "${package.name}-library-directories" { } ''
-    # The loader's own libc must win, including over other closure outputs.
-    for root in ${lib.getLib pkgs.stdenv.cc.libc} $(cat ${closure}/store-paths); do
-      for directory in "$root/lib" "$root/lib64"; do
-        if test -d "$directory"; then
-          printf '%s\n' "$directory"
-        fi
-      done
-    done > "$out"
-  '';
+  libraryManifest =
+    pkgs.runCommand "${package.name}-library-directories" { meta.license = lib.licenses.agpl3Plus; }
+      ''
+        # The loader's own libc must win, including over other closure outputs.
+        for root in ${lib.getLib pkgs.stdenv.cc.libc} $(cat ${closure}/store-paths); do
+          for directory in "$root/lib" "$root/lib64"; do
+            if test -d "$directory"; then
+              printf '%s\n' "$directory"
+            fi
+          done
+        done > "$out"
+      '';
 in
 pkgs.runCommand "${package.name}-host-graphics"
   {
     nativeBuildInputs = [ pkgs.makeShellWrapper ];
+    passthru.runtimeInputs = [
+      package
+      libraryManifest
+      pkgs.glibc
+    ];
     meta = (package.meta or { }) // {
       mainProgram = baseNameOf program;
     };

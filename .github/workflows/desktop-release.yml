@@ -67,7 +67,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/nix
-      - name: Build AppImages and update controls
+      - name: Build AppImages, update controls, and dependency sources
         env:
           RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
           RELEASE_COMMIT: ${{ needs.source.outputs.commit }}

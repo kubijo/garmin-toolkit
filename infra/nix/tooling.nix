@@ -202,6 +202,7 @@ let
               pkgs.skopeo
               pkgs.distribution
               pkgs.zsync
+              pkgs.squashfsTools
               nixOci
               dirspec
             ]
