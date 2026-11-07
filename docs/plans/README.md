@@ -8,8 +8,8 @@ limit is not automatically scheduled work.
 ## Local work
 
 - Close the missing [FIT corpus cases](../research/fit-corpus.md#coverage-gaps): multisession, wellness/sleep/HRV,
-  workouts, developer fields, and systematic truncation/checksum mutations. Test current acceptance, rejection, and
-  original-byte preservation; broader normalization is a separate scope decision.
+  workouts, and developer fields. Test current acceptance, rejection, and original-byte preservation; broader
+  normalization is a separate scope decision.
 - Write the device-adapter extension guide around the [existing boundary](../architecture/connectivity.md), tests, and
   [support matrix](../research/device-capabilities.md#usb-operations).
 - Assess battery, charging, and transport telemetry for portability, reliability, and sensitivity before selecting

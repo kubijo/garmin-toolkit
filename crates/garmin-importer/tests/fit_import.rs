@@ -16,6 +16,109 @@ use tempfile::tempdir;
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
 #[test]
+fn preserves_every_independent_integrity_failure_without_partial_projections() -> TestResult {
+    block_on(async {
+        use fixture::integrity;
+        use fixture::integrity::Header;
+
+        let root = tempdir()?;
+        let storage = Storage::open(root.path().join("integrity.sqlite3")).await?;
+        let (user, device, source) = owner_and_source()?;
+        storage.save_user(&user).await?;
+        storage.save_device(&device).await?;
+        storage.save_source(&source).await?;
+        let importer = FitImporter::new(&storage);
+        let valid = integrity::activity(Header::Legacy);
+        let control = importer
+            .import(request(
+                &user,
+                &source,
+                AcquisitionOperationId::new_v4(),
+                &valid,
+            )?)
+            .await?;
+        assert!(matches!(control, FitImportOutcome::Imported(_)));
+        assert_eq!(
+            storage
+                .artifact_bytes(control.receipt().artifact_id())
+                .await?,
+            Some(valid.clone())
+        );
+        let before = storage.activities(user.id()).await?;
+        assert_eq!(before.len(), 1);
+
+        for header in Header::ALL {
+            for (name, bytes) in integrity::corruptions(header) {
+                rejected_original(
+                    &importer,
+                    &storage,
+                    &user,
+                    &source,
+                    &bytes,
+                    &format!("{header:?}: {name}"),
+                )
+                .await?;
+            }
+        }
+        // This valid protocol form is currently rejected by rustyfit; preserve it too.
+        rejected_original(
+            &importer,
+            &storage,
+            &user,
+            &source,
+            &integrity::activity(Header::ZeroCrc),
+            "valid zero-header CRC",
+        )
+        .await?;
+        let mut chained = valid;
+        let mut tail = integrity::activity(Header::Checksummed);
+        *tail.last_mut().ok_or("missing synthetic file CRC")? ^= 1;
+        chained.extend(tail);
+        rejected_original(
+            &importer,
+            &storage,
+            &user,
+            &source,
+            &chained,
+            "valid first sequence, corrupt second sequence",
+        )
+        .await?;
+        assert_eq!(storage.activities(user.id()).await?, before);
+        storage.close().await;
+        Ok(())
+    })
+}
+
+async fn rejected_original(
+    importer: &FitImporter<'_>,
+    storage: &Storage,
+    user: &User,
+    source: &Source,
+    bytes: &[u8],
+    case: &str,
+) -> TestResult {
+    let operation = AcquisitionOperationId::new_v4();
+    let first = importer
+        .import(request(user, source, operation, bytes)?)
+        .await?;
+    let second = importer
+        .import(request(user, source, operation, bytes)?)
+        .await?;
+    assert_eq!(first, second, "{case}");
+    let FitImportOutcome::Rejected { receipt, failure } = first else {
+        return Err(format!("{case} unexpectedly normalized").into());
+    };
+    assert!(!failure.as_str().is_empty(), "{case}");
+    assert!(receipt.observation_ids().is_empty(), "{case}");
+    assert_eq!(
+        storage.artifact_bytes(receipt.artifact_id()).await?,
+        Some(bytes.to_vec()),
+        "{case}"
+    );
+    Ok(())
+}
+
+#[test]
 fn imports_chained_activities_and_retries_with_stable_ids() -> TestResult {
     block_on(async {
         let root = tempdir()?;
