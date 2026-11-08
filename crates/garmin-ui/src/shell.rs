@@ -22,7 +22,6 @@ const NAV_ICON_CENTER_INSET: f32 = RAIL_WIDTH / 2.0;
 const NAV_ITEM_START_PADDING: f32 = 16.0;
 const CONTENT_PADDING: f32 = 24.0;
 const PROFILE_MENU_WIDTH: f32 = 280.0;
-const PROFILE_CONTROL_GAP: f32 = 8.0;
 const COMPACT_HEADER_WIDTH: f32 = 600.0;
 const OVERLAY_NAV_WIDTH: f32 = 280.0;
 const NAV_GROUP_HEIGHT: f32 = 32.0;
@@ -336,18 +335,17 @@ fn show_with_padding<R>(
     );
     let inner = page(&mut page_ui);
 
+    paint_border(ui, content);
     if overlay_navigation {
         let overlay_action = navigation_overlay(ui, root, navigation, props);
         if overlay_action.is_some() {
             action = overlay_action;
         }
-    } else if nav_width > 0.0 {
-        paint_navigation_divider(ui, navigation);
     }
     if let Some(profile_action) = profile_menu(ui, selectors.profile, shell_clip, props) {
         action = Some(Action::Profile(profile_action));
     }
-    paint_window_border(ui, root);
+    paint_border(ui, root);
     Output { action, inner }
 }
 
@@ -429,7 +427,7 @@ fn paint_navigation_divider(ui: &Ui, navigation: Rect) {
     );
 }
 
-fn paint_window_border(ui: &Ui, root: Rect) {
+fn paint_border(ui: &Ui, root: Rect) {
     ui.painter().rect_stroke(
         root,
         0.0,
@@ -510,8 +508,7 @@ fn header_contents(
 
 fn header_selectors(ui: &Ui, header: Rect, props: &Props<'_>) -> HeaderSelectors {
     let controls_width = props.window_controls.map_or(0.0, |_| WINDOW_CONTROLS_WIDTH);
-    let controls_left = header.right() - controls_width;
-    let profile_right = controls_left - props.profile_selector.map_or(0.0, |_| PROFILE_CONTROL_GAP);
+    let profile_right = header.right() - controls_width;
     let preferred_profile_width = preferred_profile_width(ui, header.width(), props);
     let profile_width = if props.profile_selector.is_some() {
         preferred_profile_width.min((profile_right - header.left()).max(0.0))

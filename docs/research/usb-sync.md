@@ -70,11 +70,29 @@ directory, preserving the device UUID, comments, and unknown fields without over
 
 Manifest, USB, MTP, and FIT IDs are diagnostic; none identifies an application profile.
 
+The [physical reassignment test](../../crates/garmin-update/tests/profile_marker_acceptance.rs) requires owner consent,
+exclusive device use, one matching model, a valid pairing, and two free revisions. It appends two history entries,
+restoring the original profile while preserving prior files. Concurrent changes or incomplete recovery require owner
+review. Physical execution is ignored by default; ordinary runs use a disposable directory.
+
+```sh
+GARMIN_TOOLKIT_ACCEPTANCE_MODEL='Edge 1050' just in-shell cargo test --locked --offline \
+    -p garmin-update --test profile_marker_acceptance physical_mounted_profile_reassignment \
+    -- --ignored --exact --nocapture
+```
+
 ### Demo pairing acceptance
 
-The Nix-packaged HASS demo verified confirmed profile reassignment and reversal: numbered revisions retained the device
-UUID, the original marker's SHA-256 stayed unchanged, and refreshed UI showed the effective profile. This qualifies the
-demo flow only; app-image and physical-media acceptance are separate.
+The Nix-packaged HASS demo verified reassignment and reversal: device UUID and original marker hash were preserved, and
+refreshed UI showed the effective profile.
+
+### Physical pairing-marker acceptance
+
+On 2026-11-08, the owner-authorized test passed on the [Edge 1050 host/firmware tuple](#physical-desktop-reconnect)
+through GIO/GVFS. Production marker functions rejected conflicting creation, verified reassignment, restored the
+original profile, and preserved the device UUID and all prior files byte-for-byte. Result:
+`.tmp/physical-pairing/acceptance.log`. Fresh pairing, UI confirmation, and persistence after unplug/replug were not
+exercised.
 
 ## Existing adapters
 
@@ -180,10 +198,21 @@ repeated the two-file read while GVFS owned the watch. Raw MTP reported `DeviceB
 explicit release. Tests cover capability filtering, size, cancellation, unrelated files, unsafe paths, and source
 changes.
 
-This initial read-access baseline establishes attachment identity, enumeration, manifest discovery, raw and mounted
-complete FIT reads, decoding, initial watch delivery, and generic GVFS create/read/delete. Later packaged-host
-acceptance is recorded in [device capabilities](device-capabilities.md#usb-operations); Course and map firmware
-acceptance are recorded below. Live reconnect/deduplication remains unqualified.
+Later packaged-host acceptance is in [device capabilities](device-capabilities.md#usb-operations); Course and map
+firmware evidence follows below.
+
+### Physical desktop reconnect
+
+On 2026-11-08, Edge 1050 firmware 32.20 passed physical reconnect on Ubuntu 26.04 LTS, Linux `7.0.0-42-generic`, through
+GIO/GVFS. The owner confirmed attachment counts of one → zero → one without restarting the production x86_64 AppImage
+(`b0cb6199`, isolated data). Post-reconnect screenshots showed Ready state, browsing, and a decoded FIT preview with
+map.
+
+### Local demo reconnect
+
+On 2026-11-08, renaming the fake device directory away and back yielded one → zero → one attachments in the Linux x86_64
+demo AppImage (`b0cb6199`; UI/adapter unchanged through `6b38c9ad`). Browsing and FIT preview with map recovered.
+Semantic snapshots, action results, and a screenshot are in `.tmp/demo-reconnect`; the app and listener were stopped.
 
 ## Course transfer evidence
 
