@@ -8,27 +8,27 @@ independently absent sensor values, creator/envelope/timestamp validation, separ
 settings, and rejected unsupported or corrupt sequences. [Course tests](../../crates/garmin-fit/src/course.rs) check
 semantic round trips, message anatomy, corruption, and unresolved geometry.
 
-The [importer tests](../../crates/garmin-importer/tests/fit_import.rs) check original-byte preservation, provenance,
-retries, and failed normalization. Current normalization supports single-session activities; settings are
-preservation-only. The [data contract](../architecture/data.md) owns those invariants.
+Independent fixtures and [boundary tests](../../crates/garmin-fit/src/integrity_tests.rs) characterize:
 
-Independent [wire fixtures](../../crates/garmin-fit/src/fixture/integrity.rs) cover 12- and 14-byte headers, every
-proper prefix and single-bit mutation, isolated header/file CRC failures, and declared-length mismatches.
-[Boundary tests](../../crates/garmin-fit/src/integrity_tests.rs) include corrupt chained tails; importer tests preserve
-each rejected input byte-for-byte, keep retries stable, and prevent partial projections. Course decoding shares the same
-length and whole-sequence CRC checks.
+- [Integrity and multisession](../../crates/garmin-fit/src/fixture/integrity.rs): 12/14-byte headers, every proper
+  prefix and single-bit mutation of the minimal recording, isolated CRC errors, length mismatches, and corrupt chained
+  tails. Activity and Course decoding share length/CRC checks; two sessions in one sequence are rejected.
+- [Health](../../crates/garmin-fit/src/fixture/health.rs) and
+  [workouts](../../crates/garmin-fit/src/fixture/workout.rs): monitoring heart rate, sleep transitions, HRV
+  intervals/missing values, and a timed two-step workout. All decode; their file types are rejected by the activity
+  normalizer.
+- [Developer fields](../../crates/garmin-fit/src/fixture/developer.rs): complete metadata, missing descriptions, and
+  missing developer IDs. All are accepted without overriding native normalized values. Undescribed custom values are
+  omitted from decoded output; described values decode even without a developer ID.
 
-Independent two-session recordings decode successfully but are rejected by the single-session normalizer. Importer tests
-verify original-byte preservation, stable retries, and no partial activities, including after a valid chained sequence.
+[Importer tests](../../crates/garmin-importer/tests/fit_import.rs) verify exact original-byte preservation, stable
+retries, and no partial activities from rejected chains. These synthetic examples neither qualify device transfers nor
+add normalization support. Single-session activities are normalized; settings are preservation-only. The
+[data contract](../architecture/data.md) owns those invariants.
 
 `rustyfit` 0.10.2 rejects valid 14-byte files with an omitted (zero) header CRC when their file CRC covers the complete
 sequence, as required by the [protocol](https://developer.garmin.com/fit/articles/fit-protocol/fit_protocol.html). Those
 inputs remain preserved parser rejections; this coverage does not add support for normalizing them.
-
-## Coverage gaps
-
-Independent synthetic wellness, sleep/HRV, workout, and described/undescribed developer-field cases remain absent. They
-are tracked under [local work](../plans/README.md#local-work); this does not claim support for normalizing them.
 
 Expectations must come from the synthetic definition, not parser output or Garmin SDK fixtures. Real device files stay
 ignored; durable regressions need synthetic replacements or approved public fixtures.
@@ -63,6 +63,19 @@ Community files help select missing cases. A case becomes durable only after it 
 for redistribution with its provenance intact.
 
 ## External corpus
+
+### Suites to shadow
+
+- [Garmin Python](https://github.com/garmin/fit-python-sdk/blob/e809dbc6acfb4568259625afc7b04724fda9c4e0/tests/test_decoder.py)
+  (FIT Protocol License): integrity, chaining, invalid values, field sizes, and developer data.
+- [muktihari](https://github.com/muktihari/fit/blob/7addcbcbb7a3d99e88db5568bf691308ff4d66cb/decoder/decoder_test.go)
+  (BSD-3-Clause): malformed definitions, compressed timestamps, big-endian short fields, and missing developer metadata.
+
+Recreate named behaviors with independent bytes and expected values. These implementation suites are not a complete
+certification oracle: Python's compressed-timestamp rejection is an implementation limit, not a protocol rule.
+`muktihari/testdata` mixes SDK samples, forum recordings, and fuzz inputs; verify per-file provenance before reuse.
+
+### Optional recordings
 
 Large corpora remain optional. Fetch an exact-revision, hash-verified ZIP64 snapshot as one Nix store file and read its
 entries directly; do not clone or extract it. Corpus sweeps stay outside normal validation, required CI, and published

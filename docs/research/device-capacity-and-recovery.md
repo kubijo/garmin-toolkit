@@ -20,6 +20,31 @@ Verified recovery backups are the default. Skipping them is explicit and part of
 cannot roll back old content; it verifies retained payloads, reconciles recorded paths and sizes, replaces proven
 partials, completes journal-authorized writes and removals, then commits the original journal.
 
+## Telemetry assessment
+
+Reviewed against the [pinned dependencies](../../Cargo.toml), `mtp-rs` 0.32.0 and `gio` 0.22.9 bindings, and current
+adapters, without physical-device queries.
+
+- **Selected shared fields:** retain transport kind, storage capacity/writability, and measured operation rates.
+  [`DeviceStateSnapshot`](../../crates/garmin-model/src/device.rs) represents unavailable capacity and unknown
+  writability explicitly. Rates describe the current operation; stale samples disappear and upload excludes device
+  finalization. These fields do not predict device performance or battery safety.
+- **USB speed:** [`MtpCandidate`](../../crates/garmin-device/src/mtp.rs) already carries optional negotiated link speed.
+  Keep it as a raw-transport diagnostic. It is neither achieved throughput nor a portable mounted-device property;
+  [GIO volumes](https://docs.gtk.org/gio/iface.Volume.html) expose mount metadata, not a common USB speed API.
+- **Battery:** the dependency's `ptp/session/properties.rs` has `BatteryLevel` access and mock descriptor/value tests.
+  That proves protocol handling, not Garmin firmware support. The application's MTP adapter uses `MtpDevice`, whose
+  public API does not expose those property operations; mounted and directory adapters have no shared battery source.
+- **Charging:** no shared source exists in the current adapters. USB attachment, power descriptors, and historical FIT
+  battery samples do not establish live charging state. Do not infer it or show an absent value as false or zero.
+
+**Decision:** add no battery or charging fields to the shared model or UI. Keep the existing fields and speed
+diagnostic; no new polling, raw sessions, property dumps, or identifiers are needed. The normalized measurements reveal
+less than raw descriptors, which can include device serials, mount paths, and host topology. No telemetry history is
+added. Optional battery/charging exposure would require an adapter-specific source, bounded reads within its owned
+session, explicit unknown/stale handling, and observations tied to device, firmware, host, and adapter. This assessment
+establishes no physical support and schedules no hardware probe.
+
 ## Portable state
 
 Before mutation, the CLI writes a bounded, versioned transaction under the visible `GARMIN-TOOLKIT` device directory and

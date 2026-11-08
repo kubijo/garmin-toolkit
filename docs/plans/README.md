@@ -7,13 +7,6 @@ limit is not automatically scheduled work.
 
 ## Local work
 
-- Close the missing [FIT corpus cases](../research/fit-corpus.md#coverage-gaps): wellness/sleep/HRV, workouts, and
-  developer fields. Test current acceptance, rejection, and original-byte preservation; broader normalization is a
-  separate scope decision.
-- Write the device-adapter extension guide around the [existing boundary](../architecture/connectivity.md), tests, and
-  [support matrix](../research/device-capabilities.md#usb-operations).
-- Assess battery, charging, and transport telemetry for portability, reliability, and sensitivity before selecting
-  fields to expose. Hardware-dependent claims require observations from the target adapter/device.
 - Implement the source-only Connect IQ companion and local SDK/key tooling described in
   [the research](../research/connect-iq-companion.md#tooling-to-implement). Compilation and device acceptance require
   owner-supplied inputs below; Garmin tools and outputs stay outside CI and releases.
@@ -42,6 +35,14 @@ The [device matrix](../research/device-capabilities.md) records established oper
   complete the [zbus 6 migration](https://github.com/z-galaxy/zbus/issues/2043). Preserve native accessibility. The
   [audit policy](../../infra/gallery/deny.toml) rejects obsolete exceptions and unrelated findings;
   [AccessKit's Rust support policy](https://github.com/AccessKit/accesskit/pull/834) explains the blocker.
+
+## Future features
+
+- **Long-term statistics and insights:** in-app weekly, monthly, yearly, and custom-period summaries; period and
+  activity comparisons; and trends over time. Include activity counts, distance, duration, elevation, and available
+  performance metrics, with sport filters. Build from locally imported history, make missing data explicit, and define
+  aggregation, time-zone, and duplicate-handling rules before implementation. Reports stay in the app; no email
+  delivery.
 
 ## Deferred
 
