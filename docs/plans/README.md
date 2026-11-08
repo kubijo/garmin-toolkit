@@ -15,7 +15,6 @@ limit is not automatically scheduled work.
 
 - Complete Venu 3S explorer acceptance and establish Edge 850 support for manifest-declared operations. Record the
   device, firmware, host, and adapter; retain host/GVFS defect evidence.
-- Qualify interrupted Course transfer and recovery, including firmware discovery afterward.
 - Confirm the fēnix raw-MTP upload correction after a usable fresh session. The known `OpenSession` failure and
   successful GVFS map maintenance are separate evidence; see
   [USB limitations](../research/usb-sync.md#existing-adapters).

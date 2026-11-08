@@ -75,7 +75,7 @@ These rows describe recorded acceptance, not every operation exposed by the adap
 Evidence: [desktop reconnect](usb-sync.md#physical-desktop-reconnect),
 [physical pairing revisions/reassignment](usb-sync.md#physical-pairing-marker-acceptance),
 [map maintenance](usb-sync.md#map-maintenance-evidence), and
-[Course firmware discovery](usb-sync.md#course-transfer-evidence).
+[Course recovery/firmware discovery](usb-sync.md#course-transfer-evidence).
 
 Raw-MTP limitations are recorded with [the adapter evidence](usb-sync.md#existing-adapters). Packaged desktop/ARM64
 guest details are in [desktop packaging](desktop-packaging.md); a Linux VM on macOS does not qualify a native macOS

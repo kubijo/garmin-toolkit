@@ -216,9 +216,14 @@ Semantic snapshots, action results, and a screenshot are in `.tmp/demo-reconnect
 
 ## Course transfer evidence
 
-One owned Edge 1050 displayed a transferred FIT Course as “Last Course Added” after disconnect. This is happy-path
-firmware discovery only; cancellation, partial writes, disconnect/recovery, and discovery after recovery have not been
-inspected on the physical device.
+Verified on the [Edge 1050/GVFS tuple](#physical-desktop-reconnect): exact-byte Course recovery after failed host
+outcome persistence, duplicate-send suppression, unchanged pairing, and firmware discovery after USB disconnect.
+Mid-transfer cable loss and partial-payload recovery remain unqualified.
+
+The [recovery test](../../crates/garmin-services/src/course_transfer/tests/physical.rs) runs on disposable media by
+default. Its ignored physical case requires `GARMIN_TOOLKIT_ACCEPTANCE_MODEL` and an unused
+`GARMIN_TOOLKIT_COURSE_ACCEPTANCE_DIR`, and leaves a synthetic Course on the device. Local evidence:
+`.tmp/physical-course/acceptance.log` and `.tmp/physical-course/recovery-1`.
 
 ## Map-maintenance evidence
 
