@@ -31,6 +31,18 @@ impl Header {
 /// If the fixed recording exceeds the FIT data-size field.
 #[must_use]
 pub fn activity(header: Header) -> Vec<u8> {
+    recording(header, false)
+}
+
+/// Encode two consecutive running sessions inside one FIT sequence.
+/// # Panics
+/// If the fixed recording exceeds the FIT data-size field.
+#[must_use]
+pub fn multisession(header: Header) -> Vec<u8> {
+    recording(header, true)
+}
+
+fn recording(header: Header, multisession: bool) -> Vec<u8> {
     // file_id (0): activity type (0), development manufacturer (1), creation time (4).
     let mut data = vec![
         0x40, 0, 0, 0, 0, 3, 0, 1, 0, 1, 2, 0x84, 4, 4, 0x86, 0, 4, 255, 0,
@@ -42,13 +54,29 @@ pub fn activity(header: Header) -> Vec<u8> {
     data.extend([0x43, 0, 0, 20, 0, 2, 253, 4, 0x86, 5, 4, 0x86, 3]);
     data.extend((START + 30).to_le_bytes());
     data.extend(50_000_u32.to_le_bytes());
+    if multisession {
+        // Reuse the session, lap and record definitions for a second 30-second run.
+        for local in [1, 2] {
+            data.push(local);
+            for value in [START + 60, START + 30, 30_000, 30_000, 50_000] {
+                data.extend(value.to_le_bytes());
+            }
+            if local == 1 {
+                data.push(1); // running
+            }
+        }
+        data.push(3);
+        data.extend((START + 60).to_le_bytes());
+        data.extend(100_000_u32.to_le_bytes());
+    }
     // activity (34): timestamp (253), total timer milliseconds (0), session count (1).
     data.extend([
         0x44, 0, 0, 34, 0, 3, 253, 4, 0x86, 0, 4, 0x86, 1, 2, 0x84, 4,
     ]);
-    data.extend((START + 30).to_le_bytes());
-    data.extend(30_000_u32.to_le_bytes());
-    data.extend(1_u16.to_le_bytes());
+    let sessions = if multisession { 2_u16 } else { 1 };
+    data.extend((START + 30 * u32::from(sessions)).to_le_bytes());
+    data.extend((30_000 * u32::from(sessions)).to_le_bytes());
+    data.extend(sessions.to_le_bytes());
 
     let mut bytes = vec![header.size(), 0x20, 0, 8]; // protocol 2.0, profile 20.48
     bytes.extend(

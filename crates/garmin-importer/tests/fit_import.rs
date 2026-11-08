@@ -16,6 +16,40 @@ use tempfile::tempdir;
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
 #[test]
+fn preserves_multisession_rejections_without_partial_activities() -> TestResult {
+    block_on(async {
+        let root = tempdir()?;
+        let storage = Storage::open(root.path().join("multisession.sqlite3")).await?;
+        let (user, device, source) = owner_and_source()?;
+        storage.save_user(&user).await?;
+        storage.save_device(&device).await?;
+        storage.save_source(&source).await?;
+        let importer = FitImporter::new(&storage);
+        for header in [
+            fixture::integrity::Header::Legacy,
+            fixture::integrity::Header::Checksummed,
+        ] {
+            let bytes = fixture::integrity::multisession(header);
+            rejected_original(&importer, &storage, &user, &source, &bytes, "multisession").await?;
+            let mut chain = fixture::integrity::activity(header);
+            chain.extend(bytes);
+            rejected_original(
+                &importer,
+                &storage,
+                &user,
+                &source,
+                &chain,
+                "multisession tail",
+            )
+            .await?;
+            assert_eq!(storage.activities(user.id()).await?, Vec::new());
+        }
+        storage.close().await;
+        Ok(())
+    })
+}
+
+#[test]
 fn preserves_every_independent_integrity_failure_without_partial_projections() -> TestResult {
     block_on(async {
         use fixture::integrity;
