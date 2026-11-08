@@ -67,14 +67,15 @@ These rows describe recorded acceptance, not every operation exposed by the adap
 | fēnix / raw MTP       | Manifest and complete FIT reads/decode                                    |
 | Edge 1050 / GVFS      | Map update/removal, restart acceptance, interrupted-update rollback       |
 | Edge 1050 / HASS Pi   | Discovery, browse, activity/Course preview, activity import, path refresh |
-| Edge 1050 / Linux x64 | AppImage discovery, browse, FIT activity preview                          |
+| Edge 1050 / Linux x64 | AppImage discovery/reconnect, browse, FIT activity preview                |
 | Edge 1050 / ARM64 VM  | Automatic mounting, discovery, browse, FIT activity preview with map      |
 | Venu 3S               | Simultaneous attachment with Edge 1050 only                               |
 | Edge 850              | No recorded physical acceptance run                                       |
 
-The [map matrix](usb-sync.md#map-maintenance-evidence) covers the recorded fēnix/Edge GVFS update, restart, and recovery
-sessions. [Course evidence](usb-sync.md#course-transfer-evidence) establishes Edge firmware discovery after disconnect;
-the [pairing demo](usb-sync.md#demo-pairing-acceptance) uses synthetic media. Neither establishes other physical writes.
+Evidence: [desktop reconnect](usb-sync.md#physical-desktop-reconnect),
+[physical pairing revisions/reassignment](usb-sync.md#physical-pairing-marker-acceptance),
+[map maintenance](usb-sync.md#map-maintenance-evidence), and
+[Course firmware discovery](usb-sync.md#course-transfer-evidence).
 
 Raw-MTP limitations are recorded with [the adapter evidence](usb-sync.md#existing-adapters). Packaged desktop/ARM64
 guest details are in [desktop packaging](desktop-packaging.md); a Linux VM on macOS does not qualify a native macOS
