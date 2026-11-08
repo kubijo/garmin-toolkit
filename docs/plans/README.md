@@ -18,9 +18,6 @@ limit is not automatically scheduled work.
 - Confirm the fēnix raw-MTP upload correction after a usable fresh session. The known `OpenSession` failure and
   successful GVFS map maintenance are separate evidence; see
   [USB limitations](../research/usb-sync.md#existing-adapters).
-- Obtain firmware acceptance of workout delivery before claiming it is tested.
-- Before advertising Windows browser support, verify popup retry/tab fallback, stale-popup rejection after parent
-  reload/closure, and foreground focus with keyboard and touch. Activation must not recreate closed windows.
 - Compile, sideload, and run the [Connect IQ probe](../research/connect-iq-companion.md#probe) once the local tooling,
   owner-supplied SDK/signing key, and HASS HTTPS endpoint exist. Record phone-present and phone-absent behavior.
 
@@ -74,5 +71,6 @@ The [device matrix](../research/device-capabilities.md) records established oper
 
 ## Outside the current roadmap
 
-A separate CLI distribution channel is not planned. Flatpak is an idea, not a release track. Mobile needs a separate
-product decision. Devices without USB data access, including Index S2, are outside the current hardware scope.
+A separate CLI distribution channel is not planned. Windows support and testing are out of scope. Flatpak is an idea,
+not a release track. Mobile needs a separate product decision. Devices without USB data access, including Index S2, are
+outside the current hardware scope.

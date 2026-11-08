@@ -4,6 +4,8 @@
 use super::*;
 use crate::maps::device::MountedConnector;
 
+mod workout;
+
 struct BlockedOutcome(PathBuf);
 
 impl BlockedOutcome {

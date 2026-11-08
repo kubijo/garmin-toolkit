@@ -93,4 +93,4 @@ requesting another catalogue; switching devices remains blocked during that oper
 supersede requests for a different device. Only the latest request can publish a catalogue or clear its loading
 indicator, and logout/disconnect invalidates pending completions.
 
-Windows browser acceptance is tracked under [hardware and owner access](../plans/README.md#hardware-and-owner-access).
+Windows support and testing are outside the project scope.
