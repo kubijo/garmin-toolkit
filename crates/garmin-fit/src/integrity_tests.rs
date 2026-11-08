@@ -36,6 +36,39 @@ fn independent_recordings_have_the_declared_activity() -> Result<(), Box<dyn Err
 }
 
 #[test]
+fn multisession_is_decodable_but_not_normalized() -> Result<(), Box<dyn Error>> {
+    for header in [Header::Legacy, Header::Checksummed] {
+        let bytes = integrity::multisession(header);
+        let sequences = super::decode_raw(&bytes)?;
+        assert_eq!(sequences.len(), 1);
+        let sessions = sequences[0]
+            .messages
+            .iter()
+            .filter(|message| message.num == rustyfit::profile::typedef::MesgNum::SESSION)
+            .map(rustyfit::profile::mesgdef::Session::from)
+            .collect::<Vec<_>>();
+        assert_eq!(sessions.len(), 2);
+        for (session, start) in sessions
+            .iter()
+            .zip([integrity::START, integrity::START + 30])
+        {
+            assert_eq!(session.start_time.0, start);
+            assert_eq!(session.timestamp.0, start + 30);
+            assert_eq!(session.total_distance, 50_000);
+        }
+        assert!(matches!(
+            normalize_activities(&bytes),
+            Err(ActivityError::CountMismatch {
+                name: "session count",
+                expected: 1,
+                found: 2,
+            })
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn valid_zero_header_crc_is_a_preserved_parser_limitation() {
     assert!(matches!(
         normalize_activities(&integrity::activity(Header::ZeroCrc)),

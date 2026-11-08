@@ -18,15 +18,17 @@ proper prefix and single-bit mutation, isolated header/file CRC failures, and de
 each rejected input byte-for-byte, keep retries stable, and prevent partial projections. Course decoding shares the same
 length and whole-sequence CRC checks.
 
+Independent two-session recordings decode successfully but are rejected by the single-session normalizer. Importer tests
+verify original-byte preservation, stable retries, and no partial activities, including after a valid chained sequence.
+
 `rustyfit` 0.10.2 rejects valid 14-byte files with an omitted (zero) header CRC when their file CRC covers the complete
 sequence, as required by the [protocol](https://developer.garmin.com/fit/articles/fit-protocol/fit_protocol.html). Those
 inputs remain preserved parser rejections; this coverage does not add support for normalizing them.
 
 ## Coverage gaps
 
-Independent synthetic multisession, wellness, sleep/HRV, workout, and described/undescribed developer-field cases remain
-absent. They are tracked under [local work](../plans/README.md#local-work); this does not claim support for normalizing
-them.
+Independent synthetic wellness, sleep/HRV, workout, and described/undescribed developer-field cases remain absent. They
+are tracked under [local work](../plans/README.md#local-work); this does not claim support for normalizing them.
 
 Expectations must come from the synthetic definition, not parser output or Garmin SDK fixtures. Real device files stay
 ignored; durable regressions need synthetic replacements or approved public fixtures.
