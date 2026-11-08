@@ -222,8 +222,16 @@ Mid-transfer cable loss and partial-payload recovery remain unqualified.
 
 The [recovery test](../../crates/garmin-services/src/course_transfer/tests/physical.rs) runs on disposable media by
 default. Its ignored physical case requires `GARMIN_TOOLKIT_ACCEPTANCE_MODEL` and an unused
-`GARMIN_TOOLKIT_COURSE_ACCEPTANCE_DIR`, and leaves a synthetic Course on the device. Local evidence:
-`.tmp/physical-course/acceptance.log` and `.tmp/physical-course/recovery-1`.
+`GARMIN_TOOLKIT_COURSE_ACCEPTANCE_DIR`, and leaves a synthetic Course on the device.
+
+## Workout delivery evidence
+
+The [Edge 1050/GVFS tuple](#physical-desktop-reconnect) accepts a synthetic two-step cycling workout with exact-byte
+readback and unchanged pairing. Firmware displays Bike 1:00 followed by Rest 0:30 after USB disconnect. The
+[physical test](../../crates/garmin-services/src/course_transfer/tests/physical/workout.rs) requires
+`GARMIN_TOOLKIT_ACCEPTANCE_MODEL` and an unused `GARMIN_TOOLKIT_WORKOUT_ACCEPTANCE_DIR`. Optionally,
+`GARMIN_TOOLKIT_COURSE_TRANSFER_DIR` selects a retained synthetic Course receipt for cleanup: name, sport, coordinates
+and cues must match uniquely, with a digest guard on deletion.
 
 ## Map-maintenance evidence
 

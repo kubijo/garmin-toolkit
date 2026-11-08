@@ -186,6 +186,47 @@ fn exposes_declared_transfer_directions() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[test]
+fn workout_inputs_and_course_sources_preserve_direction_and_path_limits()
+-> Result<(), Box<dyn Error>> {
+    let xml = support::manifest(
+        GARMIN_DEVICE_V2_NAMESPACE,
+        &[
+            ("FIT_TYPE_5", "GARMIN/NEWFILES", "InputToUnit"),
+            ("FIT_TYPE_6", "GARMIN/COURSES", "OutputFromUnit"),
+            ("FIT_TYPE_5", "GARMIN/WORKOUTS", "OutputFromUnit"),
+        ],
+    )?;
+    let manifest = parse(&xml)?;
+    let capabilities = manifest.capabilities().capabilities();
+    assert_eq!(
+        capabilities[0]
+            .workout_destination("test.fit")
+            .ok_or("missing workout input")?
+            .to_string(),
+        "GARMIN/NEWFILES/test.fit"
+    );
+    assert!(
+        capabilities[0]
+            .workout_destination("../other.fit")
+            .is_none()
+    );
+    assert!(capabilities[0].workout_destination("test.exe").is_none());
+    assert!(capabilities[0].course_source("test.fit").is_none());
+    assert_eq!(
+        capabilities[1]
+            .course_source("test.fit")
+            .ok_or("missing Course source")?
+            .to_string(),
+        "GARMIN/COURSES/test.fit"
+    );
+    assert!(capabilities[1].course_destination("test.fit").is_none());
+    assert!(capabilities[1].workout_destination("test.fit").is_none());
+    assert!(capabilities[1].course_source("../other.fit").is_none());
+    assert!(capabilities[2].workout_destination("test.fit").is_none());
+    Ok(())
+}
+
 fn parse(xml: &str) -> Result<DeviceManifest, ManifestError> {
     parse_manifest(
         xml,

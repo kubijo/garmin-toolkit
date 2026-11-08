@@ -72,6 +72,29 @@ fn developer_metadata_does_not_override_native_activity_values() -> Result<(), B
 }
 
 #[test]
+fn cycling_workout_has_a_serial_bound_name() -> Result<(), Box<dyn Error>> {
+    use rustyfit::profile::mesgdef;
+
+    for header in [Header::Legacy, Header::Checksummed] {
+        let (name, bytes) = crate::fixture::workout::cycling(header, 0x1234_5678);
+        assert_eq!(name, "TKW-12345678");
+        let sequences = super::decode_raw(&bytes)?;
+        assert_eq!(sequences.len(), 1);
+        let messages = &sequences[0].messages;
+        assert_eq!(messages.len(), 4);
+        assert_eq!(
+            mesgdef::FileId::from(&messages[0]).serial_number,
+            0x1234_5678
+        );
+        let workout = mesgdef::Workout::from(&messages[1]);
+        assert_eq!(workout.sport.0, 2);
+        assert_eq!(workout.wkt_name, name);
+        assert_eq!(workout.num_valid_steps, 2);
+    }
+    Ok(())
+}
+
+#[test]
 fn workout_decodes_but_is_not_an_activity() -> Result<(), Box<dyn Error>> {
     use rustyfit::profile::{mesgdef, typedef};
 

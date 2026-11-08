@@ -250,12 +250,38 @@ impl FileCapability {
     /// Resolve a host-generated FIT Course filename only through a declared input location.
     #[must_use]
     pub fn course_destination(&self, file_name: &str) -> Option<SafeRelativePath> {
-        if self.data_type != DataType::Course
-            || !matches!(
-                self.direction,
-                TransferDirection::InputToUnit | TransferDirection::InputOutput
-            )
-        {
+        self.input_destination(DataType::Course, file_name)
+    }
+
+    /// Resolve a generated FIT workout only through a declared input location.
+    #[must_use]
+    pub fn workout_destination(&self, file_name: &str) -> Option<SafeRelativePath> {
+        self.input_destination(DataType::Workout, file_name)
+    }
+
+    /// Resolve a FIT Course filename in a declared readable location.
+    #[must_use]
+    pub fn course_source(&self, file_name: &str) -> Option<SafeRelativePath> {
+        matches!(
+            self.direction,
+            TransferDirection::OutputFromUnit | TransferDirection::InputOutput
+        )
+        .then(|| self.file_path(DataType::Course, file_name))
+        .flatten()
+    }
+
+    fn input_destination(&self, data_type: DataType, file_name: &str) -> Option<SafeRelativePath> {
+        if !matches!(
+            self.direction,
+            TransferDirection::InputToUnit | TransferDirection::InputOutput
+        ) {
+            return None;
+        }
+        self.file_path(data_type, file_name)
+    }
+
+    fn file_path(&self, data_type: DataType, file_name: &str) -> Option<SafeRelativePath> {
+        if self.data_type != data_type {
             return None;
         }
         let path = self.handle.directory.join(file_name);
