@@ -22,8 +22,23 @@ use crate::{
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+#[cfg(target_os = "linux")]
+mod physical;
+
 async fn generated_course(
     deployment: &Arc<Deployment>,
+) -> TestResult<(
+    UserContext,
+    UserContext,
+    CourseGenerationOperationId,
+    CourseGenerationId,
+)> {
+    generated_course_named(deployment, "Walk").await
+}
+
+async fn generated_course_named(
+    deployment: &Arc<Deployment>,
+    name: &str,
 ) -> TestResult<(
     UserContext,
     UserContext,
@@ -40,7 +55,7 @@ async fn generated_course(
         Timestamp::from_unix_seconds(1_788_198_400)?,
         br#"<gpx version="1.1" creator="test"><trk><trkseg><trkpt lat="50" lon="14"/><trkpt lat="50.1" lon="14.1"/></trkseg></trk></gpx>"#,
         RouteCandidateSource::TrackSegment { track: 0, segment: 0 },
-        "Walk".parse()?, RouteSport::Walking,
+        name.parse()?, RouteSport::Walking,
     )).await?;
     drop(app);
     let routes = RouteOperations::new(
