@@ -78,6 +78,10 @@ fn recording(header: Header, multisession: bool) -> Vec<u8> {
     data.extend((30_000 * u32::from(sessions)).to_le_bytes());
     data.extend(sessions.to_le_bytes());
 
+    envelope(header, &data)
+}
+
+pub(super) fn envelope(header: Header, data: &[u8]) -> Vec<u8> {
     let mut bytes = vec![header.size(), 0x20, 0, 8]; // protocol 2.0, profile 20.48
     bytes.extend(
         u32::try_from(data.len())

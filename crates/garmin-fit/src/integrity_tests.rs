@@ -36,6 +36,131 @@ fn independent_recordings_have_the_declared_activity() -> Result<(), Box<dyn Err
 }
 
 #[test]
+fn developer_metadata_does_not_override_native_activity_values() -> Result<(), Box<dyn Error>> {
+    use crate::fixture::developer;
+    use crate::fixture::developer::Metadata;
+
+    for header in [Header::Legacy, Header::Checksummed] {
+        let control = normalize_activities(&developer::activity(header, Metadata::Plain))?;
+        for metadata in Metadata::ALL {
+            let bytes = developer::activity(header, metadata);
+            let sequences = super::decode_raw(&bytes)?;
+            assert_eq!(sequences.len(), 1);
+            let record = sequences[0].messages.last().ok_or("missing record")?;
+            assert_eq!(record.num, rustyfit::profile::typedef::MesgNum::RECORD);
+            if matches!(metadata, Metadata::Described | Metadata::MissingDeveloperId) {
+                let [field] = record.developer_fields.as_slice() else {
+                    return Err("expected one decoded developer field".into());
+                };
+                assert_eq!(field.num, 5);
+                assert_eq!(field.developer_data_index, 0);
+                assert!(matches!(
+                    &field.value,
+                    rustyfit::proto::Value::Uint32(9_999_999)
+                ));
+            } else {
+                assert_eq!(record.developer_fields.len(), 0);
+            }
+            assert_eq!(
+                normalize_activities(&bytes)?,
+                control,
+                "{header:?}: {metadata:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn workout_decodes_but_is_not_an_activity() -> Result<(), Box<dyn Error>> {
+    use rustyfit::profile::{mesgdef, typedef};
+
+    for header in [Header::Legacy, Header::Checksummed] {
+        let bytes = crate::fixture::workout::bytes(header);
+        let sequences = super::decode_raw(&bytes)?;
+        assert_eq!(sequences.len(), 1);
+        let messages = &sequences[0].messages;
+        assert_eq!(messages.len(), 4);
+        assert_eq!(mesgdef::FileId::from(&messages[0]).r#type.0, 5);
+        assert_eq!(messages[1].num, typedef::MesgNum::WORKOUT);
+        let workout = mesgdef::Workout::from(&messages[1]);
+        assert_eq!(workout.sport.0, 1);
+        assert_eq!(workout.num_valid_steps, 2);
+        assert_eq!(workout.wkt_name, "Test");
+        for (message, (index, duration, intensity)) in
+            messages[2..].iter().zip([(0, 60_000, 0), (1, 30_000, 1)])
+        {
+            assert_eq!(message.num, typedef::MesgNum::WORKOUT_STEP);
+            let step = mesgdef::WorkoutStep::from(message);
+            assert_eq!(step.message_index.0, index);
+            assert_eq!(step.duration_type.0, 0);
+            assert_eq!(step.duration_value, duration);
+            assert_eq!(step.target_type.0, 2);
+            assert_eq!(step.target_value, 0);
+            assert_eq!(step.intensity.0, intensity);
+        }
+        assert!(
+            matches!(normalize_activities(&bytes), Err(ActivityError::UnsupportedFileType(kind)) if kind.as_u8() == 5)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn health_messages_decode_but_are_rejected_as_non_activity_files() -> Result<(), Box<dyn Error>> {
+    use rustyfit::profile::{mesgdef, typedef};
+
+    use crate::fixture::health::Health;
+
+    for header in [Header::Legacy, Header::Checksummed] {
+        for health in Health::ALL {
+            let bytes = health.bytes(header);
+            let sequences = super::decode_raw(&bytes)?;
+            let [fit] = sequences.as_slice() else {
+                return Err("expected one health sequence".into());
+            };
+            assert_eq!(
+                mesgdef::FileId::from(&fit.messages[0]).r#type.0,
+                health.file_type()
+            );
+            match health {
+                Health::Wellness => {
+                    assert_eq!(fit.messages.len(), 2);
+                    assert_eq!(fit.messages[1].num, typedef::MesgNum::MONITORING);
+                    let sample = mesgdef::Monitoring::from(&fit.messages[1]);
+                    assert_eq!(sample.timestamp.0, integrity::START);
+                    assert_eq!(sample.heart_rate, 62);
+                }
+                Health::Sleep => {
+                    assert_eq!(fit.messages.len(), 3);
+                    for (message, (offset, level)) in
+                        fit.messages[1..].iter().zip([(0, 2), (60, 3)])
+                    {
+                        assert_eq!(message.num, typedef::MesgNum::SLEEP_LEVEL);
+                        let sample = mesgdef::SleepLevel::from(message);
+                        assert_eq!(sample.timestamp.0, integrity::START + offset);
+                        assert_eq!(sample.sleep_level.0, level);
+                    }
+                }
+                Health::Hrv => {
+                    assert_eq!(fit.messages.len(), 2);
+                    assert_eq!(fit.messages[1].num, typedef::MesgNum::HRV);
+                    assert_eq!(
+                        mesgdef::Hrv::from(&fit.messages[1]).time,
+                        [800, 810, u16::MAX]
+                    );
+                }
+            }
+            assert!(matches!(
+                normalize_activities(&bytes),
+                Err(ActivityError::UnsupportedFileType(kind)) if kind.as_u8() == health.file_type()
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn multisession_is_decodable_but_not_normalized() -> Result<(), Box<dyn Error>> {
     for header in [Header::Legacy, Header::Checksummed] {
         let bytes = integrity::multisession(header);

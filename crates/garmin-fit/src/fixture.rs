@@ -10,8 +10,11 @@ use rustyfit::{
 };
 use thiserror::Error;
 
+pub mod developer;
+pub mod health;
 pub mod integrity;
 mod source;
+pub mod workout;
 
 pub(crate) const START: i64 = 1_780_000_000;
 #[cfg(test)]

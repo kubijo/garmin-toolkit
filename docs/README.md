@@ -9,3 +9,5 @@
 | [Development](development.md)          | Execution safeguards and documentation maintenance |
 
 Desktop and HASS users: [backup and restore](backup-restore.md).
+
+Device contributors: [extending adapters](device-adapters.md).

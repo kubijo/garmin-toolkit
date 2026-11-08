@@ -67,4 +67,5 @@ by readback. Reassociation requires separate consent and adds a numbered, create
 Inspection rejects missing or malformed history instead of silently falling back to an older association.
 
 See [the consolidated device boundary](../decisions/0035-consolidated-device-boundary.md) and
-[USB synchronization evidence](../research/usb-sync.md).
+[USB synchronization evidence](../research/usb-sync.md). Implementation steps and verification examples are in the
+[device-adapter extension guide](../device-adapters.md).
