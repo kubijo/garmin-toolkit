@@ -1,0 +1,22 @@
+id = "garmin-toolkit-monkey-c"
+name = "Monkey C (Rafiki)"
+version = "0.1.0"
+schema_version = 1
+authors = ["Garmin Toolkit contributors"]
+description = "Monkey C highlighting, diagnostics, formatting and quick fixes with the repository-pinned Rafiki."
+repository = "https://github.com/kubijo/garmin-toolkit"
+
+[lib]
+kind = "Rust"
+version = "0.7.0"
+
+[grammars.monkey_c]
+repository = "https://github.com/bombsimon/tree-sitter-monkey-c"
+rev = "6454acab6ff46cb6d1ae60b262caab0910c37a4a"
+
+[language_servers.rafiki]
+name = "Rafiki"
+languages = ["Monkey C"]
+
+[language_servers.rafiki.language_ids]
+"Monkey C" = "monkeyc"

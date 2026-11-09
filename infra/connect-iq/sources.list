@@ -1,0 +1,3 @@
+deb https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/ jammy main universe
+deb https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/ jammy-updates main universe
+deb https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/ jammy-security main universe

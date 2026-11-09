@@ -7,9 +7,8 @@ limit is not automatically scheduled work.
 
 ## Local work
 
-- Implement the source-only Connect IQ companion and local SDK/key tooling described in
-  [the research](../research/connect-iq-companion.md#tooling-to-implement). Compilation and device acceptance require
-  owner-supplied inputs below; Garmin tools and outputs stay outside CI and releases.
+- Define the HASS telemetry publication contract and implement ingestion for the
+  [Connect IQ probe](../research/connect-iq-companion.md#probe-contract).
 
 ## Hardware and owner access
 
@@ -18,8 +17,8 @@ limit is not automatically scheduled work.
 - Confirm the fēnix raw-MTP upload correction after a usable fresh session. The known `OpenSession` failure and
   successful GVFS map maintenance are separate evidence; see
   [USB limitations](../research/usb-sync.md#existing-adapters).
-- Compile, sideload, and run the [Connect IQ probe](../research/connect-iq-companion.md#probe) once the local tooling,
-  owner-supplied SDK/signing key, and HASS HTTPS endpoint exist. Record phone-present and phone-absent behavior.
+- Qualify watch discovery and phone coexistence for the [Connect IQ probe](../research/connect-iq-companion.md). Edge
+  telemetry and app-relaunch recovery are verified.
 
 The [device matrix](../research/device-capabilities.md) records established operations and their evidence.
 
@@ -58,7 +57,7 @@ The [device matrix](../research/device-capabilities.md) records established oper
 - **Image baselines and capture coverage:** numeric coverage currently excludes UI views. Merging rendered capture
   coverage into LLVM profiles is not a current gate; see
   [coverage ownership](../architecture/build-system.md#checks-and-outputs).
-- **Active Garmin Bluetooth:** requires separately approved disposable-device protocol safety evidence under
+- **Private Garmin Bluetooth protocol:** requires separately approved disposable-device safety evidence under
   [ADR 0011](../decisions/0011-garmin-bluetooth-safety-gate.md).
 
 ## Conditional maintenance

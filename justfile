@@ -21,6 +21,9 @@ mod desktop 'apps/garmin-desktop'
 # CLI application and its packages.
 mod cli 'apps/garmin-cli'
 
+# Source-only Connect IQ telemetry probe and local owner-supplied SDK tooling.
+mod connect-iq 'apps/garmin-connect-iq'
+
 update:
     cargo update
     nix flake update

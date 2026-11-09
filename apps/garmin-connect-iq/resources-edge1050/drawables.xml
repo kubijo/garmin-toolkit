@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<resources>
+  <!-- The shared mark is 24 px; Edge 1050 requires a 68 px launcher. -->
+  <bitmap id="LauncherIcon" filename="../../../crates/garmin-brand/assets/icon.svg" scaleX="2.8333333" scaleY="2.8333333" scaleRelativeTo="image"/>
+</resources>

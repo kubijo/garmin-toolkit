@@ -11,6 +11,55 @@
   toolchain,
 }:
 let
+  monkeyCGrammarSource = pkgs.fetchFromGitHub {
+    owner = "bombsimon";
+    repo = "tree-sitter-monkey-c";
+    rev = "6454acab6ff46cb6d1ae60b262caab0910c37a4a";
+    hash = "sha256-g/UCcg96n/1HaLvFrlg88d0EaolCpjfxN6kmyCb9nVM=";
+  };
+  wasiCc = pkgs.pkgsCross.wasi32.stdenv.cc;
+  zedMonkeyCGrammar =
+    pkgs.runCommand "zed-monkey-c-grammar"
+      {
+        nativeBuildInputs = [
+          pkgs.tree-sitter
+          pkgs.stdenv.cc
+        ];
+      }
+      ''
+        export XDG_CACHE_HOME="$TMPDIR/tree-sitter-cache"
+        mkdir -p "$out"
+        tree-sitter build --output "$out/monkey_c${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}" ${monkeyCGrammarSource}
+        ${lib.getExe' zedWasiSdk "clang"} -fPIC -shared -Os \
+          -Wl,--export=tree_sitter_monkey_c -Wl,--max-memory=4294967296 \
+          -I${monkeyCGrammarSource}/src ${monkeyCGrammarSource}/src/parser.c -o "$out/monkey_c.wasm"
+      '';
+  zedWasiSdk = pkgs.writeShellScriptBin "clang" ''
+    export PATH=${lib.makeBinPath [ pkgs.llvmPackages.lld ]}:"$PATH"
+    # Tree-sitter supplies the grammar's C imports; do not link WASI startup/TLS runtime code.
+    exec ${lib.getExe' wasiCc "${wasiCc.targetPrefix}cc"} -nostdlib -Wl,--no-entry,--allow-undefined "$@"
+  '';
+  rafiki = pkgs.rustPlatform.buildRustPackage {
+    pname = "rafiki";
+    version = "0.3.0-unstable-2026-10-27";
+    src = pkgs.fetchFromGitHub {
+      owner = "bombsimon";
+      repo = "monkey-c-rs";
+      rev = "afdd15d2b8c481a0c25fc74a767b4835a6443305";
+      hash = "sha256-hRFejH7y+XiZnTHwlv9/ynUwo3TgrfvGSdi96/FFCwU=";
+    };
+    cargoHash = "sha256-fFLin6itPkw42CVNwDydGkTzEDU2RXHTDcwgeVvbSN8=";
+    cargoBuildFlags = [
+      "-p"
+      "rafiki"
+    ];
+    meta = {
+      description = "Monkey C formatter, linter and language server";
+      homepage = "https://bombsimon.github.io/monkey-c-rs/";
+      license = lib.licenses.mit;
+      mainProgram = "rafiki";
+    };
+  };
   browserTypes = pkgs.importNpmLock.buildNodeModules {
     npmRoot = ../javascript;
     inherit nodejs;
@@ -21,6 +70,13 @@ let
   allFormatters = {
     # The pinned formatter set has no WGSL formatter; Naga validates this shader when WGPU builds it.
     exclude = [
+      # Jungle build definitions are not Monkey C source.
+      "apps/garmin-connect-iq/monkey.jungle"
+      # Zed queries are validated against the pinned grammar by the editor tooling check.
+      "infra/zed/monkey-c/languages/**/*.scm"
+      # The compatibility image is checked by its owned build/library-resolution workflow.
+      "infra/connect-iq/Dockerfile"
+      "infra/connect-iq/sources.list"
       "crates/garmin-ui/src/activity/gpu_map.wgsl"
       "crates/garmin-ui/src/activity/map_composition.wgsl"
       "infra/javascript/fixtures/*.pbf.hex"
@@ -51,6 +107,15 @@ let
     toml = true;
     yaml = true;
     xml = true;
+    extraFormatters.monkey-c = {
+      command = lib.getExe rafiki;
+      options = [
+        "fmt"
+        "--no-config"
+      ];
+      includes = [ "*.mc" ];
+      cacheInputs = [ ];
+    };
   };
 
   project = nix-tools.lib.configure {
@@ -140,6 +205,17 @@ let
       python.configFile = pythonConfig;
       typescript = true;
       extraProjectCheckers = {
+        monkey-c-editor.command = pkgs.writeShellScript "monkey-c-editor-check" ''
+          set -eu
+          for query in infra/zed/monkey-c/languages/monkey-c/*.scm; do
+            ${lib.getExe pkgs.tree-sitter} query --quiet \
+              --lib-path ${zedMonkeyCGrammar}/monkey_c${pkgs.stdenv.hostPlatform.extensions.sharedLibrary} \
+              --lang-name monkey_c "$query" apps/garmin-connect-iq/source/*.mc
+          done
+        '';
+        monkey-c.command = pkgs.writeShellScript "monkey-c-lint" ''
+          exec ${lib.getExe rafiki} lint --no-config apps/garmin-connect-iq/source
+        '';
         dirspec-prescriptions.command = pkgs.writeShellScript "check-dirspec-prescriptions" ''
           set -eu
           empty_tree="$(mktemp -d)"
@@ -198,6 +274,7 @@ let
               pkgs.git
               pkgs.gh
               pkgs.just
+              pkgs.dbus
               pkgs.syft
               pkgs.skopeo
               pkgs.distribution
@@ -221,6 +298,7 @@ let
   };
 in
 {
+  inherit rafiki zedWasiSdk zedMonkeyCGrammar;
   inherit (project)
     apps
     checks

@@ -102,6 +102,10 @@ let
             toolchain
             fenix.packages.${system}.targets.wasm32-unknown-unknown.stable.rust-std
           ];
+          zedExtensionToolchain = fenix.packages.${system}.combine [
+            toolchain
+            fenix.packages.${system}.targets.wasm32-wasip2.stable.rust-std
+          ];
           devTrunk = import ./trunk { inherit pkgs; };
           sharedCargoTargetDir = ".tmp/cargo-target";
           diagnosticToolchain = fenix.packages.${system}.latest.withComponents [
@@ -117,6 +121,30 @@ let
               pyproject-nix
               uv2nix
               ;
+          };
+          connectIqTools = pkgs.writeShellApplication {
+            name = "garmin-connect-iq-tools";
+            runtimeInputs = [
+              pythonToolsEnv
+              pkgs.jdk21
+              pkgs.openssl
+              pkgs.nix
+              tooling.rafiki
+            ]
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+              pkgs.xdg-utils
+              pkgs.podman
+              pkgs.dbus
+            ];
+            text = ''
+              export GARMIN_TOOLKIT_CIQ_CA_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+              export JAVA_HOME=${pkgs.jdk21}
+              if [[ ! -f infra/python/connect_iq.py ]]; then
+                printf 'Run Connect IQ tools from the repository root.\n' >&2
+                exit 1
+              fi
+              exec ${pythonToolsEnv}/bin/python infra/python/connect_iq.py "$@"
+            '';
           };
           datapackagePythonEnv = import ./python-tools.nix {
             inherit
@@ -375,6 +403,26 @@ let
                 drv = desktopVm.app;
               };
               desktop-release = flake-utils.lib.mkApp { drv = desktopRelease; };
+              connect-iq = flake-utils.lib.mkApp { drv = connectIqTools; };
+              rafiki = flake-utils.lib.mkApp { drv = tooling.rafiki; };
+              zed-monkey-c = flake-utils.lib.mkApp {
+                drv = pkgs.writeShellApplication {
+                  name = "zed-monkey-c";
+                  runtimeInputs = [
+                    zedExtensionToolchain
+                    pkgs.coreutils
+                    pkgs.bash
+                    pythonToolsEnv
+                  ];
+                  text = ''
+                    if [[ ! -f infra/zed/monkey-c/Cargo.toml ]]; then
+                      printf 'Run from the repository root.\n' >&2
+                      exit 1
+                    fi
+                    exec bash infra/zed/monkey-c/build.sh ${tooling.zedMonkeyCGrammar} "$@"
+                  '';
+                };
+              };
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               desktop-appimage = {
@@ -434,6 +482,15 @@ let
           inherit (tooling) formatter;
 
           devShells = {
+            connect-iq-editor = pkgs.mkShell {
+              packages = [
+                zedExtensionToolchain
+                tooling.rafiki
+                pkgs.git
+                pkgs.nix
+              ];
+              WASI_SDK_PATH = tooling.zedWasiSdk;
+            };
             default = withDevLinker (
               pkgs.mkShell (
                 llvmToolsEnv
@@ -455,6 +512,7 @@ let
                       pkgs.cargo-nextest
                       pkgs.gitleaks
                       pkgs.just
+                      tooling.rafiki
                       nodejs
                       pkgs.esbuild
                       pkgs.pkg-config

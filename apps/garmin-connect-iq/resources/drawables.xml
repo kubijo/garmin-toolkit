@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<resources>
+  <!-- The shared mark is 24 px; this device's launcher requires 40 px. -->
+  <bitmap id="LauncherIcon" filename="../../../crates/garmin-brand/assets/icon.svg" scaleX="1.6666667" scaleY="1.6666667" scaleRelativeTo="image"/>
+</resources>

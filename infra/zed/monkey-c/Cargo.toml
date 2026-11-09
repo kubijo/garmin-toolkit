@@ -1,0 +1,14 @@
+[package]
+name = "garmin-toolkit-monkey-c-zed"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+zed_extension_api = "=0.7.0"
+
+[workspace]

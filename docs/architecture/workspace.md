@@ -22,10 +22,11 @@ file transfers, network contact, and mutation remain explicit actions. Automatic
 stop on authentication or rate limits until explicit recovery.
 
 HASS targets Linux `aarch64` and `x86_64`; [release evidence](../research/publication-readiness.md) defines qualified
-versions and scope. Mobile, Bluetooth, and new device tuples require separate evidence. The unimplemented Connect IQ
-companion has a source-only, local-build policy. HASS serves application UI and operational health, without publishing
-Garmin Toolkit data as entities, events, recorder entries, or external statistics. Domain publication needs a concrete
-automation use case and reviewed public contract.
+versions and scope. Mobile, Bluetooth, and new device tuples require separate evidence. The Connect IQ telemetry probe
+has a source-only, local-build policy; qualified behavior is recorded in
+[its research](../research/connect-iq-companion.md). HASS serves application UI and operational health, without
+publishing Garmin Toolkit data as entities, events, recorder entries, or external statistics. Domain publication needs a
+concrete automation use case and reviewed public contract.
 
 ## Crate ownership
 

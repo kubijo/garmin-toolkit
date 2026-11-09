@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
+  <iq:application id="f498b9295437474e80c32d978e820516" type="watch-app" name="@Strings.AppName" launcherIcon="@Drawables.LauncherIcon" entry="ProbeApp" minApiLevel="3.1.0">
+    <iq:products>
+      <iq:product id="fenix8solar47mm"/>
+      <iq:product id="edge1050"/>
+    </iq:products>
+    <iq:permissions>
+      <iq:uses-permission id="BluetoothLowEnergy"/>
+      <iq:uses-permission id="Sensor"/>
+    </iq:permissions>
+    <iq:languages>
+      <iq:language>eng</iq:language>
+    </iq:languages>
+    <iq:barrels/>
+  </iq:application>
+</iq:manifest>

@@ -1,0 +1,27 @@
+import '../../infra/just/common.just'
+
+# Explicit local SDK/key tooling and offline frame inspection; never starts a radio or HASS.
+tools +args:
+    #!/usr/bin/env bash
+    cd {{ quote(repository_root) }}
+    exec nix run '{{ flake }}#connect-iq' -- "$@"
+
+# Walk through owner-operated SDK installation, key setup, checks and the first build.
+setup *args:
+    @just --justfile '{{ repository_root }}/justfile' connect-iq::tools setup "$@"
+
+# Rebuild with the SDK and key selected by setup.
+build *args:
+    @just --justfile '{{ repository_root }}/justfile' connect-iq::tools rebuild "$@"
+
+# Run owner-local SDK simulator tests without connecting to a physical device.
+test *args:
+    @just --justfile '{{ repository_root }}/justfile' connect-iq::tools test "$@"
+
+# Open the real probe UI in an owned simulator for interactive inspection.
+preview *args:
+    @just --justfile '{{ repository_root }}/justfile' connect-iq::tools preview "$@"
+
+# Run the bounded Linux peripheral endpoint only for an approved physical experiment.
+host +args:
+    @just --justfile '{{ repository_root }}/justfile' connect-iq::tools host "$@"
