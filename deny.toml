@@ -79,6 +79,8 @@ skip = [
     { crate = "rand_core@0.10.1", reason = "Walkers' Geo dependency and the WebSocket stack use adjacent rand_core releases" },
     { crate = "sha2@0.11.0", reason = "FormatJS and toolkit verification use adjacent SHA-2 releases" },
     { crate = "smithay-client-toolkit@0.19.2", reason = "winit and clipboard use adjacent Wayland client stacks" },
+    { crate = "strum@0.26.3", reason = "Published bluer 0.17.4 requires Strum 0.26 while Ratatui uses 0.28; remove when a compatible published bluer upgrades" },
+    { crate = "strum_macros@0.26.4", reason = "Published bluer 0.17.4 requires Strum's 0.26 derives while Ratatui uses 0.28; remove with the matching Strum exception" },
     { crate = "syn@2.0.119", reason = "platform and SQLx macros use syn 2 while current derives use syn 3" },
     { crate = "synstructure@0.13.2", reason = "Remoc's custom_debug derives use synstructure 0.13; ICU's derives use 0.14" },
     { crate = "thiserror@1.0.69", reason = "the older Wayland client stack still uses thiserror 1" },

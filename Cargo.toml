@@ -16,6 +16,7 @@ members = [
     "crates/garmin-diagnostics",
     "crates/garmin-fit",
     "crates/garmin-fixtures",
+    "crates/garmin-gfdi",
     "crates/garmin-gpx",
     "crates/garmin-i18n",
     "crates/garmin-importer",
@@ -50,12 +51,14 @@ async-trait = "=0.1.92"
 axum = "=0.8.9"
 base64 = "=0.23.1"
 blake3 = "=1.8.7"
+bluer = { version = "=0.17.4", default-features = false, features = ["bluetoothd"] }
 bytemuck = { version = "=1.25.2", features = ["derive"] }
 byte-unit = "=5.2.5"
 bytes = "=1.12.1"
 camino = { version = "=1.2.5", features = ["serde1"] }
 cint = "=0.3.1"
 clap = { version = "=4.6.7", features = ["derive"] }
+cobs = { version = "=0.3.0", default-features = false, features = ["alloc"] }
 crc = "=3.4.0"
 csv = "=1.4.0"
 datapackage = { path = "crates/datapackage" }
@@ -85,6 +88,7 @@ garmin-device = { path = "crates/garmin-device" }
 garmin-diagnostics = { path = "crates/garmin-diagnostics" }
 garmin-fit = { path = "crates/garmin-fit" }
 garmin-fixtures = { path = "crates/garmin-fixtures" }
+garmin-gfdi = { path = "crates/garmin-gfdi" }
 garmin-gpx = { path = "crates/garmin-gpx" }
 garmin-i18n = { path = "crates/garmin-i18n" }
 garmin-importer = { path = "crates/garmin-importer" }
@@ -122,6 +126,7 @@ miette = { git = "https://github.com/zkat/miette", rev = "e853bbf9bc78bbe0b22599
 mtp-rs = "=0.32.0"
 fast-mvt = { version = "=0.6.2", default-features = false, features = ["reader"] }
 buffa = "=0.9.2"
+buffa-build = "=0.9.2"
 geo = { version = "=0.33.1", default-features = false }
 lyon_path = "=1.0.19"
 newtype-uuid = { version = "=1.4.0", features = ["serde", "v4"] }

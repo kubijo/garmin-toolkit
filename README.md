@@ -74,6 +74,22 @@ observed service and download-authorization behavior behind a replaceable adapte
 See the [documentation index](docs/README.md), [development workflow](docs/development.md), and
 [remaining work](docs/plans/README.md). Just lists the available commands.
 
+## Acknowledgements
+
+Thanks to these projects and their contributors:
+
+- [Gadgetbridge](https://gadgetbridge.org/): Garmin Bluetooth protocol research, Protobuf schemas, and reference
+  implementation. See our [source and adaptation notes](crates/garmin-gfdi/README.md#source-and-attribution).
+- [mtp-rs](https://github.com/vdavid/mtp-rs): USB MTP device access.
+- [RustyFIT](https://github.com/muktihari/rustyfit): FIT decoding and encoding.
+- [egui](https://github.com/emilk/egui): the shared desktop and browser UI.
+- [Buffa](https://github.com/anthropics/buffa): generated Protobuf types and codecs.
+- [Carbon Design System](https://github.com/carbon-design-system/carbon),
+  [Phosphor Icons](https://github.com/phosphor-icons/core), and
+  [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic): colors, icons, and fonts.
+- [trackeR](https://cran.r-project.org/package=trackeR), [DogWalkGPS](https://github.com/swiftsam/DogWalkGPS), and
+  [HikeAlong](https://hikealongtours.com/data/): demo activity recordings.
+
 ## License
 
 Licensed under [AGPL-3.0-or-later](LICENSE-AGPL). Earlier grants and third-party attributions remain in

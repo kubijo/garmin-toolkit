@@ -1,0 +1,10 @@
+// FileAccess-only projection of Gadgetbridge gdi_smart_proto.proto.
+// Preserve package, field number, and type; other services are intentionally absent.
+syntax = "proto2";
+package garmin_vivomovehr;
+
+import "garmin/gdi_file_access.proto";
+
+message Smart {
+  optional GDI.Proto.FileAccess.Service file_access_service = 43;
+}

@@ -28,6 +28,7 @@ garmin-color = 90
 garmin-diagnostics = 90
 garmin-logging = 90
 garmin-service-api = 95
+garmin-gfdi = 95
 garmin-i18n = 95
 garmin-model = 95
 garmin-route = 95

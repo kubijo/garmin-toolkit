@@ -14,6 +14,15 @@ cache-clean CACHE MODE='dry-run':
 shell:
     just in-shell nix develop {{ flake }}
 
+# Run opt-in native Garmin identity or FileAccess commands; simulations never access Bluetooth.
+gfdi-smoke +args:
+    @just in-shell cargo run -p garmin-device --features gfdi-smoke --example gfdi-smoke -- "$@"
+
+# Exercise the real Linux D-Bus backend against an isolated fake BlueZ service.
+gfdi-smoke-check *args:
+    just in-shell cargo build -p garmin-device --features gfdi-smoke --example gfdi-smoke
+    @just in-shell uv run --frozen --project infra/python python infra/python/gfdi_smoke_acceptance.py "$@"
+
 # Trace a development build without starting an application.
 build-profile target label *options:
     @just in-shell nix develop {{ flake }} --command uv run --frozen --project infra/python python infra/python/build_profile.py "$@"

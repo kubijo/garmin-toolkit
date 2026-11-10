@@ -51,6 +51,17 @@ let
     toml = true;
     yaml = true;
     xml = true;
+    extraFormatters.protobuf = {
+      command = pkgs.writeShellScript "buf-format" ''
+        set -eu
+        for file in "$@"; do
+          ${lib.getExe pkgs.buf} format --write "$file"
+        done
+      '';
+      options = [ ];
+      includes = [ "*.proto" ];
+      cacheInputs = [ ];
+    };
   };
 
   project = nix-tools.lib.configure {
@@ -140,6 +151,11 @@ let
       python.configFile = pythonConfig;
       typescript = true;
       extraProjectCheckers = {
+        protobuf.command = pkgs.writeShellScript "buf-check" ''
+          set -eu
+          ${lib.getExe pkgs.buf} lint
+          ${lib.getExe pkgs.buf} format --diff --exit-code
+        '';
         dirspec-prescriptions.command = pkgs.writeShellScript "check-dirspec-prescriptions" ''
           set -eu
           empty_tree="$(mktemp -d)"

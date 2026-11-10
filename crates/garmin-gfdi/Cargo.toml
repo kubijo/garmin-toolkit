@@ -1,0 +1,25 @@
+[package]
+name = "garmin-gfdi"
+description = "Transport-independent Garmin GFDI wire protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cobs.workspace = true
+crc.workspace = true
+buffa.workspace = true
+flate2.workspace = true
+thiserror.workspace = true
+
+[build-dependencies]
+buffa-build.workspace = true
+
+[dev-dependencies]
+hex.workspace = true

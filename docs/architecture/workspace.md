@@ -45,6 +45,7 @@ automation use case and reviewed public contract.
 | `garmin-device`      | Discovery, manifests, transports, capacity, and file operations     |
 | `garmin-fit`         | FIT decoding, normalization, and course encoding                    |
 | `garmin-fixtures`    | Inert publishable demo and test data                                |
+| `garmin-gfdi`        | Garmin protocol framing, pairing and FileAccess state machines      |
 | `garmin-gpx`         | GPX parsing and writing behind route types                          |
 | `garmin-i18n`        | ICU MessageFormat catalogs                                          |
 | `garmin-importer`    | Provenance-aware FIT, GPX, and avatar import                        |

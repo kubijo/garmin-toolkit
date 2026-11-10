@@ -7,19 +7,18 @@ limit is not automatically scheduled work.
 
 ## Local work
 
-- Implement the source-only Connect IQ companion and local SDK/key tooling described in
-  [the research](../research/connect-iq-companion.md#tooling-to-implement). Compilation and device acceptance require
-  owner-supplied inputs below; Garmin tools and outputs stay outside CI and releases.
+- Connect validated [Bluetooth download artifacts](garmin-bluetooth-downloads.md) to the existing import service after
+  physical qualification. Preserve original bytes and source provenance; reuse import deduplication.
 
 ## Hardware and owner access
 
+- Qualify the [FileAccess download command](../research/bluetooth-adapters.md#fileaccess-download-command), including
+  first pairing, under ADR 0011. Compare downloads with USB/MTP and check inventories, bonds and phone sync.
 - Complete Venu 3S explorer acceptance and establish Edge 850 support for manifest-declared operations. Record the
   device, firmware, host, and adapter; retain host/GVFS defect evidence.
 - Confirm the fēnix raw-MTP upload correction after a usable fresh session. The known `OpenSession` failure and
   successful GVFS map maintenance are separate evidence; see
   [USB limitations](../research/usb-sync.md#existing-adapters).
-- Compile, sideload, and run the [Connect IQ probe](../research/connect-iq-companion.md#probe) once the local tooling,
-  owner-supplied SDK/signing key, and HASS HTTPS endpoint exist. Record phone-present and phone-absent behavior.
 
 The [device matrix](../research/device-capabilities.md) records established operations and their evidence.
 

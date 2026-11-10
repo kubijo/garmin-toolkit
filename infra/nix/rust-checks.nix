@@ -261,10 +261,14 @@ let
     CARGO_PROFILE = "dev";
     CARGO_TARGET_DIR = "target";
     SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-    buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.glib ];
+    buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+      pkgs.glib
+      pkgs.dbus
+    ];
     cargoLock = workspaceSrc + "/Cargo.lock";
     nativeBuildInputs = [
       formatjsCli
+      pkgs.protobuf
     ]
     ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
     strictDeps = true;

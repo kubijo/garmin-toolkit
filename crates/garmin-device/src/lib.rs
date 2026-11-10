@@ -3,6 +3,8 @@
 pub mod attachments;
 mod browser;
 mod domain;
+#[cfg(all(target_os = "linux", feature = "gfdi-smoke"))]
+pub mod gfdi_smoke;
 pub mod manifest;
 mod mass_storage;
 mod mtp;

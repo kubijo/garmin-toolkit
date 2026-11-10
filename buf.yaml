@@ -1,0 +1,30 @@
+version: v2
+modules:
+  - path: crates/garmin-gfdi/proto
+lint:
+  use:
+    - STANDARD
+  disallow_comment_ignores: true
+  # Preserve imported proto2 contracts and the matching Smart envelope projection.
+  ignore_only:
+    DIRECTORY_SAME_PACKAGE:
+      - crates/garmin-gfdi/proto/garmin
+    ENUM_FIRST_VALUE_ZERO:
+      - crates/garmin-gfdi/proto/garmin
+    ENUM_VALUE_PREFIX:
+      - crates/garmin-gfdi/proto/garmin
+    ENUM_ZERO_VALUE_SUFFIX:
+      - crates/garmin-gfdi/proto/garmin
+    FIELD_NOT_REQUIRED:
+      - crates/garmin-gfdi/proto/garmin/gdi_data_types.proto
+    PACKAGE_DIRECTORY_MATCH:
+      - crates/garmin-gfdi/proto/garmin
+      - crates/garmin-gfdi/proto/toolkit_file_access.proto
+    PACKAGE_LOWER_SNAKE_CASE:
+      - crates/garmin-gfdi/proto/garmin
+    PACKAGE_VERSION_SUFFIX:
+      - crates/garmin-gfdi/proto/garmin
+      - crates/garmin-gfdi/proto/toolkit_file_access.proto
+breaking:
+  use:
+    - WIRE

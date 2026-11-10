@@ -438,7 +438,9 @@ let
               pkgs.mkShell (
                 llvmToolsEnv
                 // {
-                  buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.libiconv ];
+                  buildInputs =
+                    lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.libiconv ]
+                    ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.dbus ];
                   packages =
                     tooling.packages
                     ++ galleryTarget.runtimeLibraries
@@ -458,6 +460,8 @@ let
                       nodejs
                       pkgs.esbuild
                       pkgs.pkg-config
+                      pkgs.protobuf
+                      pkgs.buf
                       pkgs.samply
                       pkgs.basedpyright
                       pkgs.uv
