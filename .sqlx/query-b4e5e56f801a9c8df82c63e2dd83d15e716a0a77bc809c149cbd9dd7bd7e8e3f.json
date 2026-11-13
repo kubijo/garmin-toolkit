@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT summary\nFROM connect_cache_summaries\nWHERE user_id = ? AND source_id = ? AND generation = ?\nORDER BY activity_id DESC;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "summary",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "connect_cache_summaries",
+            "name": "summary"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b4e5e56f801a9c8df82c63e2dd83d15e716a0a77bc809c149cbd9dd7bd7e8e3f"
+}

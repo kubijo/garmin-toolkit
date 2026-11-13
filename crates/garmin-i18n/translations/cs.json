@@ -3,6 +3,10 @@
     "source": "Restoring data. Please keep the application open.",
     "translation": "Obnovování dat. Nechte prosím aplikaci otevřenou."
   },
+  "+6xWTLZvm+": {
+    "source": "Dates use the activity’s local time. Filters search the whole cached account.",
+    "translation": "Data se řídí místním časem aktivity. Filtry prohledávají celý účet uložený v mezipaměti."
+  },
   "+8XF1sCZXU": {
     "source": "Walking",
     "translation": "Chůze"
@@ -86,6 +90,10 @@
   "/r6LEP1upO": {
     "source": "Offline for {duration}",
     "translation": "Bez připojení {duration}"
+  },
+  "/uR9dOTKb1": {
+    "source": "Files {completed}/{total} · Downloaded {downloaded} · Already cached {reused} · Unavailable {unavailable} · Remaining {remaining}",
+    "translation": "Soubory {completed}/{total} · Staženo {downloaded} · Již v mezipaměti {reused} · Nedostupné {unavailable} · Zbývá {remaining}"
   },
   "0L2D2d+keZ": {
     "source": "Could not read storage usage: {reason}",
@@ -359,6 +367,10 @@
     "source": "Download GPX",
     "translation": "Stáhnout GPX"
   },
+  "6F6Kbbuj1f": {
+    "source": "Activity type",
+    "translation": "Typ aktivity"
+  },
   "6SLhrE8RhT": {
     "source": "Could not open FIT file",
     "translation": "Soubor FIT se nepodařilo otevřít"
@@ -625,6 +637,10 @@
     "source": "Map components",
     "translation": "Mapové komponenty"
   },
+  "C8LPxYjkdF": {
+    "source": "Reading activity summaries · {count} found",
+    "translation": "Načítání přehledů aktivit · Nalezeno {count}"
+  },
   "C8rGezRtt/": {
     "source": "Restore this backup?",
     "translation": "Obnovit tuto zálohu?"
@@ -750,6 +766,10 @@
     "source": "Pace",
     "translation": "Tempo"
   },
+  "F4gyn3vRX6": {
+    "source": "Clear filters",
+    "translation": "Vymazat filtry"
+  },
   "F5Fq484uH5": {
     "source": "Audiobooks",
     "translation": "Audioknihy"
@@ -761,6 +781,10 @@
   "F7t70XNz2q": {
     "source": "Delete FIT Course",
     "translation": "Smazat trasu FIT Course"
+  },
+  "FLY8bC7e8U": {
+    "source": "Fuzzy search across all cached names, descriptions, activity types, dates and IDs.",
+    "translation": "Přibližné hledání ve všech uložených názvech, popisech, typech aktivit, datech a ID."
   },
   "FM9j7Zvzf8": {
     "source": "The file may contain the device ID, hardware, software, and installed maps.",
@@ -1022,6 +1046,10 @@
     "source": "Scanning selected files",
     "translation": "Prohledávání vybraných souborů"
   },
+  "Ke8H8uuJMo": {
+    "source": "Caching original FIT files",
+    "translation": "Ukládání originálních souborů FIT do mezipaměti"
+  },
   "KiuFRboc5o": {
     "source": "FIT import complete",
     "translation": "Import souboru FIT dokončen"
@@ -1186,6 +1214,10 @@
     "source": "No saved routes yet.",
     "translation": "Zatím nejsou uloženy žádné trasy."
   },
+  "Okb++Kp6sS": {
+    "source": "From date",
+    "translation": "Od data"
+  },
   "OluyIIBMLd": {
     "source": "recover/clear",
     "translation": "obnovit/vymazat"
@@ -1322,6 +1354,10 @@
     "source": "Forward",
     "translation": "Vpřed"
   },
+  "RYZEN6aKDj": {
+    "source": "Import status",
+    "translation": "Stav importu"
+  },
   "RagBhnuhGj": {
     "source": "Route action failed",
     "translation": "Operace s trasou se nezdařila"
@@ -1434,6 +1470,10 @@
     "source": "Move",
     "translation": "Přesunout"
   },
+  "UMpae1+YeY": {
+    "source": "Not yet imported",
+    "translation": "Dosud neimportované"
+  },
   "UQWuJy6zQS": {
     "source": "history",
     "translation": "historie"
@@ -1537,6 +1577,10 @@
   "WUV28A6Pf2": {
     "source": "Saving…",
     "translation": "Ukládání…"
+  },
+  "WfwGedrLl6": {
+    "source": "Choose date for {field}",
+    "translation": "Vybrat datum pro {field}"
   },
   "WgdDr3iOTL": {
     "source": "Recover finishes it. Clear requires proof that the device is updated or untouched.",
@@ -1669,6 +1713,10 @@
   "ZIstZxydku": {
     "source": "Page {page}",
     "translation": "Strana {page}"
+  },
+  "ZM3JL48pbg": {
+    "source": "All activity types",
+    "translation": "Všechny typy aktivit"
   },
   "ZsWBTFFfZ3": {
     "source": "Previous outcomes",
@@ -1834,6 +1882,10 @@
     "source": "Device operation interrupted",
     "translation": "Operace se zařízením přerušena"
   },
+  "dp6khqiQ0r": {
+    "source": "Downloading {name}",
+    "translation": "Stahování: {name}"
+  },
   "e5iRgzQaaC": {
     "source": "Resetting an unresponsive Garmin link…",
     "translation": "Resetování nereagujícího spojení Garmin…"
@@ -1841,6 +1893,10 @@
   "e5vZGbYriN": {
     "source": "The selected files and folders will be permanently removed from the device.",
     "translation": "Vybrané soubory a složky budou ze zařízení trvale odebrány."
+  },
+  "e8OWKM9Fo9": {
+    "source": "Use at most 256 characters in the search",
+    "translation": "Hledaný text může mít nejvýše 256 znaků"
   },
   "e9q3Xftjm/": {
     "source": "Reading device storage…",
@@ -1873,6 +1929,10 @@
   "esYCo9SySK": {
     "source": "Could not verify Garmin Connect",
     "translation": "Garmin Connect se nepodařilo ověřit"
+  },
+  "etJngC5ZjC": {
+    "source": "Cached original FIT files: {downloaded}/{total} · Unavailable: {unavailable}",
+    "translation": "Originální soubory FIT v mezipaměti: {downloaded}/{total} · Nedostupné: {unavailable}"
   },
   "eyx5ByCxF3": {
     "source": "Routes",
@@ -2042,6 +2102,10 @@
     "source": "This host retained an interrupted transaction. Recover it before making more changes.",
     "translation": "Tento počítač zachoval přerušenou transakci. Před dalšími změnami ji obnovte."
   },
+  "j+3gzOSAI5": {
+    "source": "Activities {first}–{last} of {total}",
+    "translation": "Aktivity {first}–{last} z {total}"
+  },
   "j+tl+1QxN9": {
     "source": "Enter, Esc, q, or mouse",
     "translation": "Enter, Esc, q nebo myš"
@@ -2065,6 +2129,10 @@
   "jUsy+KTu3J": {
     "source": "Import GPX",
     "translation": "Importovat GPX"
+  },
+  "jXLO+Na5UQ": {
+    "source": "Through date",
+    "translation": "Do data"
   },
   "ja+73nEtzy": {
     "source": "Importing the FIT file…",
@@ -2142,10 +2210,6 @@
     "source": "Folder name",
     "translation": "Název složky"
   },
-  "lRwCtdpZya": {
-    "source": "Contacting Garmin Connect…",
-    "translation": "Připojování ke Garmin Connect…"
-  },
   "lVXCowRd/a": {
     "source": "Transferring selected items…",
     "translation": "Přenášení vybraných položek…"
@@ -2177,6 +2241,10 @@
   "mCjAld2nwy": {
     "source": "Files on {device}",
     "translation": "Soubory v zařízení {device}"
+  },
+  "mEb+YLtxVl": {
+    "source": "Pages read: {pages}",
+    "translation": "Načtené stránky: {pages}"
   },
   "mSVZY9IBnl": {
     "source": "Review partial cleanup",
@@ -2235,13 +2303,13 @@
     "source": "Esc or Ctrl-C",
     "translation": "Esc nebo Ctrl-C"
   },
-  "nsvZFry2b7": {
-    "source": "Activities {first}–{last}",
-    "translation": "Aktivity {first}–{last}"
-  },
   "o/rl2aAxOO": {
     "source": "Route {route}",
     "translation": "Trasa {route}"
+  },
+  "o4R1/e86xl": {
+    "source": "Connecting to Garmin Connect…",
+    "translation": "Připojování ke Garmin Connect…"
   },
   "o5yKEpubE5": {
     "source": "Download to this device",
@@ -2628,6 +2696,10 @@
     "source": "Review changes",
     "translation": "Zkontrolovat změny"
   },
+  "wTo1unjcV7": {
+    "source": "Apply filters",
+    "translation": "Použít filtry"
+  },
   "wbVfKm8x4q": {
     "source": "Refresh catalog",
     "translation": "Obnovit katalog"
@@ -2715,6 +2787,10 @@
   "yfTF2/Sg5E": {
     "source": "The device reported invalid storage totals",
     "translation": "Zařízení nahlásilo neplatné údaje o kapacitě úložiště"
+  },
+  "yfl9jwEX6c": {
+    "source": "Enter dates as YYYY-MM-DD, with the from date on or before the through date",
+    "translation": "Zadejte data ve formátu RRRR-MM-DD. Počáteční datum nesmí být po koncovém datu."
   },
   "yn5Y7+xW28": {
     "source": "A GPX file can contain multiple tracks, segments, or routes. Choose one path to preview and save.",

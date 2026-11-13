@@ -16,6 +16,9 @@ use crate::{
 const FIT_LIMIT: ByteCount = ByteCount::from_mebibytes(64);
 const PREVIEW_LIMIT: ByteCount = ByteCount::from_mebibytes(8);
 
+mod cache;
+mod search;
+
 impl From<Error> for garmin_model::garmin_connect::ActivityFailure {
     fn from(error: Error) -> Self {
         use garmin_connect::Error as ConnectError;
@@ -46,7 +49,7 @@ impl From<Error> for garmin_model::garmin_connect::ActivityFailure {
 }
 
 impl Application {
-    /// Browses or previews cloud activities; only an explicit import persists a FIT.
+    /// Browses or previews cached cloud data; only explicit imports create activity observations.
     /// # Errors
     /// Returns redacted transport, archive validation, normalization or storage failures.
     pub async fn garmin_connect_activity(
@@ -54,38 +57,50 @@ impl Application {
         user: UserContext,
         request: ActivityRequest,
     ) -> Result<ConnectActivityResult, Error> {
+        self.garmin_connect_activity_with_progress(user, request, |_| {})
+            .await
+    }
+
+    /// Performs an activity request while publishing coalescible cache-load progress.
+    /// # Errors
+    /// Returns the same bounded failures as [`Self::garmin_connect_activity`].
+    pub async fn garmin_connect_activity_with_progress(
+        &self,
+        user: UserContext,
+        request: ActivityRequest,
+        progress: impl Fn(garmin_model::garmin_connect::LoadProgress) + Send + Sync,
+    ) -> Result<ConnectActivityResult, Error> {
         self.garmin_connect_configured(user).await?;
         let key = self
             .storage
             .garmin_connect_key(user.user_id())
             .await?
             .ok_or(Error::GarminConnectKeyMissing)?;
-        let client = garmin_connect::Client::default();
+        let lock = self
+            .connect_cache_locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(user.user_id())
+            .or_default()
+            .clone();
+        if matches!(
+            request,
+            ActivityRequest::Load { .. } | ActivityRequest::List { .. }
+        ) {
+            progress(garmin_model::garmin_connect::LoadProgress::Waiting);
+        }
+        let _guard = lock.lock().await;
         match request {
-            ActivityRequest::List { start } => {
-                let (account, mut activities) = client.activities(&key, start).await?;
-                let source = connect_source_id(user, &account)?;
-                let imported = self
-                    .storage
-                    .imported_source_identities(
-                        user.user_id(),
-                        SourceId::from_u128(source.as_u128()),
-                    )
-                    .await?;
-                let imported = imported
-                    .into_iter()
-                    .collect::<std::collections::HashSet<_>>();
-                for activity in &mut activities {
-                    activity.imported = imported.contains(&activity.id.to_string());
-                }
-                Ok(ConnectActivityResult::State(ActivityResponse::Page {
-                    start,
-                    has_more: activities.len() == 20,
-                    activities,
-                }))
+            ActivityRequest::List { start, filters } => {
+                self.cached_connect_page(user, &key, start, filters, false, &progress)
+                    .await
+            }
+            ActivityRequest::Load { start, filters } => {
+                self.cached_connect_page(user, &key, start, filters, true, &progress)
+                    .await
             }
             ActivityRequest::Preview { id } => {
-                let (download, details) = client.preview(&key, id).await?;
+                let (download, details) = self.cached_connect_download(user, &key, id).await?;
                 let (mut preview, operation) = prepare_preview(user, id, &download)?;
                 preview.details = details;
                 preview.imported = self
@@ -95,7 +110,7 @@ impl Application {
                 bounded_preview(preview)
             }
             ActivityRequest::Prepare { id } => {
-                let download = client.download(&key, id).await?;
+                let (download, _) = self.cached_connect_download(user, &key, id).await?;
                 let (preview, operation) = prepare_preview(user, id, &download)?;
                 let imported = self
                     .storage
@@ -104,7 +119,7 @@ impl Application {
                 Ok(prepared(preview, imported))
             }
             ActivityRequest::Import { id, digest } => {
-                let download = client.download(&key, id).await?;
+                let (download, _) = self.cached_connect_download(user, &key, id).await?;
                 self.import_reviewed_connect_download(user, id, &digest, download)
                     .await
                     .map(ConnectActivityResult::State)

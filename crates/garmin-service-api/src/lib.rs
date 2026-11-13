@@ -506,6 +506,7 @@ mod rpc {
             &self,
             user_id: UserId,
             request: garmin_model::garmin_connect::ActivityRequest,
+            progress: Option<rch::watch::Sender<garmin_model::garmin_connect::LoadProgress>>,
         ) -> Result<
             Result<crate::ConnectActivityResult, garmin_model::garmin_connect::ActivityFailure>,
             rtc::CallError,

@@ -44,6 +44,7 @@ garmin-route.workspace = true
 garmin-storage.workspace = true
 jiff.workspace = true
 thiserror.workspace = true
+strsim.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tracing.workspace = true

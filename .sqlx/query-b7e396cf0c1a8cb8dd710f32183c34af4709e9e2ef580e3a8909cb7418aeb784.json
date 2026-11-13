@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE\nFROM connect_cache_originals\nWHERE user_id = ? AND (source_id != ? OR activity_id NOT IN (\n    SELECT activity_id\n    FROM connect_cache_summaries\n    WHERE user_id = ? AND source_id = ? AND generation = ?\n));\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "b7e396cf0c1a8cb8dd710f32183c34af4709e9e2ef580e3a8909cb7418aeb784"
+}

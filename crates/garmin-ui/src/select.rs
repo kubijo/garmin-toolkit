@@ -23,17 +23,31 @@ const CHOICE_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
 pub struct Choice<'a> {
     label: &'a str,
     image: Option<images::Image>,
+    icon: Option<icons::Icon>,
 }
 
 impl<'a> Choice<'a> {
     #[must_use]
     pub const fn new(label: &'a str) -> Self {
-        Self { label, image: None }
+        Self {
+            label,
+            image: None,
+            icon: None,
+        }
     }
 
     #[must_use]
     pub const fn image(mut self, image: images::Image) -> Self {
         self.image = Some(image);
+        self.icon = None;
+        self
+    }
+
+    /// Shows a monochrome icon in both the selected value and its menu row.
+    #[must_use]
+    pub const fn icon(mut self, icon: icons::Icon) -> Self {
+        self.icon = Some(icon);
+        self.image = None;
         self
     }
 }
@@ -270,6 +284,15 @@ fn paint_choice(ui: &Ui, rect: egui::Rect, choice: Choice<'_>, color: egui::Colo
             image_size,
         );
         image.paint_at(ui, image_rect);
+        label_x += IMAGE_SLOT_WIDTH + IMAGE_GAP;
+    } else if let Some(icon) = choice.icon {
+        icon.mask().tint(color).paint_at(
+            ui,
+            egui::Rect::from_center_size(
+                egui::pos2(label_x + IMAGE_SLOT_WIDTH / 2.0, rect.center().y),
+                egui::Vec2::splat(IMAGE_HEIGHT),
+            ),
+        );
         label_x += IMAGE_SLOT_WIDTH + IMAGE_GAP;
     }
     ui.painter().text(

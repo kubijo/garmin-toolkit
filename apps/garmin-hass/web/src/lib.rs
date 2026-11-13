@@ -1711,7 +1711,7 @@ fn show_profile_settings(
     profile: profile::ProfileProps<'_>,
     cloud_browser: bool,
 ) -> Option<profile_settings::Action> {
-    let (checking, facts, activities, activities_busy, disabled, batch) = {
+    let (checking, facts, activities, activities_busy, disabled, batch, load_progress) = {
         let state = shared.borrow();
         (
             state.garmin_connect_checking == Some(snapshot.user.id()),
@@ -1724,6 +1724,11 @@ fn show_profile_settings(
                 .as_ref()
                 .filter(|(owner, _)| *owner == snapshot.user.id())
                 .map(|(_, batch)| batch.clone()),
+            state
+                .connect_load_progress
+                .as_ref()
+                .filter(|(owner, _)| *owner == snapshot.user.id())
+                .map(|(_, progress)| progress.clone()),
         )
     };
     let show: fn(&mut Ui, &profile_settings::Props<'_>) -> Option<profile_settings::Action> =
@@ -1744,11 +1749,13 @@ fn show_profile_settings(
             disabled,
             garmin_connect: profile_settings::GarminConnectProps {
                 now: jiff::Timestamp::now(),
+                today: jiff::Zoned::now().date(),
                 configured: snapshot.garmin_connect_configured,
                 checking,
                 facts: facts.as_ref(),
                 activities: activities.as_ref(),
                 activities_busy,
+                load_progress: load_progress.as_ref(),
                 batch: batch.as_ref(),
             },
         },
@@ -1786,6 +1793,7 @@ struct State {
     connect_preview: Option<(UserId, garmin_service_api::ConnectFitPreview)>,
     close_connect_preview: bool,
     connect_activity_loading: Option<UserId>,
+    connect_load_progress: Option<(UserId, garmin_model::garmin_connect::LoadProgress)>,
     connect_profiles_stale: bool,
     page_import: Option<(UserId, profile_settings::connect_activities::Batch)>,
     connect_import_receipt: Option<(UserId, garmin_model::garmin_connect::ActivityResponse)>,
@@ -2827,6 +2835,7 @@ fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     state.connect_import_receipt = None;
     state.connect_preview = None;
     state.connect_activity_loading = None;
+    state.connect_load_progress = None;
     state.connect_profiles_stale = false;
     state.page_import = None;
     state.close_connect_preview = true;
@@ -3028,6 +3037,45 @@ fn start_page_import(
     }
 }
 
+async fn connect_activity_with_progress(
+    client: &ApplicationServiceClient,
+    shared: &Rc<RefCell<State>>,
+    context: &eframe::egui::Context,
+    user_id: UserId,
+    request: garmin_model::garmin_connect::ActivityRequest,
+    generation: u64,
+) -> Result<garmin_service_api::ConnectActivityResult, garmin_model::garmin_connect::ActivityFailure>
+{
+    let (progress, mut updates) =
+        rch::watch::channel(garmin_model::garmin_connect::LoadProgress::Waiting);
+    let call = client.garmin_connect_activity(user_id, request, Some(progress));
+    let receive = async {
+        while updates.changed().await.is_ok() {
+            let Ok(progress) = updates.borrow_and_update().map(|value| value.clone()) else {
+                break;
+            };
+            let mut state = shared.borrow_mut();
+            if state.connection_generation != generation
+                || state.connect_activity_loading != Some(user_id)
+            {
+                break;
+            }
+            state.connect_load_progress = Some((user_id, progress));
+            context.request_repaint();
+        }
+    };
+    futures_util::pin_mut!(call, receive);
+    match future::select(call, receive).await {
+        future::Either::Left((result, _)) => result,
+        future::Either::Right(((), call)) => call.await,
+    }
+    .map_err(|error| garmin_model::garmin_connect::ActivityFailure {
+        message: ConnectError::call(error).to_string(),
+        kind: garmin_model::garmin_connect::ActivityFailureKind::Session,
+    })
+    .and_then(std::convert::identity)
+}
+
 fn spawn_connect_activity(
     shared: Rc<RefCell<State>>,
     context: eframe::egui::Context,
@@ -3043,17 +3091,22 @@ fn spawn_connect_activity(
     }
     shared.borrow_mut().preferences_saving = true;
     shared.borrow_mut().connect_activity_loading = Some(user_id);
-    connect_state::begin_request(&mut shared.borrow_mut().page_import, &request);
+    shared.borrow_mut().connect_load_progress = None;
+    {
+        let mut state = shared.borrow_mut();
+        let State {
+            page_import,
+            connect_activities,
+            ..
+        } = &mut *state;
+        connect_state::begin_request(page_import, &request, connect_activities.get(&user_id));
+    }
     let generation = shared.borrow().connection_generation;
     spawn_local(async move {
-        let result = client
-            .garmin_connect_activity(user_id, request)
-            .await
-            .map_err(|error| garmin_model::garmin_connect::ActivityFailure {
-                message: ConnectError::call(error).to_string(),
-                kind: garmin_model::garmin_connect::ActivityFailureKind::Session,
-            })
-            .and_then(std::convert::identity);
+        let result = connect_activity_with_progress(
+            &client, &shared, &context, user_id, request, generation,
+        )
+        .await;
         let refresh_profiles = shared.borrow().connect_profiles_stale
             || matches!(
                 &result,
@@ -3091,6 +3144,7 @@ fn spawn_connect_activity(
             state.notice = None;
         }
         state.connect_activity_loading = None;
+        state.connect_load_progress = None;
         let State {
             page_import,
             connect_activities,

@@ -980,6 +980,7 @@ impl ApplicationService for Host {
         &self,
         user_id: garmin_model::identity::UserId,
         request: garmin_model::garmin_connect::ActivityRequest,
+        progress: Option<rch::watch::Sender<garmin_model::garmin_connect::LoadProgress>>,
     ) -> Result<
         Result<
             garmin_service_api::ConnectActivityResult,
@@ -990,7 +991,15 @@ impl ApplicationService for Host {
         Ok(self
             .application()
             .await?
-            .garmin_connect_activity(UserContext::new(user_id), request)
+            .garmin_connect_activity_with_progress(
+                UserContext::new(user_id),
+                request,
+                move |update| {
+                    if let Some(progress) = &progress {
+                        progress.send_replace(update);
+                    }
+                },
+            )
             .await
             .map_err(garmin_model::garmin_connect::ActivityFailure::from))
     }

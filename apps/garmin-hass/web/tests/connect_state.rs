@@ -20,6 +20,38 @@ fn row(id: i64) -> RemoteActivity {
     }
 }
 
+fn cached_pages(
+    owner: UserId,
+    other: UserId,
+) -> std::collections::HashMap<UserId, ActivityResponse> {
+    std::collections::HashMap::from([
+        (
+            owner,
+            ActivityResponse::Page {
+                start: 0,
+                filters: garmin_model::garmin_connect::ActivityFilters::default(),
+                total: 2,
+                cache: garmin_model::garmin_connect::CacheStatus::default(),
+                warning: None,
+                has_more: false,
+                activities: vec![row(1), row(2)],
+            },
+        ),
+        (
+            other,
+            ActivityResponse::Page {
+                start: 0,
+                filters: garmin_model::garmin_connect::ActivityFilters::default(),
+                total: 1,
+                cache: garmin_model::garmin_connect::CacheStatus::default(),
+                warning: None,
+                has_more: false,
+                activities: vec![row(1)],
+            },
+        ),
+    ])
+}
+
 #[test]
 fn browser_routes_import_receipts_and_next_requests_to_the_original_profile() {
     let owner = UserId::from_u128(1);
@@ -30,24 +62,7 @@ fn browser_routes_import_receipts_and_next_requests_to_the_original_profile() {
         Some(ActivityRequest::Prepare { id: 1 })
     );
     let mut batch = Some((owner, batch));
-    let mut pages = std::collections::HashMap::from([
-        (
-            owner,
-            ActivityResponse::Page {
-                start: 0,
-                has_more: false,
-                activities: vec![row(1), row(2)],
-            },
-        ),
-        (
-            other,
-            ActivityResponse::Page {
-                start: 0,
-                has_more: false,
-                activities: vec![row(1)],
-            },
-        ),
-    ]);
+    let mut pages = cached_pages(owner, other);
     let result = connect_state::complete(
         owner,
         &mut batch,
@@ -97,7 +112,26 @@ fn browser_routes_import_receipts_and_next_requests_to_the_original_profile() {
     );
     assert!(matches!(result, connect_state::Completion::Batch(None)));
     assert_eq!(batch.as_ref().unwrap().1.counts.imported, 1);
-    connect_state::begin_request(&mut batch, &ActivityRequest::List { start: 20 });
+    connect_state::begin_request(
+        &mut batch,
+        &ActivityRequest::List {
+            start: 0,
+            filters: garmin_model::garmin_connect::ActivityFilters::default(),
+        },
+        pages.get(&owner),
+    );
+    assert!(
+        batch.is_some(),
+        "refilling the same cached query retains its import summary"
+    );
+    connect_state::begin_request(
+        &mut batch,
+        &ActivityRequest::List {
+            start: 20,
+            filters: garmin_model::garmin_connect::ActivityFilters::default(),
+        },
+        None,
+    );
     assert!(batch.is_none());
 }
 

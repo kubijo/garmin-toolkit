@@ -37,6 +37,42 @@ pub struct RemoteActivity {
     pub duration_seconds: Option<f64>,
 }
 
+/// Searchable cloud metadata, independent of imported activity observations.
+#[garmin_macros::portable]
+pub struct CachedActivity {
+    pub activity: RemoteActivity,
+    pub description: Option<String>,
+    pub activity_type: Option<String>,
+    pub started_local: Option<String>,
+}
+
+/// Download-cache coverage for the whole account, including unavailable originals.
+#[garmin_macros::portable(copy, default, eq)]
+pub struct CacheStatus {
+    pub total: usize,
+    pub downloaded: usize,
+    pub unavailable: usize,
+}
+
+/// Live progress for one explicit account-cache load. Totals are unknown until indexing completes.
+#[garmin_macros::portable(eq, default)]
+pub enum LoadProgress {
+    #[default]
+    Waiting,
+    Connecting,
+    Indexing {
+        discovered: usize,
+        pages: usize,
+    },
+    Downloading {
+        total: usize,
+        downloaded: usize,
+        reused: usize,
+        unavailable: usize,
+        current: Option<String>,
+    },
+}
+
 /// Whether a failure concerns one activity or the shared connection.
 #[garmin_macros::portable(eq)]
 pub enum ActivityFailureKind {
@@ -61,10 +97,65 @@ impl ActivityFailure {
 /// Explicit, profile-scoped cloud activity operations.
 #[garmin_macros::portable(eq)]
 pub enum ActivityRequest {
-    List { start: u32 },
-    Preview { id: i64 },
-    Prepare { id: i64 },
-    Import { id: i64, digest: String },
+    Load {
+        start: u32,
+        filters: ActivityFilters,
+    },
+    List {
+        start: u32,
+        filters: ActivityFilters,
+    },
+    Preview {
+        id: i64,
+    },
+    Prepare {
+        id: i64,
+    },
+    Import {
+        id: i64,
+        digest: String,
+    },
+}
+
+/// Filters evaluated against the complete locally cached account.
+#[garmin_macros::portable(eq, default)]
+pub struct ActivityFilters {
+    pub search: String,
+    pub activity_type: Option<ActivityType>,
+    pub from: Option<jiff::civil::Date>,
+    pub through: Option<jiff::civil::Date>,
+    pub not_imported: bool,
+}
+
+impl ActivityFilters {
+    #[must_use]
+    pub fn valid(&self) -> bool {
+        self.search.chars().count() <= 256
+            && !matches!((self.from, self.through), (Some(from), Some(through)) if from > through)
+    }
+}
+
+/// Parent activity keys accepted by the official activity search endpoint.
+#[garmin_macros::portable(eq)]
+pub enum ActivityType {
+    Cycling,
+    Running,
+    Swimming,
+    Walking,
+    Hiking,
+}
+
+impl ActivityType {
+    #[must_use]
+    pub const fn key(&self) -> &'static str {
+        match self {
+            Self::Cycling => "cycling",
+            Self::Running => "running",
+            Self::Swimming => "swimming",
+            Self::Walking => "walking",
+            Self::Hiking => "hiking",
+        }
+    }
 }
 
 /// One bounded page or one completed import.
@@ -72,6 +163,10 @@ pub enum ActivityRequest {
 pub enum ActivityResponse {
     Page {
         start: u32,
+        filters: ActivityFilters,
+        total: usize,
+        cache: CacheStatus,
+        warning: Option<String>,
         activities: Vec<RemoteActivity>,
         has_more: bool,
     },
@@ -147,6 +242,10 @@ mod tests {
     fn import_receipt_preserves_page_and_marks_only_the_matching_row() {
         let mut page = ActivityResponse::Page {
             start: 20,
+            filters: ActivityFilters::default(),
+            total: 2,
+            cache: CacheStatus::default(),
+            warning: None,
             activities: [42, 43]
                 .map(|id| RemoteActivity {
                     id,
@@ -170,6 +269,7 @@ mod tests {
                 start,
                 activities,
                 has_more,
+                ..
             } = &page
             else {
                 panic!("lost browser page")
@@ -179,6 +279,65 @@ mod tests {
             assert!(activities[0].imported);
             assert!(!activities[1].imported);
         }
+    }
+
+    #[test]
+    fn import_receipt_marks_filtered_rows_for_account_cache_refill() {
+        let filters = ActivityFilters {
+            not_imported: true,
+            from: Some("2026-11-01".parse().unwrap()),
+            ..ActivityFilters::default()
+        };
+        let request = ActivityRequest::List {
+            start: 20,
+            filters: filters.clone(),
+        };
+        let bytes = postcard::to_allocvec(&request).unwrap();
+        assert_eq!(
+            postcard::from_bytes::<ActivityRequest>(&bytes).unwrap(),
+            request
+        );
+        let mut page = ActivityResponse::Page {
+            start: 20,
+            filters: filters.clone(),
+            total: 20,
+            cache: CacheStatus::default(),
+            warning: None,
+            has_more: true,
+            activities: vec![RemoteActivity {
+                id: 42,
+                imported: false,
+                sport: None,
+                name: "Ride".into(),
+                started_at: None,
+                distance_metres: None,
+                duration_seconds: None,
+            }],
+        };
+        page.merge(ActivityResponse::Imported {
+            id: 42,
+            activities: 1,
+            duplicate: false,
+        });
+        let ActivityResponse::Page {
+            start,
+            filters: applied,
+            total,
+            activities,
+            has_more,
+            ..
+        } = page
+        else {
+            panic!("import receipt replaced the page")
+        };
+        assert_eq!(start, 20);
+        assert_eq!(applied, filters);
+        assert_eq!(total, 20);
+        assert!(has_more);
+        assert!(
+            activities[0].imported,
+            "the browser requeries the complete cache after import"
+        );
     }
 
     #[test]

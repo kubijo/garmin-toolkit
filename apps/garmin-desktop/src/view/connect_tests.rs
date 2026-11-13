@@ -4,6 +4,39 @@ use garmin_model::garmin_connect::{ActivityRequest, ActivityResponse, RemoteActi
 use garmin_service_api::ConnectActivityResult;
 
 #[test]
+fn cache_progress_is_owner_scoped_and_cleared_on_completion()
+-> Result<(), Box<dyn std::error::Error>> {
+    use garmin_model::garmin_connect::{ActivityFailure, ActivityFailureKind, LoadProgress};
+    let (_directory, mut desktop) = super::file_window_tests::desktop()?;
+    let user = desktop.profiles[0].user.id();
+    desktop.connect_activity_loading = Some(user);
+    desktop.connect_progress(UserId::new_v4(), LoadProgress::Connecting);
+    assert!(desktop.connect_load_progress.is_none());
+    desktop.connect_progress(
+        user,
+        LoadProgress::Indexing {
+            discovered: 20,
+            pages: 1,
+        },
+    );
+    assert!(desktop.connect_load_progress.is_some());
+    desktop.connect_activity_checked(
+        user,
+        Err(ActivityFailure {
+            message: "Offline".into(),
+            kind: ActivityFailureKind::Session,
+        }),
+    );
+    assert!(desktop.connect_load_progress.is_none());
+    desktop.connect_progress(user, LoadProgress::Connecting);
+    assert!(
+        desktop.connect_load_progress.is_none(),
+        "late updates must be ignored"
+    );
+    Ok(())
+}
+
+#[test]
 fn page_import_updates_the_cached_page_and_list_requests_clear_its_summary()
 -> Result<(), Box<dyn std::error::Error>> {
     let (_directory, mut desktop) = super::file_window_tests::desktop()?;
@@ -12,7 +45,11 @@ fn page_import_updates_the_cached_page_and_list_requests_clear_its_summary()
         user,
         ActivityResponse::Page {
             start: 0,
-            has_more: true,
+            filters: garmin_model::garmin_connect::ActivityFilters::default(),
+            total: 2,
+            cache: garmin_model::garmin_connect::CacheStatus::default(),
+            warning: None,
+            has_more: false,
             activities: (1..=2)
                 .map(|id| RemoteActivity {
                     id,
@@ -77,7 +114,10 @@ fn page_import_updates_the_cached_page_and_list_requests_clear_its_summary()
     assert!(desktop.page_import.as_ref().expect("summary").1.cancelled());
     desktop.handle_profile_settings_action(
         0,
-        profile_settings::Action::GarminConnectActivity(ActivityRequest::List { start: 20 }),
+        profile_settings::Action::GarminConnectActivity(ActivityRequest::List {
+            start: 20,
+            filters: garmin_model::garmin_connect::ActivityFilters::default(),
+        }),
     );
     assert!(
         desktop.page_import.is_none(),

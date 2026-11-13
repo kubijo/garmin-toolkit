@@ -15,7 +15,7 @@ use thiserror::Error;
 
 include!(concat!(env!("OUT_DIR"), "/modules.rs"));
 mod activities;
-pub use activities::Download;
+pub use activities::{Download, Session};
 
 const ORIGIN: &str = "https://personal.connectapi.garmin.com";
 const TOKEN_PATH: &str = "/personalapitoken-service/personal-api/personal-api-key/token";

@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    source_id,\n    generation,\n    facts\nFROM connect_cache_accounts\nWHERE user_id = ? AND credential_hash = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "connect_cache_accounts",
+            "name": "source_id"
+          }
+        }
+      },
+      {
+        "name": "generation",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "connect_cache_accounts",
+            "name": "generation"
+          }
+        }
+      },
+      {
+        "name": "facts",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "connect_cache_accounts",
+            "name": "facts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b3e2938d67436bf8722beb81c5c5cb6637dfc470586d5edeafdb1c6493f50b3b"
+}
