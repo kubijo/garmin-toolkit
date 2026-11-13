@@ -22,8 +22,12 @@ pub fn take_import_receipt(
     receipt.take().filter(|_| !stale)
 }
 
-pub fn begin_request(batch: &mut Option<(UserId, Batch)>, request: &ActivityRequest) {
-    if matches!(request, ActivityRequest::List { .. }) {
+pub fn begin_request(
+    batch: &mut Option<(UserId, Batch)>,
+    request: &ActivityRequest,
+    page: Option<&ActivityResponse>,
+) {
+    if garmin_ui::profile_settings::connect_activities::clears_batch(request, page) {
         *batch = None;
     }
 }

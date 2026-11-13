@@ -1,6 +1,8 @@
 use garmin_model::{
     artifact::ByteCount,
-    garmin_connect::{AccountFacts, ActivityDetails, PersonalApiKey, RemoteActivity},
+    garmin_connect::{
+        AccountFacts, ActivityDetails, CachedActivity, PersonalApiKey, RemoteActivity,
+    },
 };
 
 use crate::{Client, Error, fact, limit_bytes, operation_error};
@@ -17,22 +19,31 @@ pub struct Download {
     pub archive: Vec<u8>,
 }
 
-impl Client {
-    /// Fetches one page, newest first, without importing or modifying cloud data.
+/// Reuses one authenticated account while enumerating and downloading its originals.
+pub struct Session {
+    account: AccountFacts,
+    client: crate::api::HttpClient,
+}
+
+impl Session {
+    #[must_use]
+    pub const fn account(&self) -> &AccountFacts {
+        &self.account
+    }
+
+    /// Fetches a single unfiltered page in chronological order, newest first.
     /// # Errors
-    /// Rejects invalid pagination, service failures and malformed summaries.
-    pub async fn activities(
-        &self,
-        key: &PersonalApiKey,
-        start: u32,
-    ) -> Result<(AccountFacts, Vec<RemoteActivity>), Error> {
+    /// Rejects invalid offsets, malformed IDs and oversized metadata.
+    pub async fn activities(&self, start: u32) -> Result<Vec<CachedActivity>, Error> {
         let start = i32::try_from(start).map_err(|_| Error::InvalidSelection)?;
-        let (account, client) = self.authenticate(key).await?;
-        let client = client.with_max_response_body_bytes(limit_bytes(LIST_LIMIT)?);
-        let activities = client
+        let activities = self
+            .client
+            .clone()
+            .with_max_response_body_bytes(limit_bytes(LIST_LIMIT)?)
             .get_activitylist_service_activities_search_activities_builder()
             .start(start)
             .limit(20)
+            .exclude_children(false)
             .sort_order("desc")
             .sort_by("startLocal")
             .send()
@@ -46,36 +57,86 @@ impl Client {
         if activities.len() > PAGE_SIZE {
             return Err(Error::InvalidActivities);
         }
+        let description_limit = limit_bytes(DESCRIPTION_LIMIT)?;
         let mut ids = std::collections::HashSet::with_capacity(activities.len());
-        let activities = activities
+        activities
             .into_iter()
-            .map(|activity| {
-                let id = activity
+            .map(|summary| {
+                let id = summary
                     .activity_id
                     .filter(|id| *id > 0)
                     .ok_or(Error::InvalidActivities)?;
-                if !ids.insert(id) {
+                if !ids.insert(id)
+                    || summary
+                        .description
+                        .as_ref()
+                        .is_some_and(|text| text.len() > description_limit)
+                {
                     return Err(Error::InvalidActivities);
                 }
-                Ok(RemoteActivity {
-                    id,
-                    imported: false,
-                    sport: activity
-                        .activity_type
-                        .and_then(|kind| kind.type_key)
-                        .and_then(|key| sport(&key)),
-                    name: fact(activity.activity_name).unwrap_or_else(|| id.to_string()),
-                    started_at: fact(activity.start_time_gmt),
-                    distance_metres: activity
-                        .distance
-                        .filter(|value| value.is_finite() && *value >= 0.0),
-                    duration_seconds: activity
-                        .duration
-                        .filter(|value| value.is_finite() && *value >= 0.0),
+                let activity_type = summary.activity_type.and_then(|kind| fact(kind.type_key));
+                Ok(CachedActivity {
+                    activity: RemoteActivity {
+                        id,
+                        imported: false,
+                        sport: activity_type.as_deref().and_then(sport),
+                        name: fact(summary.activity_name).unwrap_or_else(|| id.to_string()),
+                        started_at: fact(summary.start_time_gmt),
+                        distance_metres: summary
+                            .distance
+                            .filter(|value| value.is_finite() && *value >= 0.0),
+                        duration_seconds: summary
+                            .duration
+                            .filter(|value| value.is_finite() && *value >= 0.0),
+                    },
+                    description: summary.description.filter(|text| !text.trim().is_empty()),
+                    activity_type,
+                    started_local: fact(summary.start_time_local),
                 })
             })
-            .collect::<Result<Vec<_>, Error>>()?;
-        Ok((account, activities))
+            .collect()
+    }
+
+    /// Downloads an original through this authenticated account.
+    /// # Errors
+    /// Returns bounded, redacted download failures.
+    pub async fn download(&self, id: i64) -> Result<Download, Error> {
+        if id <= 0 {
+            return Err(Error::InvalidSelection);
+        }
+        original(self.account.clone(), self.client.clone(), id).await
+    }
+}
+
+impl Client {
+    /// Authenticates once for a complete account-cache load.
+    /// # Errors
+    /// Returns redacted authentication and account-identity failures.
+    pub async fn session(&self, key: &PersonalApiKey) -> Result<Session, Error> {
+        let (account, client) = self.authenticate(key).await?;
+        if account.display_name.is_none() {
+            return Err(Error::MissingAccountIdentity);
+        }
+        Ok(Session { account, client })
+    }
+
+    /// Fetches one unfiltered summary page.
+    /// # Errors
+    /// Returns redacted transport or summary-validation failures.
+    pub async fn activities(
+        &self,
+        key: &PersonalApiKey,
+        start: u32,
+    ) -> Result<
+        (
+            AccountFacts,
+            Vec<garmin_model::garmin_connect::CachedActivity>,
+        ),
+        Error,
+    > {
+        let session = self.session(key).await?;
+        let activities = session.activities(start).await?;
+        Ok((session.account, activities))
     }
 
     /// Downloads an original archive for one positive activity ID.

@@ -6,7 +6,25 @@ use super::Props;
 use crate::{Size, activity, button, icons, select};
 
 mod batch;
+mod filters;
 pub use batch::{Batch, Counts, FailureReason};
+
+/// Local refills preserve the batch summary; explicit reloads and changed queries clear it.
+#[must_use]
+pub fn clears_batch(request: &ActivityRequest, page: Option<&ActivityResponse>) -> bool {
+    match (request, page) {
+        (
+            ActivityRequest::List { start, filters },
+            Some(ActivityResponse::Page {
+                start: current,
+                filters: applied,
+                ..
+            }),
+        ) => start != current || filters != applied,
+        (ActivityRequest::Load { .. } | ActivityRequest::List { .. }, _) => true,
+        _ => false,
+    }
+}
 
 /// Feedback for one explicit import, separate from the cached browser page.
 #[must_use]
@@ -51,7 +69,10 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<super::Action> {
             if !requested && props.garmin_connect.activities.is_none() && enabled {
                 ui.data_mut(|data| data.insert_temp(id, true));
                 Some(super::Action::GarminConnectActivity(
-                    ActivityRequest::List { start: 0 },
+                    ActivityRequest::Load {
+                        start: 0,
+                        filters: garmin_model::garmin_connect::ActivityFilters::default(),
+                    },
                 ))
             } else {
                 request
@@ -62,11 +83,14 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<super::Action> {
 
 fn browser(ui: &mut Ui, props: &Props<'_>, enabled: bool) -> Option<super::Action> {
     ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-    let mut request = None;
     let Some(ActivityResponse::Page {
         start,
         activities,
         has_more,
+        filters: applied,
+        total,
+        cache,
+        warning,
     }) = props.garmin_connect.activities
     else {
         if props.garmin_connect.activities_busy {
@@ -75,31 +99,68 @@ fn browser(ui: &mut Ui, props: &Props<'_>, enabled: bool) -> Option<super::Actio
             let refresh = format_message!(props.intl, default_message: "Refresh");
             if action(ui, &refresh, Some(icons::ARROWS_CLOCKWISE), enabled) {
                 return Some(super::Action::GarminConnectActivity(
-                    ActivityRequest::List { start: 0 },
+                    ActivityRequest::Load {
+                        start: 0,
+                        filters: garmin_model::garmin_connect::ActivityFilters::default(),
+                    },
                 ));
             }
         }
         return None;
     };
-    let mut batch_action = toolbar(ui, props, enabled, *start, activities);
+    let filter_request = filters::show(ui, props, applied, enabled);
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(8.0);
+    let refill =
+        (enabled && applied.not_imported && activities.iter().any(|activity| activity.imported))
+            .then(|| ActivityRequest::List {
+                start: *start,
+                filters: applied.clone(),
+            });
+    let mut batch_action = toolbar(ui, props, enabled, *start, applied, activities);
+    cache_feedback(ui, props, cache, warning.as_deref());
+    ui.add_space(8.0);
     if let Some(batch) = props.garmin_connect.batch
         && batch_status(ui, props, batch)
     {
         batch_action = Some(super::Action::CancelGarminConnectPageImport);
     }
-    let height = if activities.is_empty() {
+    let request = rows(ui, props, *start, activities, enabled);
+    ui.separator();
+    filter_request
+        .or(pager(
+            ui, props, *start, *total, *has_more, enabled, applied,
+        ))
+        .or(request)
+        .or(refill)
+        .map(super::Action::GarminConnectActivity)
+        .or(batch_action)
+}
+
+fn rows(
+    ui: &mut Ui,
+    props: &Props<'_>,
+    start: u32,
+    activities: &[RemoteActivity],
+    enabled: bool,
+) -> Option<ActivityRequest> {
+    let mut request = None;
+    let footer = if ui.available_width() < 320.0 {
         96.0
     } else {
-        let footer = if ui.available_width() < 360.0 {
-            96.0
-        } else {
-            64.0
-        };
-        (ui.available_height() - footer).max(96.0)
+        56.0
+    };
+    let height = (ui.available_height() - footer).max(0.0);
+    let height = if activities.is_empty() {
+        height.min(96.0)
+    } else {
+        height
     };
     egui::ScrollArea::vertical()
         .id_salt((props.id, "cloud-rows", start))
         .max_height(height)
+        .min_scrolled_height(0.0)
         .auto_shrink([false, false])
         .show(ui, |ui| {
             if activities.is_empty() {
@@ -136,16 +197,28 @@ fn browser(ui: &mut Ui, props: &Props<'_>, enabled: bool) -> Option<super::Actio
                             ui.end_row();
                         }
                     }
-                    if activities.len() % columns != 0 {
+                    if !activities.len().is_multiple_of(columns) {
                         ui.end_row();
                     }
                 });
         });
-    ui.separator();
-    pager(ui, props, *start, activities.len(), *has_more, enabled)
-        .or(request)
-        .map(super::Action::GarminConnectActivity)
-        .or(batch_action)
+    request
+}
+
+fn cache_feedback(
+    ui: &mut Ui,
+    props: &Props<'_>,
+    cache: &garmin_model::garmin_connect::CacheStatus,
+    warning: Option<&str>,
+) {
+    let downloaded = cache.downloaded as u64;
+    let total = cache.total as u64;
+    let unavailable = cache.unavailable as u64;
+    let status = format_message!(props.intl, default_message: "Cached original FIT files: {downloaded}/{total} · Unavailable: {unavailable}", values: { downloaded: downloaded, total: total, unavailable: unavailable });
+    crate::typography::helper(ui, &status);
+    if let Some(warning) = warning {
+        crate::typography::body(ui, warning);
+    }
 }
 
 fn toolbar(
@@ -153,6 +226,7 @@ fn toolbar(
     props: &Props<'_>,
     enabled: bool,
     start: u32,
+    filters: &garmin_model::garmin_connect::ActivityFilters,
     activities: &[RemoteActivity],
 ) -> Option<super::Action> {
     let mut result = None;
@@ -160,7 +234,10 @@ fn toolbar(
         let refresh = format_message!(props.intl, default_message: "Refresh");
         if action(ui, &refresh, Some(icons::ARROWS_CLOCKWISE), enabled) {
             result = Some(super::Action::GarminConnectActivity(
-                ActivityRequest::List { start },
+                ActivityRequest::Load {
+                    start,
+                    filters: filters.clone(),
+                },
             ));
         }
         let import = format_message!(props.intl, default_message: "Import all on this page");
@@ -172,15 +249,15 @@ fn toolbar(
         ) {
             result = Some(super::Action::StartGarminConnectPageImport);
         }
-        if props.garmin_connect.activities_busy
-            && props
-                .garmin_connect
-                .batch
-                .is_none_or(|batch| !batch.running())
-        {
-            progress(ui, props);
-        }
     });
+    if props.garmin_connect.activities_busy
+        && props
+            .garmin_connect
+            .batch
+            .is_none_or(|batch| !batch.running())
+    {
+        progress(ui, props);
+    }
     result
 }
 
@@ -241,9 +318,10 @@ fn pager(
     ui: &mut Ui,
     props: &Props<'_>,
     start: u32,
-    count: usize,
+    total: usize,
     has_more: bool,
     enabled: bool,
+    filters: &garmin_model::garmin_connect::ActivityFilters,
 ) -> Option<ActivityRequest> {
     let mut request = None;
     ui.horizontal_wrapped(|ui| {
@@ -253,13 +331,17 @@ fn pager(
         if arrow(ui, &previous, icons::CARET_LEFT, enabled && start > 0) {
             request = Some(ActivityRequest::List {
                 start: start.saturating_sub(20),
+                filters: filters.clone(),
             });
         }
         let current = start / 20;
-        let known = current + u32::from(has_more);
-        let pages = std::iter::once(0)
-            .chain((current.saturating_sub(7)..=known).filter(|page| *page != 0))
+        let known = u32::try_from(total.saturating_sub(1) / 20).unwrap_or(u32::MAX);
+        let mut pages = std::iter::once(0)
+            .chain(current.saturating_sub(7)..=current.saturating_add(7).min(known))
+            .chain(std::iter::once(known))
             .collect::<Vec<_>>();
+        pages.sort_unstable();
+        pages.dedup();
         let labels = pages.iter().map(|index| {
             let page = u64::from(index + 1);
             format_message!(props.intl, default_message: "Page {page}", values: { page: page })
@@ -270,19 +352,21 @@ fn pager(
         select::show(ui, props.id.with("cloud-page"), &mut selected, &choices,
             select::Props::new("").width(112.0).disabled(!enabled).outlined(true));
         if selected != previous_selection {
-            request = Some(ActivityRequest::List { start: pages[selected].saturating_mul(20) });
+            request = Some(ActivityRequest::List { start: pages[selected].saturating_mul(20), filters: filters.clone() });
         }
         let next = format_message!(props.intl, default_message: "Next page");
         if arrow(ui, &next, icons::CARET_RIGHT, enabled && has_more) {
             request = Some(ActivityRequest::List {
                 start: start.saturating_add(20),
+                filters: filters.clone(),
             });
         }
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(16.0);
-        let first = if count == 0 { 0 } else { u64::from(start) + 1 };
-        let last = if count == 0 { 0 } else { u64::from(start) + count as u64 };
-        ui.label(format_message!(props.intl, default_message: "Activities {first}–{last}", values: { first: first, last: last }));
+        let first = if total == 0 { 0 } else { u64::from(start) + 1 };
+        let total = total as u64;
+        let last = (u64::from(start) + 20).min(total);
+        ui.label(format_message!(props.intl, default_message: "Activities {first}–{last} of {total}", values: { first: first, last: last, total: total }));
     });
     request
 }
@@ -373,9 +457,63 @@ fn millimeters(metres: f64) -> u64 {
 }
 
 fn progress(ui: &mut Ui, props: &Props<'_>) {
-    ui.horizontal(|ui| {
-        ui.add(egui::Spinner::new().size(16.0));
-        ui.label(format_message!(props.intl, default_message: "Contacting Garmin Connect…"));
+    use garmin_model::garmin_connect::LoadProgress;
+    let (label, detail, value) = match props.garmin_connect.load_progress {
+        None | Some(LoadProgress::Waiting) => (
+            format_message!(props.intl, default_message: "Loading activity data…"),
+            None,
+            crate::progress::Value::Indeterminate,
+        ),
+        Some(LoadProgress::Connecting) => (
+            format_message!(props.intl, default_message: "Connecting to Garmin Connect…"),
+            None,
+            crate::progress::Value::Indeterminate,
+        ),
+        Some(LoadProgress::Indexing { discovered, pages }) => {
+            let count = *discovered as u64;
+            let pages = *pages as u64;
+            (
+                format_message!(props.intl, default_message: "Reading activity summaries · {count} found", values: { count: count }),
+                Some(
+                    format_message!(props.intl, default_message: "Pages read: {pages}", values: { pages: pages }),
+                ),
+                crate::progress::Value::Indeterminate,
+            )
+        }
+        Some(LoadProgress::Downloading {
+            total,
+            downloaded,
+            reused,
+            unavailable,
+            current,
+        }) => {
+            let completed = downloaded + reused + unavailable;
+            let remaining = total.saturating_sub(completed) as u64;
+            let detail = format_message!(props.intl, default_message: "Files {completed}/{total} · Downloaded {downloaded} · Already cached {reused} · Unavailable {unavailable} · Remaining {remaining}", values: { completed: completed as u64, total: *total as u64, downloaded: *downloaded as u64, reused: *reused as u64, unavailable: *unavailable as u64, remaining: remaining });
+            let label = current.as_deref().map_or_else(
+                || format_message!(props.intl, default_message: "Caching original FIT files"),
+                |name| format_message!(props.intl, default_message: "Downloading {name}", values: { name: name }),
+            );
+            (
+                label,
+                Some(detail),
+                crate::progress::Value::Determinate {
+                    completed,
+                    total: *total,
+                },
+            )
+        }
+    };
+    ui.vertical(|ui| {
+        crate::progress::show(
+            ui,
+            &crate::progress::Props {
+                label: &label,
+                detail: detail.as_deref(),
+                value,
+                height: Some(8.0),
+            },
+        );
     });
 }
 

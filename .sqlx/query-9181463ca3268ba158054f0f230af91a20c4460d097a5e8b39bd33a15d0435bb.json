@@ -1,0 +1,35 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    count(*) AS total,\n    count(CASE WHEN o.archive IS NOT NULL THEN 1 END) AS downloaded,\n    count(o.failure) AS unavailable\nFROM connect_cache_summaries AS s LEFT JOIN connect_cache_originals AS o\n    ON\n        s.user_id = o.user_id\n        AND s.source_id = o.source_id\n        AND s.activity_id = o.activity_id\nWHERE s.user_id = ? AND s.source_id = ? AND s.generation = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "total",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "downloaded",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "unavailable",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9181463ca3268ba158054f0f230af91a20c4460d097a5e8b39bd33a15d0435bb"
+}

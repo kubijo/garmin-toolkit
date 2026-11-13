@@ -174,6 +174,12 @@ impl From<StoredActivity> for ActivityDetails {
 /// Shared in-process application service.
 pub struct Application {
     storage: Storage,
+    connect_cache_locks: std::sync::Mutex<
+        std::collections::BTreeMap<
+            garmin_model::identity::UserId,
+            std::sync::Arc<tokio::sync::Mutex<()>>,
+        >,
+    >,
     #[cfg(test)]
     course_generation_gate: std::sync::Mutex<Option<std::sync::Arc<CourseGenerationGate>>>,
     #[cfg(feature = "integration-hooks")]
@@ -192,6 +198,7 @@ impl Application {
     pub const fn new(storage: Storage) -> Self {
         Self {
             storage,
+            connect_cache_locks: std::sync::Mutex::new(std::collections::BTreeMap::new()),
             #[cfg(test)]
             course_generation_gate: std::sync::Mutex::new(None),
             #[cfg(feature = "integration-hooks")]
@@ -717,6 +724,10 @@ pub enum Error {
     GarminConnectPreviewTooLarge,
     #[error("Garmin activity could not be imported: {0}")]
     GarminConnectImport(String),
+    #[error("Original FIT file is unavailable: {0}")]
+    GarminConnectOriginalUnavailable(String),
+    #[error("Garmin activity cache could not finish downloading: {0}")]
+    GarminConnectCache(String),
     #[error(transparent)]
     Storage(#[from] garmin_storage::Error),
     #[error("profile {0} does not exist")]

@@ -32,11 +32,13 @@ pub struct Props<'a> {
 /// Profile-scoped cloud configuration, verification and browser state.
 pub struct GarminConnectProps<'a> {
     pub now: jiff::Timestamp,
+    pub today: jiff::civil::Date,
     pub configured: bool,
     pub checking: bool,
     pub facts: Option<&'a garmin_model::garmin_connect::AccountFacts>,
     pub activities: Option<&'a garmin_model::garmin_connect::ActivityResponse>,
     pub activities_busy: bool,
+    pub load_progress: Option<&'a garmin_model::garmin_connect::LoadProgress>,
     pub batch: Option<&'a connect_activities::Batch>,
 }
 

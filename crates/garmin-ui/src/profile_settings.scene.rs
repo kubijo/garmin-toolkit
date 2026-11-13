@@ -55,7 +55,9 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                         },
                         picture_enabled: true,
                         garmin_connect: profile_settings::GarminConnectProps {
+                            load_progress: None,
                             now: "2026-11-10T12:00:00Z".parse().expect("gallery timestamp"),
+                            today: jiff::civil::date(2026, 11, 13),
                             configured: garmin_connect_configured,
                             checking: false,
                             facts: None,

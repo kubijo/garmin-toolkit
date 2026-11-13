@@ -25,6 +25,7 @@ struct Model {
     reject: bool,
     activities: Option<garmin_model::garmin_connect::ActivityResponse>,
     activity_request: RequestState,
+    load_progress: Option<garmin_model::garmin_connect::LoadProgress>,
     requests: Vec<garmin_model::garmin_connect::ActivityRequest>,
     batch: Option<profile_settings::connect_activities::Batch>,
 }
@@ -80,6 +81,7 @@ fn harness_for(language: garmin_i18n::Language, size: [f32; 2]) -> Harness<'stat
                         picture_enabled: false,
                         garmin_connect: profile_settings::GarminConnectProps {
                             now: "2026-11-10T12:00:00Z".parse().expect("fixture timestamp"),
+                            today: jiff::civil::date(2026, 11, 13),
                             configured: state.key.is_some(),
                             checking: false,
                             facts: state.facts.as_ref(),
@@ -88,6 +90,7 @@ fn harness_for(language: garmin_i18n::Language, size: [f32; 2]) -> Harness<'stat
                                 state.activity_request,
                                 RequestState::Loading
                             ),
+                            load_progress: state.load_progress.as_ref(),
                             batch: state.batch.as_ref(),
                         },
                         disabled: state.disabled,
@@ -130,6 +133,7 @@ fn harness_for(language: garmin_i18n::Language, size: [f32; 2]) -> Harness<'stat
                 reject: false,
                 activities: None,
                 activity_request: RequestState::Idle,
+                load_progress: None,
                 requests: Vec::new(),
                 batch: None,
                 preferences: ProfilePreferences::default()
@@ -239,9 +243,19 @@ fn browsing_cloud_activities_only_requests_a_preview_until_explicit_import() {
     assert_eq!(view.state().requests.len(), 0);
     view.state_mut().cloud = true;
     view.run();
-    assert_eq!(view.state().requests, [ActivityRequest::List { start: 0 }]);
+    assert_eq!(
+        view.state().requests,
+        [ActivityRequest::Load {
+            start: 0,
+            filters: garmin_model::garmin_connect::ActivityFilters::default()
+        }]
+    );
     view.state_mut().activities = Some(ActivityResponse::Page {
         start: 0,
+        filters: garmin_model::garmin_connect::ActivityFilters::default(),
+        total: 1,
+        cache: garmin_model::garmin_connect::CacheStatus::default(),
+        warning: None,
         has_more: false,
         activities: vec![RemoteActivity {
             id: 42,
@@ -267,7 +281,10 @@ fn browsing_cloud_activities_only_requests_a_preview_until_explicit_import() {
     assert_eq!(
         view.state().requests,
         [
-            ActivityRequest::List { start: 0 },
+            ActivityRequest::Load {
+                start: 0,
+                filters: garmin_model::garmin_connect::ActivityFilters::default()
+            },
             ActivityRequest::Preview { id: 42 }
         ],
         "row bounds: {row_bounds:?}"
@@ -281,6 +298,14 @@ fn cloud_page(start: u32) -> garmin_model::garmin_connect::ActivityResponse {
     };
     ActivityResponse::Page {
         start,
+        filters: garmin_model::garmin_connect::ActivityFilters::default(),
+        total: 80,
+        cache: garmin_model::garmin_connect::CacheStatus {
+            total: 80,
+            downloaded: 80,
+            unavailable: 0,
+        },
+        warning: None,
         has_more: true,
         activities: (0..20)
             .map(|index| RemoteActivity {
@@ -322,15 +347,246 @@ fn cloud_browser_preserves_the_current_page_and_keeps_paging_controls_visible() 
     view.state_mut().cloud = true;
     view.run();
     assert_eq!(view.state().requests.len(), 0);
-    assert!(view.query_by_label("Activities 21–40").is_some());
+    assert!(view.query_by_label("Activities 21–40 of 80").is_some());
     let next = view.get_by_label("Next page");
     assert!(next.rect().bottom() < 900.0);
     next.click();
     view.run();
-    assert_eq!(view.state().requests, [ActivityRequest::List { start: 40 }]);
+    assert_eq!(
+        view.state().requests,
+        [ActivityRequest::List {
+            start: 40,
+            filters: garmin_model::garmin_connect::ActivityFilters::default()
+        }]
+    );
     view.state_mut().cloud = false;
     view.run();
     assert!(view.query_by_label("Hamina Road Cycling 1").is_none());
+}
+
+#[test]
+fn cloud_filters_validate_dates_reset_paging_and_preserve_applied_queries() {
+    use garmin_model::garmin_connect::{ActivityFilters, ActivityRequest, ActivityResponse};
+    let mut view = harness_for(garmin_i18n::Language::English, [1280.0, 900.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("fixture-key".into())
+            .expect("fixture key"),
+    );
+    view.state_mut().activities = Some(cloud_page(20));
+    view.state_mut().cloud = true;
+    view.run();
+    let from = || By::new().predicate(|node| node.author_id() == Some("cloud.filters.from"));
+    view.get(from()).click();
+    view.get(from()).type_text("2026-02-30");
+    view.run();
+    assert!(
+        view.get_by_label("Apply filters")
+            .accesskit_node()
+            .is_disabled()
+    );
+    view.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    view.get(from()).type_text("2026-11-01");
+    view.run();
+    view.get_by_label("Apply filters").click();
+    view.run();
+    let filters = ActivityFilters {
+        from: Some("2026-11-01".parse().expect("fixture date")),
+        ..ActivityFilters::default()
+    };
+    assert_eq!(
+        view.state().requests.last(),
+        Some(&ActivityRequest::List {
+            start: 0,
+            filters: filters.clone()
+        })
+    );
+    let mut page = cloud_page(0);
+    if let ActivityResponse::Page {
+        filters: applied, ..
+    } = &mut page
+    {
+        *applied = filters.clone();
+    }
+    view.state_mut().activities = Some(page);
+    view.run();
+    view.get_by_label("Refresh").click();
+    view.run();
+    assert_eq!(
+        view.state().requests.last(),
+        Some(&ActivityRequest::Load {
+            start: 0,
+            filters: filters.clone()
+        })
+    );
+    view.get_by_label("Next page").click();
+    view.run();
+    assert_eq!(
+        view.state().requests.last(),
+        Some(&ActivityRequest::List { start: 20, filters })
+    );
+    view.get_by_label("Clear filters").click();
+    view.run();
+    assert_eq!(
+        view.state().requests.last(),
+        Some(&ActivityRequest::List {
+            start: 0,
+            filters: ActivityFilters::default()
+        })
+    );
+}
+
+#[test]
+#[ignore = "renders activity icons and date filter popups"]
+fn capture_filter_controls() -> Result<(), Box<dyn std::error::Error>> {
+    let out =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/gallery/cloud-filters");
+    std::fs::create_dir_all(&out)?;
+    for (name, size, theme) in [
+        ("dark", [840.0, 900.0], egui::ThemePreference::Dark),
+        ("light", [840.0, 900.0], egui::ThemePreference::Light),
+        ("narrow", [400.0, 900.0], egui::ThemePreference::Dark),
+    ] {
+        let mut view = harness_for(garmin_i18n::Language::English, size);
+        view.state_mut().key = Some(
+            garmin_model::garmin_connect::PersonalApiKey::from_string("fixture-key".into())
+                .expect("fixture key"),
+        );
+        view.state_mut().activities = Some(cloud_page(0));
+        view.state_mut().cloud = true;
+        view.ctx.set_theme(theme);
+        view.run();
+        view.get(By::new().predicate(|node| node.author_id() == Some("cloud.filters.type")))
+            .click();
+        view.run();
+        view.render()?.save(out.join(format!("{name}-types.png")))?;
+        view.get_by_label("Running").click();
+        view.run();
+        view.get_by_label("Choose date for From date").click();
+        view.run();
+        view.render()?
+            .save(out.join(format!("{name}-calendar.png")))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn empty_account_filter_disables_navigation_and_bulk_import() {
+    use garmin_model::garmin_connect::{ActivityFilters, ActivityResponse, CacheStatus};
+    let mut view = harness_for(garmin_i18n::Language::English, [1280.0, 900.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("fixture-key".into())
+            .expect("fixture key"),
+    );
+    view.state_mut().activities = Some(ActivityResponse::Page {
+        start: 0,
+        filters: ActivityFilters {
+            not_imported: true,
+            ..ActivityFilters::default()
+        },
+        total: 0,
+        cache: CacheStatus {
+            total: 80,
+            downloaded: 80,
+            unavailable: 0,
+        },
+        warning: None,
+        activities: Vec::new(),
+        has_more: false,
+    });
+    view.state_mut().cloud = true;
+    view.run();
+    assert!(
+        view.get_by_label("Import all on this page")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        view.get_by_label("Next page")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(view.query_by_label("Activities 0–0 of 0").is_some());
+}
+
+#[test]
+fn narrow_filter_prose_keeps_complete_sentences_on_separate_lines() {
+    let mut view = harness_for(garmin_i18n::Language::English, [400.0, 760.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("fixture-key".into())
+            .expect("fixture key"),
+    );
+    view.state_mut().activities = Some(cloud_page(0));
+    view.state_mut().cloud = true;
+    view.run();
+    assert!(
+        view.query_by_label(
+            "Dates use the activity’s local time.\nFilters search the whole cached account."
+        )
+        .is_some()
+    );
+}
+
+#[test]
+fn fuzzy_search_is_a_single_account_query_and_imports_refill_the_cached_page() {
+    use garmin_model::garmin_connect::{ActivityFilters, ActivityRequest, ActivityResponse};
+    let mut view = harness_for(garmin_i18n::Language::English, [1280.0, 900.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("fixture-key".into())
+            .expect("fixture key"),
+    );
+    view.state_mut().activities = Some(cloud_page(20));
+    view.state_mut().cloud = true;
+    view.run();
+    let search = || By::new().predicate(|node| node.author_id() == Some("cloud.filters.search"));
+    view.get(search()).click();
+    view.get(search()).type_text("hamnia coastl");
+    view.run();
+    view.get_by_label("Apply filters").click();
+    view.run();
+    assert_eq!(
+        view.state().requests.last(),
+        Some(&ActivityRequest::List {
+            start: 0,
+            filters: ActivityFilters {
+                search: "hamnia coastl".into(),
+                ..ActivityFilters::default()
+            },
+        })
+    );
+    let mut page = cloud_page(20);
+    let filters = ActivityFilters {
+        not_imported: true,
+        ..ActivityFilters::default()
+    };
+    if let ActivityResponse::Page {
+        filters: applied,
+        activities,
+        ..
+    } = &mut page
+    {
+        *applied = filters.clone();
+        for activity in activities {
+            activity.imported = false;
+        }
+    }
+    page.merge(ActivityResponse::Imported {
+        id: 3,
+        activities: 1,
+        duplicate: false,
+    });
+    assert!(!profile_settings::connect_activities::clears_batch(
+        &ActivityRequest::List {
+            start: 20,
+            filters: filters.clone()
+        },
+        Some(&page)
+    ));
+    view.state_mut().activities = Some(page);
+    view.run();
+    assert_eq!(
+        view.state().requests.last(),
+        Some(&ActivityRequest::List { start: 20, filters })
+    );
 }
 
 #[test]
@@ -399,7 +655,81 @@ fn completed_batch_does_not_hide_later_loading_feedback() {
     );
     view.state_mut().activity_request = RequestState::Loading;
     view.run_steps(4);
-    assert!(view.query_by_label("Contacting Garmin Connect…").is_some());
+    assert!(view.query_by_label("Loading activity data…").is_some());
+}
+
+#[test]
+fn account_load_reports_real_phases_and_file_counts_without_a_cached_page() {
+    use garmin_model::garmin_connect::LoadProgress;
+    let mut view = harness_for(garmin_i18n::Language::English, [760.0, 800.0]);
+    view.state_mut().cloud = true;
+    view.state_mut().activity_request = RequestState::Loading;
+    view.state_mut().load_progress = Some(LoadProgress::Indexing {
+        discovered: 120,
+        pages: 6,
+    });
+    view.run_steps(4);
+    assert!(
+        view.query_by_label("Reading activity summaries · 120 found")
+            .is_some()
+    );
+    assert!(view.query_by_label("Pages read: 6").is_some());
+    view.state_mut().load_progress = Some(LoadProgress::Downloading {
+        total: 200,
+        downloaded: 40,
+        reused: 80,
+        unavailable: 2,
+        current: Some("Hamina Road Cycling".into()),
+    });
+    view.run_steps(4);
+    assert!(
+        view.query_by_label("Downloading Hamina Road Cycling")
+            .is_some()
+    );
+    assert!(
+        view.query_by_label(
+            "Files 122/200 · Downloaded 40 · Already cached 80 · Unavailable 2 · Remaining 78"
+        )
+        .is_some()
+    );
+    assert_eq!(view.state().requests.len(), 0);
+}
+
+#[test]
+#[ignore = "renders live account-load progress with a headless GPU"]
+fn capture_account_load_progress() -> Result<(), Box<dyn std::error::Error>> {
+    use garmin_model::garmin_connect::LoadProgress;
+    let out =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/gallery/cloud-progress");
+    std::fs::create_dir_all(&out)?;
+    for (name, size, theme) in [
+        ("dark", [840.0, 600.0], egui::ThemePreference::Dark),
+        ("light", [840.0, 600.0], egui::ThemePreference::Light),
+        ("narrow", [400.0, 600.0], egui::ThemePreference::Dark),
+    ] {
+        let mut view = harness_for(garmin_i18n::Language::English, size);
+        view.state_mut().cloud = true;
+        view.state_mut().activity_request = RequestState::Loading;
+        view.ctx.set_theme(theme);
+        view.state_mut().load_progress = Some(LoadProgress::Indexing {
+            discovered: 120,
+            pages: 6,
+        });
+        view.run_steps(5);
+        view.render()?
+            .save(out.join(format!("{name}-indexing.png")))?;
+        view.state_mut().load_progress = Some(LoadProgress::Downloading {
+            total: 200,
+            downloaded: 40,
+            reused: 80,
+            unavailable: 2,
+            current: Some("Hamina Road Cycling".into()),
+        });
+        view.run_steps(5);
+        view.render()?
+            .save(out.join(format!("{name}-downloading.png")))?;
+    }
+    Ok(())
 }
 
 #[test]
@@ -430,7 +760,10 @@ fn imported_rows_remain_browsable_and_pager_can_select_a_page() {
     view.run();
     assert_eq!(
         view.state().requests.last(),
-        Some(&ActivityRequest::List { start: 0 })
+        Some(&ActivityRequest::List {
+            start: 0,
+            filters: garmin_model::garmin_connect::ActivityFilters::default()
+        })
     );
 }
 
@@ -880,6 +1213,8 @@ fn capture_cloud_browser() -> Result<(), Box<dyn std::error::Error>> {
     for (name, size, theme) in [
         ("wide-dark", [1280.0, 900.0], egui::ThemePreference::Dark),
         ("wide-light", [1280.0, 900.0], egui::ThemePreference::Light),
+        ("medium-dark", [840.0, 900.0], egui::ThemePreference::Dark),
+        ("medium-light", [840.0, 900.0], egui::ThemePreference::Light),
         ("narrow", [400.0, 760.0], egui::ThemePreference::Dark),
     ] {
         let mut view = harness_for(garmin_i18n::Language::English, size);
@@ -904,6 +1239,8 @@ fn capture_cloud_browser() -> Result<(), Box<dyn std::error::Error>> {
         assert!(batch.next_request().is_some());
         view.state_mut().batch = Some(batch);
         view.run_steps(3);
+        assert!(view.get_by_label("Next page").rect().bottom() <= size[1]);
+        assert!(view.get_by_label("Cancel import").rect().bottom() <= size[1]);
         view.render()?
             .save(out.join(format!("{name}-importing.png")))?;
         let batch = view.state_mut().batch.as_mut().expect("batch");

@@ -30,9 +30,10 @@ The UI embeds hinted Noto Sans 2.015 Regular and SemiBold. Named egui families c
 font-weight field.
 
 Use `typography::body(ui, text)` for explanatory prose: regular 14 px type, 20 px line height, secondary text color, and
-balanced two-line wrapping when it fits. Longer paragraphs wrap naturally. The helper returns an egui response and keeps
-its style local. For composition inside another widget, `typography::body_text(text)` returns `RichText` with the same
-type metrics and inherits the widget's color. `typography::semibold(text)` selects the real semibold face for inline
+balanced two-line wrapping when it fits, preferring sentence boundaries when the line widths differ by at most one
+quarter of the available measure. Longer paragraphs wrap naturally. The helper returns an egui response and keeps its
+style local. For composition inside another widget, `typography::body_text(text)` returns `RichText` with the same type
+metrics and inherits the widget's color. `typography::semibold(text)` selects the real semibold face for inline
 emphasis. Callers own the spacing between paragraphs, headings, and controls.
 
 The [activity workspace](activity-map.md) lazily loads recording details and links map, charts, laps, and playback

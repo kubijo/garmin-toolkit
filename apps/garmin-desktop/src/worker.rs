@@ -236,6 +236,10 @@ enum Command {
 }
 
 pub enum Event {
+    ConnectLoadProgress {
+        user: garmin_model::identity::UserId,
+        progress: garmin_model::garmin_connect::LoadProgress,
+    },
     ConnectActivity {
         user: garmin_model::identity::UserId,
         result: Result<
@@ -1165,7 +1169,9 @@ fn connect_activity(
         tokio::select! {
             biased;
             () = cancelled(abort) => None,
-            result = application.garmin_connect_activity(user, request) => Some(result),
+            result = application.garmin_connect_activity_with_progress(user, request, |progress| {
+                let _ = emit(events, context, Event::ConnectLoadProgress { user: user.user_id(), progress });
+            }) => Some(result),
         }
     });
     let Some(result) = result else {

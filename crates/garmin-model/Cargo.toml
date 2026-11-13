@@ -16,7 +16,7 @@ blake3.workspace = true
 garmin-color.workspace = true
 garmin-macros.workspace = true
 geo-types.workspace = true
-jiff.workspace = true
+jiff = { workspace = true, features = ["serde"] }
 mediatype.workspace = true
 newtype-uuid.workspace = true
 postcard.workspace = true

@@ -60,6 +60,7 @@ pub struct Desktop {
     connect_activities: HashMap<UserId, garmin_model::garmin_connect::ActivityResponse>,
     connect_preview: Option<device_fit_preview::Preview<(UserId, i64, String)>>,
     connect_activity_loading: Option<UserId>,
+    connect_load_progress: Option<(UserId, garmin_model::garmin_connect::LoadProgress)>,
     page_import: Option<(UserId, profile_settings::connect_activities::Batch)>,
     selected_activity: usize,
     activity_detail: Option<ActivityDetailSnapshot>,
@@ -163,6 +164,7 @@ impl Desktop {
             connect_activities: HashMap::new(),
             connect_preview: None,
             connect_activity_loading: None,
+            connect_load_progress: None,
             page_import: None,
             selected_activity: 0,
             activity_detail: None,
@@ -319,6 +321,11 @@ impl Desktop {
             .as_ref()
             .filter(|(owner, _)| *owner == self.profiles[profile_index].user.id())
             .map(|(_, batch)| batch);
+        settings_props.garmin_connect.load_progress = self
+            .connect_load_progress
+            .as_ref()
+            .filter(|(owner, _)| *owner == self.profiles[profile_index].user.id())
+            .map(|(_, progress)| progress);
         let notice = self.notice.as_ref();
         let page = &self.page;
         let intl = &self.intl;
@@ -797,17 +804,18 @@ impl Desktop {
             }
             profile_settings::Action::ChoosePicture => self.choose_profile_picture(profile_index),
             profile_settings::Action::GarminConnectActivity(request) => {
-                if matches!(
-                    request,
-                    garmin_model::garmin_connect::ActivityRequest::List { .. }
+                let user = self.profiles[profile_index].user.id();
+                if profile_settings::connect_activities::clears_batch(
+                    &request,
+                    self.connect_activities.get(&user),
                 ) {
                     self.page_import = None;
                 }
                 self.preferences_saving = true;
-                let user = self.profiles[profile_index].user.id();
                 self.worker
                     .connect_activity(UserContext::new(user), request);
                 self.connect_activity_loading = Some(user);
+                self.connect_load_progress = None;
             }
             profile_settings::Action::TestGarminConnectKey => {
                 let user = self.profiles[profile_index].user.id();
@@ -898,6 +906,7 @@ impl Desktop {
             garmin_model::garmin_connect::ActivityFailure,
         >,
     ) {
+        self.connect_load_progress = None;
         if self
             .page_import
             .as_ref()
@@ -1366,10 +1375,34 @@ impl Desktop {
         }
     }
 
+    fn connect_progress(
+        &mut self,
+        user: UserId,
+        progress: garmin_model::garmin_connect::LoadProgress,
+    ) {
+        if self.connect_activity_loading == Some(user) {
+            self.connect_load_progress = Some((user, progress));
+        }
+    }
+
+    fn import_finished(&mut self, result: Result<Vec<worker::ProfileData>, String>) {
+        match result {
+            Ok(profiles) => self.replace_profiles(profiles, None),
+            Err(reason) => {
+                self.import.failed += 1;
+                self.import.last_problem = Some(reason);
+            }
+        }
+        self.import.finish();
+    }
+
     fn process_events(&mut self) {
         let events = self.worker.drain().collect::<Vec<_>>();
         for event in events {
             match event {
+                worker::Event::ConnectLoadProgress { user, progress } => {
+                    self.connect_progress(user, progress);
+                }
                 worker::Event::ConnectActivity { user, result } => {
                     self.connect_activity_checked(user, result);
                 }
@@ -1422,15 +1455,7 @@ impl Desktop {
                 }
                 worker::Event::ImportStarted { total } => self.import.begin(total),
                 worker::Event::ImportItem(item) => self.import.record(item),
-                worker::Event::ImportFinished(result) => {
-                    if let Ok(profiles) = result {
-                        self.replace_profiles(profiles, None);
-                    } else if let Err(reason) = result {
-                        self.import.failed += 1;
-                        self.import.last_problem = Some(reason);
-                    }
-                    self.import.finish();
-                }
+                worker::Event::ImportFinished(result) => self.import_finished(result),
                 worker::Event::ActivityLoaded {
                     observation_id,
                     result,
@@ -2609,11 +2634,13 @@ fn profile_settings_props<'a>(
         disabled,
         garmin_connect: profile_settings::GarminConnectProps {
             now: jiff::Timestamp::now(),
+            today: jiff::Zoned::now().date(),
             configured: profile.garmin_connect_configured,
             checking: checking == Some(profile.user.id()),
             facts: facts.get(&profile.user.id()),
             activities: activities.get(&profile.user.id()),
             activities_busy: activity_loading == Some(profile.user.id()),
+            load_progress: None,
             batch: None,
         },
     }

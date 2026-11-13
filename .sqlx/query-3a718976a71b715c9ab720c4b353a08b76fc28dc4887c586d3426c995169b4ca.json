@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO connect_cache_accounts (\n    user_id, credential_hash, source_id, generation, facts\n) VALUES (?, ?, ?, ?, ?)\nON CONFLICT (user_id) DO UPDATE SET\n    credential_hash = excluded.credential_hash,\n    source_id = excluded.source_id,\n    generation = excluded.generation,\n    facts = excluded.facts;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "3a718976a71b715c9ab720c4b353a08b76fc28dc4887c586d3426c995169b4ca"
+}

@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(\n    SELECT 1 FROM connect_cache_originals\n    WHERE\n        user_id = ?\n        AND source_id = ?\n        AND activity_id = ?\n        AND archive IS NOT NULL\n) AS present;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "present",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "076fba9ce42c323c97433ff94768589691815dd0cb8ee0da0846f4782f58af57"
+}

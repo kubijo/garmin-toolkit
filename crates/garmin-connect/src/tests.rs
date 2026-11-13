@@ -192,7 +192,11 @@ async fn activity_pages_use_bearer_auth_and_explicit_pagination() {
         (200, br#"{"displayName":"account"}"#.to_vec()),
         (200, br#"[{"activityId":42,"activityName":"Road ride","activityType":{"typeKey":"road_biking"},"startTimeGMT":"2026-11-10 10:00:00","distance":13230.0,"duration":3600.0}]"#.to_vec()),
     ]).await;
-    let (_, activities) = client.activities(&key(), 20).await.unwrap();
+    let (_, summaries) = client.activities(&key(), 20).await.unwrap();
+    let activities = summaries
+        .into_iter()
+        .map(|summary| summary.activity)
+        .collect::<Vec<_>>();
     assert_eq!(activities[0].id, 42);
     assert_eq!(
         activities[0].sport,
@@ -203,12 +207,57 @@ async fn activity_pages_use_bearer_auth_and_explicit_pagination() {
     assert!(requests[2].starts_with("GET /activitylist-service/activities/search/activities?"));
     assert!(requests[2].contains("start=20"));
     assert!(requests[2].contains("limit=20"));
+    assert!(requests[2].contains("excludeChildren=false"));
+    assert!(!requests[2].contains("not_imported"));
     assert!(!requests[2].contains("private-test-key"));
     assert!(
         requests[2]
             .to_lowercase()
             .contains("authorization: bearer test.access.token")
     );
+}
+
+#[tokio::test]
+async fn account_session_reuses_authentication_across_pages_and_original_downloads() {
+    let first = serde_json::to_vec(
+        &(1..=20)
+            .map(|id| serde_json::json!({"activityId": id}))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let (client, peer) = server(vec![
+        (200, b"test.access.token".to_vec()),
+        (200, br#"{"displayName":"account"}"#.to_vec()),
+        (200, first),
+        (200, br#"[{"activityId":21,"activityName":"Coastal ride","description":"Recovery by the sea","startTimeLocal":"2026-11-11 00:30:00","startTimeGMT":"2026-11-10 22:30:00","activityType":{"typeKey":"road_cycling"}}]"#.to_vec()),
+        (200, b"original-archive".to_vec()),
+    ]).await;
+    let session = client.session(&key()).await.unwrap();
+    assert_eq!(session.activities(0).await.unwrap().len(), 20);
+    let second = session.activities(20).await.unwrap();
+    assert_eq!(
+        second[0].description.as_deref(),
+        Some("Recovery by the sea")
+    );
+    assert_eq!(
+        second[0].started_local.as_deref(),
+        Some("2026-11-11 00:30:00")
+    );
+    assert_eq!(second[0].activity_type.as_deref(), Some("road_cycling"));
+    assert_eq!(
+        session.download(21).await.unwrap().archive,
+        b"original-archive"
+    );
+    let requests = peer.await.unwrap();
+    assert_eq!(requests.len(), 5);
+    assert!(requests[3].contains("start=20"));
+    for request in &requests[2..] {
+        assert!(
+            request
+                .to_lowercase()
+                .contains("authorization: bearer test.access.token")
+        );
+    }
 }
 
 #[tokio::test]

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO connect_cache_summaries (\n    user_id, source_id, generation, activity_id, summary\n) VALUES (?, ?, ?, ?, ?)\nON CONFLICT (user_id, source_id, generation, activity_id) DO UPDATE SET\n    summary = excluded.summary;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "f1c6fd040a48c872558269b58a13e1ab78c16e6ba1a66f54be531f827e5839b3"
+}
