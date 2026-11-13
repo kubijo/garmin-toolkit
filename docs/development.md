@@ -6,6 +6,10 @@ Use the pinned Nix/uv tooling and repository Just entrypoints. Check commands an
 Close implementation slices with full QA and audit; deployment claims also require packaged behavioral evidence. Just
 lists the available commands.
 
+`just dev` lists the common development loop: shell, formatting, preflight, verification, tests and documentation.
+Focused gates live under `just dev::checks`; cache, profile, coverage, deps, i18n, licenses and sqlx subcommands group
+specialized tasks. For example, `just dev::sqlx` lists metadata checks and preparation.
+
 ## Execution safeguards
 
 - Do not commit, stage, unstage, reset, or otherwise alter the Git index unless explicitly requested. Existing staged
@@ -17,11 +21,11 @@ lists the available commands.
   deliberately made-up identities.
 - Use filtered flake/Just entrypoints, never `nix build path:.`.
 - Agent-run Cargo and heavyweight Rust/Nix builds require explicit permission. Run them serially through
-  `bash infra/just/memory-capped.sh just qa::full` or wrap the focused command. Manual Just commands inherit the user's
-  settings. On Linux, verify the active worker's `memory.max` is at most 6 GiB and `cpu.max` at most two CPUs. The
-  wrapper defaults Cargo to two jobs and requires a working systemd user manager. Nix daemon workers do not inherit the
-  client scope: verify separate worker limits before heavy builds. Do not request or change daemon-wide limits. Prefer
-  cached toolchains and direct Cargo/Trunk in an agent-owned scope; reuse `.tmp/cargo-target` and keep Cargo
+  `bash infra/just/memory-capped.sh just dev::verify` or wrap the focused command. Manual Just commands inherit the
+  user's settings. On Linux, verify the active worker's `memory.max` is at most 6 GiB and `cpu.max` at most two CPUs.
+  The wrapper defaults Cargo to two jobs and requires a working systemd user manager. Nix daemon workers do not inherit
+  the client scope: verify separate worker limits before heavy builds. Do not request or change daemon-wide limits.
+  Prefer cached toolchains and direct Cargo/Trunk in an agent-owned scope; reuse `.tmp/cargo-target` and keep Cargo
   home/distribution outputs in `.tmp`. The Apple Silicon macOS exception uses one Cargo job, one Nix build, and one core
   per builder; these are parallelism limits rather than a hard RAM cap.
 - Keep diagnostics and analysis in maintained tooling, not disposable scripts. Temporary outputs belong under the
@@ -65,9 +69,9 @@ HAOS browser tooling uses `.mts`, run directly by the pinned Node version. QA ch
 locked Node/CDP types from `infra/javascript/package-lock.json`; no browser bundle is built. For editor types, run
 `npm ci --ignore-scripts --prefix infra/javascript`. Node strips types at runtime but does not check them.
 
-The online `just dev::outdated` report excludes both Rust workspaces: cargo-outdated's temporary copy cannot resolve
-patched `vendor/fast-mvt`, and gallery path dependencies leave its project root. Local Nix inputs and UV packages
-without a reported latest version stay visible as unresolved findings.
+The online `just dev::deps::outdated` report excludes both Rust workspaces: cargo-outdated's temporary copy cannot
+resolve patched `vendor/fast-mvt`, and gallery path dependencies leave its project root. Local Nix inputs and UV
+packages without a reported latest version stay visible as unresolved findings.
 
 For editor import resolution, populate `infra/python/.venv` from the locked tooling dependencies:
 

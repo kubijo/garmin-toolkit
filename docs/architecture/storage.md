@@ -70,9 +70,9 @@ provenance and transformation representations; its writer and reader share those
 
 Generic descriptors, local/ZIP resources, and supported CSV validation belong to the independent
 [`datapackage` crate](../../crates/datapackage/README.md). Activity schemas, FIT policy, and storage authorization stay
-in the Garmin crates. `just qa::datapackage` compares actual upstream fixtures and selected Python test cases, checks
-the executable tests' AST against a pristine upstream reference, and builds/tests Cargo's archive outside the checkout.
-The crate owns its license, fixtures, and locked Python compatibility project.
+in the Garmin crates. `just dev::checks::datapackage` compares actual upstream fixtures and selected Python test cases,
+checks the executable tests' AST against a pristine upstream reference, and builds/tests Cargo's archive outside the
+checkout. The crate owns its license, fixtures, and locked Python compatibility project.
 
 ## Generated FIT Courses
 

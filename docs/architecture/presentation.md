@@ -112,9 +112,9 @@ display preference, not an access restriction.
 
 `garmin-i18n` wraps FormatJS. English ICU messages live beside call sites as fallback; Czech source, translation, and
 context in `translations/cs.json` compile into a flat catalog in Cargo's `OUT_DIR` using the pinned FormatJS CLI during
-the crate build. Generated catalogs are not tracked. `just dev::i18n-sync` updates editable translation metadata; checks
-reject stale, missing, empty, extra, malformed, or incompatible messages. That proves catalog completeness, not how much
-visible copy uses FormatJS. Gallery scenes expose both languages.
+the crate build. Generated catalogs are not tracked. `just dev::i18n::sync` updates editable translation metadata;
+checks reject stale, missing, empty, extra, malformed, or incompatible messages. That proves catalog completeness, not
+how much visible copy uses FormatJS. Gallery scenes expose both languages.
 
 Preflight Grit checks keep messages outside other macro token trees, reject whitespace that FormatJS would collapse, and
 reject apostrophe-quoted ICU arguments. Deliberate message line breaks travel as interpolation values.
