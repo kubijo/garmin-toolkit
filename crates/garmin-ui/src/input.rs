@@ -33,6 +33,7 @@ pub struct Props<'a> {
     size: Option<Size>,
     disabled: Option<bool>,
     subtle_border: bool,
+    password: bool,
 }
 
 impl<'a> Props<'a> {
@@ -45,12 +46,20 @@ impl<'a> Props<'a> {
             size: None,
             disabled: None,
             subtle_border: false,
+            password: false,
         }
     }
 
     #[must_use]
     pub const fn placeholder(mut self, placeholder: &'a str) -> Self {
         self.placeholder = placeholder;
+        self
+    }
+
+    /// Conceals the text and suppresses copying it from the field.
+    #[must_use]
+    pub const fn password(mut self, password: bool) -> Self {
+        self.password = password;
         self
     }
 
@@ -178,6 +187,7 @@ pub fn show(ui: &mut Ui, value: &mut String, props: Props<'_>) -> Response {
             ui.add_enabled(
                 !disabled,
                 egui::TextEdit::singleline(value)
+                    .password(props.password)
                     .hint_text(props.placeholder.to_owned())
                     .font(egui::FontId::proportional(metrics.font_size))
                     .desired_width(f32::INFINITY)

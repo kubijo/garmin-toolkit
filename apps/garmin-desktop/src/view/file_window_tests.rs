@@ -4,7 +4,7 @@ use eframe::egui;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-fn desktop() -> Result<(tempfile::TempDir, Desktop), Box<dyn std::error::Error>> {
+pub(super) fn desktop() -> Result<(tempfile::TempDir, Desktop), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let deployment = futures_lite::future::block_on(crate::mode::open(directory.path()))?;
     let application = futures_lite::future::block_on(deployment.application(deployment.epoch()))?;
@@ -24,6 +24,7 @@ fn desktop() -> Result<(tempfile::TempDir, Desktop), Box<dyn std::error::Error>>
         .map(|user| {
             ProfileView::new(
                 worker::ProfileData {
+                    garmin_connect_configured: false,
                     user,
                     activities: Vec::new(),
                     avatar: None,

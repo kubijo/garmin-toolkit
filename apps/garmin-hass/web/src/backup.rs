@@ -500,6 +500,7 @@ impl super::App {
         self.avatar_editor = None;
         self.device_browser = None;
         self.device_fit_preview = None;
+        self.cloud_fit_preview = None;
         self.device_fit_plan = None;
         self.device_fit_job = None;
     }

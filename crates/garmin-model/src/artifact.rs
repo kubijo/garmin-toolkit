@@ -137,6 +137,30 @@ impl ByteCount {
         Self(bytes)
     }
 
+    /// Constructs a byte count from binary kibibytes (1024 bytes each).
+    /// # Panics
+    /// Panics if the byte count exceeds `u64::MAX`.
+    #[must_use]
+    pub const fn from_kibibytes(kibibytes: u64) -> Self {
+        Self(
+            kibibytes
+                .checked_mul(1024)
+                .expect("kibibyte count exceeds u64 bytes"),
+        )
+    }
+
+    /// Constructs a byte count from binary mebibytes (1024 kibibytes each).
+    /// # Panics
+    /// Panics if the byte count exceeds `u64::MAX`.
+    #[must_use]
+    pub const fn from_mebibytes(mebibytes: u64) -> Self {
+        Self::from_kibibytes(
+            mebibytes
+                .checked_mul(1024)
+                .expect("mebibyte count exceeds u64 bytes"),
+        )
+    }
+
     #[must_use]
     pub const fn as_u64(&self) -> u64 {
         self.0

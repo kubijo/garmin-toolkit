@@ -399,6 +399,7 @@ let
             tooling.checks
             // {
               desktop-vm-startup = desktopVm.startupCheck;
+              garmin-connect = import ./garmin-connect.nix { inherit pkgs toolchain; };
             }
             // build.checks
             // (removeAttrs expandedQuality.checks [ "rust-coverage" ])

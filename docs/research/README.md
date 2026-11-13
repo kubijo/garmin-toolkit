@@ -6,8 +6,6 @@ reproduce their claims. Preserve counterexamples; one device tuple proves no fam
 
 ## Devices and transport
 
-- [Bluetooth adapters](bluetooth-adapters.md)
-- [Connect IQ companion](connect-iq-companion.md)
 - [Device capabilities](device-capabilities.md)
 - [Device capacity and update recovery](device-capacity-and-recovery.md)
 - [MTP test backends](mtp-test-backends.md)

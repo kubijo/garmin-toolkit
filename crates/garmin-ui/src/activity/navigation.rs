@@ -311,7 +311,15 @@ fn archive_row(ui: &mut Ui, item: &Presentation, index: usize, selected: bool) -
     );
     let response = super::row_response(ui, rect, index, &item.title);
     crate::semantics::value(&response, if selected { "selected" } else { "unselected" });
-    super::paint_row(ui, rect, &item.item_props(), selected, &response);
+    super::paint_row(
+        ui,
+        rect,
+        &item.item_props(),
+        selected,
+        &response,
+        None,
+        garmin_color::theme::Level::Two,
+    );
     response.clicked()
 }
 

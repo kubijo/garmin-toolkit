@@ -8,15 +8,38 @@ use garmin_color::{Color, swatch};
 use garmin_model::identity::ProfilePreferences;
 use garmin_ui::profile_settings::{self, Action};
 
+enum RequestState {
+    Idle,
+    Loading,
+}
+
 struct Model {
+    cloud: bool,
     profile: u8,
     accent: Option<Color>,
     preferences: ProfilePreferences,
     disabled: bool,
+    key: Option<garmin_model::garmin_connect::PersonalApiKey>,
+    facts: Option<garmin_model::garmin_connect::AccountFacts>,
+    checks: u32,
+    reject: bool,
+    activities: Option<garmin_model::garmin_connect::ActivityResponse>,
+    activity_request: RequestState,
+    requests: Vec<garmin_model::garmin_connect::ActivityRequest>,
+    batch: Option<profile_settings::connect_activities::Batch>,
 }
 
 fn harness() -> Harness<'static, Model> {
     harness_for(garmin_i18n::Language::English, [760.0, 1000.0])
+}
+
+fn test_facts() -> garmin_model::garmin_connect::AccountFacts {
+    garmin_model::garmin_connect::AccountFacts {
+        display_name: Some("Garmin Rider".into()),
+        locale: Some("cs".into()),
+        measurement_system: Some("metric".into()),
+        time_zone: Some("Europe/Prague".into()),
+    }
 }
 
 fn harness_for(language: garmin_i18n::Language, size: [f32; 2]) -> Harness<'static, Model> {
@@ -25,46 +48,108 @@ fn harness_for(language: garmin_i18n::Language, size: [f32; 2]) -> Harness<'stat
         .formatter(language)
         .expect("locale formatter");
     let mut installed = false;
-    Harness::builder().with_size(size).build_ui_state(
-        move |ui, state: &mut Model| {
-            if !installed {
-                garmin_ui::install(ui.ctx());
-                installed = true;
-                ui.ctx().request_repaint();
-                return;
-            }
-            if let Some(action) = profile_settings::show(
-                ui,
-                &profile_settings::Props {
-                    id: egui::Id::new(state.profile),
-                    intl: &intl,
-                    preferences: state.preferences,
-                    accent: state.accent,
-                    profile: garmin_ui::profile::ProfileProps {
-                        display_name: "Same name",
-                        accent: state.accent.unwrap_or(swatch::ACTION),
-                        avatar: None,
-                    },
-                    picture_enabled: false,
-                    disabled: state.disabled,
-                },
-            ) {
-                match action {
-                    Action::UpdateAccent(accent) => state.accent = accent,
-                    Action::UpdatePreferences(preferences) => state.preferences = preferences,
-                    Action::ChoosePicture => {}
+    Harness::builder()
+        .with_size(size)
+        .with_max_steps(32)
+        .build_ui_state(
+            move |ui, state: &mut Model| {
+                if !installed {
+                    garmin_ui::install(ui.ctx());
+                    installed = true;
+                    ui.ctx().request_repaint();
+                    return;
                 }
-            }
-        },
-        Model {
-            profile: 0,
-            accent: None,
-            disabled: false,
-            preferences: ProfilePreferences::default()
-                .with_show_hidden_files(true)
-                .with_inline_file_windows(true),
-        },
-    )
+                let show: fn(&mut egui::Ui, &profile_settings::Props<'_>) -> Option<Action> =
+                    if state.cloud {
+                        profile_settings::connect_activities::show
+                    } else {
+                        profile_settings::show
+                    };
+                if let Some(action) = show(
+                    ui,
+                    &profile_settings::Props {
+                        id: egui::Id::new(state.profile),
+                        intl: &intl,
+                        preferences: state.preferences,
+                        accent: state.accent,
+                        profile: garmin_ui::profile::ProfileProps {
+                            display_name: "Same name",
+                            accent: state.accent.unwrap_or(swatch::ACTION),
+                            avatar: None,
+                        },
+                        picture_enabled: false,
+                        garmin_connect: profile_settings::GarminConnectProps {
+                            now: "2026-11-10T12:00:00Z".parse().expect("fixture timestamp"),
+                            configured: state.key.is_some(),
+                            checking: false,
+                            facts: state.facts.as_ref(),
+                            activities: state.activities.as_ref(),
+                            activities_busy: matches!(
+                                state.activity_request,
+                                RequestState::Loading
+                            ),
+                            batch: state.batch.as_ref(),
+                        },
+                        disabled: state.disabled,
+                    },
+                ) {
+                    match action {
+                        Action::StartGarminConnectPageImport => start_page_import(state),
+                        Action::CancelGarminConnectPageImport => {
+                            if let Some(batch) = &mut state.batch {
+                                batch.cancel();
+                            }
+                        }
+                        Action::UpdateAccent(accent) => state.accent = accent,
+                        Action::UpdatePreferences(preferences) => state.preferences = preferences,
+                        Action::ChoosePicture => {}
+                        Action::GarminConnectActivity(request) => state.requests.push(request),
+                        Action::UpdateGarminConnectKey(key) => {
+                            if state.reject {
+                                state.facts = None;
+                            } else {
+                                state.facts = key.as_ref().map(|_| test_facts());
+                                state.key = key;
+                            }
+                        }
+                        Action::TestGarminConnectKey => {
+                            state.checks += 1;
+                            state.facts = Some(test_facts());
+                        }
+                    }
+                }
+            },
+            Model {
+                cloud: false,
+                profile: 0,
+                accent: None,
+                disabled: false,
+                key: None,
+                facts: None,
+                checks: 0,
+                reject: false,
+                activities: None,
+                activity_request: RequestState::Idle,
+                requests: Vec::new(),
+                batch: None,
+                preferences: ProfilePreferences::default()
+                    .with_show_hidden_files(true)
+                    .with_inline_file_windows(true),
+            },
+        )
+}
+
+fn start_page_import(state: &mut Model) {
+    if let Some(garmin_model::garmin_connect::ActivityResponse::Page { activities, .. }) =
+        &state.activities
+    {
+        let mut batch =
+            profile_settings::connect_activities::Batch::new(activities).expect("one page");
+        if let Some(request) = batch.next_request() {
+            state.requests.push(request);
+        }
+        state.batch = Some(batch);
+    }
 }
 
 #[test]
@@ -87,6 +172,384 @@ fn scrolling_from_the_empty_side_moves_the_heading_and_reaches_preferences() {
     let field = view
         .get(By::new().predicate(|node| node.author_id() == Some("profile.file-windows.inline")));
     assert!(field.rect().top() >= 0.0 && field.rect().bottom() <= 480.0);
+}
+
+#[test]
+fn personal_api_key_can_be_saved_replaced_and_removed() {
+    let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1600.0]);
+    view.run();
+    let field =
+        || By::new().predicate(|node| node.author_id() == Some("profile.garmin-connect.key"));
+    for key in ["first-test-key", "replacement-test-key"] {
+        if view.state().key.is_some() {
+            assert!(view.query(field()).is_none());
+            view.get_by_label("Replace key").click();
+            view.run();
+        }
+        view.get(field()).click();
+        view.get(field()).type_text(key);
+        view.run();
+        view.get_by_label("Verify and save").click();
+        view.run();
+        assert_eq!(
+            view.state()
+                .key
+                .as_ref()
+                .expect("key saved by settings action")
+                .expose(),
+            key
+        );
+        assert!(view.query_by_label("Personal API key saved").is_some());
+        assert!(view.query(field()).is_none());
+    }
+    view.get_by_label("Remove key").click();
+    view.run();
+    assert!(view.state().key.is_none());
+    assert!(view.query_by_label("No Personal API key saved").is_some());
+}
+
+#[test]
+fn unsaved_key_drafts_do_not_cross_profile_identity() {
+    let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1600.0]);
+    view.run();
+    let field =
+        || By::new().predicate(|node| node.author_id() == Some("profile.garmin-connect.key"));
+    view.get(field()).click();
+    view.get(field()).type_text("unsaved-test-key");
+    view.run();
+    view.state_mut().profile = 1;
+    view.run();
+    assert!(
+        view.get_by_label("Verify and save")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(view.state().key.is_none());
+}
+
+#[test]
+fn browsing_cloud_activities_only_requests_a_preview_until_explicit_import() {
+    use garmin_model::garmin_connect::{ActivityRequest, ActivityResponse, RemoteActivity};
+    let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1600.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("saved-key".into())
+            .expect("fixture key"),
+    );
+    view.run();
+    assert_eq!(view.state().requests.len(), 0);
+    view.state_mut().cloud = true;
+    view.run();
+    assert_eq!(view.state().requests, [ActivityRequest::List { start: 0 }]);
+    view.state_mut().activities = Some(ActivityResponse::Page {
+        start: 0,
+        has_more: false,
+        activities: vec![RemoteActivity {
+            id: 42,
+            imported: false,
+            sport: Some(garmin_model::activity::ActivitySport::Cycling),
+            name: "Road ride".into(),
+            started_at: Some("2026-11-10 10:00:00".into()),
+            distance_metres: Some(13230.0),
+            duration_seconds: Some(3600.0),
+        }],
+    });
+    view.run();
+    assert!(view.query_by_label("Import FIT").is_none());
+    let row_bounds = view.get_by_label("Road ride").rect();
+    assert!(
+        !view
+            .get_by_label("Road ride")
+            .accesskit_node()
+            .is_disabled()
+    );
+    view.get_by_label("Road ride").click();
+    view.run();
+    assert_eq!(
+        view.state().requests,
+        [
+            ActivityRequest::List { start: 0 },
+            ActivityRequest::Preview { id: 42 }
+        ],
+        "row bounds: {row_bounds:?}"
+    );
+}
+
+fn cloud_page(start: u32) -> garmin_model::garmin_connect::ActivityResponse {
+    use garmin_model::{
+        activity::ActivitySport,
+        garmin_connect::{ActivityResponse, RemoteActivity},
+    };
+    ActivityResponse::Page {
+        start,
+        has_more: true,
+        activities: (0..20)
+            .map(|index| RemoteActivity {
+                id: i64::from(index + 1),
+                imported: index == 2,
+                sport: Some(if index % 2 == 0 {
+                    ActivitySport::Cycling
+                } else {
+                    ActivitySport::Running
+                }),
+                name: format!(
+                    "{} {}",
+                    if index % 2 == 0 {
+                        "Hamina Road Cycling"
+                    } else {
+                        "Evening run"
+                    },
+                    index + 1
+                ),
+                started_at: Some("2026-11-10 07:12:38".into()),
+                distance_metres: Some(13230.0),
+                duration_seconds: Some(4320.0),
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn cloud_browser_preserves_the_current_page_and_keeps_paging_controls_visible() {
+    use garmin_model::garmin_connect::ActivityRequest;
+    let mut view = harness_for(garmin_i18n::Language::English, [1280.0, 900.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("saved-key".into())
+            .expect("fixture key"),
+    );
+    view.state_mut().activities = Some(cloud_page(20));
+    view.run();
+    assert!(view.query_by_label("Hamina Road Cycling 1").is_none());
+    view.state_mut().cloud = true;
+    view.run();
+    assert_eq!(view.state().requests.len(), 0);
+    assert!(view.query_by_label("Activities 21–40").is_some());
+    let next = view.get_by_label("Next page");
+    assert!(next.rect().bottom() < 900.0);
+    next.click();
+    view.run();
+    assert_eq!(view.state().requests, [ActivityRequest::List { start: 40 }]);
+    view.state_mut().cloud = false;
+    view.run();
+    assert!(view.query_by_label("Hamina Road Cycling 1").is_none());
+}
+
+#[test]
+fn page_import_disables_paging_but_keeps_cancellation_available() {
+    use garmin_model::garmin_connect::ActivityRequest;
+    let mut view = harness_for(garmin_i18n::Language::English, [1280.0, 900.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("saved-key".into())
+            .expect("fixture key"),
+    );
+    view.state_mut().cloud = true;
+    view.state_mut().activities = Some(cloud_page(0));
+    view.run();
+    view.get_by_label("Import all on this page").click();
+    view.run_steps(3);
+    assert_eq!(view.state().requests, [ActivityRequest::Prepare { id: 1 }]);
+    let batch = view.state().batch.as_ref().expect("started batch");
+    assert_eq!((batch.counts.total, batch.counts.skipped), (20, 1));
+    assert!(
+        view.get_by_label("Next page")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        view.get_by_label("Import all on this page")
+            .accesskit_node()
+            .is_disabled()
+    );
+    view.get_by_label("Cancel import").click();
+    view.run_steps(3);
+    assert!(view.state().batch.as_ref().expect("batch").cancelled());
+    assert!(
+        view.get_by_label("Stopping…")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert_eq!(view.state().requests.len(), 1);
+    let step = view
+        .state_mut()
+        .batch
+        .as_mut()
+        .expect("batch")
+        .complete(Err(garmin_model::garmin_connect::ActivityFailure {
+            message: "Connection lost".into(),
+            kind: garmin_model::garmin_connect::ActivityFailureKind::Session,
+        }));
+    assert!(step.request.is_none());
+    view.run();
+    assert!(view.query_by_label("Page import cancelled").is_some());
+    assert!(
+        !view
+            .get_by_label("Next page")
+            .accesskit_node()
+            .is_disabled()
+    );
+}
+
+#[test]
+fn completed_batch_does_not_hide_later_loading_feedback() {
+    let mut view = harness_for(garmin_i18n::Language::English, [1280.0, 900.0]);
+    view.state_mut().cloud = true;
+    view.state_mut().activities = Some(cloud_page(0));
+    view.state_mut().batch = Some(
+        profile_settings::connect_activities::Batch::new(&[])
+            .expect("empty page forms a completed batch"),
+    );
+    view.state_mut().activity_request = RequestState::Loading;
+    view.run_steps(4);
+    assert!(view.query_by_label("Contacting Garmin Connect…").is_some());
+}
+
+#[test]
+fn imported_rows_remain_browsable_and_pager_can_select_a_page() {
+    use garmin_model::garmin_connect::ActivityRequest;
+    let mut view = harness_for(garmin_i18n::Language::English, [960.0, 760.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("saved-key".into())
+            .expect("fixture key"),
+    );
+    view.state_mut().cloud = true;
+    view.state_mut().activities = Some(cloud_page(20));
+    view.run();
+    let imported = view.get_by_label("Hamina Road Cycling 3");
+    assert!(
+        imported
+            .accesskit_node()
+            .description()
+            .is_some_and(|text| text.contains("Imported"))
+    );
+    imported.click();
+    view.run();
+    assert_eq!(view.state().requests, [ActivityRequest::Preview { id: 3 }]);
+    view.get(By::new().predicate(|node| node.value().as_deref() == Some("Page 2")))
+        .click();
+    view.run();
+    view.get_by_label("Page 1").click();
+    view.run();
+    assert_eq!(
+        view.state().requests.last(),
+        Some(&ActivityRequest::List { start: 0 })
+    );
+}
+
+#[test]
+fn testing_a_saved_key_shows_service_facts() {
+    let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1600.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("saved-key".into())
+            .expect("fixture key"),
+    );
+    view.run();
+    view.get_by_label("Test connection").click();
+    view.run();
+    assert_eq!(view.state().checks, 1);
+    for label in [
+        "Verified with Garmin Connect",
+        "Display name",
+        "Garmin Rider",
+        "Locale",
+        "cs",
+        "Units",
+        "metric",
+        "Time zone",
+    ] {
+        assert!(view.query_by_label(label).is_some(), "missing {label}");
+    }
+}
+
+#[test]
+fn uuid_display_names_are_presented_as_profile_identifiers() {
+    let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1600.0]);
+    view.state_mut().facts = Some(garmin_model::garmin_connect::AccountFacts {
+        display_name: Some("df38d475-c521-457c-810f-71c5aa657fe9".into()),
+        ..test_facts()
+    });
+    view.run();
+    assert!(view.query_by_label("Garmin profile ID").is_some());
+    assert!(view.query_by_label("Display name").is_none());
+}
+
+#[test]
+fn failed_verification_keeps_the_new_key_in_the_editor_for_retry() {
+    let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1600.0]);
+    view.state_mut().reject = true;
+    view.run();
+    let field = By::new().predicate(|node| node.author_id() == Some("profile.garmin-connect.key"));
+    view.get(field).click();
+    view.get(By::new().predicate(|node| node.author_id() == Some("profile.garmin-connect.key")))
+        .type_text("retry-key");
+    view.run();
+    view.get_by_label("Verify and save").click();
+    view.run();
+    assert!(view.state().key.is_none());
+    assert!(
+        !view
+            .get_by_label("Verify and save")
+            .accesskit_node()
+            .is_disabled()
+    );
+    view.state_mut().reject = false;
+    view.get_by_label("Verify and save").click();
+    view.run();
+    assert_eq!(
+        view.state()
+            .key
+            .as_ref()
+            .expect("key saved after retry")
+            .expose(),
+        "retry-key"
+    );
+}
+
+#[test]
+fn key_entry_and_removal_follow_settings_busy_state() {
+    let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1600.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("saved-test-key".into())
+            .expect("valid fixture key"),
+    );
+    view.state_mut().disabled = true;
+    view.run();
+    let field = By::new().predicate(|node| node.author_id() == Some("profile.garmin-connect.key"));
+    assert!(view.query(field).is_none());
+    assert!(
+        view.get_by_label("Remove key")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        view.get_by_label("Replace key")
+            .accesskit_node()
+            .is_disabled()
+    );
+}
+
+#[test]
+fn cancelling_key_replacement_preserves_the_saved_connection() {
+    let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1600.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("saved-key".into())
+            .expect("fixture key"),
+    );
+    view.run();
+    view.get_by_label("Replace key").click();
+    view.run();
+    assert!(view.query_by_label("New Personal API key").is_some());
+    view.get(By::new().predicate(|node| node.author_id() == Some("profile.garmin-connect.key")))
+        .type_text("discarded-key");
+    view.run();
+    view.get_by_label("Cancel").click();
+    view.run();
+    assert!(view.query_by_label("New Personal API key").is_none());
+    assert_eq!(
+        view.state().key.as_ref().expect("saved key").expose(),
+        "saved-key"
+    );
+    view.get_by_label("Test connection").click();
+    view.run();
+    assert_eq!(view.state().checks, 1);
 }
 
 #[test]
@@ -381,6 +844,78 @@ fn capture_accent_picker() -> Result<(), Box<dyn std::error::Error>> {
         view.run();
         view.render()?
             .save(out.join(format!("{name}-preview.png")))?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "renders the Garmin Connect settings with a headless GPU"]
+fn capture_connect_settings() -> Result<(), Box<dyn std::error::Error>> {
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.tmp/gallery/connect-settings");
+    std::fs::create_dir_all(&out)?;
+    for (name, theme) in [
+        ("dark", egui::ThemePreference::Dark),
+        ("light", egui::ThemePreference::Light),
+    ] {
+        let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1200.0]);
+        view.state_mut().key = Some(
+            garmin_model::garmin_connect::PersonalApiKey::from_string("preview-key".into())
+                .expect("preview key"),
+        );
+        view.state_mut().facts = Some(test_facts());
+        view.ctx.set_theme(theme);
+        view.run();
+        view.render()?.save(out.join(format!("{name}.png")))?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "renders the cloud activity browser with a headless GPU"]
+fn capture_cloud_browser() -> Result<(), Box<dyn std::error::Error>> {
+    let out =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/gallery/cloud-browser");
+    std::fs::create_dir_all(&out)?;
+    for (name, size, theme) in [
+        ("wide-dark", [1280.0, 900.0], egui::ThemePreference::Dark),
+        ("wide-light", [1280.0, 900.0], egui::ThemePreference::Light),
+        ("narrow", [400.0, 760.0], egui::ThemePreference::Dark),
+    ] {
+        let mut view = harness_for(garmin_i18n::Language::English, size);
+        view.state_mut().key = Some(
+            garmin_model::garmin_connect::PersonalApiKey::from_string("preview-key".into())
+                .expect("fixture key"),
+        );
+        view.state_mut().activities = Some(cloud_page(20));
+        view.state_mut().cloud = true;
+        view.ctx.set_theme(theme);
+        view.run();
+        view.render()?.save(out.join(format!("{name}.png")))?;
+        let mut batch = if let Some(garmin_model::garmin_connect::ActivityResponse::Page {
+            activities,
+            ..
+        }) = &view.state().activities
+        {
+            profile_settings::connect_activities::Batch::new(activities).expect("one page")
+        } else {
+            unreachable!("fixture page")
+        };
+        assert!(batch.next_request().is_some());
+        view.state_mut().batch = Some(batch);
+        view.run_steps(3);
+        view.render()?
+            .save(out.join(format!("{name}-importing.png")))?;
+        let batch = view.state_mut().batch.as_mut().expect("batch");
+        batch.cancel();
+        let failure = garmin_model::garmin_connect::ActivityFailure {
+            message: "Connection lost".into(),
+            kind: garmin_model::garmin_connect::ActivityFailureKind::Session,
+        };
+        assert!(batch.complete(Err(failure)).request.is_none());
+        view.run();
+        view.render()?
+            .save(out.join(format!("{name}-cancelled.png")))?;
     }
     Ok(())
 }

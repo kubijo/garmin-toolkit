@@ -1,6 +1,8 @@
 //! Target-neutral application services.
 
 pub mod activity_export;
+mod connect;
+mod connect_import;
 pub mod course_transfer;
 pub mod deployment;
 pub mod devices;
@@ -230,6 +232,36 @@ impl Application {
         );
         self.storage.save_user(&user).await?;
         Ok(user)
+    }
+
+    /// Saves or removes this profile's Garmin Connect key.
+    /// # Errors
+    /// Returns missing-profile or storage failures.
+    pub(crate) async fn set_garmin_connect_key(
+        &self,
+        user: UserContext,
+        key: Option<garmin_model::garmin_connect::PersonalApiKey>,
+    ) -> Result<(), Error> {
+        if self.storage.user(user.user_id()).await?.is_none() {
+            return Err(Error::ProfileNotFound(user.user_id()));
+        }
+        self.storage
+            .set_garmin_connect_key(user.user_id(), key.as_ref())
+            .await?;
+        Ok(())
+    }
+
+    /// Reports saved configuration without exposing its credential.
+    /// # Errors
+    /// Returns missing-profile or storage failures.
+    pub async fn garmin_connect_configured(&self, user: UserContext) -> Result<bool, Error> {
+        if self.storage.user(user.user_id()).await?.is_none() {
+            return Err(Error::ProfileNotFound(user.user_id()));
+        }
+        Ok(self
+            .storage
+            .garmin_connect_configured(user.user_id())
+            .await?)
     }
 
     /// Replaces one profile's presentation preferences.
@@ -672,6 +704,20 @@ pub enum ImportDisposition {
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
+    GarminConnect(#[from] garmin_connect::Error),
+    #[error("No Garmin Connect key is saved for this profile")]
+    GarminConnectKeyMissing,
+    #[error("Garmin original must be a valid ZIP containing exactly one FIT file (up to 64 MiB)")]
+    GarminConnectArchive,
+    #[error("The Garmin activity changed since preview; open it again before importing")]
+    GarminConnectPreviewChanged,
+    #[error(
+        "This activity is too large for an interactive preview; use Import all on this page to import its original FIT"
+    )]
+    GarminConnectPreviewTooLarge,
+    #[error("Garmin activity could not be imported: {0}")]
+    GarminConnectImport(String),
+    #[error(transparent)]
     Storage(#[from] garmin_storage::Error),
     #[error("profile {0} does not exist")]
     ProfileNotFound(UserId),
@@ -864,6 +910,55 @@ mod tests {
                     .await,
                 Err(super::Error::ProfileNotFound(_))
             ));
+            application.close().await;
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn connect_keys_are_profile_scoped_and_unknown_profiles_are_rejected()
+    -> Result<(), Box<dyn Error>> {
+        block_on(async {
+            let root = tempdir()?;
+            let application =
+                Application::new(Storage::open(root.path().join("keys.sqlite3")).await?);
+            let first = application.create_profile("First".parse()?).await?;
+            let second = application.create_profile("Second".parse()?).await?;
+            let key = garmin_model::garmin_connect::PersonalApiKey::from_string(
+                "service-test-key".into(),
+            )?;
+            application
+                .set_garmin_connect_key(UserContext::new(first.id()), Some(key))
+                .await?;
+            application
+                .update_profile_preferences(
+                    UserContext::new(first.id()),
+                    ProfilePreferences::default().with_inline_file_windows(true),
+                )
+                .await?;
+            assert!(
+                application
+                    .garmin_connect_configured(UserContext::new(first.id()))
+                    .await?
+            );
+            assert!(
+                !application
+                    .garmin_connect_configured(UserContext::new(second.id()))
+                    .await?
+            );
+            let unknown = UserContext::new(UserId::new_v4());
+            assert!(matches!(
+                application.set_garmin_connect_key(unknown, None).await,
+                Err(super::Error::ProfileNotFound(_))
+            ));
+            application
+                .set_garmin_connect_key(UserContext::new(first.id()), None)
+                .await?;
+            assert!(
+                !application
+                    .garmin_connect_configured(UserContext::new(first.id()))
+                    .await?
+            );
             application.close().await;
             Ok(())
         })

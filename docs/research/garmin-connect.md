@@ -1,31 +1,49 @@
-# Garmin Connect
+# Garmin Connect Personal API
 
-## Support policy
+The pinned descriptor, Rust generator and offline HTTP verification live in
+[`infra/garmin-connect`](../../infra/garmin-connect/README.md). Run `just connect-api::test` to verify the contract.
 
-No Garmin Connect adapter is implemented. The deferred integration follows
-[ADR 0008](../decisions/0008-unofficial-garmin-connect-boundary.md): built-in, opt-in, unofficial, and independent of
-USB. Reuse tokens, stop on authentication/rate-limit failures, and never evade controls. Reads need evidence; writes are
-explicit; destructive changes need separate validation.
+## Documented contract
 
-Garmin's [Terms of Use](https://www.garmin.com/en-US/legal/terms-of-use/), reviewed 2026-09-04, prohibited automated or
-manual access, copying, or scraping through unexposed means. Warn about blocking and recheck terms/authentication before
-implementation and release.
+Garmin's [program overview][overview] provides a Personal API for owners accessing their own data, including activity
+JSON and original FIT files. Delivery is pull-only. It is not intended for commercial applications serving multiple
+users; validate the applicable terms and intended distribution before release.
 
-## Historical upstream audit
+The [public Swagger reference][swagger] embeds an OpenAPI 3.0.1 document, version 1.0.0, with 26 endpoint paths and
+response schemas. The production base is `https://personal.connectapi.garmin.com`; a separate `.cn` server is listed.
+Relevant operations are:
 
-These revisions are audit evidence, not current dependency pins.
+- `GET /activitylist-service/activities/search/activities`: paginated summaries, offset/limit, date and sport filters.
+  The documented default limit is 99; no maximum or guaranteed historical window is stated.
+- `GET /activity-service/activity/{activityId}`: summary, metadata, measurements and split summaries.
+- `GET /download-service/files/activity/{activityId}`: original-format activity download as a ZIP response.
 
-- [`python-garminconnect` 0.3.12][gc-audit]: The pinned MIT-licensed audit covers broad reads and writes. Adapt only
-  provenance-recorded material consistent with [ADR 0008](../decisions/0008-unofficial-garmin-connect-boundary.md).
-  Exclude TLS fingerprint rotation, randomized client identity, anti-WAF, and fallback-login behavior.
-- [Garth 0.8.0](https://github.com/matin/garth/commit/f99159a15c4c9463ce215a60ba9f7cb21f94a3b7): MIT-licensed
-  authentication history only. Upstream deprecated it after Garmin changed the mobile authentication flow.
-- [Rust-Garmin](https://github.com/poster515/Rust-Garmin/commit/81c115e1003139d51deeb17b0d43652684f9c328): Rejected
-  implementation. GPL-3.0 compatibility is not the problem; its obsolete flow, secret handling, failure behavior, and
-  absent tests are.
-- [Garmin Connect Developer Program](https://developer.garmin.com/gc-developer-program/overview/): Reconsider only if
-  Garmin offers a suitable personal/public agreement; it is not the baseline for this project.
+Activity details include user-authored names/descriptions and summary fields `perceivedWorkoutEffort`,
+`directWorkoutFeel` and `directWorkoutRpe`. Their rating scales are unspecified; previews show names and descriptions
+without interpreting those ratings.
 
-Before enabling an operation, record region, purpose, response/mutation, retries, and date.
+## Authentication and setup
 
-[gc-audit]: https://github.com/cyberjunky/python-garminconnect/commit/981d150caeda7d632224a75f3895c08df27a2a34
+The [Personal API guide][guide] documents manual key creation at the [Garmin Connect settings page][keys]. The key is
+displayed once. The [FAQ] lists expiry choices of 30, 90, 180 days or one year; users can revoke keys there.
+
+Exchange the key using `POST /personalapitoken-service/personal-api/personal-api-key/token` with an
+`Authorization: ApiKey …` header. Access tokens last 24 hours or until key expiry, whichever occurs first. There are no
+refresh tokens; obtain another token using the key. Authentication is explained separately from the Swagger document,
+which does not declare security schemes.
+
+## Live qualification
+
+Key exchange, profile facts, activity listing/paging, original FIT download, preview, explicit import and duplicate
+handling are confirmed on the owner's account. Manual-export byte comparison, other regions, expiry/revocation, service
+limits and historical reach remain unqualified.
+
+[ADR 0008](../decisions/0008-official-garmin-connect-boundary.md) owns the connector boundary;
+[the plan](../plans/garmin-connect-import.md) owns remaining implementation. The unofficial login clients and private
+Bluetooth protocol are not the source contract for this connector.
+
+[faq]: https://developer.garmin.com/gc-developer-program/personal/personal-faq/
+[guide]: https://developer.garmin.com/gc-developer-program/personal/personal-api/
+[keys]: https://connect.garmin.com/app/settings/personalApiToken
+[overview]: https://developer.garmin.com/gc-developer-program/overview/
+[swagger]: https://developer.garmin.com/gc-developer-program/personal/swagger-docs/

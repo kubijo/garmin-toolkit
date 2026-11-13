@@ -136,6 +136,19 @@ impl Storage {
         sqlx::query_file!("queries/snapshot-vacuum.sql", path)
             .execute(&self.pool)
             .await?;
+        // Scrub the private staging copy, then rebuild its pages so deleted key bytes cannot escape.
+        let mut sanitized =
+            SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&database))
+                .await?;
+        let cleared = sqlx::query_file!("queries/clear-garmin-connect-keys.sql")
+            .execute(&mut sanitized)
+            .await?;
+        if cleared.rows_affected() > 0 {
+            sqlx::query_file!("queries/snapshot-compact.sql")
+                .execute(&mut sanitized)
+                .await?;
+        }
+        sanitized.close().await?;
         let mut database_file = File::open(&database)?;
         database_file.sync_all()?;
         let manifest = Manifest {

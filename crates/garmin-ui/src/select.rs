@@ -46,6 +46,7 @@ pub struct Props<'a> {
     size: Option<Size>,
     disabled: Option<bool>,
     width: Option<f32>,
+    outlined: bool,
 }
 
 impl<'a> Props<'a> {
@@ -57,6 +58,7 @@ impl<'a> Props<'a> {
             size: None,
             disabled: None,
             width: None,
+            outlined: false,
         }
     }
 
@@ -81,6 +83,13 @@ impl<'a> Props<'a> {
     #[must_use]
     pub const fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
+        self
+    }
+
+    /// Matches tertiary buttons when used within a toolbar or control group.
+    #[must_use]
+    pub const fn outlined(mut self, outlined: bool) -> Self {
+        self.outlined = outlined;
         self
     }
 }
@@ -113,6 +122,7 @@ pub fn show(
             props.width.unwrap_or_else(|| ui.available_width()),
             row_height,
             open,
+            props.outlined,
         );
         let mut changed = false;
         let mut menu_style = ui.style().as_ref().clone();
@@ -161,6 +171,7 @@ fn control(
     width: f32,
     row_height: f32,
     open: bool,
+    outlined: bool,
 ) -> Response {
     let (_, rect) = ui.allocate_space(egui::vec2(width, row_height));
     let response = ui.interact(rect, id, Sense::click());
@@ -173,11 +184,7 @@ fn control(
     if response.hovered() && ui.is_enabled() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    let visuals = if open {
-        &ui.visuals().widgets.open
-    } else {
-        ui.style().interact(&response)
-    };
+    let visuals = control_visuals(ui, &response, open, outlined);
     ui.painter()
         .rect_filled(rect, CONTROL_RADIUS, visuals.bg_fill);
     let palette = crate::theme::palette(ui);
@@ -190,11 +197,21 @@ fn control(
         palette.borders().strong()
     };
     let border_width = if focused { 2.0 } else { 1.0 };
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom() - border_width / 2.0,
-        egui::Stroke::new(border_width, color32(border)),
-    );
+    if outlined {
+        let stroke = if focused {
+            egui::Stroke::new(border_width, color32(border))
+        } else {
+            visuals.bg_stroke
+        };
+        ui.painter()
+            .rect_stroke(rect, CONTROL_RADIUS, stroke, egui::StrokeKind::Inside);
+    } else {
+        ui.painter().hline(
+            rect.x_range(),
+            rect.bottom() - border_width / 2.0,
+            egui::Stroke::new(border_width, color32(border)),
+        );
+    }
     if let Some(choice) = choice {
         paint_choice(ui, rect, choice, visuals.fg_stroke.color);
     }
@@ -210,6 +227,38 @@ fn control(
         .tint(visuals.fg_stroke.color)
         .paint_at(ui, caret_rect);
     response
+}
+
+fn control_visuals(
+    ui: &Ui,
+    response: &Response,
+    open: bool,
+    outlined: bool,
+) -> egui::style::WidgetVisuals {
+    if !outlined {
+        return if open {
+            ui.visuals().widgets.open
+        } else {
+            *ui.style().interact(response)
+        };
+    }
+    let palette = crate::theme::palette(ui);
+    let states = palette.buttons().tertiary();
+    let state = if !ui.is_enabled() {
+        states.disabled()
+    } else if open || response.is_pointer_button_down_on() {
+        states.active()
+    } else if response.hovered() {
+        states.hover()
+    } else {
+        states.rest()
+    };
+    crate::theme::widget(
+        state.background(),
+        state.background(),
+        state.border(),
+        state.foreground(),
+    )
 }
 
 fn paint_choice(ui: &Ui, rect: egui::Rect, choice: Choice<'_>, color: egui::Color32) {

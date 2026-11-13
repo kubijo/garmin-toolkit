@@ -1,0 +1,39 @@
+[package]
+name = "garmin-connect"
+description = "Official Garmin Personal API transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[package.metadata.cargo-machete]
+# Referenced by generated OUT_DIR code; checked by the emitted REQUIRED_DEPS.toml and compilation.
+ignored = ["bytes", "chrono", "futures-util", "reqwest-middleware", "serde", "uuid"]
+
+[lints]
+workspace = true
+
+[dependencies]
+garmin-model.workspace = true
+bytes.workspace = true
+chrono = { version = "=0.4.45", features = ["serde"] }
+uuid.workspace = true
+futures-util.workspace = true
+reqwest = { workspace = true, features = ["query"] }
+reqwest-middleware.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[build-dependencies]
+hex.workspace = true
+indoc.workspace = true
+openapi-to-rust.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+indoc.workspace = true
+tokio.workspace = true

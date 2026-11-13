@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT personal_api_key FROM garmin_connect_credentials\nWHERE user_id = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "personal_api_key",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "garmin_connect_credentials",
+            "name": "personal_api_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a80666bce2a20d2adcc9904fe0729b4c686b5caebec36a4cf25bab60860b5cd2"
+}

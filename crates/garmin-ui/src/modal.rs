@@ -174,6 +174,7 @@ fn show_with_layout<R>(
         Presentation::Modal => {
             let ctx = ui.ctx().clone();
             let viewport = ctx.content_rect().size();
+            let previous = ctx.memory(|memory| memory.area_rect(id));
             let response = egui::Modal::new(id)
                 .frame(egui::Frame::new())
                 .backdrop_color(egui::Color32::from_black_alpha(BACKDROP_ALPHA))
@@ -183,6 +184,15 @@ fn show_with_layout<R>(
                         render_surface(ui, props, footer, viewport, compact, body)
                     })
                 });
+            let rect = response.response.rect;
+            if compact
+                && previous.is_none_or(|previous| {
+                    previous.min.distance(rect.min) > 0.5
+                        || (previous.size() - rect.size()).length() > 0.5
+                })
+            {
+                ctx.request_repaint();
+            }
             let mut output = response.inner;
             let close_requested = response.response.should_close()
                 || (props.backdrop_closes.unwrap_or_default()
@@ -242,6 +252,7 @@ fn render_surface<R>(
     surface_frame(ui)
         .show(ui, |ui| {
             ui.set_width(width);
+            let mut header_cancel = None;
             let inner = egui::Frame::new()
                 .inner_margin(if compact {
                     egui::Margin::ZERO
@@ -252,14 +263,7 @@ fn render_surface<R>(
                     crate::theme::layer(ui, theme::Level::Two, |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         if compact {
-                            egui::Frame::new()
-                                .inner_margin(egui::Margin {
-                                    left: 16,
-                                    right: 16,
-                                    top: 16,
-                                    bottom: 8,
-                                })
-                                .show(ui, |ui| header(ui, props, true));
+                            header_cancel = compact_header(ui, props);
                         } else {
                             header(ui, props, false);
                         }
@@ -270,7 +274,10 @@ fn render_surface<R>(
                     })
                 })
                 .inner;
-            let (action, primary, cancel, back) = render_footer(ui, props, footer);
+            let (mut action, primary, cancel, back) = render_footer(ui, props, footer);
+            if header_cancel.as_ref().is_some_and(Response::clicked) {
+                action = Some(Action::Cancel);
+            }
             Output {
                 action,
                 inner,
@@ -300,6 +307,43 @@ fn contained_backdrop(ui: &Ui, id: Id, bounds: egui::Rect) -> Response {
     ui.painter()
         .rect_filled(bounds, 0.0, egui::Color32::from_black_alpha(BACKDROP_ALPHA));
     ui.interact(bounds, id, egui::Sense::click_and_drag())
+}
+
+fn compact_header(ui: &mut Ui, props: &Props<'_>) -> Option<Response> {
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let width = (ui.available_width()
+            - if props.cancel_label.is_some() {
+                40.0
+            } else {
+                0.0
+            })
+        .max(0.0);
+        ui.allocate_ui_with_layout(egui::vec2(width, 0.0), Layout::top_down(Align::Min), |ui| {
+            ui.set_min_width(width);
+            egui::Frame::NONE
+                .inner_margin(egui::Margin {
+                    left: 16,
+                    right: 16,
+                    top: 16,
+                    bottom: 8,
+                })
+                .show(ui, |ui| header(ui, props, true));
+        });
+        props.cancel_label.map(|label| {
+            let response = button::IconProps {
+                label,
+                icon: crate::icons::X,
+                kind: button::Kind::Ghost,
+                size: ComponentSize::Medium,
+                enabled: !props.cancel_disabled.unwrap_or(false),
+            }
+            .show(ui);
+            crate::semantics::target(ui, &response, "modal.header-close");
+            response
+        })
+    })
+    .inner
 }
 
 fn header(ui: &mut Ui, props: &Props<'_>, compact: bool) {

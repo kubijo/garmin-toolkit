@@ -183,6 +183,7 @@ fn show_window_scene(
                 navigation: shell::Navigation::Expanded,
                 devices: &devices,
                 backup_enabled: false,
+                garmin_connect_configured: false,
                 window_controls: None,
             },
             |ui| {

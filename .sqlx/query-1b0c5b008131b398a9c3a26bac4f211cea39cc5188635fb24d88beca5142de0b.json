@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    EXISTS(\n        SELECT 1 FROM garmin_connect_credentials\n        WHERE user_id = ?\n    ) AS configured;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "configured",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1b0c5b008131b398a9c3a26bac4f211cea39cc5188635fb24d88beca5142de0b"
+}

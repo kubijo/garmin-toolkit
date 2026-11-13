@@ -67,6 +67,7 @@ fn show(
                 navigation: shell::Navigation::Expanded,
                 devices: &devices,
                 backup_enabled: false,
+                garmin_connect_configured: false,
                 window_controls: native_controls.then_some(&controls),
             },
             |ui| {

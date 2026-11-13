@@ -4,6 +4,7 @@ mod automation;
 mod backup;
 mod browser_timing;
 mod browser_zoom;
+mod connect_state;
 mod control;
 mod developer;
 mod files;
@@ -200,6 +201,7 @@ struct App {
     avatar_editor: Option<AvatarEditor>,
     device_browser: Option<device_browser::Browser>,
     device_fit_preview: Option<device_fit_preview::Preview>,
+    cloud_fit_preview: Option<device_fit_preview::Preview<(UserId, i64, String)>>,
     device_fit_plan: Option<uuid::Uuid>,
     device_fit_job: Option<uuid::Uuid>,
     pairing_confirmation: Option<PairingConfirmation>,
@@ -273,6 +275,7 @@ impl App {
             avatar_editor: None,
             device_browser: None,
             device_fit_preview: None,
+            cloud_fit_preview: None,
             device_fit_plan: None,
             device_fit_job: None,
             pairing_confirmation: None,
@@ -452,12 +455,15 @@ impl App {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "composes workspace destinations and their independent controllers"
+    )]
     fn show_application(
         &mut self,
         ui: &mut Ui,
         product_name: &str,
         devices: &[DeviceSnapshot],
-        preferences_saving: bool,
         device_catalog_loading: Option<&str>,
         notice: Option<&Notice>,
     ) {
@@ -479,6 +485,9 @@ impl App {
             .map(profile::Presentation::props)
             .collect::<Vec<_>>();
         let current_profile = &profiles[profile_index];
+        if matches!(self.page, Page::GarminConnect) && !current_profile.garmin_connect_configured {
+            self.page = Page::ProfileSettings;
+        }
         let output = workspace::show(
             ui,
             &workspace::Props {
@@ -491,6 +500,7 @@ impl App {
                 navigation: self.navigation,
                 devices,
                 backup_enabled: current_profile.user.role() == garmin_model::identity::Role::Owner,
+                garmin_connect_configured: current_profile.garmin_connect_configured,
                 window_controls: None,
             },
             |ui| {
@@ -523,14 +533,21 @@ impl App {
                         (current_profile.user.role() == garmin_model::identity::Role::Owner)
                             .then_some(current_profile.user.id()),
                     )),
-                    Page::ProfileSettings => PageAction::Settings(profile_settings::show(
+                    Page::ProfileSettings => PageAction::Settings(show_profile_settings(
                         ui,
-                        &settings_props(
-                            &self.intl,
-                            current_profile,
-                            self.profile_presentations[profile_index].props(),
-                            preferences_saving,
-                        ),
+                        &self.intl,
+                        &self.shared,
+                        current_profile,
+                        self.profile_presentations[profile_index].props(),
+                        false,
+                    )),
+                    Page::GarminConnect => PageAction::Settings(show_profile_settings(
+                        ui,
+                        &self.intl,
+                        &self.shared,
+                        current_profile,
+                        self.profile_presentations[profile_index].props(),
+                        true,
                     )),
                     Page::Maps(key) => {
                         PageAction::Maps(maps::show(ui, &self.intl, &self.shared, key))
@@ -620,24 +637,8 @@ impl App {
                 self.selected_activity = index;
                 self.load_selected_activity(profiles);
             }
-            PageAction::Settings(Some(profile_settings::Action::ChoosePicture)) => {
-                self.choose_profile_picture(profiles);
-            }
-            PageAction::Settings(Some(profile_settings::Action::UpdateAccent(accent))) => {
-                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
-                    spawn_update_accent(
-                        Rc::clone(&self.shared),
-                        self.context.clone(),
-                        profile.user.id(),
-                        accent,
-                        format_message!(&self.intl, default_message: "Could not save profile settings"),
-                    );
-                }
-            }
-            PageAction::Settings(Some(profile_settings::Action::UpdatePreferences(
-                preferences,
-            ))) => {
-                self.update_preferences(preferences, profiles);
+            PageAction::Settings(Some(action)) => {
+                self.handle_profile_settings_action(action, profiles);
             }
             PageAction::Maps(Some((revision, command))) => maps::submit(
                 Rc::clone(&self.shared),
@@ -863,6 +864,77 @@ impl App {
         };
         self.context.set_theme(theme);
         self.applied_preferences = Some((user_id, preferences));
+    }
+
+    fn handle_profile_settings_action(
+        &mut self,
+        action: profile_settings::Action,
+        profiles: &[ProfileSnapshot],
+    ) {
+        match action {
+            profile_settings::Action::ChoosePicture => self.choose_profile_picture(profiles),
+            profile_settings::Action::UpdateAccent(accent) => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
+                    spawn_update_accent(
+                        Rc::clone(&self.shared),
+                        self.context.clone(),
+                        profile.user.id(),
+                        accent,
+                        format_message!(&self.intl, default_message: "Could not save profile settings"),
+                    );
+                }
+            }
+            profile_settings::Action::StartGarminConnectPageImport => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
+                    start_page_import(
+                        Rc::clone(&self.shared),
+                        self.context.clone(),
+                        profile.user.id(),
+                        cloud_refresh_failure(&self.intl),
+                    );
+                }
+            }
+            profile_settings::Action::CancelGarminConnectPageImport => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index))
+                    && let Some((owner, batch)) = &mut self.shared.borrow_mut().page_import
+                    && *owner == profile.user.id()
+                {
+                    batch.cancel();
+                }
+            }
+            profile_settings::Action::UpdateGarminConnectKey(key) => {
+                self.request_garmin_connect(ConnectRequest::Save(key), profiles);
+            }
+            profile_settings::Action::TestGarminConnectKey => {
+                self.request_garmin_connect(ConnectRequest::Test, profiles);
+            }
+            profile_settings::Action::GarminConnectActivity(request) => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
+                    spawn_connect_activity(
+                        Rc::clone(&self.shared),
+                        self.context.clone(),
+                        profile.user.id(),
+                        request,
+                        cloud_refresh_failure(&self.intl),
+                    );
+                }
+            }
+            profile_settings::Action::UpdatePreferences(preferences) => {
+                self.update_preferences(preferences, profiles);
+            }
+        }
+    }
+
+    fn request_garmin_connect(&self, request: ConnectRequest, profiles: &[ProfileSnapshot]) {
+        if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
+            spawn_garmin_connect(
+                Rc::clone(&self.shared),
+                self.context.clone(),
+                profile.user.id(),
+                request,
+                format_message!(&self.intl, default_message: "Could not verify Garmin Connect"),
+            );
+        }
     }
 
     fn update_preferences(
@@ -1094,6 +1166,64 @@ impl App {
         }
     }
 
+    fn show_cloud_fit_preview(&mut self, ui: &mut Ui) {
+        let user = self.selected_profile.and_then(|index| {
+            self.shared
+                .borrow()
+                .profiles
+                .get(index)
+                .map(|profile| profile.user.id())
+        });
+        let pending = self.shared.borrow_mut().connect_preview.take();
+        if std::mem::take(&mut self.shared.borrow_mut().close_connect_preview) {
+            self.cloud_fit_preview = None;
+        }
+        if let Some((owner, plan)) = pending.filter(|(owner, _)| Some(*owner) == user) {
+            self.cloud_fit_preview = Some(
+                device_fit_preview::Preview::new(
+                    (owner, plan.id, plan.digest),
+                    plan.preview,
+                    &self.map_runtime,
+                )
+                .with_cloud_details(plan.details, plan.imported),
+            );
+        }
+        if self
+            .cloud_fit_preview
+            .as_ref()
+            .is_some_and(|preview| Some(preview.target().0) != user)
+        {
+            self.cloud_fit_preview = None;
+        }
+        let (busy, units) = {
+            let state = self.shared.borrow();
+            (
+                state.preferences_saving,
+                self.selected_profile
+                    .and_then(|index| state.profiles.get(index))
+                    .map_or(garmin_model::identity::UnitSystem::Metric, |profile| {
+                        profile.user.profile().preferences().unit_system()
+                    }),
+            )
+        };
+        let Some(preview) = self.cloud_fit_preview.as_mut() else {
+            return;
+        };
+        match preview.show(ui, &self.intl, busy, units, jiff::Zoned::now().date()) {
+            Some(device_fit_preview::Action::Close) => self.cloud_fit_preview = None,
+            Some(device_fit_preview::Action::Import((owner, id, digest))) => {
+                spawn_connect_activity(
+                    Rc::clone(&self.shared),
+                    self.context.clone(),
+                    owner,
+                    garmin_model::garmin_connect::ActivityRequest::Import { id, digest },
+                    cloud_refresh_failure(&self.intl),
+                );
+            }
+            None => {}
+        }
+    }
+
     fn show_device_fit_preview(&mut self, ui: &mut Ui) {
         let units = self
             .selected_profile
@@ -1287,7 +1417,7 @@ impl App {
                 Ok(DeviceFitImportOutcome::Imported { activities }) => {
                     Notice::success(format_message!(
                         &self.intl,
-                        default_message: "Imported {count} activities",
+                        default_message: "{count, plural, one {# activity imported} other {# activities imported}}",
                         values: { count: activities },
                     ))
                 }
@@ -1391,13 +1521,25 @@ impl eframe::App for App {
             error,
             notice,
             activity_detail,
-            preferences_saving,
             device_catalog_loading,
             disconnected_since,
             deployment_mode,
         ) = {
             let mut state = self.shared.borrow_mut();
             state.show_device_browser_interruption(&self.intl);
+            let refresh_pending = state.connect_profiles_stale;
+            if let Some((user, response)) = connect_state::take_import_receipt(
+                &mut state.connect_import_receipt,
+                refresh_pending,
+            ) && self
+                .selected_profile
+                .and_then(|index| self.profiles.get(index))
+                .is_some_and(|profile| profile.user.id() == user)
+                && let Some(message) =
+                    profile_settings::connect_activities::receipt(&self.intl, &response)
+            {
+                state.notice = Some(Notice::information(message));
+            }
             (
                 Rc::clone(&state.snapshots),
                 Rc::clone(&state.profiles),
@@ -1406,7 +1548,6 @@ impl eframe::App for App {
                 state.error.clone(),
                 state.notice.clone(),
                 state.activity_detail.as_ref().map(Rc::clone),
-                state.preferences_saving || state.avatar_saving,
                 state.file_requests.catalog.loading().map(str::to_owned),
                 state.disconnected_since_milliseconds,
                 state.deployment_mode,
@@ -1426,7 +1567,6 @@ impl eframe::App for App {
                 ui,
                 product_name,
                 devices.as_slice(),
-                preferences_saving,
                 device_catalog_loading.as_deref(),
                 notice.as_ref(),
             ),
@@ -1444,6 +1584,7 @@ impl eframe::App for App {
             self.show_create_profile(ui);
             self.show_avatar_editor(ui);
             self.show_device_fit_preview(ui);
+            self.show_cloud_fit_preview(ui);
             self.show_pairing_confirmation(ui);
         }
         if let Some(since) = disconnected_since.filter(|_| loaded) {
@@ -1562,21 +1703,56 @@ fn show_activities(
     )
 }
 
-fn settings_props<'a>(
-    intl: &'a Intl,
+fn show_profile_settings(
+    ui: &mut Ui,
+    intl: &Intl,
+    shared: &RefCell<State>,
     snapshot: &ProfileSnapshot,
-    profile: profile::ProfileProps<'a>,
-    disabled: bool,
-) -> profile_settings::Props<'a> {
-    profile_settings::Props {
-        id: eframe::egui::Id::new(snapshot.user.id()),
-        intl,
-        preferences: snapshot.user.profile().preferences(),
-        accent: snapshot.user.profile().accent(),
-        profile,
-        picture_enabled: true,
-        disabled,
-    }
+    profile: profile::ProfileProps<'_>,
+    cloud_browser: bool,
+) -> Option<profile_settings::Action> {
+    let (checking, facts, activities, activities_busy, disabled, batch) = {
+        let state = shared.borrow();
+        (
+            state.garmin_connect_checking == Some(snapshot.user.id()),
+            state.garmin_connect_facts.get(&snapshot.user.id()).cloned(),
+            state.connect_activities.get(&snapshot.user.id()).cloned(),
+            state.connect_activity_loading == Some(snapshot.user.id()),
+            state.preferences_saving || state.avatar_saving,
+            state
+                .page_import
+                .as_ref()
+                .filter(|(owner, _)| *owner == snapshot.user.id())
+                .map(|(_, batch)| batch.clone()),
+        )
+    };
+    let show: fn(&mut Ui, &profile_settings::Props<'_>) -> Option<profile_settings::Action> =
+        if cloud_browser {
+            profile_settings::connect_activities::show
+        } else {
+            profile_settings::show
+        };
+    show(
+        ui,
+        &profile_settings::Props {
+            id: Id::new(snapshot.user.id()),
+            intl,
+            preferences: snapshot.user.profile().preferences(),
+            accent: snapshot.user.profile().accent(),
+            profile,
+            picture_enabled: true,
+            disabled,
+            garmin_connect: profile_settings::GarminConnectProps {
+                now: jiff::Timestamp::now(),
+                configured: snapshot.garmin_connect_configured,
+                checking,
+                facts: facts.as_ref(),
+                activities: activities.as_ref(),
+                activities_busy,
+                batch: batch.as_ref(),
+            },
+        },
+    )
 }
 
 fn set_profile_preferences(snapshot: &mut ProfileSnapshot, preferences: ProfilePreferences) {
@@ -1604,6 +1780,17 @@ struct State {
     activity_detail: Option<Rc<ActivityDetailSnapshot>>,
     requested_activity: Option<garmin_model::observation::ObservationId>,
     preferences_saving: bool,
+    garmin_connect_checking: Option<UserId>,
+    connect_activities:
+        std::collections::HashMap<UserId, garmin_model::garmin_connect::ActivityResponse>,
+    connect_preview: Option<(UserId, garmin_service_api::ConnectFitPreview)>,
+    close_connect_preview: bool,
+    connect_activity_loading: Option<UserId>,
+    connect_profiles_stale: bool,
+    page_import: Option<(UserId, profile_settings::connect_activities::Batch)>,
+    connect_import_receipt: Option<(UserId, garmin_model::garmin_connect::ActivityResponse)>,
+    garmin_connect_facts:
+        std::collections::HashMap<UserId, garmin_model::garmin_connect::AccountFacts>,
     avatar_saving: bool,
     avatar_draft: Option<AvatarDraft>,
     avatar_finished: Option<bool>,
@@ -2633,6 +2820,16 @@ async fn next_connection_event(
 fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     let mut state = shared.borrow_mut();
     state.client = None;
+    state.preferences_saving = false;
+    state.garmin_connect_checking = None;
+    state.garmin_connect_facts.clear();
+    state.connect_activities.clear();
+    state.connect_import_receipt = None;
+    state.connect_preview = None;
+    state.connect_activity_loading = None;
+    state.connect_profiles_stale = false;
+    state.page_import = None;
+    state.close_connect_preview = true;
     state.routes.disconnect();
     state.logs = None;
     state.interrupt_device_browser_operation();
@@ -2700,6 +2897,7 @@ fn spawn_create_profile(
                 let user_id = user.id();
                 let profiles = Rc::make_mut(&mut state.profiles);
                 profiles.push(ProfileSnapshot {
+                    garmin_connect_configured: false,
                     user,
                     avatar: None,
                     activities: Vec::new(),
@@ -2722,6 +2920,246 @@ fn spawn_create_profile(
         drop(state);
         context.request_repaint();
     });
+}
+
+enum ConnectRequest {
+    Save(Option<garmin_model::garmin_connect::PersonalApiKey>),
+    Test,
+}
+
+fn spawn_garmin_connect(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    user_id: UserId,
+    request: ConnectRequest,
+    failure: String,
+) {
+    let Some(client) = shared.borrow().client.clone() else {
+        return;
+    };
+    if shared.borrow().preferences_saving {
+        return;
+    }
+    shared.borrow_mut().preferences_saving = true;
+    shared.borrow_mut().garmin_connect_checking = match &request {
+        ConnectRequest::Save(None) => None,
+        _ => Some(user_id),
+    };
+    let generation = shared.borrow().connection_generation;
+    spawn_local(async move {
+        let result = match request {
+            ConnectRequest::Save(key) => client.set_garmin_connect_key(user_id, key).await,
+            ConnectRequest::Test => client
+                .check_garmin_connect(user_id)
+                .await
+                .map(|result| result.map(Some)),
+        }
+        .map_err(ConnectError::call)
+        .and_then(|result| result.map_err(ConnectError::domain));
+        let mut state = shared.borrow_mut();
+        if state.connection_generation != generation {
+            return;
+        }
+        state.preferences_saving = false;
+        state.garmin_connect_checking = None;
+        match result {
+            Ok(facts) => {
+                if state
+                    .page_import
+                    .as_ref()
+                    .is_some_and(|(owner, _)| *owner == user_id)
+                {
+                    state.page_import = None;
+                }
+                state.connect_activities.remove(&user_id);
+                state.close_connect_preview = true;
+                if let Some(profile) = Rc::make_mut(&mut state.profiles)
+                    .iter_mut()
+                    .find(|profile| profile.user.id() == user_id)
+                {
+                    profile.garmin_connect_configured = facts.is_some();
+                }
+                if let Some(facts) = facts {
+                    state.garmin_connect_facts.insert(user_id, facts);
+                } else {
+                    state.garmin_connect_facts.remove(&user_id);
+                }
+            }
+            Err(error) => {
+                state.garmin_connect_facts.remove(&user_id);
+                state.notice = Some(Notice::error(failure, error));
+            }
+        }
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+fn cloud_refresh_failure(intl: &Intl) -> String {
+    format_message!(intl, default_message: "Could not refresh local activities; use Refresh in Garmin activities to retry")
+}
+
+fn start_page_import(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    user: UserId,
+    refresh_failure: String,
+) {
+    let request = {
+        let mut state = shared.borrow_mut();
+        if state.preferences_saving {
+            return;
+        }
+        let Some(garmin_model::garmin_connect::ActivityResponse::Page { activities, .. }) =
+            state.connect_activities.get(&user)
+        else {
+            return;
+        };
+        let Some(mut batch) = profile_settings::connect_activities::Batch::new(activities) else {
+            return;
+        };
+        let request = batch.next_request();
+        state.page_import = Some((user, batch));
+        state.close_connect_preview = true;
+        request
+    };
+    if let Some(request) = request {
+        spawn_connect_activity(shared, context, user, request, refresh_failure);
+    }
+}
+
+fn spawn_connect_activity(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    user_id: UserId,
+    request: garmin_model::garmin_connect::ActivityRequest,
+    refresh_failure: String,
+) {
+    let Some(client) = shared.borrow().client.clone() else {
+        return;
+    };
+    if shared.borrow().preferences_saving {
+        return;
+    }
+    shared.borrow_mut().preferences_saving = true;
+    shared.borrow_mut().connect_activity_loading = Some(user_id);
+    connect_state::begin_request(&mut shared.borrow_mut().page_import, &request);
+    let generation = shared.borrow().connection_generation;
+    spawn_local(async move {
+        let result = client
+            .garmin_connect_activity(user_id, request)
+            .await
+            .map_err(|error| garmin_model::garmin_connect::ActivityFailure {
+                message: ConnectError::call(error).to_string(),
+                kind: garmin_model::garmin_connect::ActivityFailureKind::Session,
+            })
+            .and_then(std::convert::identity);
+        let refresh_profiles = shared.borrow().connect_profiles_stale
+            || matches!(
+                &result,
+                Ok(garmin_service_api::ConnectActivityResult::State(
+                    garmin_model::garmin_connect::ActivityResponse::Imported { .. }
+                ))
+            );
+        let profiles = if refresh_profiles {
+            Some(
+                client
+                    .profiles()
+                    .await
+                    .map_err(ConnectError::call)
+                    .and_then(|result| result.map_err(ConnectError::domain)),
+            )
+        } else {
+            None
+        };
+        let mut state = shared.borrow_mut();
+        if state.connection_generation != generation {
+            return;
+        }
+        state.preferences_saving = false;
+        let was_stale = state.connect_profiles_stale;
+        let State {
+            profiles: current_profiles,
+            connect_profiles_stale,
+            ..
+        } = &mut *state;
+        if let Some(error) =
+            connect_state::finish_refresh(current_profiles, connect_profiles_stale, profiles)
+        {
+            state.notice = Some(Notice::error(refresh_failure.clone(), error));
+        } else if was_stale && !state.connect_profiles_stale {
+            state.notice = None;
+        }
+        state.connect_activity_loading = None;
+        let State {
+            page_import,
+            connect_activities,
+            ..
+        } = &mut *state;
+        let result = match connect_state::complete(user_id, page_import, connect_activities, result)
+        {
+            connect_state::Completion::Batch(request) => {
+                state.close_connect_preview = true;
+                drop(state);
+                if let Some(request) = request {
+                    spawn_connect_activity(
+                        Rc::clone(&shared),
+                        context.clone(),
+                        user_id,
+                        request,
+                        refresh_failure,
+                    );
+                }
+                context.request_repaint();
+                return;
+            }
+            connect_state::Completion::Single(result) => result,
+        };
+        finish_single_connect_activity(&mut state, user_id, result);
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+fn finish_single_connect_activity(
+    state: &mut State,
+    user_id: UserId,
+    result: Result<
+        garmin_service_api::ConnectActivityResult,
+        garmin_model::garmin_connect::ActivityFailure,
+    >,
+) {
+    match result {
+        Ok(garmin_service_api::ConnectActivityResult::State(response)) => {
+            if matches!(
+                response,
+                garmin_model::garmin_connect::ActivityResponse::Imported { .. }
+            ) {
+                state.connect_import_receipt = Some((user_id, response.clone()));
+            }
+            if let Some(cached) = state.connect_activities.get_mut(&user_id) {
+                cached.merge(response);
+            } else {
+                state.connect_activities.insert(user_id, response);
+            }
+            state.close_connect_preview = true;
+        }
+        Ok(garmin_service_api::ConnectActivityResult::Preview(preview)) => {
+            state.connect_preview = Some((user_id, preview));
+        }
+        Ok(garmin_service_api::ConnectActivityResult::Prepared { .. }) => {
+            state.notice = Some(Notice::error(
+                "Garmin Connect".into(),
+                ConnectError::domain("Unexpected Garmin Connect preparation response"),
+            ));
+        }
+        Err(error) => {
+            state.notice = Some(Notice::error(
+                "Garmin Connect".into(),
+                ConnectError::domain(error.message),
+            ));
+        }
+    }
 }
 
 fn spawn_update_accent(

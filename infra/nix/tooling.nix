@@ -35,6 +35,9 @@ let
       # Preserve byte-exact upstream compatibility inputs and plain license/dependency text.
       "crates/datapackage/tests/upstream/**"
       "crates/datapackage/LICENSE"
+      "infra/garmin-connect/openapi.json"
+      "infra/garmin-connect/LICENSE"
+      "infra/garmin-connect/NOTICE"
     ];
     html = true;
     javascript = true;
@@ -75,6 +78,9 @@ let
       # Byte-exact upstream fixtures, tests, and licenses are checked by their manifest.
       "crates/datapackage/tests/upstream/**"
       "crates/datapackage/LICENSE"
+      "infra/garmin-connect/openapi.json"
+      "infra/garmin-connect/LICENSE"
+      "infra/garmin-connect/NOTICE"
       # Preserve upstream formatting and tooling conventions in vendored dependencies.
       "vendor/**"
     ];
