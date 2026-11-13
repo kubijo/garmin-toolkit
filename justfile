@@ -3,6 +3,9 @@ import 'infra/just/common.just'
 # Development tasks for builds, documentation, and dependency maintenance.
 mod dev 'infra/just/dev.just'
 
+# Pinned Garmin Personal API descriptor and generated-client verification.
+mod connect-api 'infra/garmin-connect'
+
 # Development-only recipes for rendering and inspecting the TUI.
 mod gallery 'infra/gallery'
 

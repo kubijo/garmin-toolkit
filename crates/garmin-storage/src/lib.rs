@@ -20,6 +20,7 @@ use thiserror::Error;
 mod activity;
 mod avatar;
 mod course;
+mod garmin_connect;
 mod ingestion;
 mod route;
 pub mod snapshot;

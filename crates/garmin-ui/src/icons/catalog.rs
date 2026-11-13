@@ -12,6 +12,7 @@ icon_catalog! {
         CHART_LINE => phosphor_svgs::style::regular::CHART_LINE,
         CHECK => phosphor_svgs::style::regular::CHECK,
         CLOCK_COUNTER_CLOCKWISE => phosphor_svgs::style::regular::CLOCK_COUNTER_CLOCKWISE,
+        CLOUD => phosphor_svgs::style::regular::CLOUD,
         CODE => phosphor_svgs::style::regular::CODE,
         DATABASE => phosphor_svgs::style::regular::DATABASE,
         DESKTOP => phosphor_svgs::style::regular::DESKTOP,

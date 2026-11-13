@@ -1,0 +1,11 @@
+import '../just/common.just'
+
+# Compile the full generated client and run its loopback HTTP contract tests.
+test:
+    just in-shell python3 -m unittest discover --start-directory {{ repository_root }}/infra/python --pattern test_garmin_connect_input.py
+    just in-shell cargo test --manifest-path {{ repository_root }}/infra/garmin-connect/Cargo.toml --locked
+
+# Refresh the pinned descriptor, then check generation and HTTP behavior.
+update revision sha256:
+    just in-shell python3 {{ repository_root }}/infra/python/garmin_connect_input.py {{ quote(revision) }} {{ quote(sha256) }}
+    just connect-api::test

@@ -13,6 +13,16 @@ revision, and approval identities; host captures, transport handles, payloads, a
 FIT preview content distinguishes activities from read-only courses. Course previews carry owned names, canonical
 geometry, an optional sport, and a fixed-width cue count; they do not authorize activity imports.
 
+Cloud `ConnectFitPreview` carries the existing normalized FIT preview, an activity ID, and a digest binding the profile,
+activity ID, account and reviewed FIT bytes. `ConnectActivityResult` distinguishes a bounded interactive preview,
+compact batch preparation (ID, digest and imported status), and list/import results. Interactive previews are capped at
+8 MiB encoded before entering browser RPC; batch preparation never transfers recording samples. Cloud activity rows
+include profile- and account-scoped imported status derived from successful stored observations. Cloud previews also
+carry bounded user-authored activity names/descriptions and account-scoped imported status. Activity failures
+distinguish one-file errors from session errors, so explicit page imports stop on access or rate limits without parsing
+diagnostic text. Batch queues and native-size progress counts stay client-side. Credentials and raw archives stay
+host-side; explicit import rechecks the saved key, account and digest before using the existing importer.
+
 Route contracts contain owned metadata, canonical coordinates and sports, opaque operation/artifact IDs, and bounded
 upload or geometry chunks. Sessions bind the profile and database epoch; requests carry no filesystem paths, parser
 selection, or replacement geometry. Import and generation receipts identify immutable saved results. Downloads use the
@@ -104,6 +114,8 @@ or {
     `DeviceFitPreviewContent`,
     `DeviceFitPreviewCourse`,
     `DeviceFitImportPlan`,
+    `ConnectFitPreview`,
+    `ConnectActivityResult`,
     `DeviceFitPreviewActivity`,
     `DeviceFitImportOutcome`,
     `DeviceFitImportStatus`,

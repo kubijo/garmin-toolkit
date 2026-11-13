@@ -22,10 +22,9 @@ file transfers, network contact, and mutation remain explicit actions. Automatic
 stop on authentication or rate limits until explicit recovery.
 
 HASS targets Linux `aarch64` and `x86_64`; [release evidence](../research/publication-readiness.md) defines qualified
-versions and scope. Mobile, Bluetooth, and new device tuples require separate evidence. The unimplemented Connect IQ
-companion has a source-only, local-build policy. HASS serves application UI and operational health, without publishing
-Garmin Toolkit data as entities, events, recorder entries, or external statistics. Domain publication needs a concrete
-automation use case and reviewed public contract.
+versions and scope. Mobile, Bluetooth, and new device tuples require separate evidence. HASS serves application UI and
+operational health, without publishing Garmin Toolkit data as entities, events, recorder entries, or external
+statistics. Domain publication needs a concrete automation use case and reviewed public contract.
 
 ## Crate ownership
 
@@ -42,6 +41,7 @@ automation use case and reviewed public contract.
 | `garmin-brand`       | Canonical visual assets and rasterization                           |
 | `garmin-capture`     | Session evidence, logs, and HTTP exchanges                          |
 | `garmin-color`       | Renderer-neutral colors and semantic themes                         |
+| `garmin-connect`     | Official Personal API authentication and typed profile requests     |
 | `garmin-device`      | Discovery, manifests, transports, capacity, and file operations     |
 | `garmin-fit`         | FIT decoding, normalization, and course encoding                    |
 | `garmin-fixtures`    | Inert publishable demo and test data                                |

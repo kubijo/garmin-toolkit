@@ -4,8 +4,7 @@ Rationale and tradeoffs for lasting choices.
 
 ## Boundaries and safety
 
-- [0008: Unofficial Garmin Connect](0008-unofficial-garmin-connect-boundary.md)
-- [0009: Local-only Connect IQ builds](0009-local-only-connect-iq-builds.md)
+- [0008: Official Garmin Connect](0008-official-garmin-connect-boundary.md)
 - [0011: Garmin Bluetooth safety gate](0011-garmin-bluetooth-safety-gate.md)
 - [0023: Deferred security hardening](0023-deferred-security-hardening.md)
 - [0033: Product identity, license, and provenance](0033-garmin-toolkit-identity-and-license.md)

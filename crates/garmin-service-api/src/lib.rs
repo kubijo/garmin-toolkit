@@ -156,6 +156,27 @@ pub struct DeviceFitImportPlan {
     pub preview: DeviceFitPreview,
 }
 
+/// A downloaded cloud FIT preview; import must match the reviewed account and bytes.
+#[garmin_macros::portable]
+pub struct ConnectFitPreview {
+    pub id: i64,
+    pub digest: String,
+    pub details: garmin_model::garmin_connect::ActivityDetails,
+    pub imported: bool,
+    pub preview: DeviceFitPreview,
+}
+
+#[garmin_macros::portable]
+pub enum ConnectActivityResult {
+    State(garmin_model::garmin_connect::ActivityResponse),
+    Preview(ConnectFitPreview),
+    Prepared {
+        id: i64,
+        digest: String,
+        imported: bool,
+    },
+}
+
 #[garmin_macros::portable]
 pub struct DeviceFitPreviewActivity {
     pub source: String,
@@ -206,6 +227,7 @@ pub enum DeploymentMode {
 
 #[garmin_macros::portable]
 pub struct ProfileSnapshot {
+    pub garmin_connect_configured: bool,
     pub user: User,
     pub avatar: Option<ProfileAvatarSnapshot>,
     pub activities: Vec<ActivitySnapshot>,
@@ -468,6 +490,26 @@ mod rpc {
             user_id: UserId,
             accent: Option<garmin_color::Color>,
         ) -> Result<Result<User, String>, rtc::CallError>;
+        async fn set_garmin_connect_key(
+            &self,
+            user_id: UserId,
+            key: Option<garmin_model::garmin_connect::PersonalApiKey>,
+        ) -> Result<
+            Result<Option<garmin_model::garmin_connect::AccountFacts>, String>,
+            rtc::CallError,
+        >;
+        async fn check_garmin_connect(
+            &self,
+            user_id: UserId,
+        ) -> Result<Result<garmin_model::garmin_connect::AccountFacts, String>, rtc::CallError>;
+        async fn garmin_connect_activity(
+            &self,
+            user_id: UserId,
+            request: garmin_model::garmin_connect::ActivityRequest,
+        ) -> Result<
+            Result<crate::ConnectActivityResult, garmin_model::garmin_connect::ActivityFailure>,
+            rtc::CallError,
+        >;
         async fn import_avatar(
             &self,
             user_id: UserId,

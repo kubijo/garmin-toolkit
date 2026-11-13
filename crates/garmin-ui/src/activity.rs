@@ -181,7 +181,7 @@ impl Metric {
     }
 }
 
-fn format_distance(millimeters: u64, units: UnitSystem) -> String {
+pub(crate) fn format_distance(millimeters: u64, units: UnitSystem) -> String {
     match units {
         UnitSystem::Metric => metric_distance(millimeters),
         UnitSystem::Imperial => imperial_distance(millimeters),
@@ -210,8 +210,8 @@ fn imperial_distance(millimeters: u64) -> String {
     }
 }
 
-fn duration(milliseconds: u64) -> String {
-    let seconds = (milliseconds + 500) / 1_000;
+pub(crate) fn duration(milliseconds: u64) -> String {
+    let seconds = milliseconds.saturating_add(500) / 1_000;
     let hours = seconds / 3_600;
     let minutes = seconds % 3_600 / 60;
     if hours > 0 {
@@ -223,7 +223,7 @@ fn duration(milliseconds: u64) -> String {
     }
 }
 
-const fn sport_icon(sport: ActivitySport) -> icons::Icon {
+pub(crate) const fn sport_icon(sport: ActivitySport) -> icons::Icon {
     match sport {
         ActivitySport::Running => icons::PERSON_SIMPLE_RUN,
         ActivitySport::Cycling => icons::BICYCLE,
@@ -334,7 +334,15 @@ pub fn list(ui: &mut Ui, props: &ListProps<'_>) -> Option<Action> {
                 "unselected"
             });
         });
-        paint_row(ui, row, item, props.selected == Some(index), &response);
+        paint_row(
+            ui,
+            row,
+            item,
+            props.selected == Some(index),
+            &response,
+            None,
+            theme::Level::Two,
+        );
         if index + 1 < props.items.len() {
             ui.painter().hline(
                 row.x_range(),
@@ -347,6 +355,36 @@ pub fn list(ui: &mut Ui, props: &ListProps<'_>) -> Option<Action> {
         }
     }
     action
+}
+
+/// Renders a standalone row with the same presentation as the activity list.
+pub(crate) fn selectable_row(
+    ui: &mut Ui,
+    props: &ItemProps<'_>,
+    accent: Option<garmin_color::Color>,
+) -> Response {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.0), Sense::click());
+    let response = if response.hovered() {
+        response.highlight()
+    } else {
+        response
+    };
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), props.title)
+    });
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_description(props.subtitle));
+    let palette = crate::theme::palette(ui);
+    ui.painter().rect_filled(
+        rect,
+        PANEL_RADIUS,
+        color32(palette.surfaces().layer(theme::Level::One)),
+    );
+    paint_row(ui, rect, props, false, &response, accent, theme::Level::One);
+    response
+        .on_hover_text(props.title)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Renders one activity detail panel.
@@ -479,27 +517,32 @@ fn row_response(ui: &Ui, rect: Rect, index: usize, label: &str) -> Response {
     }
 }
 
-fn paint_row(ui: &Ui, rect: Rect, props: &ItemProps<'_>, selected: bool, response: &Response) {
+fn paint_row(
+    ui: &Ui,
+    rect: Rect,
+    props: &ItemProps<'_>,
+    selected: bool,
+    response: &Response,
+    accent: Option<garmin_color::Color>,
+    level: theme::Level,
+) {
     let palette = crate::theme::palette(ui);
     if response.highlighted() || selected {
         ui.painter().rect_filled(
             rect,
             CONTROL_RADIUS,
-            palette
-                .surfaces()
-                .layer_hover(theme::Level::Two)
-                .into_cint(),
+            palette.surfaces().layer_hover(level).into_cint(),
         );
+    }
+    if let Some(accent) = accent {
+        crate::profile::paint_accent_wash(ui.painter(), rect, accent);
     }
     if selected {
         ui.painter().rect_filled(
             Rect::from_min_size(rect.min, egui::vec2(SELECTED_MARKER_WIDTH, rect.height())),
             egui::CornerRadius::ZERO,
-            crate::theme::selection_accent_on(
-                ui,
-                palette.surfaces().layer_hover(theme::Level::Two),
-            )
-            .into_cint(),
+            crate::theme::selection_accent_on(ui, palette.surfaces().layer_hover(level))
+                .into_cint(),
         );
     }
 

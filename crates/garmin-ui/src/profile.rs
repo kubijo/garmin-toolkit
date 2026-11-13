@@ -658,7 +658,7 @@ fn paint_focus_ring(ui: &Ui, response: &Response) {
     }
 }
 
-fn paint_accent_wash(painter: &egui::Painter, rect: egui::Rect, accent: Color) {
+pub(crate) fn paint_accent_wash(painter: &egui::Painter, rect: egui::Rect, accent: Color) {
     // Shift the 45° fade right, keeping the preceding corner filled to avoid a hard edge.
     let reach = rect.height() * 2.0;
     let offset = rect.height() * 0.25;

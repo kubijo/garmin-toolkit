@@ -52,6 +52,7 @@ fn disconnected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                 navigation: shell::Navigation::Expanded,
                 devices: &devices,
                 backup_enabled: false,
+                garmin_connect_configured: false,
                 window_controls: None,
             },
             |ui| {

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM garmin_connect_credentials;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "1bc348cdca8f747ffdbd474dbcbee245d958deb9b3e5b36d700f80e99533b26c"
+}

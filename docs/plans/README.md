@@ -7,9 +7,7 @@ limit is not automatically scheduled work.
 
 ## Local work
 
-- Implement the source-only Connect IQ companion and local SDK/key tooling described in
-  [the research](../research/connect-iq-companion.md#tooling-to-implement). Compilation and device acceptance require
-  owner-supplied inputs below; Garmin tools and outputs stay outside CI and releases.
+- Qualify [Garmin Connect file fidelity, coverage and connection lifecycle](garmin-connect-import.md).
 
 ## Hardware and owner access
 
@@ -18,8 +16,6 @@ limit is not automatically scheduled work.
 - Confirm the fēnix raw-MTP upload correction after a usable fresh session. The known `OpenSession` failure and
   successful GVFS map maintenance are separate evidence; see
   [USB limitations](../research/usb-sync.md#existing-adapters).
-- Compile, sideload, and run the [Connect IQ probe](../research/connect-iq-companion.md#probe) once the local tooling,
-  owner-supplied SDK/signing key, and HASS HTTPS endpoint exist. Record phone-present and phone-absent behavior.
 
 The [device matrix](../research/device-capabilities.md) records established operations and their evidence.
 
@@ -40,13 +36,12 @@ The [device matrix](../research/device-capabilities.md) records established oper
 
 ## Deferred
 
-- **Security hardening:** authentication, credential custody, database protection, and snapshot encryption are postponed
-  in full, including feasibility experiments. [ADR 0023](../decisions/0023-deferred-security-hardening.md) defines
-  current trusted/passwordless operation; [parked options](../research/security-hardening.md) are not decisions.
-- **Garmin Connect and sharing:** resume after credential custody is established. Revalidate
-  [ADR 0008](../decisions/0008-unofficial-garmin-connect-boundary.md), authentication, terms, and limits; then implement
-  an opt-in adapter independent of USB. Preserve source provenance and application UUIDs. Choose sharing boundaries,
-  authorization/revocation, conflict handling, and snapshot policy before implementation; test negative isolation.
+- **Security hardening:** application authentication, database protection and snapshot encryption remain postponed.
+  [ADR 0023](../decisions/0023-deferred-security-hardening.md) preserves trusted/passwordless operation while the Garmin
+  Connect slice establishes only its required credential custody; [parked options](../research/security-hardening.md)
+  are not decisions.
+- **Sharing:** choose authorization/revocation, conflict handling, and snapshot policy after credential custody is
+  established; test negative isolation. Sharing is separate from personal Garmin Connect imports.
 - **Desktop hot reload:** revisit the [measured pauses](../research/build-performance.md#gallery-reload-measurement) on
   the selected loader version. Qualify retained UI state, callback/tracing lifetimes, compile-error recovery,
   first-visible-frame latency, and memory across repeated Linux/macOS reloads. Incompatible type edits require restart.
@@ -58,11 +53,11 @@ The [device matrix](../research/device-capabilities.md) records established oper
 - **Image baselines and capture coverage:** numeric coverage currently excludes UI views. Merging rendered capture
   coverage into LLVM profiles is not a current gate; see
   [coverage ownership](../architecture/build-system.md#checks-and-outputs).
-- **Active Garmin Bluetooth:** requires separately approved disposable-device protocol safety evidence under
-  [ADR 0011](../decisions/0011-garmin-bluetooth-safety-gate.md).
 
 ## Conditional maintenance
 
+- Upgrade dependencies to current compatible releases with small migration costs, prioritizing the SQLite advisory
+  through `SQLx` (`RUSTSEC-2026-0459`). Defer substantial rewrites; do not suppress it.
 - Profile bindgen after representative WASM edits using the
   [build timing workflow](../architecture/build-system.md#development-build-timing).
 - Before upgrading Rust, recheck the nightly `egui_adapter::Paint: Sync` recursion diagnostic against stable builds.
@@ -74,3 +69,6 @@ The [device matrix](../research/device-capabilities.md) records established oper
 A separate CLI distribution channel is not planned. Windows support and testing are out of scope. Flatpak is an idea,
 not a release track. Mobile needs a separate product decision. Devices without USB data access, including Index S2, are
 outside the current hardware scope.
+
+Connect IQ SDK/app experiments are preserved on `poc/connect-iq-telemetry`; native Bluetooth clients and protocol
+research are on `poc/native-garmin-bluetooth`. Neither is part of `dev` or scheduled product work.

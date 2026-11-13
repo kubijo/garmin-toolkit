@@ -32,7 +32,7 @@ def prepare_image(compressed: Path, destination: Path, guest: Platform) -> None:
 def download_image(destination: Path, guest: Platform) -> None:
     from urllib.request import Request, urlopen
 
-    request = Request(guest.image_url, headers={'User-Agent': 'garmin-toolkit-haos-app'})
+    request = Request(guest.image_url)
     with urlopen(request, timeout=30) as source, destination.open('xb') as output:
         total = 0
         while chunk := source.read(1024 * 1024):

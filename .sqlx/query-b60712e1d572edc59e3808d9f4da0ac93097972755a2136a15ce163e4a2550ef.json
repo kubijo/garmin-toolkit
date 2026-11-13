@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(\n    SELECT 1\n    FROM acquisitions AS a\n    INNER JOIN normalization_runs AS n ON a.id = n.acquisition_id\n    INNER JOIN observations AS o ON n.id = o.normalization_run_id\n    WHERE a.owner_id = ? AND a.operation_id = ? AND o.kind = 'activity'\n) AS imported;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "imported",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b60712e1d572edc59e3808d9f4da0ac93097972755a2136a15ce163e4a2550ef"
+}

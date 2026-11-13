@@ -950,6 +950,51 @@ impl ApplicationService for Host {
             .map_err(|error| error.to_string()))
     }
 
+    async fn set_garmin_connect_key(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        key: Option<garmin_model::garmin_connect::PersonalApiKey>,
+    ) -> Result<Result<Option<garmin_model::garmin_connect::AccountFacts>, String>, rtc::CallError>
+    {
+        Ok(self
+            .application()
+            .await?
+            .verify_and_save_garmin_connect_key(UserContext::new(user_id), key)
+            .await
+            .map_err(|error| error.to_string()))
+    }
+
+    async fn check_garmin_connect(
+        &self,
+        user_id: garmin_model::identity::UserId,
+    ) -> Result<Result<garmin_model::garmin_connect::AccountFacts, String>, rtc::CallError> {
+        Ok(self
+            .application()
+            .await?
+            .check_garmin_connect(UserContext::new(user_id))
+            .await
+            .map_err(|error| error.to_string()))
+    }
+
+    async fn garmin_connect_activity(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        request: garmin_model::garmin_connect::ActivityRequest,
+    ) -> Result<
+        Result<
+            garmin_service_api::ConnectActivityResult,
+            garmin_model::garmin_connect::ActivityFailure,
+        >,
+        rtc::CallError,
+    > {
+        Ok(self
+            .application()
+            .await?
+            .garmin_connect_activity(UserContext::new(user_id), request)
+            .await
+            .map_err(garmin_model::garmin_connect::ActivityFailure::from))
+    }
+
     async fn update_accent(
         &self,
         user_id: garmin_model::identity::UserId,
@@ -1106,6 +1151,10 @@ async fn profile_snapshots(application: &Application) -> Result<Vec<ProfileSnaps
             .await
             .map_err(|error| error.to_string())?;
         profiles.push(ProfileSnapshot {
+            garmin_connect_configured: application
+                .garmin_connect_configured(context)
+                .await
+                .map_err(|error| error.to_string())?,
             avatar: avatar.map(|avatar| ProfileAvatarSnapshot {
                 key: avatar.artifact_id().to_string(),
                 thumbnail: avatar.into_thumbnail(),

@@ -17,5 +17,5 @@ safety.
 ## Consequences
 
 Until disposable-device evidence exists, defer Bluetooth crates, proxies, and macOS work; use fakes and publishable
-fixtures. [Adapter research](../research/bluetooth-adapters.md) informs a future design but grants no permission to
-connect or write.
+fixtures. Native protocol code and adapter research are preserved on `poc/native-garmin-bluetooth`; they are not product
+dependencies or permission to write to a device.

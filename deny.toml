@@ -46,6 +46,8 @@ allow-wildcard-paths = true
 skip = [
     { crate = "base64@0.21.7", reason = "Walkers' native HTTP cache uses SSRI's base64 0.21; the toolkit uses newer base64 releases" },
     { crate = "base64@0.23.1", reason = "Map unlocks and FormatJS use base64 0.23; other dependencies use 0.22" },
+    { crate = "bit-set@0.8.0", reason = "Build-only openapi-to-rust 0.23 uses jsonschema 0.49 and fancy-regex 0.19, which require bit-set 0.8; Naga uses 0.10" },
+    { crate = "bit-vec@0.8.0", reason = "Build-only openapi-to-rust's schema validator requires bit-set 0.8 and bit-vec 0.8; Naga's bit-set 0.10 uses bit-vec 0.9" },
     { crate = "bitflags@1.3.2", reason = "egui's SVG renderer uses png 0.17; the rest of the graph uses bitflags 2" },
     { crate = "block-buffer@0.12.1", reason = "FormatJS uses SHA-2 0.11 while SQLx uses SHA-2 0.10" },
     { crate = "calloop@0.13.0", reason = "winit and clipboard integration use adjacent Wayland client stacks" },
@@ -77,13 +79,18 @@ skip = [
     { crate = "rustix@0.38.44", reason = "the Wayland stack and nusb use adjacent rustix generations" },
     { crate = "rand@0.10.3", reason = "Walkers' Geo dependency uses rand 0.10; the WebSocket stack uses rand 0.9" },
     { crate = "rand_core@0.10.1", reason = "Walkers' Geo dependency and the WebSocket stack use adjacent rand_core releases" },
+    { crate = "serde_spanned@0.6.9", reason = "Build-only openapi-to-rust 0.23 requires toml 0.8 and toml_edit 0.22, which use serde_spanned 0.6; system-deps uses 1" },
     { crate = "sha2@0.11.0", reason = "FormatJS and toolkit verification use adjacent SHA-2 releases" },
     { crate = "smithay-client-toolkit@0.19.2", reason = "winit and clipboard use adjacent Wayland client stacks" },
     { crate = "syn@2.0.119", reason = "platform and SQLx macros use syn 2 while current derives use syn 3" },
     { crate = "synstructure@0.13.2", reason = "Remoc's custom_debug derives use synstructure 0.13; ICU's derives use 0.14" },
     { crate = "thiserror@1.0.69", reason = "the older Wayland client stack still uses thiserror 1" },
     { crate = "thiserror-impl@1.0.69", reason = "the older Wayland client stack still uses thiserror 1" },
+    { crate = "toml@0.8.23", reason = "Build-only openapi-to-rust 0.23 requires toml 0.8; system-deps uses toml 1" },
+    { crate = "toml_datetime@0.6.11", reason = "Build-only openapi-to-rust's toml 0.8 and toml_edit 0.22 require toml_datetime 0.6; the current TOML stack uses 1" },
+    { crate = "toml_edit@0.22.27", reason = "Build-only openapi-to-rust 0.23 requires toml_edit 0.22; toolkit updates and proc-macro-crate use 0.25" },
     { crate = "unicode-width@0.1.14", reason = "Walkers' native HTTP cache uses miette 5 and unicode-width 0.1; the toolkit uses unicode-width 0.2" },
+    { crate = "winnow@0.7.15", reason = "Build-only openapi-to-rust's toml_edit 0.22 requires winnow 0.7; the current TOML stack and Askama use 1" },
 ]
 
 [sources]

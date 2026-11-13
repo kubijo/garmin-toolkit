@@ -10,6 +10,7 @@ pub enum Page {
     Activities,
     Routes,
     ProfileSettings,
+    GarminConnect,
     Backup,
     Device(String),
     Maps(String),
@@ -22,6 +23,7 @@ impl Page {
             Self::Activities => Some(0),
             Self::Routes => Some(1),
             Self::ProfileSettings => Some(2),
+            Self::GarminConnect => Some(3 + devices.len()),
             Self::Backup => None,
             Self::Device(key) | Self::Maps(key) => devices
                 .iter()
@@ -36,6 +38,7 @@ impl Page {
             0 => Some(Self::Activities),
             1 => Some(Self::Routes),
             2 => Some(Self::ProfileSettings),
+            _ if index == 3 + devices.len() => Some(Self::GarminConnect),
             _ => devices
                 .get(index.checked_sub(3)?)
                 .map(|device| Self::Device(device.key.clone())),
@@ -53,6 +56,7 @@ pub struct Props<'a> {
     pub navigation: shell::Navigation,
     pub devices: &'a [DeviceSnapshot],
     pub backup_enabled: bool,
+    pub garmin_connect_configured: bool,
     pub window_controls: Option<&'a shell::WindowControls<'a>>,
 }
 
@@ -89,6 +93,11 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
         })
         .collect::<Vec<_>>();
     let devices_label = format_message!(props.intl, default_message: "Attached devices");
+    let connect_label = format_message!(props.intl, default_message: "Garmin activities");
+    let connect_destinations = [shell::Destination {
+        label: &connect_label,
+        icon: icons::CLOUD,
+    }];
     let navigation_groups = [
         shell::NavigationGroup {
             label: None,
@@ -97,6 +106,14 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
         shell::NavigationGroup {
             label: (!device_destinations.is_empty()).then_some(devices_label.as_str()),
             destinations: &device_destinations,
+        },
+        shell::NavigationGroup {
+            label: None,
+            destinations: if props.garmin_connect_configured {
+                &connect_destinations
+            } else {
+                &[]
+            },
         },
     ];
     let toggle_label = format_message!(props.intl, default_message: "Toggle navigation");
@@ -110,7 +127,12 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
     };
     let show = if matches!(
         props.page,
-        Page::Activities | Page::Routes | Page::ProfileSettings | Page::Backup | Page::Maps(_)
+        Page::Activities
+            | Page::Routes
+            | Page::ProfileSettings
+            | Page::GarminConnect
+            | Page::Backup
+            | Page::Maps(_)
     ) {
         shell::show_edge_to_edge
     } else {
@@ -171,5 +193,7 @@ mod tests {
             Some(Page::Device("mock-cycle".to_owned()))
         );
         assert_eq!(Page::Backup.index(&devices), None);
+        assert_eq!(Page::GarminConnect.index(&devices), Some(5));
+        assert_eq!(Page::from_index(5, &devices), Some(Page::GarminConnect));
     }
 }

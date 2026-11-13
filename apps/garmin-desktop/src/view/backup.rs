@@ -77,6 +77,12 @@ impl Desktop {
         self.profile_menu_expanded = false;
         self.page = Page::Activities;
         self.preferences_saving = false;
+        self.garmin_connect_checking = None;
+        self.garmin_connect_facts.clear();
+        self.connect_activities.clear();
+        self.connect_preview = None;
+        self.connect_activity_loading = None;
+        self.page_import = None;
         self.selected_activity = 0;
         self.activity_detail = None;
         self.activity_workspace = activity::Workspace::new(&self.map_runtime);

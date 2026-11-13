@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT DISTINCT a.source_identity\nFROM acquisitions AS a\nINNER JOIN normalization_runs AS n ON a.id = n.acquisition_id\nINNER JOIN observations AS o ON n.id = o.normalization_run_id\nWHERE a.owner_id = ? AND a.source_id = ? AND o.kind = 'activity';\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_identity",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "source_identity"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "996d46e7563a4462add72234d094ca1fdb1ad8eaf3843ee62a7ba617a673337a"
+}

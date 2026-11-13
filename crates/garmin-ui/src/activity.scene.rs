@@ -246,6 +246,7 @@ fn application_scene(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globa
                 navigation: shell::Navigation::Expanded,
                 devices: &[],
                 backup_enabled: false,
+                garmin_connect_configured: false,
                 window_controls: None,
             },
             |ui| {
