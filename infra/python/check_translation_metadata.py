@@ -65,7 +65,7 @@ def main(arguments: list[str]) -> int:
     print('Czech translation catalog validation failed:', file=sys.stderr)
     for error in errors:
         print(f'  - {error}', file=sys.stderr)
-    print('Run just dev::i18n-sync and review the resulting entries.', file=sys.stderr)
+    print('Run just dev::i18n::sync and review the resulting entries.', file=sys.stderr)
     return 1
 
 

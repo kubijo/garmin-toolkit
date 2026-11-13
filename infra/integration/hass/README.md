@@ -340,8 +340,8 @@ with automatic WebSocketStream selection, reproducible without fault hooks or tr
 it. Preserve the library's buffering and transport semantics when changing this selection.
 
 Both suites build the packaged demo and run a disposable NixOS VM with two CPUs and 4 GiB RAM. The route suite is also a
-Linux flake check, so CI's `nix flake check` runs it; ordinary `qa::full` does not boot a VM. The local recipe runs the
-Nix-built driver as your user so it can use your KVM access; CI runs it in the Nix builder. Both require hardware
+Linux flake check, so CI's `nix flake check` runs it; ordinary `dev::verify` does not boot a VM. The local recipe runs
+the Nix-built driver as your user so it can use your KVM access; CI runs it in the Nix builder. Both require hardware
 acceleration and refuse CPU emulation. Build and VM output go to separate logs in the printed diagnostics directory;
 cancellation stops the owned process group before removing temporary VM state. New files must be Git-tracked for the
 repository's Git-backed flake to include them.

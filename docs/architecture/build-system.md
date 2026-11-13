@@ -9,16 +9,16 @@ below.
 
 ## Checks and outputs
 
-Full QA, `qa::test`, and CI run the workspace with all features plus separate desktop and HASS production suites with
-`--no-default-features`. Full QA and CI lint both configurations. All-features builds select demo composition, so the
-production checks exercise startup and device adapters that the demo excludes. Host tests cover application identity,
-isolated data roots, persisted profiles after restart, and HASS environment overrides using disposable storage and fake
-devices.
+`dev::verify`, `dev::test`, and CI run the workspace with all features plus separate desktop and HASS production suites
+with `--no-default-features`. Full QA and CI lint both configurations. All-features builds select demo composition, so
+the production checks exercise startup and device adapters that the demo excludes. Host tests cover application
+identity, isolated data roots, persisted profiles after restart, and HASS environment overrides using disposable storage
+and fake devices.
 
 Coverage enforces per-owner floors from `infra/coverage/owners.toml` in the Nix coverage app and check.
-`just qa::coverage-owners .tmp/coverage/lcov.info --policy infra/coverage/owners.toml` checks an existing report. Nested
-packages are separate owners; unmeasured owners and unassigned files remain visible. `--output FILE.json` writes the
-per-owner and per-file counts for policy review. Line coverage does not establish behavioral correctness. The native
+`just dev::coverage::owners .tmp/coverage/lcov.info --policy infra/coverage/owners.toml` checks an existing report.
+Nested packages are separate owners; unmeasured owners and unassigned files remain visible. `--output FILE.json` writes
+the per-owner and per-file counts for policy review. Line coverage does not establish behavioral correctness. The native
 collector excludes `crates/garmin-ui/` and `apps/garmin-desktop/src/view.rs`; browser-only WASM code is unmeasured by
 the native run. Owner percentages describe only the files measured by that collector.
 
@@ -55,14 +55,14 @@ production package builds retain the release profile.
 The CLI package and its dependency cache share the same locked package selection. Building the entire workspace in that
 cache would compile unused packages and unify dependency features differently from the final CLI build.
 
-`just dev::cache-report` shows the target caches and read-only totals for the Cargo home and Nix user cache. Root Just
+`just dev::cache::report` shows the target caches and read-only totals for the Cargo home and Nix user cache. Root Just
 and Nix QA entrypoints make generated build-script outputs in repository target caches writable before reuse. Some
 dependency build scripts preserve read-only Nix source permissions when copying bindings into `out`; without this
 preparation, their next rebuild cannot overwrite those files. Preparation preserves other artifacts and source files.
-`just dev::cache-clean shared` previews removal of the shared target; use `just dev::cache-clean shared apply` to remove
-it after builds have stopped. The other accepted names are `gallery-live`, `nightly`, and `legacy`; `legacy` covers the
-old Nix-shell, gallery-check, web-profile, and temporary HASS target directories. This command only removes the named
-repository target cache. It does not prune Nix store outputs, Cargo's global cache, or build-profile reports.
+`just dev::cache::clean shared` previews removal of the shared target; use `just dev::cache::clean shared apply` to
+remove it after builds have stopped. The other accepted names are `gallery-live`, `nightly`, and `legacy`; `legacy`
+covers the old Nix-shell, gallery-check, web-profile, and temporary HASS target directories. This command only removes
+the named repository target cache. It does not prune Nix store outputs, Cargo's global cache, or build-profile reports.
 
 Gallery recipes add pinned FormatJS to the executable path, including hot-reload child builds. They retain the caller's
 Rust toolchain and graphics runtime; entering the full Nix development shell remains explicit.
@@ -91,8 +91,8 @@ cannot. FlakeHub caching and diagnostic uploads are disabled.
 ## Development build timing
 
 ```sh
-just dev::build-profile desktop LABEL
-just dev::compiler-profile ui LABEL
+just dev::profile::build desktop LABEL
+just dev::profile::compiler ui LABEL
 ```
 
 Use unique labels. Reports in `.tmp/build-profile/LABEL` contain HTML/Perfetto timelines, Cargo timings, commands,

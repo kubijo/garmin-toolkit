@@ -1,8 +1,8 @@
 # License bundles
 
-`just qa::licenses` checks the distributable desktop and HASS notices. `just dev::licenses` synchronizes the notice
-manifest and regenerates the bundles. Generation selects the normal dependency closure for each shipped component,
-including the HASS web client.
+`just dev::licenses::check` checks the distributable desktop and HASS notices. `just dev::licenses::generate`
+synchronizes the notice manifest and regenerates the bundles. Generation selects the normal dependency closure for each
+shipped component, including the HASS web client.
 
 The desktop bundle covers production, demo fixtures, and the GPX worker on Linux x86_64/ARM64 and macOS ARM64. Desktop
 packages install it under `share/doc/garmin-toolkit/assets/licenses/`, alongside project licenses, attribution, and the

@@ -1,6 +1,6 @@
 """Exercise the patched Trunk with real Cargo, WASM, bindgen, and JavaScript inputs.
 
-Run explicitly through just qa::trunk-cache; ordinary Python tests do not build Rust.
+Run explicitly through just dev::checks::trunk-cache; ordinary Python tests do not build Rust.
 """
 
 import os
