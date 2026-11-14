@@ -18,31 +18,6 @@ let
   };
   pythonConfig = ../../ruff.toml;
   sqlFluffConfig = ../sqlfluff/pyproject.toml;
-  sqlfluff = pkgs.sqlfluff.override {
-    python3Packages = pkgs.python3Packages.overrideScope (
-      _final: prev: {
-        diff-cover = prev.diff-cover.overridePythonAttrs (
-          old:
-          assert lib.assertMsg (old.version == "10.5.1" && prev.pygments.version == "2.21.0")
-            "Revisit the diff-cover HTML fixture exception after dependency updates; see docs/architecture/build-system.md";
-          {
-            # Published sources remain unchanged. Only these six HTML fixture comparisons
-            # disagree with Pygments 2.21; all other package tests and SQL checks still run.
-            pytestFlags =
-              (old.pytestFlags or [ ])
-              ++ map (test: "--deselect=tests/test_integration.py::TestDiffQualityIntegration::${test}") [
-                "test_added_file_pycodestyle_html"
-                "test_all_reports"
-                "test_added_file_pyflakes_html"
-                "test_added_file_pylint_html"
-                "test_fail_under_html"
-                "test_fail_under_pass_html"
-              ];
-          }
-        );
-      }
-    );
-  };
   allFormatters = {
     # The pinned formatter set has no WGSL formatter; Naga validates this shader when WGPU builds it.
     exclude = [
@@ -57,6 +32,12 @@ let
       "infra/python/templates/*.html"
       # The plain-text checksum template is rendered and checked by the release tests.
       "infra/release/*.j2"
+      # Preserve byte-exact upstream compatibility inputs and plain license/dependency text.
+      "crates/datapackage/tests/upstream/**"
+      "crates/datapackage/LICENSE"
+      "infra/garmin-connect/openapi.json"
+      "infra/garmin-connect/LICENSE"
+      "infra/garmin-connect/NOTICE"
     ];
     html = true;
     javascript = true;
@@ -78,7 +59,7 @@ let
   project = nix-tools.lib.configure {
     inherit src system;
     toolPkgs = pkgs // {
-      inherit sqlfluff;
+      inherit (pkgs) sqlfluff;
     };
     exclude = [
       ".python-version"
@@ -94,12 +75,19 @@ let
       "infra/fixtures/fit/development-activities/recordings/**"
       "old/**"
       "infra/gallery/fonts/**"
+      # Byte-exact upstream fixtures, tests, and licenses are checked by their manifest.
+      "crates/datapackage/tests/upstream/**"
+      "crates/datapackage/LICENSE"
+      "infra/garmin-connect/openapi.json"
+      "infra/garmin-connect/LICENSE"
+      "infra/garmin-connect/NOTICE"
       # Preserve upstream formatting and tooling conventions in vendored dependencies.
       "vendor/**"
     ];
     format = allFormatters;
     inherit nodejs;
     outdated = {
+      npm.projects.browser.root = "infra/javascript";
       uv.projects.tooling.root = "infra/python";
       githubActions = true;
     };
@@ -201,9 +189,12 @@ let
           exec ${lib.getExe nodejs} infra/javascript/haos-devtools.test.mts
         '';
         python-lock.command = pkgs.writeShellScript "python-lock-check" ''
+          ${lib.getExe pkgs.uv} lock --check --offline \
+            --python ${pythonToolsEnv}/bin/python \
+            --project infra/python || exit $?
           exec ${lib.getExe pkgs.uv} lock --check --offline \
             --python ${pythonToolsEnv}/bin/python \
-            --project infra/python
+            --project crates/datapackage/compat
         '';
         python-tests.command = pkgs.writeShellScript "python-tests" ''
           export PATH=${
@@ -216,6 +207,8 @@ let
               pkgs.syft
               pkgs.skopeo
               pkgs.distribution
+              pkgs.zsync
+              pkgs.squashfsTools
               nixOci
               dirspec
             ]

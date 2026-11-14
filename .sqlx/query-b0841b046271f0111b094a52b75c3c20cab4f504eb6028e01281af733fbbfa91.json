@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    archive,\n    failure\nFROM connect_cache_originals\nWHERE user_id = ? AND source_id = ? AND activity_id = ?;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "archive",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "connect_cache_originals",
+            "name": "archive"
+          }
+        }
+      },
+      {
+        "name": "failure",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "connect_cache_originals",
+            "name": "failure"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "b0841b046271f0111b094a52b75c3c20cab4f504eb6028e01281af733fbbfa91"
+}

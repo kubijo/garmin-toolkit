@@ -31,6 +31,49 @@ snapshot and verify semantics against the observation fingerprint. Route detail 
 `route_plan` follows the current head, while `route_revision` returns the requested immutable revision within its
 owner's scope, including historical revisions.
 
+## Portable activity exports
+
+`Application::export_activity` writes an owned activity as a ZIP containing a
+[Data Package v2](https://datapackage.org/standard/data-package/). It includes associated activity observations,
+schema-typed CSV relations for summaries, laps, samples, and timer events, GPX 1.1 tracks, acquisition and normalization
+provenance, and every associated original FIT artifact. Equal semantic fingerprints and explicit association groups
+select related recordings within the same profile. FIT bytes remain authoritative; a chained FIT is preserved whole.
+
+The descriptor names resources, their SHA-256 hashes and byte counts, field types, units, nullability, primary keys, and
+foreign keys. CSV preserves canonical integer units and source ordering; missing measurements remain empty cells. GPX
+uses WGS84 degrees and meters and starts a new segment at missing coordinates or timer pauses. Samples captured while
+stopped remain in CSV. Filenames use typed IDs rather than source filenames. Publication creates a new file; existing
+destinations are never replaced.
+
+The application profile is version `0.1.0`. `activity_export::read` parses that profile without importing into storage,
+extracting archive paths, or fetching URLs. It checks resource integrity, schemas, keys, row ordering, measurement
+ranges, and provenance coverage. Reads are limited to 4,096 members, 1 GiB of uncompressed data, and a 4 MiB descriptor.
+This reader supports the Toolkit activity profile rather than arbitrary Data Packages.
+
+The CLI operates on an exclusively locked, stopped deployment:
+
+```bash
+garmin-cli activity export --deployment /path/to/stopped-deployment \
+    --profile PROFILE_UUID --observation OBSERVATION_UUID --output activity.zip
+garmin-cli activity inspect activity.zip
+```
+
+Full QA generates packages from the publishable activity corpus and checks them with pinned Frictionless Python 5.21.0.
+It also rewrites descriptors through that library and requires Rust to read the resulting deflated ZIPs. Independent
+validator controls exercise strict v2 metadata, types, required values, primary and foreign keys, and integrity,
+following cases from its
+[upstream package tests](https://github.com/frictionlessdata/frictionless-py/blob/v5.21.0/frictionless/package/__spec__/test_validate.py).
+Rust tests cover round trips, original FIT preservation, profile isolation, restarts, malformed packages, and GPX gaps.
+These activity exports are distinct from deployment snapshots and standalone GPX sharing. Storage returns domain records
+for the source, acquisition, normalization, artifact, and fingerprint. The activity export module owns the portable
+provenance and transformation representations; its writer and reader share those profile types.
+
+Generic descriptors, local/ZIP resources, and supported CSV validation belong to the independent
+[`datapackage` crate](../../crates/datapackage/README.md). Activity schemas, FIT policy, and storage authorization stay
+in the Garmin crates. `just dev::checks::datapackage` compares actual upstream fixtures and selected Python test cases,
+checks the executable tests' AST against a pristine upstream reference, and builds/tests Cargo's archive outside the
+checkout. The crate owns its license, fixtures, and locked Python compatibility project.
+
 ## Generated FIT Courses
 
 `Application::generate_course` resolves an owned, exact route revision and encodes only its persisted geometry. Each

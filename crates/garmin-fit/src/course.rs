@@ -101,6 +101,68 @@ impl DecodedCourse {
     }
 }
 
+/// Display data recovered from an external FIT course without importing it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CoursePreview {
+    pub name: Option<String>,
+    pub sport: Option<RouteSport>,
+    pub points: Vec<RoutePoint>,
+    pub cue_count: u32,
+}
+
+/// Reads third-party course geometry without requiring this toolkit's encoding order.
+/// # Errors
+/// Rejects corrupt FIT data, ambiguous file identities, or invalid coordinates.
+pub fn preview(bytes: &[u8]) -> Result<CoursePreview, Error> {
+    let files = super::decode_raw(bytes).map_err(|error| Error::Decoding(error.to_string()))?;
+    let [fit] = files.as_slice() else {
+        return Err(Error::NotCourse);
+    };
+    let mut result = CoursePreview {
+        name: None,
+        sport: None,
+        points: Vec::new(),
+        cue_count: 0,
+    };
+    let mut file_type = None;
+    let mut has_course = false;
+    for message in &fit.messages {
+        match message.num {
+            typedef::MesgNum::FILE_ID => {
+                if file_type
+                    .replace(mesgdef::FileId::from(message).r#type)
+                    .is_some()
+                {
+                    return Err(Error::InvalidStructure("multiple file-id messages"));
+                }
+            }
+            typedef::MesgNum::COURSE => {
+                if has_course {
+                    return Err(Error::InvalidStructure("multiple course messages"));
+                }
+                has_course = true;
+                let course = mesgdef::Course::from(message);
+                result.name = (!course.name.trim().is_empty()).then_some(course.name);
+                result.sport = decode_sport(course.sport).ok();
+            }
+            typedef::MesgNum::RECORD => {
+                let record = mesgdef::Record::from(message);
+                if record.position_lat != i32::MAX || record.position_long != i32::MAX {
+                    result.points.push(decode_record(&record)?);
+                }
+            }
+            typedef::MesgNum::COURSE_POINT => {
+                result.cue_count = result.cue_count.checked_add(1).ok_or(Error::TooManyCues)?;
+            }
+            _ => {}
+        }
+    }
+    if file_type != Some(typedef::File::COURSE) {
+        return Err(Error::NotCourse);
+    }
+    Ok(result)
+}
+
 /// FIT Course conversion failure.
 #[derive(Debug, Error)]
 pub enum Error {
@@ -242,12 +304,10 @@ pub fn encode(revision: &RoutePlanRevision, serial: SerialNumber) -> Result<Vec<
 pub fn decode(bytes: &[u8]) -> Result<DecodedCourse, Error> {
     let mut input = FromStd::new(Cursor::new(bytes));
     let mut decoder = Decoder::new();
-    let fit = decoder
-        .decode(&mut input)
+    let fit = super::decode_sequence(&mut decoder, &mut input)
         .map_err(|error| Error::Decoding(error.to_string()))?
         .ok_or(Error::NotCourse)?;
-    if decoder
-        .decode(&mut input)
+    if super::decode_sequence(&mut decoder, &mut input)
         .map_err(|error| Error::Decoding(error.to_string()))?
         .is_some()
     {
@@ -514,6 +574,7 @@ fn decode_record(record: &mesgdef::Record) -> Result<RoutePoint, Error> {
         .ok_or(Error::InvalidStructure("record longitude is missing"))?;
     let elevation = record
         .enhanced_altitude_scaled()
+        .or_else(|| record.altitude_scaled())
         .map(Elevation::from_meters)
         .transpose()?;
     Ok(RoutePoint::from_parts(
@@ -653,6 +714,22 @@ mod tests {
         )?;
         bytes.truncate(bytes.len() / 2);
         assert!(matches!(decode(&bytes), Err(Error::Decoding(_))));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_a_misdeclared_length_even_with_repaired_checksums() -> TestResult {
+        let bytes = encode(
+            &revision(RouteShape::from_geometry(points())?)?,
+            SerialNumber::from_u32(1)?,
+        )?;
+        for delta in [-1, 1] {
+            let corrupt = crate::fixture::integrity::misdeclared_length(&bytes, delta);
+            assert!(
+                matches!(decode(&corrupt), Err(Error::Decoding(_))),
+                "data length {delta:+}"
+            );
+        }
         Ok(())
     }
 

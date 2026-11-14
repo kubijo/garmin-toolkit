@@ -53,6 +53,7 @@ fn backup_is_an_owner_only_secondary_action() {
                         navigation: shell::Navigation::Expanded,
                         devices: &devices,
                         backup_enabled: owner,
+                        garmin_connect_configured: owner,
                         window_controls: None,
                     },
                     |_| {},
@@ -64,6 +65,7 @@ fn backup_is_an_owner_only_secondary_action() {
             None,
         );
         view.run();
+        assert_eq!(view.query_by_label("Garmin activities").is_some(), owner);
         let device = view.get_by_label("Mock Cycle");
         assert!(
             device

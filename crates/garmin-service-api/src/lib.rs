@@ -116,7 +116,36 @@ pub struct DownloadTicket {
 #[garmin_macros::portable]
 pub struct DeviceFitPreview {
     pub file_name: String,
-    pub activities: Vec<DeviceFitPreviewActivity>,
+    pub content: DeviceFitPreviewContent,
+}
+
+#[garmin_macros::portable]
+pub enum DeviceFitPreviewContent {
+    Activities(Vec<DeviceFitPreviewActivity>),
+    Course(DeviceFitPreviewCourse),
+}
+
+#[garmin_macros::portable]
+pub struct DeviceFitPreviewCourse {
+    pub name: Option<String>,
+    pub sport: Option<garmin_model::route::RouteSport>,
+    pub points: Vec<garmin_model::route::RoutePoint>,
+    pub cue_count: u32,
+}
+
+impl DeviceFitPreview {
+    #[must_use]
+    pub fn activities(&self) -> &[DeviceFitPreviewActivity] {
+        match &self.content {
+            DeviceFitPreviewContent::Activities(activities) => activities,
+            DeviceFitPreviewContent::Course(_) => &[],
+        }
+    }
+
+    #[must_use]
+    pub const fn supports_activity_import(&self) -> bool {
+        matches!(self.content, DeviceFitPreviewContent::Activities(_))
+    }
 }
 
 /// A reviewed device FIT file, bound to exact bytes and a profile.
@@ -125,6 +154,27 @@ pub struct DeviceFitImportPlan {
     pub id: uuid::Uuid,
     pub job: uuid::Uuid,
     pub preview: DeviceFitPreview,
+}
+
+/// A downloaded cloud FIT preview; import must match the reviewed account and bytes.
+#[garmin_macros::portable]
+pub struct ConnectFitPreview {
+    pub id: i64,
+    pub digest: String,
+    pub details: garmin_model::garmin_connect::ActivityDetails,
+    pub imported: bool,
+    pub preview: DeviceFitPreview,
+}
+
+#[garmin_macros::portable]
+pub enum ConnectActivityResult {
+    State(garmin_model::garmin_connect::ActivityResponse),
+    Preview(ConnectFitPreview),
+    Prepared {
+        id: i64,
+        digest: String,
+        imported: bool,
+    },
 }
 
 #[garmin_macros::portable]
@@ -177,6 +227,7 @@ pub enum DeploymentMode {
 
 #[garmin_macros::portable]
 pub struct ProfileSnapshot {
+    pub garmin_connect_configured: bool,
     pub user: User,
     pub avatar: Option<ProfileAvatarSnapshot>,
     pub activities: Vec<ActivitySnapshot>,
@@ -439,6 +490,27 @@ mod rpc {
             user_id: UserId,
             accent: Option<garmin_color::Color>,
         ) -> Result<Result<User, String>, rtc::CallError>;
+        async fn set_garmin_connect_key(
+            &self,
+            user_id: UserId,
+            key: Option<garmin_model::garmin_connect::PersonalApiKey>,
+        ) -> Result<
+            Result<Option<garmin_model::garmin_connect::AccountFacts>, String>,
+            rtc::CallError,
+        >;
+        async fn check_garmin_connect(
+            &self,
+            user_id: UserId,
+        ) -> Result<Result<garmin_model::garmin_connect::AccountFacts, String>, rtc::CallError>;
+        async fn garmin_connect_activity(
+            &self,
+            user_id: UserId,
+            request: garmin_model::garmin_connect::ActivityRequest,
+            progress: Option<rch::watch::Sender<garmin_model::garmin_connect::LoadProgress>>,
+        ) -> Result<
+            Result<crate::ConnectActivityResult, garmin_model::garmin_connect::ActivityFailure>,
+            rtc::CallError,
+        >;
         async fn import_avatar(
             &self,
             user_id: UserId,

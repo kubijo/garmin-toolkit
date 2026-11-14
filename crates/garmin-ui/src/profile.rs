@@ -22,7 +22,7 @@ const ROW_PADDING: f32 = 8.0;
 const CHOOSER_MAX_WIDTH: f32 = 440.0;
 const CHOOSER_AVATAR_SIZE: f32 = 48.0;
 const CHOOSER_ROW_HEIGHT: f32 = 64.0;
-const CHOOSER_ROW_PADDING: f32 = 12.0;
+const CHOOSER_ROW_PADDING: f32 = 16.0;
 const HEADER_AVATAR_SIZE: f32 = 20.0;
 const ACCENT_WASH_OPACITY: f32 = 0.16;
 
@@ -658,7 +658,7 @@ fn paint_focus_ring(ui: &Ui, response: &Response) {
     }
 }
 
-fn paint_accent_wash(painter: &egui::Painter, rect: egui::Rect, accent: Color) {
+pub(crate) fn paint_accent_wash(painter: &egui::Painter, rect: egui::Rect, accent: Color) {
     // Shift the 45° fade right, keeping the preceding corner filled to avoid a hard edge.
     let reach = rect.height() * 2.0;
     let offset = rect.height() * 0.25;

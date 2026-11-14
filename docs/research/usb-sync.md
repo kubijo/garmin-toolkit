@@ -70,13 +70,29 @@ directory, preserving the device UUID, comments, and unknown fields without over
 
 Manifest, USB, MTP, and FIT IDs are diagnostic; none identifies an application profile.
 
+The [physical reassignment test](../../crates/garmin-update/tests/profile_marker_acceptance.rs) requires owner consent,
+exclusive device use, one matching model, a valid pairing, and two free revisions. It appends two history entries,
+restoring the original profile while preserving prior files. Concurrent changes or incomplete recovery require owner
+review. Physical execution is ignored by default; ordinary runs use a disposable directory.
+
+```sh
+GARMIN_TOOLKIT_ACCEPTANCE_MODEL='Edge 1050' just in-shell cargo test --locked --offline \
+    -p garmin-update --test profile_marker_acceptance physical_mounted_profile_reassignment \
+    -- --ignored --exact --nocapture
+```
+
 ### Demo pairing acceptance
 
-On 2026-10-04, the Nix-packaged HASS demo reassigned the mock watch from Alex Rider to Sam Runner through the
-confirmation dialog, then back to Alex. The host created `pairing-000001.toml` and `pairing-000002.toml` with revisions
-one and two and the same device UUID. The original `pairing.toml` kept its SHA-256 hash, and the refreshed UI showed
-each effective profile while hiding the pairing action for that profile. The browser tab initially ran an older bundle;
-reloading it exposed the current pairing action. This verifies the demo flow, not the HASS add-on or physical media.
+The Nix-packaged HASS demo verified reassignment and reversal: device UUID and original marker hash were preserved, and
+refreshed UI showed the effective profile.
+
+### Physical pairing-marker acceptance
+
+On 2026-11-08, the owner-authorized test passed on the [Edge 1050 host/firmware tuple](#physical-desktop-reconnect)
+through GIO/GVFS. Production marker functions rejected conflicting creation, verified reassignment, restored the
+original profile, and preserved the device UUID and all prior files byte-for-byte. Result:
+`.tmp/physical-pairing/acceptance.log`. Fresh pairing, UI confirmation, and persistence after unplug/replug were not
+exercised.
 
 ## Existing adapters
 
@@ -142,8 +158,9 @@ This does not prove Garmin compatibility.
 
 Keep `mtp-rs` types private; expose only owned identity, lifecycle, capability, I/O, and diagnostic types.
 
-HASS/Linux use `nusb` and `mtp-rs`; Windows uses WPD. macOS remains unproven because `ptpcamerad` may own the device.
-Mass storage may use an existing mount but never mounts block devices.
+Targets select raw MTP or mounted GIO according to the [connectivity contract](../architecture/connectivity.md). The
+upstream Windows backend uses WPD; native macOS device access remains unproven because `ptpcamerad` may own it. Mass
+storage may use an existing mount but never mounts block devices.
 
 ## Observed desktop attachment
 
@@ -181,15 +198,40 @@ repeated the two-file read while GVFS owned the watch. Raw MTP reported `DeviceB
 explicit release. Tests cover capability filtering, size, cancellation, unrelated files, unsafe paths, and source
 changes.
 
-This read-access baseline proves attachment identity, enumeration, manifest discovery, raw and mounted complete FIT
-reads, decoding, initial watch delivery, and generic GVFS create/read/delete. It does not prove later hotplug,
-reconnect, HASS permissions, or device acceptance of written Garmin content.
+Later packaged-host acceptance is in [device capabilities](device-capabilities.md#usb-operations); Course and map
+firmware evidence follows below.
+
+### Physical desktop reconnect
+
+On 2026-11-08, Edge 1050 firmware 32.20 passed physical reconnect on Ubuntu 26.04 LTS, Linux `7.0.0-42-generic`, through
+GIO/GVFS. The owner confirmed attachment counts of one → zero → one without restarting the production x86_64 AppImage
+(`b0cb6199`, isolated data). Post-reconnect screenshots showed Ready state, browsing, and a decoded FIT preview with
+map.
+
+### Local demo reconnect
+
+On 2026-11-08, renaming the fake device directory away and back yielded one → zero → one attachments in the Linux x86_64
+demo AppImage (`b0cb6199`; UI/adapter unchanged through `6b38c9ad`). Browsing and FIT preview with map recovered.
+Semantic snapshots, action results, and a screenshot are in `.tmp/demo-reconnect`; the app and listener were stopped.
 
 ## Course transfer evidence
 
-One owned Edge 1050 displayed a transferred FIT Course as “Last Course Added” after disconnect. This is happy-path
-firmware discovery only; cancellation, partial writes, disconnect/recovery, and discovery after recovery have not been
-inspected on the physical device.
+Verified on the [Edge 1050/GVFS tuple](#physical-desktop-reconnect): exact-byte Course recovery after failed host
+outcome persistence, duplicate-send suppression, unchanged pairing, and firmware discovery after USB disconnect.
+Mid-transfer cable loss and partial-payload recovery remain unqualified.
+
+The [recovery test](../../crates/garmin-services/src/course_transfer/tests/physical.rs) runs on disposable media by
+default. Its ignored physical case requires `GARMIN_TOOLKIT_ACCEPTANCE_MODEL` and an unused
+`GARMIN_TOOLKIT_COURSE_ACCEPTANCE_DIR`, and leaves a synthetic Course on the device.
+
+## Workout delivery evidence
+
+The [Edge 1050/GVFS tuple](#physical-desktop-reconnect) accepts a synthetic two-step cycling workout with exact-byte
+readback and unchanged pairing. Firmware displays Bike 1:00 followed by Rest 0:30 after USB disconnect. The
+[physical test](../../crates/garmin-services/src/course_transfer/tests/physical/workout.rs) requires
+`GARMIN_TOOLKIT_ACCEPTANCE_MODEL` and an unused `GARMIN_TOOLKIT_WORKOUT_ACCEPTANCE_DIR`. Optionally,
+`GARMIN_TOOLKIT_COURSE_TRANSFER_DIR` selects a retained synthetic Course receipt for cleanup: name, sport, coordinates
+and cues must match uniquely, with a digest guard on deletion.
 
 ## Map-maintenance evidence
 

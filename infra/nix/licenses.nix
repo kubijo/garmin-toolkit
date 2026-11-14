@@ -7,6 +7,8 @@
 }:
 
 let
+  inherit (builtins) fromJSON readFile;
+  connectInput = fromJSON (readFile ../garmin-connect/input.json);
   carbonRevision = "7518c84ffd00f22434fe19d83119692c12fccb2f";
   flagIconsRevision = "7aa5b2bdddd570ece62c812c0cb588ccdc099e2e";
   notoSansRevision = "c4a321e123e4d4ff315f57f4e0adf294fe3a95be";
@@ -43,6 +45,30 @@ let
   };
   config = (pkgs.formats.json { }).generate "garmin-toolkit-license-config.json" {
     assets = [
+      {
+        name = "garmin-personal-api-schema";
+        version = connectInput.revision;
+        license = "Apache-2.0";
+        license_file = pkgs.writeText "garmin-personal-api-notices" (
+          readFile ../garmin-connect/NOTICE + "\n" + readFile ../garmin-connect/LICENSE
+        );
+        source = "https://github.com/Likenttt/connect-personal-api-ts/blob/${connectInput.revision}/spec/openapi.json";
+        targets = [
+          "desktop"
+          "hass"
+        ];
+      }
+      {
+        name = "openapi-to-rust-generated-client";
+        version = "0.23.0";
+        license = "MIT";
+        license_file = ../licenses/notices/openapi-to-rust-LICENSE.txt;
+        source = "https://github.com/gpu-cli/openapi-to-rust/tree/505fa248da127ddb384a1012928d92f3083f592e";
+        targets = [
+          "desktop"
+          "hass"
+        ];
+      }
       {
         name = "elegance-symbols";
         version = "0.16.0";
@@ -149,7 +175,26 @@ let
         package = "garmin-desktop";
         triples = [
           "aarch64-apple-darwin"
+          "aarch64-unknown-linux-gnu"
           "x86_64-unknown-linux-gnu"
+        ];
+        bundled = [
+          {
+            package = "garmin-gpx-worker";
+            triples = [
+              "aarch64-apple-darwin"
+              "aarch64-unknown-linux-gnu"
+              "x86_64-unknown-linux-gnu"
+            ];
+          }
+          {
+            package = "garmin-fixtures";
+            triples = [
+              "aarch64-apple-darwin"
+              "aarch64-unknown-linux-gnu"
+              "x86_64-unknown-linux-gnu"
+            ];
+          }
         ];
       }
       {
@@ -171,7 +216,10 @@ let
       file: file.hasExt "py" || file.hasExt "toml" || file.hasExt "txt"
     ) (workspaceSrc + "/infra/licenses");
   };
-  python = pkgs.python3.withPackages (packages: [ packages.tyro ]);
+  python = pkgs.python3.withPackages (packages: [
+    packages.tyro
+    packages.tomlkit
+  ]);
   testCommand = "${lib.getExe python} -m unittest discover -s infra/licenses -p 'test_*.py'";
   generateCommand =
     arguments: "${lib.getExe python} ${generatorSource}/generate.py --config ${config} ${arguments}";
@@ -184,7 +232,7 @@ let
     name = "licenses";
     inherit runtimeInputs;
     text = ''
-      ${generateCommand ''"$@"''}
+      ${generateCommand ''--sync --notice-manifest infra/licenses/notices.toml "$@"''}
     '';
   };
   checker = pkgs.writeShellApplication {

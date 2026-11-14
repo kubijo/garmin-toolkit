@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO garmin_connect_credentials (user_id, personal_api_key) VALUES (?, ?)\nON CONFLICT (user_id) DO UPDATE SET\n    personal_api_key = excluded.personal_api_key;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "6278516172180dce16af6f8af2109beaf100736ff29f9d80e264d1f7dd410398"
+}

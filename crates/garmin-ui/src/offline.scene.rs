@@ -8,6 +8,7 @@ scene_meta! { title: "Application / Offline" }
 
 #[scene(default)]
 fn disconnected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let width = ctx.slider("width", 960.0, 320.0, 1280.0, 1.0);
     let intl = globals.intl();
     let title = format_message!(&intl, default_message: "Connection lost");
     let message = format_message!(&intl, default_message: "Reconnecting automatically…");
@@ -37,7 +38,7 @@ fn disconnected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         capabilities: Vec::new(),
         storages: Vec::new(),
     }];
-    stage!(ctx, ui, (960, 600), |ui| {
+    stage!(ctx, ui, globals.stage((width, 600.0)), |ui| {
         ui.disable();
         let _ = workspace::show(
             ui,
@@ -51,6 +52,7 @@ fn disconnected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                 navigation: shell::Navigation::Expanded,
                 devices: &devices,
                 backup_enabled: false,
+                garmin_connect_configured: false,
                 window_controls: None,
             },
             |ui| {

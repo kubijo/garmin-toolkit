@@ -139,7 +139,7 @@ impl Driver {
             "action" => {
                 let steps = actions::parse(argument)?;
                 for step in &steps {
-                    if !matches!(step.action, Action::Resize { .. }) {
+                    if !matches!(step.action, Action::Resize { .. } | Action::Reveal) {
                         super::lookup(driver.tree.as_ref(), &step.target, screen)?
                             .ok_or("target missing, disabled or clipped")?;
                     }

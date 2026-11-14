@@ -1,4 +1,6 @@
 {
+  appImageRuntime,
+  appRun,
   craneLib,
   launcher,
   lib,
@@ -11,9 +13,11 @@
   productionIdentity,
   src,
   withHostGraphics,
+  workspaceSrc,
 }:
 
 let
+  inherit (builtins) length;
   flatpakRuntimeVersion = "25.08";
 
   arch =
@@ -24,39 +28,167 @@ let
     else
       throw "desktop distribution supports only x86_64-linux and aarch64-linux";
 
-  appImage = mkAppImage {
-    program = lib.getExe (withHostGraphics {
-      inherit package;
-    });
-    name = "${productionIdentity.slug}-${arch}.AppImage";
+  updateInfo =
+    identity:
+    "gh-releases-zsync|kubijo|garmin-toolkit|latest-all|${identity.slug}-${arch}.AppImage.zsync";
+
+  updateRuntime =
+    identity:
+    pkgs.runCommand "${identity.slug}-update-runtime"
+      {
+        meta.license = appImageRuntime.meta.license;
+        passthru.runtimeInputs = [ appImageRuntime ];
+        nativeBuildInputs = [ pkgs.binutils ];
+      }
+      ''
+        cp ${appImageRuntime} "$out"
+        chmod u+w "$out"
+        printf '%s' ${lib.escapeShellArg (updateInfo identity)} > update-info
+        test "$(stat -c %s update-info)" -lt 1024
+        truncate -s 1024 update-info
+        objcopy --update-section .upd_info=update-info "$out"
+        # objcopy may reset the ELF padding used for the AppImage type marker.
+        printf '\101\111\002' | dd of="$out" bs=1 seek=8 conv=notrunc status=none
+      '';
+  productionRuntime = updateRuntime productionIdentity;
+  demoRuntime = updateRuntime demoIdentity;
+  productionProgram = withHostGraphics { inherit package; };
+  demoProgram = withHostGraphics { package = demoPackage; };
+  sourceMetadata = import (workspaceSrc + "/infra/nix/hass-source-metadata.nix") {
+    inherit lib;
+    roots = [
+      productionProgram
+      demoProgram
+      productionRuntime
+      demoRuntime
+      appRun
+      pkgs.pkgsStatic.stdenv.cc.libc
+    ];
+  };
+  sourceComponents = {
+    production = {
+      runtime = productionRuntime.outPath;
+      appRun = "${appRun}/AppRun";
+      staticLibraries =
+        let
+          libraries = map (library: (lib.getLib library).outPath) (
+            appImageRuntime.buildInputs
+            ++ appImageRuntime.propagatedBuildInputs
+            ++ [ pkgs.pkgsStatic.stdenv.cc.libc ]
+          );
+        in
+        assert length libraries >= 8;
+        libraries;
+    };
+    demo = {
+      runtime = demoRuntime.outPath;
+      appRun = "${appRun}/AppRun";
+      staticLibraries = sourceComponents.production.staticLibraries;
+    };
   };
 
-  demoAppImage = mkAppImage {
-    program = lib.getExe (withHostGraphics {
-      package = demoPackage;
-    });
-    name = "${demoIdentity.slug}-${arch}.AppImage";
-  };
+  sourceMetadataCheck =
+    let
+      libraries = sourceComponents.production.staticLibraries;
+      covered =
+        path:
+        lib.any (
+          provider:
+          lib.elem path provider.outputs
+          && provider.licenses != [ ]
+          && lib.all (license: license.free && license.id != "NOASSERTION") provider.licenses
+        ) sourceMetadata;
+    in
+    # The pinned runtime links seven libraries plus musl. pkgsStatic moves its
+    # buildInputs into propagatedBuildInputs; inspecting only the former loses them.
+    assert length libraries >= 8;
+    assert lib.all covered libraries;
+    pkgs.runCommandLocal "check-desktop-source-metadata" { } ''touch "$out"'';
+
+  appImage =
+    (mkAppImage.override {
+      mkappimage-runtime = productionRuntime;
+      mkappimage-apprun = appRun;
+    })
+      {
+        program = lib.getExe productionProgram;
+        name = "${productionIdentity.slug}-${arch}.AppImage";
+      };
+
+  demoAppImage =
+    (mkAppImage.override {
+      mkappimage-runtime = demoRuntime;
+      mkappimage-apprun = appRun;
+    })
+      {
+        program = lib.getExe demoProgram;
+        name = "${demoIdentity.slug}-${arch}.AppImage";
+      };
+
+  mkZsync =
+    identity: image:
+    pkgs.runCommand "${identity.slug}-${arch}.AppImage.zsync"
+      {
+        nativeBuildInputs = [ pkgs.zsync ];
+      }
+      ''
+        zsyncmake -f ${identity.slug}-${arch}.AppImage \
+          -u https://github.com/kubijo/garmin-toolkit/releases/download/v${package.version}/${identity.slug}-${arch}.AppImage \
+          -o "$out" ${image}
+      '';
+  appImageZsync = mkZsync productionIdentity appImage;
+  demoAppImageZsync = mkZsync demoIdentity demoAppImage;
+
+  releaseAssets = pkgs.runCommand "garmin-desktop-release-assets-${arch}" { } ''
+    mkdir -p "$out"
+    cp ${appImage} "$out/${productionIdentity.slug}-${arch}.AppImage"
+    cp ${appImageZsync} "$out/${productionIdentity.slug}-${arch}.AppImage.zsync"
+    cp ${demoAppImage} "$out/${demoIdentity.slug}-${arch}.AppImage"
+    cp ${demoAppImageZsync} "$out/${demoIdentity.slug}-${arch}.AppImage.zsync"
+  '';
+
+  updateMetadataCheck =
+    pkgs.runCommand "check-desktop-update-metadata"
+      {
+        nativeBuildInputs = [ pkgs.zsync ];
+      }
+      ''
+        test "$(${productionRuntime} --appimage-updateinformation)" = ${lib.escapeShellArg (updateInfo productionIdentity)}
+        test "$(${demoRuntime} --appimage-updateinformation)" = ${lib.escapeShellArg (updateInfo demoIdentity)}
+        for runtime in ${productionRuntime} ${demoRuntime}; do
+          test "$("$runtime" --appimage-offset)" = "$(stat -c %s "$runtime")"
+        done
+        zsync -i ${productionRuntime} -o restored-runtime ${mkZsync productionIdentity productionRuntime}
+        cmp ${productionRuntime} restored-runtime
+        touch "$out"
+      '';
 
   mkAppImageExporter =
-    { appImage, identity }:
+    {
+      appImage,
+      identity,
+      zsync,
+    }:
     pkgs.writeShellApplication {
       name = "export-${identity.slug}-appimage";
       runtimeInputs = [ pkgs.coreutils ];
       text = ''
         mkdir -p dist
         install -Dm755 ${appImage} "dist/${identity.slug}-${arch}.AppImage"
+        install -Dm644 ${zsync} "dist/${identity.slug}-${arch}.AppImage.zsync"
         printf 'wrote %s\n' "dist/${identity.slug}-${arch}.AppImage"
       '';
     };
 
   appImageExporter = mkAppImageExporter {
     inherit appImage;
+    zsync = appImageZsync;
     identity = productionIdentity;
   };
 
   demoAppImageExporter = mkAppImageExporter {
     appImage = demoAppImage;
+    zsync = demoAppImageZsync;
     identity = demoIdentity;
   };
 
@@ -217,7 +349,14 @@ in
 {
   inherit
     appImage
+    sourceComponents
+    sourceMetadata
+    sourceMetadataCheck
     appImageExporter
+    appImageZsync
+    demoAppImageZsync
+    releaseAssets
+    updateMetadataCheck
     flatpakBuilder
     flatpakStage
     demoAppImage

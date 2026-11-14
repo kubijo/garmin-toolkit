@@ -2,8 +2,10 @@
 
 ## Boundary
 
-Preserve imports, keep parser types inside `garmin-fit`, and encode only courses/workouts. Tests use publishable data
-with independent expectations.
+`garmin-fit` normalizes supported single-session activities and encodes Courses. Workouts and wellness are not
+normalized or encoded by the application. Original imports remain preserved; parser types stay private. Tests use
+publishable data with independent expectations; [corpus coverage](fit-corpus.md) distinguishes implemented cases from
+gaps.
 
 ## Treatment
 
@@ -38,8 +40,6 @@ unsupported, and corrupt chains.
 
 ## Browser import acceptance
 
-On 2026-10-03, the packaged HASS demo completed a selected FIT import after its browser WebSocket closed during the
-request. The replacement connection reported one imported Cycling activity in a previously empty profile. Retrying the
-same file reported it was already imported and left one activity. The host regression
-`fit_import_completes_after_caller_disconnects` covers completion when the original caller disappears. This is demo
-transport evidence, not physical-device acceptance.
+The packaged HASS demo verified import completion after WebSocket disconnect and a duplicate-free retry after
+reconnection. The host regression `fit_import_completes_after_caller_disconnects` covers the lost caller. This checks
+demo transport only; physical-device acceptance is separate.

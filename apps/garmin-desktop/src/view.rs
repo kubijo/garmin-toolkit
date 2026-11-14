@@ -36,6 +36,10 @@ use crate::{
 use garmin_ui::window::{Event as WindowEvent, NativeWindow, Spec as WindowSpec, WindowHost as _};
 
 mod backup;
+#[cfg(all(test, feature = "demo"))]
+mod connect_tests;
+#[cfg(all(test, feature = "demo"))]
+mod file_window_tests;
 mod maps;
 
 pub struct Desktop {
@@ -51,6 +55,13 @@ pub struct Desktop {
     profile_menu_expanded: bool,
     page: Page,
     preferences_saving: bool,
+    garmin_connect_checking: Option<UserId>,
+    garmin_connect_facts: HashMap<UserId, garmin_model::garmin_connect::AccountFacts>,
+    connect_activities: HashMap<UserId, garmin_model::garmin_connect::ActivityResponse>,
+    connect_preview: Option<device_fit_preview::Preview<(UserId, i64, String)>>,
+    connect_activity_loading: Option<UserId>,
+    connect_load_progress: Option<(UserId, garmin_model::garmin_connect::LoadProgress)>,
+    page_import: Option<(UserId, profile_settings::connect_activities::Batch)>,
     selected_activity: usize,
     activity_detail: Option<ActivityDetailSnapshot>,
     activity_workspace: activity::Workspace,
@@ -59,7 +70,7 @@ pub struct Desktop {
     create_profile: Option<profile::CreateState>,
     avatar_editor: Option<AvatarEditor>,
     device_browser: Option<device_browser::Browser>,
-    file_window: NativeWindow<device_browser::Action, ()>,
+    file_window: NativeWindow<FileWindowAction, ()>,
     file_window_wake: Option<crate::developer::RootWakeRequest>,
     file_window_close_pending: bool,
     file_window_device: Option<String>,
@@ -92,6 +103,26 @@ impl Desktop {
         map_renderer: activity::WgpuMapHandle,
         profiling: profiling::RuntimeMetricsRecorder,
     ) -> Result<Self, Error> {
+        Self::with_map_renderer(
+            deployment,
+            translations,
+            context,
+            device_platform,
+            data_root,
+            activity::map_runtime::Renderer::wgpu(map_renderer),
+            profiling,
+        )
+    }
+
+    fn with_map_renderer(
+        deployment: Arc<Deployment>,
+        translations: Translations,
+        context: Context,
+        device_platform: device_backend::Platform,
+        data_root: &Path,
+        map_renderer: activity::map_runtime::Renderer,
+        profiling: profiling::RuntimeMetricsRecorder,
+    ) -> Result<Self, Error> {
         let intl = translations.formatter_for_client(Language::English)?;
         let maps = maps::Controller::new(Arc::clone(&deployment))?;
         let worker = Worker::spawn(
@@ -107,11 +138,8 @@ impl Desktop {
         )
         .map_err(std::io::Error::other)?;
         let map_worker = crate::map_worker::Worker::spawn(&data_root.join("cache/activity-map"))?;
-        let map_runtime = activity::map_runtime::MapRuntimeHandle::new(
-            map_worker,
-            activity::map_runtime::Renderer::wgpu(map_renderer),
-        )
-        .with_metrics(profiling.clone());
+        let map_runtime = activity::map_runtime::MapRuntimeHandle::new(map_worker, map_renderer)
+            .with_metrics(profiling.clone());
         let activity_workspace = activity::Workspace::new(&map_runtime);
         let routes = crate::routes::Controller::new(
             Arc::clone(&deployment),
@@ -131,6 +159,13 @@ impl Desktop {
             profile_menu_expanded: false,
             page: Page::Activities,
             preferences_saving: false,
+            garmin_connect_checking: None,
+            garmin_connect_facts: HashMap::new(),
+            connect_activities: HashMap::new(),
+            connect_preview: None,
+            connect_activity_loading: None,
+            connect_load_progress: None,
+            page_import: None,
             selected_activity: 0,
             activity_detail: None,
             activity_workspace,
@@ -242,6 +277,10 @@ impl Desktop {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "composes workspace destinations and their independent controllers"
+    )]
     fn show_application(
         &mut self,
         ui: &mut Ui,
@@ -255,6 +294,11 @@ impl Desktop {
             .map(ProfileView::profile_props)
             .collect::<Vec<_>>();
         let device_snapshots = self.device_snapshots();
+        if matches!(self.page, Page::GarminConnect)
+            && !self.profiles[profile_index].garmin_connect_configured
+        {
+            self.page = Page::ProfileSettings;
+        }
         let activities_page = ActivitiesPage::new(
             &self.intl,
             &self.profiles[profile_index],
@@ -263,16 +307,25 @@ impl Desktop {
             &self.import,
             drop_active,
         );
-        let profile = self.profiles[profile_index].user.profile();
-        let settings_props = profile_settings::Props {
-            id: Id::new(self.profiles[profile_index].user.id()),
-            intl: &self.intl,
-            preferences: profile.preferences(),
-            accent: profile.accent(),
-            profile: self.profiles[profile_index].profile_props(),
-            picture_enabled: true,
-            disabled: self.preferences_saving,
-        };
+        let mut settings_props = profile_settings_props(
+            &self.intl,
+            &self.profiles[profile_index],
+            self.preferences_saving,
+            self.garmin_connect_checking,
+            &self.garmin_connect_facts,
+            &self.connect_activities,
+            self.connect_activity_loading,
+        );
+        settings_props.garmin_connect.batch = self
+            .page_import
+            .as_ref()
+            .filter(|(owner, _)| *owner == self.profiles[profile_index].user.id())
+            .map(|(_, batch)| batch);
+        settings_props.garmin_connect.load_progress = self
+            .connect_load_progress
+            .as_ref()
+            .filter(|(owner, _)| *owner == self.profiles[profile_index].user.id())
+            .map(|(_, progress)| progress);
         let notice = self.notice.as_ref();
         let page = &self.page;
         let intl = &self.intl;
@@ -292,6 +345,7 @@ impl Desktop {
             window_controls: Some(&window_controls),
             backup_enabled: self.profiles[profile_index].user.role()
                 == garmin_model::identity::Role::Owner,
+            garmin_connect_configured: self.profiles[profile_index].garmin_connect_configured,
         };
         let route_devices = route_device_connectors(&self.devices, &device_snapshots);
         let output = workspace::show(ui, &props, |ui| {
@@ -321,6 +375,9 @@ impl Desktop {
                 Page::ProfileSettings => {
                     PageOutput::Settings(profile_settings::show(ui, &settings_props))
                 }
+                Page::GarminConnect => PageOutput::Settings(
+                    profile_settings::connect_activities::show(ui, &settings_props),
+                ),
                 Page::Maps(key) => PageOutput::Maps {
                     key: key.clone(),
                     command: self.maps.show(ui, intl, key),
@@ -425,6 +482,8 @@ impl Desktop {
             .and_then(|index| self.profiles.get(index))
             .is_some_and(|profile| profile.user.profile().preferences().inline_file_windows());
         self.file_window.set_inline(&self.context, inline);
+        let units = self.selected_unit_system();
+        let preview = &mut self.device_fit_preview;
         let browser = &mut self.device_browser;
         if let Some(browser) = browser {
             browser.set_show_hidden_files(show_hidden);
@@ -440,8 +499,12 @@ impl Desktop {
             &self.intl,
             || (),
             |ui| {
+                let preview_open = preview.is_some();
+                let preview_action = preview.as_mut().and_then(|preview| {
+                    preview.show(ui, intl, busy, units, jiff::Zoned::now().date())
+                });
                 let action = if let Some(browser) = browser {
-                    ui.add_enabled_ui(!busy, |ui| browser.show(ui, intl)).inner
+                    ui.add_enabled_ui(!busy && !preview_open, |ui| browser.show(ui, intl)).inner
                 } else {
                     ui.label(if loading { "Waiting for the device catalogue…" } else { "Device catalogue unavailable. Close this window and choose Browse files to retry." });
                     None
@@ -457,12 +520,30 @@ impl Desktop {
                     toast_bounds,
                     notification::StackMode::Automatic,
                 );
-                action
+                preview_action
+                    .map(FileWindowAction::Preview)
+                    .or_else(|| action.map(FileWindowAction::Browser))
             },
         );
         for event in events {
+            if matches!(event, WindowEvent::Closed) {
+                self.device_fit_preview = None;
+            }
             if let WindowEvent::Command { command, .. } = event {
-                self.handle_device_browser_action(&command);
+                match command {
+                    FileWindowAction::Preview(device_fit_preview::Action::Close) => {
+                        self.device_fit_preview = None;
+                    }
+                    FileWindowAction::Preview(device_fit_preview::Action::Import(target)) => {
+                        self.device_fit_preview = None;
+                        self.handle_device_browser_action(&device_browser::Action::ImportFit(
+                            device_browser_selection(target),
+                        ));
+                    }
+                    FileWindowAction::Browser(action) => {
+                        self.handle_device_browser_action(&action);
+                    }
+                }
             }
         }
         !inline && self.file_window.is_open()
@@ -475,6 +556,7 @@ impl Desktop {
     fn handle_device_browser_action(&mut self, action: &device_browser::Action) {
         if matches!(action, device_browser::Action::Close) {
             self.file_window.close(&self.context);
+            self.device_fit_preview = None;
             self.file_toasts = notification::Toasts::default();
             self.file_progress_toast = None;
             if !self.device_browser_status.is_busy() {
@@ -628,6 +710,7 @@ impl Desktop {
             return;
         }
         if !same_window {
+            self.device_fit_preview = None;
             self.file_toasts = notification::Toasts::default();
             self.file_progress_toast = None;
         }
@@ -709,7 +792,46 @@ impl Desktop {
         action: profile_settings::Action,
     ) {
         match action {
+            profile_settings::Action::StartGarminConnectPageImport => {
+                self.start_page_import(profile_index);
+            }
+            profile_settings::Action::CancelGarminConnectPageImport => {
+                if let Some((owner, batch)) = &mut self.page_import
+                    && *owner == self.profiles[profile_index].user.id()
+                {
+                    batch.cancel();
+                }
+            }
             profile_settings::Action::ChoosePicture => self.choose_profile_picture(profile_index),
+            profile_settings::Action::GarminConnectActivity(request) => {
+                let user = self.profiles[profile_index].user.id();
+                if profile_settings::connect_activities::clears_batch(
+                    &request,
+                    self.connect_activities.get(&user),
+                ) {
+                    self.page_import = None;
+                }
+                self.preferences_saving = true;
+                self.worker
+                    .connect_activity(UserContext::new(user), request);
+                self.connect_activity_loading = Some(user);
+                self.connect_load_progress = None;
+            }
+            profile_settings::Action::TestGarminConnectKey => {
+                let user = self.profiles[profile_index].user.id();
+                self.preferences_saving = true;
+                self.garmin_connect_checking = Some(user);
+                self.worker.check_garmin_connect(UserContext::new(user));
+            }
+            profile_settings::Action::UpdateGarminConnectKey(key) => {
+                self.preferences_saving = true;
+                self.garmin_connect_checking =
+                    key.as_ref().map(|_| self.profiles[profile_index].user.id());
+                self.worker.set_garmin_connect_key(
+                    UserContext::new(self.profiles[profile_index].user.id()),
+                    key,
+                );
+            }
             profile_settings::Action::UpdateAccent(accent) => {
                 self.preferences_saving = true;
                 self.worker.update_accent(
@@ -722,6 +844,156 @@ impl Desktop {
                 self.preferences_saving = true;
                 self.worker
                     .update_preferences(UserContext::new(user.id()), preferences);
+            }
+        }
+    }
+
+    fn start_page_import(&mut self, profile_index: usize) {
+        if self.preferences_saving {
+            return;
+        }
+        let user = self.profiles[profile_index].user.id();
+        let Some(garmin_model::garmin_connect::ActivityResponse::Page { activities, .. }) =
+            self.connect_activities.get(&user)
+        else {
+            return;
+        };
+        let Some(mut batch) = profile_settings::connect_activities::Batch::new(activities) else {
+            return;
+        };
+        let request = batch.next_request();
+        self.page_import = Some((user, batch));
+        self.connect_preview = None;
+        if let Some(request) = request {
+            self.handle_profile_settings_action(
+                profile_index,
+                profile_settings::Action::GarminConnectActivity(request),
+            );
+        }
+    }
+
+    fn complete_page_import(
+        &mut self,
+        user: UserId,
+        result: Result<
+            garmin_service_api::ConnectActivityResult,
+            garmin_model::garmin_connect::ActivityFailure,
+        >,
+    ) {
+        let Some((_, batch)) = &mut self.page_import else {
+            return;
+        };
+        let step = batch.complete(result);
+        if let Some(receipt) = step.receipt
+            && let Some(page) = self.connect_activities.get_mut(&user)
+        {
+            page.merge(receipt);
+        }
+        self.connect_preview = None;
+        self.preferences_saving = step.request.is_some();
+        self.connect_activity_loading = step.request.as_ref().map(|_| user);
+        if let Some(request) = step.request {
+            self.worker
+                .connect_activity(UserContext::new(user), request);
+        }
+    }
+
+    fn connect_activity_checked(
+        &mut self,
+        user: UserId,
+        result: Result<
+            garmin_service_api::ConnectActivityResult,
+            garmin_model::garmin_connect::ActivityFailure,
+        >,
+    ) {
+        self.connect_load_progress = None;
+        if self
+            .page_import
+            .as_ref()
+            .is_some_and(|(owner, batch)| *owner == user && batch.running())
+        {
+            self.complete_page_import(user, result);
+            return;
+        }
+        self.preferences_saving = false;
+        self.connect_activity_loading = None;
+        match result {
+            Ok(garmin_service_api::ConnectActivityResult::State(response)) => {
+                if let Some(message) =
+                    profile_settings::connect_activities::receipt(&self.intl, &response)
+                    && self
+                        .selected_profile
+                        .and_then(|index| self.profiles.get(index))
+                        .is_some_and(|profile| profile.user.id() == user)
+                {
+                    self.notice = Some(Notice::information(message));
+                }
+                if let Some(cached) = self.connect_activities.get_mut(&user) {
+                    cached.merge(response);
+                } else {
+                    self.connect_activities.insert(user, response);
+                }
+                self.connect_preview = None;
+            }
+            Ok(garmin_service_api::ConnectActivityResult::Preview(plan)) => {
+                if self
+                    .selected_profile
+                    .and_then(|index| self.profiles.get(index))
+                    .is_some_and(|profile| profile.user.id() == user)
+                {
+                    self.connect_preview = Some(
+                        device_fit_preview::Preview::new(
+                            (user, plan.id, plan.digest),
+                            plan.preview,
+                            &self.map_runtime,
+                        )
+                        .with_cloud_details(plan.details, plan.imported),
+                    );
+                }
+            }
+            Ok(garmin_service_api::ConnectActivityResult::Prepared { .. }) => {
+                self.notice = Some(Notice::error(
+                    "Unexpected Garmin Connect preparation response".into(),
+                ));
+            }
+            Err(reason) => self.notice = Some(Notice::error(reason.message)),
+        }
+    }
+
+    fn connect_checked(
+        &mut self,
+        user: UserId,
+        result: Result<Option<garmin_model::garmin_connect::AccountFacts>, String>,
+    ) {
+        self.preferences_saving = false;
+        self.garmin_connect_checking = None;
+        match result {
+            Ok(facts) => {
+                if self
+                    .page_import
+                    .as_ref()
+                    .is_some_and(|(owner, _)| *owner == user)
+                {
+                    self.page_import = None;
+                }
+                self.connect_activities.remove(&user);
+                self.connect_preview = None;
+                if let Some(profile) = self
+                    .profiles
+                    .iter_mut()
+                    .find(|profile| profile.user.id() == user)
+                {
+                    profile.garmin_connect_configured = facts.is_some();
+                }
+                if let Some(facts) = facts {
+                    self.garmin_connect_facts.insert(user, facts);
+                } else {
+                    self.garmin_connect_facts.remove(&user);
+                }
+            }
+            Err(reason) => {
+                self.garmin_connect_facts.remove(&user);
+                self.notice = Some(Notice::error(reason));
             }
         }
     }
@@ -835,7 +1107,13 @@ impl Desktop {
         if let Some(operation) = self.import.operation() {
             operations.push(operation);
         }
-        if self.preferences_saving {
+        if self
+            .page_import
+            .as_ref()
+            .is_some_and(|(_, batch)| batch.running())
+        {
+            operations.push(ActiveOperation::ImportingActivities);
+        } else if self.preferences_saving {
             operations.push(ActiveOperation::SavingPreferences);
         }
         if let Some(profile) = &self.create_profile {
@@ -944,9 +1222,8 @@ impl Desktop {
         let Some(dialog) = crate::native::file_dialog(&self.context) else {
             return;
         };
-        let dialog = dialog.add_filter("FIT activity", &["fit"]);
         let paths = match action {
-            file_import::Action::Files => dialog.pick_files(),
+            file_import::Action::Files => dialog.add_filter("FIT activity", &["fit"]).pick_files(),
             file_import::Action::Folder => dialog.pick_folder().map(|path| vec![path]),
         };
         if let Some(paths) = paths {
@@ -1098,10 +1375,40 @@ impl Desktop {
         }
     }
 
+    fn connect_progress(
+        &mut self,
+        user: UserId,
+        progress: garmin_model::garmin_connect::LoadProgress,
+    ) {
+        if self.connect_activity_loading == Some(user) {
+            self.connect_load_progress = Some((user, progress));
+        }
+    }
+
+    fn import_finished(&mut self, result: Result<Vec<worker::ProfileData>, String>) {
+        match result {
+            Ok(profiles) => self.replace_profiles(profiles, None),
+            Err(reason) => {
+                self.import.failed += 1;
+                self.import.last_problem = Some(reason);
+            }
+        }
+        self.import.finish();
+    }
+
     fn process_events(&mut self) {
         let events = self.worker.drain().collect::<Vec<_>>();
         for event in events {
             match event {
+                worker::Event::ConnectLoadProgress { user, progress } => {
+                    self.connect_progress(user, progress);
+                }
+                worker::Event::ConnectActivity { user, result } => {
+                    self.connect_activity_checked(user, result);
+                }
+                worker::Event::GarminConnectChecked { user, result } => {
+                    self.connect_checked(user, result);
+                }
                 worker::Event::Unavailable(reason) => {
                     self.load = LoadState::Unavailable(reason);
                 }
@@ -1148,15 +1455,7 @@ impl Desktop {
                 }
                 worker::Event::ImportStarted { total } => self.import.begin(total),
                 worker::Event::ImportItem(item) => self.import.record(item),
-                worker::Event::ImportFinished(result) => {
-                    if let Ok(profiles) = result {
-                        self.replace_profiles(profiles, None);
-                    } else if let Err(reason) = result {
-                        self.import.failed += 1;
-                        self.import.last_problem = Some(reason);
-                    }
-                    self.import.finish();
-                }
+                worker::Event::ImportFinished(result) => self.import_finished(result),
                 worker::Event::ActivityLoaded {
                     observation_id,
                     result,
@@ -1176,7 +1475,7 @@ impl Desktop {
                             self.activity_detail = Some(ActivityDetailSnapshot {
                                 id: details.observation_id(),
                                 recording: garmin_service_api::ActivityRecordingSnapshot::from(
-                                    details.normalized().activity(),
+                                    details.activity(),
                                 ),
                             });
                         }
@@ -1202,7 +1501,7 @@ impl Desktop {
             return;
         }
         self.device_browser_loading = None;
-        if self.file_window_device.as_deref() != Some(key.as_str()) {
+        if !self.owns_file_window(&key) {
             return;
         }
         let catalog = match result {
@@ -1265,10 +1564,11 @@ impl Desktop {
         ) {
             self.devices.invalidate(&key);
         }
-        if self
-            .device_browser
-            .as_ref()
-            .is_none_or(|browser| browser.device_key() != key)
+        if !self.owns_file_window(&key)
+            || self
+                .device_browser
+                .as_ref()
+                .is_none_or(|browser| browser.device_key() != key)
         {
             return;
         }
@@ -1322,6 +1622,17 @@ impl Desktop {
                     .push(notification::Toast::new(notification::Kind::Error, reason));
             }
         }
+    }
+
+    fn owns_file_window(&self, device_key: &str) -> bool {
+        self.file_window.is_open()
+            && self.file_window_device.as_deref() == Some(device_key)
+            && self.file_window_owner.is_some()
+            && self.file_window_owner
+                == self
+                    .selected_profile
+                    .and_then(|index| self.profiles.get(index))
+                    .map(|profile| profile.user.id())
     }
 
     fn replace_profiles(&mut self, profiles: Vec<worker::ProfileData>, select: Option<UserId>) {
@@ -1531,24 +1842,37 @@ impl Desktop {
         }
     }
 
-    fn show_device_fit_preview(&mut self, ui: &mut Ui) {
+    fn show_connect_preview(&mut self, ui: &mut Ui) {
+        let user = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .map(|profile| profile.user.id());
+        if self
+            .connect_preview
+            .as_ref()
+            .is_some_and(|preview| Some(preview.target().0) != user)
+        {
+            self.connect_preview = None;
+        }
         let units = self.selected_unit_system();
-        let Some(preview) = self.device_fit_preview.as_mut() else {
+        let Some(preview) = self.connect_preview.as_mut() else {
             return;
         };
         match preview.show(
             ui,
             &self.intl,
-            self.device_browser_status.is_busy(),
+            self.preferences_saving,
             units,
             jiff::Zoned::now().date(),
         ) {
-            Some(device_fit_preview::Action::Close) => self.device_fit_preview = None,
-            Some(device_fit_preview::Action::Import(target)) => {
-                self.device_fit_preview = None;
-                self.handle_device_browser_action(&device_browser::Action::ImportFit(
-                    device_browser_selection(target),
-                ));
+            Some(device_fit_preview::Action::Close) => self.connect_preview = None,
+            Some(device_fit_preview::Action::Import((owner, id, digest))) => {
+                self.preferences_saving = true;
+                self.worker.connect_activity(
+                    UserContext::new(owner),
+                    garmin_model::garmin_connect::ActivityRequest::Import { id, digest },
+                );
+                self.connect_activity_loading = Some(owner);
             }
             None => {}
         }
@@ -1599,6 +1923,7 @@ impl eframe::App for Desktop {
         }
         self.show_create_profile(ui);
         self.show_avatar_editor(ui);
+        self.show_connect_preview(ui);
         if self.show_file_window() {
             self.file_window_close_pending = false;
             if self.file_window_wake.is_none() {
@@ -1613,7 +1938,6 @@ impl eframe::App for Desktop {
             self.file_window_close_pending = true;
             ui.ctx().request_repaint_of(ViewportId::ROOT);
         }
-        self.show_device_fit_preview(ui);
         self.show_quit_confirmation(ui);
         self.show_toasts(ui.ctx(), toast_bounds);
         garmin_ui::window::resize(ui);
@@ -1621,6 +1945,11 @@ impl eframe::App for Desktop {
         self.profiling
             .record_desktop_frame(started.elapsed().as_secs_f32() * 1_000.0);
     }
+}
+
+enum FileWindowAction {
+    Browser(device_browser::Action),
+    Preview(device_fit_preview::Action),
 }
 
 enum LoadState {
@@ -2286,7 +2615,39 @@ fn count(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
+fn profile_settings_props<'a>(
+    intl: &'a Intl,
+    profile: &'a ProfileView,
+    disabled: bool,
+    checking: Option<UserId>,
+    facts: &'a HashMap<UserId, garmin_model::garmin_connect::AccountFacts>,
+    activities: &'a HashMap<UserId, garmin_model::garmin_connect::ActivityResponse>,
+    activity_loading: Option<UserId>,
+) -> profile_settings::Props<'a> {
+    profile_settings::Props {
+        id: Id::new(profile.user.id()),
+        intl,
+        preferences: profile.user.profile().preferences(),
+        accent: profile.user.profile().accent(),
+        profile: profile.profile_props(),
+        picture_enabled: true,
+        disabled,
+        garmin_connect: profile_settings::GarminConnectProps {
+            now: jiff::Timestamp::now(),
+            today: jiff::Zoned::now().date(),
+            configured: profile.garmin_connect_configured,
+            checking: checking == Some(profile.user.id()),
+            facts: facts.get(&profile.user.id()),
+            activities: activities.get(&profile.user.id()),
+            activities_busy: activity_loading == Some(profile.user.id()),
+            load_progress: None,
+            batch: None,
+        },
+    }
+}
+
 struct ProfileView {
+    garmin_connect_configured: bool,
     user: User,
     accent: Color,
     avatar: Option<profile::AvatarImage>,
@@ -2311,6 +2672,7 @@ impl ProfileView {
         let accent = profile.user.profile().accent().unwrap_or(swatch::ACTION);
         Self {
             user: profile.user,
+            garmin_connect_configured: profile.garmin_connect_configured,
             accent,
             avatar,
             previews: profile.activities,
@@ -2347,11 +2709,7 @@ fn activity_presentation(
     intl: &Intl,
     units: UnitSystem,
 ) -> activity::Presentation {
-    let source = preview
-        .creator()
-        .product_name()
-        .map_or("FIT", |value| value.as_str());
-    activity::Presentation::from_summary(preview.summary(), source, intl, units)
+    activity::Presentation::from_summary(preview.summary(), preview.source(), intl, units)
 }
 
 #[cfg(test)]

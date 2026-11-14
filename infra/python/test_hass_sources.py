@@ -16,6 +16,7 @@ from hass_source_parts import part_path
 from hass_sources import (
     BundleSources,
     bundle_sources,
+    bundle_store_sources,
     realisation_targets,
     resolve_runtime,
     runtime_coverage,
@@ -33,6 +34,22 @@ RECIPE = '/nix/store/' + '1' * 32 + '-fixture.drv'
 
 
 class SourceBundleTests(unittest.TestCase):
+    def test_strict_store_export_rejects_unknown_licenses_before_source_fetch_or_archive_creation(self) -> None:
+        metadata = self.root / 'metadata.json'
+        records: list[Object] = [{'derivation': RECIPE, 'licenses': []}]
+        metadata.write_bytes(json_bytes(records))
+        output = self.root / 'unresolved'
+        with (
+            patch('hass_sources.nix_json', return_value={SOURCE: {'deriver': RECIPE}}),
+            patch('hass_sources.derivations', side_effect=AssertionError('Source fetch started')),
+            self.assertRaisesRegex(ValueError, 'coverage remains unresolved'),
+        ):
+            bundle_store_sources(
+                BundleSources(archive=self.source / 'COPYING', metadata=metadata, output=output, require_resolved=True),
+                {SOURCE},
+            )
+        self.assertFalse(output.exists())
+
     def setUp(self) -> None:
         SCRATCH.mkdir(exist_ok=True)
         temporary = tempfile.TemporaryDirectory(prefix='source-tests.', dir=SCRATCH)
@@ -67,6 +84,24 @@ class SourceBundleTests(unittest.TestCase):
         self.assertEqual(file_sha256(self.archive), file_sha256(second))
         verify_sources(self.archive, self.report, 'a' * 64, require_resolved=True)
         self.assertEqual(list(self.root.glob('COPYING')), [])
+
+    def test_store_deduplication_does_not_change_archive_bytes(self) -> None:
+        other = self.root / 'another-source'
+        other.mkdir()
+        original = self.source / 'COPYING'
+        copies = [self.source / 'copy', other / 'copy']
+        for path in copies:
+            path.write_bytes(original.read_bytes())
+        independent = self.root / 'independent.tar.gz'
+        linked = self.root / 'linked.tar.gz'
+        write_bundle([self.source, other], independent)
+        for path in copies:
+            path.unlink()
+            path.hardlink_to(original)
+        write_bundle([self.source, other], linked)
+        self.assertEqual(independent.read_bytes(), linked.read_bytes())
+        with tarfile.open(linked) as archive:
+            self.assertFalse(any(member.islnk() for member in archive))
 
     def test_source_budgets_are_independent_of_image_budgets(self) -> None:
         with patch('archive_io.MAX_MEMBERS', 1), patch('archive_io.MAX_IMAGE_BYTES', 1024):
@@ -103,7 +138,7 @@ class SourceBundleTests(unittest.TestCase):
         paths = [self.source, self.recipe]
         with patch('tarfile.bltn_open', side_effect=AssertionError('Read a source payload')):
             members = list(source_members(paths))
-        self.assertTrue(any(member.islnk() for member in members))
+        self.assertFalse(any(member.islnk() for member in members))
         self.assertTrue(any(member.issym() for member in members))
         original = self.root / 'links.tar.gz'
         write_bundle(paths, original)

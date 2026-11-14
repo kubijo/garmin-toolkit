@@ -30,9 +30,10 @@ The UI embeds hinted Noto Sans 2.015 Regular and SemiBold. Named egui families c
 font-weight field.
 
 Use `typography::body(ui, text)` for explanatory prose: regular 14 px type, 20 px line height, secondary text color, and
-balanced two-line wrapping when it fits. Longer paragraphs wrap naturally. The helper returns an egui response and keeps
-its style local. For composition inside another widget, `typography::body_text(text)` returns `RichText` with the same
-type metrics and inherits the widget's color. `typography::semibold(text)` selects the real semibold face for inline
+balanced two-line wrapping when it fits, preferring sentence boundaries when the line widths differ by at most one
+quarter of the available measure. Longer paragraphs wrap naturally. The helper returns an egui response and keeps its
+style local. For composition inside another widget, `typography::body_text(text)` returns `RichText` with the same type
+metrics and inherits the widget's color. `typography::semibold(text)` selects the real semibold face for inline
 emphasis. Callers own the spacing between paragraphs, headings, and controls.
 
 The [activity workspace](activity-map.md) lazily loads recording details and links map, charts, laps, and playback
@@ -112,9 +113,9 @@ display preference, not an access restriction.
 
 `garmin-i18n` wraps FormatJS. English ICU messages live beside call sites as fallback; Czech source, translation, and
 context in `translations/cs.json` compile into a flat catalog in Cargo's `OUT_DIR` using the pinned FormatJS CLI during
-the crate build. Generated catalogs are not tracked. `just dev::i18n-sync` updates editable translation metadata; checks
-reject stale, missing, empty, extra, malformed, or incompatible messages. That proves catalog completeness, not how much
-visible copy uses FormatJS. Gallery scenes expose both languages.
+the crate build. Generated catalogs are not tracked. `just dev::i18n::sync` updates editable translation metadata;
+checks reject stale, missing, empty, extra, malformed, or incompatible messages. That proves catalog completeness, not
+how much visible copy uses FormatJS. Gallery scenes expose both languages.
 
 Preflight Grit checks keep messages outside other macro token trees, reject whitespace that FormatJS would collapse, and
 reject apostrophe-quoted ICU arguments. Deliberate message line breaks travel as interpolation values.

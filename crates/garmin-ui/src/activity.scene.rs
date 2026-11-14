@@ -246,6 +246,7 @@ fn application_scene(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globa
                 navigation: shell::Navigation::Expanded,
                 devices: &[],
                 backup_enabled: false,
+                garmin_connect_configured: false,
                 window_controls: None,
             },
             |ui| {
@@ -471,11 +472,12 @@ fn empty_workspace(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals
 
 #[scene]
 fn archive(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let width = ctx.slider("width", 1_180.0, 320.0, 1_280.0, 1.0);
     show_workspace(
         ctx,
         ui,
         globals,
-        egui::vec2(1_180.0, 760.0),
+        egui::vec2(width, 760.0),
         WorkspaceSlot::Archive,
         WorkspaceScene::COMPLETE,
     );
@@ -651,16 +653,18 @@ fn device_fit_preview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
                     },
                     DeviceFitPreview {
                         file_name: "2026-09-15-ride.fit".to_owned(),
-                        activities: vec![DeviceFitPreviewActivity {
-                            source: "Edge 850".to_owned(),
-                            summary: summary(
-                                ActivitySport::Cycling,
-                                RECORDING_START_MILLISECONDS,
-                                43 * 60 * 1_000,
-                                16_800_000,
-                            ),
-                            recording: sample_recording(RecordingKind::Complete),
-                        }],
+                        content: garmin_service_api::DeviceFitPreviewContent::Activities(vec![
+                            DeviceFitPreviewActivity {
+                                source: "Edge 850".to_owned(),
+                                summary: summary(
+                                    ActivitySport::Cycling,
+                                    RECORDING_START_MILLISECONDS,
+                                    43 * 60 * 1_000,
+                                    16_800_000,
+                                ),
+                                recording: sample_recording(RecordingKind::Complete),
+                            },
+                        ]),
                     },
                     &runtime,
                 )

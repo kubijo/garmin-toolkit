@@ -33,6 +33,8 @@ pub struct Props<'a> {
     size: Option<Size>,
     disabled: Option<bool>,
     subtle_border: bool,
+    password: bool,
+    action: Option<button::IconProps<'a>>,
 }
 
 impl<'a> Props<'a> {
@@ -45,12 +47,28 @@ impl<'a> Props<'a> {
             size: None,
             disabled: None,
             subtle_border: false,
+            password: false,
+            action: None,
         }
     }
 
     #[must_use]
     pub const fn placeholder(mut self, placeholder: &'a str) -> Self {
         self.placeholder = placeholder;
+        self
+    }
+
+    /// Adds a trailing action inside the input surface, reserving space for its button.
+    #[must_use]
+    pub const fn action(mut self, action: button::IconProps<'a>) -> Self {
+        self.action = Some(action);
+        self
+    }
+
+    /// Conceals the text and suppresses copying it from the field.
+    #[must_use]
+    pub const fn password(mut self, password: bool) -> Self {
+        self.password = password;
         self
     }
 
@@ -164,6 +182,15 @@ pub fn show(ui: &mut Ui, value: &mut String, props: Props<'_>) -> Response {
     let size = props.size.unwrap_or_default();
     let disabled = props.disabled.unwrap_or_default();
     let metrics = metrics(size);
+    let action_width = if props.action.is_some() {
+        match size {
+            Size::Small => 32,
+            Size::Medium => 40,
+            Size::Large => 48,
+        }
+    } else {
+        0
+    };
     field(
         ui,
         FieldProps {
@@ -175,19 +202,41 @@ pub fn show(ui: &mut Ui, value: &mut String, props: Props<'_>) -> Response {
         },
         |ui, fill| {
             control_style(ui, fill, false);
-            ui.add_enabled(
+            let mut response = ui.add_enabled(
                 !disabled,
                 egui::TextEdit::singleline(value)
+                    .password(props.password)
                     .hint_text(props.placeholder.to_owned())
                     .font(egui::FontId::proportional(metrics.font_size))
                     .desired_width(f32::INFINITY)
                     .min_size(egui::vec2(0.0, metrics.height))
-                    .margin(egui::Margin::symmetric(
-                        metrics.horizontal_padding,
-                        metrics.vertical_padding,
-                    ))
+                    .margin(egui::Margin {
+                        right: metrics.horizontal_padding + action_width,
+                        ..egui::Margin::symmetric(
+                            metrics.horizontal_padding,
+                            metrics.vertical_padding,
+                        )
+                    })
                     .background_color(fill),
-            )
+            );
+            if let Some(action) = props.action {
+                let rect = egui::Rect::from_min_max(
+                    egui::pos2(response.rect.right() - metrics.height, response.rect.top()),
+                    response.rect.right_bottom(),
+                );
+                let action = ui
+                    .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                        button::IconProps {
+                            size,
+                            enabled: !disabled && action.enabled,
+                            ..action
+                        }
+                        .show(ui)
+                    })
+                    .inner;
+                response = response.union(action);
+            }
+            response
         },
     )
 }
@@ -254,7 +303,7 @@ fn field(
 ) -> Response {
     let app_theme = crate::theme::palette(ui);
     ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.y = 6.0;
+        ui.spacing_mut().item_spacing.y = 8.0;
         let label_color = if props.enabled {
             app_theme.content().text_primary()
         } else {

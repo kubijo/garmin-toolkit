@@ -103,6 +103,32 @@ impl Worker {
         self.send(Command::UpdatePreferences { user, preferences });
     }
 
+    pub fn set_garmin_connect_key(
+        &self,
+        user: UserContext,
+        key: Option<garmin_model::garmin_connect::PersonalApiKey>,
+    ) {
+        self.send(Command::GarminConnect {
+            user,
+            action: ConnectAction::Save(key),
+        });
+    }
+
+    pub fn connect_activity(
+        &self,
+        user: UserContext,
+        request: garmin_model::garmin_connect::ActivityRequest,
+    ) {
+        self.send(Command::ConnectActivity { user, request });
+    }
+
+    pub fn check_garmin_connect(&self, user: UserContext) {
+        self.send(Command::GarminConnect {
+            user,
+            action: ConnectAction::Test,
+        });
+    }
+
     pub fn update_accent(&self, user: UserContext, accent: Option<garmin_color::Color>) {
         self.send(Command::UpdateAccent { user, accent });
     }
@@ -166,7 +192,20 @@ impl Drop for Worker {
     }
 }
 
+enum ConnectAction {
+    Save(Option<garmin_model::garmin_connect::PersonalApiKey>),
+    Test,
+}
+
 enum Command {
+    ConnectActivity {
+        user: UserContext,
+        request: garmin_model::garmin_connect::ActivityRequest,
+    },
+    GarminConnect {
+        user: UserContext,
+        action: ConnectAction,
+    },
     Reload,
     CreateProfile(DisplayName),
     UpdatePreferences {
@@ -197,6 +236,21 @@ enum Command {
 }
 
 pub enum Event {
+    ConnectLoadProgress {
+        user: garmin_model::identity::UserId,
+        progress: garmin_model::garmin_connect::LoadProgress,
+    },
+    ConnectActivity {
+        user: garmin_model::identity::UserId,
+        result: Result<
+            garmin_service_api::ConnectActivityResult,
+            garmin_model::garmin_connect::ActivityFailure,
+        >,
+    },
+    GarminConnectChecked {
+        user: garmin_model::identity::UserId,
+        result: Result<Option<garmin_model::garmin_connect::AccountFacts>, String>,
+    },
     Unavailable(String),
     Reloaded(Result<Vec<ProfileData>, String>),
     ProfileCreated(Result<(garmin_model::identity::UserId, Vec<ProfileData>), String>),
@@ -223,6 +277,7 @@ pub enum Event {
 }
 
 pub struct ProfileData {
+    pub garmin_connect_configured: bool,
     pub user: User,
     pub activities: Vec<garmin_services::ActivityPreview>,
     pub avatar: Option<garmin_services::ProfileAvatar>,
@@ -392,6 +447,12 @@ fn execute_command(
                 return false;
             }
         }
+        Command::ConnectActivity { user, request } => {
+            return connect_activity(runtime, application, user, request, events, context, abort);
+        }
+        Command::GarminConnect { user, action } => {
+            return check_connect_key(runtime, application, user, action, events, context, abort);
+        }
         Command::UpdateAccent { user, accent } => {
             let result = block_on(application.update_profile_accent(user, accent))
                 .map_err(|error| error.to_string())
@@ -420,16 +481,14 @@ fn execute_command(
             let result = block_on(application.activity(user, observation_id))
                 .map(|details| details.map(Box::new))
                 .map_err(|error| error.to_string());
-            if !emit(
+            return emit(
                 events,
                 context,
                 Event::ActivityLoaded {
                     observation_id,
                     result,
                 },
-            ) {
-                return false;
-            }
+            );
         }
         Command::ImportAvatar {
             user,
@@ -732,6 +791,10 @@ async fn load_profiles(application: &Application) -> Result<Vec<ProfileData>, St
             .await
             .map_err(|error| error.to_string())?;
         profiles.push(ProfileData {
+            garmin_connect_configured: application
+                .garmin_connect_configured(context)
+                .await
+                .map_err(|error| error.to_string())?,
             user,
             activities,
             avatar,
@@ -1005,28 +1068,7 @@ fn device_fit_preview(
     file_name: String,
     bytes: &[u8],
 ) -> Result<garmin_service_api::DeviceFitPreview, String> {
-    let import = garmin_fit::normalize_activities(bytes).map_err(|error| error.to_string())?;
-    let activities = import
-        .normalized_activities()
-        .map(|activity| {
-            let source = activity
-                .creator()
-                .product_name()
-                .map_or_else(|| "FIT".to_owned(), ToString::to_string);
-            garmin_service_api::DeviceFitPreviewActivity {
-                source,
-                summary: activity.activity().summary(),
-                recording: garmin_service_api::ActivityRecordingSnapshot::from(activity.activity()),
-            }
-        })
-        .collect::<Vec<_>>();
-    if activities.is_empty() {
-        return Err("the FIT file does not contain an activity".to_owned());
-    }
-    Ok(garmin_service_api::DeviceFitPreview {
-        file_name,
-        activities,
-    })
+    garmin_services::devices::fit_preview::inspect(file_name, bytes)
 }
 
 fn timestamp(time: SystemTime) -> Result<Timestamp, String> {
@@ -1114,6 +1156,89 @@ struct EventSender {
     epoch: Uuid,
 }
 
+fn connect_activity(
+    runtime: &tokio::runtime::Runtime,
+    application: &Application,
+    user: UserContext,
+    request: garmin_model::garmin_connect::ActivityRequest,
+    events: &EventSender,
+    context: &egui::Context,
+    abort: &CancellationToken,
+) -> bool {
+    let result = runtime.block_on(async {
+        tokio::select! {
+            biased;
+            () = cancelled(abort) => None,
+            result = application.garmin_connect_activity_with_progress(user, request, |progress| {
+                let _ = emit(events, context, Event::ConnectLoadProgress { user: user.user_id(), progress });
+            }) => Some(result),
+        }
+    });
+    let Some(result) = result else {
+        return false;
+    };
+    let result = result.map_err(garmin_model::garmin_connect::ActivityFailure::from);
+    let imported = matches!(
+        &result,
+        Ok(garmin_service_api::ConnectActivityResult::State(
+            garmin_model::garmin_connect::ActivityResponse::Imported { .. }
+        ))
+    );
+    emit(
+        events,
+        context,
+        Event::ConnectActivity {
+            user: user.user_id(),
+            result,
+        },
+    ) && (!imported
+        || emit(
+            events,
+            context,
+            Event::Reloaded(block_on(load_profiles(application))),
+        ))
+}
+
+async fn cancelled(abort: &CancellationToken) {
+    while !abort.is_cancelled() {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+fn check_connect_key(
+    runtime: &tokio::runtime::Runtime,
+    application: &Application,
+    user: UserContext,
+    action: ConnectAction,
+    events: &EventSender,
+    context: &egui::Context,
+    abort: &CancellationToken,
+) -> bool {
+    let result = runtime.block_on(async {
+        tokio::select! {
+            biased;
+            () = cancelled(abort) => None,
+            result = async {
+                match action {
+                    ConnectAction::Save(key) => application.verify_and_save_garmin_connect_key(user, key).await,
+                    ConnectAction::Test => application.check_garmin_connect(user).await.map(Some),
+                }
+            } => Some(result),
+        }
+    });
+    let Some(result) = result else {
+        return false;
+    };
+    emit(
+        events,
+        context,
+        Event::GarminConnectChecked {
+            user: user.user_id(),
+            result: result.map_err(|error| error.to_string()),
+        },
+    )
+}
+
 fn emit(events: &EventSender, context: &egui::Context, event: Event) -> bool {
     if events.sender.send((events.epoch, event)).is_err() {
         return false;
@@ -1130,6 +1255,38 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[test]
+    fn cancelled_connect_command_stops_without_a_result() -> Result<(), Box<dyn Error>> {
+        let root = tempdir()?;
+        let application = Application::new(block_on(garmin_storage::Storage::open(
+            root.path().join("storage.sqlite3"),
+        ))?);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let abort = CancellationToken::default();
+        abort.cancel();
+        let (sender, received) = channel();
+        let events = EventSender {
+            sender,
+            epoch: Uuid::new_v4(),
+        };
+        // A nonexistent profile also prevents service contact if the cancellation guard regresses.
+        let user = UserContext::new(garmin_model::identity::UserId::new_v4());
+        assert!(!check_connect_key(
+            &runtime,
+            &application,
+            user,
+            ConnectAction::Test,
+            &events,
+            &egui::Context::default(),
+            &abort
+        ));
+        assert!(received.try_recv().is_err());
+        block_on(application.close());
+        Ok(())
+    }
 
     #[test]
     fn epoch_change_discards_queued_results_and_tags_new_commands() {
@@ -1228,8 +1385,8 @@ mod tests {
         let preview = device_fit_preview("activity.fit".to_owned(), &bytes)?;
 
         assert_eq!(preview.file_name, "activity.fit");
-        assert_eq!(preview.activities.len(), 1);
-        assert_ne!(preview.activities[0].source, "");
+        assert_eq!(preview.activities().len(), 1);
+        assert_ne!(preview.activities()[0].source, "");
         Ok(())
     }
 

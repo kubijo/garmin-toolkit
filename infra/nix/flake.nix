@@ -15,7 +15,12 @@
   ...
 }:
 let
-  inherit (builtins) attrNames filter;
+  inherit (builtins)
+    attrNames
+    filter
+    fromTOML
+    readFile
+    ;
 
   systems =
     flake-utils.lib.eachSystem
@@ -104,7 +109,6 @@ let
             "rustc"
             "rust-std"
           ];
-          coverageMinimum = 65;
           pythonToolsEnv = import ./python-tools.nix {
             inherit
               nixpkgs
@@ -113,6 +117,17 @@ let
               pyproject-nix
               uv2nix
               ;
+          };
+          datapackagePythonEnv = import ./python-tools.nix {
+            inherit
+              nixpkgs
+              pkgs
+              pyproject-build-systems
+              pyproject-nix
+              uv2nix
+              ;
+            workspaceRoot = ../../crates/datapackage/compat;
+            environmentName = "datapackage-conformance-env";
           };
           build = import ./packages.nix {
             inherit
@@ -157,6 +172,46 @@ let
             inherit sharedCargoTargetDir;
             inherit workspaceSrc;
           };
+          desktopVm = import ./desktop-vm.nix {
+            inherit
+              lib
+              pkgs
+              pythonToolsEnv
+              workspaceSrc
+              ;
+          };
+          desktopReleaseSource = lib.fileset.toSource {
+            root = workspaceSrc;
+            fileset = lib.fileset.unions (
+              [ (workspaceSrc + "/infra/release/hass-sources.dirspec.toml") ]
+              ++ map (name: workspaceSrc + "/infra/python/${name}.py") [
+                "desktop_release"
+                "desktop_sources"
+                "archive_io"
+                "haos_platform"
+                "hass_image_inventory"
+                "hass_release_contract"
+                "hass_source_parts"
+                "hass_sources"
+                "github_releases"
+                "json_data"
+              ]
+            );
+          };
+          desktopRelease = pkgs.writeShellApplication {
+            name = "garmin-desktop-release";
+            runtimeInputs = [
+              pkgs.git
+              pkgs.gh
+              pkgs.nix
+              pkgs.zsync
+              pkgs.squashfsTools
+              dirspec
+            ];
+            text = ''
+              exec ${pythonToolsEnv}/bin/python ${desktopReleaseSource}/infra/python/desktop_release.py "$@"
+            '';
+          };
           galleryTarget = gallery.lib.mkTool {
             inherit
               dirspec
@@ -181,6 +236,35 @@ let
             inherit sharedCargoTargetDir;
             inherit workspaceSrc;
           };
+          mkHassDev =
+            arch: targetSystem: rustTarget:
+            let
+              target = hass.lib.mkTarget {
+                inherit
+                  brandAssets
+                  dirspec
+                  formatjsCli
+                  sharedCargoTargetDir
+                  nodejs
+                  system
+                  wasmToolchain
+                  workspaceSrc
+                  targetSystem
+                  ;
+                sourceRevision = self.rev or self.dirtyRev or "unreleased";
+                toolchain = fenix.packages.${system}.combine [
+                  toolchain
+                  fenix.packages.${system}.targets.${rustTarget}.stable.rust-std
+                ];
+              };
+            in
+            import ./hass-dev.nix {
+              inherit pkgs arch;
+              inherit (target) package;
+              version = "${(fromTOML (readFile ../../Cargo.toml)).workspace.package.version}-dev";
+              sourceRevision = self.rev or self.dirtyRev or "unreleased";
+              configFile = ../../apps/garmin-hass/addon/config.yaml;
+            };
           mkHassIntegration =
             options:
             import ../integration/hass (
@@ -216,7 +300,7 @@ let
           };
           expandedQuality = import ./rust-checks.nix {
             inherit
-              coverageMinimum
+              datapackagePythonEnv
               formatjsCli
               hostSccacheHook
               inheritanceCheck
@@ -250,14 +334,22 @@ let
             default = build.garminCli;
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            desktop-appimage = desktopTarget.distribution.appImage;
+            desktop-release-assets = desktopTarget.distribution.releaseAssets;
             garmin-hass-app-image = hassTarget.appImage;
+            garmin-hass-dev-amd64 = mkHassDev "amd64" "x86_64-linux" "x86_64-unknown-linux-gnu";
+            garmin-hass-dev-aarch64 = mkHassDev "aarch64" "aarch64-linux" "aarch64-unknown-linux-gnu";
             garmin-hass-app-sbom = releaseAutomation.sbom;
             garmin-hass-app-repository = releaseAutomation.repository;
             garmin-hass-arm64-test-repository = releaseAutomation.arm64TestRepository;
             hass-reconnect-driver = hassReconnect.driver;
           };
 
-          legacyPackages.hass-source-metadata = hassTarget.sourceMetadata;
+          legacyPackages = {
+            hass-source-metadata = hassTarget.sourceMetadata;
+            desktop-source-metadata = desktopTarget.distribution.sourceMetadata ++ hassTarget.sourceMetadata;
+            desktop-source-components = desktopTarget.distribution.sourceComponents;
+          };
 
           apps =
             tooling.apps
@@ -279,6 +371,10 @@ let
               hass-ci = flake-utils.lib.mkApp { drv = releaseAutomation.ci; };
               hass-recovery = flake-utils.lib.mkApp { drv = releaseAutomation.recovery; };
               default = self.apps.${system}.garmin-cli;
+              desktop-vm-test = flake-utils.lib.mkApp {
+                drv = desktopVm.app;
+              };
+              desktop-release = flake-utils.lib.mkApp { drv = desktopRelease; };
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               desktop-appimage = {
@@ -301,16 +397,23 @@ let
 
           checks =
             tooling.checks
+            // {
+              desktop-vm-startup = desktopVm.startupCheck;
+              garmin-connect = import ./garmin-connect.nix { inherit pkgs toolchain; };
+            }
             // build.checks
             // (removeAttrs expandedQuality.checks [ "rust-coverage" ])
             // {
               desktop = desktopTarget.check;
+              desktop-launcher-install = desktopTarget.launcherInstallCheck;
               gallery = galleryTarget.check;
               hass = hassTarget.check;
               license-bundles = licenseAutomation.check;
               hass-app-repository = releaseAutomation.repository;
             }
             // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              desktop-update-metadata = desktopTarget.distribution.updateMetadataCheck;
+              desktop-source-metadata = desktopTarget.distribution.sourceMetadataCheck;
               hass-integration = hassIntegration;
             };
           legacyPackages.ci =

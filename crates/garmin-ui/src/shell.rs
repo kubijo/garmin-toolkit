@@ -22,7 +22,6 @@ const NAV_ICON_CENTER_INSET: f32 = RAIL_WIDTH / 2.0;
 const NAV_ITEM_START_PADDING: f32 = 16.0;
 const CONTENT_PADDING: f32 = 24.0;
 const PROFILE_MENU_WIDTH: f32 = 280.0;
-const PROFILE_CONTROL_GAP: f32 = 8.0;
 const COMPACT_HEADER_WIDTH: f32 = 600.0;
 const OVERLAY_NAV_WIDTH: f32 = 280.0;
 const NAV_GROUP_HEIGHT: f32 = 32.0;
@@ -336,18 +335,17 @@ fn show_with_padding<R>(
     );
     let inner = page(&mut page_ui);
 
+    paint_border(ui, content);
     if overlay_navigation {
         let overlay_action = navigation_overlay(ui, root, navigation, props);
         if overlay_action.is_some() {
             action = overlay_action;
         }
-    } else if nav_width > 0.0 {
-        paint_navigation_divider(ui, navigation);
     }
     if let Some(profile_action) = profile_menu(ui, selectors.profile, shell_clip, props) {
         action = Some(Action::Profile(profile_action));
     }
-    paint_window_border(ui, root);
+    paint_border(ui, root);
     Output { action, inner }
 }
 
@@ -359,12 +357,19 @@ fn navigation_overlay(ui: &Ui, root: Rect, navigation: Rect, props: &Props<'_>) 
         .movable(false)
         .fixed_pos(overlay.min)
         .show(ui.ctx(), |area_ui| {
+            area_ui.set_style(ui.style().clone());
             area_ui.set_min_size(overlay.size());
+            let background = area_ui
+                .painter()
+                .with_clip_rect(overlay.intersect(ui.clip_rect()));
             let mut overlay_ui = area_ui.new_child(
                 UiBuilder::new()
                     .max_rect(overlay)
                     .ui_stack_info(crate::theme::profile_accent_info(accent)),
             );
+            if !ui.is_enabled() {
+                overlay_ui.disable();
+            }
             overlay_ui.set_clip_rect(overlay.intersect(ui.clip_rect()));
             let area_ui = &overlay_ui;
             let outside = Rect::from_min_max(
@@ -376,10 +381,8 @@ fn navigation_overlay(ui: &Ui, root: Rect, navigation: Rect, props: &Props<'_>) 
                 area_ui.make_persistent_id("shell-navigation-dismiss"),
                 Sense::click_and_drag(),
             );
-            area_ui
-                .painter()
-                .rect_filled(outside, 0.0, egui::Color32::from_black_alpha(120));
-            area_ui.painter().rect_filled(
+            background.rect_filled(outside, 0.0, egui::Color32::from_black_alpha(120));
+            background.rect_filled(
                 navigation,
                 0.0,
                 color32(crate::theme::palette(ui).surfaces().chrome()),
@@ -424,7 +427,7 @@ fn paint_navigation_divider(ui: &Ui, navigation: Rect) {
     );
 }
 
-fn paint_window_border(ui: &Ui, root: Rect) {
+fn paint_border(ui: &Ui, root: Rect) {
     ui.painter().rect_stroke(
         root,
         0.0,
@@ -505,8 +508,7 @@ fn header_contents(
 
 fn header_selectors(ui: &Ui, header: Rect, props: &Props<'_>) -> HeaderSelectors {
     let controls_width = props.window_controls.map_or(0.0, |_| WINDOW_CONTROLS_WIDTH);
-    let controls_left = header.right() - controls_width;
-    let profile_right = controls_left - props.profile_selector.map_or(0.0, |_| PROFILE_CONTROL_GAP);
+    let profile_right = header.right() - controls_width;
     let preferred_profile_width = preferred_profile_width(ui, header.width(), props);
     let profile_width = if props.profile_selector.is_some() {
         preferred_profile_width.min((profile_right - header.left()).max(0.0))
@@ -713,10 +715,16 @@ fn profile_menu(
     }
     let geometry =
         crate::header_selector::menu_geometry(selector_rect, PROFILE_MENU_WIDTH, shell_clip.left());
+    let style = ui.style().clone();
+    let enabled = ui.is_enabled();
     egui::Area::new(ui.make_persistent_id("shell-profile-menu"))
         .order(Order::Foreground)
         .fixed_pos(geometry.position)
         .show(ui.ctx(), |ui| {
+            ui.set_style(style);
+            if !enabled {
+                ui.disable();
+            }
             ui.set_clip_rect(shell_clip);
             ui.set_width(geometry.width);
             profile::menu(
@@ -809,24 +817,22 @@ fn paint_destination(
     response: &Response,
 ) {
     let theme = crate::theme::palette(ui);
+    let level = if response.highlighted() {
+        theme::Level::Two
+    } else {
+        theme::Level::One
+    };
+    let surface = theme.surfaces().layer_hover(level);
+    let accent = crate::theme::selection_accent_on(ui, surface);
     if response.highlighted() || active {
-        let level = if response.highlighted() {
-            theme::Level::Two
-        } else {
-            theme::Level::One
-        };
-        ui.painter().rect_filled(
-            rect,
-            CONTROL_RADIUS,
-            theme.surfaces().layer_hover(level).into_cint(),
-        );
+        ui.painter()
+            .rect_filled(rect, CONTROL_RADIUS, surface.into_cint());
     }
     if active {
         ui.painter().rect_filled(
             Rect::from_min_size(rect.min, egui::vec2(ACTIVE_MARKER_WIDTH, rect.height())),
             egui::CornerRadius::ZERO,
-            crate::theme::selection_accent_on(ui, theme.surfaces().layer_hover(theme::Level::One))
-                .into_cint(),
+            accent.into_cint(),
         );
     }
 
@@ -841,7 +847,7 @@ fn paint_destination(
         icon: destination.icon,
         size: ICON_SIZE,
         color: if active {
-            theme.content().icon_primary()
+            accent
         } else {
             theme.content().icon_secondary()
         },
@@ -902,6 +908,154 @@ fn paint_focus_ring(ui: &Ui, response: &Response) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_navigation_keeps_an_opaque_background() {
+        for dark in [false, true] {
+            let context = egui::Context::default();
+            crate::install(&context);
+            let root = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 600.0));
+            let navigation =
+                Rect::from_min_max(egui::pos2(0.0, HEADER_HEIGHT), egui::pos2(280.0, 600.0));
+            let palette = if dark {
+                &theme::GRAY_100
+            } else {
+                &theme::GRAY_10
+            };
+            let expected = color32(palette.surfaces().chrome());
+            for frame in 0..3 {
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(root),
+                        time: Some(f64::from(frame)),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        *ui.visuals_mut() = if dark {
+                            egui::Visuals::dark()
+                        } else {
+                            egui::Visuals::light()
+                        };
+                        ui.disable();
+                        let _ = navigation_overlay(
+                            ui,
+                            root,
+                            navigation,
+                            &Props {
+                                product_name: "Toolkit",
+                                navigation_groups: &[],
+                                active: None,
+                                navigation: Navigation::Expanded,
+                                profile_selector: None,
+                                toggle_label: "Toggle navigation",
+                                profile_label: "Profiles",
+                                window_controls: None,
+                            },
+                        );
+                    },
+                );
+                if frame == 2 {
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Rect(rect) if rect.rect == navigation && rect.fill == expected
+                    )), "disabled navigation lost its opaque background, dark={dark}");
+                }
+                output.drop_without_applying_deltas();
+            }
+        }
+    }
+
+    #[test]
+    fn detached_navigation_and_profile_menu_use_the_callers_theme() {
+        let translations = garmin_i18n::Translations::bundled().unwrap();
+        let intl = translations
+            .formatter(garmin_i18n::Language::English)
+            .unwrap();
+        let profiles = [profile::ProfileProps {
+            display_name: "Test profile",
+            accent: garmin_color::swatch::cyan::G40,
+            avatar: None,
+        }];
+        let selector = profile::SelectorProps {
+            intl: &intl,
+            profiles: &profiles,
+            selected: Some(0),
+            expanded: true,
+            backup_enabled: true,
+        };
+        let groups = [NavigationGroup {
+            label: None,
+            destinations: &[Destination {
+                label: "Destination",
+                icon: icons::HOUSE,
+            }],
+        }];
+        for dark in [false, true] {
+            let context = egui::Context::default();
+            crate::install(&context);
+            context.set_visuals(if dark {
+                egui::Visuals::light()
+            } else {
+                egui::Visuals::dark()
+            });
+            for frame in 0..4 {
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(320.0, 600.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        *ui.visuals_mut() = if dark {
+                            egui::Visuals::dark()
+                        } else {
+                            egui::Visuals::light()
+                        };
+                        let _ = show(
+                            ui,
+                            &Props {
+                                product_name: "Toolkit",
+                                navigation_groups: &groups,
+                                active: Some(0),
+                                navigation: Navigation::Expanded,
+                                profile_selector: Some(&selector),
+                                toggle_label: "Toggle navigation",
+                                profile_label: "Profiles",
+                                window_controls: None,
+                            },
+                            |_| {},
+                        );
+                    },
+                );
+                if frame == 3 {
+                    let palette = if dark {
+                        &theme::GRAY_100
+                    } else {
+                        &theme::GRAY_10
+                    };
+                    let expected = color32(palette.content().text_primary());
+                    for label in ["Destination", "Profile settings"] {
+                        let text = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Text(text) if text.galley.text() == label => {
+                                    Some(text)
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or_else(|| panic!("missing detached label {label}"));
+                        let color = text
+                            .override_text_color
+                            .unwrap_or(text.galley.job.sections[0].format.color);
+                        assert_eq!(color, expected, "{label} lost caller theme, dark={dark}");
+                    }
+                }
+                output.drop_without_applying_deltas();
+            }
+        }
+    }
 
     #[test]
     fn window_menu_uses_only_secondary_press_inside_title() {

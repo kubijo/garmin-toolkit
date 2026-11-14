@@ -16,6 +16,219 @@ use tempfile::tempdir;
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
 #[test]
+fn preserves_accepted_developer_fields_with_and_without_metadata() -> TestResult {
+    block_on(async {
+        let root = tempdir()?;
+        let storage = Storage::open(root.path().join("developer.sqlite3")).await?;
+        let (user, device, source) = owner_and_source()?;
+        storage.save_user(&user).await?;
+        storage.save_device(&device).await?;
+        storage.save_source(&source).await?;
+        let importer = FitImporter::new(&storage);
+        for header in [
+            fixture::integrity::Header::Legacy,
+            fixture::integrity::Header::Checksummed,
+        ] {
+            for metadata in fixture::developer::Metadata::ALL {
+                let bytes = fixture::developer::activity(header, metadata);
+                let operation = AcquisitionOperationId::new_v4();
+                let first = importer
+                    .import(request(&user, &source, operation, &bytes)?)
+                    .await?;
+                let second = importer
+                    .import(request(&user, &source, operation, &bytes)?)
+                    .await?;
+                assert_eq!(first, second, "{header:?}: {metadata:?}");
+                let FitImportOutcome::Imported(receipt) = first else {
+                    return Err(format!("{header:?}: {metadata:?} unexpectedly rejected").into());
+                };
+                assert_eq!(receipt.observation_ids().len(), 1);
+                assert_eq!(
+                    storage.artifact_bytes(receipt.artifact_id()).await?,
+                    Some(bytes)
+                );
+            }
+        }
+        assert_eq!(storage.activities(user.id()).await?.len(), 8);
+        storage.close().await;
+        Ok(())
+    })
+}
+
+#[test]
+fn preserves_non_activity_rejections_and_rejects_chains_atomically() -> TestResult {
+    block_on(async {
+        let root = tempdir()?;
+        let storage = Storage::open(root.path().join("health.sqlite3")).await?;
+        let (user, device, source) = owner_and_source()?;
+        storage.save_user(&user).await?;
+        storage.save_device(&device).await?;
+        storage.save_source(&source).await?;
+        let importer = FitImporter::new(&storage);
+        for header in [
+            fixture::integrity::Header::Legacy,
+            fixture::integrity::Header::Checksummed,
+        ] {
+            let mut cases = fixture::health::Health::ALL
+                .map(|health| (format!("{health:?}"), health.bytes(header)))
+                .to_vec();
+            cases.push(("workout".to_owned(), fixture::workout::bytes(header)));
+            for (name, bytes) in cases {
+                let case = format!("{header:?}: {name}");
+                rejected_original(&importer, &storage, &user, &source, &bytes, &case).await?;
+                let activity = fixture::integrity::activity(header);
+                for chain in [
+                    [activity.as_slice(), bytes.as_slice()].concat(),
+                    [bytes.as_slice(), activity.as_slice()].concat(),
+                ] {
+                    rejected_original(&importer, &storage, &user, &source, &chain, &case).await?;
+                    assert_eq!(storage.activities(user.id()).await?, Vec::new());
+                }
+            }
+        }
+        storage.close().await;
+        Ok(())
+    })
+}
+
+#[test]
+fn preserves_multisession_rejections_without_partial_activities() -> TestResult {
+    block_on(async {
+        let root = tempdir()?;
+        let storage = Storage::open(root.path().join("multisession.sqlite3")).await?;
+        let (user, device, source) = owner_and_source()?;
+        storage.save_user(&user).await?;
+        storage.save_device(&device).await?;
+        storage.save_source(&source).await?;
+        let importer = FitImporter::new(&storage);
+        for header in [
+            fixture::integrity::Header::Legacy,
+            fixture::integrity::Header::Checksummed,
+        ] {
+            let bytes = fixture::integrity::multisession(header);
+            rejected_original(&importer, &storage, &user, &source, &bytes, "multisession").await?;
+            let mut chain = fixture::integrity::activity(header);
+            chain.extend(bytes);
+            rejected_original(
+                &importer,
+                &storage,
+                &user,
+                &source,
+                &chain,
+                "multisession tail",
+            )
+            .await?;
+            assert_eq!(storage.activities(user.id()).await?, Vec::new());
+        }
+        storage.close().await;
+        Ok(())
+    })
+}
+
+#[test]
+fn preserves_every_independent_integrity_failure_without_partial_projections() -> TestResult {
+    block_on(async {
+        use fixture::integrity;
+        use fixture::integrity::Header;
+
+        let root = tempdir()?;
+        let storage = Storage::open(root.path().join("integrity.sqlite3")).await?;
+        let (user, device, source) = owner_and_source()?;
+        storage.save_user(&user).await?;
+        storage.save_device(&device).await?;
+        storage.save_source(&source).await?;
+        let importer = FitImporter::new(&storage);
+        let valid = integrity::activity(Header::Legacy);
+        let control = importer
+            .import(request(
+                &user,
+                &source,
+                AcquisitionOperationId::new_v4(),
+                &valid,
+            )?)
+            .await?;
+        assert!(matches!(control, FitImportOutcome::Imported(_)));
+        assert_eq!(
+            storage
+                .artifact_bytes(control.receipt().artifact_id())
+                .await?,
+            Some(valid.clone())
+        );
+        let before = storage.activities(user.id()).await?;
+        assert_eq!(before.len(), 1);
+
+        for header in Header::ALL {
+            for (name, bytes) in integrity::corruptions(header) {
+                rejected_original(
+                    &importer,
+                    &storage,
+                    &user,
+                    &source,
+                    &bytes,
+                    &format!("{header:?}: {name}"),
+                )
+                .await?;
+            }
+        }
+        // This valid protocol form is currently rejected by rustyfit; preserve it too.
+        rejected_original(
+            &importer,
+            &storage,
+            &user,
+            &source,
+            &integrity::activity(Header::ZeroCrc),
+            "valid zero-header CRC",
+        )
+        .await?;
+        let mut chained = valid;
+        let mut tail = integrity::activity(Header::Checksummed);
+        *tail.last_mut().ok_or("missing synthetic file CRC")? ^= 1;
+        chained.extend(tail);
+        rejected_original(
+            &importer,
+            &storage,
+            &user,
+            &source,
+            &chained,
+            "valid first sequence, corrupt second sequence",
+        )
+        .await?;
+        assert_eq!(storage.activities(user.id()).await?, before);
+        storage.close().await;
+        Ok(())
+    })
+}
+
+async fn rejected_original(
+    importer: &FitImporter<'_>,
+    storage: &Storage,
+    user: &User,
+    source: &Source,
+    bytes: &[u8],
+    case: &str,
+) -> TestResult {
+    let operation = AcquisitionOperationId::new_v4();
+    let first = importer
+        .import(request(user, source, operation, bytes)?)
+        .await?;
+    let second = importer
+        .import(request(user, source, operation, bytes)?)
+        .await?;
+    assert_eq!(first, second, "{case}");
+    let FitImportOutcome::Rejected { receipt, failure } = first else {
+        return Err(format!("{case} unexpectedly normalized").into());
+    };
+    assert!(!failure.as_str().is_empty(), "{case}");
+    assert!(receipt.observation_ids().is_empty(), "{case}");
+    assert_eq!(
+        storage.artifact_bytes(receipt.artifact_id()).await?,
+        Some(bytes.to_vec()),
+        "{case}"
+    );
+    Ok(())
+}
+
+#[test]
 fn imports_chained_activities_and_retries_with_stable_ids() -> TestResult {
     block_on(async {
         let root = tempdir()?;

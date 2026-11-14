@@ -1,0 +1,1 @@
+DELETE FROM garmin_connect_credentials;

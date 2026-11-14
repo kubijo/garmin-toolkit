@@ -11,7 +11,7 @@ use garmin_ui::{device, device_browser, profile, shell, workspace};
 scene_meta! { title: "Components / File browser" }
 
 thread_local! {
-    static BROWSERS: crate::SceneState<device_browser::Browser, 7> = const { crate::SceneState::empty() };
+    static BROWSERS: crate::SceneState<device_browser::Browser, 8> = const { crate::SceneState::empty() };
     static SELECTED_BROWSERS: crate::SceneState<(device_browser::Browser, u8), 3> = const { crate::SceneState::empty() };
     static CONTEXT_BROWSERS: crate::SceneState<(device_browser::Browser, bool), 2> = const { crate::SceneState::empty() };
 }
@@ -26,6 +26,7 @@ enum BrowserSlot {
     Window,
     NarrowWindow,
     MultiSelected,
+    PluralActivities,
 }
 
 #[derive(Clone, Copy)]
@@ -47,8 +48,20 @@ const INITIAL_DIRECTORY: &str = "Garmin/Activity/History";
 
 #[scene(default)]
 fn populated(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    let catalog_error = ctx.toggle("catalog_error", false);
+    let fit_error = ctx.toggle("fit_error", false);
     stage!(ctx, ui, globals.stage((960.0, 640.0)), |ui| {
         let intl = globals.intl();
+        device_browser::show_catalog_error(
+            ui,
+            &intl,
+            catalog_error.then_some("The synthetic device is busy. Refresh to retry."),
+        );
+        device_browser::show_fit_error(
+            ui,
+            &intl,
+            fit_error.then_some("The synthetic FIT course cannot be opened as an activity."),
+        );
         BROWSERS.with_scene(
             BrowserSlot::Default as usize,
             || {
@@ -66,6 +79,43 @@ fn populated(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             },
         );
     },);
+}
+
+#[scene]
+fn plural_activities(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage((960.0, 640.0)), |ui| {
+        let intl = globals.intl();
+        BROWSERS.with_scene(
+            BrowserSlot::PluralActivities as usize,
+            || {
+                let mut value = catalog();
+                for storage in &mut value.storages {
+                    for entry in &mut storage.entries {
+                        if let Ok(suffix) = entry.path.strip_prefix("Garmin/Activity") {
+                            let mut path = entry.path.clone();
+                            path.clear();
+                            path.push("Garmin/Activities");
+                            if !suffix.as_str().is_empty() {
+                                path.push(suffix);
+                            }
+                            entry.path = path;
+                        }
+                    }
+                }
+                device_browser::Browser::open_directory(
+                    value,
+                    &intl,
+                    "Mock Watch-o-Matic 9000",
+                    "mock-internal",
+                    "Garmin/Activities/History",
+                )
+                .expect("the synthetic plural activity directory exists")
+            },
+            |browser| {
+                let _ = browser.show(ui, &intl);
+            },
+        );
+    });
 }
 
 #[scene]
@@ -133,6 +183,7 @@ fn show_window_scene(
                 navigation: shell::Navigation::Expanded,
                 devices: &devices,
                 backup_enabled: false,
+                garmin_connect_configured: false,
                 window_controls: None,
             },
             |ui| {

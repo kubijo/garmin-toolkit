@@ -69,6 +69,27 @@ pub fn body(ui: &mut Ui, text: &str) -> Response {
     .inner
 }
 
+/// Compact supporting copy with secondary color and balanced wrapping (12 px / 16 px).
+pub fn helper(ui: &mut Ui, text: &str) -> Response {
+    ui.scope(|ui| {
+        ui.style_mut()
+            .text_styles
+            .insert(TextStyle::Small, font(12.0, Weight::Regular));
+        let text = crate::text::balanced(ui, text, &TextStyle::Small, false);
+        let color = crate::theme::color32(crate::theme::palette(ui).content().text_secondary());
+        ui.add(
+            egui::Label::new(
+                RichText::new(text.as_ref())
+                    .font(font(12.0, Weight::Regular))
+                    .line_height(Some(16.0))
+                    .color(color),
+            )
+            .wrap(),
+        )
+    })
+    .inner
+}
+
 pub(crate) fn install(ctx: &egui::Context) {
     ctx.set_fonts(definitions());
 }

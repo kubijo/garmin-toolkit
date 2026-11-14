@@ -224,7 +224,7 @@ def capture(args: Options) -> int:
         if args.target not in ('ui', 'desktop'):
             raise ValueError('compiler profiling supports the ui and desktop libraries')
         if 'nightly' not in compiler_version or not all(shutil.which(tool) for tool in ('summarize', 'crox')):
-            raise ValueError('use just dev::compiler-profile for the pinned nightly and measureme tools')
+            raise ValueError('use just dev::profile::compiler for the pinned nightly and measureme tools')
         if args.target_dir is not None:
             raise ValueError('compiler profiles use their isolated nightly target directory')
     BASE.mkdir(parents=True, exist_ok=True)

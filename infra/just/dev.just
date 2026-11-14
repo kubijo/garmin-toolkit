@@ -1,48 +1,50 @@
 import 'common.just'
 
-cache_tool := repository_root / "infra/just/build-cache.sh"
+# Focused repository and platform checks.
+mod checks 'dev-checks.just'
 
-# Report repository build caches and read-only external cache totals.
-cache-report:
-    @bash {{ quote(cache_tool) }} report
+# Build-cache inspection and cleanup.
+mod cache 'dev-cache.just'
 
-# Clean one named target cache; preview unless MODE is explicitly apply.
-cache-clean CACHE MODE='dry-run':
-    @bash {{ quote(cache_tool) }} clean {{ quote(CACHE) }} {{ quote(MODE) }}
+# Build and compiler profiling.
+mod profile 'dev-profile.just'
+
+# Coverage collection and ownership reports.
+mod coverage 'dev-coverage.just'
+
+# Dependency reports and updates.
+mod deps 'dev-deps.just'
+
+# Translation checks and catalog synchronization.
+mod i18n 'dev-i18n.just'
+
+# License-bundle checks and generation.
+mod licenses 'dev-licenses.just'
+
+# SQLx offline metadata checks and preparation.
+mod sqlx 'dev-sqlx.just'
 
 # Enter the pinned development shell.
 shell:
     just in-shell nix develop {{ flake }}
 
-# Trace a development build without starting an application.
-build-profile target label *options:
-    @just in-shell nix develop {{ flake }} --command uv run --frozen --project infra/python python infra/python/build_profile.py "$@"
+# Format every maintained source type.
+format:
+    just in-shell nix run {{ flake }}#format
 
-# Profile the UI or desktop library's compiler internals in an isolated nightly cache.
-compiler-profile target label *options:
-    @just in-shell nix develop {{ flake }}\#compiler-profile --command uv run --frozen --project infra/python python infra/python/build_profile.py "$@" --compiler-profile
+# Fail fast on formatting and repository policy without compiling the workspace.
+preflight:
+    just in-shell nix run {{ flake }}#validate
+
+# Run the complete local release gate, cheap checks first.
+verify:
+    just in-shell nix run {{ flake }}#validate
+    just in-shell nix run {{ flake }}#project-lint
+
+# Run the complete Rust test suite.
+test:
+    just in-shell nix run {{ flake }}#test
 
 # Build API documentation with warnings denied.
 docs *args:
     @just in-shell nix run {{ flake }}#docs -- "$@"
-
-# Report outdated Nix inputs, Python dependencies, and CI actions.
-outdated *args:
-    @just in-shell nix run {{ flake }}#outdated -- "$@"
-
-# Update dependencies through cargo & nix flake
-update:
-    cargo update
-    nix flake update
-
-# Update the Czech catalog from source messages.
-i18n-sync:
-    just in-shell nix run {{ flake }}#i18n-sync
-
-# Regenerate committed dependency and asset license bundles.
-licenses *args:
-    @just in-shell nix run {{ flake }}#licenses -- "$@"
-
-# Regenerate SQLx's checked-in offline query metadata.
-sqlx-prepare:
-    just in-shell nix run {{ flake }}#sqlx-prepare

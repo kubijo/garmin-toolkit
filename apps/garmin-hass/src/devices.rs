@@ -11,8 +11,8 @@ use garmin_service_api::{
     ActivityDetailSnapshot, ActivitySnapshot, ApplicationService, AvatarUpload,
     DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogEntry,
     DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceCatalogStorage, DeviceFitImportOutcome,
-    DeviceFitImportPlan, DeviceFitImportStatus, DeviceFitPreview, DeviceFitPreviewActivity,
-    DeviceSnapshot, DownloadTicket, ProfileAvatarSnapshot, ProfileSnapshot,
+    DeviceFitImportPlan, DeviceFitImportStatus, DeviceFitPreview, DeviceSnapshot, DownloadTicket,
+    ProfileAvatarSnapshot, ProfileSnapshot,
 };
 use garmin_services::{
     Application, AvatarImportRequest, FitImportRequest, FitImportResult, ImportDisposition,
@@ -795,7 +795,9 @@ impl ApplicationService for Host {
             })
         }
         .await;
-        if let Ok(plan) = &result {
+        if let Ok(plan) = &result
+            && plan.preview.supports_activity_import()
+        {
             self.fit_plans
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -946,6 +948,60 @@ impl ApplicationService for Host {
             .update_profile_preferences(UserContext::new(user_id), preferences)
             .await
             .map_err(|error| error.to_string()))
+    }
+
+    async fn set_garmin_connect_key(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        key: Option<garmin_model::garmin_connect::PersonalApiKey>,
+    ) -> Result<Result<Option<garmin_model::garmin_connect::AccountFacts>, String>, rtc::CallError>
+    {
+        Ok(self
+            .application()
+            .await?
+            .verify_and_save_garmin_connect_key(UserContext::new(user_id), key)
+            .await
+            .map_err(|error| error.to_string()))
+    }
+
+    async fn check_garmin_connect(
+        &self,
+        user_id: garmin_model::identity::UserId,
+    ) -> Result<Result<garmin_model::garmin_connect::AccountFacts, String>, rtc::CallError> {
+        Ok(self
+            .application()
+            .await?
+            .check_garmin_connect(UserContext::new(user_id))
+            .await
+            .map_err(|error| error.to_string()))
+    }
+
+    async fn garmin_connect_activity(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        request: garmin_model::garmin_connect::ActivityRequest,
+        progress: Option<rch::watch::Sender<garmin_model::garmin_connect::LoadProgress>>,
+    ) -> Result<
+        Result<
+            garmin_service_api::ConnectActivityResult,
+            garmin_model::garmin_connect::ActivityFailure,
+        >,
+        rtc::CallError,
+    > {
+        Ok(self
+            .application()
+            .await?
+            .garmin_connect_activity_with_progress(
+                UserContext::new(user_id),
+                request,
+                move |update| {
+                    if let Some(progress) = &progress {
+                        progress.send_replace(update);
+                    }
+                },
+            )
+            .await
+            .map_err(garmin_model::garmin_connect::ActivityFailure::from))
     }
 
     async fn update_accent(
@@ -1104,6 +1160,10 @@ async fn profile_snapshots(application: &Application) -> Result<Vec<ProfileSnaps
             .await
             .map_err(|error| error.to_string())?;
         profiles.push(ProfileSnapshot {
+            garmin_connect_configured: application
+                .garmin_connect_configured(context)
+                .await
+                .map_err(|error| error.to_string())?,
             avatar: avatar.map(|avatar| ProfileAvatarSnapshot {
                 key: avatar.artifact_id().to_string(),
                 thumbnail: avatar.into_thumbnail(),
@@ -1119,10 +1179,7 @@ fn activity_snapshot(activity: &garmin_services::ActivityPreview) -> ActivitySna
     let summary = activity.summary();
     ActivitySnapshot {
         id: activity.observation_id(),
-        source: activity
-            .creator()
-            .product_name()
-            .map_or_else(|| "FIT".to_owned(), ToString::to_string),
+        source: activity.source().to_owned(),
         summary,
     }
 }
@@ -1130,9 +1187,7 @@ fn activity_snapshot(activity: &garmin_services::ActivityPreview) -> ActivitySna
 fn activity_detail_snapshot(details: &garmin_services::ActivityDetails) -> ActivityDetailSnapshot {
     ActivityDetailSnapshot {
         id: details.observation_id(),
-        recording: garmin_service_api::ActivityRecordingSnapshot::from(
-            details.normalized().activity(),
-        ),
+        recording: garmin_service_api::ActivityRecordingSnapshot::from(details.activity()),
     }
 }
 
@@ -1285,25 +1340,7 @@ async fn receive_browser_upload(
 }
 
 fn device_fit_preview(file_name: String, bytes: &[u8]) -> Result<DeviceFitPreview, String> {
-    let import = garmin_fit::normalize_activities(bytes).map_err(|error| error.to_string())?;
-    let activities = import
-        .normalized_activities()
-        .map(|activity| DeviceFitPreviewActivity {
-            source: activity
-                .creator()
-                .product_name()
-                .map_or_else(|| "FIT".to_owned(), ToString::to_string),
-            summary: activity.activity().summary(),
-            recording: garmin_service_api::ActivityRecordingSnapshot::from(activity.activity()),
-        })
-        .collect::<Vec<_>>();
-    if activities.is_empty() {
-        return Err("the FIT file does not contain an activity".to_owned());
-    }
-    Ok(DeviceFitPreview {
-        file_name,
-        activities,
-    })
+    garmin_services::devices::fit_preview::inspect(file_name, bytes)
 }
 
 fn device_fit_identity(
@@ -2075,6 +2112,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn device_fit_course_preview_does_not_authorize_activity_import()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let storage = crate::prepare_deployment(directory.path()).await?;
+        let host = Host::new(
+            Box::new(FitSource {
+                bytes: Arc::new(Mutex::new(fixture::course()?)),
+            }),
+            storage,
+        );
+        let user = host.create_profile("Mock Rider".to_owned()).await??;
+        let target = fit_target();
+        let preview = host
+            .device_fit_preview(user.id(), "device".to_owned(), target.clone())
+            .await??;
+        assert!(!preview.preview.supports_activity_import());
+        assert!(matches!(
+            preview.preview.content,
+            garmin_service_api::DeviceFitPreviewContent::Course(_)
+        ));
+        let import = host
+            .import_device_fit(user.id(), "device".to_owned(), target, preview.id)
+            .await?;
+        assert!(import.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn device_fit_preview_approval_binds_profile_and_bytes() {
         let directory = tempfile::tempdir().unwrap();
         let storage = crate::prepare_deployment(directory.path()).await.unwrap();
@@ -2099,7 +2164,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(preview.preview.file_name, "activity.fit");
-        assert_eq!(preview.preview.activities.len(), 1);
+        assert_eq!(preview.preview.activities().len(), 1);
         assert_ne!(preview.id, preview.job);
         let other_user = host
             .create_profile("Other Rider".to_owned())

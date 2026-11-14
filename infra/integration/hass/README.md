@@ -1,5 +1,27 @@
 # HASS integration tests
 
+## Push a development app to an existing HAOS host
+
+After local QA, use an SSH alias from your normal SSH config:
+
+```sh
+just hass::deploy-dev homeassistant
+```
+
+The default target is ARM64; `--arch amd64` selects x86-64. Linux builds cross-compile when the target differs from the
+build host. `--build-only` builds and prints the bundle path without contacting HA. SSH and SCP use the existing agent
+and config with batch authentication; agent forwarding is unnecessary. Local Python handles deployment and JSON; the
+remote account needs `ha`, `tar`, and write access to the local apps directory. Override its location with
+`--apps-dir /addons` on older installations; the default is `/local_apps` as exposed by Terminal & SSH.
+
+The command installs **Garmin Toolkit Dev** (`local_garmin_toolkit-dev`) from a prebuilt root filesystem, then stops the
+stable app and starts Dev. Its data is separate. `--stable-slug` overrides the published repository's default
+`af63a031_garmin_toolkit`. Existing Dev data survives rebuilds. If starting Dev fails, the installer attempts to stop
+Dev and restart stable when stable was previously running. It does not copy profiles or device data.
+
+To switch back, stop Garmin Toolkit Dev and start Garmin Toolkit in Home Assistant. Keep only one running while a Garmin
+is attached. The local bundle contains development code; this flow does not publish a release.
+
 ## Repository-install acceptance
 
 Pass a [generated store tree](../../release/README.md#generated-home-assistant-repository) and matching image to the
@@ -48,7 +70,8 @@ app, and reopen the existing repository. Home Assistant/My Home Assistant have n
 uses the owned DevTools connection; app actions and captures still use the built-in APIs. Dark screenshots and
 `install-links.json` accompany the digest-bound installation and populated lifecycle evidence.
 
-Remaining release gates belong to the [publication plan](../../../docs/plans/device-expansion-and-publication.md).
+Release qualification is recorded in [publication evidence](../../../docs/research/publication-readiness.md);
+physical-device evidence is recorded in [device capabilities](../../../docs/research/device-capabilities.md).
 
 ## Home Assistant app package
 
@@ -98,7 +121,7 @@ For a populated workflow through authenticated ingress, run:
 
 ```bash
 just hass::haos-app-check \
-    --app-archive .tmp/hass-native-build/garmin-toolkit-hass-0.1.0-amd64.oci.tar \
+    --app-archive .tmp/hass-native-build/garmin-toolkit-hass-VERSION-amd64.oci.tar \
     --build-receipt .tmp/hass-native-build/native-build.json \
     --repository /nix/store/REPOSITORY-garmin-hass-app-repository
 ```
@@ -223,7 +246,7 @@ See [recovery evidence](../../../docs/research/publication-readiness.md#recovery
 
 ## HAOS app smoke
 
-Build `.#packages.x86_64-linux.garmin-hass-app-image` with a memory-capped Nix builder, then run:
+Build the matching `.#garmin-hass-app-image` with a memory-capped Nix builder, then run:
 
 ```bash
 just hass::haos-app-smoke --app-archive /nix/store/...-garmin-toolkit-hass.oci.tar --timeout 1200
@@ -276,7 +299,7 @@ This mode skips native builds, the full CI matrix, signing, and promotion. Clean
 and the unchanged candidate branch; the candidate image tag remains. Reports and screenshots are uploaded as
 `hass-arm64-delivery`. Public Store metadata and release tags must remain unchanged. Each combined release index needs
 its own acceptance on both architectures; see
-[release evidence](../../../docs/research/publication-readiness.md#published-amd64arm64-release).
+[release evidence](../../../docs/research/publication-readiness.md#published-hass-amd64arm64-release).
 
 ## ARM64 HAOS boot smoke
 
@@ -308,21 +331,20 @@ just hass::integration --suite reconnect
 ```
 
 This exercises both bare WebSocket APIs and application reconnects with WebSocketStream available or absent, fault hooks
-enabled or disabled, and tracing enabled or disabled. Each of the 16 cases alternates eight abrupt/graceful host
-restarts, then verifies process and state cleanup. Constructor counters assert that the application always selects
-standard WebSocket. It is an explicit diagnostic target, separate from the route workflow check in CI.
+enabled or disabled, and tracing enabled or disabled. Cases alternate abrupt/graceful host restarts and verify process
+and state cleanup. Constructor counters assert standard WebSocket selection. This diagnostic is separate from CI's route
+workflow check.
 
 The application selects `websocket-web`'s standard interface to avoid a Chromium 153.0.8010.12 native reconnect crash
 with automatic WebSocketStream selection, reproducible without fault hooks or tracing. Bare sockets did not reproduce
 it. Preserve the library's buffering and transport semantics when changing this selection.
 
 Both suites build the packaged demo and run a disposable NixOS VM with two CPUs and 4 GiB RAM. The route suite is also a
-Linux flake check, so CI's `nix flake check` runs it; ordinary `qa::full` does not boot a VM. The local recipe runs the
-Nix-built driver as your user so it can use your KVM access; CI runs it in the Nix builder. Both require hardware
-acceleration and refuse to fall back to CPU emulation. The local Python runner uses Tyro and Rich for its CLI and
-progress output. Build and VM output go to separate log files in the printed diagnostics directory; cancellation stops
-the owned process group before removing temporary VM state. New files must be Git-tracked for the repository's
-Git-backed flake to include them.
+Linux flake check, so CI's `nix flake check` runs it; ordinary `dev::verify` does not boot a VM. The local recipe runs
+the Nix-built driver as your user so it can use your KVM access; CI runs it in the Nix builder. Both require hardware
+acceleration and refuse CPU emulation. Build and VM output go to separate logs in the printed diagnostics directory;
+cancellation stops the owned process group before removing temporary VM state. New files must be Git-tracked for the
+repository's Git-backed flake to include them.
 
 Host-user KVM access does not imply that a sandboxed Nix build user can open `/dev/kvm`. If the flake check fails before
 the QEMU monitor connects with a KVM permission error, use `just hass::integration` to run the same suite under your

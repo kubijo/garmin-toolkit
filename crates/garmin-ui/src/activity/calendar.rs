@@ -1,11 +1,11 @@
 //! Local-date navigation; activity indices always refer to the host's original list.
 
 use egui::{RichText, Ui};
-use garmin_i18n::{CalendarDay, Intl, MonthGrid, format_message};
+use garmin_i18n::{CalendarDay, Intl, MonthGrid};
 use jiff::civil::{Date, DateTime};
 
 use super::{Action, Presentation};
-use crate::{Size, button, icons};
+use crate::calendar::month_header;
 
 const CELL: f32 = 24.0;
 
@@ -50,7 +50,7 @@ impl Calendar {
         if grid.anchor != anchor || grid.locale != locale {
             *grid = CachedMonth::new(anchor, intl);
         }
-        if let Some(month) = month_header(ui, intl, &grid.model) {
+        if let Some(month) = month_header(ui, intl, &grid.model, "activity.calendar") {
             self.month = Some(month);
             *grid = CachedMonth::new(month, intl);
         }
@@ -101,44 +101,6 @@ impl Calendar {
             }
         }
     }
-}
-
-fn month_header(ui: &mut Ui, intl: &Intl, month: &MonthGrid) -> Option<Date> {
-    let mut selected = None;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let previous = month.previous;
-        let next = month.next;
-        let response = button::IconProps {
-            icon: icons::CARET_LEFT,
-            label: &format_message!(intl, default_message: "Previous month"),
-            kind: button::Kind::Ghost,
-            size: Size::Small,
-            enabled: previous.is_some(),
-        }
-        .show(ui);
-        crate::semantics::target(ui, &response, "activity.calendar.previous-month");
-        if response.clicked() {
-            selected = previous;
-        }
-        ui.add_sized(
-            [(ui.available_width() - 36.0).max(1.0), 32.0],
-            egui::Label::new(RichText::new(&month.title).strong()),
-        );
-        let response = button::IconProps {
-            icon: icons::CARET_RIGHT,
-            label: &format_message!(intl, default_message: "Next month"),
-            kind: button::Kind::Ghost,
-            size: Size::Small,
-            enabled: next.is_some(),
-        }
-        .show(ui);
-        crate::semantics::target(ui, &response, "activity.calendar.next-month");
-        if response.clicked() {
-            selected = next;
-        }
-    });
-    selected
 }
 
 fn day_button(

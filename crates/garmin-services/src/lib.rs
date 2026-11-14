@@ -1,5 +1,8 @@
 //! Target-neutral application services.
 
+pub mod activity_export;
+mod connect;
+mod connect_import;
 pub mod course_transfer;
 pub mod deployment;
 pub mod devices;
@@ -8,14 +11,13 @@ pub mod paths;
 pub mod routes;
 pub mod snapshots;
 
-use garmin_fit::{CreatorDiagnostics, NormalizedActivity};
 use garmin_importer::{
     AvatarCrop, AvatarImportReceipt, AvatarImportRequest as ImporterAvatarRequest, AvatarImporter,
     FitImportOutcome, FitImportRequest as ImporterRequest, FitImporter, RouteImportReceipt,
     RouteImportRequest as ImporterRouteRequest, RouteImporter,
 };
 use garmin_model::{
-    activity::ActivitySummary,
+    activity::{Activity, ActivitySummary},
     artifact::{AcquisitionOperationId, ArtifactId, NormalizationFailure, SourceIdentity},
     identity::{DisplayName, Profile, ProfilePreferences, Role, Source, User, UserId},
     observation::ObservationId,
@@ -104,7 +106,7 @@ impl UserContext {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActivityPreview {
     observation_id: ObservationId,
-    creator: CreatorDiagnostics,
+    source: String,
     summary: ActivitySummary,
 }
 
@@ -115,8 +117,8 @@ impl ActivityPreview {
     }
 
     #[must_use]
-    pub const fn creator(&self) -> &CreatorDiagnostics {
-        &self.creator
+    pub fn source(&self) -> &str {
+        &self.source
     }
 
     #[must_use]
@@ -131,7 +133,10 @@ impl From<StoredActivitySummary> for ActivityPreview {
         let summary = stored.summary();
         Self {
             observation_id,
-            creator: stored.into_creator(),
+            source: stored
+                .creator()
+                .product_name()
+                .map_or_else(|| "FIT".to_owned(), ToString::to_string),
             summary,
         }
     }
@@ -141,7 +146,7 @@ impl From<StoredActivitySummary> for ActivityPreview {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActivityDetails {
     observation_id: ObservationId,
-    normalized: NormalizedActivity,
+    activity: Activity,
 }
 
 impl ActivityDetails {
@@ -151,8 +156,8 @@ impl ActivityDetails {
     }
 
     #[must_use]
-    pub const fn normalized(&self) -> &NormalizedActivity {
-        &self.normalized
+    pub const fn activity(&self) -> &Activity {
+        &self.activity
     }
 }
 
@@ -161,7 +166,7 @@ impl From<StoredActivity> for ActivityDetails {
         let observation_id = stored.observation_id();
         Self {
             observation_id,
-            normalized: stored.into_normalized(),
+            activity: stored.into_normalized().into_parts().1,
         }
     }
 }
@@ -169,6 +174,12 @@ impl From<StoredActivity> for ActivityDetails {
 /// Shared in-process application service.
 pub struct Application {
     storage: Storage,
+    connect_cache_locks: std::sync::Mutex<
+        std::collections::BTreeMap<
+            garmin_model::identity::UserId,
+            std::sync::Arc<tokio::sync::Mutex<()>>,
+        >,
+    >,
     #[cfg(test)]
     course_generation_gate: std::sync::Mutex<Option<std::sync::Arc<CourseGenerationGate>>>,
     #[cfg(feature = "integration-hooks")]
@@ -187,6 +198,7 @@ impl Application {
     pub const fn new(storage: Storage) -> Self {
         Self {
             storage,
+            connect_cache_locks: std::sync::Mutex::new(std::collections::BTreeMap::new()),
             #[cfg(test)]
             course_generation_gate: std::sync::Mutex::new(None),
             #[cfg(feature = "integration-hooks")]
@@ -227,6 +239,36 @@ impl Application {
         );
         self.storage.save_user(&user).await?;
         Ok(user)
+    }
+
+    /// Saves or removes this profile's Garmin Connect key.
+    /// # Errors
+    /// Returns missing-profile or storage failures.
+    pub(crate) async fn set_garmin_connect_key(
+        &self,
+        user: UserContext,
+        key: Option<garmin_model::garmin_connect::PersonalApiKey>,
+    ) -> Result<(), Error> {
+        if self.storage.user(user.user_id()).await?.is_none() {
+            return Err(Error::ProfileNotFound(user.user_id()));
+        }
+        self.storage
+            .set_garmin_connect_key(user.user_id(), key.as_ref())
+            .await?;
+        Ok(())
+    }
+
+    /// Reports saved configuration without exposing its credential.
+    /// # Errors
+    /// Returns missing-profile or storage failures.
+    pub async fn garmin_connect_configured(&self, user: UserContext) -> Result<bool, Error> {
+        if self.storage.user(user.user_id()).await?.is_none() {
+            return Err(Error::ProfileNotFound(user.user_id()));
+        }
+        Ok(self
+            .storage
+            .garmin_connect_configured(user.user_id())
+            .await?)
     }
 
     /// Replaces one profile's presentation preferences.
@@ -357,13 +399,6 @@ impl Application {
             .acquisition_time(user.user_id(), operation)
             .await?
             .is_some())
-    }
-
-    /// Inspects GPX bytes without storing them.
-    /// # Errors
-    /// [`enum@Error`] when the GPX document cannot be parsed.
-    pub fn inspect_gpx(bytes: &[u8]) -> Result<garmin_gpx::Document, Error> {
-        Ok(garmin_gpx::parse(bytes)?)
     }
 
     /// Imports one explicitly selected GPX route candidate.
@@ -676,6 +711,24 @@ pub enum ImportDisposition {
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
+    GarminConnect(#[from] garmin_connect::Error),
+    #[error("No Garmin Connect key is saved for this profile")]
+    GarminConnectKeyMissing,
+    #[error("Garmin original must be a valid ZIP containing exactly one FIT file (up to 64 MiB)")]
+    GarminConnectArchive,
+    #[error("The Garmin activity changed since preview; open it again before importing")]
+    GarminConnectPreviewChanged,
+    #[error(
+        "This activity is too large for an interactive preview; use Import all on this page to import its original FIT"
+    )]
+    GarminConnectPreviewTooLarge,
+    #[error("Garmin activity could not be imported: {0}")]
+    GarminConnectImport(String),
+    #[error("Original FIT file is unavailable: {0}")]
+    GarminConnectOriginalUnavailable(String),
+    #[error("Garmin activity cache could not finish downloading: {0}")]
+    GarminConnectCache(String),
+    #[error(transparent)]
     Storage(#[from] garmin_storage::Error),
     #[error("profile {0} does not exist")]
     ProfileNotFound(UserId),
@@ -735,11 +788,12 @@ mod tests {
                     })
                 }));
                 for preview in previews {
+                    assert_eq!(preview.source(), "Demo Track Recorder");
                     let details = application
                         .activity(context, preview.observation_id())
                         .await?
                         .ok_or("listed activity could not be loaded")?;
-                    assert_eq!(details.normalized().activity().summary(), preview.summary());
+                    assert_eq!(details.activity().summary(), preview.summary());
 
                     for other in corpus
                         .users()
@@ -867,6 +921,55 @@ mod tests {
                     .await,
                 Err(super::Error::ProfileNotFound(_))
             ));
+            application.close().await;
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn connect_keys_are_profile_scoped_and_unknown_profiles_are_rejected()
+    -> Result<(), Box<dyn Error>> {
+        block_on(async {
+            let root = tempdir()?;
+            let application =
+                Application::new(Storage::open(root.path().join("keys.sqlite3")).await?);
+            let first = application.create_profile("First".parse()?).await?;
+            let second = application.create_profile("Second".parse()?).await?;
+            let key = garmin_model::garmin_connect::PersonalApiKey::from_string(
+                "service-test-key".into(),
+            )?;
+            application
+                .set_garmin_connect_key(UserContext::new(first.id()), Some(key))
+                .await?;
+            application
+                .update_profile_preferences(
+                    UserContext::new(first.id()),
+                    ProfilePreferences::default().with_inline_file_windows(true),
+                )
+                .await?;
+            assert!(
+                application
+                    .garmin_connect_configured(UserContext::new(first.id()))
+                    .await?
+            );
+            assert!(
+                !application
+                    .garmin_connect_configured(UserContext::new(second.id()))
+                    .await?
+            );
+            let unknown = UserContext::new(UserId::new_v4());
+            assert!(matches!(
+                application.set_garmin_connect_key(unknown, None).await,
+                Err(super::Error::ProfileNotFound(_))
+            ));
+            application
+                .set_garmin_connect_key(UserContext::new(first.id()), None)
+                .await?;
+            assert!(
+                !application
+                    .garmin_connect_configured(UserContext::new(first.id()))
+                    .await?
+            );
             application.close().await;
             Ok(())
         })
@@ -1047,7 +1150,7 @@ mod tests {
                 "Selected files".parse()?,
                 None,
             );
-            let document = Application::inspect_gpx(GPX_FIXTURE)?;
+            let document = garmin_gpx::parse(GPX_FIXTURE)?;
             let candidate = document
                 .candidates()
                 .first()

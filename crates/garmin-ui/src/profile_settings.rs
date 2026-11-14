@@ -7,6 +7,8 @@ use garmin_model::identity::{LanguagePreference, ProfilePreferences, ThemePrefer
 
 use crate::{Size, button, icons, images, profile, radio};
 mod accent;
+pub mod connect_activities;
+mod garmin_connect;
 
 const fn language_autonym(language: LanguagePreference) -> &'static str {
     match language {
@@ -24,11 +26,30 @@ pub struct Props<'a> {
     pub profile: profile::ProfileProps<'a>,
     pub picture_enabled: bool,
     pub disabled: bool,
+    pub garmin_connect: GarminConnectProps<'a>,
 }
 
-/// One changed preference.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Profile-scoped cloud configuration, verification and browser state.
+pub struct GarminConnectProps<'a> {
+    pub now: jiff::Timestamp,
+    pub today: jiff::civil::Date,
+    pub configured: bool,
+    pub checking: bool,
+    pub facts: Option<&'a garmin_model::garmin_connect::AccountFacts>,
+    pub activities: Option<&'a garmin_model::garmin_connect::ActivityResponse>,
+    pub activities_busy: bool,
+    pub load_progress: Option<&'a garmin_model::garmin_connect::LoadProgress>,
+    pub batch: Option<&'a connect_activities::Batch>,
+}
+
+/// An explicit profile-settings or cloud-browser action.
+#[derive(Clone, Debug)]
 pub enum Action {
+    StartGarminConnectPageImport,
+    CancelGarminConnectPageImport,
+    GarminConnectActivity(garmin_model::garmin_connect::ActivityRequest),
+    TestGarminConnectKey,
+    UpdateGarminConnectKey(Option<garmin_model::garmin_connect::PersonalApiKey>),
     ChoosePicture,
     UpdateAccent(Option<garmin_color::Color>),
     UpdatePreferences(ProfilePreferences),
@@ -58,6 +79,12 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
                     if let Some(preferences) = show_preferences(ui, props) {
                         action = Some(Action::UpdatePreferences(preferences));
                     }
+                    ui.add_space(16.0);
+                    ui.separator();
+                    ui.add_space(16.0);
+                    if let Some(update) = garmin_connect::show(ui, props) {
+                        action = Some(update);
+                    }
                 });
             });
         });
@@ -77,7 +104,7 @@ fn show_picture(ui: &mut Ui, props: &Props<'_>) -> bool {
             size: 64.0,
         }
         .show(ui);
-        ui.add_space(12.0);
+        ui.add_space(16.0);
         (button::Props {
             label: &choose_picture,
             icon: Some(icons::CAMERA),

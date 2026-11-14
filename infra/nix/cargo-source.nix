@@ -15,6 +15,7 @@ lib.fileset.toSource {
   fileset = lib.fileset.unions (
     [
       workspaceCargoSources
+      (workspaceSrc + "/crates/datapackage/tests/upstream")
       (workspaceSrc + "/vendor/fast-mvt")
       (workspaceSrc + "/vendor/winit")
       (workspaceSrc + "/crates/garmin-brand/assets")
@@ -25,6 +26,7 @@ lib.fileset.toSource {
       (workspaceSrc + "/crates/garmin-simulator/fixtures")
       (workspaceSrc + "/crates/garmin-ui/assets")
       (workspaceSrc + "/infra/fixtures")
+      (workspaceSrc + "/infra/garmin-connect")
       (workspaceSrc + "/apps/garmin-hass/web/Trunk.toml")
       (workspaceSrc + "/apps/garmin-hass/web/index.html")
       (workspaceSrc + "/apps/garmin-hass/web/initializer.js")

@@ -20,6 +20,7 @@ pub(crate) fn balanced<'a>(
     }
 
     let mut best = None;
+    let mut sentence = None;
     for (index, character) in text.char_indices() {
         if !character.is_whitespace() {
             continue;
@@ -32,14 +33,23 @@ pub(crate) fn balanced<'a>(
             continue;
         }
         let imbalance = (left_width - right_width).abs();
+        // Keep a whole sentence together when that still produces reasonably even lines.
+        if left.ends_with(['.', '!', '?'])
+            && imbalance <= available * 0.25
+            && sentence.is_none_or(|(_, _, score)| imbalance < score)
+        {
+            sentence = Some((left, right, imbalance));
+        }
         if best.is_none_or(|(_, _, score)| imbalance < score) {
             best = Some((left, right, imbalance));
         }
     }
 
-    best.map_or(Cow::Borrowed(text), |(left, right, _)| {
-        Cow::Owned(format!("{left}\n{right}"))
-    })
+    sentence
+        .or(best)
+        .map_or(Cow::Borrowed(text), |(left, right, _)| {
+            Cow::Owned(format!("{left}\n{right}"))
+        })
 }
 
 fn width(ui: &Ui, text: &str, style: &TextStyle, strong: bool) -> f32 {

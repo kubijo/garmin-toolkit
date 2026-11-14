@@ -12,9 +12,11 @@ pub mod automation;
 pub mod backup;
 pub mod brand;
 pub mod button;
+mod calendar;
 pub mod capacity;
 #[cfg(any(test, feature = "automation"))]
 pub mod capture;
+pub mod date_input;
 pub mod developer;
 pub mod device;
 pub mod device_browser;

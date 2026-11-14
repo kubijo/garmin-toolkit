@@ -35,6 +35,7 @@ class BundleSources:
     metadata: Path
     output: Path
     realise: bool = False
+    require_resolved: bool = False
 
 
 def nix_json(*arguments: str) -> Object:
@@ -155,10 +156,11 @@ def licenses_resolved(licenses: list[Object]) -> bool:
 
 
 def source_members(paths: list[Path]) -> Iterator[tarfile.TarInfo]:
-    """Match tarfile's traversal and hardlink accounting without reading file payloads."""
+    """Walk canonical members without depending on host hardlink deduplication."""
     with tarfile.open(fileobj=io.BytesIO(), mode='w', dereference=False) as archive:
 
         def walk(path: Path, name: str) -> Iterator[tarfile.TarInfo]:
+            archive.dereference = not path.is_symlink()
             # CPython returns None for unsupported types, despite the narrower stub.
             member = cast(tarfile.TarInfo | None, archive.gettarinfo(path, name))
             if member is None:
@@ -212,7 +214,14 @@ def write_bundle(paths: list[Path], destination: Path) -> tuple[str, list[Object
         tarfile.open(fileobj=compressed, mode='w|', dereference=False) as archive,
     ):
         for path in paths:
-            archive.add(path, arcname='sources/' + path.name, filter=normalized)
+            for member in source_members([path]):
+                relative = Path(member.name).relative_to('sources/' + path.name)
+                member = normalized(member)
+                if member.isfile():
+                    with (path / relative).open('rb') as stream:
+                        archive.addfile(member, stream)
+                else:
+                    archive.addfile(member)
     return raw.digest.hexdigest(), [{'size': path.stat().st_size, 'sha256': file_sha256(path)} for path in raw.paths]
 
 
@@ -225,15 +234,26 @@ def check_link(member: tarfile.TarInfo, roots: set[str]) -> None:
 
 
 def bundle_sources(options: BundleSources) -> None:
-    if options.output.exists() or options.output.is_symlink():
-        raise ValueError('Dependency source output already exists')
     inspected = inspect_archive(options.archive)
     files = inventory_image(options.archive, inspected)
-    runtime = nix_json('path-info', '--json', '--json-format', '1', *sorted(files.store_paths))
-    if set(runtime) != files.store_paths:
+    bundle_store_sources(options, files.store_paths)
+
+
+def bundle_store_sources(options: BundleSources, store_paths: set[str]) -> None:
+    """Export a measured runtime store inventory, independently of its container format."""
+    if options.output.exists() or options.output.is_symlink():
+        raise ValueError('Dependency source output already exists')
+    if not store_paths or any(re.fullmatch(STORE_PATH, path) is None for path in store_paths):
+        raise ValueError('Expected canonical runtime store paths')
+    runtime = nix_json('path-info', '--json', '--json-format', '1', *sorted(store_paths))
+    if set(runtime) != store_paths:
         raise ValueError('Nix runtime inventory differs from the image')
     metadata = object_rows(read_json(options.metadata))
     runtime = resolve_runtime(runtime, metadata)
+    coverage = runtime_coverage(runtime, metadata)
+    unresolved = [text(row['path']) for row in coverage if row['resolved'] is not True]
+    if options.require_resolved and unresolved:
+        raise ValueError('Runtime redistribution coverage remains unresolved: ' + ', '.join(unresolved))
     roots = sorted({text(object_value(row).get('deriver', '')) for row in runtime.values()})
     if not roots or any(re.fullmatch(STORE_PATH + r'\.drv', path) is None for path in roots):
         raise ValueError('Runtime outputs have missing producing derivations')
@@ -265,7 +285,6 @@ def bundle_sources(options: BundleSources) -> None:
     if vendors:
         closure = nix_json('path-info', '--json', '--json-format', '1', '--recursive', *sorted(vendors))
         paths = sorted(set(paths) | {Path(path) for path in closure})
-    coverage = runtime_coverage(runtime, metadata)
     options.output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.hass-sources.', dir=options.output.parent) as temporary:
         staged = Path(temporary) / 'sources'

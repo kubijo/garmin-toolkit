@@ -6,8 +6,7 @@ authorizes bounded manifest/storage inspection; file catalog, transfer, network 
 
 `garmin-device` provides raw MTP through `mtp-rs` and Linux system mounts through GIO. Current CLI composition selects
 either adapter. Desktop and the standalone HASS host use the system mount; the Home Assistant app image selects raw MTP
-because it cannot assume a desktop GIO session. Windows raw MTP uses the `mtp-rs` WPD backend. Adapter locations remain
-private.
+because it cannot assume a desktop GIO session. Adapter locations remain private.
 
 `DeviceLink` is the shared capacity and disposable-probe boundary for directories, desktop-mounted MTP, and raw MTP. Raw
 benchmarks and raw transaction writes use one streaming primitive. Payload EOF completes `Upload`; waiting for the
@@ -67,4 +66,5 @@ by readback. Reassociation requires separate consent and adds a numbered, create
 Inspection rejects missing or malformed history instead of silently falling back to an older association.
 
 See [the consolidated device boundary](../decisions/0035-consolidated-device-boundary.md) and
-[USB synchronization evidence](../research/usb-sync.md).
+[USB synchronization evidence](../research/usb-sync.md). Implementation steps and verification examples are in the
+[device-adapter extension guide](../device-adapters.md).

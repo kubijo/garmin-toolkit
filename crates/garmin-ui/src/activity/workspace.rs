@@ -134,21 +134,30 @@ impl Workspace {
             .id_salt("activity-workspace-scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                let route_free = props
+                    .recording
+                    .is_some_and(|recording| !has_recorded_route(recording));
                 let mut navigation = |ui: &mut Ui, viewer: &mut Viewer| {
-                    egui::Frame::new().inner_margin(8.0).show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 4.0;
-                        action = self.navigation.show(ui, intl, props, &mut |ui| {
-                            actions(ui);
-                            if let Some(recording) = props.recording {
-                                viewer.sync_recording(props.recording_key.unwrap_or("activity"));
-                                let domain = viewer.cache.domain(recording, props.units);
-                                ui.add_space(4.0);
-                                viewer.axis_controls(ui, intl, &domain, button::Width::Fill);
-                            }
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin {
+                            bottom: if route_free { 0 } else { 8 },
+                            ..egui::Margin::same(8)
+                        })
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 4.0;
+                            action = self.navigation.show(ui, intl, props, &mut |ui| {
+                                actions(ui);
+                                if let Some(recording) = props.recording {
+                                    viewer
+                                        .sync_recording(props.recording_key.unwrap_or("activity"));
+                                    let domain = viewer.cache.domain(recording, props.units);
+                                    ui.add_space(4.0);
+                                    viewer.axis_controls(ui, intl, &domain, button::Width::Fill);
+                                }
+                            });
                         });
-                    });
                 };
-                if ui.available_width() >= 720.0 {
+                if ui.available_width() >= 720.0 && !route_free {
                     Self::show_viewer(
                         &mut self.viewer,
                         ui,
@@ -160,6 +169,9 @@ impl Workspace {
                 } else {
                     let top = ui.cursor().top();
                     navigation(ui, &mut self.viewer);
+                    if route_free {
+                        ui.add_space(CHART_GAP - ui.spacing().item_spacing.y);
+                    }
                     // Scrolling must not resize the map.
                     let height = (viewport_height - (ui.cursor().top() - top)).clamp(320.0, 560.0);
                     Self::show_viewer(&mut self.viewer, ui, intl, props, height, None);
@@ -758,6 +770,9 @@ impl Viewer {
         no_route: &str,
         height: f32,
     ) -> map::Output {
+        if !has_recorded_route(recording) {
+            return self.no_route_controls(ui, intl, no_route);
+        }
         let range = self.sample_range(recording);
         let selected_coordinate = selected_route_coordinate(
             recording,
@@ -806,6 +821,63 @@ impl Viewer {
         output
     }
 
+    fn no_route_controls(&mut self, ui: &mut Ui, intl: &Intl, message: &str) -> map::Output {
+        if self.interaction.is_playing() {
+            self.interaction.stop_and_clear_cursor();
+        }
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 96.0), Sense::hover());
+        let palette = crate::theme::palette(ui);
+        ui.painter().rect_filled(
+            rect,
+            PANEL_RADIUS,
+            color32(palette.surfaces().layer(theme::Level::One)),
+        );
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, false, message));
+        crate::semantics::target(ui, &response, "activity.no-route-placeholder");
+        let text_width = ui
+            .painter()
+            .layout_no_wrap(
+                message.to_owned(),
+                egui::TextStyle::Body.resolve(ui.style()),
+                color32(palette.content().text_secondary()),
+            )
+            .size()
+            .x;
+        let notice_width = text_width + 32.0;
+        let notice_bounds = egui::Rect::from_min_size(
+            egui::pos2(rect.center().x - notice_width / 2.0, rect.top() + 16.0),
+            egui::vec2(notice_width, 24.0),
+        );
+        let mut notice_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(notice_bounds)
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        notice_ui.spacing_mut().item_spacing.x = 8.0;
+        let icon = icons::Props {
+            icon: icons::MAP_TRIFOLD,
+            size: 24.0,
+            color: palette.content().icon_secondary(),
+        }
+        .show(&mut notice_ui);
+        crate::semantics::target(&notice_ui, &icon, "activity.no-route-icon");
+        let notice = notice_ui
+            .label(RichText::new(message).color(color32(palette.content().text_secondary())));
+        crate::semantics::target(&notice_ui, &notice, "activity.no-route");
+        let controls_bounds = egui::Rect::from_min_size(
+            egui::pos2(rect.center().x - 92.0, rect.top() + 48.0),
+            egui::vec2(184.0, 32.0),
+        );
+        disabled_playback_controls(ui, intl, controls_bounds);
+        map::Output {
+            hovered: None,
+            clicked: None,
+            empty_clicked: false,
+            rect,
+        }
+    }
+
     fn map_controls(
         &mut self,
         ui: &mut Ui,
@@ -813,7 +885,7 @@ impl Viewer {
         recording: &ActivityRecordingSnapshot,
         map_rect: egui::Rect,
     ) -> Vec<egui::Rect> {
-        const INSET: f32 = 12.0;
+        const INSET: f32 = 16.0;
         const BUTTON: f32 = 32.0;
         const FRAME: f32 = BUTTON + 4.0;
         const GAP: f32 = 2.0;
@@ -867,7 +939,7 @@ impl Viewer {
             format_message!(intl, default_message: "Play")
         };
         let icon = if playing { icons::STOP } else { icons::PLAY };
-        let playback_width = 6.0 + BUTTON + 12.0 + 136.0;
+        let playback_width = 6.0 + BUTTON + 16.0 + 136.0;
         let playback_bounds = egui::Rect::from_min_size(
             egui::pos2(
                 map_rect.center().x - playback_width / 2.0,
@@ -881,9 +953,9 @@ impl Viewer {
             playback_bounds,
             Layout::left_to_right(Align::Center),
             |ui| {
-                ui.spacing_mut().item_spacing.x = GAP;
+                ui.spacing_mut().item_spacing.x = 0.0;
                 let play = floating_icon_button(ui, &play_label, icon, playing, can_play);
-                ui.add_space(10.0);
+                ui.add_space(16.0);
                 let speed = playback_speed_slider(
                     ui,
                     &mut self.interaction.playback_speed,
@@ -1204,6 +1276,34 @@ impl Viewer {
     }
 }
 
+fn disabled_playback_controls(ui: &mut Ui, intl: &Intl, bounds: egui::Rect) {
+    let mut controls = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(bounds)
+            .layout(Layout::left_to_right(Align::Center)),
+    );
+    controls.spacing_mut().item_spacing.x = 0.0;
+    controls.add_enabled_ui(false, |ui| {
+        let play_label = format_message!(intl, default_message: "Play");
+        let play = floating_icon_button(ui, &play_label, icons::PLAY, false, false);
+        crate::semantics::target(ui, &play, "playback.toggle");
+        crate::semantics::value(&play, "stopped");
+        ui.add_space(16.0);
+        let speed_label = format_message!(intl, default_message: "Playback speed");
+        let mut speed = PlaybackSpeed::Normal;
+        playback_speed_slider(ui, &mut speed, &speed_label, false);
+    });
+    let response = controls.interact(
+        bounds,
+        controls.id().with("disabled-playback"),
+        Sense::hover(),
+    );
+    let label = format_message!(intl, default_message: "Playback controls");
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, false, label.as_str()));
+    crate::semantics::target(&controls, &response, "activity.no-route-controls");
+}
+
 fn floating_control<R>(
     ui: &mut Ui,
     bounds: egui::Rect,
@@ -1271,6 +1371,7 @@ fn playback_speed_slider(
     enabled: bool,
 ) -> egui::Response {
     ui.add_enabled_ui(enabled, |ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
         let palette = crate::theme::palette(ui);
         let rail = color32(palette.content().icon_secondary());
         let foreground = color32(palette.content().icon_primary());
@@ -1606,6 +1707,13 @@ fn paint_lap_row_divider(ui: &Ui, rect: egui::Rect) {
     );
 }
 
+fn has_recorded_route(recording: &ActivityRecordingSnapshot) -> bool {
+    recording
+        .samples
+        .iter()
+        .any(|sample| sample.coordinate.is_some())
+}
+
 fn activity_map_height(available_height: f32) -> f32 {
     (available_height * 0.68).clamp(320.0, 560.0)
 }
@@ -1638,7 +1746,7 @@ fn sample_metric_row(ui: &mut Ui, metrics: &[(String, String)]) {
 }
 
 fn viewer_inset() -> egui::Frame {
-    egui::Frame::new().inner_margin(egui::Margin::symmetric(12, 0))
+    egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 0))
 }
 
 fn empty_panel(ui: &mut Ui, message: &str) {
@@ -1848,7 +1956,7 @@ fn analysis_panel<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> egui::I
         .lerp_to_gamma(color32(palette.surfaces().layer(theme::Level::One)), 0.5);
     egui::Frame::new()
         .fill(surface)
-        .inner_margin(egui::Margin::symmetric(8, 6))
+        .inner_margin(egui::Margin::symmetric(8, 4))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = CHART_GAP;
@@ -1867,7 +1975,7 @@ fn chart_panel<R>(
         ui.spacing_mut().interact_size.y = ui.text_style_height(&egui::TextStyle::Body);
         if beside {
             ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
+                ui.spacing_mut().item_spacing.x = 16.0;
                 ui.allocate_ui_with_layout(
                     egui::vec2(CHART_SUMMARY_WIDTH, 0.0),
                     Layout::top_down(Align::Min),
@@ -2984,6 +3092,116 @@ mod tests {
         }
     }
 
+    fn desktop_import_actions(ui: &mut egui::Ui) {
+        ui.add_space(12.0);
+        let _ = crate::file_import::actions(
+            ui,
+            &crate::file_import::Props {
+                title: "Import FIT",
+                description: "Import files or a folder",
+                files_label: "Choose files",
+                folder_label: "Choose a folder",
+                drop_active: false,
+                enabled: true,
+            },
+        );
+    }
+
+    #[test]
+    fn fit_route_remains_reachable_at_the_minimum_desktop_size() {
+        let context = egui::Context::default();
+        crate::install(&context);
+        context.add_plugin(crate::automation::Driver::default());
+        let intl = garmin_i18n::Translations::bundled()
+            .unwrap()
+            .formatter(garmin_i18n::Language::English)
+            .unwrap();
+        let duration = ActivityDuration::from_milliseconds(1_000);
+        let summary = garmin_model::activity::ActivitySummary::from_parts(
+            ActivitySport::Cycling,
+            TimeRange::from_parts(timestamp(0), timestamp(1_000)).unwrap(),
+            ActivityTotals::from_parts(duration, duration, None, None, None, None).unwrap(),
+            ActivityMetrics::default(),
+        );
+        let presentations = [super::Presentation::from_summary(
+            summary,
+            "Test",
+            &intl,
+            UnitSystem::Metric,
+        )];
+        let items = [presentations[0].item_props()];
+        let recording = recording(vec![
+            sample(0, None, None, Some((60.0, 24.0))),
+            sample(1_000, None, None, Some((60.01, 24.01))),
+        ]);
+        let runtime = crate::activity::map_runtime::MapRuntimeHandle::new(
+            TestMapBackend,
+            crate::activity::map_runtime::Renderer::software(),
+        );
+        let mut workspace = super::Workspace::new(&runtime);
+        crate::automation::command(
+            &context,
+            "sequence",
+            &serde_json::json!([
+                {"kind":"wait", "target":"activity.viewer"},
+                {"kind":"scroll", "target":"activity.viewer", "delta":100_000},
+                {"kind":"scroll_into_view", "target":"map.fit"},
+                {"kind":"assert_available", "target":"map.fit"},
+                {"kind":"click", "target":"map.fit"},
+            ]),
+        )
+        .unwrap();
+        for tick in 0..600 {
+            context
+                .run_ui(
+                    egui::RawInput {
+                        time: Some(f64::from(tick) / 60.0),
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(720.0, 480.0),
+                        )),
+                        focused: true,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        // Reserve the desktop header and expanded navigation alongside the workspace.
+                        let bounds =
+                            egui::Rect::from_min_max(egui::pos2(224.0, 32.0), ui.max_rect().max);
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(bounds), |ui| {
+                            ui.set_clip_rect(bounds);
+                            let _ = workspace.show_with_actions(
+                                ui,
+                                &intl,
+                                &super::WorkspaceProps {
+                                    today: jiff::civil::date(2026, 11, 4),
+                                    items: &items,
+                                    presentations: &presentations,
+                                    selected: Some(0),
+                                    recording: Some(&recording),
+                                    recording_key: Some("minimum-size"),
+                                    units: UnitSystem::Metric,
+                                    empty_list: "Empty",
+                                    empty_detail: "Select",
+                                    no_route: "No route",
+                                },
+                                desktop_import_actions,
+                            );
+                        });
+                    },
+                )
+                .drop_without_applying_deltas();
+            let plugin = context.plugin::<crate::automation::Driver>();
+            let driver = plugin.lock();
+            if let Some(report) = driver.report()
+                && report.state != "running"
+            {
+                assert_eq!(report.state, "passed", "{:?}", report.failure);
+                return;
+            }
+        }
+        panic!("minimum-size activity controls did not settle");
+    }
+
     #[test]
     fn nearest_plot_position_reports_original_sample_index() {
         let values = [0.0, 1.0, 2.5, 9.0];
@@ -3607,10 +3825,10 @@ mod tests {
             |ui| {
                 let control = super::floating_control(
                     ui,
-                    egui::Rect::from_min_size(egui::pos2(12.0, 12.0), egui::vec2(186.0, 36.0)),
+                    egui::Rect::from_min_size(egui::pos2(16.0, 16.0), egui::vec2(190.0, 36.0)),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
-                        ui.spacing_mut().item_spacing.x = 2.0;
+                        ui.spacing_mut().item_spacing.x = 0.0;
                         let play = super::floating_icon_button(
                             ui,
                             "Play",
@@ -3618,12 +3836,12 @@ mod tests {
                             false,
                             enabled,
                         );
-                        ui.add_space(10.0);
+                        ui.add_space(16.0);
                         let slider =
                             super::playback_speed_slider(ui, speed, "Playback speed", enabled);
                         assert!(slider.rect.height() <= play.rect.height());
                         assert!((slider.rect.center().y - play.rect.center().y).abs() < 1.0);
-                        assert!(slider.rect.left() - play.rect.right() >= 12.0);
+                        assert!(slider.rect.left() - play.rect.right() >= 16.0);
                         slider
                     },
                 );

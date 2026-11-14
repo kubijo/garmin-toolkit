@@ -38,6 +38,22 @@ scene = "maps::Playground"
 Theme = "Light"
 
 [[shot]]
+name = "catalog-grid-wide"
+scene = "maps::Playground"
+[shot.knobs]
+width = 1536
+"many maps" = true
+
+[[shot]]
+name = "catalog-grid-light"
+scene = "maps::Playground"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+width = 1120
+"many maps" = true
+
+[[shot]]
 name = "catalog-czech-narrow"
 scene = "maps::Playground"
 [shot.globals]

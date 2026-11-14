@@ -1,40 +1,37 @@
 # FIT corpus
 
-## Initial cases
+## Implemented coverage
 
-The data foundation creates these deterministic synthetic fixtures:
+[`garmin-fit` fixtures](../../crates/garmin-fit/src/fixture.rs) generate activities, chained activity/settings
+sequences, and a Course. [`garmin-fit` tests](../../crates/garmin-fit/src/lib.rs) cover activity normalization,
+independently absent sensor values, creator/envelope/timestamp validation, separate chained activities, preserved
+settings, and rejected unsupported or corrupt sequences. [Course tests](../../crates/garmin-fit/src/course.rs) check
+semantic round trips, message anatomy, corruption, and unresolved geometry.
 
-| Case                    | Required content                                                          |
-| ----------------------- | ------------------------------------------------------------------------- |
-| `activity-basic`        | File/device identity, one session/lap, timestamped GPS and sensors        |
-| `activity-multisport`   | Multiple sessions and laps with distinct sports                           |
-| `wellness`              | Timestamped monitoring and body measurements; some optional values absent |
-| `sleep-hrv`             | Interval sleep data and HRV samples spanning a synthetic day boundary     |
-| `course`                | Route points and course metadata                                          |
-| `workout`               | Nested steps, targets, repetitions, and rest                              |
-| `developer-unknown`     | Described developer fields plus an unknown message/field                  |
-| `developer-undescribed` | A developer field without its required description                        |
-| `truncated`             | A valid case cut at defined offsets                                       |
-| `bad-checksum`          | A valid case with one controlled mutation                                 |
+Independent fixtures and [boundary tests](../../crates/garmin-fit/src/integrity_tests.rs) characterize:
 
-Basic activity normalization must match the synthetic definition exactly; multisport hierarchy and ordering must
-survive. Absent wellness values stay absent. Unknown fields preserve supported values and original bytes; undescribed
-developer fields fail cleanly. Every truncation returns an error without panic or committed partial data; checksum
-failure is reported without a commit.
+- [Integrity and multisession](../../crates/garmin-fit/src/fixture/integrity.rs): 12/14-byte headers, every proper
+  prefix and single-bit mutation of the minimal recording, isolated CRC errors, length mismatches, and corrupt chained
+  tails. Activity and Course decoding share length/CRC checks; two sessions in one sequence are rejected.
+- [Health](../../crates/garmin-fit/src/fixture/health.rs) and
+  [workouts](../../crates/garmin-fit/src/fixture/workout.rs): monitoring heart rate, sleep transitions, HRV
+  intervals/missing values, and a timed two-step workout. All decode; their file types are rejected by the activity
+  normalizer.
+- [Developer fields](../../crates/garmin-fit/src/fixture/developer.rs): complete metadata, missing descriptions, and
+  missing developer IDs. All are accepted without overriding native normalized values. Undescribed custom values are
+  omitted from decoded output; described values decode even without a developer ID.
 
-Course and workout cases compare semantics, not bytes. Expectations come from the synthetic definition, never Garmin SDK
-fixtures or parser output.
+[Importer tests](../../crates/garmin-importer/tests/fit_import.rs) verify exact original-byte preservation, stable
+retries, and no partial activities from rejected chains. These synthetic examples neither qualify device transfers nor
+add normalization support. Single-session activities are normalized; settings are preservation-only. The
+[data contract](../architecture/data.md) owns those invariants.
 
-## Shared invariants
+`rustyfit` 0.10.2 rejects valid 14-byte files with an omitted (zero) header CRC when their file CRC covers the complete
+sequence, as required by the [protocol](https://developer.garmin.com/fit/articles/fit-protocol/fit_protocol.html). Those
+inputs remain preserved parser rejections; this coverage does not add support for normalizing them.
 
-- Imported bytes and their SHA-256 hash remain unchanged.
-- Parser types stay in `fit`; normalization is deterministic.
-- Reimport is idempotent; similar artifacts remain separate until reconciled.
-- Unknown or unsupported data cannot block preservation of a valid source artifact.
-- Interrupted reads leave only discardable staging data; retry is deterministic.
-- Corruption produces classified errors without panics, partial database state, or fabricated normalized values.
-
-Real device files stay ignored. They extend support only through a synthetic regression or approved public fixture.
+Expectations must come from the synthetic definition, not parser output or Garmin SDK fixtures. Real device files stay
+ignored; durable regressions need synthetic replacements or approved public fixtures.
 
 ## Development corpus
 
@@ -66,6 +63,19 @@ Community files help select missing cases. A case becomes durable only after it 
 for redistribution with its provenance intact.
 
 ## External corpus
+
+### Suites to shadow
+
+- [Garmin Python](https://github.com/garmin/fit-python-sdk/blob/e809dbc6acfb4568259625afc7b04724fda9c4e0/tests/test_decoder.py)
+  (FIT Protocol License): integrity, chaining, invalid values, field sizes, and developer data.
+- [muktihari](https://github.com/muktihari/fit/blob/7addcbcbb7a3d99e88db5568bf691308ff4d66cb/decoder/decoder_test.go)
+  (BSD-3-Clause): malformed definitions, compressed timestamps, big-endian short fields, and missing developer metadata.
+
+Recreate named behaviors with independent bytes and expected values. These implementation suites are not a complete
+certification oracle: Python's compressed-timestamp rejection is an implementation limit, not a protocol rule.
+`muktihari/testdata` mixes SDK samples, forum recordings, and fuzz inputs; verify per-file provenance before reuse.
+
+### Optional recordings
 
 Large corpora remain optional. Fetch an exact-revision, hash-verified ZIP64 snapshot as one Nix store file and read its
 entries directly; do not clone or extract it. Corpus sweeps stay outside normal validation, required CI, and published

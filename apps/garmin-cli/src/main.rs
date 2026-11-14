@@ -1,3 +1,4 @@
+mod activity_export;
 mod diagnostic;
 mod diagnostics;
 mod pending_recovery;
@@ -106,6 +107,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Export or inspect portable activity packages.
+    Activity(activity_export::Options),
     /// Read logs and events from a running local desktop or HASS demo.
     Diagnostics(diagnostics::Args),
     /// Discover and inspect devices.
@@ -603,6 +606,7 @@ async fn run_cli(cli: Cli, capture: Option<SessionCapture>) -> Result<()> {
         );
     }
     match cli.command {
+        Some(Command::Activity(options)) => options.run(cli.json).await,
         Some(Command::Diagnostics(args)) => args.run(cli.json).await,
         None => match (cli.mock_device, cli.mock_server.as_ref()) {
             (Some(path), Some(mock_server)) => {

@@ -48,8 +48,7 @@ Application controllers do not handle activation tokens. Both Developer tools an
 API, and focusing preserves each window's identity, size, and state. Synthetic egui automation cannot supply compositor
 input serials, so compositor focus acceptance requires real input.
 
-Upstreaming and an explicit-token alternative are tracked in the
-[shared interface plan](../plans/shared-interface-workflows.md#deferred-wayland-activation-work).
+Upstreaming and an explicit-token alternative are tracked in the [deferred work list](../plans/README.md#deferred).
 
 ## Consumers
 
@@ -94,4 +93,4 @@ requesting another catalogue; switching devices remains blocked during that oper
 supersede requests for a different device. Only the latest request can publish a catalogue or clear its loading
 indicator, and logout/disconnect invalidates pending completions.
 
-Runtime checks are tracked in the [shared interface plan](../plans/shared-interface-workflows.md#runtime-acceptance).
+Windows support and testing are outside the project scope.

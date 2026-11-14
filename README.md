@@ -6,7 +6,12 @@ Experimental, unofficial Linux tools for Garmin devices and data:
 - `garmin-desktop`: local activity and route management;
 - `garmin-hass`: experimental Home Assistant app.
 
-Applications compose the reusable crates under `crates/`.
+## Desktop
+
+Download `garmin-toolkit-ARCH.AppImage` from [GitHub Releases](https://github.com/kubijo/garmin-toolkit/releases),
+choosing `x86_64` or `aarch64` for your Linux host. Make it executable and launch it, or integrate it with Gear Lever
+for automatic GitHub update discovery. The `garmin-toolkit-demo-ARCH.AppImage` variant uses separate demo data.
+[Device support](docs/research/device-capabilities.md#usb-operations) is recorded per tested host and adapter.
 
 ## Home Assistant
 
@@ -66,14 +71,24 @@ observed service and download-authorization behavior behind a replaceable adapte
 
 ## Development
 
-```sh
-just qa::preflight
-just qa::full
-just qa::audit
-```
+See the [documentation index](docs/README.md), [development workflow](docs/development.md), and
+[remaining work](docs/plans/README.md). Just lists the available commands.
 
-See the [documentation index](docs/README.md) and [development safeguards](docs/development.md). The gallery renders
-terminal and desktop states without entering a shipped binary.
+## Acknowledgements
+
+Thanks to these projects and their contributors:
+
+- [mtp-rs](https://github.com/vdavid/mtp-rs): USB MTP device access.
+- [RustyFIT](https://github.com/muktihari/rustyfit): FIT decoding and encoding.
+- [egui](https://github.com/emilk/egui): the shared desktop and browser UI.
+- [Buffa](https://github.com/anthropics/buffa): generated Protobuf types and codecs.
+- [connect-personal-api-ts](https://github.com/Likenttt/connect-personal-api-ts): Garmin Personal API schema snapshot.
+- [openapi-to-rust](https://github.com/gpu-cli/openapi-to-rust): generated Personal API client and types.
+- [Carbon Design System](https://github.com/carbon-design-system/carbon),
+  [Phosphor Icons](https://github.com/phosphor-icons/core), and
+  [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic): colors, icons, and fonts.
+- [trackeR](https://cran.r-project.org/package=trackeR), [DogWalkGPS](https://github.com/swiftsam/DogWalkGPS), and
+  [HikeAlong](https://hikealongtours.com/data/): demo activity recordings.
 
 ## License
 

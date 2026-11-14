@@ -172,10 +172,21 @@ impl Navigation {
         }
         let mut action = None;
         let mut close = false;
-        let width = (ui.ctx().content_rect().width() - 48.0).clamp(1.0, 560.0);
+        let bounds = ui.max_rect().intersect(ui.clip_rect());
+        let width = (bounds.width() - 48.0).clamp(1.0, 560.0);
         let style = ui.style().clone();
         let accent = crate::theme::profile_accent(ui);
-        let response = egui::Modal::new(ui.id().with("activity-archive"))
+        let id = ui.id().with("activity-archive");
+        let response = egui::Modal::new(id)
+            .area(
+                egui::Area::new(id)
+                    .kind(egui::UiKind::Modal)
+                    .order(egui::Order::Foreground)
+                    .sense(egui::Sense::hover())
+                    .fixed_pos(bounds.center())
+                    .pivot(egui::Align2::CENTER_CENTER)
+                    .constrain_to(bounds),
+            )
             .frame(crate::modal::surface_frame(ui).inner_margin(16))
             .backdrop_color(crate::theme::color32(crate::theme::palette(ui).overlay()))
             .show(ui.ctx(), |ui| {
@@ -186,7 +197,7 @@ impl Navigation {
                     self.archive_filters(ui, intl);
                     let query = self.query.to_lowercase();
                     egui::ScrollArea::vertical()
-                        .max_height((ui.ctx().content_rect().height() - 180.0).max(80.0))
+                        .max_height((bounds.height() - 180.0).max(80.0))
                         .show(ui, |ui| {
                             let mut any = false;
                             for index in calendar::chronological(props.presentations)
@@ -208,7 +219,19 @@ impl Navigation {
                             );
                             }
                         });
-                    let response = ui.button(format_message!(intl, default_message: "Close"));
+                    let response = ui
+                        .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            button::Props {
+                                label: &format_message!(intl, default_message: "Close"),
+                                icon: None,
+                                kind: button::Kind::Secondary,
+                                size: Size::Medium,
+                                width: button::Width::Fit,
+                                enabled: true,
+                            }
+                            .show(ui)
+                        })
+                        .inner;
                     crate::semantics::target(ui, &response, "activity.list.close");
                     close = response.clicked();
                 });
@@ -288,7 +311,15 @@ fn archive_row(ui: &mut Ui, item: &Presentation, index: usize, selected: bool) -
     );
     let response = super::row_response(ui, rect, index, &item.title);
     crate::semantics::value(&response, if selected { "selected" } else { "unselected" });
-    super::paint_row(ui, rect, &item.item_props(), selected, &response);
+    super::paint_row(
+        ui,
+        rect,
+        &item.item_props(),
+        selected,
+        &response,
+        None,
+        garmin_color::theme::Level::Two,
+    );
     response.clicked()
 }
 
@@ -303,3 +334,6 @@ fn metrics(ui: &mut Ui, presentation: &Presentation) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests;

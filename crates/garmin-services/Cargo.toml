@@ -15,8 +15,10 @@ integration-hooks = []
 workspace = true
 
 [dependencies]
+datapackage.workspace = true
 dirs.workspace = true
 garmin-color.workspace = true
+garmin-connect.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 blake3.workspace = true
@@ -31,6 +33,7 @@ garmin-simulator.workspace = true
 garmin-update.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+postbag.workspace = true
 sha2.workspace = true
 remoc.workspace = true
 garmin-fit.workspace = true
@@ -39,12 +42,15 @@ garmin-importer.workspace = true
 garmin-model.workspace = true
 garmin-route.workspace = true
 garmin-storage.workspace = true
+jiff.workspace = true
 thiserror.workspace = true
+strsim.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 url.workspace = true
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 postcard.workspace = true

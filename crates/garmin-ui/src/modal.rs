@@ -136,6 +136,17 @@ pub fn show<R>(
     show_with_footer(ui, id, props, FooterOptions::default(), body)
 }
 
+/// Shows media content edge to edge beneath a compact header.
+#[must_use]
+pub fn show_compact<R>(
+    ui: &mut Ui,
+    id: Id,
+    props: &Props<'_>,
+    body: impl FnOnce(&mut Ui) -> R,
+) -> Output<R> {
+    show_with_layout(ui, id, props, FooterOptions::default(), true, body)
+}
+
 /// Shows a dialog with an optional Back action and cancel icon.
 #[must_use]
 pub fn show_with_footer<R>(
@@ -145,15 +156,43 @@ pub fn show_with_footer<R>(
     footer: FooterOptions<'_>,
     body: impl FnOnce(&mut Ui) -> R,
 ) -> Output<R> {
+    show_with_layout(ui, id, props, footer, false, body)
+}
+
+fn show_with_layout<R>(
+    ui: &mut Ui,
+    id: Id,
+    props: &Props<'_>,
+    footer: FooterOptions<'_>,
+    compact: bool,
+    body: impl FnOnce(&mut Ui) -> R,
+) -> Output<R> {
     let bounds = ui.max_rect();
+    let style = ui.style().clone();
+    let accent = crate::theme::profile_accent(ui);
     match props.presentation {
         Presentation::Modal => {
             let ctx = ui.ctx().clone();
             let viewport = ctx.content_rect().size();
+            let previous = ctx.memory(|memory| memory.area_rect(id));
             let response = egui::Modal::new(id)
                 .frame(egui::Frame::new())
                 .backdrop_color(egui::Color32::from_black_alpha(BACKDROP_ALPHA))
-                .show(&ctx, |ui| render_surface(ui, props, footer, viewport, body));
+                .show(&ctx, |ui| {
+                    ui.set_style(style);
+                    crate::theme::with_profile_accent(ui, accent, |ui| {
+                        render_surface(ui, props, footer, viewport, compact, body)
+                    })
+                });
+            let rect = response.response.rect;
+            if compact
+                && previous.is_none_or(|previous| {
+                    previous.min.distance(rect.min) > 0.5
+                        || (previous.size() - rect.size()).length() > 0.5
+                })
+            {
+                ctx.request_repaint();
+            }
             let mut output = response.inner;
             let close_requested = response.response.should_close()
                 || (props.backdrop_closes.unwrap_or_default()
@@ -179,7 +218,10 @@ pub fn show_with_footer<R>(
                 .pivot(Align2::CENTER_CENTER)
                 .constrain_to(bounds)
                 .show(ui.ctx(), |ui| {
-                    render_surface(ui, props, footer, bounds.size(), body)
+                    ui.set_style(style);
+                    crate::theme::with_profile_accent(ui, accent, |ui| {
+                        render_surface(ui, props, footer, bounds.size(), compact, body)
+                    })
                 })
                 .inner;
             if output.action.is_none()
@@ -198,6 +240,7 @@ fn render_surface<R>(
     props: &Props<'_>,
     footer: FooterOptions<'_>,
     bounds: egui::Vec2,
+    compact: bool,
     body: impl FnOnce(&mut Ui) -> R,
 ) -> Output<R> {
     let width = props
@@ -209,12 +252,21 @@ fn render_surface<R>(
     surface_frame(ui)
         .show(ui, |ui| {
             ui.set_width(width);
+            let mut header_cancel = None;
             let inner = egui::Frame::new()
-                .inner_margin(BODY_MARGIN)
+                .inner_margin(if compact {
+                    egui::Margin::ZERO
+                } else {
+                    BODY_MARGIN
+                })
                 .show(ui, |ui| {
                     crate::theme::layer(ui, theme::Level::Two, |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        header(ui, props);
+                        if compact {
+                            header_cancel = compact_header(ui, props);
+                        } else {
+                            header(ui, props, false);
+                        }
                         egui::ScrollArea::vertical()
                             .max_height(max_body_height)
                             .show(ui, body)
@@ -222,7 +274,10 @@ fn render_surface<R>(
                     })
                 })
                 .inner;
-            let (action, primary, cancel, back) = render_footer(ui, props, footer);
+            let (mut action, primary, cancel, back) = render_footer(ui, props, footer);
+            if header_cancel.as_ref().is_some_and(Response::clicked) {
+                action = Some(Action::Cancel);
+            }
             Output {
                 action,
                 inner,
@@ -254,14 +309,51 @@ fn contained_backdrop(ui: &Ui, id: Id, bounds: egui::Rect) -> Response {
     ui.interact(bounds, id, egui::Sense::click_and_drag())
 }
 
-fn header(ui: &mut Ui, props: &Props<'_>) {
+fn compact_header(ui: &mut Ui, props: &Props<'_>) -> Option<Response> {
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let width = (ui.available_width()
+            - if props.cancel_label.is_some() {
+                40.0
+            } else {
+                0.0
+            })
+        .max(0.0);
+        ui.allocate_ui_with_layout(egui::vec2(width, 0.0), Layout::top_down(Align::Min), |ui| {
+            ui.set_min_width(width);
+            egui::Frame::NONE
+                .inner_margin(egui::Margin {
+                    left: 16,
+                    right: 16,
+                    top: 16,
+                    bottom: 8,
+                })
+                .show(ui, |ui| header(ui, props, true));
+        });
+        props.cancel_label.map(|label| {
+            let response = button::IconProps {
+                label,
+                icon: crate::icons::X,
+                kind: button::Kind::Ghost,
+                size: ComponentSize::Medium,
+                enabled: !props.cancel_disabled.unwrap_or(false),
+            }
+            .show(ui);
+            crate::semantics::target(ui, &response, "modal.header-close");
+            response
+        })
+    })
+    .inner
+}
+
+fn header(ui: &mut Ui, props: &Props<'_>, compact: bool) {
     ui.add(
         egui::Label::new(crate::typography::semibold(props.title).size(22.0))
             .selectable(false)
             .wrap(),
     );
     if let Some(description) = props.description {
-        ui.add_space(16.0);
+        ui.add_space(if compact { 8.0 } else { 16.0 });
         let description = crate::text::balanced(ui, description, &TextStyle::Body, false);
         ui.add(
             egui::Label::new(
@@ -276,7 +368,9 @@ fn header(ui: &mut Ui, props: &Props<'_>) {
             .wrap(),
         );
     }
-    ui.add_space(24.0);
+    if !compact {
+        ui.add_space(24.0);
+    }
 }
 
 fn render_footer(
@@ -366,6 +460,51 @@ fn primary_activated(_kind: PrimaryKind, response: &Response) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detached_dialog_inherits_the_callers_theme_and_profile_accent() {
+        for presentation in [Presentation::Modal, Presentation::Contained] {
+            for dark in [false, true] {
+                let context = egui::Context::default();
+                crate::install(&context);
+                context.set_visuals(if dark {
+                    egui::Visuals::light()
+                } else {
+                    egui::Visuals::dark()
+                });
+                let accent = garmin_color::swatch::cyan::G40;
+                context
+                    .run_ui(egui::RawInput::default(), |ui| {
+                        *ui.visuals_mut() = if dark {
+                            egui::Visuals::dark()
+                        } else {
+                            egui::Visuals::light()
+                        };
+                        crate::theme::with_profile_accent(ui, accent, |ui| {
+                            let _ = show(
+                                ui,
+                                Id::new("scoped-dialog-style"),
+                                &Props {
+                                    title: "Activities",
+                                    description: None,
+                                    size: Size::Medium,
+                                    presentation,
+                                    cancel_label: Some("Close"),
+                                    cancel_disabled: None,
+                                    backdrop_closes: None,
+                                    primary: None,
+                                },
+                                |ui| {
+                                    assert_eq!(ui.visuals().dark_mode, dark);
+                                    assert_eq!(crate::theme::profile_accent(ui), accent);
+                                },
+                            );
+                        });
+                    })
+                    .drop_without_applying_deltas();
+            }
+        }
+    }
 
     #[test]
     fn danger_primary_accepts_keyboard_activation() {

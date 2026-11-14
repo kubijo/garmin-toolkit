@@ -15,6 +15,7 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let height = ctx.slider("height", 900.0, 480.0, 1000.0, 1.0);
     let application = ctx.toggle("application", false);
     let disabled = ctx.toggle("disabled", false);
+    let garmin_connect_configured = ctx.toggle("key saved", false);
     let accent_index = ctx.buttons("accent", &["default", "pink", "green"], 0);
     let initial_accent = match accent_index {
         1 => Some(garmin_color::swatch::magenta::G50),
@@ -53,6 +54,17 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                             avatar: None,
                         },
                         picture_enabled: true,
+                        garmin_connect: profile_settings::GarminConnectProps {
+                            load_progress: None,
+                            now: "2026-11-10T12:00:00Z".parse().expect("gallery timestamp"),
+                            today: jiff::civil::date(2026, 11, 13),
+                            configured: garmin_connect_configured,
+                            checking: false,
+                            facts: None,
+                            activities: None,
+                            activities_busy: false,
+                            batch: None,
+                        },
                         disabled,
                     },
                     application,
@@ -94,6 +106,7 @@ fn show_settings(
             navigation: shell::Navigation::Expanded,
             devices: &[],
             backup_enabled: true,
+            garmin_connect_configured: props.garmin_connect.configured,
             window_controls: None,
         },
         |ui| profile_settings::show(ui, props),

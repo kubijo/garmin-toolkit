@@ -1,16 +1,16 @@
 import 'infra/just/common.just'
 
-# Development tasks for builds, documentation, and dependency maintenance.
+# Development builds, quality gates, documentation, and dependency maintenance.
 mod dev 'infra/just/dev.just'
+
+# Pinned Garmin Personal API descriptor and generated-client verification.
+mod connect-api 'infra/garmin-connect'
 
 # Development-only recipes for rendering and inspecting the TUI.
 mod gallery 'infra/gallery'
 
 # Garmin Toolkit host for Home Assistant.
 mod hass 'apps/garmin-hass'
-
-# Repository quality gates and focused checks.
-mod qa 'infra/just/qa.just'
 
 # Local release assembly and artifact verification.
 mod release 'infra/just/release.just'
@@ -22,5 +22,4 @@ mod desktop 'apps/garmin-desktop'
 mod cli 'apps/garmin-cli'
 
 update:
-    cargo update
-    nix flake update
+    just dev::deps::update

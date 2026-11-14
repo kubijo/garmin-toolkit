@@ -137,6 +137,26 @@
             '';
           launcher = mkLauncher productionIdentity;
           demoLauncher = mkLauncher demoIdentity;
+          documentation = pkgs.runCommandLocal "garmin-desktop-notices" { } ''
+            destination="$out/share/doc/garmin-toolkit"
+            mkdir -p "$destination/assets/licenses" "$destination/infra/fixtures/fit"
+            for name in LICENSE-AGPL LICENSE-MIT LICENSE-APACHE COPYRIGHT.md THIRD_PARTY_NOTICES.md; do
+              install -m444 "${workspaceSrc}/$name" "$destination/$name"
+            done
+            install -m444 ${workspaceSrc}/assets/licenses/bundle-desktop.json \
+              "$destination/assets/licenses/bundle-desktop.json"
+            cp -r ${workspaceSrc}/infra/fixtures/fit/development-activities \
+              "$destination/infra/fixtures/fit/"
+          '';
+          installLauncher = launcher: destination: ''
+            cp -r ${launcher}/share ${destination}/
+            # Avoid cp --no-preserve=mode: its ACL updates fail on macOS builder virtiofs.
+            chmod -R u+w ${destination}/share
+          '';
+          installDocumentation = destination: ''
+            cp -r ${documentation}/share ${destination}/
+            chmod -R u+w ${destination}/share
+          '';
           mkPackage =
             { launcher, demo }:
             let
@@ -155,7 +175,10 @@
               // {
                 inherit cargoExtraArgs;
                 pname = "garmin-desktop" + lib.optionalString demo "-demo";
-                meta.mainProgram = "garmin-desktop";
+                meta = {
+                  mainProgram = "garmin-desktop";
+                  license = lib.licenses.agpl3Plus;
+                };
                 inherit cargoArtifacts;
                 nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ dirspec ];
                 # Keep dynamically loaded libraries and GIO modules in the
@@ -166,9 +189,9 @@
                     --prefix GIO_EXTRA_MODULES : ${lib.escapeShellArg linuxRuntimeEnvironment.GIO_EXTRA_MODULES}
                   )
                 '';
-                postInstall = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-                  cp -r --no-preserve=mode ${launcher}/share "$out/"
-                '';
+                postInstall =
+                  installDocumentation ''"$out"''
+                  + lib.optionalString pkgs.stdenv.hostPlatform.isLinux (installLauncher launcher ''"$out"'');
                 postFixup = ''
                   dirspec "$out" --spec ${packageSpec}
                 '';
@@ -194,8 +217,32 @@
               productionIdentity
               launcher
               src
+              workspaceSrc
               ;
             mkAppImage = nix-appimage.lib.${system}.mkAppImage;
+            appImageRuntime =
+              nix-appimage.packages.${system}.appimage-runtimes.appimage-type2-runtime.overrideAttrs
+                (
+                  previous:
+                  assert previous.src.outputHash == "sha256-GR3LMuWMSafQmc2RQyveue3sq+HYBtl+VkcZVYMS0CI=";
+                  {
+                    # Pinned runtime 01164bfc retains its upstream MIT notice in the source export.
+                    meta = (previous.meta or { }) // {
+                      license = lib.licenses.mit;
+                    };
+                  }
+                );
+            appRun = nix-appimage.packages.${system}.appimage-appruns.userns-chroot.overrideAttrs (
+              previous:
+              assert nix-appimage.rev == "7946addbc0d97e358a6d7aefe5e82310f0fe6b18";
+              {
+                # AppRun's original recipe embeds only main.c; retain the enclosing MIT notice too.
+                src = nix-appimage.outPath;
+                meta = (previous.meta or { }) // {
+                  license = lib.licenses.mit;
+                };
+              }
+            );
             withHostGraphics = import (workspaceSrc + "/infra/nix/host-graphics") { inherit pkgs; };
           };
           launcherCheck =
@@ -213,6 +260,27 @@
                 appstreamcli validate --no-net ${demoLauncher}/share/metainfo/${demoIdentity.id}.metainfo.xml
                 touch "$out"
               '';
+          launcherInstallCheck = pkgs.runCommandLocal "check-desktop-launcher-install" { } ''
+            mkdir -p "$TMPDIR/production" "$TMPDIR/demo"
+            ${installLauncher launcher ''"$TMPDIR/production"''}
+            ${installLauncher demoLauncher ''"$TMPDIR/demo"''}
+            diff --recursive --brief ${launcher}/share "$TMPDIR/production/share"
+            diff --recursive --brief ${demoLauncher}/share "$TMPDIR/demo/share"
+            ${installDocumentation ''"$TMPDIR/production"''}
+            ${installDocumentation ''"$TMPDIR/demo"''}
+            diff --recursive --brief ${documentation}/share/doc "$TMPDIR/production/share/doc"
+            diff --recursive --brief ${documentation}/share/doc "$TMPDIR/demo/share/doc"
+            test -w "$TMPDIR/production/share/applications/${productionIdentity.id}.desktop"
+            test -w "$TMPDIR/demo/share/applications/${demoIdentity.id}.desktop"
+            documentation=${documentation}/share/doc/garmin-toolkit
+            cmp ${workspaceSrc}/assets/licenses/bundle-desktop.json "$documentation/assets/licenses/bundle-desktop.json"
+            for name in LICENSE-AGPL LICENSE-MIT LICENSE-APACHE COPYRIGHT.md THIRD_PARTY_NOTICES.md; do
+              cmp "${workspaceSrc}/$name" "$documentation/$name"
+            done
+            diff --recursive --brief ${workspaceSrc}/infra/fixtures/fit/development-activities \
+              "$documentation/infra/fixtures/fit/development-activities"
+            touch "$out"
+          '';
         in
         {
           inherit
@@ -220,6 +288,7 @@
             launcher
             demoLauncher
             demoPackage
+            launcherInstallCheck
             package
             ;
           check =

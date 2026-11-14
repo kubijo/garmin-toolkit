@@ -46,7 +46,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
             ui.set_min_width(ui.available_width());
             if ui.available_width() < 560.0 {
                 heading(ui, props, palette);
-                ui.add_space(6.0);
+                ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if file_button(ui, props, button::Width::Fit).clicked() {
                         action = Some(Action::Files);

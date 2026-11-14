@@ -19,13 +19,17 @@ use thiserror::Error;
 
 mod activity;
 mod avatar;
+mod connect_cache;
 mod course;
+mod garmin_connect;
+pub use connect_cache::CachedAccount;
 mod ingestion;
 mod route;
 pub mod snapshot;
 
 pub use activity::{
-    ActivityProjection, ActivityProjectionError, StoredActivity, StoredActivitySummary,
+    ActivityExport, ActivityProjection, ActivityProjectionError, StoredActivity,
+    StoredActivitySummary,
 };
 pub use avatar::{AvatarPersistenceError, ProfileAvatar, StoredProfileAvatar};
 pub use course::{
