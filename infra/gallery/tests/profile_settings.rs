@@ -11,6 +11,7 @@ use garmin_ui::profile_settings::{self, Action};
 enum RequestState {
     Idle,
     Loading,
+    Cancelling,
 }
 
 struct Model {
@@ -40,6 +41,36 @@ fn test_facts() -> garmin_model::garmin_connect::AccountFacts {
         locale: Some("cs".into()),
         measurement_system: Some("metric".into()),
         time_zone: Some("Europe/Prague".into()),
+    }
+}
+
+fn apply_action(state: &mut Model, action: Action) {
+    match action {
+        Action::CancelGarminConnectRefresh => {
+            state.activity_request = RequestState::Cancelling;
+        }
+        Action::StartGarminConnectPageImport => start_page_import(state),
+        Action::CancelGarminConnectPageImport => {
+            if let Some(batch) = &mut state.batch {
+                batch.cancel();
+            }
+        }
+        Action::UpdateAccent(accent) => state.accent = accent,
+        Action::UpdatePreferences(preferences) => state.preferences = preferences,
+        Action::ChoosePicture => {}
+        Action::GarminConnectActivity(request) => state.requests.push(request),
+        Action::UpdateGarminConnectKey(key) => {
+            if state.reject {
+                state.facts = None;
+            } else {
+                state.facts = key.as_ref().map(|_| test_facts());
+                state.key = key;
+            }
+        }
+        Action::TestGarminConnectKey => {
+            state.checks += 1;
+            state.facts = Some(test_facts());
+        }
     }
 }
 
@@ -88,38 +119,23 @@ fn harness_for(language: garmin_i18n::Language, size: [f32; 2]) -> Harness<'stat
                             activities: state.activities.as_ref(),
                             activities_busy: matches!(
                                 state.activity_request,
-                                RequestState::Loading
+                                RequestState::Loading | RequestState::Cancelling
                             ),
                             load_progress: state.load_progress.as_ref(),
+                            refresh_state: if matches!(
+                                state.activity_request,
+                                RequestState::Cancelling
+                            ) {
+                                profile_settings::RefreshState::Cancelling
+                            } else {
+                                profile_settings::RefreshState::Running
+                            },
                             batch: state.batch.as_ref(),
                         },
                         disabled: state.disabled,
                     },
                 ) {
-                    match action {
-                        Action::StartGarminConnectPageImport => start_page_import(state),
-                        Action::CancelGarminConnectPageImport => {
-                            if let Some(batch) = &mut state.batch {
-                                batch.cancel();
-                            }
-                        }
-                        Action::UpdateAccent(accent) => state.accent = accent,
-                        Action::UpdatePreferences(preferences) => state.preferences = preferences,
-                        Action::ChoosePicture => {}
-                        Action::GarminConnectActivity(request) => state.requests.push(request),
-                        Action::UpdateGarminConnectKey(key) => {
-                            if state.reject {
-                                state.facts = None;
-                            } else {
-                                state.facts = key.as_ref().map(|_| test_facts());
-                                state.key = key;
-                            }
-                        }
-                        Action::TestGarminConnectKey => {
-                            state.checks += 1;
-                            state.facts = Some(test_facts());
-                        }
-                    }
+                    apply_action(state, action);
                 }
             },
             Model {
@@ -707,6 +723,41 @@ fn account_load_reports_real_phases_and_file_counts_without_a_cached_page() {
 }
 
 #[test]
+fn cache_refresh_cancellation_remains_available_while_busy_and_cannot_be_requested_twice() {
+    use garmin_model::garmin_connect::LoadProgress;
+    let mut view = harness_for(garmin_i18n::Language::English, [400.0, 760.0]);
+    view.state_mut().cloud = true;
+    view.state_mut().activity_request = RequestState::Loading;
+    view.state_mut().load_progress = Some(LoadProgress::Downloading {
+        total: 200,
+        downloaded: 40,
+        reused: 80,
+        unavailable: 2,
+        current: Some("Hamina Road Cycling".into()),
+    });
+    view.run_steps(4);
+    assert!(
+        !view
+            .get_by_label("Cancel refresh")
+            .accesskit_node()
+            .is_disabled()
+    );
+    view.get_by_label("Cancel refresh").click();
+    view.run_steps(4);
+    assert!(view.query_by_label("Cancelling refresh…").is_some());
+    assert!(
+        view.get_by_label("Cancel refresh")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert_eq!(view.state().requests.len(), 0);
+    view.state_mut().activity_request = RequestState::Idle;
+    view.state_mut().load_progress = None;
+    view.run_steps(4);
+    assert!(view.query_by_label("Cancel refresh").is_none());
+}
+
+#[test]
 #[ignore = "renders live account-load progress with a headless GPU"]
 fn capture_account_load_progress() -> Result<(), Box<dyn std::error::Error>> {
     use garmin_model::garmin_connect::LoadProgress;
@@ -739,6 +790,10 @@ fn capture_account_load_progress() -> Result<(), Box<dyn std::error::Error>> {
         view.run_steps(5);
         view.render()?
             .save(out.join(format!("{name}-downloading.png")))?;
+        view.get_by_label("Cancel refresh").click();
+        view.run_steps(5);
+        view.render()?
+            .save(out.join(format!("{name}-cancelling.png")))?;
     }
     Ok(())
 }
@@ -1238,6 +1293,23 @@ fn capture_cloud_browser() -> Result<(), Box<dyn std::error::Error>> {
         view.ctx.set_theme(theme);
         view.run();
         view.render()?.save(out.join(format!("{name}.png")))?;
+        view.state_mut().activity_request = RequestState::Loading;
+        view.state_mut().load_progress =
+            Some(garmin_model::garmin_connect::LoadProgress::Downloading {
+                total: 80,
+                downloaded: 40,
+                reused: 20,
+                unavailable: 0,
+                current: Some("Hamina Road Cycling".into()),
+            });
+        view.run_steps(4);
+        assert!(view.get_by_label("Cancel refresh").rect().bottom() <= size[1]);
+        assert!(view.get_by_label("Next page").rect().bottom() <= size[1]);
+        view.render()?
+            .save(out.join(format!("{name}-refreshing.png")))?;
+        view.state_mut().activity_request = RequestState::Idle;
+        view.state_mut().load_progress = None;
+        view.run_steps(4);
         let mut batch = if let Some(garmin_model::garmin_connect::ActivityResponse::Page {
             activities,
             ..

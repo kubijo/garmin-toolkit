@@ -49,11 +49,63 @@ async fn server(responses: Vec<(u16, Vec<u8>)>) -> (Client, tokio::task::JoinHan
         }
         requests
     });
-    (Client { origin }, peer)
+    (
+        Client {
+            origin,
+            ..Client::default()
+        },
+        peer,
+    )
 }
 
 fn key() -> PersonalApiKey {
     PersonalApiKey::from_string("private-test-key".into()).expect("test key")
+}
+
+#[tokio::test]
+async fn cancellation_during_token_exchange_does_not_request_profile() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+    let client = Client {
+        origin: format!("http://{}", listener.local_addr().expect("address")),
+        ..Client::default()
+    };
+    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_cancelled = cancelled.clone();
+    let peer = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("token request");
+        let mut request = Vec::new();
+        while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+            let mut bytes = [0; 4096];
+            let count = socket.read(&mut bytes).await.expect("headers");
+            assert!(count > 0);
+            request.extend_from_slice(&bytes[..count]);
+        }
+        server_cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+        let response = indoc::indoc! {"
+            HTTP/1.1 200 OK
+            Content-Length: 5
+            Connection: close
+
+            token"}
+        .replace('\n', "\r\n");
+        socket
+            .write_all(response.as_bytes())
+            .await
+            .expect("token response");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                .await
+                .is_err(),
+            "cancelled authentication must not start a profile request"
+        );
+    });
+    let result = client
+        .session_cancellable(&key(), &|| {
+            cancelled.load(std::sync::atomic::Ordering::SeqCst)
+        })
+        .await;
+    assert!(matches!(result, Err(Error::Cancelled)));
+    peer.await.expect("test server");
 }
 
 #[tokio::test]

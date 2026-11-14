@@ -70,6 +70,21 @@ impl Application {
         request: ActivityRequest,
         progress: impl Fn(garmin_model::garmin_connect::LoadProgress) + Send + Sync,
     ) -> Result<ConnectActivityResult, Error> {
+        self.garmin_connect_activity_cancellable(user, request, progress, || false)
+            .await
+    }
+
+    /// Performs a cloud request with cooperative refresh cancellation at durable boundaries.
+    /// # Errors
+    /// Returns the same bounded failures as [`Self::garmin_connect_activity`].
+    pub async fn garmin_connect_activity_cancellable(
+        &self,
+        user: UserContext,
+        request: ActivityRequest,
+        progress: impl Fn(garmin_model::garmin_connect::LoadProgress) + Send + Sync,
+        cancelled: impl Fn() -> bool + Send + Sync,
+    ) -> Result<ConnectActivityResult, Error> {
+        let progress = cache::Control::new(&progress, &cancelled);
         self.garmin_connect_configured(user).await?;
         let key = self
             .storage
@@ -83,15 +98,27 @@ impl Application {
             .entry(user.user_id())
             .or_default()
             .clone();
-        if matches!(
+        let refreshing = matches!(
             request,
             ActivityRequest::Load { .. }
                 | ActivityRequest::List { .. }
                 | ActivityRequest::RefreshAll { .. }
-        ) {
-            progress(garmin_model::garmin_connect::LoadProgress::Waiting);
+        );
+        if refreshing {
+            progress.report(garmin_model::garmin_connect::LoadProgress::Waiting);
         }
-        let _guard = lock.lock().await;
+        let acquire = lock.lock();
+        tokio::pin!(acquire);
+        let _guard = loop {
+            tokio::select! {
+                guard = &mut acquire => break guard,
+                () = tokio::time::sleep(std::time::Duration::from_millis(50)), if refreshing => {
+                    if cancelled() {
+                        return Ok(ConnectActivityResult::RefreshCancelled(None));
+                    }
+                }
+            }
+        };
         match request {
             ActivityRequest::List { start, filters } => {
                 self.cached_connect_page(user, &key, start, filters, None, &progress)

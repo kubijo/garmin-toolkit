@@ -29,6 +29,14 @@ pub struct Props<'a> {
     pub garmin_connect: GarminConnectProps<'a>,
 }
 
+/// State of a refresh's cooperative cancellation control.
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub enum RefreshState {
+    #[default]
+    Running,
+    Cancelling,
+}
+
 /// Profile-scoped cloud configuration, verification and browser state.
 pub struct GarminConnectProps<'a> {
     pub now: jiff::Timestamp,
@@ -39,6 +47,7 @@ pub struct GarminConnectProps<'a> {
     pub activities: Option<&'a garmin_model::garmin_connect::ActivityResponse>,
     pub activities_busy: bool,
     pub load_progress: Option<&'a garmin_model::garmin_connect::LoadProgress>,
+    pub refresh_state: RefreshState,
     pub batch: Option<&'a connect_activities::Batch>,
 }
 
@@ -47,6 +56,7 @@ pub struct GarminConnectProps<'a> {
 pub enum Action {
     StartGarminConnectPageImport,
     CancelGarminConnectPageImport,
+    CancelGarminConnectRefresh,
     GarminConnectActivity(garmin_model::garmin_connect::ActivityRequest),
     TestGarminConnectKey,
     UpdateGarminConnectKey(Option<garmin_model::garmin_connect::PersonalApiKey>),

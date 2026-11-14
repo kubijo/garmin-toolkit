@@ -12,6 +12,88 @@ use garmin_storage::{
 
 type TestResult = Result<(), Box<dyn Error>>;
 
+#[test]
+fn discarding_staging_preserves_published_and_other_profile_summaries() -> TestResult {
+    use garmin_model::{
+        garmin_connect::{AccountFacts, CachedActivity, RemoteActivity},
+        identity::SourceId,
+    };
+    use garmin_storage::CachedAccount;
+    block_on(async {
+        let root = tempfile::tempdir()?;
+        let storage = Storage::open(root.path().join("cache.sqlite3")).await?;
+        let owner = user(1)?;
+        let other = user(2)?;
+        storage.save_user(&owner).await?;
+        storage.save_user(&other).await?;
+        let mut account = CachedAccount {
+            source: SourceId::from_u128(1),
+            generation: "published".into(),
+            facts: AccountFacts {
+                display_name: Some("account".into()),
+                locale: None,
+                measurement_system: None,
+                time_zone: None,
+            },
+        };
+        let summaries = [CachedActivity {
+            activity: RemoteActivity {
+                id: 1,
+                imported: false,
+                sport: None,
+                name: "Ride".into(),
+                started_at: None,
+                distance_metres: None,
+                duration_seconds: None,
+            },
+            description: None,
+            activity_type: None,
+            started_local: None,
+        }];
+        storage
+            .stage_connect_summaries(owner.id(), account.source, &account.generation, &summaries)
+            .await?;
+        storage
+            .publish_connect_cache(owner.id(), "fingerprint", &account)
+            .await?;
+        storage
+            .discard_connect_summaries(owner.id(), account.source, &account.generation)
+            .await?;
+        assert_eq!(
+            storage
+                .connect_cache_summaries(owner.id(), &account)
+                .await?
+                .len(),
+            1
+        );
+        account.generation = "abandoned".into();
+        storage
+            .stage_connect_summaries(owner.id(), account.source, &account.generation, &summaries)
+            .await?;
+        storage
+            .stage_connect_summaries(other.id(), account.source, &account.generation, &summaries)
+            .await?;
+        storage
+            .discard_connect_summaries(owner.id(), account.source, &account.generation)
+            .await?;
+        assert_eq!(
+            storage
+                .connect_cache_summaries(owner.id(), &account)
+                .await?
+                .len(),
+            0
+        );
+        assert_eq!(
+            storage
+                .connect_cache_summaries(other.id(), &account)
+                .await?
+                .len(),
+            1
+        );
+        Ok(())
+    })
+}
+
 fn user(id: u128) -> Result<User, Box<dyn Error>> {
     Ok(User::from_parts(
         UserId::from_u128(id),

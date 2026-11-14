@@ -4,6 +4,26 @@ use garmin_model::garmin_connect::{ActivityRequest, ActivityResponse, RemoteActi
 use garmin_service_api::ConnectActivityResult;
 
 #[test]
+fn refresh_cancellation_is_request_scoped_and_completion_clears_it()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_directory, mut desktop) = super::file_window_tests::desktop()?;
+    let user = desktop.profiles[0].user.id();
+    let token = garmin_progress::CancellationToken::default();
+    desktop.connect_cancellation = Some((UserId::new_v4(), token.clone()));
+    desktop.handle_profile_settings_action(0, profile_settings::Action::CancelGarminConnectRefresh);
+    assert!(!token.is_cancelled());
+    desktop.connect_cancellation = Some((user, token.clone()));
+    desktop.connect_activity_loading = Some(user);
+    desktop.handle_profile_settings_action(0, profile_settings::Action::CancelGarminConnectRefresh);
+    assert!(token.is_cancelled());
+    desktop.connect_activity_checked(user, Ok(ConnectActivityResult::RefreshCancelled(None)));
+    assert!(desktop.connect_cancellation.is_none());
+    assert!(desktop.connect_activity_loading.is_none());
+    assert!(!desktop.preferences_saving);
+    Ok(())
+}
+
+#[test]
 fn cache_progress_is_owner_scoped_and_cleared_on_completion()
 -> Result<(), Box<dyn std::error::Error>> {
     use garmin_model::garmin_connect::{ActivityFailure, ActivityFailureKind, LoadProgress};

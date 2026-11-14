@@ -99,7 +99,9 @@ fn browser(ui: &mut Ui, props: &Props<'_>, enabled: bool) -> Option<super::Actio
     }) = props.garmin_connect.activities
     else {
         if props.garmin_connect.activities_busy {
-            progress(ui, props);
+            if progress(ui, props) {
+                return Some(super::Action::CancelGarminConnectRefresh);
+            }
         } else {
             let refresh = format_message!(props.intl, default_message: "Refresh");
             if action(ui, &refresh, Some(icons::ARROWS_CLOCKWISE), enabled) {
@@ -254,8 +256,9 @@ fn toolbar(
             .garmin_connect
             .batch
             .is_none_or(|batch| !batch.running())
+        && progress(ui, props)
     {
-        progress(ui, props);
+        result = Some(super::Action::CancelGarminConnectRefresh);
     }
     result
 }
@@ -497,7 +500,7 @@ fn millimeters(metres: f64) -> u64 {
     (metres * 1000.0).round() as u64
 }
 
-fn progress(ui: &mut Ui, props: &Props<'_>) {
+fn progress(ui: &mut Ui, props: &Props<'_>) -> bool {
     use garmin_model::garmin_connect::LoadProgress;
     let (label, detail, value) = match props.garmin_connect.load_progress {
         None | Some(LoadProgress::Waiting) => (
@@ -545,6 +548,12 @@ fn progress(ui: &mut Ui, props: &Props<'_>) {
             )
         }
     };
+    let cancelling = props.garmin_connect.refresh_state == super::RefreshState::Cancelling;
+    let label = if cancelling {
+        format_message!(props.intl, default_message: "Cancelling refresh…")
+    } else {
+        label
+    };
     ui.vertical(|ui| {
         crate::progress::show(
             ui,
@@ -555,7 +564,15 @@ fn progress(ui: &mut Ui, props: &Props<'_>) {
                 height: Some(8.0),
             },
         );
-    });
+        props.garmin_connect.load_progress.is_some()
+            && action(
+                ui,
+                &format_message!(props.intl, default_message: "Cancel refresh"),
+                None,
+                !cancelling,
+            )
+    })
+    .inner
 }
 
 fn action(ui: &mut Ui, label: &str, icon: Option<icons::Icon>, enabled: bool) -> bool {

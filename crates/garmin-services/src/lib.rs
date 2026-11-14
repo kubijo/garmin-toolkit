@@ -174,6 +174,8 @@ impl From<StoredActivity> for ActivityDetails {
 /// Shared in-process application service.
 pub struct Application {
     storage: Storage,
+    #[cfg(feature = "integration-hooks")]
+    connect_test_origin: std::sync::Mutex<Option<std::net::SocketAddr>>,
     connect_cache_locks: std::sync::Mutex<
         std::collections::BTreeMap<
             garmin_model::identity::UserId,
@@ -198,12 +200,30 @@ impl Application {
     pub const fn new(storage: Storage) -> Self {
         Self {
             storage,
+            #[cfg(feature = "integration-hooks")]
+            connect_test_origin: std::sync::Mutex::new(None),
             connect_cache_locks: std::sync::Mutex::new(std::collections::BTreeMap::new()),
             #[cfg(test)]
             course_generation_gate: std::sync::Mutex::new(None),
             #[cfg(feature = "integration-hooks")]
             integration_gate: std::sync::Mutex::new(None),
         }
+    }
+
+    /// Selects a loopback-only synthetic Garmin service for integration tests.
+    /// # Errors
+    /// Rejects addresses outside loopback.
+    #[cfg(feature = "integration-hooks")]
+    pub fn set_connect_test_origin(
+        &self,
+        address: std::net::SocketAddr,
+    ) -> Result<(), garmin_connect::Error> {
+        garmin_connect::Client::integration_loopback(address)?;
+        *self
+            .connect_test_origin
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(address);
+        Ok(())
     }
 
     #[cfg(feature = "integration-hooks")]
@@ -728,6 +748,8 @@ pub enum Error {
     GarminConnectOriginalUnavailable(String),
     #[error("Garmin activity cache could not finish downloading: {0}")]
     GarminConnectCache(String),
+    #[error("Garmin activity refresh cancelled")]
+    GarminConnectRefreshCancelled,
     #[error(transparent)]
     Storage(#[from] garmin_storage::Error),
     #[error("profile {0} does not exist")]

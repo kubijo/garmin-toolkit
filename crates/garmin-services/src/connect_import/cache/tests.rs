@@ -14,6 +14,17 @@ struct MockRemote {
     fail: Option<(i64, u16)>,
     pages: Mutex<Vec<u32>>,
     downloads: Mutex<Vec<i64>>,
+    gate: Option<std::sync::Arc<DownloadGate>>,
+}
+
+#[derive(Default)]
+struct DownloadGate {
+    started: tokio::sync::Notify,
+    finish: tokio::sync::Notify,
+}
+
+fn uninterrupted() -> Control<'static> {
+    Control::new(&|_| {}, &|| false)
 }
 
 impl MockRemote {
@@ -64,6 +75,7 @@ impl MockRemote {
             fail: Some((1, 404)),
             pages: Mutex::new(Vec::new()),
             downloads: Mutex::new(Vec::new()),
+            gate: None,
         }
     }
 }
@@ -85,6 +97,10 @@ impl Remote for MockRemote {
     }
     async fn download(&self, id: i64) -> Result<garmin_connect::Download, garmin_connect::Error> {
         self.downloads.lock().unwrap().push(id);
+        if let Some(gate) = &self.gate {
+            gate.started.notify_one();
+            gate.finish.notified().await;
+        }
         if let Some((failed, status)) = self.fail
             && failed == id
         {
@@ -114,6 +130,210 @@ async fn application(path: &std::path::Path) -> (Application, UserContext, Perso
         .await
         .unwrap();
     (Application::new(storage), UserContext::new(user.id()), key)
+}
+
+#[tokio::test]
+async fn cancelled_initial_load_returns_a_normal_outcome_without_contacting_garmin() {
+    let root = tempfile::tempdir().unwrap();
+    let (app, user, _) = application(&root.path().join("cache.sqlite3")).await;
+    let result = app
+        .garmin_connect_activity_cancellable(
+            user,
+            ActivityRequest::Load {
+                start: 0,
+                filters: ActivityFilters::default(),
+            },
+            |_| {},
+            || true,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        result,
+        ConnectActivityResult::RefreshCancelled(None)
+    ));
+    assert_eq!(app.activities(user).await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn cancelling_an_index_keeps_the_previous_snapshot_even_on_the_final_page() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("cache.sqlite3");
+    let (app, user, key) = application(&path).await;
+    let database = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&path)
+            .read_only(true),
+    )
+    .await
+    .unwrap();
+    let mut remote = MockRemote::new();
+    let fingerprint = credential_hash(&key);
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
+        .await
+        .unwrap();
+    let previous = cached_account(&app, user, &fingerprint).await;
+    let summaries = remote.summaries.clone();
+    for count in [1, 23] {
+        remote.summaries = summaries[..count].to_vec();
+        remote.summaries[0].activity.name = "Unpublished edit".into();
+        remote.pages.lock().unwrap().clear();
+        remote.downloads.lock().unwrap().clear();
+        let cancel = garmin_progress::CancellationToken::default();
+        let report = |progress| {
+            if matches!(progress, LoadProgress::Indexing { pages: 1, .. }) {
+                cancel.cancel();
+            }
+        };
+        let result = app
+            .load_connect_cache(
+                user,
+                &fingerprint,
+                &remote,
+                Refresh::Full,
+                &Control::new(&report, &|| cancel.is_cancelled()),
+            )
+            .await;
+        assert!(matches!(result, Err(Error::GarminConnectRefreshCancelled)));
+        assert_eq!(*remote.pages.lock().unwrap(), [0]);
+        assert!(remote.downloads.lock().unwrap().is_empty());
+        let retained = cached_account(&app, user, &fingerprint).await;
+        assert_eq!(retained.generation, previous.generation);
+        let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM connect_cache_summaries")
+            .fetch_one(&database)
+            .await
+            .unwrap();
+        assert_eq!(
+            stored, 23,
+            "cancelled generations must be physically removed"
+        );
+        assert_eq!(
+            app.storage
+                .connect_cache_status(user.user_id(), &retained)
+                .await
+                .unwrap()
+                .total,
+            23
+        );
+    }
+}
+
+#[tokio::test]
+async fn cancellation_finishes_the_in_flight_file_and_resumes_without_redownloading_it() {
+    let root = tempfile::tempdir().unwrap();
+    let (app, user, key) = application(&root.path().join("cache.sqlite3")).await;
+    let mut remote = MockRemote::new();
+    remote.fail = None;
+    let gate = std::sync::Arc::new(DownloadGate::default());
+    remote.gate = Some(gate.clone());
+    let cancel = garmin_progress::CancellationToken::default();
+    let cancelled = || cancel.is_cancelled();
+    let report = |_| {};
+    let control = Control::new(&report, &cancelled);
+    let fingerprint = credential_hash(&key);
+    let load = app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &control);
+    let stop = async {
+        gate.started.notified().await;
+        cancel.cancel();
+        gate.finish.notify_one();
+    };
+    let (result, ()) = tokio::join!(load, stop);
+    assert!(matches!(result, Err(Error::GarminConnectRefreshCancelled)));
+    assert_eq!(*remote.downloads.lock().unwrap(), [23]);
+    let response = app
+        .cancelled_connect_page(user, &key, 0, ActivityFilters::default())
+        .await
+        .unwrap();
+    let ConnectActivityResult::RefreshCancelled(Some(ActivityResponse::Page { cache, .. })) =
+        response
+    else {
+        panic!("cancelled refresh returns the published page")
+    };
+    assert_eq!((cache.total, cache.downloaded), (23, 1));
+    remote.gate = None;
+    app.load_connect_cache(
+        user,
+        &fingerprint,
+        &remote,
+        Refresh::Recent,
+        &uninterrupted(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        remote
+            .downloads
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|id| **id == 23)
+            .count(),
+        1
+    );
+    let account = cached_account(&app, user, &fingerprint).await;
+    assert_eq!(
+        app.storage
+            .connect_cache_status(user.user_id(), &account)
+            .await
+            .unwrap()
+            .downloaded,
+        23
+    );
+    assert_eq!(app.activities(user).await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn cancelling_a_queued_request_preserves_the_index_without_waiting_for_the_lock() {
+    let root = tempfile::tempdir().unwrap();
+    let (app, user, key) = application(&root.path().join("cache.sqlite3")).await;
+    let remote = MockRemote::new();
+    let fingerprint = credential_hash(&key);
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
+        .await
+        .unwrap();
+    let lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+    app.connect_cache_locks
+        .lock()
+        .unwrap()
+        .insert(user.user_id(), lock.clone());
+    let _guard = lock.lock().await;
+    let cancel = garmin_progress::CancellationToken::default();
+    let waiting = tokio::sync::Notify::new();
+    let request = app.garmin_connect_activity_cancellable(
+        user,
+        ActivityRequest::Load {
+            start: 0,
+            filters: ActivityFilters::default(),
+        },
+        |progress| {
+            if matches!(progress, LoadProgress::Waiting) {
+                waiting.notify_one();
+            }
+        },
+        || cancel.is_cancelled(),
+    );
+    let stop = async {
+        waiting.notified().await;
+        cancel.cancel();
+    };
+    let (result, ()) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(request, stop)
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        result.unwrap(),
+        ConnectActivityResult::RefreshCancelled(None)
+    ));
+    let account = cached_account(&app, user, &fingerprint).await;
+    assert_eq!(
+        app.storage
+            .connect_cache_status(user.user_id(), &account)
+            .await
+            .unwrap()
+            .total,
+        23
+    );
 }
 
 async fn cached_account(app: &Application, user: UserContext, fingerprint: &str) -> CachedAccount {
@@ -156,7 +376,7 @@ async fn full_account_cache_survives_restart_and_searches_beyond_page_one_withou
     let (app, user, key) = application(&path).await;
     let remote = MockRemote::new();
     let fingerprint = credential_hash(&key);
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
         .await
         .unwrap();
     assert_eq!(*remote.pages.lock().unwrap(), [0, 20]);
@@ -216,7 +436,7 @@ async fn full_account_cache_survives_restart_and_searches_beyond_page_one_withou
         (23, 22, 1)
     );
     import_cached_preview(&app, user).await;
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
         .await
         .unwrap();
     assert_eq!(
@@ -268,9 +488,15 @@ async fn progress_tracks_indexing_downloads_reuse_and_unavailable_originals() {
         }
         updates.lock().unwrap().push(value);
     };
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &report)
-        .await
-        .unwrap();
+    app.load_connect_cache(
+        user,
+        &fingerprint,
+        &remote,
+        Refresh::Full,
+        &Control::new(&report, &|| false),
+    )
+    .await
+    .unwrap();
     {
         let updates = updates.lock().unwrap();
         assert!(updates.contains(&LoadProgress::Indexing {
@@ -309,9 +535,15 @@ async fn progress_tracks_indexing_downloads_reuse_and_unavailable_originals() {
     }
     updates.lock().unwrap().clear();
     remote.downloads.lock().unwrap().clear();
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &report)
-        .await
-        .unwrap();
+    app.load_connect_cache(
+        user,
+        &fingerprint,
+        &remote,
+        Refresh::Full,
+        &Control::new(&report, &|| false),
+    )
+    .await
+    .unwrap();
     assert!(
         updates
             .lock()
@@ -344,7 +576,7 @@ async fn rate_limits_leave_searchable_metadata_and_resume_without_redownloading_
     remote.fail = Some((22, 429));
     let fingerprint = credential_hash(&key);
     assert!(
-        app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+        app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
             .await
             .is_err()
     );
@@ -360,9 +592,15 @@ async fn rate_limits_leave_searchable_metadata_and_resume_without_redownloading_
     assert_eq!(*remote.downloads.lock().unwrap(), [23, 22]);
     remote.fail = None;
     remote.pages.lock().unwrap().clear();
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
-        .await
-        .unwrap();
+    app.load_connect_cache(
+        user,
+        &fingerprint,
+        &remote,
+        Refresh::Recent,
+        &uninterrupted(),
+    )
+    .await
+    .unwrap();
     assert_eq!(*remote.pages.lock().unwrap(), [0]);
     assert_eq!(
         remote
@@ -393,7 +631,7 @@ async fn incremental_refresh_preserves_history_retries_missing_files_and_full_re
     let (app, user, key) = application(&root.path().join("cache.sqlite3")).await;
     let mut remote = MockRemote::new();
     let fingerprint = credential_hash(&key);
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
         .await
         .unwrap();
     let mut newest = remote.summaries[0].clone();
@@ -418,9 +656,15 @@ async fn incremental_refresh_preserves_history_retries_missing_files_and_full_re
     remote.fail = None;
     remote.pages.lock().unwrap().clear();
     remote.downloads.lock().unwrap().clear();
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
-        .await
-        .unwrap();
+    app.load_connect_cache(
+        user,
+        &fingerprint,
+        &remote,
+        Refresh::Recent,
+        &uninterrupted(),
+    )
+    .await
+    .unwrap();
     assert_eq!(*remote.pages.lock().unwrap(), [0]);
     assert_eq!(*remote.downloads.lock().unwrap(), [24, 1]);
     let account = cached_account(&app, user, &fingerprint).await;
@@ -450,7 +694,7 @@ async fn incremental_refresh_preserves_history_retries_missing_files_and_full_re
     );
     remote.pages.lock().unwrap().clear();
     remote.downloads.lock().unwrap().clear();
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
         .await
         .unwrap();
     assert_eq!(*remote.pages.lock().unwrap(), [0, 20]);
@@ -487,7 +731,7 @@ async fn incremental_refresh_reads_all_new_pages_before_the_first_overlap() {
     let mut remote = MockRemote::new();
     remote.fail = None;
     let fingerprint = credential_hash(&key);
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
         .await
         .unwrap();
     let template = remote.summaries[0].clone();
@@ -502,9 +746,15 @@ async fn incremental_refresh_reads_all_new_pages_before_the_first_overlap() {
     remote.summaries = new;
     remote.pages.lock().unwrap().clear();
     remote.downloads.lock().unwrap().clear();
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
-        .await
-        .unwrap();
+    app.load_connect_cache(
+        user,
+        &fingerprint,
+        &remote,
+        Refresh::Recent,
+        &uninterrupted(),
+    )
+    .await
+    .unwrap();
     assert_eq!(*remote.pages.lock().unwrap(), [0, 20]);
     assert_eq!(remote.downloads.lock().unwrap().len(), 25);
     let account = cached_account(&app, user, &fingerprint).await;
@@ -525,13 +775,13 @@ async fn failed_metadata_refresh_preserves_the_previous_snapshot_and_account_swi
     let (app, user, key) = application(&root.path().join("cache.sqlite3")).await;
     let mut remote = MockRemote::new();
     let fingerprint = credential_hash(&key);
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
         .await
         .unwrap();
     let previous = cached_account(&app, user, &fingerprint).await;
     remote.summaries[20] = remote.summaries[0].clone();
     assert!(
-        app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+        app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
             .await
             .is_err()
     );
@@ -549,9 +799,15 @@ async fn failed_metadata_refresh_preserves_the_previous_snapshot_and_account_swi
     remote.fail = None;
     remote.facts.display_name = Some("different-account".into());
     let count = remote.downloads.lock().unwrap().len();
-    app.load_connect_cache(user, "replacement-key", &remote, Refresh::Full, &|_| {})
-        .await
-        .unwrap();
+    app.load_connect_cache(
+        user,
+        "replacement-key",
+        &remote,
+        Refresh::Full,
+        &uninterrupted(),
+    )
+    .await
+    .unwrap();
     let switched = app
         .storage
         .connect_cache_account(user.user_id(), "replacement-key")
@@ -581,7 +837,7 @@ async fn interrupted_incremental_indexing_keeps_the_previous_snapshot_and_downlo
     let (app, user, key) = application(&root.path().join("cache.sqlite3")).await;
     let mut remote = MockRemote::new();
     let fingerprint = credential_hash(&key);
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
         .await
         .unwrap();
     let previous = cached_account(&app, user, &fingerprint).await;
@@ -596,9 +852,15 @@ async fn interrupted_incremental_indexing_keeps_the_previous_snapshot_and_downlo
     remote.summaries[20] = remote.summaries[0].clone();
     remote.downloads.lock().unwrap().clear();
     assert!(
-        app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
-            .await
-            .is_err()
+        app.load_connect_cache(
+            user,
+            &fingerprint,
+            &remote,
+            Refresh::Recent,
+            &uninterrupted()
+        )
+        .await
+        .is_err()
     );
     let retained = cached_account(&app, user, &fingerprint).await;
     assert_eq!(retained.generation, previous.generation);
@@ -620,16 +882,28 @@ async fn incremental_request_for_a_different_account_falls_back_to_full_enumerat
     let mut remote = MockRemote::new();
     remote.fail = None;
     let fingerprint = credential_hash(&key);
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
-        .await
-        .unwrap();
+    app.load_connect_cache(
+        user,
+        &fingerprint,
+        &remote,
+        Refresh::Recent,
+        &uninterrupted(),
+    )
+    .await
+    .unwrap();
     let original = cached_account(&app, user, &fingerprint).await;
     remote.facts.display_name = Some("different-account".into());
     remote.pages.lock().unwrap().clear();
     remote.downloads.lock().unwrap().clear();
-    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
-        .await
-        .unwrap();
+    app.load_connect_cache(
+        user,
+        &fingerprint,
+        &remote,
+        Refresh::Recent,
+        &uninterrupted(),
+    )
+    .await
+    .unwrap();
     assert_eq!(*remote.pages.lock().unwrap(), [0, 20]);
     assert_eq!(remote.downloads.lock().unwrap().len(), 23);
     let switched = cached_account(&app, user, &fingerprint).await;

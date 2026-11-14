@@ -44,6 +44,35 @@ pub(super) enum Refresh {
     Full,
 }
 
+pub(super) struct Control<'a> {
+    progress: &'a (dyn Fn(LoadProgress) + Send + Sync),
+    cancelled: &'a (dyn Fn() -> bool + Send + Sync),
+}
+
+impl<'a> Control<'a> {
+    pub(super) fn new(
+        progress: &'a (dyn Fn(LoadProgress) + Send + Sync),
+        cancelled: &'a (dyn Fn() -> bool + Send + Sync),
+    ) -> Self {
+        Self {
+            progress,
+            cancelled,
+        }
+    }
+
+    pub(super) fn report(&self, progress: LoadProgress) {
+        (self.progress)(progress);
+    }
+
+    fn check(&self) -> Result<(), Error> {
+        if (self.cancelled)() {
+            Err(Error::GarminConnectRefreshCancelled)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 impl Application {
     pub(super) async fn cached_connect_page(
         &self,
@@ -52,7 +81,7 @@ impl Application {
         start: u32,
         filters: ActivityFilters,
         refresh: Option<Refresh>,
-        progress: &(impl Fn(LoadProgress) + Send + Sync),
+        progress: &Control<'_>,
     ) -> Result<ConnectActivityResult, Error> {
         if !filters.valid() {
             return Err(garmin_connect::Error::InvalidSelection.into());
@@ -65,8 +94,27 @@ impl Application {
         let mut warning = None;
         if refresh.is_some() || existing.is_none() {
             let result = async {
-                progress(LoadProgress::Connecting);
-                let session = garmin_connect::Client::default().session(key).await?;
+                progress.check()?;
+                progress.report(LoadProgress::Connecting);
+                let client = garmin_connect::Client::default();
+                #[cfg(feature = "integration-hooks")]
+                let client = if let Some(address) = *self
+                    .connect_test_origin
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                {
+                    garmin_connect::Client::integration_loopback(address)?
+                } else {
+                    client
+                };
+                let session = client
+                    .session_cancellable(key, &|| (progress.cancelled)())
+                    .await;
+                progress.check()?;
+                if matches!(session, Err(garmin_connect::Error::Cancelled)) {
+                    return Err(Error::GarminConnectRefreshCancelled);
+                }
+                let session = session?;
                 self.load_connect_cache(
                     user,
                     &fingerprint,
@@ -78,6 +126,9 @@ impl Application {
             }
             .await;
             if let Err(error) = result {
+                if matches!(error, Error::GarminConnectRefreshCancelled) {
+                    return self.cancelled_connect_page(user, key, start, filters).await;
+                }
                 if self
                     .storage
                     .connect_cache_account(user.user_id(), &fingerprint)
@@ -96,6 +147,31 @@ impl Application {
             .ok_or(garmin_connect::Error::MissingAccountIdentity)?;
         self.query_connect_cache(user, &account, start, filters, warning)
             .await
+    }
+
+    async fn cancelled_connect_page(
+        &self,
+        user: UserContext,
+        key: &PersonalApiKey,
+        start: u32,
+        filters: ActivityFilters,
+    ) -> Result<ConnectActivityResult, Error> {
+        let account = self
+            .storage
+            .connect_cache_account(user.user_id(), &credential_hash(key))
+            .await?;
+        let page = if let Some(account) = account {
+            let ConnectActivityResult::State(page) = self
+                .query_connect_cache(user, &account, start, filters, None)
+                .await?
+            else {
+                unreachable!("cache queries return pages")
+            };
+            Some(page)
+        } else {
+            None
+        };
+        Ok(ConnectActivityResult::RefreshCancelled(page))
     }
 
     async fn query_connect_cache(
@@ -164,25 +240,57 @@ impl Application {
         fingerprint: &str,
         remote: &impl Remote,
         refresh: Refresh,
-        progress: &(impl Fn(LoadProgress) + Send + Sync),
+        progress: &Control<'_>,
     ) -> Result<(), Error> {
         let account = CachedAccount {
             source: SourceId::from_u128(connect_source_id(user, remote.account())?.as_u128()),
             generation: uuid::Uuid::new_v4().to_string(),
             facts: remote.account().clone(),
         };
+        let result = async {
+            let retained = self
+                .retained_connect_summaries(user, fingerprint, account.source, refresh)
+                .await?;
+            let seen = self
+                .index_connect_cache(user, remote, progress, &account, retained)
+                .await?;
+            progress.check()?;
+            self.storage
+                .publish_connect_cache(user.user_id(), fingerprint, &account)
+                .await?;
+            Ok::<_, Error>(seen)
+        }
+        .await;
+        if result.is_err() {
+            self.storage
+                .discard_connect_summaries(user.user_id(), account.source, &account.generation)
+                .await?;
+        }
+        let seen = result?;
+        self.download_connect_originals(user, &account, seen, remote, progress)
+            .await
+    }
+
+    async fn index_connect_cache(
+        &self,
+        user: UserContext,
+        remote: &impl Remote,
+        progress: &Control<'_>,
+        account: &CachedAccount,
+        mut retained: std::collections::BTreeMap<i64, CachedActivity>,
+    ) -> Result<std::collections::BTreeMap<i64, String>, Error> {
         let mut start = 0_u32;
-        let mut retained = self
-            .retained_connect_summaries(user, fingerprint, account.source, refresh)
-            .await?;
         let mut seen = std::collections::BTreeMap::new();
         let mut pages = 0;
-        progress(LoadProgress::Indexing {
+        progress.report(LoadProgress::Indexing {
             discovered: 0,
             pages,
         });
         loop {
-            let summaries = remote.activities(start).await?;
+            progress.check()?;
+            let summaries = remote.activities(start).await;
+            progress.check()?;
+            let summaries = summaries?;
             let overlap = summaries
                 .iter()
                 .any(|summary| retained.contains_key(&summary.activity.id));
@@ -206,7 +314,7 @@ impl Application {
                 )
                 .await?;
             pages += 1;
-            progress(LoadProgress::Indexing {
+            progress.report(LoadProgress::Indexing {
                 discovered: seen.len(),
                 pages,
             });
@@ -217,6 +325,7 @@ impl Application {
                 .checked_add(20)
                 .ok_or(garmin_connect::Error::InvalidSelection)?;
         }
+        progress.check()?;
         let retained = retained.into_values().collect::<Vec<_>>();
         for summary in &retained {
             seen.insert(summary.activity.id, summary.activity.name.clone());
@@ -229,11 +338,7 @@ impl Application {
                 &retained,
             )
             .await?;
-        self.storage
-            .publish_connect_cache(user.user_id(), fingerprint, &account)
-            .await?;
-        self.download_connect_originals(user, &account, seen, remote, progress)
-            .await
+        Ok(seen)
     }
 
     async fn retained_connect_summaries(
@@ -267,7 +372,7 @@ impl Application {
         account: &CachedAccount,
         seen: std::collections::BTreeMap<i64, String>,
         remote: &impl Remote,
-        progress: &(impl Fn(LoadProgress) + Send + Sync),
+        progress: &Control<'_>,
     ) -> Result<(), Error> {
         let status = self
             .storage
@@ -280,11 +385,13 @@ impl Application {
             unavailable: 0,
             current: None,
         };
-        progress(state.clone());
+        progress.report(state.clone());
+        progress.check()?;
         if status.downloaded == seen.len() {
             return Ok(());
         }
         for (id, name) in seen.into_iter().rev() {
+            progress.check()?;
             if self
                 .storage
                 .connect_has_original(user.user_id(), account.source, id)
@@ -295,7 +402,8 @@ impl Application {
             if let LoadProgress::Downloading { current, .. } = &mut state {
                 *current = Some(name);
             }
-            progress(state.clone());
+            progress.report(state.clone());
+            progress.check()?;
             let result = async {
                 let download = remote.download(id).await?;
                 if download.account.display_name != account.facts.display_name {
@@ -305,6 +413,9 @@ impl Application {
                 Ok::<_, Error>(download.archive)
             }
             .await;
+            if result.is_err() {
+                progress.check()?;
+            }
             let result = match result {
                 Ok(bytes) => Ok(bytes),
                 Err(error) => {
@@ -336,7 +447,8 @@ impl Application {
             } else {
                 false
             };
-            progress(state.clone());
+            progress.report(state.clone());
+            progress.check()?;
             if finished {
                 break;
             }

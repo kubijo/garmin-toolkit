@@ -175,6 +175,8 @@ pub enum ConnectActivityResult {
         digest: String,
         imported: bool,
     },
+    /// A normal cancellation. With no replacement page, the client keeps its current view.
+    RefreshCancelled(Option<garmin_model::garmin_connect::ActivityResponse>),
 }
 
 #[garmin_macros::portable]
@@ -507,6 +509,7 @@ mod rpc {
             user_id: UserId,
             request: garmin_model::garmin_connect::ActivityRequest,
             progress: Option<rch::watch::Sender<garmin_model::garmin_connect::LoadProgress>>,
+            cancellation: Option<rch::watch::Receiver<bool>>,
         ) -> Result<
             Result<crate::ConnectActivityResult, garmin_model::garmin_connect::ActivityFailure>,
             rtc::CallError,
