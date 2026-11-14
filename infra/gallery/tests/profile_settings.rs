@@ -418,6 +418,17 @@ fn cloud_filters_validate_dates_reset_paging_and_preserve_applied_queries() {
             filters: filters.clone()
         })
     );
+    view.get_by_label("Refresh options").click();
+    view.run();
+    view.get_by_label("Full refresh").click();
+    view.run();
+    assert_eq!(
+        view.state().requests.last(),
+        Some(&ActivityRequest::RefreshAll {
+            start: 0,
+            filters: filters.clone()
+        })
+    );
     view.get_by_label("Next page").click();
     view.run();
     assert_eq!(

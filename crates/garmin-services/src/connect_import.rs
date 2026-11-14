@@ -85,19 +85,39 @@ impl Application {
             .clone();
         if matches!(
             request,
-            ActivityRequest::Load { .. } | ActivityRequest::List { .. }
+            ActivityRequest::Load { .. }
+                | ActivityRequest::List { .. }
+                | ActivityRequest::RefreshAll { .. }
         ) {
             progress(garmin_model::garmin_connect::LoadProgress::Waiting);
         }
         let _guard = lock.lock().await;
         match request {
             ActivityRequest::List { start, filters } => {
-                self.cached_connect_page(user, &key, start, filters, false, &progress)
+                self.cached_connect_page(user, &key, start, filters, None, &progress)
                     .await
             }
             ActivityRequest::Load { start, filters } => {
-                self.cached_connect_page(user, &key, start, filters, true, &progress)
-                    .await
+                self.cached_connect_page(
+                    user,
+                    &key,
+                    start,
+                    filters,
+                    Some(cache::Refresh::Recent),
+                    &progress,
+                )
+                .await
+            }
+            ActivityRequest::RefreshAll { start, filters } => {
+                self.cached_connect_page(
+                    user,
+                    &key,
+                    start,
+                    filters,
+                    Some(cache::Refresh::Full),
+                    &progress,
+                )
+                .await
             }
             ActivityRequest::Preview { id } => {
                 let (download, details) = self.cached_connect_download(user, &key, id).await?;
