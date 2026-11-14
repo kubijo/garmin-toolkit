@@ -92,6 +92,28 @@ impl Storage {
         Ok(())
     }
 
+    /// Discards one abandoned staging generation while preserving published snapshots.
+    /// # Errors
+    /// Returns database failures.
+    pub async fn discard_connect_summaries(
+        &self,
+        user: UserId,
+        source: SourceId,
+        generation: &str,
+    ) -> Result<(), Error> {
+        let user = user.to_string();
+        let source = source.to_string();
+        sqlx::query_file!(
+            "queries/connect-cache-discard-summaries.sql",
+            user,
+            source,
+            generation
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Atomically publishes a complete metadata snapshot and removes stale cache entries.
     /// # Errors
     /// Returns database or serialization failures.

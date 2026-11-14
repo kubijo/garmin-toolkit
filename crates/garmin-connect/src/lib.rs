@@ -26,17 +26,33 @@ const PROFILE_LIMIT: ByteCount = ByteCount::from_kibibytes(256);
 /// each check obtains a fresh access token.
 pub struct Client {
     origin: String,
+    system_proxy: bool,
 }
 
 impl Default for Client {
     fn default() -> Self {
         Self {
             origin: ORIGIN.into(),
+            system_proxy: !cfg!(test),
         }
     }
 }
 
 impl Client {
+    /// Builds a loopback-only endpoint for synthetic integration tests.
+    /// # Errors
+    /// Rejects addresses outside loopback.
+    #[cfg(feature = "integration-hooks")]
+    pub fn integration_loopback(address: std::net::SocketAddr) -> Result<Self, Error> {
+        if !address.ip().is_loopback() {
+            return Err(Error::InvalidSelection);
+        }
+        Ok(Self {
+            origin: format!("http://{address}"),
+            system_proxy: false,
+        })
+    }
+
     /// Exchanges the key and reads typed profile facts from the official service.
     /// # Errors
     /// Reports bounded, redacted transport, authorization, or response failures.
@@ -48,7 +64,18 @@ impl Client {
         &self,
         key: &PersonalApiKey,
     ) -> Result<(AccountFacts, api::HttpClient), Error> {
-        let transport = http(HeaderMap::new())?;
+        self.authenticate_cancellable(key, &|| false).await
+    }
+
+    async fn authenticate_cancellable(
+        &self,
+        key: &PersonalApiKey,
+        cancelled: &(impl Fn() -> bool + Send + Sync),
+    ) -> Result<(AccountFacts, api::HttpClient), Error> {
+        if cancelled() {
+            return Err(Error::Cancelled);
+        }
+        let transport = http(HeaderMap::new(), self.system_proxy)?;
         let mut authorization = HeaderValue::from_str(&format!("ApiKey {}", key.expose()))
             .map_err(|_| Error::InvalidToken)?;
         authorization.set_sensitive(true);
@@ -60,6 +87,9 @@ impl Client {
             .map_err(network)?;
         status(response.status(), "key exchange")?;
         let token = body(response, limit_bytes(TOKEN_LIMIT)?).await?;
+        if cancelled() {
+            return Err(Error::Cancelled);
+        }
         let token = std::str::from_utf8(&token)
             .map_err(|_| Error::InvalidToken)?
             .trim();
@@ -71,7 +101,7 @@ impl Client {
         bearer.set_sensitive(true);
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, bearer);
-        let client = api::HttpClient::with_client(http(headers)?)
+        let client = api::HttpClient::with_client(http(headers, self.system_proxy)?)
             .with_base_url(&self.origin)
             .with_max_response_body_bytes(limit_bytes(PROFILE_LIMIT)?);
         let profile = client
@@ -113,13 +143,16 @@ fn fact(value: Option<String>) -> Option<String> {
         .map(|value| value.chars().take(256).collect())
 }
 
-fn http(headers: HeaderMap) -> Result<reqwest::Client, Error> {
+fn http(headers: HeaderMap, system_proxy: bool) -> Result<reqwest::Client, Error> {
     let builder = reqwest::Client::builder()
         .default_headers(headers)
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(15));
-    #[cfg(test)]
-    let builder = builder.no_proxy();
+    let builder = if system_proxy {
+        builder
+    } else {
+        builder.no_proxy()
+    };
     builder.build().map_err(network)
 }
 
@@ -184,6 +217,8 @@ fn operation_error(error: api::ApiOpError<serde_json::Value>, operation: &'stati
 /// or underlying HTTP error is retained.
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Garmin Connect request cancelled")]
+    Cancelled,
     #[error("Could not reach Garmin Connect")]
     Network,
     #[error("Garmin Connect did not respond in time")]

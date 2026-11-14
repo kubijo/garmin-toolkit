@@ -20,6 +20,13 @@ Live progress reports connection, indexed pages and discovered summaries while t
 file completion with new downloads, reused cache entries, unavailable files and remaining work. Desktop events and a
 coalescing browser watch channel carry the same profile-scoped updates; completion clears transient progress state.
 
+Refresh cancellation is request-scoped. It stops before another remote request or metadata publication, retains the
+previous published index when summary loading is cancelled, and finishes persisting an original already in flight. RPC
+disconnection signals cancellation to an owned refresh task, which retains its deployment lease through cleanup.
+Cancellation returns the currently published page as a normal outcome; cancelling while queued leaves the client's
+current view intact without waiting for another job's lock. Page imports keep their separate cancellation control and
+explicit-import boundary.
+
 Fuzzy search matches unordered words across the whole cached account's names, descriptions, activity type keys,
 local/UTC start times and IDs. Alphabetic words tolerate minor insertions, deletions and transpositions; short terms and
 numbers use literal substrings. Type, inclusive local-date and **Not yet imported** filters apply before pagination,
@@ -51,9 +58,71 @@ including **Refresh**, retries the local list. Changing pages or refreshing clea
   reach remain unqualified.
 - Verify expiry/revocation against the live service. Explicit requests currently obtain fresh access tokens.
 
+## Configurable auto-sync analysis
+
+Proposed scope: opt-in, per-profile incremental cache refresh and original FIT downloads. Activity import stays
+explicit; full-history reconciliation stays available through the Refresh menu. Configuration is **Off** or **Every n
+hours / days / weeks**, backed by a domain type containing a positive count and unit, with checked duration conversion.
+Preserve the chosen unit in storage and use ICU plural messages in the UI.
+
+Timed incremental refresh inherits the overlap limit: backdated uploads and older edits or deletions still need full
+reconciliation. An optional second full-refresh cadence would provide automatic reconciliation of older history;
+incremental-only scheduling does not promise it.
+
+Recommended timing semantics are elapsed intervals: a day is 24 hours and a week is seven days. Display due times in the
+user's locale. This gives a stable duration across daylight-saving changes; recurrence at the same local clock time
+would be a separate scheduling feature. Schedule from the last successful completion, including a successful manual
+refresh. Enabling a previously unsynchronised profile runs once immediately. On restart or resume, perform at most one
+overdue run, then calculate the next due time; accumulate no missed-run backlog.
+
+Cancellation defers the next automatic attempt by one configured interval so a timer cannot immediately undo a user's
+cancel action; it does not advance last successful completion. Changing the interval recalculates the next due time from
+the last success while respecting a current cancellation deferral.
+
+Persist the schedule, last attempt, last successful completion, next due time and redacted failure state with the
+profile database. Keep failure retries separate from the configured cadence, with bounded backoff and any supported
+server retry delay. Definitive credential rejection pauses attempts until credentials are repaired. An expired access
+token during a long run should get one bounded fresh-session attempt before being treated as a credential problem.
+Removing or replacing credentials must cancel or invalidate work tied to the previous account. Disabling auto-sync
+cancels its current run at the same durable boundaries as manual refresh, preserving downloaded originals.
+
+Rejected HTTP responses currently retain the operation and status code, so honoring a server-provided retry delay would
+also require preserving that header in the client error contract.
+
+Expose a structured refresh completion and failure classification before adding the runner. Today a stopped download can
+return a cached page with a warning, and the cache layer reduces some errors to text. An `Ok` page therefore cannot be
+used as the successful-sync marker. Distinguish completed, partial and cancelled runs, preserve authentication /
+rate-limit / network classification, and record unavailable individual originals as coverage. Those individual files can
+retry on the regular cadence without putting a completed index into a tight failure-retry loop.
+
+The backend owns scheduling, so several HASS browser tabs cannot create duplicate jobs. HASS can sync while its server
+is running with no browser open. Desktop sync runs while the application is running and catches up once when reopened;
+running after application exit would require an additional daemon or OS integration. The current desktop worker uses a
+current-thread Tokio runtime around individual commands and blocks on a command receiver while idle. It needs a
+continuously driven scheduler runner tied to the active deployment, rather than a timer on the existing idle runtime.
+
+Use the same per-profile exclusion for automatic and manual refreshes, imports and account changes. A busy profile skips
+or defers a scheduled attempt instead of queuing duplicate jobs. Before background sync, allow cached list/search reads
+to use an atomic database read snapshot without waiting for the long refresh mutex. Current list queries take that
+mutex; simply adding a timer would block browsing during downloads. Define manual-operation priority so an arriving
+preview or import can yield a background refresh at a durable boundary. Deployment replacement and restore must stop and
+drain the old scheduler before releasing its application lease, then bind the runner to the new deployment epoch.
+
+Expose last success, next attempt, current phase and an error/retry state through backend profile snapshots. A
+background run should update cached pages when its generation changes and leave settings editing available. Keep the
+cancellation signal tied to the job that started it; a browser closing must not own the lifetime of a scheduled backend
+job. Scheduled jobs need a backend-owned identity and a profile-authorized cancellation operation, rather than ownership
+by the lifetime of a browser request's watch channel.
+
+Implementation sequence: introduce structured outcomes, interval/settings and persisted status; enable background-safe
+snapshot reads and manual priority; add an injected-clock due-time planner and deployment-owned runner; expose
+settings/status in both hosts. Test restart and suspend catch-up, clock changes, failed attempts, credential changes,
+disable/cancel, deployment replacement, multiple clients and overlapping manual work using synthetic remotes and a
+controllable clock.
+
 ## Future work
 
 - Access-token reuse and renewal.
-- Optional history selection and incremental polling, separate from manual browsing.
+- Optional history selection and the configurable auto-sync design above.
 
 Broader security remains deferred under [ADR 0023](../decisions/0023-deferred-security-hardening.md).

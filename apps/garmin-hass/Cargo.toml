@@ -49,6 +49,9 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+indoc.workspace = true
+sqlx.workspace = true
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
 garmin-fit = { workspace = true, features = ["test-fixtures"] }
 garmin-fixtures.workspace = true
 image.workspace = true

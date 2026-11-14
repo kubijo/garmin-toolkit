@@ -1862,6 +1862,10 @@
     "source": "Display name",
     "translation": "Zobrazované jméno"
   },
+  "dbzHTNf97L": {
+    "source": "Cancelling refresh…",
+    "translation": "Rušení obnovení…"
+  },
   "device.pair.current_profile": {
     "source": "Current profile",
     "translation": "Aktuální profil"
@@ -1917,6 +1921,10 @@
   "eLrXv7EkrC": {
     "source": "Inspecting…",
     "translation": "Kontrola…"
+  },
+  "eM1RAYUhgk": {
+    "source": "Cancel refresh",
+    "translation": "Zrušit obnovení"
   },
   "eOgUhQrBnr": {
     "source": "Plan: {digest}",
@@ -2285,6 +2293,10 @@
   "nZ9QXAjOmF": {
     "source": "Map update installed.",
     "translation": "Aktualizace map nainstalována."
+  },
+  "ncw9ezSDQN": {
+    "source": "Refresh cancelled",
+    "translation": "Obnovení zrušeno"
   },
   "nlC75ttuUb": {
     "source": "Toolkit ID",

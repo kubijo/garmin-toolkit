@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM connect_cache_summaries\nWHERE\n    user_id = ? AND source_id = ? AND generation = ?\n    AND NOT EXISTS (\n        SELECT 1 FROM connect_cache_accounts AS published\n        WHERE\n            published.user_id = connect_cache_summaries.user_id\n            AND published.source_id = connect_cache_summaries.source_id\n            AND published.generation = connect_cache_summaries.generation\n    );\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "cfa71cec6612fa5f6716dc2c0980670694103ce0ab55c4fedcf32637b150e47f"
+}

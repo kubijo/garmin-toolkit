@@ -902,6 +902,14 @@ impl App {
                     batch.cancel();
                 }
             }
+            profile_settings::Action::CancelGarminConnectRefresh => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index))
+                    && let Some((owner, signal)) = &self.shared.borrow().connect_cancellation
+                    && *owner == profile.user.id()
+                {
+                    signal.send_replace(true);
+                }
+            }
             profile_settings::Action::UpdateGarminConnectKey(key) => {
                 self.request_garmin_connect(ConnectRequest::Save(key), profiles);
             }
@@ -1496,6 +1504,33 @@ impl App {
     }
 }
 
+impl App {
+    fn apply_connect_notices(&self, state: &mut State) {
+        if let Some(user) = state.connect_refresh_cancelled.take()
+            && self
+                .selected_profile
+                .and_then(|index| self.profiles.get(index))
+                .is_some_and(|profile| profile.user.id() == user)
+        {
+            state.notice = Some(Notice::information(
+                format_message!(&self.intl, default_message: "Refresh cancelled"),
+            ));
+        }
+        let refresh_pending = state.connect_profiles_stale;
+        if let Some((user, response)) =
+            connect_state::take_import_receipt(&mut state.connect_import_receipt, refresh_pending)
+            && self
+                .selected_profile
+                .and_then(|index| self.profiles.get(index))
+                .is_some_and(|profile| profile.user.id() == user)
+            && let Some(message) =
+                profile_settings::connect_activities::receipt(&self.intl, &response)
+        {
+            state.notice = Some(Notice::information(message));
+        }
+    }
+}
+
 impl eframe::App for App {
     fn raw_input_hook(
         &mut self,
@@ -1527,19 +1562,7 @@ impl eframe::App for App {
         ) = {
             let mut state = self.shared.borrow_mut();
             state.show_device_browser_interruption(&self.intl);
-            let refresh_pending = state.connect_profiles_stale;
-            if let Some((user, response)) = connect_state::take_import_receipt(
-                &mut state.connect_import_receipt,
-                refresh_pending,
-            ) && self
-                .selected_profile
-                .and_then(|index| self.profiles.get(index))
-                .is_some_and(|profile| profile.user.id() == user)
-                && let Some(message) =
-                    profile_settings::connect_activities::receipt(&self.intl, &response)
-            {
-                state.notice = Some(Notice::information(message));
-            }
+            self.apply_connect_notices(&mut state);
             (
                 Rc::clone(&state.snapshots),
                 Rc::clone(&state.profiles),
@@ -1711,7 +1734,16 @@ fn show_profile_settings(
     profile: profile::ProfileProps<'_>,
     cloud_browser: bool,
 ) -> Option<profile_settings::Action> {
-    let (checking, facts, activities, activities_busy, disabled, batch, load_progress) = {
+    let (
+        checking,
+        facts,
+        activities,
+        activities_busy,
+        disabled,
+        batch,
+        load_progress,
+        refresh_cancelling,
+    ) = {
         let state = shared.borrow();
         (
             state.garmin_connect_checking == Some(snapshot.user.id()),
@@ -1729,6 +1761,10 @@ fn show_profile_settings(
                 .as_ref()
                 .filter(|(owner, _)| *owner == snapshot.user.id())
                 .map(|(_, progress)| progress.clone()),
+            state
+                .connect_cancellation
+                .as_ref()
+                .is_some_and(|(owner, signal)| *owner == snapshot.user.id() && *signal.borrow()),
         )
     };
     let show: fn(&mut Ui, &profile_settings::Props<'_>) -> Option<profile_settings::Action> =
@@ -1756,6 +1792,11 @@ fn show_profile_settings(
                 activities: activities.as_ref(),
                 activities_busy,
                 load_progress: load_progress.as_ref(),
+                refresh_state: if refresh_cancelling {
+                    profile_settings::RefreshState::Cancelling
+                } else {
+                    profile_settings::RefreshState::Running
+                },
                 batch: batch.as_ref(),
             },
         },
@@ -1794,6 +1835,8 @@ struct State {
     close_connect_preview: bool,
     connect_activity_loading: Option<UserId>,
     connect_load_progress: Option<(UserId, garmin_model::garmin_connect::LoadProgress)>,
+    connect_cancellation: Option<(UserId, rch::watch::Sender<bool>)>,
+    connect_refresh_cancelled: Option<UserId>,
     connect_profiles_stale: bool,
     page_import: Option<(UserId, profile_settings::connect_activities::Batch)>,
     connect_import_receipt: Option<(UserId, garmin_model::garmin_connect::ActivityResponse)>,
@@ -2836,6 +2879,7 @@ fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     state.connect_preview = None;
     state.connect_activity_loading = None;
     state.connect_load_progress = None;
+    state.connect_cancellation = None;
     state.connect_profiles_stale = false;
     state.page_import = None;
     state.close_connect_preview = true;
@@ -3046,9 +3090,23 @@ async fn connect_activity_with_progress(
     generation: u64,
 ) -> Result<garmin_service_api::ConnectActivityResult, garmin_model::garmin_connect::ActivityFailure>
 {
+    use garmin_model::garmin_connect::ActivityRequest;
+    let refreshing = matches!(
+        request,
+        ActivityRequest::Load { .. }
+            | ActivityRequest::List { .. }
+            | ActivityRequest::RefreshAll { .. }
+    );
     let (progress, mut updates) =
         rch::watch::channel(garmin_model::garmin_connect::LoadProgress::Waiting);
-    let call = client.garmin_connect_activity(user_id, request, Some(progress));
+    let (cancel, cancellation) = rch::watch::channel(false);
+    shared.borrow_mut().connect_cancellation = refreshing.then_some((user_id, cancel));
+    let call = client.garmin_connect_activity(
+        user_id,
+        request,
+        refreshing.then_some(progress),
+        refreshing.then_some(cancellation),
+    );
     let receive = async {
         while updates.changed().await.is_ok() {
             let Ok(progress) = updates.borrow_and_update().map(|value| value.clone()) else {
@@ -3145,6 +3203,7 @@ fn spawn_connect_activity(
         }
         state.connect_activity_loading = None;
         state.connect_load_progress = None;
+        state.connect_cancellation = None;
         let State {
             page_import,
             connect_activities,
@@ -3184,6 +3243,13 @@ fn finish_single_connect_activity(
     >,
 ) {
     match result {
+        Ok(garmin_service_api::ConnectActivityResult::RefreshCancelled(page)) => {
+            if let Some(page) = page {
+                state.connect_activities.insert(user_id, page);
+            }
+            state.connect_refresh_cancelled = Some(user_id);
+            state.close_connect_preview = true;
+        }
         Ok(garmin_service_api::ConnectActivityResult::State(response)) => {
             if matches!(
                 response,

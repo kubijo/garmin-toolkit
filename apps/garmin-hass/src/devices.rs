@@ -229,6 +229,8 @@ pub(super) struct Host {
     fit_plans: Arc<Mutex<FitPlans>>,
     #[cfg(test)]
     fit_import_pause: Option<Arc<FitImportPause>>,
+    #[cfg(test)]
+    connect_refresh_cancel: Arc<Mutex<Option<CancellationToken>>>,
     #[cfg(feature = "demo")]
     integration_gate: Arc<Mutex<Option<Arc<garmin_services::integration_gate::IntegrationGate>>>>,
     snapshot_session:
@@ -272,6 +274,8 @@ impl Host {
             fit_plans: Arc::new(Mutex::new(FitPlans::new(epoch))),
             #[cfg(test)]
             fit_import_pause: None,
+            #[cfg(test)]
+            connect_refresh_cancel: Arc::default(),
             #[cfg(feature = "demo")]
             integration_gate: Arc::new(Mutex::new(None)),
             source: Arc::new(Mutex::new(source)),
@@ -981,6 +985,7 @@ impl ApplicationService for Host {
         user_id: garmin_model::identity::UserId,
         request: garmin_model::garmin_connect::ActivityRequest,
         progress: Option<rch::watch::Sender<garmin_model::garmin_connect::LoadProgress>>,
+        cancellation: Option<rch::watch::Receiver<bool>>,
     ) -> Result<
         Result<
             garmin_service_api::ConnectActivityResult,
@@ -988,20 +993,54 @@ impl ApplicationService for Host {
         >,
         rtc::CallError,
     > {
-        Ok(self
-            .application()
-            .await?
-            .garmin_connect_activity_with_progress(
-                UserContext::new(user_id),
-                request,
-                move |update| {
-                    if let Some(progress) = &progress {
-                        progress.send_replace(update);
-                    }
-                },
-            )
+        use garmin_model::garmin_connect::ActivityRequest;
+        let refreshing = matches!(
+            request,
+            ActivityRequest::Load { .. }
+                | ActivityRequest::List { .. }
+                | ActivityRequest::RefreshAll { .. }
+        );
+        let application = self
+            .deployment
+            .application_owned(self.epoch)
             .await
-            .map_err(garmin_model::garmin_connect::ActivityFailure::from))
+            .map_err(|_| rtc::CallError::NotServed)?;
+        let disconnected = CancellationToken::default();
+        let job_cancelled = disconnected.clone();
+        let operation = async move {
+            application
+                .garmin_connect_activity_cancellable(
+                    UserContext::new(user_id),
+                    request,
+                    move |update| {
+                        if let Some(progress) = &progress {
+                            progress.send_replace(update);
+                        }
+                    },
+                    move || {
+                        job_cancelled.is_cancelled()
+                            || cancellation.as_ref().is_some_and(refresh_cancelled)
+                    },
+                )
+                .await
+                .map_err(garmin_model::garmin_connect::ActivityFailure::from)
+        };
+        if refreshing {
+            #[cfg(test)]
+            {
+                *self
+                    .connect_refresh_cancel
+                    .lock()
+                    .expect("test cancellation observer") = Some(disconnected.clone());
+            }
+            let _cancel_on_drop = CancelOnDrop(disconnected);
+            // The RPC may be dropped, but the job must reach its next durable boundary.
+            tokio::spawn(operation)
+                .await
+                .map_err(|_| rtc::CallError::NotServed)
+        } else {
+            Ok(operation.await)
+        }
     }
 
     async fn update_accent(
@@ -1636,6 +1675,13 @@ fn device_snapshot(presentation: garmin_device::attachments::Presentation) -> De
     }
 }
 
+fn refresh_cancelled(signal: &rch::watch::Receiver<bool>) -> bool {
+    signal.has_changed().is_err() || signal.borrow().map_or(true, |value| *value)
+}
+
+#[cfg(all(test, feature = "demo"))]
+mod connect_refresh_tests;
+
 #[cfg(test)]
 mod tests {
     use std::io::{Cursor, Write as _};
@@ -1660,6 +1706,33 @@ mod tests {
     use remoc::ConnectExt as _;
     use remoc::prelude::ServerShared as _;
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn refresh_cancels_when_remote_sender_closes_without_sending_true() {
+        let (sender, receiver) = remoc::rch::watch::channel::<bool, remoc::codec::Default>(false);
+        let (left, right) = tokio::io::duplex(64 * 1024);
+        let (read, write) = tokio::io::split(left);
+        let providing = tokio::spawn(
+            remoc::Connect::io(garmin_service_api::control::transport_config(), read, write)
+                .provide(receiver),
+        );
+        let (read, write) = tokio::io::split(right);
+        let mut remote: remoc::rch::watch::Receiver<bool> =
+            remoc::Connect::io(garmin_service_api::control::transport_config(), read, write)
+                .consume()
+                .await
+                .expect("receive cancellation channel");
+        assert!(!super::refresh_cancelled(&remote));
+        drop(sender);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), remote.changed())
+                .await
+                .expect("channel closure reaches the server")
+                .is_err()
+        );
+        assert!(super::refresh_cancelled(&remote));
+        providing.abort();
+    }
 
     struct FitSource {
         bytes: Arc<Mutex<Vec<u8>>>,

@@ -15,6 +15,9 @@ ignored = ["bytes", "chrono", "futures-util", "reqwest-middleware", "serde", "uu
 [lints]
 workspace = true
 
+[features]
+integration-hooks = []
+
 [dependencies]
 garmin-model.workspace = true
 bytes.workspace = true

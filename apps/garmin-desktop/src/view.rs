@@ -61,6 +61,7 @@ pub struct Desktop {
     connect_preview: Option<device_fit_preview::Preview<(UserId, i64, String)>>,
     connect_activity_loading: Option<UserId>,
     connect_load_progress: Option<(UserId, garmin_model::garmin_connect::LoadProgress)>,
+    connect_cancellation: Option<(UserId, garmin_progress::CancellationToken)>,
     page_import: Option<(UserId, profile_settings::connect_activities::Batch)>,
     selected_activity: usize,
     activity_detail: Option<ActivityDetailSnapshot>,
@@ -165,6 +166,7 @@ impl Desktop {
             connect_preview: None,
             connect_activity_loading: None,
             connect_load_progress: None,
+            connect_cancellation: None,
             page_import: None,
             selected_activity: 0,
             activity_detail: None,
@@ -326,6 +328,16 @@ impl Desktop {
             .as_ref()
             .filter(|(owner, _)| *owner == self.profiles[profile_index].user.id())
             .map(|(_, progress)| progress);
+        settings_props.garmin_connect.refresh_state = if self
+            .connect_cancellation
+            .as_ref()
+            .is_some_and(|(owner, token)| {
+                *owner == self.profiles[profile_index].user.id() && token.is_cancelled()
+            }) {
+            profile_settings::RefreshState::Cancelling
+        } else {
+            profile_settings::RefreshState::Running
+        };
         let notice = self.notice.as_ref();
         let page = &self.page;
         let intl = &self.intl;
@@ -792,6 +804,13 @@ impl Desktop {
         action: profile_settings::Action,
     ) {
         match action {
+            profile_settings::Action::CancelGarminConnectRefresh => {
+                if let Some((owner, token)) = &self.connect_cancellation
+                    && *owner == self.profiles[profile_index].user.id()
+                {
+                    token.cancel();
+                }
+            }
             profile_settings::Action::StartGarminConnectPageImport => {
                 self.start_page_import(profile_index);
             }
@@ -812,8 +831,11 @@ impl Desktop {
                     self.page_import = None;
                 }
                 self.preferences_saving = true;
-                self.worker
-                    .connect_activity(UserContext::new(user), request);
+                self.connect_cancellation = Some((
+                    user,
+                    self.worker
+                        .connect_activity(UserContext::new(user), request),
+                ));
                 self.connect_activity_loading = Some(user);
                 self.connect_load_progress = None;
             }
@@ -907,6 +929,7 @@ impl Desktop {
         >,
     ) {
         self.connect_load_progress = None;
+        self.connect_cancellation = None;
         if self
             .page_import
             .as_ref()
@@ -918,6 +941,20 @@ impl Desktop {
         self.preferences_saving = false;
         self.connect_activity_loading = None;
         match result {
+            Ok(garmin_service_api::ConnectActivityResult::RefreshCancelled(page)) => {
+                if let Some(page) = page {
+                    self.connect_activities.insert(user, page);
+                }
+                if self
+                    .selected_profile
+                    .and_then(|index| self.profiles.get(index))
+                    .is_some_and(|profile| profile.user.id() == user)
+                {
+                    self.notice = Some(Notice::information(
+                        format_message!(&self.intl, default_message: "Refresh cancelled"),
+                    ));
+                }
+            }
             Ok(garmin_service_api::ConnectActivityResult::State(response)) => {
                 if let Some(message) =
                     profile_settings::connect_activities::receipt(&self.intl, &response)
@@ -2641,6 +2678,7 @@ fn profile_settings_props<'a>(
             activities: activities.get(&profile.user.id()),
             activities_busy: activity_loading == Some(profile.user.id()),
             load_progress: None,
+            refresh_state: profile_settings::RefreshState::Running,
             batch: None,
         },
     }

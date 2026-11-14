@@ -118,8 +118,14 @@ impl Worker {
         &self,
         user: UserContext,
         request: garmin_model::garmin_connect::ActivityRequest,
-    ) {
-        self.send(Command::ConnectActivity { user, request });
+    ) -> CancellationToken {
+        let cancellation = CancellationToken::default();
+        self.send(Command::ConnectActivity(ConnectActivityCommand {
+            user,
+            request,
+            cancellation: cancellation.clone(),
+        }));
+        cancellation
     }
 
     pub fn check_garmin_connect(&self, user: UserContext) {
@@ -197,11 +203,14 @@ enum ConnectAction {
     Test,
 }
 
+struct ConnectActivityCommand {
+    user: UserContext,
+    request: garmin_model::garmin_connect::ActivityRequest,
+    cancellation: CancellationToken,
+}
+
 enum Command {
-    ConnectActivity {
-        user: UserContext,
-        request: garmin_model::garmin_connect::ActivityRequest,
-    },
+    ConnectActivity(ConnectActivityCommand),
     GarminConnect {
         user: UserContext,
         action: ConnectAction,
@@ -447,8 +456,8 @@ fn execute_command(
                 return false;
             }
         }
-        Command::ConnectActivity { user, request } => {
-            return connect_activity(runtime, application, user, request, events, context, abort);
+        Command::ConnectActivity(activity) => {
+            return connect_activity(runtime, application, activity, events, context, abort);
         }
         Command::GarminConnect { user, action } => {
             return check_connect_key(runtime, application, user, action, events, context, abort);
@@ -1159,19 +1168,23 @@ struct EventSender {
 fn connect_activity(
     runtime: &tokio::runtime::Runtime,
     application: &Application,
-    user: UserContext,
-    request: garmin_model::garmin_connect::ActivityRequest,
+    activity: ConnectActivityCommand,
     events: &EventSender,
     context: &egui::Context,
     abort: &CancellationToken,
 ) -> bool {
+    let ConnectActivityCommand {
+        user,
+        request,
+        cancellation,
+    } = activity;
     let result = runtime.block_on(async {
         tokio::select! {
             biased;
             () = cancelled(abort) => None,
-            result = application.garmin_connect_activity_with_progress(user, request, |progress| {
+            result = application.garmin_connect_activity_cancellable(user, request, |progress| {
                 let _ = emit(events, context, Event::ConnectLoadProgress { user: user.user_id(), progress });
-            }) => Some(result),
+            }, || cancellation.is_cancelled()) => Some(result),
         }
     });
     let Some(result) = result else {

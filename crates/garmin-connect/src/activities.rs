@@ -113,7 +113,18 @@ impl Client {
     /// # Errors
     /// Returns redacted authentication and account-identity failures.
     pub async fn session(&self, key: &PersonalApiKey) -> Result<Session, Error> {
-        let (account, client) = self.authenticate(key).await?;
+        self.session_cancellable(key, &|| false).await
+    }
+
+    /// Authenticates, stopping between requests when cancellation is requested.
+    /// # Errors
+    /// Returns cancellation, authentication and account-identity failures.
+    pub async fn session_cancellable(
+        &self,
+        key: &PersonalApiKey,
+        cancelled: &(impl Fn() -> bool + Send + Sync),
+    ) -> Result<Session, Error> {
+        let (account, client) = self.authenticate_cancellable(key, cancelled).await?;
         if account.display_name.is_none() {
             return Err(Error::MissingAccountIdentity);
         }
