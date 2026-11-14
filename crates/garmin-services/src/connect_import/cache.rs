@@ -38,6 +38,12 @@ fn credential_hash(key: &PersonalApiKey) -> String {
     blake3::hash(key.expose().as_bytes()).to_hex().to_string()
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum Refresh {
+    Recent,
+    Full,
+}
+
 impl Application {
     pub(super) async fn cached_connect_page(
         &self,
@@ -45,7 +51,7 @@ impl Application {
         key: &PersonalApiKey,
         start: u32,
         filters: ActivityFilters,
-        refresh: bool,
+        refresh: Option<Refresh>,
         progress: &(impl Fn(LoadProgress) + Send + Sync),
     ) -> Result<ConnectActivityResult, Error> {
         if !filters.valid() {
@@ -57,12 +63,18 @@ impl Application {
             .connect_cache_account(user.user_id(), &fingerprint)
             .await?;
         let mut warning = None;
-        if refresh || existing.is_none() {
+        if refresh.is_some() || existing.is_none() {
             let result = async {
                 progress(LoadProgress::Connecting);
                 let session = garmin_connect::Client::default().session(key).await?;
-                self.load_connect_cache(user, &fingerprint, &session, progress)
-                    .await
+                self.load_connect_cache(
+                    user,
+                    &fingerprint,
+                    &session,
+                    refresh.unwrap_or(Refresh::Recent),
+                    progress,
+                )
+                .await
             }
             .await;
             if let Err(error) = result {
@@ -151,6 +163,7 @@ impl Application {
         user: UserContext,
         fingerprint: &str,
         remote: &impl Remote,
+        refresh: Refresh,
         progress: &(impl Fn(LoadProgress) + Send + Sync),
     ) -> Result<(), Error> {
         let account = CachedAccount {
@@ -159,6 +172,9 @@ impl Application {
             facts: remote.account().clone(),
         };
         let mut start = 0_u32;
+        let mut retained = self
+            .retained_connect_summaries(user, fingerprint, account.source, refresh)
+            .await?;
         let mut seen = std::collections::BTreeMap::new();
         let mut pages = 0;
         progress(LoadProgress::Indexing {
@@ -167,6 +183,9 @@ impl Application {
         });
         loop {
             let summaries = remote.activities(start).await?;
+            let overlap = summaries
+                .iter()
+                .any(|summary| retained.contains_key(&summary.activity.id));
             if summaries.len() > 20
                 || summaries.iter().any(|summary| {
                     seen.insert(summary.activity.id, summary.activity.name.clone())
@@ -174,6 +193,9 @@ impl Application {
                 })
             {
                 return Err(garmin_connect::Error::InvalidActivities.into());
+            }
+            for summary in &summaries {
+                retained.remove(&summary.activity.id);
             }
             self.storage
                 .stage_connect_summaries(
@@ -188,18 +210,55 @@ impl Application {
                 discovered: seen.len(),
                 pages,
             });
-            if summaries.len() < 20 {
+            if summaries.len() < 20 || overlap {
                 break;
             }
             start = start
                 .checked_add(20)
                 .ok_or(garmin_connect::Error::InvalidSelection)?;
         }
+        let retained = retained.into_values().collect::<Vec<_>>();
+        for summary in &retained {
+            seen.insert(summary.activity.id, summary.activity.name.clone());
+        }
+        self.storage
+            .stage_connect_summaries(
+                user.user_id(),
+                account.source,
+                &account.generation,
+                &retained,
+            )
+            .await?;
         self.storage
             .publish_connect_cache(user.user_id(), fingerprint, &account)
             .await?;
         self.download_connect_originals(user, &account, seen, remote, progress)
             .await
+    }
+
+    async fn retained_connect_summaries(
+        &self,
+        user: UserContext,
+        fingerprint: &str,
+        source: SourceId,
+        refresh: Refresh,
+    ) -> Result<std::collections::BTreeMap<i64, CachedActivity>, Error> {
+        if matches!(refresh, Refresh::Recent)
+            && let Some(account) = self
+                .storage
+                .connect_cache_account(user.user_id(), fingerprint)
+                .await?
+            && account.source == source
+        {
+            return Ok(self
+                .storage
+                .connect_cache_summaries(user.user_id(), &account)
+                .await?
+                .into_iter()
+                .map(|summary| (summary.activity.id, summary))
+                .collect());
+        }
+        Ok(std::collections::BTreeMap::new())
     }
 
     async fn download_connect_originals(

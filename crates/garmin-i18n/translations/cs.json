@@ -67,6 +67,10 @@
     "source": "The map service returned no components for this device.",
     "translation": "Mapová služba pro toto zařízení nevrátila žádné součásti."
   },
+  "/MRwGLGGwD": {
+    "source": "Refresh options",
+    "translation": "Možnosti obnovení"
+  },
   "/MUtJPf10Q": {
     "source": "Active files ({count})",
     "translation": "Aktivní soubory ({count})"
@@ -2359,6 +2363,10 @@
     "source": "Upload",
     "translation": "Nahrávání"
   },
+  "pKgiu1boqd": {
+    "source": "Check the entire history for older edits and deletions, and retry missing files.",
+    "translation": "Zkontrolovat celou historii kvůli starším úpravám a smazaným aktivitám a znovu stáhnout chybějící soubory."
+  },
   "pNTyiXnDwf": {
     "source": "Keep",
     "translation": "Ponechat"
@@ -2791,6 +2799,10 @@
   "yfl9jwEX6c": {
     "source": "Enter dates as YYYY-MM-DD, with the from date on or before the through date",
     "translation": "Zadejte data ve formátu RRRR-MM-DD. Počáteční datum nesmí být po koncovém datu."
+  },
+  "yi34xdBehR": {
+    "source": "Full refresh",
+    "translation": "Obnovit vše"
   },
   "yn5Y7+xW28": {
     "source": "A GPX file can contain multiple tracks, segments, or routes. Choose one path to preview and save.",

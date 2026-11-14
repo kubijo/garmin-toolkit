@@ -21,7 +21,12 @@ pub fn clears_batch(request: &ActivityRequest, page: Option<&ActivityResponse>) 
                 ..
             }),
         ) => start != current || filters != applied,
-        (ActivityRequest::Load { .. } | ActivityRequest::List { .. }, _) => true,
+        (
+            ActivityRequest::Load { .. }
+            | ActivityRequest::List { .. }
+            | ActivityRequest::RefreshAll { .. },
+            _,
+        ) => true,
         _ => false,
     }
 }
@@ -231,20 +236,14 @@ fn toolbar(
 ) -> Option<super::Action> {
     let mut result = None;
     ui.horizontal_wrapped(|ui| {
-        let refresh = format_message!(props.intl, default_message: "Refresh");
-        if action(ui, &refresh, Some(icons::ARROWS_CLOCKWISE), enabled) {
-            result = Some(super::Action::GarminConnectActivity(
-                ActivityRequest::Load {
-                    start,
-                    filters: filters.clone(),
-                },
-            ));
+        if let Some(request) = refresh_actions(ui, props, enabled, start, filters) {
+            result = Some(super::Action::GarminConnectActivity(request));
         }
         let import = format_message!(props.intl, default_message: "Import all on this page");
         if action(
             ui,
             &import,
-            Some(icons::UPLOAD_SIMPLE),
+            Some(icons::DOWNLOAD_SIMPLE),
             enabled && activities.iter().any(|activity| !activity.imported),
         ) {
             result = Some(super::Action::StartGarminConnectPageImport);
@@ -259,6 +258,48 @@ fn toolbar(
         progress(ui, props);
     }
     result
+}
+
+fn refresh_actions(
+    ui: &mut Ui,
+    props: &Props<'_>,
+    enabled: bool,
+    start: u32,
+    filters: &garmin_model::garmin_connect::ActivityFilters,
+) -> Option<ActivityRequest> {
+    let label = format_message!(props.intl, default_message: "Refresh");
+    let button = button::Props {
+        label: &label,
+        icon: None,
+        kind: button::Kind::Tertiary,
+        size: Size::Medium,
+        width: button::Width::Fit,
+        enabled,
+    };
+    let width = button.natural_width(ui) + 40.0 - 1.0;
+    let mut request = None;
+    ui.allocate_ui_with_layout(egui::vec2(width, 40.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = -1.0;
+        if button.show(ui).clicked() {
+            request = Some(ActivityRequest::Load { start, filters: filters.clone() });
+        }
+        let options = button::IconProps {
+            label: &format_message!(props.intl, default_message: "Refresh options"),
+            icon: icons::CARET_DOWN,
+            kind: button::Kind::Tertiary,
+            size: Size::Medium,
+            enabled,
+        }.show(ui);
+        let _ = egui::Popup::menu(&options).show(|ui| {
+            let full = format_message!(props.intl, default_message: "Full refresh");
+            let helper = format_message!(props.intl, default_message: "Check the entire history for older edits and deletions, and retry missing files.");
+            if (button::Props { label: &full, icon: Some(icons::ARROWS_CLOCKWISE), kind: button::Kind::Ghost, size: Size::Medium, width: button::Width::Fill, enabled }).show(ui).on_hover_text(helper).clicked() {
+                request = Some(ActivityRequest::RefreshAll { start, filters: filters.clone() });
+                ui.close();
+            }
+        });
+    });
+    request
 }
 
 fn batch_status(ui: &mut Ui, props: &Props<'_>, batch: &Batch) -> bool {

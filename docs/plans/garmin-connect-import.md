@@ -7,12 +7,14 @@ original FIT bytes, source account/activity identity and existing deduplication 
 independent. [ADR 0008](../decisions/0008-official-garmin-connect-boundary.md) defines scope;
 [API research](../research/garmin-connect.md) records the documented contract and uncertainties.
 
-Configured profiles expose **Garmin activities** in navigation. Loading and **Refresh** enumerate all account summaries
-and cache original FIT archives in the profile database, independently of activity acquisition and import. One
-authenticated session serves the load. Refresh updates metadata, removes deleted cloud entries from the cache and
-retries missing originals; already downloaded originals are reused. Individual unavailable files remain searchable.
-Connection or rate-limit failures stop downloading, retain completed files and show a warning; cached metadata remains
-browsable.
+Configured profiles expose **Garmin activities** in navigation. The first load enumerates all account summaries and
+caches original FIT archives in the profile database, independently of activity acquisition and import. Subsequent loads
+and **Refresh** read recent pages until a page overlaps the cached index, update summaries from those pages, preserve
+older cached history and retry missing originals throughout the account. **Full refresh** enumerates the complete
+history to reconcile older edits and deletions. Backdated additions beyond the overlap require a full refresh. One
+authenticated session serves either refresh; already downloaded originals are reused. Individual unavailable files
+remain searchable. Connection or rate-limit failures stop downloading, retain completed files and show a warning; cached
+metadata remains browsable.
 
 Live progress reports connection, indexed pages and discovered summaries while the total remains unknown, then original
 file completion with new downloads, reused cache entries, unavailable files and remaining work. Desktop events and a

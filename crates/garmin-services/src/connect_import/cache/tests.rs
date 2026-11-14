@@ -156,7 +156,7 @@ async fn full_account_cache_survives_restart_and_searches_beyond_page_one_withou
     let (app, user, key) = application(&path).await;
     let remote = MockRemote::new();
     let fingerprint = credential_hash(&key);
-    app.load_connect_cache(user, &fingerprint, &remote, &|_| {})
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
         .await
         .unwrap();
     assert_eq!(*remote.pages.lock().unwrap(), [0, 20]);
@@ -216,7 +216,7 @@ async fn full_account_cache_survives_restart_and_searches_beyond_page_one_withou
         (23, 22, 1)
     );
     import_cached_preview(&app, user).await;
-    app.load_connect_cache(user, &fingerprint, &remote, &|_| {})
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
         .await
         .unwrap();
     assert_eq!(
@@ -268,7 +268,7 @@ async fn progress_tracks_indexing_downloads_reuse_and_unavailable_originals() {
         }
         updates.lock().unwrap().push(value);
     };
-    app.load_connect_cache(user, &fingerprint, &remote, &report)
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &report)
         .await
         .unwrap();
     {
@@ -309,7 +309,7 @@ async fn progress_tracks_indexing_downloads_reuse_and_unavailable_originals() {
     }
     updates.lock().unwrap().clear();
     remote.downloads.lock().unwrap().clear();
-    app.load_connect_cache(user, &fingerprint, &remote, &report)
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &report)
         .await
         .unwrap();
     assert!(
@@ -344,7 +344,7 @@ async fn rate_limits_leave_searchable_metadata_and_resume_without_redownloading_
     remote.fail = Some((22, 429));
     let fingerprint = credential_hash(&key);
     assert!(
-        app.load_connect_cache(user, &fingerprint, &remote, &|_| {})
+        app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
             .await
             .is_err()
     );
@@ -359,9 +359,11 @@ async fn rate_limits_leave_searchable_metadata_and_resume_without_redownloading_
     );
     assert_eq!(*remote.downloads.lock().unwrap(), [23, 22]);
     remote.fail = None;
-    app.load_connect_cache(user, &fingerprint, &remote, &|_| {})
+    remote.pages.lock().unwrap().clear();
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
         .await
         .unwrap();
+    assert_eq!(*remote.pages.lock().unwrap(), [0]);
     assert_eq!(
         remote
             .downloads
@@ -385,19 +387,151 @@ async fn rate_limits_leave_searchable_metadata_and_resume_without_redownloading_
 }
 
 #[tokio::test]
+async fn incremental_refresh_preserves_history_retries_missing_files_and_full_refresh_reconciles_it()
+ {
+    let root = tempfile::tempdir().unwrap();
+    let (app, user, key) = application(&root.path().join("cache.sqlite3")).await;
+    let mut remote = MockRemote::new();
+    let fingerprint = credential_hash(&key);
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+        .await
+        .unwrap();
+    let mut newest = remote.summaries[0].clone();
+    newest.activity.id = 24;
+    newest.activity.name = "New ride".into();
+    remote.summaries.insert(0, newest);
+    remote.summaries.retain(|summary| summary.activity.id != 23);
+    remote
+        .summaries
+        .iter_mut()
+        .find(|summary| summary.activity.id == 5)
+        .unwrap()
+        .activity
+        .name = "Recent edit".into();
+    remote
+        .summaries
+        .iter_mut()
+        .find(|summary| summary.activity.id == 22)
+        .unwrap()
+        .activity
+        .name = "Older edit".into();
+    remote.fail = None;
+    remote.pages.lock().unwrap().clear();
+    remote.downloads.lock().unwrap().clear();
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
+        .await
+        .unwrap();
+    assert_eq!(*remote.pages.lock().unwrap(), [0]);
+    assert_eq!(*remote.downloads.lock().unwrap(), [24, 1]);
+    let account = cached_account(&app, user, &fingerprint).await;
+    let summaries = app
+        .storage
+        .connect_cache_summaries(user.user_id(), &account)
+        .await
+        .unwrap();
+    assert_eq!(summaries.len(), 24);
+    assert_eq!(
+        summaries
+            .iter()
+            .find(|summary| summary.activity.id == 5)
+            .unwrap()
+            .activity
+            .name,
+        "Recent edit"
+    );
+    assert_eq!(
+        summaries
+            .iter()
+            .find(|summary| summary.activity.id == 22)
+            .unwrap()
+            .activity
+            .name,
+        "Ride 22"
+    );
+    remote.pages.lock().unwrap().clear();
+    remote.downloads.lock().unwrap().clear();
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+        .await
+        .unwrap();
+    assert_eq!(*remote.pages.lock().unwrap(), [0, 20]);
+    assert!(remote.downloads.lock().unwrap().is_empty());
+    let account = cached_account(&app, user, &fingerprint).await;
+    let summaries = app
+        .storage
+        .connect_cache_summaries(user.user_id(), &account)
+        .await
+        .unwrap();
+    assert_eq!(summaries.len(), 23);
+    assert_eq!(
+        summaries
+            .iter()
+            .find(|summary| summary.activity.id == 22)
+            .unwrap()
+            .activity
+            .name,
+        "Older edit"
+    );
+    assert!(
+        !app.storage
+            .connect_has_original(user.user_id(), account.source, 23)
+            .await
+            .unwrap()
+    );
+    assert_eq!(app.activities(user).await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn incremental_refresh_reads_all_new_pages_before_the_first_overlap() {
+    let root = tempfile::tempdir().unwrap();
+    let (app, user, key) = application(&root.path().join("cache.sqlite3")).await;
+    let mut remote = MockRemote::new();
+    remote.fail = None;
+    let fingerprint = credential_hash(&key);
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+        .await
+        .unwrap();
+    let template = remote.summaries[0].clone();
+    let mut new = (24..=48)
+        .map(|id| {
+            let mut summary = template.clone();
+            summary.activity.id = id;
+            summary
+        })
+        .collect::<Vec<_>>();
+    new.append(&mut remote.summaries);
+    remote.summaries = new;
+    remote.pages.lock().unwrap().clear();
+    remote.downloads.lock().unwrap().clear();
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
+        .await
+        .unwrap();
+    assert_eq!(*remote.pages.lock().unwrap(), [0, 20]);
+    assert_eq!(remote.downloads.lock().unwrap().len(), 25);
+    let account = cached_account(&app, user, &fingerprint).await;
+    assert_eq!(
+        app.storage
+            .connect_cache_status(user.user_id(), &account)
+            .await
+            .unwrap()
+            .total,
+        48
+    );
+}
+
+#[tokio::test]
 async fn failed_metadata_refresh_preserves_the_previous_snapshot_and_account_switch_cannot_reuse_its_files()
  {
     let root = tempfile::tempdir().unwrap();
     let (app, user, key) = application(&root.path().join("cache.sqlite3")).await;
     let mut remote = MockRemote::new();
     let fingerprint = credential_hash(&key);
-    app.load_connect_cache(user, &fingerprint, &remote, &|_| {})
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
         .await
         .unwrap();
     let previous = cached_account(&app, user, &fingerprint).await;
     remote.summaries[20] = remote.summaries[0].clone();
     assert!(
-        app.load_connect_cache(user, &fingerprint, &remote, &|_| {})
+        app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
             .await
             .is_err()
     );
@@ -415,7 +549,7 @@ async fn failed_metadata_refresh_preserves_the_previous_snapshot_and_account_swi
     remote.fail = None;
     remote.facts.display_name = Some("different-account".into());
     let count = remote.downloads.lock().unwrap().len();
-    app.load_connect_cache(user, "replacement-key", &remote, &|_| {})
+    app.load_connect_cache(user, "replacement-key", &remote, Refresh::Full, &|_| {})
         .await
         .unwrap();
     let switched = app
@@ -439,4 +573,65 @@ async fn failed_metadata_refresh_preserves_the_previous_snapshot_and_account_swi
             .unwrap()
             .is_none()
     );
+}
+
+#[tokio::test]
+async fn interrupted_incremental_indexing_keeps_the_previous_snapshot_and_downloads_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    let (app, user, key) = application(&root.path().join("cache.sqlite3")).await;
+    let mut remote = MockRemote::new();
+    let fingerprint = credential_hash(&key);
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &|_| {})
+        .await
+        .unwrap();
+    let previous = cached_account(&app, user, &fingerprint).await;
+    let template = remote.summaries[0].clone();
+    remote.summaries = (24..=48)
+        .map(|id| {
+            let mut summary = template.clone();
+            summary.activity.id = id;
+            summary
+        })
+        .collect();
+    remote.summaries[20] = remote.summaries[0].clone();
+    remote.downloads.lock().unwrap().clear();
+    assert!(
+        app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
+            .await
+            .is_err()
+    );
+    let retained = cached_account(&app, user, &fingerprint).await;
+    assert_eq!(retained.generation, previous.generation);
+    assert_eq!(
+        app.storage
+            .connect_cache_status(user.user_id(), &retained)
+            .await
+            .unwrap()
+            .total,
+        23
+    );
+    assert!(remote.downloads.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn incremental_request_for_a_different_account_falls_back_to_full_enumeration() {
+    let root = tempfile::tempdir().unwrap();
+    let (app, user, key) = application(&root.path().join("cache.sqlite3")).await;
+    let mut remote = MockRemote::new();
+    remote.fail = None;
+    let fingerprint = credential_hash(&key);
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
+        .await
+        .unwrap();
+    let original = cached_account(&app, user, &fingerprint).await;
+    remote.facts.display_name = Some("different-account".into());
+    remote.pages.lock().unwrap().clear();
+    remote.downloads.lock().unwrap().clear();
+    app.load_connect_cache(user, &fingerprint, &remote, Refresh::Recent, &|_| {})
+        .await
+        .unwrap();
+    assert_eq!(*remote.pages.lock().unwrap(), [0, 20]);
+    assert_eq!(remote.downloads.lock().unwrap().len(), 23);
+    let switched = cached_account(&app, user, &fingerprint).await;
+    assert_ne!(original.source, switched.source);
 }

@@ -97,6 +97,7 @@ impl ActivityFailure {
 /// Explicit, profile-scoped cloud activity operations.
 #[garmin_macros::portable(eq)]
 pub enum ActivityRequest {
+    /// Checks recent summaries and missing originals; a missing cache loads the full account.
     Load {
         start: u32,
         filters: ActivityFilters,
@@ -114,6 +115,11 @@ pub enum ActivityRequest {
     Import {
         id: i64,
         digest: String,
+    },
+    /// Reconciles the entire remote history, including older edits and deletions.
+    RefreshAll {
+        start: u32,
+        filters: ActivityFilters,
     },
 }
 
