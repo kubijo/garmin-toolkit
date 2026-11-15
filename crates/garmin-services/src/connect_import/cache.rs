@@ -34,23 +34,23 @@ impl Remote for garmin_connect::Session {
     }
 }
 
-fn credential_hash(key: &PersonalApiKey) -> String {
+pub(crate) fn credential_hash(key: &PersonalApiKey) -> String {
     blake3::hash(key.expose().as_bytes()).to_hex().to_string()
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum Refresh {
+pub(crate) enum Refresh {
     Recent,
     Full,
 }
 
-pub(super) struct Control<'a> {
+pub(crate) struct Control<'a> {
     progress: &'a (dyn Fn(LoadProgress) + Send + Sync),
     cancelled: &'a (dyn Fn() -> bool + Send + Sync),
 }
 
 impl<'a> Control<'a> {
-    pub(super) fn new(
+    pub(crate) fn new(
         progress: &'a (dyn Fn(LoadProgress) + Send + Sync),
         cancelled: &'a (dyn Fn() -> bool + Send + Sync),
     ) -> Self {
@@ -74,6 +74,60 @@ impl<'a> Control<'a> {
 }
 
 impl Application {
+    #[cfg_attr(
+        not(feature = "integration-hooks"),
+        expect(
+            clippy::unused_self,
+            clippy::unnecessary_wraps,
+            reason = "Integration builds select a fallible loopback client from application state."
+        )
+    )]
+    fn connect_client(&self) -> Result<garmin_connect::Client, Error> {
+        #[cfg(feature = "integration-hooks")]
+        if let Some(address) = *self
+            .connect_test_origin
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            return Ok(garmin_connect::Client::integration_loopback(address)?);
+        }
+        Ok(garmin_connect::Client::default())
+    }
+
+    pub(crate) async fn sync_connect_refresh(
+        &self,
+        user: UserContext,
+        key: &PersonalApiKey,
+        refresh: Refresh,
+        progress: &Control<'_>,
+    ) -> Result<garmin_model::garmin_connect::CacheStatus, Error> {
+        progress.check()?;
+        progress.report(LoadProgress::Connecting);
+        let session = self
+            .connect_client()?
+            .session_cancellable(key, &|| (progress.cancelled)())
+            .await;
+        progress.check()?;
+        let session = match session {
+            Err(garmin_connect::Error::Cancelled) => {
+                return Err(Error::GarminConnectRefreshCancelled);
+            }
+            result => result?,
+        };
+        let fingerprint = credential_hash(key);
+        self.load_connect_cache(user, &fingerprint, &session, refresh, progress)
+            .await?;
+        let account = self
+            .storage
+            .connect_cache_account(user.user_id(), &fingerprint)
+            .await?
+            .ok_or(garmin_connect::Error::MissingAccountIdentity)?;
+        Ok(self
+            .storage
+            .connect_cache_status(user.user_id(), &account)
+            .await?)
+    }
+
     pub(super) async fn cached_connect_page(
         &self,
         user: UserContext,
@@ -93,38 +147,10 @@ impl Application {
             .await?;
         let mut warning = None;
         if refresh.is_some() || existing.is_none() {
-            let result = async {
-                progress.check()?;
-                progress.report(LoadProgress::Connecting);
-                let client = garmin_connect::Client::default();
-                #[cfg(feature = "integration-hooks")]
-                let client = if let Some(address) = *self
-                    .connect_test_origin
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                {
-                    garmin_connect::Client::integration_loopback(address)?
-                } else {
-                    client
-                };
-                let session = client
-                    .session_cancellable(key, &|| (progress.cancelled)())
-                    .await;
-                progress.check()?;
-                if matches!(session, Err(garmin_connect::Error::Cancelled)) {
-                    return Err(Error::GarminConnectRefreshCancelled);
-                }
-                let session = session?;
-                self.load_connect_cache(
-                    user,
-                    &fingerprint,
-                    &session,
-                    refresh.unwrap_or(Refresh::Recent),
-                    progress,
-                )
-                .await
-            }
-            .await;
+            let result = self
+                .sync_connect_refresh(user, key, refresh.unwrap_or(Refresh::Recent), progress)
+                .await;
+            self.record_manual_connect_refresh(user, &result).await?;
             if let Err(error) = result {
                 if matches!(error, Error::GarminConnectRefreshCancelled) {
                     return self.cancelled_connect_page(user, key, start, filters).await;
@@ -195,6 +221,31 @@ impl Application {
         for summary in &mut summaries {
             summary.activity.imported = imported.contains(&summary.activity.id.to_string());
         }
+        let coverage = self
+            .storage
+            .connect_cache_status(user.user_id(), account)
+            .await?;
+        Self::connect_page(
+            garmin_storage::CacheSnapshot {
+                activities: summaries,
+                coverage,
+            },
+            start,
+            filters,
+            warning,
+        )
+    }
+
+    pub(crate) fn connect_page(
+        snapshot: garmin_storage::CacheSnapshot,
+        start: u32,
+        filters: ActivityFilters,
+        warning: Option<String>,
+    ) -> Result<ConnectActivityResult, Error> {
+        if !filters.valid() {
+            return Err(garmin_connect::Error::InvalidSelection.into());
+        }
+        let mut summaries = snapshot.activities;
         summaries.retain(|summary| search::matches(&filters, summary));
         summaries.sort_by(|left, right| {
             right
@@ -219,10 +270,7 @@ impl Application {
             .take(20)
             .map(|summary| summary.activity)
             .collect::<Vec<_>>();
-        let cache = self
-            .storage
-            .connect_cache_status(user.user_id(), account)
-            .await?;
+        let cache = snapshot.coverage;
         Ok(ConnectActivityResult::State(ActivityResponse::Page {
             start: u32::try_from(start).map_err(|_| garmin_connect::Error::InvalidSelection)?,
             filters,
@@ -419,9 +467,9 @@ impl Application {
             let result = match result {
                 Ok(bytes) => Ok(bytes),
                 Err(error) => {
-                    let failure = ActivityFailure::from(error);
+                    let failure = ActivityFailure::from(&error);
                     if failure.stops_batch() {
-                        return Err(Error::GarminConnectCache(failure.message));
+                        return Err(error);
                     }
                     Err(failure.message)
                 }

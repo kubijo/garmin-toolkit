@@ -15,6 +15,7 @@ enum RequestState {
 }
 
 struct Model {
+    sync: garmin_model::garmin_connect::sync::Snapshot,
     cloud: bool,
     profile: u8,
     accent: Option<Color>,
@@ -46,6 +47,13 @@ fn test_facts() -> garmin_model::garmin_connect::AccountFacts {
 
 fn apply_action(state: &mut Model, action: Action) {
     match action {
+        Action::UpdateConnectSync(interval) => state.sync.state.configure(
+            interval,
+            garmin_model::value::Timestamp::from_jiff(
+                "2026-11-10T12:00:00Z".parse().expect("fixture timestamp"),
+            ),
+        ),
+        Action::CancelConnectSync(_) => state.sync.progress = None,
         Action::CancelGarminConnectRefresh => {
             state.activity_request = RequestState::Cancelling;
         }
@@ -111,6 +119,7 @@ fn harness_for(language: garmin_i18n::Language, size: [f32; 2]) -> Harness<'stat
                         },
                         picture_enabled: false,
                         garmin_connect: profile_settings::GarminConnectProps {
+                            sync: Some(&state.sync),
                             now: "2026-11-10T12:00:00Z".parse().expect("fixture timestamp"),
                             today: jiff::civil::date(2026, 11, 13),
                             configured: state.key.is_some(),
@@ -139,6 +148,7 @@ fn harness_for(language: garmin_i18n::Language, size: [f32; 2]) -> Harness<'stat
                 }
             },
             Model {
+                sync: garmin_model::garmin_connect::sync::Snapshot::default(),
                 cloud: false,
                 profile: 0,
                 accent: None,
@@ -1263,6 +1273,83 @@ fn capture_connect_settings() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("preview key"),
         );
         view.state_mut().facts = Some(test_facts());
+        view.ctx.set_theme(theme);
+        view.run();
+        view.render()?.save(out.join(format!("{name}.png")))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn auto_sync_is_opt_in_and_can_be_disabled_without_changing_other_preferences() {
+    use garmin_model::garmin_connect::sync::{Interval, Unit};
+    let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1600.0]);
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("fixture-key".into())
+            .expect("key"),
+    );
+    let previous = view.state().preferences;
+    view.run();
+    assert_eq!(view.state().sync.state.interval, None);
+    view.get_by_label("Every").click();
+    view.run();
+    view.get_by_label("Save sync settings").click();
+    view.run();
+    assert_eq!(
+        view.state().sync.state.interval,
+        Interval::new(1, Unit::Day)
+    );
+    assert_eq!(view.state().preferences, previous);
+    view.get_by_label("Off").click();
+    view.run();
+    view.get_by_label("Save sync settings").click();
+    view.run();
+    assert_eq!(view.state().sync.state.interval, None);
+}
+
+#[test]
+#[ignore = "renders automatic sync settings in both themes"]
+fn capture_auto_sync() -> Result<(), Box<dyn std::error::Error>> {
+    use garmin_model::{
+        garmin_connect::sync::{Interval, Outcome, Unit},
+        value::Timestamp,
+    };
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/gallery/auto-sync");
+    std::fs::create_dir_all(&out)?;
+    for (name, theme, language, width) in [
+        (
+            "dark",
+            egui::ThemePreference::Dark,
+            garmin_i18n::Language::English,
+            760.0,
+        ),
+        (
+            "light",
+            egui::ThemePreference::Light,
+            garmin_i18n::Language::English,
+            760.0,
+        ),
+        (
+            "narrow-cs",
+            egui::ThemePreference::Dark,
+            garmin_i18n::Language::Czech,
+            384.0,
+        ),
+    ] {
+        let mut view = harness_for(language, [width, 1600.0]);
+        view.state_mut().key = Some(
+            garmin_model::garmin_connect::PersonalApiKey::from_string("fixture-key".into())
+                .expect("key"),
+        );
+        let at = Timestamp::from_jiff("2026-11-10T12:00:00Z".parse()?);
+        view.state_mut()
+            .sync
+            .state
+            .configure(Interval::new(3, Unit::Hour), at);
+        view.state_mut()
+            .sync
+            .state
+            .finish(Outcome::Complete { unavailable: 0 }, at, None);
         view.ctx.set_theme(theme);
         view.run();
         view.render()?.save(out.join(format!("{name}.png")))?;

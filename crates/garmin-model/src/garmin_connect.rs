@@ -4,6 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 use thiserror::Error;
 
+pub mod sync;
+
 /// Reusable owner-created key. Debug output never includes its contents.
 #[derive(Clone, Serialize)]
 #[serde(transparent)]

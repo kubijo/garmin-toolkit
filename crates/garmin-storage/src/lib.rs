@@ -20,10 +20,12 @@ use thiserror::Error;
 mod activity;
 mod avatar;
 mod connect_cache;
+mod connect_sync;
 mod course;
 mod garmin_connect;
-pub use connect_cache::CachedAccount;
+pub use connect_cache::{CacheSnapshot, CachedAccount};
 mod ingestion;
+pub mod jobs;
 mod route;
 pub mod snapshot;
 

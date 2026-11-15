@@ -16,16 +16,23 @@ use crate::{
 const FIT_LIMIT: ByteCount = ByteCount::from_mebibytes(64);
 const PREVIEW_LIMIT: ByteCount = ByteCount::from_mebibytes(8);
 
-mod cache;
+pub(crate) mod cache;
 mod search;
 
 impl From<Error> for garmin_model::garmin_connect::ActivityFailure {
     fn from(error: Error) -> Self {
+        Self::from(&error)
+    }
+}
+
+impl From<&Error> for garmin_model::garmin_connect::ActivityFailure {
+    fn from(error: &Error) -> Self {
         use garmin_connect::Error as ConnectError;
         use garmin_model::garmin_connect::ActivityFailureKind;
         let kind = match &error {
             Error::GarminConnect(
                 ConnectError::Network
+                | ConnectError::RateLimited { .. }
                 | ConnectError::Timeout
                 | ConnectError::InvalidToken
                 | ConnectError::InvalidProfile
@@ -91,13 +98,16 @@ impl Application {
             .garmin_connect_key(user.user_id())
             .await?
             .ok_or(Error::GarminConnectKeyMissing)?;
-        let lock = self
-            .connect_cache_locks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .entry(user.user_id())
-            .or_default()
-            .clone();
+        if let ActivityRequest::List { start, filters } = &request
+            && let Some(snapshot) = self
+                .storage
+                .connect_cache_snapshot(user.user_id(), &cache::credential_hash(&key))
+                .await?
+        {
+            return Self::connect_page(snapshot, *start, filters.clone(), None);
+        }
+        self.cancel_connect_sync(user);
+        let lock = self.connect_lock(user);
         let refreshing = matches!(
             request,
             ActivityRequest::Load { .. }
@@ -110,44 +120,62 @@ impl Application {
         let acquire = lock.lock();
         tokio::pin!(acquire);
         let _guard = loop {
+            self.cancel_connect_sync(user);
             tokio::select! {
                 guard = &mut acquire => break guard,
-                () = tokio::time::sleep(std::time::Duration::from_millis(50)), if refreshing => {
-                    if cancelled() {
+                () = futures_timer::Delay::new(std::time::Duration::from_millis(50)) => {
+                    if refreshing && cancelled() {
+                        self.record_manual_connect_cancellation(user).await?;
                         return Ok(ConnectActivityResult::RefreshCancelled(None));
                     }
                 }
             }
         };
+        let key = self
+            .storage
+            .garmin_connect_key(user.user_id())
+            .await?
+            .ok_or(Error::GarminConnectKeyMissing)?;
+        self.perform_connect_request(user, &key, request, &progress)
+            .await
+    }
+
+    async fn perform_connect_request(
+        &self,
+        user: UserContext,
+        key: &garmin_model::garmin_connect::PersonalApiKey,
+        request: ActivityRequest,
+        progress: &cache::Control<'_>,
+    ) -> Result<ConnectActivityResult, Error> {
         match request {
             ActivityRequest::List { start, filters } => {
-                self.cached_connect_page(user, &key, start, filters, None, &progress)
+                self.cached_connect_page(user, key, start, filters, None, progress)
                     .await
             }
             ActivityRequest::Load { start, filters } => {
                 self.cached_connect_page(
                     user,
-                    &key,
+                    key,
                     start,
                     filters,
                     Some(cache::Refresh::Recent),
-                    &progress,
+                    progress,
                 )
                 .await
             }
             ActivityRequest::RefreshAll { start, filters } => {
                 self.cached_connect_page(
                     user,
-                    &key,
+                    key,
                     start,
                     filters,
                     Some(cache::Refresh::Full),
-                    &progress,
+                    progress,
                 )
                 .await
             }
             ActivityRequest::Preview { id } => {
-                let (download, details) = self.cached_connect_download(user, &key, id).await?;
+                let (download, details) = self.cached_connect_download(user, key, id).await?;
                 let (mut preview, operation) = prepare_preview(user, id, &download)?;
                 preview.details = details;
                 preview.imported = self
@@ -157,7 +185,7 @@ impl Application {
                 bounded_preview(preview)
             }
             ActivityRequest::Prepare { id } => {
-                let (download, _) = self.cached_connect_download(user, &key, id).await?;
+                let (download, _) = self.cached_connect_download(user, key, id).await?;
                 let (preview, operation) = prepare_preview(user, id, &download)?;
                 let imported = self
                     .storage
@@ -166,7 +194,7 @@ impl Application {
                 Ok(prepared(preview, imported))
             }
             ActivityRequest::Import { id, digest } => {
-                let (download, _) = self.cached_connect_download(user, &key, id).await?;
+                let (download, _) = self.cached_connect_download(user, key, id).await?;
                 self.import_reviewed_connect_download(user, id, &digest, download)
                     .await
                     .map(ConnectActivityResult::State)

@@ -58,6 +58,7 @@ pub struct Desktop {
     garmin_connect_checking: Option<UserId>,
     garmin_connect_facts: HashMap<UserId, garmin_model::garmin_connect::AccountFacts>,
     connect_activities: HashMap<UserId, garmin_model::garmin_connect::ActivityResponse>,
+    connect_cache_revisions: HashMap<UserId, garmin_model::garmin_connect::sync::Revision>,
     connect_preview: Option<device_fit_preview::Preview<(UserId, i64, String)>>,
     connect_activity_loading: Option<UserId>,
     connect_load_progress: Option<(UserId, garmin_model::garmin_connect::LoadProgress)>,
@@ -163,6 +164,7 @@ impl Desktop {
             garmin_connect_checking: None,
             garmin_connect_facts: HashMap::new(),
             connect_activities: HashMap::new(),
+            connect_cache_revisions: HashMap::new(),
             connect_preview: None,
             connect_activity_loading: None,
             connect_load_progress: None,
@@ -804,6 +806,19 @@ impl Desktop {
         action: profile_settings::Action,
     ) {
         match action {
+            profile_settings::Action::UpdateConnectSync(interval) => {
+                self.preferences_saving = true;
+                self.worker.connect_sync(
+                    UserContext::new(self.profiles[profile_index].user.id()),
+                    garmin_model::garmin_connect::sync::Request::Configure(interval),
+                );
+            }
+            profile_settings::Action::CancelConnectSync(job) => {
+                self.worker.connect_sync(
+                    UserContext::new(self.profiles[profile_index].user.id()),
+                    garmin_model::garmin_connect::sync::Request::Cancel(job),
+                );
+            }
             profile_settings::Action::CancelGarminConnectRefresh => {
                 if let Some((owner, token)) = &self.connect_cancellation
                     && *owner == self.profiles[profile_index].user.id()
@@ -1433,10 +1448,86 @@ impl Desktop {
         self.import.finish();
     }
 
+    fn connect_sync_states(
+        &mut self,
+        states: Vec<(UserId, garmin_model::garmin_connect::sync::Snapshot)>,
+    ) {
+        if self.preferences_saving {
+            return;
+        }
+        for (user, snapshot) in states {
+            if let Some(profile) = self
+                .profiles
+                .iter_mut()
+                .find(|profile| profile.user.id() == user)
+            {
+                let revision = snapshot.revision();
+                let changed = self.connect_cache_revisions.get(&user) != Some(&revision);
+                profile.connect_sync = snapshot;
+                if changed
+                    && self.connect_activity_loading != Some(user)
+                    && !self
+                        .page_import
+                        .as_ref()
+                        .is_some_and(|(owner, batch)| *owner == user && batch.running())
+                    && let Some(garmin_model::garmin_connect::ActivityResponse::Page {
+                        start,
+                        filters,
+                        ..
+                    }) = self.connect_activities.get(&user)
+                {
+                    self.worker.read_connect_cache(
+                        UserContext::new(user),
+                        *start,
+                        filters.clone(),
+                        revision,
+                    );
+                }
+            }
+        }
+    }
+
+    fn cached_connect_page(
+        &mut self,
+        request: worker::ConnectCacheRead,
+        page: Option<garmin_model::garmin_connect::ActivityResponse>,
+    ) {
+        if !self.preferences_saving
+            && self.connect_activity_loading != Some(request.user)
+            && !self
+                .page_import
+                .as_ref()
+                .is_some_and(|(owner, batch)| *owner == request.user && batch.running())
+            && let Some(page) = page
+            && matches!(self.connect_activities.get(&request.user), Some(garmin_model::garmin_connect::ActivityResponse::Page { start, filters, .. }) if *start == request.start && *filters == request.filters)
+        {
+            self.connect_activities.insert(request.user, page);
+            self.connect_cache_revisions
+                .insert(request.user, request.revision);
+        }
+    }
+
+    fn connect_sync_failure(&mut self, user: UserId, reason: String) {
+        if self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .is_some_and(|profile| profile.user.id() == user)
+        {
+            self.notice = Some(Notice::error(reason));
+        }
+    }
+
     fn process_events(&mut self) {
         let events = self.worker.drain().collect::<Vec<_>>();
         for event in events {
             match event {
+                worker::Event::ConnectSyncStates(states) => self.connect_sync_states(states),
+                worker::Event::ConnectSyncFailure { user, reason } => {
+                    self.connect_sync_failure(user, reason);
+                }
+                worker::Event::CachedConnectPage { request, page } => {
+                    self.cached_connect_page(request, page);
+                }
                 worker::Event::ConnectLoadProgress { user, progress } => {
                     self.connect_progress(user, progress);
                 }
@@ -2670,6 +2761,7 @@ fn profile_settings_props<'a>(
         picture_enabled: true,
         disabled,
         garmin_connect: profile_settings::GarminConnectProps {
+            sync: Some(&profile.connect_sync),
             now: jiff::Timestamp::now(),
             today: jiff::Zoned::now().date(),
             configured: profile.garmin_connect_configured,
@@ -2685,6 +2777,7 @@ fn profile_settings_props<'a>(
 }
 
 struct ProfileView {
+    connect_sync: garmin_model::garmin_connect::sync::Snapshot,
     garmin_connect_configured: bool,
     user: User,
     accent: Color,
@@ -2710,6 +2803,7 @@ impl ProfileView {
         let accent = profile.user.profile().accent().unwrap_or(swatch::ACTION);
         Self {
             user: profile.user,
+            connect_sync: profile.connect_sync,
             garmin_connect_configured: profile.garmin_connect_configured,
             accent,
             avatar,

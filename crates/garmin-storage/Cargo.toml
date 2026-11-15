@@ -12,6 +12,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+apalis-core.workspace = true
+apalis-sqlite.workspace = true
 blake3.workspace = true
 garmin-color.workspace = true
 garmin-fit.workspace = true

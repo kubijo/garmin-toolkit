@@ -11,7 +11,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -29,7 +29,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -51,7 +51,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -87,11 +87,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -105,7 +105,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 303
+          "text_index": 307
         },
         {
           "license": "Apache-2.0",
@@ -195,11 +195,75 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
           "text_index": 31
+        }
+      ]
+    },
+    {
+      "name": "apalis",
+      "version": "1.2.0",
+      "license": "MIT OR Apache-2.0",
+      "source": {
+        "kind": "cargo"
+      },
+      "notices": [
+        {
+          "license": "MIT",
+          "text_index": 259
+        },
+        {
+          "license": "Apache-2.0",
+          "text_index": 260
+        }
+      ]
+    },
+    {
+      "name": "apalis-codec",
+      "version": "1.2.0",
+      "license": "MIT OR Apache-2.0",
+      "source": {
+        "kind": "cargo"
+      },
+      "notices": [
+        {
+          "license": "MIT",
+          "text_index": 259
+        },
+        {
+          "license": "Apache-2.0",
+          "text_index": 260
+        }
+      ]
+    },
+    {
+      "name": "apalis-core",
+      "version": "1.2.0",
+      "license": "MIT",
+      "source": {
+        "kind": "cargo"
+      },
+      "notices": [
+        {
+          "license": "MIT",
+          "text_index": 259
+        }
+      ]
+    },
+    {
+      "name": "apalis-sqlite",
+      "version": "1.1.0",
+      "license": "MIT",
+      "source": {
+        "kind": "cargo"
+      },
+      "notices": [
+        {
+          "license": "MIT",
+          "text_index": 279
         }
       ]
     },
@@ -299,7 +363,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -313,7 +377,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 328
+          "text_index": 332
         },
         {
           "license": "Apache-2.0",
@@ -335,7 +399,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -353,7 +417,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -371,7 +435,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -389,7 +453,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -407,7 +471,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -425,7 +489,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -443,7 +507,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -461,7 +525,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -511,7 +575,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -525,11 +589,11 @@
       "notices": [
         {
           "license": "ISC",
-          "text_index": 310
+          "text_index": 314
         },
         {
           "license": "Apache-2.0",
-          "text_index": 310
+          "text_index": 314
         }
       ]
     },
@@ -587,7 +651,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 254
+          "text_index": 255
         }
       ]
     },
@@ -601,7 +665,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 318
+          "text_index": 322
         },
         {
           "license": "Apache-2.0",
@@ -619,7 +683,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 332
+          "text_index": 336
         },
         {
           "license": "Apache-2.0",
@@ -771,7 +835,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -785,7 +849,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -803,7 +867,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 286
+          "text_index": 290
         },
         {
           "license": "Apache-2.0",
@@ -835,7 +899,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 270
+          "text_index": 273
         }
       ]
     },
@@ -857,7 +921,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 250
+          "text_index": 251
         }
       ]
     },
@@ -871,11 +935,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -889,11 +953,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -935,7 +999,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -1033,11 +1097,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 309
+          "text_index": 313
         },
         {
           "license": "Apache-2.0",
-          "text_index": 309
+          "text_index": 313
         }
       ]
     },
@@ -1051,15 +1115,15 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 290
+          "text_index": 294
         },
         {
           "license": "Apache-2.0",
-          "text_index": 289
+          "text_index": 293
         },
         {
           "license": "Zlib",
-          "text_index": 291
+          "text_index": 295
         }
       ]
     },
@@ -1181,7 +1245,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 285
+          "text_index": 289
         }
       ]
     },
@@ -1213,7 +1277,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 328
+          "text_index": 332
         },
         {
           "license": "Apache-2.0",
@@ -1231,7 +1295,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 328
+          "text_index": 332
         },
         {
           "license": "Apache-2.0",
@@ -1267,7 +1331,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -1303,7 +1367,7 @@
         },
         {
           "license": "MIT-0",
-          "text_index": 305
+          "text_index": 309
         },
         {
           "license": "Apache-2.0",
@@ -1321,7 +1385,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 271
+          "text_index": 274
         }
       ]
     },
@@ -1371,7 +1435,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 243
+          "text_index": 244
         },
         {
           "license": "Apache-2.0",
@@ -1389,7 +1453,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 249
+          "text_index": 250
         },
         {
           "license": "Apache-2.0",
@@ -1407,7 +1471,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 245
+          "text_index": 246
         },
         {
           "license": "Apache-2.0",
@@ -1425,7 +1489,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 331
+          "text_index": 335
         },
         {
           "license": "Apache-2.0",
@@ -1443,7 +1507,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 331
+          "text_index": 335
         },
         {
           "license": "Apache-2.0",
@@ -1497,11 +1561,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -1515,11 +1579,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -1573,11 +1637,11 @@
       "notices": [
         {
           "license": "Apache-2.0",
-          "text_index": 292
+          "text_index": 296
         },
         {
           "license": "MIT",
-          "text_index": 293
+          "text_index": 297
         }
       ]
     },
@@ -1591,7 +1655,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 323
+          "text_index": 327
         }
       ]
     },
@@ -1763,7 +1827,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -1907,7 +1971,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 265
+          "text_index": 268
         }
       ]
     },
@@ -1921,7 +1985,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -2077,7 +2141,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 278
+          "text_index": 282
         },
         {
           "license": "Apache-2.0",
@@ -2121,7 +2185,7 @@
         },
         {
           "license": "OFL-1.1",
-          "text_index": 338
+          "text_index": 342
         },
         {
           "license": "Ubuntu-font-1.0",
@@ -2197,7 +2261,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -2215,7 +2279,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -2229,7 +2293,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 277
+          "text_index": 281
         },
         {
           "license": "Apache-2.0",
@@ -2251,7 +2315,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -2279,7 +2343,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 283
+          "text_index": 287
         },
         {
           "license": "Apache-2.0",
@@ -2333,7 +2397,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -2341,7 +2405,7 @@
         },
         {
           "license": "Unicode-DFS-2016",
-          "text_index": 342
+          "text_index": 346
         }
       ]
     },
@@ -2355,7 +2419,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -2370,7 +2434,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 312
+          "text_index": 316
         }
       ]
     },
@@ -2416,7 +2480,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 256
+          "text_index": 257
         }
       ]
     },
@@ -2430,7 +2494,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 256
+          "text_index": 257
         }
       ]
     },
@@ -2448,7 +2512,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 300
+          "text_index": 304
         }
       ]
     },
@@ -2526,7 +2590,7 @@
       "notices": [
         {
           "license": "BSD-3-Clause",
-          "text_index": 294
+          "text_index": 298
         }
       ]
     },
@@ -2540,7 +2604,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 295
+          "text_index": 299
         }
       ]
     },
@@ -2554,7 +2618,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 296
+          "text_index": 300
         }
       ]
     },
@@ -2568,7 +2632,7 @@
       "notices": [
         {
           "license": "BSD-3-Clause",
-          "text_index": 297
+          "text_index": 301
         }
       ]
     },
@@ -2712,7 +2776,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -2799,7 +2863,7 @@
       "notices": [
         {
           "license": "Apache-2.0",
-          "text_index": 346
+          "text_index": 350
         }
       ]
     },
@@ -2813,7 +2877,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 337
+          "text_index": 341
         }
       ]
     },
@@ -2863,7 +2927,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 248
+          "text_index": 249
         }
       ]
     },
@@ -2931,7 +2995,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 307
+          "text_index": 311
         }
       ]
     },
@@ -2945,7 +3009,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 307
+          "text_index": 311
         }
       ]
     },
@@ -2959,7 +3023,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 307
+          "text_index": 311
         }
       ]
     },
@@ -2973,7 +3037,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 307
+          "text_index": 311
         }
       ]
     },
@@ -3005,7 +3069,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 302
+          "text_index": 306
         },
         {
           "license": "Apache-2.0",
@@ -3013,7 +3077,7 @@
         },
         {
           "license": "Zlib",
-          "text_index": 340
+          "text_index": 344
         }
       ]
     },
@@ -3027,7 +3091,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 307
+          "text_index": 311
         }
       ]
     },
@@ -3055,7 +3119,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 329
+          "text_index": 333
         },
         {
           "license": "Apache-2.0",
@@ -3073,7 +3137,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 285
+          "text_index": 289
         },
         {
           "license": "Apache-2.0",
@@ -3091,7 +3155,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 247
+          "text_index": 248
         }
       ]
     },
@@ -3105,7 +3169,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 333
+          "text_index": 337
         }
       ]
     },
@@ -3209,7 +3273,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 341
+          "text_index": 345
         },
         {
           "license": "Apache-2.0",
@@ -3345,7 +3409,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 259
+          "text_index": 262
         }
       ]
     },
@@ -3359,7 +3423,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 273
+          "text_index": 276
         },
         {
           "license": "Apache-2.0",
@@ -3481,7 +3545,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 269
+          "text_index": 272
         }
       ]
     },
@@ -3495,7 +3559,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 272
+          "text_index": 275
         }
       ]
     },
@@ -3509,7 +3573,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 269
+          "text_index": 272
         },
         {
           "license": "Apache-2.0",
@@ -3527,7 +3591,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 269
+          "text_index": 272
         }
       ]
     },
@@ -3541,7 +3605,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 272
+          "text_index": 275
         }
       ]
     },
@@ -3573,7 +3637,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3587,7 +3651,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3601,7 +3665,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3615,7 +3679,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3629,7 +3693,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3643,7 +3707,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3657,7 +3721,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3671,7 +3735,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3685,7 +3749,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3699,7 +3763,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3713,7 +3777,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3727,7 +3791,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3741,7 +3805,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3755,7 +3819,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3769,7 +3833,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3783,7 +3847,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3797,7 +3861,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3811,7 +3875,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3825,7 +3889,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3839,7 +3903,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3853,7 +3917,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3867,7 +3931,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3881,7 +3945,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3895,7 +3959,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3909,7 +3973,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3923,7 +3987,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3937,7 +4001,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3951,7 +4015,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3965,7 +4029,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3979,7 +4043,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -3993,7 +4057,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -4007,7 +4071,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -4021,7 +4085,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -4071,7 +4135,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 283
+          "text_index": 287
         },
         {
           "license": "Apache-2.0",
@@ -4089,7 +4153,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 283
+          "text_index": 287
         },
         {
           "license": "Apache-2.0",
@@ -4107,7 +4171,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 287
+          "text_index": 291
         }
       ]
     },
@@ -4239,7 +4303,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -4257,7 +4321,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -4289,11 +4353,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -4307,11 +4371,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -4325,11 +4389,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -4343,11 +4407,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -4433,7 +4497,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -4469,7 +4533,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 347
+          "text_index": 351
         }
       ]
     },
@@ -4501,7 +4565,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 285
+          "text_index": 289
         }
       ]
     },
@@ -4523,7 +4587,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -4537,7 +4601,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -4623,7 +4687,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 311
+          "text_index": 315
         },
         {
           "license": "Apache-2.0",
@@ -4641,7 +4705,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 311
+          "text_index": 315
         },
         {
           "license": "Apache-2.0",
@@ -4659,7 +4723,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 311
+          "text_index": 315
         },
         {
           "license": "Apache-2.0",
@@ -4691,11 +4755,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 263
+          "text_index": 266
         },
         {
           "license": "BSD-3-Clause",
-          "text_index": 263
+          "text_index": 266
         }
       ]
     },
@@ -4727,7 +4791,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 264
+          "text_index": 267
         }
       ]
     },
@@ -4741,11 +4805,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -4777,7 +4841,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 336
+          "text_index": 340
         }
       ]
     },
@@ -4791,7 +4855,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 320
+          "text_index": 324
         }
       ]
     },
@@ -4805,7 +4869,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 282
+          "text_index": 286
         },
         {
           "license": "Zlib",
@@ -4827,7 +4891,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 282
+          "text_index": 286
         },
         {
           "license": "Zlib",
@@ -4881,7 +4945,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 276
+          "text_index": 280
         },
         {
           "license": "Apache-2.0",
@@ -4913,7 +4977,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 278
         },
         {
           "license": "Apache-2.0",
@@ -4931,7 +4995,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 278
         },
         {
           "license": "Apache-2.0",
@@ -5062,7 +5126,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 335
+          "text_index": 339
         }
       ]
     },
@@ -5170,7 +5234,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -5210,7 +5274,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -5224,7 +5288,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -5243,7 +5307,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 274
+          "text_index": 277
         }
       ]
     },
@@ -5275,7 +5339,7 @@
       "notices": [
         {
           "license": "MPL-2.0",
-          "text_index": 288
+          "text_index": 292
         }
       ]
     },
@@ -5303,7 +5367,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 322
+          "text_index": 326
         },
         {
           "license": "Apache-2.0",
@@ -5321,7 +5385,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 322
+          "text_index": 326
         },
         {
           "license": "Apache-2.0",
@@ -5343,7 +5407,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -5429,7 +5493,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 317
+          "text_index": 321
         }
       ]
     },
@@ -5443,7 +5507,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 317
+          "text_index": 321
         }
       ]
     },
@@ -5458,7 +5522,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 266
+          "text_index": 269
         }
       ]
     },
@@ -5490,7 +5554,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -5508,7 +5572,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -5522,7 +5586,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -5580,7 +5644,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -5644,7 +5708,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -5694,7 +5758,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 255
+          "text_index": 256
         },
         {
           "license": "Apache-2.0",
@@ -5762,7 +5826,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 324
+          "text_index": 328
         }
       ]
     },
@@ -5992,7 +6056,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 253
+          "text_index": 254
         },
         {
           "license": "Apache-2.0",
@@ -6032,7 +6096,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -6136,7 +6200,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 260
+          "text_index": 263
         },
         {
           "license": "Apache-2.0",
@@ -6172,7 +6236,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 262
+          "text_index": 265
         }
       ]
     },
@@ -6186,7 +6250,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 252
+          "text_index": 253
         }
       ]
     },
@@ -6254,7 +6318,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 327
+          "text_index": 331
         },
         {
           "license": "Apache-2.0",
@@ -6308,7 +6372,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -6326,7 +6390,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 300
+          "text_index": 304
         }
       ]
     },
@@ -6348,7 +6412,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -6424,7 +6488,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 261
+          "text_index": 264
         },
         {
           "license": "Apache-2.0",
@@ -6488,11 +6552,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 325
+          "text_index": 329
         }
       ]
     },
@@ -6506,7 +6570,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 251
+          "text_index": 252
         }
       ]
     },
@@ -6520,7 +6584,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 251
+          "text_index": 252
         }
       ]
     },
@@ -6570,7 +6634,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -6588,7 +6652,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -6606,7 +6670,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -6624,7 +6688,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -6642,7 +6706,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -6832,7 +6896,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 280
+          "text_index": 284
         }
       ]
     },
@@ -6846,7 +6910,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 284
+          "text_index": 288
         },
         {
           "license": "Apache-2.0",
@@ -6868,7 +6932,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 326
+          "text_index": 330
         }
       ]
     },
@@ -6882,7 +6946,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 306
+          "text_index": 310
         },
         {
           "license": "Apache-2.0",
@@ -6968,7 +7032,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -6982,7 +7046,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -7032,7 +7096,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 313
+          "text_index": 317
         }
       ]
     },
@@ -7168,7 +7232,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 242
+          "text_index": 243
         },
         {
           "license": "Apache-2.0",
@@ -7218,7 +7282,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 321
+          "text_index": 325
         }
       ]
     },
@@ -7278,7 +7342,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 258
+          "text_index": 261
         },
         {
           "license": "Apache-2.0",
@@ -7332,11 +7396,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -7350,7 +7414,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -7360,7 +7424,7 @@
     },
     {
       "name": "thiserror",
-      "version": "2.0.20",
+      "version": "2.0.21",
       "license": "MIT OR Apache-2.0",
       "source": {
         "kind": "cargo"
@@ -7368,7 +7432,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -7404,7 +7468,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 244
+          "text_index": 245
         }
       ]
     },
@@ -7482,7 +7546,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -7504,7 +7568,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 308
+          "text_index": 312
         }
       ]
     },
@@ -7518,7 +7582,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 279
+          "text_index": 283
         }
       ]
     },
@@ -7564,7 +7628,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 279
+          "text_index": 283
         }
       ]
     },
@@ -7812,7 +7876,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 246
+          "text_index": 247
         }
       ]
     },
@@ -7826,7 +7890,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -7844,7 +7908,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -7862,11 +7926,25 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 315
+          "text_index": 319
         },
         {
           "license": "Apache-2.0",
           "text_index": 34
+        }
+      ]
+    },
+    {
+      "name": "ulid",
+      "version": "3.0.0",
+      "license": "MIT",
+      "source": {
+        "kind": "cargo"
+      },
+      "notices": [
+        {
+          "license": "MIT",
+          "text_index": 242
         }
       ]
     },
@@ -7930,7 +8008,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -7938,7 +8016,7 @@
         },
         {
           "license": "Unicode-3.0",
-          "text_index": 343
+          "text_index": 347
         }
       ]
     },
@@ -7960,7 +8038,7 @@
         },
         {
           "license": "Unicode-3.0",
-          "text_index": 343
+          "text_index": 347
         }
       ]
     },
@@ -7982,7 +8060,7 @@
         },
         {
           "license": "Unicode-3.0",
-          "text_index": 344
+          "text_index": 348
         }
       ]
     },
@@ -8064,11 +8142,11 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 299
+          "text_index": 303
         },
         {
           "license": "Apache-2.0",
-          "text_index": 298
+          "text_index": 302
         }
       ]
     },
@@ -8118,7 +8196,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 257
+          "text_index": 258
         }
       ]
     },
@@ -8178,7 +8256,7 @@
     },
     {
       "name": "uuid",
-      "version": "1.26.0",
+      "version": "1.29.2",
       "license": "Apache-2.0 OR MIT",
       "source": {
         "kind": "cargo"
@@ -8196,7 +8274,7 @@
     },
     {
       "name": "uuid-rng-internal",
-      "version": "1.29.0",
+      "version": "1.29.2",
       "license": "Apache-2.0 OR MIT",
       "source": {
         "kind": "cargo"
@@ -8258,11 +8336,11 @@
       "notices": [
         {
           "license": "Unlicense",
-          "text_index": 339
+          "text_index": 343
         },
         {
           "license": "MIT",
-          "text_index": 319
+          "text_index": 323
         }
       ]
     },
@@ -8276,7 +8354,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 267
+          "text_index": 270
         }
       ]
     },
@@ -8358,7 +8436,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         },
         {
           "license": "Apache-2.0",
@@ -8394,7 +8472,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 268
+          "text_index": 271
         },
         {
           "license": "Apache-2.0",
@@ -8426,7 +8504,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 334
+          "text_index": 338
         },
         {
           "license": "Apache-2.0",
@@ -8444,7 +8522,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 278
         },
         {
           "license": "Apache-2.0",
@@ -8462,7 +8540,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 278
         },
         {
           "license": "Apache-2.0",
@@ -8480,7 +8558,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 278
         },
         {
           "license": "Apache-2.0",
@@ -8498,7 +8576,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 278
         },
         {
           "license": "Apache-2.0",
@@ -8516,7 +8594,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 278
         },
         {
           "license": "Apache-2.0",
@@ -8534,7 +8612,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 275
+          "text_index": 278
         },
         {
           "license": "Apache-2.0",
@@ -8560,7 +8638,7 @@
         },
         {
           "license": "MIT",
-          "text_index": 285
+          "text_index": 289
         }
       ]
     },
@@ -8588,7 +8666,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 304
+          "text_index": 308
         }
       ]
     },
@@ -8634,7 +8712,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -8666,7 +8744,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 316
+          "text_index": 320
         }
       ]
     },
@@ -8680,7 +8758,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 330
+          "text_index": 334
         }
       ]
     },
@@ -8694,7 +8772,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -8730,7 +8808,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -8762,7 +8840,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -8776,7 +8854,7 @@
       "notices": [
         {
           "license": "Unicode-3.0",
-          "text_index": 345
+          "text_index": 349
         }
       ]
     },
@@ -8790,7 +8868,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 314
+          "text_index": 318
         }
       ]
     },
@@ -8818,7 +8896,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 301
+          "text_index": 305
         }
       ]
     },
@@ -8874,7 +8952,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 281
+          "text_index": 285
         },
         {
           "license": "Apache-2.0",
@@ -8882,7 +8960,7 @@
         },
         {
           "license": "Zlib",
-          "text_index": 348
+          "text_index": 352
         }
       ]
     },
@@ -8896,7 +8974,7 @@
       "notices": [
         {
           "license": "MIT",
-          "text_index": 281
+          "text_index": 285
         },
         {
           "license": "Apache-2.0",
@@ -8904,7 +8982,7 @@
         },
         {
           "license": "Zlib",
-          "text_index": 348
+          "text_index": 352
         }
       ]
     }
@@ -9152,6 +9230,7 @@
     "MIT License\n\nCopyright (c) 2016 Paul Mason\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2017 \n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2017 Brendan Ashworth\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
+    "MIT License\n\nCopyright (c) 2017 Dylan Hart\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2017 Nikolai Vazquez\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2017 crc-rs Developers\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2018 PistonDevelopers\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
@@ -9168,6 +9247,8 @@
     "MIT License\n\nCopyright (c) 2020 Philip Degarmo and other contributors\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.",
     "MIT License\n\nCopyright (c) 2020 Scripta Qumranica Electronica\n\nCreated by Bronson Brown-deVost\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2020 magiclen.org (Ron Li)\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
+    "MIT License\n\nCopyright (c) 2020-2025 apalis Contributors\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
+    "MIT License\n\nCopyright (c) 2020-2025 apalis Contributors\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n\n\nStandard license terms (Apache-2.0): https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/Apache-2.0.txt\n\nApache License\nVersion 2.0, January 2004\nhttp://www.apache.org/licenses/\n\nTERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\n1. Definitions.\n\n\"License\" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.\n\n\"Licensor\" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.\n\n\"Legal Entity\" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, \"control\" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.\n\n\"You\" (or \"Your\") shall mean an individual or Legal Entity exercising permissions granted by this License.\n\n\"Source\" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.\n\n\"Object\" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.\n\n\"Work\" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).\n\n\"Derivative Works\" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.\n\n\"Contribution\" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, \"submitted\" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as \"Not a Contribution.\"\n\n\"Contributor\" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.\n\n2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.\n\n3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.\n\n4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:\n\n     (a) You must give any other recipients of the Work or Derivative Works a copy of this License; and\n\n     (b) You must cause any modified files to carry prominent notices stating that You changed the files; and\n\n     (c) You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and\n\n     (d) If the Work includes a \"NOTICE\" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License.\n\n     You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.\n\n5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.\n\n6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.\n\n7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.\n\n8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.\n\n9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.\n\nEND OF TERMS AND CONDITIONS\n\nAPPENDIX: How to apply the Apache License to your work.\n\nTo apply the Apache License to your work, attach the following boilerplate notice, with the fields enclosed by brackets \"[]\" replaced with your own identifying information. (Don't include the brackets!)  The text should be enclosed in the appropriate comment syntax for the file format. We also recommend that a file or class name and description of purpose be included on the same \"printed page\" as the copyright notice for easier identification within third-party archives.\n\nCopyright [yyyy] [name of copyright owner]\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\nhttp://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n",
     "MIT License\n\nCopyright (c) 2021 1Password\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2021 MarcusGrass\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2021 TrueLayer\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
@@ -9186,6 +9267,7 @@
     "MIT License\n\nCopyright (c) 2025 Daniel Curtis\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2025 James Lalonde\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2025 The gfx-rs developers\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
+    "MIT License\n\nCopyright (c) 2025 apalis\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2026 David Veszelovszki\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) 2026 Yuri Astrakhan <YuriAstrakhan@gmail.com>\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
     "MIT License\n\nCopyright (c) <year> <copyright holders>\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n",

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO connect_sync (user_id, state) VALUES (?, ?)\nON CONFLICT (user_id) DO UPDATE SET state = excluded.state;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "0aac16c175780d14862fbfbc1c2ad609d2cb416135025809ad6031b26b153932"
+}

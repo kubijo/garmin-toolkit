@@ -8,6 +8,7 @@ use garmin_model::identity::{LanguagePreference, ProfilePreferences, ThemePrefer
 use crate::{Size, button, icons, images, profile, radio};
 mod accent;
 pub mod connect_activities;
+mod connect_sync;
 mod garmin_connect;
 
 const fn language_autonym(language: LanguagePreference) -> &'static str {
@@ -39,6 +40,7 @@ pub enum RefreshState {
 
 /// Profile-scoped cloud configuration, verification and browser state.
 pub struct GarminConnectProps<'a> {
+    pub sync: Option<&'a garmin_model::garmin_connect::sync::Snapshot>,
     pub now: jiff::Timestamp,
     pub today: jiff::civil::Date,
     pub configured: bool,
@@ -54,6 +56,8 @@ pub struct GarminConnectProps<'a> {
 /// An explicit profile-settings or cloud-browser action.
 #[derive(Clone, Debug)]
 pub enum Action {
+    UpdateConnectSync(Option<garmin_model::garmin_connect::sync::Interval>),
+    CancelConnectSync(garmin_model::garmin_connect::sync::JobId),
     StartGarminConnectPageImport,
     CancelGarminConnectPageImport,
     CancelGarminConnectRefresh,

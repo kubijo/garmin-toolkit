@@ -60,9 +60,11 @@ impl Worker {
         let (event_tx, events) = channel();
         let abort = CancellationToken::default();
         let worker_abort = abort.clone();
+        let jobs = deployment.start_jobs()?;
         let join = std::thread::Builder::new()
             .name("garmin-toolkit-application".to_owned())
             .spawn(move || {
+                let _jobs = jobs;
                 run(
                     &deployment,
                     &command_rx,
@@ -100,7 +102,35 @@ impl Worker {
     }
 
     pub fn update_preferences(&self, user: UserContext, preferences: ProfilePreferences) {
-        self.send(Command::UpdatePreferences { user, preferences });
+        self.send(Command::UpdateProfile {
+            user,
+            change: ProfileChange::Preferences(preferences),
+        });
+    }
+
+    pub fn connect_sync(
+        &self,
+        user: UserContext,
+        request: garmin_model::garmin_connect::sync::Request,
+    ) {
+        self.send(Command::ConnectSync { user, request });
+    }
+
+    pub fn read_connect_cache(
+        &self,
+        user: UserContext,
+        start: u32,
+        filters: garmin_model::garmin_connect::ActivityFilters,
+        revision: garmin_model::garmin_connect::sync::Revision,
+    ) {
+        self.send(Command::ReadConnectCache {
+            request: ConnectCacheRead {
+                user: user.user_id(),
+                start,
+                filters,
+                revision,
+            },
+        });
     }
 
     pub fn set_garmin_connect_key(
@@ -136,7 +166,10 @@ impl Worker {
     }
 
     pub fn update_accent(&self, user: UserContext, accent: Option<garmin_color::Color>) {
-        self.send(Command::UpdateAccent { user, accent });
+        self.send(Command::UpdateProfile {
+            user,
+            change: ProfileChange::Accent(accent),
+        });
     }
 
     pub fn import(&self, user: UserContext, paths: Vec<PathBuf>) {
@@ -209,7 +242,20 @@ struct ConnectActivityCommand {
     cancellation: CancellationToken,
 }
 
+#[derive(Clone, Copy)]
+enum ProfileChange {
+    Preferences(ProfilePreferences),
+    Accent(Option<garmin_color::Color>),
+}
+
 enum Command {
+    ReadConnectCache {
+        request: ConnectCacheRead,
+    },
+    ConnectSync {
+        user: UserContext,
+        request: garmin_model::garmin_connect::sync::Request,
+    },
     ConnectActivity(ConnectActivityCommand),
     GarminConnect {
         user: UserContext,
@@ -217,13 +263,9 @@ enum Command {
     },
     Reload,
     CreateProfile(DisplayName),
-    UpdatePreferences {
+    UpdateProfile {
         user: UserContext,
-        preferences: ProfilePreferences,
-    },
-    UpdateAccent {
-        user: UserContext,
-        accent: Option<garmin_color::Color>,
+        change: ProfileChange,
     },
     Import {
         user: UserContext,
@@ -244,7 +286,28 @@ enum Command {
     Shutdown,
 }
 
+pub struct ConnectCacheRead {
+    pub user: garmin_model::identity::UserId,
+    pub start: u32,
+    pub filters: garmin_model::garmin_connect::ActivityFilters,
+    pub revision: garmin_model::garmin_connect::sync::Revision,
+}
+
 pub enum Event {
+    ConnectSyncFailure {
+        user: garmin_model::identity::UserId,
+        reason: String,
+    },
+    CachedConnectPage {
+        request: ConnectCacheRead,
+        page: Option<garmin_model::garmin_connect::ActivityResponse>,
+    },
+    ConnectSyncStates(
+        Vec<(
+            garmin_model::identity::UserId,
+            garmin_model::garmin_connect::sync::Snapshot,
+        )>,
+    ),
     ConnectLoadProgress {
         user: garmin_model::identity::UserId,
         progress: garmin_model::garmin_connect::LoadProgress,
@@ -286,6 +349,7 @@ pub enum Event {
 }
 
 pub struct ProfileData {
+    pub connect_sync: garmin_model::garmin_connect::sync::Snapshot,
     pub garmin_connect_configured: bool,
     pub user: User,
     pub activities: Vec<garmin_services::ActivityPreview>,
@@ -394,8 +458,35 @@ fn run(
         .build()
         .expect("device browser runtime must start");
     while !abort.is_cancelled() {
-        let Ok((epoch, command)) = commands.recv() else {
-            break;
+        let (epoch, command) = match commands.recv_timeout(std::time::Duration::from_secs(2)) {
+            Ok(command) => command,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                let epoch = deployment.epoch();
+                if let Ok(application) = block_on(deployment.application(epoch)) {
+                    let snapshots = block_on(async {
+                        let mut snapshots = Vec::new();
+                        for user in application.profiles().await? {
+                            let state = application
+                                .connect_sync_status(UserContext::new(user.id()))
+                                .await?;
+                            snapshots.push((user.id(), state));
+                        }
+                        Ok::<_, garmin_services::Error>(snapshots)
+                    });
+                    if let Ok(snapshots) = snapshots {
+                        let _ = emit(
+                            &EventSender {
+                                sender: event_tx.clone(),
+                                epoch,
+                            },
+                            context,
+                            Event::ConnectSyncStates(snapshots),
+                        );
+                    }
+                }
+                continue;
+            }
         };
         if matches!(command, Command::Shutdown) {
             break;
@@ -427,6 +518,75 @@ fn run(
     block_on(deployment.close());
 }
 
+fn read_connect_cache_command(
+    application: &Application,
+    request: ConnectCacheRead,
+    events: &EventSender,
+    context: &egui::Context,
+) -> bool {
+    let page = block_on(application.read_connect_cache(
+        UserContext::new(request.user),
+        request.start,
+        request.filters.clone(),
+    ))
+    .ok()
+    .flatten();
+    emit(events, context, Event::CachedConnectPage { request, page })
+}
+
+fn connect_sync_command(
+    runtime: &tokio::runtime::Runtime,
+    application: &Application,
+    user: UserContext,
+    request: garmin_model::garmin_connect::sync::Request,
+    events: &EventSender,
+    context: &egui::Context,
+) -> bool {
+    use garmin_model::garmin_connect::sync::Request;
+    match request {
+        Request::Configure(interval) => {
+            let result = runtime
+                .block_on(application.configure_connect_sync(user, interval))
+                .map_err(|error| error.to_string())
+                .and_then(|_| block_on(load_profiles(application)));
+            emit(events, context, Event::ProfileUpdated(result))
+        }
+        Request::Cancel(_) | Request::Status => {
+            let result = if let Request::Cancel(job) = request {
+                runtime.block_on(application.cancel_scheduled_connect_sync(user, job))
+            } else {
+                block_on(application.connect_sync_status(user))
+            };
+            let event = match result {
+                Ok(snapshot) => Event::ConnectSyncStates(vec![(user.user_id(), snapshot)]),
+                Err(error) => Event::ConnectSyncFailure {
+                    user: user.user_id(),
+                    reason: error.to_string(),
+                },
+            };
+            emit(events, context, event)
+        }
+    }
+}
+
+fn update_profile(
+    application: &Application,
+    user: UserContext,
+    change: ProfileChange,
+    events: &EventSender,
+    context: &egui::Context,
+) -> bool {
+    let result = match change {
+        ProfileChange::Preferences(preferences) => {
+            block_on(application.update_profile_preferences(user, preferences))
+        }
+        ProfileChange::Accent(accent) => block_on(application.update_profile_accent(user, accent)),
+    }
+    .map_err(|error| error.to_string())
+    .and_then(|_| block_on(load_profiles(application)));
+    emit(events, context, Event::ProfileUpdated(result))
+}
+
 fn execute_command(
     runtime: &tokio::runtime::Runtime,
     application: &Application,
@@ -437,6 +597,12 @@ fn execute_command(
     mutations: &garmin_services::maps::MutationLocks,
 ) -> bool {
     match command {
+        Command::ReadConnectCache { request } => {
+            return read_connect_cache_command(application, request, events, context);
+        }
+        Command::ConnectSync { user, request } => {
+            return connect_sync_command(runtime, application, user, request, events, context);
+        }
         Command::Reload => {
             if !emit(
                 events,
@@ -462,21 +628,8 @@ fn execute_command(
         Command::GarminConnect { user, action } => {
             return check_connect_key(runtime, application, user, action, events, context, abort);
         }
-        Command::UpdateAccent { user, accent } => {
-            let result = block_on(application.update_profile_accent(user, accent))
-                .map_err(|error| error.to_string())
-                .and_then(|_| block_on(load_profiles(application)));
-            if !emit(events, context, Event::ProfileUpdated(result)) {
-                return false;
-            }
-        }
-        Command::UpdatePreferences { user, preferences } => {
-            let result = block_on(application.update_profile_preferences(user, preferences))
-                .map_err(|error| error.to_string())
-                .and_then(|_| block_on(load_profiles(application)));
-            if !emit(events, context, Event::ProfileUpdated(result)) {
-                return false;
-            }
+        Command::UpdateProfile { user, change } => {
+            return update_profile(application, user, change, events, context);
         }
         Command::Import { user, paths } => {
             if !import_paths(application, user, paths, events, context, abort) {
@@ -800,6 +953,10 @@ async fn load_profiles(application: &Application) -> Result<Vec<ProfileData>, St
             .await
             .map_err(|error| error.to_string())?;
         profiles.push(ProfileData {
+            connect_sync: application
+                .connect_sync_status(context)
+                .await
+                .map_err(|error| error.to_string())?,
             garmin_connect_configured: application
                 .garmin_connect_configured(context)
                 .await

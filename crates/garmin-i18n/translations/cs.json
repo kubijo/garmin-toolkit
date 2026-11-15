@@ -592,6 +592,10 @@
     "source": "Maximum",
     "translation": "Maximum"
   },
+  "BEUasI3ITc": {
+    "source": "{count, plural, one {day} other {days}}",
+    "translation": "{count, plural, one {dni} few {dnech} other {dnech}}"
+  },
   "BIFTGSbTOV": {
     "source": "Pending transaction",
     "translation": "Nedokončená transakce"
@@ -978,6 +982,10 @@
     "source": "select",
     "translation": "vybrat"
   },
+  "JE2YVbgaBx": {
+    "source": "Every",
+    "translation": "Opakovat po"
+  },
   "JLwGDxma/f": {
     "source": "current file progress shown below",
     "translation": "průběh aktuálního souboru je níže"
@@ -1229,6 +1237,10 @@
   "OnM1xpU1Dm": {
     "source": "{used} used · {free} free · {total} total",
     "translation": "Využito {used} · volno {free} · celkem {total}"
+  },
+  "OvzONl52rs": {
+    "source": "Off",
+    "translation": "Vypnuto"
   },
   "P+26PZCuAh": {
     "source": "All sports",
@@ -1674,6 +1686,10 @@
     "source": "continue",
     "translation": "pokračovat"
   },
+  "YNcVM7AINm": {
+    "source": "Could not update automatic sync",
+    "translation": "Nastavení automatické synchronizace se nepodařilo aktualizovat"
+  },
   "YXoHk0YjYL": {
     "source": "Power",
     "translation": "Výkon"
@@ -1782,6 +1798,10 @@
     "source": "This plan runs on an isolated copy. The source device is unchanged.",
     "translation": "Tento plán se provede na izolované kopii. Zdrojové zařízení se nezmění."
   },
+  "c7GVTPBmjp": {
+    "source": "Save sync settings",
+    "translation": "Uložit nastavení synchronizace"
+  },
   "c7n9m7DfL0": {
     "source": "Reclaim",
     "translation": "Uvolněné místo"
@@ -1789,6 +1809,10 @@
   "cG0Q8MnYSg": {
     "source": "Temperature",
     "translation": "Teplota"
+  },
+  "cI0qRHLdR3": {
+    "source": "{count, plural, one {hour} other {hours}}",
+    "translation": "{count, plural, one {hodině} few {hodinách} other {hodinách}}"
   },
   "cJtOboitAO": {
     "source": "↑↓/wheel",
@@ -1850,6 +1874,10 @@
     "source": "Route name",
     "translation": "Název trasy"
   },
+  "d7UwRbaYx7": {
+    "source": "{count, plural, one {week} other {weeks}}",
+    "translation": "{count, plural, one {týdnu} few {týdnech} other {týdnech}}"
+  },
   "dDHiosRzUJ": {
     "source": "Reading selected device metadata…",
     "translation": "Načítání údajů vybraného zařízení…"
@@ -1894,6 +1922,10 @@
     "source": "Downloading {name}",
     "translation": "Stahování: {name}"
   },
+  "du1laW45Py": {
+    "source": "Never",
+    "translation": "Nikdy"
+  },
   "e5iRgzQaaC": {
     "source": "Resetting an unresponsive Garmin link…",
     "translation": "Resetování nereagujícího spojení Garmin…"
@@ -1909,6 +1941,10 @@
   "e9q3Xftjm/": {
     "source": "Reading device storage…",
     "translation": "Načítání úložiště zařízení…"
+  },
+  "eHg5TwaW7Y": {
+    "source": "Last successful sync",
+    "translation": "Poslední úspěšná synchronizace"
   },
   "eHp6THD6eM": {
     "source": "Uploading to the device…",
@@ -2062,6 +2098,10 @@
     "source": "Could not browse device files",
     "translation": "Soubory v zařízení se nepodařilo procházet"
   },
+  "hlcyG4J658": {
+    "source": "Automatic sync",
+    "translation": "Automatická synchronizace"
+  },
   "hmr5dvqYY0": {
     "source": "keep running",
     "translation": "nechat běžet"
@@ -2197,6 +2237,10 @@
   "kYBPW27JnX": {
     "source": "Diagnostics:",
     "translation": "Diagnostika:"
+  },
+  "kgWMP789PS": {
+    "source": "Refreshes cached activities and downloads FIT files while the desktop app or Home Assistant server is running. Imports remain manual.",
+    "translation": "Za běhu desktopové aplikace nebo serveru Home Assistant aktualizuje mezipaměť aktivit a stahuje soubory FIT. Aktivity se importují ručně."
   },
   "kw7rKDLZG8": {
     "source": "File size: {size}",
@@ -2399,6 +2443,10 @@
     "source": "Contacting the map-update service.",
     "translation": "Kontaktování služby pro aktualizaci map."
   },
+  "pyXjljeCoI": {
+    "source": "Not scheduled",
+    "translation": "Nenaplánováno"
+  },
   "pyjZXBYOEF": {
     "source": "Local simulated map service — no data is sent to Garmin",
     "translation": "Místní simulovaná mapová služba — Garminu se neodesílají žádná data"
@@ -2478,6 +2526,10 @@
   "r54z1q6Q3W": {
     "source": "Browse files",
     "translation": "Procházet soubory"
+  },
+  "r68Vd2i7+W": {
+    "source": "Next attempt",
+    "translation": "Příští pokus"
   },
   "rBj9IbMve1": {
     "source": "Next page",
@@ -2598,6 +2650,10 @@
   "tOdNiYuuag": {
     "source": "Dark",
     "translation": "Tmavý"
+  },
+  "ti1d8wDs9/": {
+    "source": "A day is 24 hours; a week is seven days.",
+    "translation": "Den znamená 24 hodin, týden sedm dní."
   },
   "tx3c/+oGnx": {
     "source": "{name} already exists in the destination folder. Replace it?",

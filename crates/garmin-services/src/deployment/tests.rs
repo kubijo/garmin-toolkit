@@ -11,7 +11,87 @@ use crate::{Application, UserContext};
 
 type Result<T = ()> = std::result::Result<T, Box<dyn StdError>>;
 
+#[tokio::test]
+async fn restore_cancels_old_scheduler_leases_and_rebinds_the_runner() -> Result {
+    use garmin_model::garmin_connect::sync::{Interval, Outcome, Unit};
+    let (_root, deployment, actor, prepared) =
+        setup_with_schedule(Interval::new(1, Unit::Hour)).await?;
+    let epoch = deployment.epoch();
+    let runner = deployment.start_jobs()?;
+    let stop = deployment.jobs_stop.lock().expect("stop token").clone();
+    let lease = deployment.application_owned(epoch).await?;
+    let old_job = tokio::spawn(async move {
+        let _lease = lease;
+        while !stop.is_cancelled() {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        deployment.restore(epoch, actor, prepared),
+    )
+    .await??;
+    old_job.await?;
+    let user = deployment
+        .application(deployment.epoch())
+        .await?
+        .profiles()
+        .await?[0]
+        .id();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let state = deployment
+                .application(deployment.epoch())
+                .await?
+                .connect_sync_status(UserContext::new(user))
+                .await?;
+            if matches!(
+                state.state.outcome,
+                Outcome::Failed {
+                    kind: garmin_model::garmin_connect::sync::Failure::Credentials,
+                    ..
+                }
+            ) {
+                return Ok::<_, Box<dyn StdError>>(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await??;
+    assert_eq!(name(&deployment).await?, "Restored");
+    deployment.close().await;
+    drop(runner);
+    Ok(())
+}
+
+#[tokio::test]
+async fn unauthorized_restore_does_not_interrupt_scheduled_jobs() -> Result {
+    let (_root, deployment, _, prepared) = setup().await?;
+    let epoch = deployment.epoch();
+    let member = deployment
+        .application(epoch)
+        .await?
+        .create_profile("Member".parse()?)
+        .await?;
+    let stop = deployment.jobs_stop.lock().expect("stop token").clone();
+    assert!(
+        deployment
+            .restore(epoch, UserContext::new(member.id()), prepared)
+            .await
+            .is_err()
+    );
+    assert!(!stop.is_cancelled());
+    deployment.close().await;
+    Ok(())
+}
+
 async fn setup() -> Result<(TempDir, Arc<Deployment>, UserContext, PreparedRestore)> {
+    setup_with_schedule(None).await
+}
+
+async fn setup_with_schedule(
+    schedule: Option<garmin_model::garmin_connect::sync::Interval>,
+) -> Result<(TempDir, Arc<Deployment>, UserContext, PreparedRestore)> {
     let root = tempfile::tempdir()?;
     let deployment = Deployment::open(root.path().join("live")).await?;
     let epoch = deployment.epoch();
@@ -23,6 +103,17 @@ async fn setup() -> Result<(TempDir, Arc<Deployment>, UserContext, PreparedResto
     let mut replacement =
         Application::new(Storage::open(root.path().join("replacement.sqlite3")).await?);
     let new_owner = replacement.create_profile("Restored".parse()?).await?;
+    if let Some(interval) = schedule {
+        let mut state = garmin_model::garmin_connect::sync::State::default();
+        state.configure(
+            Some(interval),
+            garmin_model::value::Timestamp::from_jiff(jiff::Timestamp::now()),
+        );
+        replacement
+            .storage
+            .save_connect_sync_state(new_owner.id(), &state)
+            .await?;
+    }
     let archive = root.path().join("backup.tar.zst");
     replacement
         .snapshot(

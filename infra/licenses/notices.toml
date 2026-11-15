@@ -3,6 +3,21 @@
 # Identical files share storage while each upstream source remains recorded.
 
 [[notices]]
+license = "MIT"
+packages = ["apalis 1.2.0", "apalis-codec 1.2.0", "apalis-core 1.2.0"]
+file = "notices/apalis-LICENSE.txt"
+source = "https://raw.githubusercontent.com/apalis-dev/apalis/81dd4e2d4a882e20a404e78749e40f2a663fadf3/LICENSE"
+sha256 = "fbc7d9ec0fe45675b2a45bf06e71ee2266c05257cb3bc52819e7a1fbe36a28c9"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["apalis 1.2.0", "apalis-codec 1.2.0"]
+file = "notices/apalis-LICENSE.txt"
+source = "https://raw.githubusercontent.com/apalis-dev/apalis/81dd4e2d4a882e20a404e78749e40f2a663fadf3/LICENSE"
+sha256 = "fbc7d9ec0fe45675b2a45bf06e71ee2266c05257cb3bc52819e7a1fbe36a28c9"
+include_standard_terms = true
+
+[[notices]]
 license = "CC0-1.0"
 packages = ["blake3 1.8.7"]
 package_file = "LICENSE_CC0"
@@ -339,20 +354,6 @@ source = "https://raw.githubusercontent.com/gfx-rs/rspirv/8afc3d0ac8e158128cd141
 sha256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
 
 [[notices]]
-license = "Apache-2.0"
-packages = ["uuid-rng-internal 1.29.0"]
-file = "notices/geo-LICENSE-APACHE.txt"
-source = "https://raw.githubusercontent.com/uuid-rs/uuid/4643e607d0ded1f2f95c1c427456e17bd5edf708/LICENSE-APACHE"
-sha256 = "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
-
-[[notices]]
-license = "MIT"
-packages = ["uuid-rng-internal 1.29.0"]
-file = "notices/uuid-LICENSE-MIT.txt"
-source = "https://raw.githubusercontent.com/uuid-rs/uuid/4643e607d0ded1f2f95c1c427456e17bd5edf708/LICENSE-MIT"
-sha256 = "436bc5a105d8e57dcd8778730f3754f7bf39c14d2f530e4cde4bd2d17a83ec3d"
-
-[[notices]]
 license = "MIT"
 packages = ["walkers 0.60.0"]
 file = "notices/walkers-LICENSE.txt"
@@ -455,16 +456,30 @@ sha256 = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
 
 [[notices]]
 license = "Apache-2.0"
-packages = ["uuid 1.26.0"]
+packages = ["uuid 1.29.2"]
 file = "notices/geo-LICENSE-APACHE.txt"
-source = "https://raw.githubusercontent.com/uuid-rs/uuid/cdc96a87bddc38d0eb8f894c764e151d2299b4b3/LICENSE-APACHE"
+source = "https://raw.githubusercontent.com/uuid-rs/uuid/5205a6ea18425e6781f2ac09e896d88153d9cd2d/LICENSE-APACHE"
 sha256 = "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
 
 [[notices]]
 license = "MIT"
-packages = ["uuid 1.26.0"]
+packages = ["uuid 1.29.2"]
 file = "notices/uuid-LICENSE-MIT.txt"
-source = "https://raw.githubusercontent.com/uuid-rs/uuid/cdc96a87bddc38d0eb8f894c764e151d2299b4b3/LICENSE-MIT"
+source = "https://raw.githubusercontent.com/uuid-rs/uuid/5205a6ea18425e6781f2ac09e896d88153d9cd2d/LICENSE-MIT"
+sha256 = "436bc5a105d8e57dcd8778730f3754f7bf39c14d2f530e4cde4bd2d17a83ec3d"
+
+[[notices]]
+license = "Apache-2.0"
+packages = ["uuid-rng-internal 1.29.2"]
+file = "notices/geo-LICENSE-APACHE.txt"
+source = "https://raw.githubusercontent.com/uuid-rs/uuid/5205a6ea18425e6781f2ac09e896d88153d9cd2d/LICENSE-APACHE"
+sha256 = "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+
+[[notices]]
+license = "MIT"
+packages = ["uuid-rng-internal 1.29.2"]
+file = "notices/uuid-LICENSE-MIT.txt"
+source = "https://raw.githubusercontent.com/uuid-rs/uuid/5205a6ea18425e6781f2ac09e896d88153d9cd2d/LICENSE-MIT"
 sha256 = "436bc5a105d8e57dcd8778730f3754f7bf39c14d2f530e4cde4bd2d17a83ec3d"
 [terms."MIT"]
 file = "notices/spdx-MIT.txt"

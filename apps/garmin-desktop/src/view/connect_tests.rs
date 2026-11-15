@@ -4,6 +4,42 @@ use garmin_model::garmin_connect::{ActivityRequest, ActivityResponse, RemoteActi
 use garmin_service_api::ConnectActivityResult;
 
 #[test]
+fn background_pages_wait_for_manual_work_and_reject_changed_filters()
+-> Result<(), Box<dyn std::error::Error>> {
+    use garmin_model::garmin_connect::{ActivityFilters, CacheStatus, sync::Revision};
+    let (_directory, mut desktop) = super::file_window_tests::desktop()?;
+    let user = desktop.profiles[0].user.id();
+    let page = |total| ActivityResponse::Page {
+        start: 0,
+        filters: ActivityFilters::default(),
+        total,
+        cache: CacheStatus::default(),
+        warning: None,
+        has_more: false,
+        activities: Vec::new(),
+    };
+    let request = |start| worker::ConnectCacheRead {
+        user,
+        start,
+        filters: ActivityFilters::default(),
+        revision: Revision::default(),
+    };
+    desktop.connect_activities.insert(user, page(1));
+    desktop.connect_activity_loading = Some(user);
+    desktop.cached_connect_page(request(0), Some(page(2)));
+    assert!(desktop.connect_cache_revisions.is_empty());
+    assert_eq!(desktop.connect_activities[&user], page(1));
+    desktop.connect_activity_loading = None;
+    desktop.cached_connect_page(request(20), Some(page(2)));
+    assert!(desktop.connect_cache_revisions.is_empty());
+    assert_eq!(desktop.connect_activities[&user], page(1));
+    desktop.cached_connect_page(request(0), Some(page(2)));
+    assert_eq!(desktop.connect_activities[&user], page(2));
+    assert_eq!(desktop.connect_cache_revisions[&user], Revision::default());
+    Ok(())
+}
+
+#[test]
 fn refresh_cancellation_is_request_scoped_and_completion_clears_it()
 -> Result<(), Box<dyn std::error::Error>> {
     let (_directory, mut desktop) = super::file_window_tests::desktop()?;

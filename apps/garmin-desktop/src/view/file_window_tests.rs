@@ -24,6 +24,7 @@ pub(super) fn desktop() -> Result<(tempfile::TempDir, Desktop), Box<dyn std::err
         .map(|user| {
             ProfileView::new(
                 worker::ProfileData {
+                    connect_sync: garmin_model::garmin_connect::sync::Snapshot::default(),
                     garmin_connect_configured: false,
                     user,
                     activities: Vec::new(),

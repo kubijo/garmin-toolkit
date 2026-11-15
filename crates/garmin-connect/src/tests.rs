@@ -62,6 +62,28 @@ fn key() -> PersonalApiKey {
     PersonalApiKey::from_string("private-test-key".into()).expect("test key")
 }
 
+#[test]
+fn retry_after_retains_seconds_and_http_dates_without_retaining_headers() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        reqwest::header::RETRY_AFTER,
+        HeaderValue::from_static("900"),
+    );
+    assert_eq!(retry_after(&headers), Some(Duration::from_mins(15)));
+    let date = httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_hours(1));
+    headers.insert(
+        reqwest::header::RETRY_AFTER,
+        HeaderValue::from_str(&date).expect("date header"),
+    );
+    let delay = retry_after(&headers).expect("HTTP date delay");
+    assert!(delay >= Duration::from_secs(3598) && delay <= Duration::from_hours(1));
+    headers.insert(
+        reqwest::header::RETRY_AFTER,
+        HeaderValue::from_static("invalid"),
+    );
+    assert_eq!(retry_after(&headers), None);
+}
+
 #[tokio::test]
 async fn cancellation_during_token_exchange_does_not_request_profile() {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
@@ -183,7 +205,11 @@ async fn rejected_keys_redirects_and_rate_limits_stop_before_profile_request_and
         )])
         .await;
         let error = client.check(&key()).await.expect_err("refused key");
-        assert!(matches!(error, Error::Rejected { status: actual, .. } if actual == status));
+        if status == 429 {
+            assert!(matches!(error, Error::RateLimited { .. }));
+        } else {
+            assert!(matches!(error, Error::Rejected { status: actual, .. } if actual == status));
+        }
         let diagnostic = format!("{error:?} {error}");
         assert!(!diagnostic.contains("private-test-key"));
         assert!(!diagnostic.contains("test.access.token"));

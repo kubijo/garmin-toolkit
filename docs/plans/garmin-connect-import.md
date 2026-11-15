@@ -45,7 +45,8 @@ previously imported file has import disabled. Importing does not download the or
 **Import all on this page** snapshots up to 20 visible activities, skips imported rows and processes the rest
 sequentially through the same FIT checks. Cancellation stops between files and retains completed imports. The summary
 reports imported, skipped and failed counts; access, connection and rate-limit failures stop the batch. There is no
-automatic import or periodic polling. Loading the cloud browser does traverse the account history to populate its cache.
+automatic import. Optional auto-sync refreshes the account cache and downloads original FIT files on a per-profile
+schedule. Loading the cloud browser also populates that cache.
 
 Batch preparation returns only the activity ID, exact-byte digest and imported status. Interactive preview responses are
 capped at 8 MiB of encoded data before entering the browser RPC transport; larger recordings can still be imported
@@ -58,71 +59,87 @@ including **Refresh**, retries the local list. Changing pages or refreshing clea
   reach remain unqualified.
 - Verify expiry/revocation against the live service. Explicit requests currently obtain fresh access tokens.
 
-## Configurable auto-sync analysis
+## Configurable auto-sync
 
-Proposed scope: opt-in, per-profile incremental cache refresh and original FIT downloads. Activity import stays
-explicit; full-history reconciliation stays available through the Refresh menu. Configuration is **Off** or **Every n
-hours / days / weeks**, backed by a domain type containing a positive count and unit, with checked duration conversion.
-Preserve the chosen unit in storage and use ICU plural messages in the UI.
+Auto-sync is opt-in, per-profile incremental cache refresh and original FIT downloads. Activity import stays explicit;
+full-history reconciliation stays available through the Refresh menu. Configuration is **Off** or **Every n hours / days
+/ weeks**, backed by a domain type containing a positive count and unit, with checked duration conversion. The chosen
+unit is preserved in storage and the UI uses ICU plural messages.
 
 Timed incremental refresh inherits the overlap limit: backdated uploads and older edits or deletions still need full
 reconciliation. An optional second full-refresh cadence would provide automatic reconciliation of older history;
 incremental-only scheduling does not promise it.
 
-Recommended timing semantics are elapsed intervals: a day is 24 hours and a week is seven days. Display due times in the
-user's locale. This gives a stable duration across daylight-saving changes; recurrence at the same local clock time
-would be a separate scheduling feature. Schedule from the last successful completion, including a successful manual
-refresh. Enabling a previously unsynchronised profile runs once immediately. On restart or resume, perform at most one
-overdue run, then calculate the next due time; accumulate no missed-run backlog.
+Timing uses elapsed intervals: a day is 24 hours and a week is seven days. Due times use the user's locale and local
+time zone. This gives a stable duration across daylight-saving changes; recurrence at the same local clock time would be
+a separate scheduling feature. Schedule from the last successful completion, including a successful manual refresh.
+Enabling a previously unsynchronised profile runs once immediately. On restart or resume, perform at most one overdue
+run, then calculate the next due time; accumulate no missed-run backlog.
 
 Cancellation defers the next automatic attempt by one configured interval so a timer cannot immediately undo a user's
 cancel action; it does not advance last successful completion. Changing the interval recalculates the next due time from
 the last success while respecting a current cancellation deferral.
 
-Persist the schedule, last attempt, last successful completion, next due time and redacted failure state with the
-profile database. Keep failure retries separate from the configured cadence, with bounded backoff and any supported
-server retry delay. Definitive credential rejection pauses attempts until credentials are repaired. An expired access
-token during a long run should get one bounded fresh-session attempt before being treated as a credential problem.
-Removing or replacing credentials must cancel or invalidate work tied to the previous account. Disabling auto-sync
-cancels its current run at the same durable boundaries as manual refresh, preserving downloaded originals.
+The profile database persists the schedule, last attempt, last successful completion, next due time and redacted failure
+state. Failure retries use bounded backoff separately from the configured cadence. Server retry deadlines survive
+restarts and interval edits. Definitive credential rejection pauses attempts until credentials are repaired; changing
+the interval does not unpause rejected credentials. Scheduled refreshes retry an expired session once with fresh
+authentication before treating another rejection as a credential problem. Removing or replacing credentials must cancel
+or invalidate work tied to the previous account. Disabling auto-sync cancels its current run at the same durable
+boundaries as manual refresh, preserving downloaded originals.
 
-Rejected HTTP responses currently retain the operation and status code, so honoring a server-provided retry delay would
-also require preserving that header in the client error contract.
+The client preserves a parsed `Retry-After` delay from rejected responses, supporting seconds and HTTP dates without
+retaining response headers or bodies in diagnostics.
 
-Expose a structured refresh completion and failure classification before adding the runner. Today a stopped download can
-return a cached page with a warning, and the cache layer reduces some errors to text. An `Ok` page therefore cannot be
-used as the successful-sync marker. Distinguish completed, partial and cancelled runs, preserve authentication /
-rate-limit / network classification, and record unavailable individual originals as coverage. Those individual files can
-retry on the regular cadence without putting a completed index into a tight failure-retry loop.
+Scheduled work consumes typed refresh failures directly rather than treating an `Ok` cached page with a warning as
+successful completion. Authentication, rate-limit and network failures retain their classification. Individual
+unavailable originals are coverage on a completed refresh and retry on the regular cadence. User cancellation defers the
+next attempt; shutdown or deployment replacement interrupts the job and leaves it due for one catch-up after restart.
+Both preserve the last successful completion.
 
 The backend owns scheduling, so several HASS browser tabs cannot create duplicate jobs. HASS can sync while its server
 is running with no browser open. Desktop sync runs while the application is running and catches up once when reopened;
-running after application exit would require an additional daemon or OS integration. The current desktop worker uses a
-current-thread Tokio runtime around individual commands and blocks on a command receiver while idle. It needs a
-continuously driven scheduler runner tied to the active deployment, rather than a timer on the existing idle runtime.
+running after application exit would require an additional daemon or OS integration. The shared core owns an Apalis
+worker and its continuously driven runtime, independently of desktop command processing and browser connections. Desktop
+and HASS use the same `Deployment::start_jobs()` entry point and retain its lifetime guard. Other hosting modalities can
+use this entry point without implementing scheduling. Short-lived read-only commands do not start jobs.
 
-Use the same per-profile exclusion for automatic and manual refreshes, imports and account changes. A busy profile skips
-or defers a scheduled attempt instead of queuing duplicate jobs. Before background sync, allow cached list/search reads
-to use an atomic database read snapshot without waiting for the long refresh mutex. Current list queries take that
-mutex; simply adding a timer would block browsing during downloads. Define manual-operation priority so an arriving
-preview or import can yield a background refresh at a durable boundary. Deployment replacement and restore must stop and
-drain the old scheduler before releasing its application lease, then bind the runner to the new deployment epoch.
+Apalis SQLite provides persisted delayed dispatch, task claiming, acknowledgement, infrastructure retries and orphan
+recovery. Garmin-specific cadence, credential pauses, cancellation deferrals and server retry deadlines remain explicit
+application policy. Saving that policy and enqueueing its next job share one SQLite transaction. Jobs contain profile
+identities and an expected due time, never credentials or FIT payloads. Changing credentials, resetting schedule state
+and enqueueing are also one transaction, so failed account changes preserve the previous credential and timing. Replaced
+schedules produce harmless stale jobs; handlers revalidate the current due time under the profile mutex before any
+network request. Delivery is at least once, so application handlers remain idempotent.
 
-Expose last success, next attempt, current phase and an error/retry state through backend profile snapshots. A
-background run should update cached pages when its generation changes and leave settings editing available. Keep the
-cancellation signal tied to the job that started it; a browser closing must not own the lifetime of a scheduled backend
-job. Scheduled jobs need a backend-owned identity and a profile-authorized cancellation operation, rather than ownership
-by the lifetime of a browser request's watch channel.
+The queue shares the application database and its backup/restore boundary. The application migration embeds the pinned
+Apalis schema; a parity test checks it against upstream migrations. It preserves synchronous FULL writes instead of
+calling the library's convenience setup, which changes durability PRAGMAs. Library upgrades must retain schema parity or
+add a normal application migration. On startup and after restore the core reconciles saved schedules, including
+interrupted attempts. Shutdown closes application job admission and drains active handlers while backend transactions
+remain driven, then stops and flushes the worker before releasing its application lease. Restore then reopens a worker
+against the new database epoch. Apalis supplies timed queue polling; the outer runtime loop only supervises deployment
+replacement and worker recovery, with no periodic scan of profile due times.
 
-Implementation sequence: introduce structured outcomes, interval/settings and persisted status; enable background-safe
-snapshot reads and manual priority; add an injected-clock due-time planner and deployment-owned runner; expose
-settings/status in both hosts. Test restart and suspend catch-up, clock changes, failed attempts, credential changes,
-disable/cancel, deployment replacement, multiple clients and overlapping manual work using synthetic remotes and a
-controllable clock.
+Automatic and manual refreshes, imports, account changes and schedule changes share per-profile exclusion. A busy
+profile makes scheduled work wait and revalidate eligibility after manual work finishes. Cached lists and searches use
+an atomic SQLite read snapshot without waiting for that mutex. An arriving manual refresh, preview or import cancels a
+background job at its next durable boundary. Deployment replacement pauses scheduling, cancels old jobs and waits for
+their application leases before replacing storage; the runner then binds new work to the current epoch.
+
+Backend profile snapshots expose last success, next attempt, current phase and redacted failure state. Both hosts poll
+that status without initiating refreshes. Cached pages update when the publication/completion revision changes; failed
+or stale page reads retry without overwriting a newer filter or page selection. Settings stay editable during a
+background run. Cancelling scheduled work is profile-scoped and independent of browser request watch channels.
+
+Qualification uses explicit-clock planner tests, the real Apalis SQLite backend, and synthetic loopback remotes.
+Coverage includes transactional enqueue rollback, queue deduplication, delayed work surviving reopen, acknowledgement
+drain, abandoned-worker recovery, cancellation, cache reads and deployment replacement. No timer test contacts Garmin or
+imports activities.
 
 ## Future work
 
 - Access-token reuse and renewal.
-- Optional history selection and the configurable auto-sync design above.
+- Optional history selection and a second cadence for full-history reconciliation.
 
 Broader security remains deferred under [ADR 0023](../decisions/0023-deferred-security-hardening.md).

@@ -107,6 +107,7 @@ pub async fn run(browser: BrowserOptions) -> Result<(), Error> {
         .try_init();
     tracing::info!("HASS starting");
     let deployment = prepare_deployment(&data_root).await?;
+    let _jobs = deployment.start_jobs()?;
     let devices = devices::Host::with_simulation_write_rate(
         mode::device_source(&data_root)?,
         Arc::clone(&deployment),

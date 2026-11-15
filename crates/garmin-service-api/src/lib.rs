@@ -230,6 +230,7 @@ pub enum DeploymentMode {
 #[garmin_macros::portable]
 pub struct ProfileSnapshot {
     pub garmin_connect_configured: bool,
+    pub connect_sync: garmin_model::garmin_connect::sync::Snapshot,
     pub user: User,
     pub avatar: Option<ProfileAvatarSnapshot>,
     pub activities: Vec<ActivitySnapshot>,
@@ -498,6 +499,20 @@ mod rpc {
             key: Option<garmin_model::garmin_connect::PersonalApiKey>,
         ) -> Result<
             Result<Option<garmin_model::garmin_connect::AccountFacts>, String>,
+            rtc::CallError,
+        >;
+        async fn connect_sync(
+            &self,
+            user_id: UserId,
+            request: garmin_model::garmin_connect::sync::Request,
+        ) -> Result<Result<garmin_model::garmin_connect::sync::Snapshot, String>, rtc::CallError>;
+        async fn read_connect_cache(
+            &self,
+            user_id: UserId,
+            start: u32,
+            filters: garmin_model::garmin_connect::ActivityFilters,
+        ) -> Result<
+            Result<Option<garmin_model::garmin_connect::ActivityResponse>, String>,
             rtc::CallError,
         >;
         async fn check_garmin_connect(
