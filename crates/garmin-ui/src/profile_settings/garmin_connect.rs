@@ -45,7 +45,13 @@ pub(super) fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
         editor(ui, props, &mut draft);
     }
     ui.add_space(8.0);
-    let action = buttons(ui, props, &mut draft);
+    let mut action = buttons(ui, props, &mut draft);
+    if props.garmin_connect.configured {
+        ui.add_space(24.0);
+        if let Some(update) = super::connect_sync::show(ui, props) {
+            action = Some(update);
+        }
+    }
     if let Some(facts) = props
         .garmin_connect
         .facts

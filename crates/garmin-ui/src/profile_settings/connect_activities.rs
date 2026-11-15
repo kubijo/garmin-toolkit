@@ -70,6 +70,28 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<super::Action> {
             ui.heading(format_message!(props.intl, default_message: "Garmin activities"));
             ui.label(format_message!(props.intl, default_message: "Select an activity to preview"));
             ui.add_space(16.0);
+            if !props.garmin_connect.activities_busy
+                && let Some(sync) = props.garmin_connect.sync
+                && sync.progress.is_some()
+            {
+                if refresh_progress(
+                    ui,
+                    props.intl,
+                    sync.progress.as_ref(),
+                    if matches!(
+                        sync.state.outcome,
+                        garmin_model::garmin_connect::sync::Outcome::Cancelled
+                    ) {
+                        super::RefreshState::Cancelling
+                    } else {
+                        super::RefreshState::Running
+                    },
+                ) && let Some(job) = sync.job
+                {
+                    return Some(super::Action::CancelConnectSync(job));
+                }
+                ui.add_space(16.0);
+            }
             let request = browser(ui, props, enabled);
             if !requested && props.garmin_connect.activities.is_none() && enabled {
                 ui.data_mut(|data| data.insert_temp(id, true));
@@ -501,15 +523,29 @@ fn millimeters(metres: f64) -> u64 {
 }
 
 fn progress(ui: &mut Ui, props: &Props<'_>) -> bool {
+    refresh_progress(
+        ui,
+        props.intl,
+        props.garmin_connect.load_progress,
+        props.garmin_connect.refresh_state,
+    )
+}
+
+pub(super) fn refresh_progress(
+    ui: &mut Ui,
+    intl: &garmin_i18n::Intl,
+    phase: Option<&garmin_model::garmin_connect::LoadProgress>,
+    state: super::RefreshState,
+) -> bool {
     use garmin_model::garmin_connect::LoadProgress;
-    let (label, detail, value) = match props.garmin_connect.load_progress {
+    let (label, detail, value) = match phase {
         None | Some(LoadProgress::Waiting) => (
-            format_message!(props.intl, default_message: "Loading activity data…"),
+            format_message!(intl, default_message: "Loading activity data…"),
             None,
             crate::progress::Value::Indeterminate,
         ),
         Some(LoadProgress::Connecting) => (
-            format_message!(props.intl, default_message: "Connecting to Garmin Connect…"),
+            format_message!(intl, default_message: "Connecting to Garmin Connect…"),
             None,
             crate::progress::Value::Indeterminate,
         ),
@@ -517,9 +553,9 @@ fn progress(ui: &mut Ui, props: &Props<'_>) -> bool {
             let count = *discovered as u64;
             let pages = *pages as u64;
             (
-                format_message!(props.intl, default_message: "Reading activity summaries · {count} found", values: { count: count }),
+                format_message!(intl, default_message: "Reading activity summaries · {count} found", values: { count: count }),
                 Some(
-                    format_message!(props.intl, default_message: "Pages read: {pages}", values: { pages: pages }),
+                    format_message!(intl, default_message: "Pages read: {pages}", values: { pages: pages }),
                 ),
                 crate::progress::Value::Indeterminate,
             )
@@ -533,10 +569,10 @@ fn progress(ui: &mut Ui, props: &Props<'_>) -> bool {
         }) => {
             let completed = downloaded + reused + unavailable;
             let remaining = total.saturating_sub(completed) as u64;
-            let detail = format_message!(props.intl, default_message: "Files {completed}/{total} · Downloaded {downloaded} · Already cached {reused} · Unavailable {unavailable} · Remaining {remaining}", values: { completed: completed as u64, total: *total as u64, downloaded: *downloaded as u64, reused: *reused as u64, unavailable: *unavailable as u64, remaining: remaining });
+            let detail = format_message!(intl, default_message: "Files {completed}/{total} · Downloaded {downloaded} · Already cached {reused} · Unavailable {unavailable} · Remaining {remaining}", values: { completed: completed as u64, total: *total as u64, downloaded: *downloaded as u64, reused: *reused as u64, unavailable: *unavailable as u64, remaining: remaining });
             let label = current.as_deref().map_or_else(
-                || format_message!(props.intl, default_message: "Caching original FIT files"),
-                |name| format_message!(props.intl, default_message: "Downloading {name}", values: { name: name }),
+                || format_message!(intl, default_message: "Caching original FIT files"),
+                |name| format_message!(intl, default_message: "Downloading {name}", values: { name: name }),
             );
             (
                 label,
@@ -548,9 +584,9 @@ fn progress(ui: &mut Ui, props: &Props<'_>) -> bool {
             )
         }
     };
-    let cancelling = props.garmin_connect.refresh_state == super::RefreshState::Cancelling;
+    let cancelling = state == super::RefreshState::Cancelling;
     let label = if cancelling {
-        format_message!(props.intl, default_message: "Cancelling refresh…")
+        format_message!(intl, default_message: "Cancelling refresh…")
     } else {
         label
     };
@@ -564,10 +600,10 @@ fn progress(ui: &mut Ui, props: &Props<'_>) -> bool {
                 height: Some(8.0),
             },
         );
-        props.garmin_connect.load_progress.is_some()
+        phase.is_some()
             && action(
                 ui,
-                &format_message!(props.intl, default_message: "Cancel refresh"),
+                &format_message!(intl, default_message: "Cancel refresh"),
                 None,
                 !cancelling,
             )

@@ -53,6 +53,53 @@ fn cached_pages(
 }
 
 #[test]
+fn cache_reply_from_before_a_completed_import_cannot_erase_its_marker_or_revision() {
+    let owner = UserId::from_u128(1);
+    let other = UserId::from_u128(2);
+    let mut pages = cached_pages(owner, other);
+    let mut reads = connect_state::CacheReads::default();
+    let revision = garmin_model::garmin_connect::sync::Revision::default();
+    let first = reads.capture(owner, &pages[&owner]).expect("page");
+    let before = pages[&owner].clone();
+    assert!(reads.apply(first, revision.clone(), &mut pages, before.clone()));
+    assert!(!reads.changed(owner, &revision));
+    let pending = reads
+        .capture(owner, &pages[&owner])
+        .expect("read in flight");
+    let epoch = reads.epoch(owner);
+    let other_read = reads.capture(other, &pages[&other]).expect("other page");
+    let other_page = pages[&other].clone();
+    reads.invalidate(owner); // Foreground request starts while the background reply is in flight.
+    pages
+        .get_mut(&owner)
+        .expect("page")
+        .merge(ActivityResponse::Imported {
+            id: 1,
+            activities: 1,
+            duplicate: false,
+        });
+    // Import has completed and the busy flag is now false; the old response still must be rejected.
+    assert!(!reads.is_current(epoch));
+    assert!(!reads.apply(pending, revision.clone(), &mut pages, before));
+    assert!(
+        reads.changed(owner, &revision),
+        "stale response must not mark its revision as applied"
+    );
+    let ActivityResponse::Page { activities, .. } = &pages[&owner] else {
+        panic!("page");
+    };
+    assert!(activities[0].imported);
+    assert!(
+        reads.apply(other_read, revision.clone(), &mut pages, other_page),
+        "epochs are profile scoped"
+    );
+    let fresh = reads.capture(owner, &pages[&owner]).expect("fresh read");
+    let after = pages[&owner].clone();
+    assert!(reads.apply(fresh, revision.clone(), &mut pages, after));
+    assert!(!reads.changed(owner, &revision));
+}
+
+#[test]
 fn browser_routes_import_receipts_and_next_requests_to_the_original_profile() {
     let owner = UserId::from_u128(1);
     let other = UserId::from_u128(2);

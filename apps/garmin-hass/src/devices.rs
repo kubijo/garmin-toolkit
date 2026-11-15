@@ -968,6 +968,41 @@ impl ApplicationService for Host {
             .map_err(|error| error.to_string()))
     }
 
+    async fn read_connect_cache(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        start: u32,
+        filters: garmin_model::garmin_connect::ActivityFilters,
+    ) -> Result<
+        Result<Option<garmin_model::garmin_connect::ActivityResponse>, String>,
+        rtc::CallError,
+    > {
+        Ok(self
+            .application()
+            .await?
+            .read_connect_cache(UserContext::new(user_id), start, filters)
+            .await
+            .map_err(|error| error.to_string()))
+    }
+
+    async fn connect_sync(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        request: garmin_model::garmin_connect::sync::Request,
+    ) -> Result<Result<garmin_model::garmin_connect::sync::Snapshot, String>, rtc::CallError> {
+        use garmin_model::garmin_connect::sync::Request;
+        let application = self.application().await?;
+        let user = UserContext::new(user_id);
+        Ok(match request {
+            Request::Configure(interval) => {
+                application.configure_connect_sync(user, interval).await
+            }
+            Request::Status => application.connect_sync_status(user).await,
+            Request::Cancel(job) => application.cancel_scheduled_connect_sync(user, job).await,
+        }
+        .map_err(|error| error.to_string()))
+    }
+
     async fn check_garmin_connect(
         &self,
         user_id: garmin_model::identity::UserId,
@@ -1199,6 +1234,10 @@ async fn profile_snapshots(application: &Application) -> Result<Vec<ProfileSnaps
             .await
             .map_err(|error| error.to_string())?;
         profiles.push(ProfileSnapshot {
+            connect_sync: application
+                .connect_sync_status(context)
+                .await
+                .map_err(|error| error.to_string())?,
             garmin_connect_configured: application
                 .garmin_connect_configured(context)
                 .await
@@ -1681,6 +1720,9 @@ fn refresh_cancelled(signal: &rch::watch::Receiver<bool>) -> bool {
 
 #[cfg(all(test, feature = "demo"))]
 mod connect_refresh_tests;
+
+#[cfg(all(test, feature = "demo"))]
+mod connect_sync_tests;
 
 #[cfg(test)]
 mod tests {

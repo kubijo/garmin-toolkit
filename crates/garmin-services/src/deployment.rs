@@ -31,6 +31,11 @@ struct Live {
 /// One host's exclusive ownership of its database root.
 /// Hosts acquire application leases for every job; leases cannot outlive restore quiescence.
 pub struct Deployment {
+    pub(crate) jobs_started: std::sync::atomic::AtomicBool,
+    pub(crate) jobs_pauses: std::sync::atomic::AtomicUsize,
+    pub(crate) jobs_shutdown: garmin_progress::CancellationToken,
+    pub(crate) jobs_stop: std::sync::Mutex<garmin_progress::CancellationToken>,
+    pub(crate) jobs_changed: tokio::sync::Notify,
     root: PathBuf,
     live: Arc<RwLock<Live>>,
     epoch: tokio::sync::watch::Sender<Uuid>,
@@ -114,6 +119,11 @@ impl Deployment {
         let application = Application::new(storage);
         let epoch = Uuid::new_v4();
         Ok(Arc::new(Self {
+            jobs_started: std::sync::atomic::AtomicBool::new(false),
+            jobs_pauses: std::sync::atomic::AtomicUsize::new(0),
+            jobs_shutdown: garmin_progress::CancellationToken::default(),
+            jobs_stop: std::sync::Mutex::new(garmin_progress::CancellationToken::default()),
+            jobs_changed: tokio::sync::Notify::new(),
             root,
             live: Arc::new(RwLock::new(Live {
                 application: Some(application),
@@ -250,6 +260,11 @@ impl Deployment {
         actor: UserContext,
         prepared: PreparedRestore,
     ) -> Result<Uuid, Error> {
+        {
+            let application = self.application(epoch).await?;
+            application.require_snapshot_owner(actor).await?;
+        }
+        let _sync_pause = self.pause_jobs();
         #[cfg(feature = "integration-hooks")]
         let gate = self
             .integration_gate
@@ -343,12 +358,40 @@ impl Deployment {
 
     /// Closes the selected store. The root stays locked until the last deployment handle is dropped.
     pub async fn close(&self) {
+        self.jobs_shutdown.cancel();
+        let _sync_pause = self.pause_jobs();
         let mut live = self.live.write().await;
         if let Some(application) = live.application.take() {
             application.close().await;
         }
         live.epoch = Uuid::new_v4();
         self.epoch.send_replace(live.epoch);
+    }
+}
+
+struct JobsPause<'a>(&'a Deployment);
+
+impl Drop for JobsPause<'_> {
+    fn drop(&mut self) {
+        self.0
+            .jobs_pauses
+            .fetch_sub(1, std::sync::atomic::Ordering::Release);
+        self.0.jobs_changed.notify_waiters();
+    }
+}
+
+impl Deployment {
+    fn pause_jobs(&self) -> JobsPause<'_> {
+        self.jobs_pauses
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        let mut stop = self
+            .jobs_stop
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        stop.cancel();
+        *stop = garmin_progress::CancellationToken::default();
+        self.jobs_changed.notify_waiters();
+        JobsPause(self)
     }
 }
 

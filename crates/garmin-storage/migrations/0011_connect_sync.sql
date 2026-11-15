@@ -1,0 +1,4 @@
+CREATE TABLE connect_sync (
+    user_id TEXT PRIMARY KEY NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    state TEXT NOT NULL
+) STRICT;

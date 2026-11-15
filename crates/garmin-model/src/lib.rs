@@ -1,7 +1,6 @@
 //! Source-neutral application domain.
 
 pub mod diagnostics;
-pub mod garmin_connect;
 pub mod logging;
 
 macro_rules! define_id {
@@ -21,6 +20,8 @@ macro_rules! define_id {
         pub type $name = newtype_uuid::TypedUuid<$kind>;
     };
 }
+
+pub mod garmin_connect;
 
 macro_rules! text_value {
     ($name:ident, $error_type:ty, $error:expr, $doc:literal) => {

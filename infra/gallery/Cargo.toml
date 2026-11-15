@@ -37,7 +37,7 @@ parley_ratatui = "=0.3.4"
 pollster = "=0.4.0"
 ratatui = { version = "=0.30.2", features = ["unstable-rendered-line-info"] }
 serde = { version = "=1.0.229", features = ["derive"] }
-uuid = "=1.26.0"
+uuid = "=1.29.2"
 
 [build-dependencies]
 gallery-build = { git = "https://github.com/kubijo/rs-gallery.git", tag = "v0.14.0", package = "gallery-build" }

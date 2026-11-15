@@ -44,7 +44,11 @@ repository = "https://github.com/kubijo/garmin-toolkit"
 publish = false
 
 [workspace.dependencies]
+httpdate = "=1.0.3"
 anyhow = "=1.0.104"
+apalis = { version = "=1.2.0", default-features = false, features = ["catch-panic", "limit"] }
+apalis-core = { version = "=1.2.0", default-features = false }
+apalis-sqlite = { version = "=1.1.0", default-features = false, features = ["migrate", "json"] }
 askama = { version = "=0.16.1", default-features = false, features = ["derive", "std"] }
 arc-swap = "=1.9.2"
 async-trait = "=0.1.92"
@@ -75,6 +79,7 @@ formatjs_intl = "=0.5.0"
 fs2 = "=0.4.3"
 flate2 = "=1.1.10"
 futures-lite = "=2.6.1"
+futures-timer = "=3.0.4"
 futures-util = "=0.3.34"
 geo-types = "=0.7.20"
 geographiclib-rs = { version = "=0.2.7", default-features = false }
@@ -158,7 +163,7 @@ syn = "=3.0.9"
 tempfile = "=3.27.0"
 termcolor = "=1.4.1"
 termcolor-json = "=1.0.0"
-thiserror = "=2.0.20"
+thiserror = "=2.0.21"
 time = { version = "=0.3.55", features = ["formatting"] }
 tokio = { version = "=1.53.3", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-wasm-io = { package = "tokio", version = "=1.53.3", default-features = false, features = ["io-util"] }
@@ -170,7 +175,7 @@ tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt"] }
 url = { version = "=2.5.8", features = ["serde"] }
 usvg = { version = "=0.45.1", default-features = false }
-uuid = { version = "=1.26.0", features = ["serde", "v4", "v5"] }
+uuid = { version = "=1.29.2", features = ["serde", "v4", "v5"] }
 walkdir = "=2.5.0"
 walkers = { version = "=0.60.0", default-features = false, features = ["mvt"] }
 wasm-bindgen = "=0.2.126"

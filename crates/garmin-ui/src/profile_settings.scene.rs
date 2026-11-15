@@ -6,7 +6,7 @@ use garmin_ui::{profile, profile_settings, shell, workspace};
 scene_meta! { title: "Application / Profiles / Settings" }
 
 thread_local! {
-    static SETTINGS: crate::SceneState<(ProfilePreferences, Option<garmin_color::Color>), 6> = const { crate::SceneState::empty() };
+    static SETTINGS: crate::SceneState<(ProfilePreferences, Option<garmin_color::Color>, garmin_model::garmin_connect::sync::Snapshot), 6> = const { crate::SceneState::empty() };
 }
 
 #[scene(default)]
@@ -38,9 +38,10 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                         ThemePreference::Auto,
                     ),
                     initial_accent,
+                    garmin_model::garmin_connect::sync::Snapshot::default(),
                 )
             },
-            |(preferences, accent)| {
+            |(preferences, accent, sync)| {
                 let action = show_settings(
                     ui,
                     &profile_settings::Props {
@@ -55,6 +56,7 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                         },
                         picture_enabled: true,
                         garmin_connect: profile_settings::GarminConnectProps {
+                            sync: Some(sync),
                             load_progress: None,
                             refresh_state: profile_settings::RefreshState::Running,
                             now: "2026-11-10T12:00:00Z".parse().expect("gallery timestamp"),
@@ -75,6 +77,14 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                         *preferences = value;
                     }
                     Some(profile_settings::Action::UpdateAccent(value)) => *accent = value,
+                    Some(profile_settings::Action::UpdateConnectSync(interval)) => {
+                        sync.state.configure(
+                            interval,
+                            garmin_model::value::Timestamp::from_jiff(
+                                "2026-11-10T12:00:00Z".parse().expect("gallery timestamp"),
+                            ),
+                        );
+                    }
                     _ => {}
                 }
             },

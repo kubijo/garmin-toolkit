@@ -85,7 +85,7 @@ impl Client {
             .send()
             .await
             .map_err(network)?;
-        status(response.status(), "key exchange")?;
+        status(response.status(), response.headers(), "key exchange")?;
         let token = body(response, limit_bytes(TOKEN_LIMIT)?).await?;
         if cancelled() {
             return Err(Error::Cancelled);
@@ -164,15 +164,34 @@ fn network(error: reqwest::Error) -> Error {
     }
 }
 
-fn status(status: StatusCode, operation: &'static str) -> Result<(), Error> {
+fn status(status: StatusCode, headers: &HeaderMap, operation: &'static str) -> Result<(), Error> {
     if status.is_success() {
         Ok(())
+    } else if status == StatusCode::TOO_MANY_REQUESTS {
+        Err(Error::RateLimited {
+            operation,
+            retry_after: retry_after(headers),
+        })
     } else {
         Err(Error::Rejected {
             operation,
             status: status.as_u16(),
         })
     }
+}
+
+fn retry_after(headers: &HeaderMap) -> Option<Duration> {
+    let value = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+    value
+        .parse::<u64>()
+        .ok()
+        .map(Duration::from_secs)
+        .or_else(|| {
+            httpdate::parse_http_date(value).ok().map(|date| {
+                date.duration_since(std::time::SystemTime::now())
+                    .unwrap_or_default()
+            })
+        })
 }
 
 fn limit_bytes(limit: ByteCount) -> Result<usize, Error> {
@@ -203,6 +222,10 @@ fn profile_error(error: api::ApiOpError<serde_json::Value>) -> Error {
 fn operation_error(error: api::ApiOpError<serde_json::Value>, operation: &'static str) -> Error {
     match error {
         api::ApiOpError::Api(error) if error.status == 200 => Error::InvalidProfile,
+        api::ApiOpError::Api(error) if error.status == 429 => Error::RateLimited {
+            operation,
+            retry_after: retry_after(&error.headers),
+        },
         api::ApiOpError::Api(error) => Error::Rejected {
             operation,
             status: error.status,
@@ -217,6 +240,11 @@ fn operation_error(error: api::ApiOpError<serde_json::Value>, operation: &'stati
 /// or underlying HTTP error is retained.
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Garmin rejected the {operation} (HTTP 429)")]
+    RateLimited {
+        operation: &'static str,
+        retry_after: Option<Duration>,
+    },
     #[error("Garmin Connect request cancelled")]
     Cancelled,
     #[error("Could not reach Garmin Connect")]

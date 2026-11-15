@@ -14,9 +14,10 @@ use tokio::{
 use super::{Host, SourceProvider as _};
 
 #[derive(Clone, Copy)]
-enum Phase {
+pub(super) enum Phase {
     Indexing,
     Downloading,
+    Complete,
 }
 
 #[derive(Clone, Copy)]
@@ -25,7 +26,7 @@ enum Disconnect {
     Transport,
 }
 
-async fn synthetic_garmin(
+pub(super) async fn synthetic_garmin(
     phase: Phase,
     started: Arc<Notify>,
     finish: Arc<Notify>,
@@ -59,9 +60,17 @@ async fn synthetic_garmin(
             responses.push(b"[]".to_vec());
             responses.push(archive);
         }
+        Phase::Complete => {
+            responses.push(b"[]".to_vec());
+            responses.extend(std::iter::repeat_n(archive, 20));
+        }
     }
     let server = tokio::spawn(async move {
-        let last = responses.len() - 1;
+        let checkpoint = if matches!(phase, Phase::Complete) {
+            4
+        } else {
+            responses.len() - 1
+        };
         for (index, body) in responses.into_iter().enumerate() {
             let (mut socket, _) = listener.accept().await.expect("Garmin request");
             let mut request = Vec::new();
@@ -71,7 +80,7 @@ async fn synthetic_garmin(
                 assert!(count > 0);
                 request.extend_from_slice(&bytes[..count]);
             }
-            if index == last {
+            if index == checkpoint {
                 started.notify_one();
                 finish.notified().await;
             }
@@ -93,7 +102,7 @@ async fn synthetic_garmin(
             tokio::time::timeout(Duration::from_millis(100), listener.accept())
                 .await
                 .is_err(),
-            "cancelled refresh started another request"
+            "refresh started an unexpected extra request"
         );
     });
     (address, server)
@@ -157,6 +166,7 @@ async fn assert_cache(root: &std::path::Path, phase: Phase) {
     match phase {
         Phase::Indexing => assert_eq!((summaries, originals), (0, 0)),
         Phase::Downloading => assert_eq!((summaries, originals), (20, 1)),
+        Phase::Complete => assert_eq!((summaries, originals), (20, 20)),
     }
     database.close().await;
 }

@@ -3,9 +3,11 @@
 pub mod activity_export;
 mod connect;
 mod connect_import;
+pub mod connect_sync;
 pub mod course_transfer;
 pub mod deployment;
 pub mod devices;
+pub mod jobs;
 pub mod maps;
 pub mod paths;
 pub mod routes;
@@ -174,6 +176,8 @@ impl From<StoredActivity> for ActivityDetails {
 /// Shared in-process application service.
 pub struct Application {
     storage: Storage,
+    connect_sync_runs: std::sync::Mutex<std::collections::BTreeMap<UserId, connect_sync::Run>>,
+    connect_sync_state_lock: tokio::sync::Mutex<()>,
     #[cfg(feature = "integration-hooks")]
     connect_test_origin: std::sync::Mutex<Option<std::net::SocketAddr>>,
     connect_cache_locks: std::sync::Mutex<
@@ -197,9 +201,11 @@ pub(crate) struct CourseGenerationGate {
 
 impl Application {
     #[must_use]
-    pub const fn new(storage: Storage) -> Self {
+    pub fn new(storage: Storage) -> Self {
         Self {
             storage,
+            connect_sync_runs: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+            connect_sync_state_lock: tokio::sync::Mutex::const_new(()),
             #[cfg(feature = "integration-hooks")]
             connect_test_origin: std::sync::Mutex::new(None),
             connect_cache_locks: std::sync::Mutex::new(std::collections::BTreeMap::new()),
@@ -272,9 +278,18 @@ impl Application {
         if self.storage.user(user.user_id()).await?.is_none() {
             return Err(Error::ProfileNotFound(user.user_id()));
         }
+        let refresh_guard = self.interrupt_connect_sync(user).await;
+        let configured = key.is_some();
+        let state_guard = self.connect_sync_state_lock.lock().await;
+        let mut state = self.storage.connect_sync_state(user.user_id()).await?;
+        let interval = if configured { state.interval } else { None };
+        state = garmin_model::garmin_connect::sync::State::default();
+        state.configure(interval, Timestamp::from_jiff(jiff::Timestamp::now()));
         self.storage
-            .set_garmin_connect_key(user.user_id(), key.as_ref())
+            .set_garmin_connect_configuration(user.user_id(), key.as_ref(), &state)
             .await?;
+        drop(state_guard);
+        drop(refresh_guard);
         Ok(())
     }
 
@@ -730,6 +745,8 @@ pub enum ImportDisposition {
 /// Application query failure.
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Background job is waiting for its due time")]
+    BackgroundJobDeferred,
     #[error(transparent)]
     GarminConnect(#[from] garmin_connect::Error),
     #[error("No Garmin Connect key is saved for this profile")]

@@ -910,6 +910,28 @@ impl App {
                     signal.send_replace(true);
                 }
             }
+            profile_settings::Action::UpdateConnectSync(interval) => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
+                    spawn_connect_sync(
+                        Rc::clone(&self.shared),
+                        self.context.clone(),
+                        profile.user.id(),
+                        garmin_model::garmin_connect::sync::Request::Configure(interval),
+                        format_message!(&self.intl, default_message: "Could not update automatic sync"),
+                    );
+                }
+            }
+            profile_settings::Action::CancelConnectSync(job) => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
+                    spawn_connect_sync(
+                        Rc::clone(&self.shared),
+                        self.context.clone(),
+                        profile.user.id(),
+                        garmin_model::garmin_connect::sync::Request::Cancel(job),
+                        format_message!(&self.intl, default_message: "Could not update automatic sync"),
+                    );
+                }
+            }
             profile_settings::Action::UpdateGarminConnectKey(key) => {
                 self.request_garmin_connect(ConnectRequest::Save(key), profiles);
             }
@@ -1784,6 +1806,7 @@ fn show_profile_settings(
             picture_enabled: true,
             disabled,
             garmin_connect: profile_settings::GarminConnectProps {
+                sync: Some(&snapshot.connect_sync),
                 now: jiff::Timestamp::now(),
                 today: jiff::Zoned::now().date(),
                 configured: snapshot.garmin_connect_configured,
@@ -1831,6 +1854,7 @@ struct State {
     garmin_connect_checking: Option<UserId>,
     connect_activities:
         std::collections::HashMap<UserId, garmin_model::garmin_connect::ActivityResponse>,
+    connect_cache_reads: connect_state::CacheReads,
     connect_preview: Option<(UserId, garmin_service_api::ConnectFitPreview)>,
     close_connect_preview: bool,
     connect_activity_loading: Option<UserId>,
@@ -2835,6 +2859,10 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                                 if let Err(error) = heartbeat(&client).await {
                                     break error.to_string();
                                 }
+                                let poll = poll_connect_sync(&client, &shared, &context);
+                                let timeout = wait_milliseconds(HEARTBEAT_TIMEOUT_MILLISECONDS);
+                                futures_util::pin_mut!(poll, timeout);
+                                let _ = future::select(poll, timeout).await;
                             }
                         }
                     };
@@ -2875,6 +2903,7 @@ fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     state.garmin_connect_checking = None;
     state.garmin_connect_facts.clear();
     state.connect_activities.clear();
+    state.connect_cache_reads = connect_state::CacheReads::default();
     state.connect_import_receipt = None;
     state.connect_preview = None;
     state.connect_activity_loading = None;
@@ -2950,6 +2979,7 @@ fn spawn_create_profile(
                 let user_id = user.id();
                 let profiles = Rc::make_mut(&mut state.profiles);
                 profiles.push(ProfileSnapshot {
+                    connect_sync: garmin_model::garmin_connect::sync::Snapshot::default(),
                     garmin_connect_configured: false,
                     user,
                     avatar: None,
@@ -2969,6 +2999,152 @@ fn spawn_create_profile(
                 state.created_profile = Some(user_id);
             }
             Err(error) => state.profile_create_problem = Some(error.to_string()),
+        }
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+async fn poll_connect_sync(
+    client: &ApplicationServiceClient,
+    shared: &Rc<RefCell<State>>,
+    context: &eframe::egui::Context,
+) {
+    let (generation, users) = {
+        let state = shared.borrow();
+        if state.preferences_saving {
+            return;
+        }
+        (
+            state.connection_generation,
+            state
+                .profiles
+                .iter()
+                .filter(|profile| profile.garmin_connect_configured)
+                .map(|profile| profile.user.id())
+                .collect::<Vec<_>>(),
+        )
+    };
+    for user in users {
+        let epoch = shared.borrow().connect_cache_reads.epoch(user);
+        let Ok(Ok(snapshot)) = client
+            .connect_sync(user, garmin_model::garmin_connect::sync::Request::Status)
+            .await
+        else {
+            continue;
+        };
+        let page_request = {
+            let mut state = shared.borrow_mut();
+            if state.connection_generation != generation || state.preferences_saving {
+                return;
+            }
+            if !state.connect_cache_reads.is_current(epoch) {
+                continue;
+            }
+            let revision = snapshot.revision();
+            let changed = state.connect_cache_reads.changed(user, &revision);
+            let Some(profile) = Rc::make_mut(&mut state.profiles)
+                .iter_mut()
+                .find(|profile| profile.user.id() == user)
+            else {
+                continue;
+            };
+            profile.connect_sync = snapshot;
+            if changed
+                && state.connect_activity_loading != Some(user)
+                && !state
+                    .page_import
+                    .as_ref()
+                    .is_some_and(|(owner, batch)| *owner == user && batch.running())
+            {
+                state
+                    .connect_activities
+                    .get(&user)
+                    .and_then(|page| state.connect_cache_reads.capture(user, page))
+                    .map(|request| (request, revision))
+            } else {
+                None
+            }
+        };
+        context.request_repaint();
+        if let Some((request, revision)) = page_request {
+            let Ok(Ok(Some(page))) = client
+                .read_connect_cache(user, request.start, request.filters.clone())
+                .await
+            else {
+                continue;
+            };
+            let mut state = shared.borrow_mut();
+            if state.connection_generation == generation
+                && !state.preferences_saving
+                && state.connect_activity_loading != Some(user)
+                && !state
+                    .page_import
+                    .as_ref()
+                    .is_some_and(|(owner, batch)| *owner == user && batch.running())
+            {
+                let State {
+                    connect_cache_reads,
+                    connect_activities,
+                    ..
+                } = &mut *state;
+                if connect_cache_reads.apply(request, revision, connect_activities, page) {
+                    context.request_repaint();
+                }
+            }
+        }
+    }
+}
+
+fn spawn_connect_sync(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    user: UserId,
+    request: garmin_model::garmin_connect::sync::Request,
+    failure: String,
+) {
+    let Some(client) = shared.borrow().client.clone() else {
+        return;
+    };
+    let configuring = matches!(
+        request,
+        garmin_model::garmin_connect::sync::Request::Configure(_)
+    );
+    if configuring {
+        if shared.borrow().preferences_saving {
+            return;
+        }
+        shared.borrow_mut().preferences_saving = true;
+    }
+    shared.borrow_mut().connect_cache_reads.invalidate(user);
+    let epoch = shared.borrow().connect_cache_reads.epoch(user);
+    let generation = shared.borrow().connection_generation;
+    spawn_local(async move {
+        let result = client
+            .connect_sync(user, request)
+            .await
+            .map_err(ConnectError::call)
+            .and_then(|result| result.map_err(ConnectError::domain));
+        let mut state = shared.borrow_mut();
+        if state.connection_generation != generation {
+            return;
+        }
+        if configuring {
+            state.preferences_saving = false;
+        }
+        match result {
+            Ok(snapshot)
+                if !state.preferences_saving && state.connect_cache_reads.is_current(epoch) =>
+            {
+                if let Some(profile) = Rc::make_mut(&mut state.profiles)
+                    .iter_mut()
+                    .find(|profile| profile.user.id() == user)
+                {
+                    profile.connect_sync = snapshot;
+                }
+            }
+            Ok(_) => {}
+            Err(error) => state.notice = Some(Notice::error(failure, error)),
         }
         drop(state);
         context.request_repaint();
@@ -2998,6 +3174,7 @@ fn spawn_garmin_connect(
         ConnectRequest::Save(None) => None,
         _ => Some(user_id),
     };
+    shared.borrow_mut().connect_cache_reads.invalidate(user_id);
     let generation = shared.borrow().connection_generation;
     spawn_local(async move {
         let result = match request {
@@ -3149,6 +3326,7 @@ fn spawn_connect_activity(
     }
     shared.borrow_mut().preferences_saving = true;
     shared.borrow_mut().connect_activity_loading = Some(user_id);
+    shared.borrow_mut().connect_cache_reads.invalidate(user_id);
     shared.borrow_mut().connect_load_progress = None;
     {
         let mut state = shared.borrow_mut();

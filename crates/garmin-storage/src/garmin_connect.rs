@@ -76,17 +76,42 @@ impl Storage {
         user: UserId,
         key: Option<&PersonalApiKey>,
     ) -> Result<(), Error> {
-        let user = user.to_string();
-        if let Some(key) = key {
-            let value = key.expose();
-            sqlx::query_file!("queries/save-garmin-connect-key.sql", user, value)
-                .execute(&self.pool)
-                .await?;
-        } else {
-            sqlx::query_file!("queries/delete-garmin-connect-key.sql", user)
-                .execute(&self.pool)
-                .await?;
-        }
+        let mut connection = self.pool.acquire().await?;
+        write_key(&mut connection, user, key).await
+    }
+
+    /// Commits a credential change, schedule invalidation and its next queued job atomically.
+    /// # Errors
+    /// Returns persistence failures without publishing any part of the change.
+    pub async fn set_garmin_connect_configuration(
+        &self,
+        user: UserId,
+        key: Option<&PersonalApiKey>,
+        state: &garmin_model::garmin_connect::sync::State,
+    ) -> Result<(), Error> {
+        let mut transaction = self.pool.begin().await?;
+        write_key(&mut transaction, user, key).await?;
+        crate::connect_sync::write_state(&mut transaction, user, state).await?;
+        transaction.commit().await?;
         Ok(())
     }
+}
+
+async fn write_key(
+    connection: &mut sqlx::SqliteConnection,
+    user: UserId,
+    key: Option<&PersonalApiKey>,
+) -> Result<(), Error> {
+    let user = user.to_string();
+    if let Some(key) = key {
+        let value = key.expose();
+        sqlx::query_file!("queries/save-garmin-connect-key.sql", user, value)
+            .execute(&mut *connection)
+            .await?;
+    } else {
+        sqlx::query_file!("queries/delete-garmin-connect-key.sql", user)
+            .execute(&mut *connection)
+            .await?;
+    }
+    Ok(())
 }

@@ -469,6 +469,10 @@ let
       touch "$out"
     '';
 
+  sqlxRustcWrapper = pkgs.writeShellScript "sqlx-rustc-wrapper" (
+    readFile ../just/sqlx-rustc-wrapper.sh
+  );
+
   sqlxPrepareCommand = check: ''
     sqlx_prepare_dir=$(mktemp -d)
     trap 'rm -rf "$sqlx_prepare_dir"' EXIT
@@ -478,11 +482,14 @@ let
     ${sqlx} migrate run \
       --source crates/garmin-storage/migrations \
       --database-url "$sqlx_database_url"
+    export GARMIN_SQLX_RUSTC_WRAPPER="''${RUSTC_WRAPPER:-}"
+    RUSTC_WRAPPER=${sqlxRustcWrapper} \
     ${cargo} sqlx prepare ${lib.optionalString check "--check"} \
       --workspace \
       --no-dotenv \
       --database-url "$sqlx_database_url" \
       -- \
+      --workspace \
       --all-features \
       --all-targets
   '';

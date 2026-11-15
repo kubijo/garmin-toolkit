@@ -12,6 +12,12 @@ pub struct CachedAccount {
     pub facts: AccountFacts,
 }
 
+/// One consistent published cache read, independent of an in-progress refresh.
+pub struct CacheSnapshot {
+    pub activities: Vec<CachedActivity>,
+    pub coverage: CacheStatus,
+}
+
 fn invalid(reason: impl std::fmt::Display) -> Error {
     Error::InvalidData {
         field: "Garmin Connect cache",
@@ -20,6 +26,59 @@ fn invalid(reason: impl std::fmt::Display) -> Error {
 }
 
 impl Storage {
+    /// Reads the active generation, import markers and coverage in a single SQLite snapshot.
+    /// # Errors
+    /// Returns database or invalid cached-value failures.
+    pub async fn connect_cache_snapshot(
+        &self,
+        user: UserId,
+        fingerprint: &str,
+    ) -> Result<Option<CacheSnapshot>, Error> {
+        let user = user.to_string();
+        let mut transaction = self.pool.begin().await?;
+        let Some(account) =
+            sqlx::query_file!("queries/connect-cache-account.sql", user, fingerprint)
+                .fetch_optional(&mut *transaction)
+                .await?
+        else {
+            return Ok(None);
+        };
+        let source = account.source_id;
+        let generation = account.generation;
+        let summaries = sqlx::query_file_scalar!(
+            "queries/connect-cache-summaries.sql",
+            user,
+            source,
+            generation
+        )
+        .fetch_all(&mut *transaction)
+        .await?;
+        let imported =
+            sqlx::query_file_scalar!("queries/imported-source-identities.sql", user, source)
+                .fetch_all(&mut *transaction)
+                .await?
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>();
+        let counts =
+            sqlx::query_file!("queries/connect-cache-status.sql", user, source, generation)
+                .fetch_one(&mut *transaction)
+                .await?;
+        transaction.commit().await?;
+        let mut activities = Vec::with_capacity(summaries.len());
+        for summary in summaries {
+            let mut summary: CachedActivity = serde_json::from_str(&summary).map_err(invalid)?;
+            summary.activity.imported = imported.contains(&summary.activity.id.to_string());
+            activities.push(summary);
+        }
+        Ok(Some(CacheSnapshot {
+            activities,
+            coverage: CacheStatus {
+                total: usize::try_from(counts.total).map_err(invalid)?,
+                downloaded: usize::try_from(counts.downloaded).map_err(invalid)?,
+                unavailable: usize::try_from(counts.unavailable).map_err(invalid)?,
+            },
+        }))
+    }
     /// Checks download coverage without reading the cached archive.
     /// # Errors
     /// Returns database failures.

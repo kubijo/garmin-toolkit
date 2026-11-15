@@ -22,3 +22,4 @@ Rationale and tradeoffs for lasting choices.
 - [0037: Single execution path](0037-single-execution-path.md)
 - [0039: Virtual devices](0039-virtual-device-runtime.md)
 - [0040: Canonical service models](0040-canonical-models-across-service-boundaries.md)
+- [0041: Core background jobs](0041-core-background-jobs.md)
