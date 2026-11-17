@@ -24,6 +24,10 @@ token and the library's task-count and stop APIs to avoid that ordering. Deliver
 without starting application work and remain retryable in the queue. Only then can restore replace storage. Reopen a
 worker against the new generation and reconcile persisted schedule state.
 
+Backup also requires an exclusive application lease. After authorizing the owner, pause and drain jobs before acquiring
+that lease; resume the runner when snapshot creation finishes or fails. Backup preserves the deployment epoch. Rejected
+or already-cancelled backup requests do not interrupt jobs.
+
 ## Why
 
 A custom timer loop gives this repository responsibility for generic scheduling and recovery. A shared library engine

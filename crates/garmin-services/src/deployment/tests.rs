@@ -12,6 +12,140 @@ use crate::{Application, UserContext};
 type Result<T = ()> = std::result::Result<T, Box<dyn StdError>>;
 
 #[tokio::test]
+async fn backup_drains_the_job_runner_and_resumes_it_without_changing_epoch() -> Result {
+    use apalis_core::backend::ListWorkers as _;
+
+    let (root, deployment, actor, _) = setup().await?;
+    let epoch = deployment.epoch();
+    let runner = deployment.start_jobs()?;
+    let wait_for_workers = async |count| {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if deployment
+                    .application(epoch)
+                    .await?
+                    .storage
+                    .jobs()
+                    .list_workers()
+                    .await?
+                    .len()
+                    >= count
+                {
+                    return Ok::<_, Box<dyn StdError>>(());
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await?
+    };
+    wait_for_workers(1).await?;
+    let archive = root.path().join("runner-backup.tar.zst");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        deployment.backup(
+            epoch,
+            actor,
+            &archive,
+            Limits::default(),
+            &garmin_progress::CancellationToken::default(),
+        ),
+    )
+    .await??;
+    assert_eq!(deployment.epoch(), epoch);
+    let _prepared =
+        PreparedRestore::read(File::open(&archive)?, root.path(), Limits::default()).await?;
+    wait_for_workers(2).await?;
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            deployment.backup(
+                epoch,
+                actor,
+                &archive,
+                Limits::default(),
+                &garmin_progress::CancellationToken::default(),
+            ),
+        )
+        .await?
+        .is_err(),
+        "an existing backup cannot be overwritten"
+    );
+    wait_for_workers(3).await?;
+    deployment.close().await;
+    drop(runner);
+    Ok(())
+}
+
+#[tokio::test]
+async fn pause_cancels_a_generation_admitted_before_it_started() -> Result {
+    let (_root, deployment, _, _) = setup().await?;
+    let (captured, ready) = tokio::sync::oneshot::channel();
+    let (release, proceed) = std::sync::mpsc::channel();
+    let gate = std::sync::Mutex::new(Some((captured, proceed)));
+    *deployment.hook.lock().expect("hook") = Some(Box::new(move |checkpoint| {
+        if checkpoint == Checkpoint::JobsAdmissionChecked
+            && let Some((captured, proceed)) = gate.lock().expect("gate").take()
+        {
+            captured.send(()).expect("test is waiting");
+            proceed
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("test releases admission");
+        }
+        Ok(())
+    }));
+    let owner = Arc::clone(&deployment);
+    let admission = std::thread::spawn(move || crate::jobs::generation_token(&owner));
+    tokio::time::timeout(std::time::Duration::from_secs(5), ready).await??;
+    let pause = deployment.pause_jobs();
+    release.send(())?;
+    let token = admission
+        .join()
+        .expect("admission thread")
+        .expect("generation was admitted before the pause");
+    assert!(token.is_cancelled(), "the admitted generation must drain");
+    drop(pause);
+    deployment.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rejected_backups_do_not_interrupt_scheduled_jobs() -> Result {
+    let (root, deployment, actor, _) = setup().await?;
+    let epoch = deployment.epoch();
+    let member = deployment
+        .application(epoch)
+        .await?
+        .create_profile("Member".parse()?)
+        .await?;
+    let stop = deployment.jobs_stop.lock().expect("stop token").clone();
+    let archive = root.path().join("rejected.tar.zst");
+    let cancelled = garmin_progress::CancellationToken::default();
+    assert!(
+        deployment
+            .backup(
+                epoch,
+                UserContext::new(member.id()),
+                &archive,
+                Limits::default(),
+                &cancelled
+            )
+            .await
+            .is_err()
+    );
+    cancelled.cancel();
+    assert!(
+        deployment
+            .backup(epoch, actor, &archive, Limits::default(), &cancelled)
+            .await
+            .is_err()
+    );
+    assert!(!stop.is_cancelled());
+    assert!(!archive.exists());
+    deployment.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn restore_cancels_old_scheduler_leases_and_rebinds_the_runner() -> Result {
     use garmin_model::garmin_connect::sync::{Interval, Outcome, Unit};
     let (_root, deployment, actor, prepared) =
