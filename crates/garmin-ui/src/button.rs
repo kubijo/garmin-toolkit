@@ -126,6 +126,9 @@ pub struct GroupProps {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GroupStyle {
     Subtle,
+    /// Flat options separated by short,
+    /// independently colored bottom rules.
+    Underlined,
     /// Solid surfaces with icons consistently above their labels.
     Tiles,
 }
@@ -133,7 +136,7 @@ pub enum GroupStyle {
 #[derive(Clone, Copy)]
 struct Selection {
     selected: bool,
-    solid: bool,
+    style: GroupStyle,
     stacked: bool,
     tint: Option<garmin_color::Color>,
 }
@@ -186,7 +189,7 @@ where
                 metrics(button.size),
                 Some(Selection {
                     selected: is_selected,
-                    solid: props.style == GroupStyle::Tiles,
+                    style: props.style,
                     stacked,
                     tint: choice.tint,
                 }),
@@ -194,6 +197,18 @@ where
             .on_hover_text(choice.label);
         if let Some(target) = choice.target {
             crate::semantics::target(ui, &response, target);
+        }
+        if props.style == GroupStyle::Underlined && !is_selected {
+            ui.painter().line_segment(
+                [
+                    response.rect.left_bottom() - egui::vec2(0.0, 1.0),
+                    response.rect.right_bottom() - egui::vec2(0.0, 1.0),
+                ],
+                egui::Stroke::new(
+                    2.0,
+                    crate::theme::color32(crate::theme::palette(ui).borders().strong()),
+                ),
+            );
         }
         (response.clicked() && !is_selected).then_some(choice.value)
     })
@@ -378,7 +393,7 @@ fn group_visuals(ui: &mut Ui, selection: Selection) {
         let fill = if let Some(tint) = selection.tint {
             let base = palette.surfaces().layer_hover(theme::Level::Two);
             base.mix(tint, amount).unwrap_or(base)
-        } else if !selection.solid {
+        } else if selection.style != GroupStyle::Tiles {
             palette.surfaces().layer_hover(level)
         } else {
             continue;
@@ -386,6 +401,11 @@ fn group_visuals(ui: &mut Ui, selection: Selection) {
         *widget = crate::theme::widget(fill, fill, fill, palette.content().text_primary());
     }
     visuals.widgets.open = visuals.widgets.active;
+    if selection.style == GroupStyle::Underlined {
+        visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+        visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+        visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+    }
 }
 
 /// Inputs for an icon-only button.

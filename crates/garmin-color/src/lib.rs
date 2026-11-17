@@ -9,6 +9,7 @@ use ::palette::{
 use cint::{Alpha, ColorInterop, EncodedSrgb};
 use thiserror::Error;
 
+pub mod charts;
 pub mod swatch;
 pub mod theme;
 

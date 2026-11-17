@@ -8,7 +8,7 @@ use garmin_model::identity::{LanguagePreference, ProfilePreferences, ThemePrefer
 use crate::{Size, button, icons, images, profile, radio};
 mod accent;
 pub mod connect_activities;
-mod connect_sync;
+pub(crate) mod connect_sync;
 mod garmin_connect;
 
 const fn language_autonym(language: LanguagePreference) -> &'static str {
@@ -226,6 +226,8 @@ fn show_preferences(ui: &mut Ui, props: &Props<'_>) -> Option<ProfilePreferences
     }
     preferences = preferences.with_show_hidden_files(props.preferences.show_hidden_files());
     preferences = preferences.with_inline_file_windows(props.preferences.inline_file_windows());
+    preferences =
+        preferences.with_monthly_distance_targets(props.preferences.monthly_distance_targets());
     ui.add_space(16.0);
     if let Some(inline) = show_file_windows(ui, props, preferences.inline_file_windows()) {
         preferences = preferences.with_inline_file_windows(inline);

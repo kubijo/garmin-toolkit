@@ -506,6 +506,30 @@ impl App {
             |ui| {
                 show_notice(ui, notice);
                 match &self.page {
+                    Page::Trends => {
+                        let mut state = self.shared.borrow_mut();
+                        let enabled = state.client.is_some() && !state.preferences_saving;
+                        let refreshing =
+                            state.connect_activity_loading == Some(current_profile.user.id());
+                        let progress = state
+                            .connect_load_progress
+                            .as_ref()
+                            .filter(|(user, _)| *user == current_profile.user.id())
+                            .map(|(_, progress)| progress.clone());
+                        PageAction::Trends(garmin_ui::trends::show(
+                            ui,
+                            state.trends.entry(current_profile.user.id()).or_default(),
+                            &garmin_ui::trends::Props {
+                                intl: &self.intl,
+                                today: jiff::Zoned::now().date(),
+                                preferences: current_profile.user.profile().preferences(),
+                                sync: Some(&current_profile.connect_sync),
+                                enabled,
+                                refreshing,
+                                load_progress: progress.as_ref(),
+                            },
+                        ))
+                    }
                     Page::Routes => {
                         routes::show(
                             ui,
@@ -608,8 +632,79 @@ impl App {
         ui.ctx().request_repaint_after(Duration::from_secs(1));
     }
 
+    fn handle_trends_action(
+        &mut self,
+        action: Option<garmin_ui::trends::Action>,
+        profiles: &[ProfileSnapshot],
+    ) {
+        let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) else {
+            return;
+        };
+        match action {
+            Some(garmin_ui::trends::Action::Read(revision)) => {
+                let shared = Rc::clone(&self.shared);
+                let context = self.context.clone();
+                let user = profile.user.id();
+                let client = shared.borrow().client.clone();
+                let epoch = shared.borrow().epoch.clone();
+                spawn_local(async move {
+                    let result = if let Some(client) = client {
+                        client
+                            .connect_trends(user)
+                            .await
+                            .map_err(|error| error.to_string())
+                            .and_then(|result| result)
+                    } else {
+                        Err("Connection unavailable".to_owned())
+                    };
+                    let mut state = shared.borrow_mut();
+                    if state.epoch == epoch {
+                        state
+                            .trends
+                            .entry(user)
+                            .or_default()
+                            .complete(&revision, result);
+                    }
+                    context.request_repaint();
+                });
+            }
+            Some(garmin_ui::trends::Action::OpenActivities) => {
+                self.page = Page::GarminConnect;
+            }
+            Some(garmin_ui::trends::Action::Sync) => self.handle_profile_settings_action(
+                profile_settings::Action::GarminConnectActivity(
+                    garmin_model::garmin_connect::ActivityRequest::Load {
+                        start: 0,
+                        filters: garmin_model::garmin_connect::ActivityFilters::default(),
+                    },
+                ),
+                profiles,
+            ),
+            Some(garmin_ui::trends::Action::Cancel(job)) => self.handle_profile_settings_action(
+                job.map_or(
+                    profile_settings::Action::CancelGarminConnectRefresh,
+                    profile_settings::Action::CancelConnectSync,
+                ),
+                profiles,
+            ),
+            Some(garmin_ui::trends::Action::SaveTargets(targets)) => self
+                .handle_profile_settings_action(
+                    profile_settings::Action::UpdatePreferences(
+                        profile
+                            .user
+                            .profile()
+                            .preferences()
+                            .with_monthly_distance_targets(targets),
+                    ),
+                    profiles,
+                ),
+            None => {}
+        }
+    }
+
     fn handle_page_action(&mut self, action: PageAction, profiles: &[ProfileSnapshot]) {
         match action {
+            PageAction::Trends(action) => self.handle_trends_action(action, profiles),
             PageAction::Backup(Some(action)) => {
                 if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
                     if matches!(
@@ -933,6 +1028,9 @@ impl App {
                 }
             }
             profile_settings::Action::UpdateGarminConnectKey(key) => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
+                    self.shared.borrow_mut().trends.remove(&profile.user.id());
+                }
                 self.request_garmin_connect(ConnectRequest::Save(key), profiles);
             }
             profile_settings::Action::TestGarminConnectKey => {
@@ -1654,6 +1752,7 @@ impl eframe::App for App {
 }
 
 enum PageAction {
+    Trends(Option<garmin_ui::trends::Action>),
     Routes,
     Maps(Option<(uuid::Uuid, garmin_service_api::maps::Command)>),
     Backup(Option<garmin_ui::backup::Action>),
@@ -1838,6 +1937,7 @@ fn set_profile_preferences(snapshot: &mut ProfileSnapshot, preferences: ProfileP
     reason = "profile readiness and three independent asynchronous operations may overlap"
 )]
 struct State {
+    trends: std::collections::HashMap<UserId, garmin_ui::trends::State>,
     routes: routes::Controller,
     epoch: Option<String>,
     backup: backup::Controller,

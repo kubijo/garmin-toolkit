@@ -506,6 +506,13 @@ mod rpc {
             user_id: UserId,
             request: garmin_model::garmin_connect::sync::Request,
         ) -> Result<Result<garmin_model::garmin_connect::sync::Snapshot, String>, rtc::CallError>;
+        async fn connect_trends(
+            &self,
+            user_id: UserId,
+        ) -> Result<
+            Result<Option<garmin_model::garmin_connect::trends::History>, String>,
+            rtc::CallError,
+        >;
         async fn read_connect_cache(
             &self,
             user_id: UserId,

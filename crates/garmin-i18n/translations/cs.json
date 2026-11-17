@@ -83,9 +83,17 @@
     "source": "Zoom out",
     "translation": "Oddálit"
   },
+  "/VnDMl81rh": {
+    "source": "Other",
+    "translation": "Ostatní"
+  },
   "/ayTrkk6L/": {
     "source": "Choose a profile to continue.",
     "translation": "Pro pokračování vyberte profil."
+  },
+  "/d0U2n6DFU": {
+    "source": "Distance, time and consistency across your sports.",
+    "translation": "Vzdálenost, čas a pravidelnost napříč sporty."
   },
   "/quHYgXvvj": {
     "source": "The connection was lost, so the result is unknown. The operation wasn’t retried.",
@@ -267,6 +275,10 @@
     "source": "Files to remove",
     "translation": "Soubory k odstranění"
   },
+  "3uJDrUnevY": {
+    "source": "Current period",
+    "translation": "Aktuální období"
+  },
   "3y9DGgura7": {
     "source": "Resume",
     "translation": "Pokračovat"
@@ -291,6 +303,10 @@
     "source": "Saved {file}",
     "translation": "Uloženo: {file}"
   },
+  "4fSUVQYmNQ": {
+    "source": "Cumulative",
+    "translation": "Kumulativně"
+  },
   "4l6vz1/eZ5": {
     "source": "Copy",
     "translation": "Kopírovat"
@@ -306,6 +322,10 @@
   "4te3m4+fu7": {
     "source": "{duration} elapsed",
     "translation": "uplynulo {duration}"
+  },
+  "4z94t1rx1L": {
+    "source": "Your activity history will appear here",
+    "translation": "Zde se zobrazí historie vašich aktivit"
   },
   "55H791wmWM": {
     "source": "Mouse",
@@ -338,6 +358,10 @@
   "5q3qC0sC3r": {
     "source": "Download",
     "translation": "Stahování"
+  },
+  "5qtqQvyDiR": {
+    "source": "Sync activities",
+    "translation": "Synchronizovat aktivity"
   },
   "5w4t9ugrVa": {
     "source": "Already imported",
@@ -387,6 +411,10 @@
     "source": "Upload file",
     "translation": "Nahrát soubor"
   },
+  "6oTKbPuvZY": {
+    "source": "Missing measurement",
+    "translation": "Chybějící měření"
+  },
   "6qGk6O3huN": {
     "source": "Map authorization — protected maps require device-bound authorization.",
     "translation": "Autorizace map — chráněné mapy vyžadují autorizaci vázanou na zařízení."
@@ -398,6 +426,10 @@
   "734gAe/gd6": {
     "source": "Could not remove item",
     "translation": "Položku se nepodařilo odebrat"
+  },
+  "76dCvAnYqs": {
+    "source": "Activities and FIT files are cached. Imports remain manual.",
+    "translation": "Aktivity a soubory FIT jsou v mezipaměti. Import zůstává ruční."
   },
   "77LpDyUvjF": {
     "source": "ETA {duration}",
@@ -415,6 +447,10 @@
     "source": "{count, plural, one {# file was already imported} other {# files were already imported}}",
     "translation": "{count, plural, one {# soubor již byl importován} few {# soubory již byly importovány} other {# souborů již bylo importováno}}"
   },
+  "7TX2Wm9vV/": {
+    "source": "Sync is running. Trends use the last published summary cache.",
+    "translation": "Probíhá synchronizace. Trendy vycházejí z posledního zveřejněného přehledu v mezipaměti."
+  },
   "7XneskfMun": {
     "source": "Apply map update",
     "translation": "Použít aktualizaci map"
@@ -422,6 +458,10 @@
   "7c6qjta7pc": {
     "source": "discard attempt",
     "translation": "zahodit pokus"
+  },
+  "7pXrnqU8wt": {
+    "source": "Day",
+    "translation": "Den"
   },
   "7vGfzPy2DT": {
     "source": "Could not pair device",
@@ -491,6 +531,10 @@
   "8zJ8uJVJjg": {
     "source": "This device's map operation is shared across profiles. You can leave this page and return while it runs.",
     "translation": "Operace s mapami tohoto zařízení je sdílená mezi profily. Během jejího průběhu můžete tuto stránku opustit a později se vrátit."
+  },
+  "9+DdtuCqLw": {
+    "source": "Next",
+    "translation": "Další"
   },
   "95PRHWmLRH": {
     "source": "Device finalize",
@@ -637,6 +681,10 @@
     "source": "Active operation:",
     "translation": "Aktivní operace:"
   },
+  "BqDdI890tk": {
+    "source": "Active days",
+    "translation": "Aktivní dny"
+  },
   "ByQwVA1h99": {
     "source": "Select a file or folder to see its details",
     "translation": "Výběrem souboru nebo složky zobrazíte podrobnosti"
@@ -653,6 +701,10 @@
     "source": "Restore this backup?",
     "translation": "Obnovit tuto zálohu?"
   },
+  "C9D7MTS6dW": {
+    "source": "Sync completed with unavailable files",
+    "translation": "Synchronizace dokončena, některé soubory nejsou dostupné"
+  },
   "CCO9dTMlqW": {
     "source": "{received} of {total}",
     "translation": "{received} z {total}"
@@ -668,6 +720,10 @@
   "CNsqMm7Bej": {
     "source": "Transaction committed. Eject or unmount before unplugging.",
     "translation": "Transakce potvrzena. Před odpojením zařízení vysuňte nebo odpojte."
+  },
+  "CPpsOfNaIN": {
+    "source": "Trends",
+    "translation": "Trendy"
   },
   "CfylkJzWM/": {
     "source": "Skipped — no automatic rollback",
@@ -709,9 +765,17 @@
     "source": "Checking FIT import status…",
     "translation": "Kontrola stavu importu FIT…"
   },
+  "DLoddCn/3b": {
+    "source": "Last successful sync: {date}",
+    "translation": "Poslední úspěšná synchronizace: {date}"
+  },
   "DUIDEquXSb": {
     "source": "Storage",
     "translation": "Úložiště"
+  },
+  "DXCBeqsbbK": {
+    "source": "Missing originals do not affect Trends. Sync retries these downloads; some Garmin activities have no downloadable FIT file.",
+    "translation": "Chybějící originály nemají vliv na trendy. Synchronizace stažení zopakuje; některé aktivity nemají soubor FIT ke stažení."
   },
   "DXXrFODt/A": {
     "source": "Preparing guarded removal…",
@@ -757,6 +821,14 @@
   "EYIw2MRv0g": {
     "source": "Clear selection",
     "translation": "Zrušit výběr"
+  },
+  "EbDhQAvnyd": {
+    "source": "{count, plural, one {# FIT file is unavailable.} other {# FIT files are unavailable.}} Imports remain manual.",
+    "translation": "{count, plural, one {# soubor FIT není dostupný.} few {# soubory FIT nejsou dostupné.} other {# souborů FIT není dostupných.}} Import zůstává ruční."
+  },
+  "EdumfQe3wb": {
+    "source": "No target",
+    "translation": "Bez cíle"
   },
   "Er+nt9lZA3": {
     "source": "FIT Course file",
@@ -806,6 +878,10 @@
     "source": "garmin-cli — Recovering map update",
     "translation": "garmin-cli — Obnova aktualizace map"
   },
+  "FZG55rxd+f": {
+    "source": "Save targets",
+    "translation": "Uložit cíle"
+  },
   "FbELO094kF": {
     "source": "No diagnostic capture was requested.",
     "translation": "Diagnostický záznam nebyl vyžádán."
@@ -830,6 +906,10 @@
     "source": "Download FIT",
     "translation": "Stáhnout FIT"
   },
+  "FsPOmU41pY": {
+    "source": "Known values only; missing measurements leave gaps.",
+    "translation": "Pouze známé hodnoty; chybějící měření ponechávají mezery."
+  },
   "Fu2FXApEU9": {
     "source": "Uploaded backup",
     "translation": "Nahraná záloha"
@@ -841,6 +921,10 @@
   "G/yZLul6P1": {
     "source": "Remove",
     "translation": "Odebrat"
+  },
+  "GLt427BDIT": {
+    "source": "Known values only",
+    "translation": "Pouze známé hodnoty"
   },
   "GZHJ5iXBAS": {
     "source": "Garmin map service",
@@ -882,9 +966,17 @@
     "source": "Name",
     "translation": "Název"
   },
+  "HDb54bmr0h": {
+    "source": "Activity calendar",
+    "translation": "Kalendář aktivit"
+  },
   "HbB+7XhI6d": {
     "source": "Send FIT to device",
     "translation": "Odeslat FIT do zařízení"
+  },
+  "HbqYCD9Agy": {
+    "source": "No activities recorded in this period",
+    "translation": "V tomto období nejsou zaznamenány žádné aktivity"
   },
   "HfPeesWm+w": {
     "source": "FIT activity preview · {file}",
@@ -921,6 +1013,10 @@
   "IADK+TMMIi": {
     "source": "Save backup on server",
     "translation": "Uložit zálohu na serveru"
+  },
+  "IFo1ooSAuf": {
+    "source": "Year",
+    "translation": "Rok"
   },
   "IMaFFovBVj": {
     "source": "Delete partial upload",
@@ -985,6 +1081,10 @@
   "JE2YVbgaBx": {
     "source": "Every",
     "translation": "Opakovat po"
+  },
+  "JJNc3cbYIJ": {
+    "source": "Previous",
+    "translation": "Předchozí"
   },
   "JLwGDxma/f": {
     "source": "current file progress shown below",
@@ -1054,9 +1154,17 @@
     "source": "Create verified recovery backups",
     "translation": "Vytvořit ověřené zálohy pro obnovu"
   },
+  "KUxmIME28e": {
+    "source": "Monthly targets in kilometres. Zero leaves a sport without a target.",
+    "translation": "Měsíční cíle v kilometrech. Nula ponechá sport bez cíle."
+  },
   "KX0OMbmhrp": {
     "source": "Scanning selected files",
     "translation": "Prohledávání vybraných souborů"
+  },
+  "KYaahEdJil": {
+    "source": "Sync paused: Garmin request limit reached",
+    "translation": "Synchronizace pozastavena: dosažen limit požadavků Garminu"
   },
   "Ke8H8uuJMo": {
     "source": "Caching original FIT files",
@@ -1078,6 +1186,10 @@
     "source": "Device transfer",
     "translation": "Přenos do zařízení"
   },
+  "KoVX1dHOlg": {
+    "source": "Downloaded files were kept.",
+    "translation": "Stažené soubory byly zachovány."
+  },
   "KqTQL532Pk": {
     "source": "Send {file} to Garmin:",
     "translation": "Odeslat {file} Garminu:"
@@ -1089,6 +1201,10 @@
   "L9pY09lqmU": {
     "source": "Ascent",
     "translation": "Stoupání"
+  },
+  "LAHRoH79cM": {
+    "source": "Period comparison",
+    "translation": "Porovnání období"
   },
   "LDwEtTDRI0": {
     "source": "Recorded user ID",
@@ -1105,6 +1221,10 @@
   "Lf81FX5U/k": {
     "source": "{count, plural, one {# file} other {# files}}",
     "translation": "{count, plural, one {# soubor} few {# soubory} other {# souborů}}"
+  },
+  "Lj83S+NoHQ": {
+    "source": "Sync did not finish",
+    "translation": "Synchronizace nebyla dokončena"
   },
   "LmMjtRuyez": {
     "source": "System data · browse only",
@@ -1126,6 +1246,10 @@
     "source": "Connect a device to send this Course.",
     "translation": "Pro odeslání této trasy připojte zařízení."
   },
+  "McUCOUOjcW": {
+    "source": "Next automatic attempt: {next}",
+    "translation": "Další automatický pokus: {next}"
+  },
   "MchMxikYDL": {
     "source": "Release to import these files",
     "translation": "Uvolněním soubory importujete"
@@ -1134,9 +1258,17 @@
     "source": "Transfer needs review",
     "translation": "Přenos vyžaduje kontrolu"
   },
+  "MxiQ42pGFd": {
+    "source": "Some measurements are missing. Totals include known values only; charts leave gaps.",
+    "translation": "Některá měření chybějí. Součty zahrnují pouze známé hodnoty; v grafech zůstávají mezery."
+  },
   "Mzg9qCOIW/": {
     "source": "No route geometry",
     "translation": "Trasa nemá geometrii"
+  },
+  "N+m+LWEK8O": {
+    "source": "Select a day to pin its totals here.",
+    "translation": "Vyberte den a zobrazte zde jeho souhrn."
   },
   "N0weLRGX26": {
     "source": "Fit route",
@@ -1197,6 +1329,10 @@
   "NzVVEHYhOx": {
     "source": "Generate FIT",
     "translation": "Vygenerovat FIT"
+  },
+  "O3U8zpwAyH": {
+    "source": "Sync your Garmin account to see trends. Activities remain unimported.",
+    "translation": "Pro zobrazení trendů synchronizujte účet Garmin. Aktivity se tím neimportují."
   },
   "O9GTIcAimZ": {
     "source": "Profile picture",
@@ -1402,6 +1538,10 @@
     "source": "Create it inside {directory}.",
     "translation": "Vytvořit ve složce {directory}."
   },
+  "SAdJjFJd4m": {
+    "source": "Cached history could not be read",
+    "translation": "Historii v mezipaměti se nepodařilo načíst"
+  },
   "SCzdiH3MZY": {
     "source": "Select an activity to preview",
     "translation": "Vyberte aktivitu pro náhled"
@@ -1441,6 +1581,14 @@
   "T+iSkqepEh": {
     "source": "Inspecting removal journal…",
     "translation": "Kontrola žurnálu odebrání…"
+  },
+  "T9rCcNKWcR": {
+    "source": "{difference} ({percent}%) vs previous period",
+    "translation": "{difference} ({percent} %) oproti předchozímu období"
+  },
+  "TBovrxFZgY": {
+    "source": "Month",
+    "translation": "Měsíc"
   },
   "TDaF6JVgG6": {
     "source": "Dismiss",
@@ -1526,6 +1674,10 @@
     "source": "Creating a profile",
     "translation": "Vytváření profilu"
   },
+  "V/FE54QApg": {
+    "source": "Sync completed",
+    "translation": "Synchronizace dokončena"
+  },
   "V0NIpWVejS": {
     "source": "Save on server",
     "translation": "Uložit na server"
@@ -1549,6 +1701,10 @@
   "VDvZ/Nk5y5": {
     "source": "Review the device and selected changes.",
     "translation": "Zkontrolujte zařízení a vybrané změny."
+  },
+  "VG4KUGNXdu": {
+    "source": "No previous activity",
+    "translation": "V předchozím období nejsou žádné aktivity"
   },
   "VQjgECGVBn": {
     "source": "Server: {path}",
@@ -1762,6 +1918,10 @@
     "source": "Size",
     "translation": "Velikost"
   },
+  "ajrtCrrEvE": {
+    "source": "Activity time",
+    "translation": "Čas aktivit"
+  },
   "arHMOUHUDu": {
     "source": "Overwrite file",
     "translation": "Přepsat soubor"
@@ -1805,6 +1965,10 @@
   "c7n9m7DfL0": {
     "source": "Reclaim",
     "translation": "Uvolněné místo"
+  },
+  "c8OAYN69dl": {
+    "source": "{count} summaries have no usable local date and are excluded from period totals.",
+    "translation": "{count} přehledů nemá použitelné místní datum a nejsou zahrnuty do součtů za období."
   },
   "cG0Q8MnYSg": {
     "source": "Temperature",
@@ -1889,6 +2053,10 @@
   "dOQCL8n7dZ": {
     "source": "Display name",
     "translation": "Zobrazované jméno"
+  },
+  "dXegrQ9Tbp": {
+    "source": "{count, plural, one {# original FIT unavailable} other {# original FITs unavailable}}; Trends use activity summaries.",
+    "translation": "{count, plural, one {# originální FIT není dostupný} few {# originální FIT nejsou dostupné} other {# originálních FIT není dostupných}}; trendy používají souhrny aktivit."
   },
   "dbzHTNf97L": {
     "source": "Cancelling refresh…",
@@ -2122,6 +2290,10 @@
     "source": "focus",
     "translation": "výběr"
   },
+  "iKrzg9MpTb": {
+    "source": "Monthly targets only",
+    "translation": "Pouze měsíční cíle"
+  },
   "iTwRWBbue8": {
     "source": "Discard removes this notice. Cache and capture files remain.",
     "translation": "Zahozením se odstraní toto oznámení. Mezipaměť a soubory záznamu zůstanou."
@@ -2270,6 +2442,10 @@
     "source": "Transferring selected items…",
     "translation": "Přenášení vybraných položek…"
   },
+  "lil64yj9Lc": {
+    "source": "{change}% vs previous period",
+    "translation": "{change} % oproti předchozímu období"
+  },
   "lkMoYJ9N2j": {
     "source": "Cancellation may require rollback or later recovery. Do not disconnect until this screen closes.",
     "translation": "Přerušení může vyžadovat návrat nebo pozdější obnovu. Neodpojujte zařízení, dokud se tato obrazovka nezavře."
@@ -2302,6 +2478,10 @@
     "source": "Pages read: {pages}",
     "translation": "Načtené stránky: {pages}"
   },
+  "mGOJ1CqoLu": {
+    "source": "Reload cached history",
+    "translation": "Obnovit historii z mezipaměti"
+  },
   "mSVZY9IBnl": {
     "source": "Review partial cleanup",
     "translation": "Zkontrolovat odstranění neúplného souboru"
@@ -2309,6 +2489,10 @@
   "mePIopRwmA": {
     "source": "Backup download",
     "translation": "Stažení zálohy"
+  },
+  "msgdQsL44D": {
+    "source": "Sync did not finish. Downloaded files were kept.",
+    "translation": "Synchronizace nebyla dokončena. Stažené soubory byly zachovány."
   },
   "mvCaSAxfUj": {
     "source": "Device storage",
@@ -2337,6 +2521,10 @@
   "nZ9QXAjOmF": {
     "source": "Map update installed.",
     "translation": "Aktualizace map nainstalována."
+  },
+  "naURAcjnJN": {
+    "source": "Distance targets",
+    "translation": "Cíle vzdálenosti"
   },
   "ncw9ezSDQN": {
     "source": "Refresh cancelled",
@@ -2515,6 +2703,10 @@
     "source": "Could not connect to the device host",
     "translation": "K hostiteli zařízení se nepodařilo připojit"
   },
+  "qwd0Xk4ucM": {
+    "source": "Edit monthly distance targets",
+    "translation": "Upravit měsíční cíle vzdálenosti"
+  },
   "r1ey/2zpHa": {
     "source": "Update complete",
     "translation": "Aktualizace dokončena"
@@ -2566,6 +2758,10 @@
   "rWG5IWErKN": {
     "source": "Create a folder",
     "translation": "Vytvořit složku"
+  },
+  "raqirBGCP3": {
+    "source": "known distance",
+    "translation": "známá vzdálenost"
   },
   "rbrahOGMC3": {
     "source": "Close",
@@ -2635,6 +2831,10 @@
     "source": "Garmin map components",
     "translation": "Mapové komponenty Garmin"
   },
+  "sd2ieZmd+n": {
+    "source": "Week",
+    "translation": "Týden"
+  },
   "sk6RoEELTT": {
     "source": "Check available maps",
     "translation": "Zjistit dostupné mapy"
@@ -2650,6 +2850,14 @@
   "tOdNiYuuag": {
     "source": "Dark",
     "translation": "Tmavý"
+  },
+  "tRA46qLfgH": {
+    "source": "0 min",
+    "translation": "0 min"
+  },
+  "tZb8aOEDSS": {
+    "source": "2 h+",
+    "translation": "2 h+"
   },
   "ti1d8wDs9/": {
     "source": "A day is 24 hours; a week is seven days.",
@@ -2679,6 +2887,10 @@
     "source": "Review sending Course version {version}",
     "translation": "Zkontrolovat odeslání trasy verze {version}"
   },
+  "uTi1ee+W5V": {
+    "source": "Sync cancelled",
+    "translation": "Synchronizace zrušena"
+  },
   "uTim4o4gsV": {
     "source": "{space} free space required",
     "translation": "vyžadováno {space} volného místa"
@@ -2702,6 +2914,10 @@
   "ubmFc8rrea": {
     "source": "Install",
     "translation": "Nainstalovat"
+  },
+  "uctN1pmj4S": {
+    "source": "Cached activity history starts {date}",
+    "translation": "Historie aktivit v mezipaměti začíná {date}"
   },
   "ug01MkZy2v": {
     "source": "Time",
@@ -2776,9 +2992,17 @@
     "source": "Apply filters",
     "translation": "Použít filtry"
   },
+  "wYsv4ZHu+B": {
+    "source": "Monthly",
+    "translation": "Měsíčně"
+  },
   "wbVfKm8x4q": {
     "source": "Refresh catalog",
     "translation": "Obnovit katalog"
+  },
+  "wfRZB6HN2Y": {
+    "source": "Distance over time",
+    "translation": "Vzdálenost v čase"
   },
   "wggmFwvpck": {
     "source": "Could not remove selected items",
@@ -2795,6 +3019,10 @@
   "x7dmkYtBOl": {
     "source": "Map operation in progress",
     "translation": "Probíhá operace s mapami"
+  },
+  "xCdwjTaaS/": {
+    "source": "Distance by sport",
+    "translation": "Vzdálenost podle sportu"
   },
   "xV85jaFwOx": {
     "source": "Create a backup",
@@ -2827,6 +3055,10 @@
   "y55uGhVHy8": {
     "source": "row",
     "translation": "řádek"
+  },
+  "y9z4HNK99O": {
+    "source": "Sync interrupted",
+    "translation": "Synchronizace přerušena"
   },
   "yBaILMpvgy": {
     "source": "Saving profile settings",
@@ -2871,6 +3103,10 @@
   "yi34xdBehR": {
     "source": "Full refresh",
     "translation": "Obnovit vše"
+  },
+  "ymGru0T2YZ": {
+    "source": "View cloud activities",
+    "translation": "Zobrazit cloudové aktivity"
   },
   "yn5Y7+xW28": {
     "source": "A GPX file can contain multiple tracks, segments, or routes. Choose one path to preview and save.",
@@ -2923,5 +3159,9 @@
   "zrmOoAZXGn": {
     "source": "Unnamed path",
     "translation": "Nepojmenovaná trasa"
+  },
+  "zxvhnETmn2": {
+    "source": "Daily",
+    "translation": "Denně"
   }
 }

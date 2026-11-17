@@ -1078,6 +1078,22 @@ fn window_and_theme_changes_preserve_other_profile_preferences() {
 }
 
 #[test]
+fn changing_units_language_and_theme_preserves_monthly_distance_targets() {
+    let mut view = harness();
+    let targets = [160, 500, 10];
+    view.state_mut().preferences = view
+        .state()
+        .preferences
+        .with_monthly_distance_targets(targets);
+    view.run();
+    for label in ["Imperial", "Čeština", "Light"] {
+        view.get_by_label(label).click();
+        view.run();
+        assert_eq!(view.state().preferences.monthly_distance_targets(), targets);
+    }
+}
+
+#[test]
 fn binary_preferences_are_visible_radios_and_preserve_other_settings() {
     let mut view = harness();
     view.run();

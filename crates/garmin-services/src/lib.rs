@@ -12,6 +12,7 @@ pub mod maps;
 pub mod paths;
 pub mod routes;
 pub mod snapshots;
+mod trends;
 
 use garmin_importer::{
     AvatarCrop, AvatarImportReceipt, AvatarImportRequest as ImporterAvatarRequest, AvatarImporter,

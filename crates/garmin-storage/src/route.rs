@@ -830,7 +830,15 @@ mod tests {
                 Role::Owner,
                 Profile::from_display_name("Walker".parse()?),
             );
-            storage.save_user(&owner).await?;
+            sqlx::query("INSERT INTO users (id, role, display_name, unit_system, language, theme) VALUES (?, ?, ?, ?, ?, ?)")
+                .bind(owner.id().to_string())
+                .bind("owner")
+                .bind("Walker")
+                .bind("metric")
+                .bind("en")
+                .bind("auto")
+                .execute(&storage.pool)
+                .await?;
             let initial = revision(RoutePlanId::new_v4(), None, RevisionSource::Freehand)?;
             let plan = RoutePlan::from_parts(initial.plan_id(), owner.id(), initial.id());
             let mut transaction = storage.pool.begin().await?;

@@ -1,0 +1,114 @@
+use super::*;
+
+#[test]
+fn generation_changes_clear_old_reports_even_when_the_next_read_fails() {
+    for generation in [None, Some("new-account".to_owned())] {
+        let old = Revision {
+            generation: Some("old-account".to_owned()),
+            completed: None,
+        };
+        let new = Revision {
+            generation,
+            completed: None,
+        };
+        let mut state = State::from_cache(Some(History::default()), old.clone());
+        state.selected = Some("2026-11-15".parse().expect("date"));
+        assert!(state.needs_read(&new));
+        assert!(state.history.is_none());
+        assert!(state.selected.is_none());
+        state.complete(&old, Ok(Some(History::default())));
+        assert!(
+            state.history.is_none(),
+            "late old-account responses stay discarded"
+        );
+        state.complete(&new, Err("cache read failed".to_owned()));
+        assert!(state.history.is_none());
+    }
+}
+
+#[test]
+fn same_generation_reload_failure_keeps_the_cached_report() {
+    let revision = Revision {
+        generation: Some("same-account".to_owned()),
+        completed: None,
+    };
+    let mut state = State::from_cache(Some(History::default()), revision.clone());
+    state.read = ReadState::Idle;
+    assert!(state.needs_read(&revision));
+    state.complete(&revision, Err("offline".to_owned()));
+    assert!(state.history.is_some());
+    let completed = Revision {
+        completed: Some(garmin_model::value::Timestamp::from_unix_seconds(1).expect("instant")),
+        ..revision
+    };
+    assert!(state.needs_read(&completed));
+    assert!(state.history.is_some());
+    state.revision = Some(completed.clone());
+    state.complete(&completed, Err("read failed".to_owned()));
+    assert!(state.history.is_some());
+}
+
+#[test]
+fn superseded_cache_reads_cannot_replace_a_new_generation() {
+    let old = Revision {
+        generation: Some("old".into()),
+        completed: None,
+    };
+    let new = Revision {
+        generation: Some("new".into()),
+        completed: None,
+    };
+    let mut state = State::from_cache(Some(History::default()), new.clone());
+    state.read = ReadState::Loading;
+    state.complete(&old, Err("stale error".into()));
+    assert!(matches!(state.read, ReadState::Loading));
+    state.complete(&new, Err("offline".into()));
+    assert!(matches!(state.read, ReadState::Failed(_)));
+    assert!(
+        state.history.is_some(),
+        "read failures retain published history"
+    );
+}
+
+#[test]
+fn day_year_and_missing_measurement_views_keep_integer_counts() {
+    let history = History {
+        days: vec![garmin_model::garmin_connect::trends::Day {
+            date: "2026-11-16".parse().expect("date"),
+            sport: Sport::Running,
+            totals: garmin_model::garmin_connect::trends::Totals {
+                activities: 2,
+                missing_distance: 1,
+                duration_seconds: 3600.0,
+                ..Default::default()
+            },
+        }],
+        undated: 0,
+        summaries: 2,
+    };
+    let date = "2026-11-16".parse().expect("date");
+    let range = Range {
+        from: date,
+        through: date,
+    };
+    let (_, distance) = values(
+        &history,
+        range,
+        Some(Sport::Running),
+        Metric::Distance,
+        Period::Day,
+        true,
+        ProfilePreferences::default(),
+    );
+    let (_, counts) = values(
+        &history,
+        range,
+        Some(Sport::Running),
+        Metric::Count,
+        Period::Day,
+        true,
+        ProfilePreferences::default(),
+    );
+    assert_eq!(distance, [None]);
+    assert_eq!(counts, [Some(2.0)]);
+}

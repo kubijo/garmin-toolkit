@@ -57,6 +57,7 @@ pub struct Destination<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct NavigationGroup<'a> {
     pub label: Option<&'a str>,
+    pub separated: bool,
     pub destinations: &'a [Destination<'a>],
 }
 
@@ -743,6 +744,9 @@ fn navigation_contents(ui: &Ui, rect: Rect, props: &Props<'_>) -> Option<Action>
     let mut top = rect.top() + 8.0;
     let mut destination_index = 0;
     for group in props.navigation_groups {
+        if group.separated && !group.destinations.is_empty() {
+            top += 8.0;
+        }
         if let Some(label) = group.label
             && props.navigation == Navigation::Expanded
         {
@@ -984,6 +988,7 @@ mod tests {
         };
         let groups = [NavigationGroup {
             label: None,
+            separated: false,
             destinations: &[Destination {
                 label: "Destination",
                 icon: icons::HOUSE,

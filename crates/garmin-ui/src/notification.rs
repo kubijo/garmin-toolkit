@@ -86,10 +86,45 @@ pub enum Action {
 
 /// Renders an inline notification.
 pub fn show(ui: &mut Ui, props: &Props<'_>) {
-    let _ = render_inline(ui, props);
+    let _ = render_inline(ui, props, None);
 }
 
-fn render_inline(ui: &mut Ui, props: &Props<'_>) -> Response {
+/// Renders an inline notification with a semibold value in its supporting copy.
+pub fn show_with_emphasis(ui: &mut Ui, props: &Props<'_>, emphasis: &str) {
+    let _ = render_inline(ui, props, Some(emphasis));
+}
+
+fn inline_detail(
+    detail: &str,
+    emphasis: Option<&str>,
+    color: egui::Color32,
+) -> egui::text::LayoutJob {
+    let normal = egui::TextFormat {
+        font_id: crate::typography::font(12.0, crate::typography::Weight::Regular),
+        color,
+        ..Default::default()
+    };
+    let mut job = egui::text::LayoutJob::default();
+    if let Some(emphasis) = emphasis.filter(|value| !value.is_empty())
+        && let Some((before, after)) = detail.split_once(emphasis)
+    {
+        job.append(before, 0.0, normal.clone());
+        job.append(
+            emphasis,
+            0.0,
+            egui::TextFormat {
+                font_id: crate::typography::font(12.0, crate::typography::Weight::SemiBold),
+                ..normal.clone()
+            },
+        );
+        job.append(after, 0.0, normal);
+    } else {
+        job.append(detail, 0.0, normal);
+    }
+    job
+}
+
+fn render_inline(ui: &mut Ui, props: &Props<'_>, emphasis: Option<&str>) -> Response {
     let palette = crate::theme::palette(ui);
     let accent = props.kind.color(ui);
     let output = egui::Frame::NONE
@@ -114,11 +149,7 @@ fn render_inline(ui: &mut Ui, props: &Props<'_>) -> Response {
                     .x;
                 let detail_width = ui
                     .painter()
-                    .layout_no_wrap(
-                        detail.to_owned(),
-                        crate::typography::font(12.0, crate::typography::Weight::Regular),
-                        egui::Color32::WHITE,
-                    )
+                    .layout_job(inline_detail(detail, emphasis, egui::Color32::WHITE))
                     .size()
                     .x;
                 title_width + detail_width + 18.0 + 24.0 > ui.available_width()
@@ -138,11 +169,11 @@ fn render_inline(ui: &mut Ui, props: &Props<'_>) -> Response {
                 );
                 if let Some(detail) = props.detail {
                     ui.add(
-                        egui::Label::new(
-                            RichText::new(detail)
-                                .size(12.0)
-                                .color(palette.content().text_secondary().into_cint()),
-                        )
+                        egui::Label::new(inline_detail(
+                            detail,
+                            emphasis,
+                            widget_theme::color32(palette.content().text_secondary()),
+                        ))
                         .selectable(false)
                         .wrap(),
                     );
@@ -724,6 +755,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn inline_emphasis_preserves_localized_copy_and_only_bolds_the_value() {
+        let date = "15. listopadu 2026, 22:06";
+        let detail = format!("Stažené soubory byly zachovány.\nDalší pokus: {date}");
+        let job = inline_detail(&detail, Some(date), egui::Color32::WHITE);
+        assert_eq!(job.text, detail);
+        let emphasized = job
+            .sections
+            .iter()
+            .filter(|section| {
+                section.format.font_id
+                    == crate::typography::font(12.0, crate::typography::Weight::SemiBold)
+            })
+            .map(|section| &job.text[section.byte_range.start.0..section.byte_range.end.0])
+            .collect::<Vec<_>>();
+        assert_eq!(emphasized, [date]);
+        for missing in [None, Some(""), Some("not present")] {
+            let job = inline_detail(&detail, missing, egui::Color32::WHITE);
+            assert_eq!(job.text, detail);
+            assert!(job.sections.iter().all(|section| section.format.font_id
+                == crate::typography::font(12.0, crate::typography::Weight::Regular)));
+        }
+    }
+
+    #[test]
     fn inline_error_stays_in_the_page_and_wraps_at_narrow_widths() {
         let context = egui::Context::default();
         crate::install(&context);
@@ -759,6 +814,7 @@ mod tests {
                             title: "Import failed",
                             detail: Some(detail),
                         },
+                        None,
                     )
                     .rect;
                 },

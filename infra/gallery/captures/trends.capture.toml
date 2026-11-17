@@ -1,0 +1,200 @@
+out = "../../../.tmp/gallery/trends"
+size = "1440x3600"
+sheet = "sheet.png"
+report = "capture.json"
+settle = false
+
+[[shot]]
+name = "partial-targets"
+scene = "trends::Overview"
+[shot.knobs]
+"partial targets" = true
+
+[[shot]]
+name = "partial-targets-light"
+scene = "trends::Overview"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+"partial targets" = true
+
+[[shot]]
+name = "partial-targets-narrow"
+scene = "trends::Overview"
+[shot.knobs]
+width = 384
+height = 3200
+"partial targets" = true
+
+[[shot]]
+name = "partial-targets-empty"
+scene = "trends::Overview"
+[shot.knobs]
+history = "empty"
+"partial targets" = true
+
+[[shot]]
+name = "no-targets-light"
+scene = "trends::Overview"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+targets = false
+
+[[shot]]
+name = "target-editor"
+scene = "trends::Overview"
+[shot.knobs]
+"edit targets" = true
+
+[[shot]]
+name = "target-editor-light"
+scene = "trends::Overview"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+"edit targets" = true
+
+[[shot]]
+name = "target-editor-narrow"
+scene = "trends::Overview"
+[shot.knobs]
+width = 384
+height = 3200
+"edit targets" = true
+
+[[shot]]
+name = "missing-original"
+scene = "trends::Overview"
+[shot.knobs]
+"missing original" = true
+
+[[shot]]
+name = "dark"
+scene = "trends::Overview"
+
+[[shot]]
+name = "light"
+scene = "trends::Overview"
+[shot.globals]
+Theme = "Light"
+
+[[shot]]
+name = "narrow"
+scene = "trends::Overview"
+[shot.knobs]
+width = 384
+height = 3200
+
+[[shot]]
+name = "narrow-light"
+scene = "trends::Overview"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+width = 384
+height = 3200
+
+[[shot]]
+name = "empty"
+scene = "trends::Overview"
+[shot.knobs]
+history = "empty"
+
+[[shot]]
+name = "missing"
+scene = "trends::Overview"
+[shot.knobs]
+history = "missing"
+
+[[shot]]
+name = "no-cache"
+scene = "trends::Overview"
+[shot.knobs]
+history = "no cache"
+
+[[shot]]
+name = "no-targets"
+scene = "trends::Overview"
+[shot.knobs]
+targets = false
+
+[[shot]]
+name = "day-cumulative"
+scene = "trends::Overview"
+[shot.knobs]
+period = "day"
+cumulative = true
+
+[[shot]]
+name = "cumulative-light"
+scene = "trends::Overview"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+cumulative = true
+
+[[shot]]
+name = "missing-cumulative"
+scene = "trends::Overview"
+[shot.knobs]
+history = "missing"
+cumulative = true
+
+[[shot]]
+name = "week-imperial"
+scene = "trends::Overview"
+[shot.knobs]
+period = "week"
+imperial = true
+
+[[shot]]
+name = "year-light"
+scene = "trends::Overview"
+[shot.globals]
+Theme = "Light"
+[shot.knobs]
+period = "year"
+
+[[shot]]
+name = "running"
+scene = "trends::Overview"
+[shot.knobs]
+status = "running"
+
+[[shot]]
+name = "first-sync"
+scene = "trends::Overview"
+[shot.knobs]
+history = "no cache"
+status = "running"
+
+[[shot]]
+name = "read-failed"
+scene = "trends::Overview"
+[shot.knobs]
+status = "failed read"
+
+[[shot]]
+name = "offline-narrow"
+scene = "trends::Overview"
+[shot.knobs]
+status = "offline"
+width = 384
+height = 3200
+
+[[shot]]
+name = "no-previous"
+scene = "trends::Overview"
+[shot.knobs]
+"comparison history" = false
+
+[[shot]]
+name = "czech-narrow"
+scene = "trends::Overview"
+[shot.globals]
+Theme = "Light"
+Language = "Čeština"
+[shot.knobs]
+width = 384
+height = 3200

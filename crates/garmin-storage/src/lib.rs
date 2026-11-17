@@ -110,6 +110,8 @@ impl Storage {
         let theme = encode_theme(preferences.theme());
         let show_hidden_files = preferences.show_hidden_files();
         let inline_file_windows = preferences.inline_file_windows();
+        let [running_target_km, cycling_target_km, swimming_target_km] =
+            preferences.monthly_distance_targets().map(i64::from);
         let stored = sqlx::query_file!(
             "queries/save-user.sql",
             id,
@@ -122,6 +124,9 @@ impl Storage {
             theme,
             show_hidden_files,
             inline_file_windows,
+            running_target_km,
+            cycling_target_km,
+            swimming_target_km,
             avatar_artifact_id,
             id,
             avatar_artifact_id,
@@ -217,9 +222,25 @@ struct UserRow {
     theme: String,
     show_hidden_files: i64,
     inline_file_windows: i64,
+    running_target_km: i64,
+    cycling_target_km: i64,
+    swimming_target_km: i64,
 }
 
 fn decode_user(row: UserRow) -> Result<User, Error> {
+    let targets = [
+        row.running_target_km,
+        row.cycling_target_km,
+        row.swimming_target_km,
+    ]
+    .map(|value| {
+        u32::try_from(value).map_err(|error| Error::InvalidData {
+            field: "monthly distance target",
+            reason: error.to_string(),
+        })
+    });
+    let [running, cycling, swimming] = targets;
+    let targets = [running?, cycling?, swimming?];
     let inline_file_windows = match row.inline_file_windows {
         0 => false,
         1 => true,
@@ -280,7 +301,8 @@ fn decode_user(row: UserRow) -> Result<User, Error> {
                 decode_theme(&row.theme)?,
             )
             .with_show_hidden_files(show_hidden_files)
-            .with_inline_file_windows(inline_file_windows),
+            .with_inline_file_windows(inline_file_windows)
+            .with_monthly_distance_targets(targets),
         ),
     ))
 }

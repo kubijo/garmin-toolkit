@@ -968,6 +968,19 @@ impl ApplicationService for Host {
             .map_err(|error| error.to_string()))
     }
 
+    async fn connect_trends(
+        &self,
+        user_id: garmin_model::identity::UserId,
+    ) -> Result<Result<Option<garmin_model::garmin_connect::trends::History>, String>, rtc::CallError>
+    {
+        Ok(self
+            .application()
+            .await?
+            .connect_trends(UserContext::new(user_id))
+            .await
+            .map_err(|error| error.to_string()))
+    }
+
     async fn read_connect_cache(
         &self,
         user_id: garmin_model::identity::UserId,
