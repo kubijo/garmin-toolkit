@@ -54,6 +54,7 @@ pub struct Desktop {
     selected_profile: Option<usize>,
     profile_menu_expanded: bool,
     page: Page,
+    trends: HashMap<UserId, garmin_ui::trends::State>,
     preferences_saving: bool,
     garmin_connect_checking: Option<UserId>,
     garmin_connect_facts: HashMap<UserId, garmin_model::garmin_connect::AccountFacts>,
@@ -160,6 +161,7 @@ impl Desktop {
             selected_profile: None,
             profile_menu_expanded: false,
             page: Page::Activities,
+            trends: HashMap::new(),
             preferences_saving: false,
             garmin_connect_checking: None,
             garmin_connect_facts: HashMap::new(),
@@ -392,6 +394,21 @@ impl Desktop {
                 Page::GarminConnect => PageOutput::Settings(
                     profile_settings::connect_activities::show(ui, &settings_props),
                 ),
+                Page::Trends => PageOutput::Trends(garmin_ui::trends::show(
+                    ui,
+                    self.trends
+                        .entry(self.profiles[profile_index].user.id())
+                        .or_default(),
+                    &garmin_ui::trends::Props {
+                        intl,
+                        today: jiff::Zoned::now().date(),
+                        preferences: settings_props.preferences,
+                        sync: settings_props.garmin_connect.sync,
+                        enabled: !self.preferences_saving,
+                        refreshing: settings_props.garmin_connect.activities_busy,
+                        load_progress: settings_props.garmin_connect.load_progress,
+                    },
+                )),
                 Page::Maps(key) => PageOutput::Maps {
                     key: key.clone(),
                     command: self.maps.show(ui, intl, key),
@@ -422,6 +439,45 @@ impl Desktop {
 
     fn handle_page_output(&mut self, profile_index: usize, output: PageOutput) {
         match output {
+            PageOutput::Trends(action) => {
+                let user = &self.profiles[profile_index].user;
+                match action {
+                    Some(garmin_ui::trends::Action::Read(revision)) => self
+                        .worker
+                        .read_trends(UserContext::new(user.id()), revision),
+                    Some(garmin_ui::trends::Action::OpenActivities) => {
+                        self.page = Page::GarminConnect;
+                    }
+                    Some(garmin_ui::trends::Action::Sync) => self.handle_profile_settings_action(
+                        profile_index,
+                        profile_settings::Action::GarminConnectActivity(
+                            garmin_model::garmin_connect::ActivityRequest::Load {
+                                start: 0,
+                                filters: garmin_model::garmin_connect::ActivityFilters::default(),
+                            },
+                        ),
+                    ),
+                    Some(garmin_ui::trends::Action::Cancel(job)) => self
+                        .handle_profile_settings_action(
+                            profile_index,
+                            job.map_or(
+                                profile_settings::Action::CancelGarminConnectRefresh,
+                                profile_settings::Action::CancelConnectSync,
+                            ),
+                        ),
+                    Some(garmin_ui::trends::Action::SaveTargets(targets)) => {
+                        let preferences = user
+                            .profile()
+                            .preferences()
+                            .with_monthly_distance_targets(targets);
+                        self.handle_profile_settings_action(
+                            profile_index,
+                            profile_settings::Action::UpdatePreferences(preferences),
+                        );
+                    }
+                    None => {}
+                }
+            }
             PageOutput::Maps {
                 key,
                 command: Some((revision, command)),
@@ -861,6 +917,7 @@ impl Desktop {
                 self.worker.check_garmin_connect(UserContext::new(user));
             }
             profile_settings::Action::UpdateGarminConnectKey(key) => {
+                self.trends.remove(&self.profiles[profile_index].user.id());
                 self.preferences_saving = true;
                 self.garmin_connect_checking =
                     key.as_ref().map(|_| self.profiles[profile_index].user.id());
@@ -1517,10 +1574,35 @@ impl Desktop {
         }
     }
 
+    fn profile_created(&mut self, result: Result<(UserId, Vec<worker::ProfileData>), String>) {
+        match result {
+            Ok((user_id, profiles)) => {
+                self.replace_profiles(profiles, Some(user_id));
+                self.create_profile = None;
+            }
+            Err(reason) => {
+                if let Some(dialog) = self.create_profile.as_mut() {
+                    dialog.set_problem(reason);
+                } else {
+                    self.notice = Some(Notice::error(reason));
+                }
+            }
+        }
+    }
+
     fn process_events(&mut self) {
         let events = self.worker.drain().collect::<Vec<_>>();
         for event in events {
             match event {
+                worker::Event::Trends {
+                    user,
+                    revision,
+                    result,
+                } => self
+                    .trends
+                    .entry(user)
+                    .or_default()
+                    .complete(&revision, result),
                 worker::Event::ConnectSyncStates(states) => self.connect_sync_states(states),
                 worker::Event::ConnectSyncFailure { user, reason } => {
                     self.connect_sync_failure(user, reason);
@@ -1541,19 +1623,7 @@ impl Desktop {
                     self.load = LoadState::Unavailable(reason);
                 }
                 worker::Event::Reloaded(result) => self.profiles_loaded(result),
-                worker::Event::ProfileCreated(result) => match result {
-                    Ok((user_id, profiles)) => {
-                        self.replace_profiles(profiles, Some(user_id));
-                        self.create_profile = None;
-                    }
-                    Err(reason) => {
-                        if let Some(dialog) = self.create_profile.as_mut() {
-                            dialog.set_problem(reason);
-                        } else {
-                            self.notice = Some(Notice::error(reason));
-                        }
-                    }
-                },
+                worker::Event::ProfileCreated(result) => self.profile_created(result),
                 worker::Event::ProfileUpdated(result) => {
                     self.preferences_saving = false;
                     match result {
@@ -2294,6 +2364,7 @@ fn device_catalog_snapshot(
 }
 
 enum PageOutput {
+    Trends(Option<garmin_ui::trends::Action>),
     Routes,
     Maps {
         key: String,

@@ -217,10 +217,12 @@ fn show_shell(
     let navigation_groups = [
         shell::NavigationGroup {
             label: None,
+            separated: false,
             destinations: PRIMARY_DESTINATIONS,
         },
         shell::NavigationGroup {
             label: Some("Attached devices"),
+            separated: false,
             destinations: DEVICE_DESTINATIONS,
         },
     ];

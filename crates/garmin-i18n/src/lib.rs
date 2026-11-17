@@ -269,6 +269,17 @@ impl DateFormats {
     }
 
     #[must_use]
+    pub fn date(&self, date: jiff::civil::Date) -> String {
+        self.date.format(&iso_date(date)).to_string()
+    }
+
+    #[must_use]
+    pub fn week_start(&self) -> jiff::civil::Weekday {
+        jiff::civil::Weekday::from_monday_zero_offset(self.week.first_weekday as i8 - 1)
+            .unwrap_or(jiff::civil::Weekday::Monday)
+    }
+
+    #[must_use]
     pub fn time(&self, local: jiff::civil::Time) -> String {
         self.time.format(&icu_time(local)).to_string()
     }

@@ -133,6 +133,88 @@ async fn application(path: &std::path::Path) -> (Application, UserContext, Perso
 }
 
 #[tokio::test]
+async fn trends_targets_survive_preferences_persistence_and_restart() {
+    let root = tempfile::tempdir().expect("directory");
+    let path = root.path().join("targets.sqlite3");
+    let (app, user, _) = application(&path).await;
+    let targets = [160, 500, 10];
+    app.update_profile_preferences(
+        user,
+        garmin_model::identity::ProfilePreferences::default()
+            .with_monthly_distance_targets(targets),
+    )
+    .await
+    .expect("save preferences");
+    drop(app);
+    let storage = garmin_storage::Storage::open(&path).await.expect("reopen");
+    assert_eq!(
+        storage
+            .user(user.user_id())
+            .await
+            .expect("stored user")
+            .expect("user exists")
+            .profile()
+            .preferences()
+            .monthly_distance_targets(),
+        targets
+    );
+}
+
+#[tokio::test]
+async fn trends_read_all_published_summaries_without_imports_or_refreshes() {
+    let root = tempfile::tempdir().expect("directory");
+    let (app, user, key) = application(&root.path().join("trends.sqlite3")).await;
+    assert!(
+        app.connect_trends(user)
+            .await
+            .expect("empty cache")
+            .is_none()
+    );
+    let remote = MockRemote::new();
+    app.load_connect_cache(
+        user,
+        &credential_hash(&key),
+        &remote,
+        Refresh::Full,
+        &uninterrupted(),
+    )
+    .await
+    .expect("cache");
+    let report = app
+        .connect_trends(user)
+        .await
+        .expect("read trends")
+        .expect("published history");
+    assert_eq!(
+        report.summaries, 23,
+        "includes summaries beyond the first page"
+    );
+    let range = garmin_model::garmin_connect::trends::Range {
+        from: "2026-11-01".parse().expect("date"),
+        through: "2026-11-30".parse().expect("date"),
+    };
+    assert_eq!(report.totals(range, None).activities, 23);
+    assert_eq!(app.activities(user).await.expect("imports").len(), 0);
+    assert_eq!(*remote.pages.lock().expect("pages"), [0, 20]);
+    assert!(
+        app.connect_trends(UserContext::new(UserId::new_v4()))
+            .await
+            .is_err()
+    );
+    let replacement = PersonalApiKey::from_string("different-key".into()).expect("key");
+    app.storage
+        .set_garmin_connect_key(user.user_id(), Some(&replacement))
+        .await
+        .expect("replace");
+    assert!(
+        app.connect_trends(user)
+            .await
+            .expect("scoped cache")
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn cancelled_initial_load_returns_a_normal_outcome_without_contacting_garmin() {
     let root = tempfile::tempdir().unwrap();
     let (app, user, _) = application(&root.path().join("cache.sqlite3")).await;

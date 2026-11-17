@@ -1,8 +1,8 @@
 use super::{Action, Props};
-use crate::{Size, button, input, radio, select};
+use crate::{Size, button, input, notification, radio, select};
 use egui::Ui;
 use garmin_i18n::format_message;
-use garmin_model::garmin_connect::sync::{Interval, Outcome, Snapshot, Unit};
+use garmin_model::garmin_connect::sync::{Failure, Interval, Outcome, Snapshot, Unit};
 
 #[derive(Clone)]
 struct Draft {
@@ -157,4 +157,69 @@ fn status(ui: &mut Ui, props: &Props<'_>, snapshot: &Snapshot, id: egui::Id) -> 
         }
     }
     action
+}
+
+pub(crate) fn feedback(ui: &mut Ui, intl: &garmin_i18n::Intl, snapshot: &Snapshot) -> bool {
+    use crate::notification::Kind;
+    if snapshot.progress.is_some() {
+        return false;
+    }
+    let (kind, title, mut detail) = match &snapshot.state.outcome {
+        Outcome::Never | Outcome::Running => return false,
+        Outcome::Complete { unavailable: 0 } => (
+            Kind::Success,
+            format_message!(intl, default_message: "Sync completed"),
+            format_message!(intl, default_message: "Activities and FIT files are cached. Imports remain manual."),
+        ),
+        Outcome::Complete { unavailable } => (
+            Kind::Warning,
+            format_message!(intl, default_message: "Sync completed with unavailable files"),
+            format_message!(intl, default_message: "{count, plural, one {# FIT file is unavailable.} other {# FIT files are unavailable.}} Imports remain manual.", values: { count: *unavailable as u64 }),
+        ),
+        Outcome::Cancelled => (
+            Kind::Information,
+            format_message!(intl, default_message: "Sync cancelled"),
+            format_message!(intl, default_message: "Downloaded files were kept."),
+        ),
+        Outcome::Interrupted => (
+            Kind::Warning,
+            format_message!(intl, default_message: "Sync interrupted"),
+            format_message!(intl, default_message: "Downloaded files were kept."),
+        ),
+        Outcome::Failed {
+            kind: Failure::RateLimit,
+            ..
+        } => (
+            Kind::Warning,
+            format_message!(intl, default_message: "Sync paused: Garmin request limit reached"),
+            format_message!(intl, default_message: "Sync did not finish. Downloaded files were kept."),
+        ),
+        Outcome::Failed { message, .. } => (
+            Kind::Error,
+            format_message!(intl, default_message: "Sync did not finish"),
+            notification::normalize_error_detail(message),
+        ),
+    };
+    let next = snapshot.state.next_attempt.map(|next| {
+        intl.dates().datetime(
+            next.as_jiff()
+                .to_zoned(jiff::tz::TimeZone::system())
+                .datetime(),
+        )
+    });
+    if let Some(next) = &next {
+        detail.push('\n');
+        detail.push_str(&format_message!(intl, default_message: "Next automatic attempt: {next}", values: { next: next.as_str() }));
+    }
+    let props = notification::Props {
+        kind,
+        title: &title,
+        detail: Some(&detail),
+    };
+    if let Some(next) = &next {
+        notification::show_with_emphasis(ui, &props, next);
+    } else {
+        notification::show(ui, &props);
+    }
+    true
 }

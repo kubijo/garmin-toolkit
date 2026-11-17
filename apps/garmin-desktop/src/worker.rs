@@ -133,6 +133,14 @@ impl Worker {
         });
     }
 
+    pub fn read_trends(
+        &self,
+        user: UserContext,
+        revision: garmin_model::garmin_connect::sync::Revision,
+    ) {
+        self.send(Command::ReadTrends { user, revision });
+    }
+
     pub fn set_garmin_connect_key(
         &self,
         user: UserContext,
@@ -249,6 +257,10 @@ enum ProfileChange {
 }
 
 enum Command {
+    ReadTrends {
+        user: UserContext,
+        revision: garmin_model::garmin_connect::sync::Revision,
+    },
     ReadConnectCache {
         request: ConnectCacheRead,
     },
@@ -294,6 +306,11 @@ pub struct ConnectCacheRead {
 }
 
 pub enum Event {
+    Trends {
+        user: garmin_model::identity::UserId,
+        revision: garmin_model::garmin_connect::sync::Revision,
+        result: Result<Option<garmin_model::garmin_connect::trends::History>, String>,
+    },
     ConnectSyncFailure {
         user: garmin_model::identity::UserId,
         reason: String,
@@ -518,6 +535,25 @@ fn run(
     block_on(deployment.close());
 }
 
+fn read_trends_command(
+    application: &Application,
+    user: UserContext,
+    revision: garmin_model::garmin_connect::sync::Revision,
+    events: &EventSender,
+    context: &egui::Context,
+) -> bool {
+    let result = block_on(application.connect_trends(user)).map_err(|error| error.to_string());
+    emit(
+        events,
+        context,
+        Event::Trends {
+            user: user.user_id(),
+            revision,
+            result,
+        },
+    )
+}
+
 fn read_connect_cache_command(
     application: &Application,
     request: ConnectCacheRead,
@@ -597,6 +633,9 @@ fn execute_command(
     mutations: &garmin_services::maps::MutationLocks,
 ) -> bool {
     match command {
+        Command::ReadTrends { user, revision } => {
+            return read_trends_command(application, user, revision, events, context);
+        }
         Command::ReadConnectCache { request } => {
             return read_connect_cache_command(application, request, events, context);
         }

@@ -5,6 +5,7 @@ use std::fmt;
 use thiserror::Error;
 
 pub mod sync;
+pub mod trends;
 
 /// Reusable owner-created key. Debug output never includes its contents.
 #[derive(Clone, Serialize)]

@@ -28,11 +28,10 @@ The [device matrix](../research/device-capabilities.md) records established oper
 
 ## Future features
 
-- **Long-term statistics and insights:** in-app weekly, monthly, yearly, and custom-period summaries; period and
-  activity comparisons; and trends over time. Include activity counts, distance, duration, elevation, and available
-  performance metrics, with sport filters. Build from locally imported history, make missing data explicit, and define
-  aggregation, time-zone, and duplicate-handling rules before implementation. Reports stay in the app; no email
-  delivery.
+- **Further statistics and insights:** extend [account activity trends](activity-trends.md) with custom date ranges,
+  activity comparisons, elevation, and available performance metrics. Define coexistence with local-only history and
+  cross-source duplicate handling before combining sources; show coverage for FIT-derived metrics. Reports stay in the
+  app; no email delivery.
 
 ## Deferred
 

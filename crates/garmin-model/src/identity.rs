@@ -112,9 +112,22 @@ pub struct ProfilePreferences {
     show_hidden_files: bool,
     #[serde(default)]
     inline_file_windows: bool,
+    #[serde(default)]
+    monthly_distance_targets: [u32; 3],
 }
 
 impl ProfilePreferences {
+    #[must_use]
+    pub const fn monthly_distance_targets(self) -> [u32; 3] {
+        self.monthly_distance_targets
+    }
+
+    #[must_use]
+    pub const fn with_monthly_distance_targets(mut self, targets: [u32; 3]) -> Self {
+        self.monthly_distance_targets = targets;
+        self
+    }
+
     #[must_use]
     pub const fn from_parts(
         unit_system: UnitSystem,
@@ -127,6 +140,7 @@ impl ProfilePreferences {
             theme,
             show_hidden_files: false,
             inline_file_windows: false,
+            monthly_distance_targets: [0; 3],
         }
     }
 

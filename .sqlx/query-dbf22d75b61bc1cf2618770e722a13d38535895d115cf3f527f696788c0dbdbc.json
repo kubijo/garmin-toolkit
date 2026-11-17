@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n    id,\n    role,\n    display_name,\n    accent_rgba,\n    avatar_artifact_id,\n    unit_system,\n    language,\n    theme,\n    show_hidden_files,\n    inline_file_windows\nFROM users\nWHERE id = ?;\n",
+  "query": "SELECT\n    id,\n    role,\n    display_name,\n    accent_rgba,\n    avatar_artifact_id,\n    unit_system,\n    language,\n    theme,\n    show_hidden_files,\n    inline_file_windows,\n    running_target_km,\n    cycling_target_km,\n    swimming_target_km\nFROM users\nORDER BY LOWER(display_name), id;\n",
   "describe": {
     "columns": [
       {
@@ -112,10 +112,43 @@
             "name": "inline_file_windows"
           }
         }
+      },
+      {
+        "name": "running_target_km",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "running_target_km"
+          }
+        }
+      },
+      {
+        "name": "cycling_target_km",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "cycling_target_km"
+          }
+        }
+      },
+      {
+        "name": "swimming_target_km",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "swimming_target_km"
+          }
+        }
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       false,
@@ -127,8 +160,11 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "e7c59c8340ecb41342249f4dd006a21e1aea1d459d922ea8f88fdfdfffa5e5d6"
+  "hash": "dbf22d75b61bc1cf2618770e722a13d38535895d115cf3f527f696788c0dbdbc"
 }

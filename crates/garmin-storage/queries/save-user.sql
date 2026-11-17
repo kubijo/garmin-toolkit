@@ -8,7 +8,10 @@ INSERT INTO users (
     language,
     theme,
     show_hidden_files,
-    inline_file_windows
+    inline_file_windows,
+    running_target_km,
+    cycling_target_km,
+    swimming_target_km
 )
 SELECT
     ? AS id,
@@ -20,7 +23,10 @@ SELECT
     ? AS language,
     ? AS theme,
     ? AS show_hidden_files,
-    ? AS inline_file_windows
+    ? AS inline_file_windows,
+    ? AS running_target_km,
+    ? AS cycling_target_km,
+    ? AS swimming_target_km
 WHERE
     ? IS NULL OR EXISTS (
         SELECT 1
@@ -38,5 +44,8 @@ ON CONFLICT (id) DO UPDATE SET
     language = excluded.language,
     theme = excluded.theme,
     show_hidden_files = excluded.show_hidden_files,
-    inline_file_windows = excluded.inline_file_windows
+    inline_file_windows = excluded.inline_file_windows,
+    running_target_km = excluded.running_target_km,
+    cycling_target_km = excluded.cycling_target_km,
+    swimming_target_km = excluded.swimming_target_km
 RETURNING id;
