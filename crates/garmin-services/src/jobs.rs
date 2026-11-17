@@ -85,20 +85,31 @@ async fn run(deployment: Weak<Deployment>, stopped: CancellationToken) {
         if stopped.is_cancelled() || owner.jobs_shutdown.is_cancelled() {
             break;
         }
-        if owner.jobs_pauses.load(Ordering::Acquire) != 0 {
-            changed.await;
-        } else {
-            let stop = owner
-                .jobs_stop
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone();
+        if let Some(stop) = generation_token(&owner) {
             if let Err(error) = run_generation(Arc::clone(&owner), stopped.clone(), stop).await {
                 tracing::warn!(%error, "Core job engine stopped; reopening its durable queue");
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
+        } else {
+            changed.await;
         }
     }
+}
+
+pub(super) fn generation_token(owner: &Deployment) -> Option<CancellationToken> {
+    // Capture before checking admission: a concurrent pause must either be
+    // observed below or cancel this exact generation's token.
+    let stop = owner
+        .jobs_stop
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    let paused = owner.jobs_pauses.load(Ordering::Acquire) != 0;
+    #[cfg(test)]
+    owner
+        .checkpoint(crate::deployment::Checkpoint::JobsAdmissionChecked)
+        .expect("job admission test hook succeeds");
+    (!paused).then_some(stop)
 }
 
 async fn run_generation(

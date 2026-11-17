@@ -63,6 +63,7 @@ type TestHook = Box<dyn Fn(Checkpoint) -> Result<(), Error> + Send + Sync>;
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Checkpoint {
+    JobsAdmissionChecked,
     Staged,
     Journaled,
     Closed,
@@ -222,6 +223,14 @@ impl Deployment {
         limits: Limits,
         cancelled: &garmin_progress::CancellationToken,
     ) -> Result<Manifest, Error> {
+        {
+            let application = self.application(epoch).await?;
+            application.require_snapshot_owner(actor).await?;
+        }
+        if cancelled.is_cancelled() {
+            return Err(Error::Recovery("snapshot creation cancelled"));
+        }
+        let _jobs_pause = self.pause_jobs();
         let mut live = self.live.write().await;
         if live.epoch != epoch {
             return Err(Error::Stale);
@@ -344,7 +353,7 @@ impl Deployment {
     }
 
     #[cfg(test)]
-    fn checkpoint(&self, checkpoint: Checkpoint) -> Result<(), Error> {
+    pub(crate) fn checkpoint(&self, checkpoint: Checkpoint) -> Result<(), Error> {
         if let Some(hook) = self
             .hook
             .lock()

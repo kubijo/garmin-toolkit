@@ -146,6 +146,7 @@ async fn wait(
 async fn host_download_server_files_and_database_epoch() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let deployment = Deployment::open(root.path().join("data")).await?;
+    let _jobs = deployment.start_jobs()?;
     let epoch = deployment.epoch();
     let owner = deployment
         .application(epoch)
