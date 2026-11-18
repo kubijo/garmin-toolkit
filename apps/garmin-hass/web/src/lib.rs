@@ -3439,11 +3439,18 @@ fn spawn_connect_activity(
     }
     let generation = shared.borrow().connection_generation;
     spawn_local(async move {
+        let refreshes_cache = matches!(
+            &request,
+            garmin_model::garmin_connect::ActivityRequest::Load { .. }
+                | garmin_model::garmin_connect::ActivityRequest::List { .. }
+                | garmin_model::garmin_connect::ActivityRequest::RefreshAll { .. }
+        );
         let result = connect_activity_with_progress(
             &client, &shared, &context, user_id, request, generation,
         )
         .await;
-        let refresh_profiles = shared.borrow().connect_profiles_stale
+        let refresh_profiles = refreshes_cache
+            || shared.borrow().connect_profiles_stale
             || matches!(
                 &result,
                 Ok(garmin_service_api::ConnectActivityResult::State(

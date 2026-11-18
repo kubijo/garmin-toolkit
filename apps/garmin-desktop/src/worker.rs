@@ -1374,6 +1374,12 @@ fn connect_activity(
         request,
         cancellation,
     } = activity;
+    let refreshes_cache = matches!(
+        &request,
+        garmin_model::garmin_connect::ActivityRequest::Load { .. }
+            | garmin_model::garmin_connect::ActivityRequest::List { .. }
+            | garmin_model::garmin_connect::ActivityRequest::RefreshAll { .. }
+    );
     let result = runtime.block_on(async {
         tokio::select! {
             biased;
@@ -1406,6 +1412,15 @@ fn connect_activity(
             context,
             Event::Reloaded(block_on(load_profiles(application))),
         ))
+        && (!refreshes_cache
+            || connect_sync_command(
+                runtime,
+                application,
+                user,
+                garmin_model::garmin_connect::sync::Request::Status,
+                events,
+                context,
+            ))
 }
 
 async fn cancelled(abort: &CancellationToken) {
@@ -1464,6 +1479,82 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[test]
+    fn manual_refresh_publishes_its_final_sync_status_without_waiting_for_polling()
+    -> Result<(), Box<dyn Error>> {
+        let root = tempdir()?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let application = Application::new(runtime.block_on(garmin_storage::Storage::open(
+            root.path().join("state.sqlite3"),
+        ))?);
+        let profile = runtime.block_on(application.create_profile("Owner".parse()?))?;
+        let user = UserContext::new(profile.id());
+        let seed = runtime.block_on(garmin_storage::Storage::open(
+            root.path().join("state.sqlite3"),
+        ))?;
+        runtime.block_on(seed.set_garmin_connect_key(
+            user.user_id(),
+            Some(&garmin_model::garmin_connect::PersonalApiKey::from_string(
+                "fixture-key".into(),
+            )?),
+        ))?;
+        runtime.block_on(seed.close());
+        let cancellation = CancellationToken::default();
+        cancellation.cancel();
+        let (sender, received) = channel();
+        let events = EventSender {
+            sender,
+            epoch: Uuid::new_v4(),
+        };
+        assert!(connect_activity(
+            &runtime,
+            &application,
+            ConnectActivityCommand {
+                user,
+                request: garmin_model::garmin_connect::ActivityRequest::Load {
+                    start: 0,
+                    filters: garmin_model::garmin_connect::ActivityFilters::default()
+                },
+                cancellation,
+            },
+            &events,
+            &egui::Context::default(),
+            &CancellationToken::default(),
+        ));
+        let mut completed = false;
+        let mut updated = false;
+        for (_, event) in received.try_iter() {
+            match event {
+                Event::ConnectActivity {
+                    result: Ok(garmin_service_api::ConnectActivityResult::RefreshCancelled(_)),
+                    ..
+                } => completed = true,
+                Event::ConnectSyncStates(states) => {
+                    assert!(
+                        completed,
+                        "completion clears the busy flag before status arrives"
+                    );
+                    assert_eq!(states.len(), 1);
+                    assert_eq!(states[0].0, user.user_id());
+                    assert!(matches!(
+                        states[0].1.state.outcome,
+                        garmin_model::garmin_connect::sync::Outcome::Cancelled
+                    ));
+                    updated = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            updated,
+            "completion must publish the persisted outcome immediately"
+        );
+        runtime.block_on(application.close());
+        Ok(())
+    }
 
     #[test]
     fn cancelled_connect_command_stops_without_a_result() -> Result<(), Box<dyn Error>> {

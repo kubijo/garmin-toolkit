@@ -31,14 +31,19 @@ pub(super) fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
         ui.heading("Garmin Connect");
-        if props.garmin_connect.checking {
+        ui.scope(|ui| {
+            ui.spacing_mut().interact_size.y = 16.0;
             ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new().size(16.0));
-                ui.label(format_message!(props.intl, default_message: "Checking Garmin Connect…"));
+                if props.garmin_connect.checking {
+                    ui.add(egui::Spinner::new().size(16.0));
+                    ui.label(
+                        format_message!(props.intl, default_message: "Checking Garmin Connect…"),
+                    );
+                } else {
+                    ui.label(status);
+                }
             });
-        } else {
-            ui.label(status);
-        }
+        });
     });
     if !props.garmin_connect.configured || draft.replacing {
         ui.add_space(8.0);
@@ -52,11 +57,7 @@ pub(super) fn show(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
             action = Some(update);
         }
     }
-    if let Some(facts) = props
-        .garmin_connect
-        .facts
-        .filter(|_| !props.garmin_connect.checking)
-    {
+    if let Some(facts) = props.garmin_connect.facts {
         ui.add_space(16.0);
         show_facts(ui, props, facts);
     }
