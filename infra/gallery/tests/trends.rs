@@ -101,6 +101,48 @@ fn browsing_periods_and_targets_never_starts_a_cloud_sync() {
 }
 
 #[test]
+fn custom_dates_apply_locally_and_return_to_a_preset() {
+    let mut view = harness();
+    let from = || By::new().predicate(|node| node.author_id() == Some("trends.range.from"));
+    let active = || By::new().predicate(|node| node.author_id() == Some("trends.range.active"));
+    view.run();
+    view.get_by_label("Custom").click();
+    view.run();
+    view.get(from()).click();
+    view.run();
+    view.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    view.get(from()).type_text("2026-11-10");
+    view.run();
+    assert_eq!(view.get(from()).value().as_deref(), Some("2026-11-10"));
+    view.get_by_label("Apply date range").click();
+    view.run();
+    assert!(
+        view.query_by_label("Edit date range").is_some(),
+        "range was not applied"
+    );
+    assert_eq!(
+        view.get(active()).value().as_deref(),
+        Some("2026-11-10/2026-11-17")
+    );
+    view.get_by_label("Edit date range").click();
+    view.run();
+    view.get_by_label("Cancel").click();
+    view.run();
+    assert_eq!(
+        view.get(active()).value().as_deref(),
+        Some("2026-11-10/2026-11-17")
+    );
+    view.get_by_label("Month").click();
+    view.run();
+    assert_eq!(
+        view.get(active()).value().as_deref(),
+        Some("2026-11-01/2026-11-17")
+    );
+    assert_eq!(view.state().reads, 1);
+    assert_eq!(view.state().syncs, 0);
+}
+
+#[test]
 fn published_empty_history_is_not_a_missing_cache_and_reload_is_explicit() {
     let mut view = harness();
     view.run();

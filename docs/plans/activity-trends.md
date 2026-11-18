@@ -45,8 +45,10 @@ The deterministic history includes rest days, one to three activities per day, v
 zero-distance session, independent previous-month activity, and a seasonal history with an empty month. The
 missing-field variant removes one distance and one duration while preserving activity counts.
 
+Custom ranges include both endpoints, cover up to 366 days, and compare against the immediately preceding window of
+equal length. Monthly goals apply to the Month preset.
+
 ## Remaining scope
 
-Custom date ranges, local-only history combined with account history, cross-source deduplication, activity-to-activity
-comparisons, and FIT-derived elevation/performance metrics remain separate work. They must not be inferred from missing
-summary fields or FIT download coverage.
+Local-only history, cross-source deduplication, activity comparisons, and FIT-derived elevation and performance metrics
+remain separate work.

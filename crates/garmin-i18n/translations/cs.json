@@ -15,6 +15,10 @@
     "source": "Capture",
     "translation": "Záznam"
   },
+  "+Fv0fRbDdK": {
+    "source": "Apply date range",
+    "translation": "Použít rozsah dat"
+  },
   "+Fwb3TtExA": {
     "source": "Apply the reviewed changes to the connected device after you confirm the plan.",
     "translation": "Po potvrzení plánu se zkontrolované změny provedou na připojeném zařízení."
@@ -516,6 +520,10 @@
     "source": "Device paired with profile",
     "translation": "Zařízení bylo spárováno s profilem"
   },
+  "8t5YdNcpcJ": {
+    "source": "Choose up to 366 days ending today or earlier, with enough room for the preceding period.",
+    "translation": "Zvolte nejvýše 366 dní s koncem nejpozději dnes a s prostorem pro předchozí období."
+  },
   "8uIBg0TGg4": {
     "source": "Operation",
     "translation": "Operace"
@@ -768,6 +776,10 @@
   "DLoddCn/3b": {
     "source": "Last successful sync: {date}",
     "translation": "Poslední úspěšná synchronizace: {date}"
+  },
+  "DQxd6LisQx": {
+    "source": "Edit date range",
+    "translation": "Upravit rozsah dat"
   },
   "DUIDEquXSb": {
     "source": "Storage",
@@ -1573,6 +1585,10 @@
   "SduMNm+0em": {
     "source": "Downgrade",
     "translation": "Vrátit na starší verzi"
+  },
+  "Sjo1P44FYy": {
+    "source": "Custom",
+    "translation": "Vlastní"
   },
   "Sjo7wAgj1Y": {
     "source": "Enter or D",

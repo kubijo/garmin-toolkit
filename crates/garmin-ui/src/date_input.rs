@@ -18,7 +18,7 @@ pub fn show(
 ) -> Response {
     let choose =
         format_message!(intl, default_message: "Choose date for {field}", values: { field: label });
-    let mut response = input::show(
+    let (mut response, action) = input::show_with_action(
         ui,
         value,
         input::Props::new(label)
@@ -35,11 +35,14 @@ pub fn show(
     let popup_id = id.with("calendar-popup");
     let month_id = id.with("calendar-month");
     let selected = value.trim().parse::<Date>().ok();
-    if response.clicked() && !Popup::is_id_open(ui.ctx(), popup_id) {
+    let Some(action) = action else {
+        return response;
+    };
+    if action.clicked() && !Popup::is_id_open(ui.ctx(), popup_id) {
         ui.data_mut(|data| data.insert_temp(month_id, selected.unwrap_or(today)));
     }
     let mut changed = false;
-    let _ = Popup::menu(&response)
+    let _ = Popup::menu(&action)
         .id(popup_id)
         .width(280.0)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
