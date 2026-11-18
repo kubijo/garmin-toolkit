@@ -154,14 +154,19 @@ class Installer:
             self.refresh_store(version)
             dev = self.app(DEV_SLUG)
             if dev.installed:
+                action = 'rebuild' if dev.version == version else 'update'
+                operation = 'rebuilding' if action == 'rebuild' else 'updating'
                 if dev.state == 'started':
-                    self.step(f'Stopping {DEV_SLUG} before rebuilding')
+                    self.step(f'Stopping {DEV_SLUG} before {operation}')
                     self.ha('apps', 'stop', DEV_SLUG)
-                self.step(f'Rebuilding {DEV_SLUG}')
-                self.ha('apps', 'rebuild', DEV_SLUG, timeout=1800)
+                self.step(f'{operation.capitalize()} {DEV_SLUG}')
+                self.ha('apps', action, DEV_SLUG, timeout=1800)
             else:
                 self.step(f'Installing {DEV_SLUG}')
                 self.ha('apps', 'install', DEV_SLUG, timeout=1800)
+            self.step(f'Verifying installed {DEV_SLUG} version')
+            if self.app(DEV_SLUG).version != version:
+                raise ValueError(f'Development app did not reach the requested version {version}')
             self.switch(stable)
         except OSError, ValueError, subprocess.SubprocessError:
             self.output.panel(f'Failed while {self.stage}', title='Deployment step failed', style='red', error=True)
