@@ -7,7 +7,8 @@ use crate::{
 };
 use garmin_i18n::format_message;
 use garmin_progress::{
-    OperationStage, ProgressEvent, ProgressEventKind, ProgressReporter, ProgressState, ProgressUnit,
+    OperationStage, ProgressAmount, ProgressEvent, ProgressEventKind, ProgressReporter,
+    ProgressState, ProgressUnit,
 };
 use ratatui::{Frame, layout::Rect};
 use std::time::{Duration, SystemTime};
@@ -31,15 +32,17 @@ pub(super) fn render_stage(
                 stage: OperationStage::Backup,
                 state,
                 kind: ProgressEventKind::default(),
-                unit: ProgressUnit::Bytes,
                 label: "Backing up device file".to_owned(),
                 path: Some("Garmin/D6184140A.img".to_owned()),
-                completed: if state == ProgressState::Started {
-                    0
-                } else {
-                    1_560_000_000
-                },
-                total: Some(3_402_039_296),
+                amount: ProgressAmount::new(
+                    ProgressUnit::Bytes,
+                    if state == ProgressState::Started {
+                        0
+                    } else {
+                        1_560_000_000
+                    },
+                    Some(3_402_039_296),
+                ),
             });
         }
         let now = std::time::Instant::now();
@@ -86,11 +89,9 @@ fn progress_fixture(
             stage,
             state: ProgressState::Started,
             kind: ProgressEventKind::default(),
-            unit: preview_progress_unit(stage),
             label: label.to_owned(),
             path: path.map(str::to_owned),
-            completed: 0,
-            total: Some(total),
+            amount: ProgressAmount::new(preview_progress_unit(stage), 0, Some(total)),
         });
         let state = if index == active_index && completion.is_none() {
             ProgressState::Advanced
@@ -103,15 +104,17 @@ fn progress_fixture(
             stage,
             state,
             kind: ProgressEventKind::default(),
-            unit: preview_progress_unit(stage),
             label: label.to_owned(),
             path: path.map(str::to_owned),
-            completed: if state == ProgressState::Completed {
-                total
-            } else {
-                total.saturating_mul(2) / 5
-            },
-            total: Some(total),
+            amount: ProgressAmount::new(
+                preview_progress_unit(stage),
+                if state == ProgressState::Completed {
+                    total
+                } else {
+                    total.saturating_mul(2) / 5
+                },
+                Some(total),
+            ),
         });
         model.stages[index].1.elapsed =
             Some(Duration::from_secs(if total >= 10_000_000 { 4 } else { 1 }));
@@ -250,15 +253,17 @@ pub(super) fn render_pipeline_complete_preview(
                 stage: *stage,
                 state,
                 kind: ProgressEventKind::default(),
-                unit: stage.progress_unit(),
                 label: label.to_owned(),
                 path: path.map(str::to_owned),
-                completed: if state == ProgressState::Completed {
-                    total
-                } else {
-                    0
-                },
-                total: Some(total),
+                amount: ProgressAmount::new(
+                    stage.progress_unit(),
+                    if state == ProgressState::Completed {
+                        total
+                    } else {
+                        0
+                    },
+                    Some(total),
+                ),
             });
         }
     }
@@ -332,7 +337,7 @@ pub(super) fn render_link_benchmark_complete_preview(
 fn set_link_benchmark_timings(model: &mut ProgressModel, reading: bool) {
     for (stage, view) in &mut model.stages {
         if *stage == OperationStage::DeviceVerify {
-            view.unit = ProgressUnit::Bytes;
+            view.amount = ProgressAmount::default();
         }
         view.elapsed = match stage {
             OperationStage::Upload => Some(Duration::from_millis(16_170)),
@@ -402,11 +407,9 @@ pub(super) fn render_link_benchmark_finalize_preview(
             stage: OperationStage::DeviceFinalize,
             state: ProgressState::Advanced,
             kind: ProgressEventKind::default(),
-            unit: ProgressUnit::Operations,
             label: "Response timed out; reopening the device in 5 seconds".to_owned(),
             path: None,
-            completed: 0,
-            total: Some(1),
+            amount: ProgressAmount::new(ProgressUnit::Operations, 0, Some(1)),
         });
     }
     preview.render_progress(

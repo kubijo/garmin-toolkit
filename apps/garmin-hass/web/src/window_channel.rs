@@ -1,11 +1,12 @@
 //! Browser transport only; payloads and routing are owned by Rust.
 use eframe::egui::Context;
+use garmin_model::artifact::ByteCount;
 use garmin_ui::window::protocol::{Message, valid_session};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{JsCast as _, prelude::*};
 
-const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
+const MAX_MESSAGE_BYTES: ByteCount = ByteCount::from_mebibytes(32);
 
 pub struct Channel<C, S> {
     transport: web_sys::BroadcastChannel,
@@ -26,7 +27,7 @@ impl<C: Serialize + DeserializeOwned + 'static, S: Serialize + DeserializeOwned 
         let queue = incoming.clone();
         let callback = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
             if let Some(text) = event.data().as_string()
-                && text.len() <= MAX_MESSAGE_BYTES
+                && ByteCount::from_bytes(text.len() as u64) <= MAX_MESSAGE_BYTES
                 && let Ok(message) = serde_json::from_str::<Message<C, S>>(&text)
             {
                 let mut queue = queue.borrow_mut();
@@ -50,7 +51,7 @@ impl<C: Serialize + DeserializeOwned + 'static, S: Serialize + DeserializeOwned 
 
     pub fn send_serialized(&self, message: &impl Serialize) -> Result<(), String> {
         let text = serde_json::to_string(message).map_err(|error| error.to_string())?;
-        if text.len() > MAX_MESSAGE_BYTES {
+        if ByteCount::from_bytes(text.len() as u64) > MAX_MESSAGE_BYTES {
             return Err("Window snapshot exceeds the 32 MiB message limit".into());
         }
         self.transport

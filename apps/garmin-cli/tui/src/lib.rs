@@ -1,5 +1,4 @@
 use anyhow::Result;
-use byte_unit::{Byte, UnitType};
 use crossterm::event;
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
@@ -14,8 +13,8 @@ use garmin_i18n::{Intl, Language, Translations, format_message};
 use garmin_model::map::MapOperation;
 use garmin_progress::metrics::{stage_elapsed, stale_byte_progress};
 use garmin_progress::{
-    CancellationToken, DeviceStateUpdate, OperationStage, ProgressReceiver, ProgressState,
-    ProgressUnit,
+    CancellationToken, DeviceStateUpdate, OperationStage, ProgressAmount, ProgressReceiver,
+    ProgressState,
 };
 use indoc::indoc;
 use ratatui::backend::CrosstermBackend;
@@ -3115,9 +3114,9 @@ fn completion_fields(intl: &Intl, body: &CompletionBody) -> [(String, Line<'stat
                 intl,
                 default_message: "{bytes} in {seconds}s · {rate}",
                 values: {
-                    bytes: decimal_bytes(body.report.bytes_written),
+                    bytes: body.report.bytes_written.format_decimal(2),
                     seconds: format!("{:.2}", body.report.elapsed.as_secs_f64()),
-                    rate: display_rate(body.report.bytes_per_second()),
+                    rate: body.report.rate().format_decimal(2),
                 },
             )),
         ),
@@ -3187,16 +3186,6 @@ fn completion_value_line(value: String) -> Line<'static> {
         value,
         Style::default().add_modifier(Modifier::BOLD),
     ))
-}
-
-fn display_rate(bytes_per_second: f64) -> String {
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "the non-negative rounded rate is saturated for display as bytes"
-    )]
-    let bytes_per_second = bytes_per_second.max(0.0).round() as u64;
-    format!("{}/s", decimal_bytes(bytes_per_second))
 }
 
 #[derive(Debug, Clone)]
@@ -3778,9 +3767,11 @@ fn progress_fill_color(state: Option<ProgressState>) -> Color {
     reason = "the gauge API requires an approximate f64 ratio"
 )]
 fn progress_ratio(view: &StageView) -> f64 {
-    match (view.state, view.total) {
+    match (view.state, view.amount.total()) {
         (Some(ProgressState::Completed), _) => 1.0,
-        (_, Some(total)) if total > 0 => (view.completed as f64 / total as f64).clamp(0.0, 1.0),
+        (_, Some(total)) if total > 0 => {
+            (view.amount.completed() as f64 / total as f64).clamp(0.0, 1.0)
+        }
         (Some(ProgressState::Started | ProgressState::Advanced), _) => 0.03,
         _ => 0.0,
     }
@@ -3838,24 +3829,27 @@ fn dashboard_gauge_label(stage: OperationStage, view: &StageView, model: &Progre
 
 fn gauge_label_with_metrics(stage: OperationStage, view: &StageView, metrics: &[String]) -> String {
     let intl = selected_formatter();
-    let mut label = match view.total {
-        Some(total)
-            if view.unit == ProgressUnit::Operations
-                && (stage == OperationStage::Commit || total > 1) =>
-        {
+    let mut label = match view.amount {
+        ProgressAmount::Operations {
+            completed,
+            total: Some(total),
+        } if stage == OperationStage::Commit || total > 1 => {
             format_message!(
                 &intl,
                 default_message: "{completed} / {total} {total, plural, one {operation} other {operations}} — {label}",
                 values: {
-                    completed: i64::try_from(view.completed).unwrap_or(i64::MAX),
+                    completed: i64::try_from(completed).unwrap_or(i64::MAX),
                     total: i64::try_from(total).unwrap_or(i64::MAX),
                     label: view.label.clone(),
                 },
             )
         }
-        Some(total) if view.unit == ProgressUnit::Bytes && total > 1 => {
-            let completed = decimal_bytes(view.completed);
-            let total = decimal_bytes(total);
+        ProgressAmount::Bytes {
+            completed,
+            total: Some(total),
+        } if total.as_bytes() > 1 => {
+            let completed = completed.format_decimal(2);
+            let total = total.format_decimal(2);
             format!("{completed} / {total} — {}", view.label)
         }
         _ => view.label.clone(),
@@ -3888,7 +3882,7 @@ fn progress_metrics(_stage: OperationStage, view: &StageView) -> Vec<String> {
     }
     let mut metrics = Vec::with_capacity(3);
     if let Some(rate) = observation.bytes_per_second {
-        metrics.push(format_message!(&intl, default_message: "avg {rate}/s", values: { rate: decimal_bytes(rate) }));
+        metrics.push(format_message!(&intl, default_message: "avg {rate}/s", values: { rate: rate.format_decimal_amount(2) }));
     }
     metrics.push(format_message!(&intl, default_message: "{duration} elapsed", values: { duration: progress_elapsed(elapsed) }));
     if let Some(eta) = observation.remaining {
@@ -3903,13 +3897,6 @@ fn progress_elapsed(elapsed: Duration) -> String {
     } else {
         elapsed_clock(elapsed)
     }
-}
-
-fn decimal_bytes(bytes: u64) -> String {
-    format!(
-        "{:.2}",
-        Byte::from_u64(bytes).get_appropriate_unit(UnitType::Decimal)
-    )
 }
 
 fn device_selection_loop(
@@ -4099,7 +4086,9 @@ mod tests {
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use garmin_model::map::MapOperation;
-    use garmin_progress::{OperationStage, ProgressReporter, ProgressState, ProgressUnit};
+    use garmin_progress::{
+        OperationStage, ProgressAmount, ProgressReporter, ProgressState, ProgressUnit,
+    };
     use ratatui::layout::Rect;
     use ratatui::widgets::TableState;
     use std::time::{Duration, Instant};
@@ -4344,8 +4333,7 @@ mod tests {
         let view = StageView {
             state: Some(ProgressState::Advanced),
             label: "Reading MTP object back".to_owned(),
-            completed: 64_000_000,
-            total: Some(256_000_000),
+            amount: ProgressAmount::new(ProgressUnit::Bytes, 64_000_000, Some(256_000_000)),
             elapsed: Some(Duration::from_secs(24)),
             ..StageView::default()
         };
@@ -4365,8 +4353,7 @@ mod tests {
         let view = StageView {
             state: Some(ProgressState::Completed),
             label: "Read back and SHA-256 verified".to_owned(),
-            completed: 256_000_000,
-            total: Some(256_000_000),
+            amount: ProgressAmount::new(ProgressUnit::Bytes, 256_000_000, Some(256_000_000)),
             elapsed: Some(Duration::from_secs(96)),
             ..StageView::default()
         };
@@ -4381,10 +4368,8 @@ mod tests {
     fn subsecond_byte_sample_does_not_claim_an_impossible_rate_or_eta() {
         let view = StageView {
             state: Some(ProgressState::Advanced),
-            unit: ProgressUnit::Bytes,
             label: "Verifying existing device file".to_owned(),
-            completed: 1_980_000_000,
-            total: Some(16_920_000_000),
+            amount: ProgressAmount::new(ProgressUnit::Bytes, 1_980_000_000, Some(16_920_000_000)),
             elapsed: Some(Duration::from_nanos(237)),
             ..StageView::default()
         };
@@ -4401,10 +4386,8 @@ mod tests {
         let recorded_now = std::time::SystemTime::now();
         let view = StageView {
             state: Some(ProgressState::Advanced),
-            unit: ProgressUnit::Bytes,
             label: "Verifying existing device file".to_owned(),
-            completed: 1_980_000_000,
-            total: Some(16_920_000_000),
+            amount: ProgressAmount::new(ProgressUnit::Bytes, 1_980_000_000, Some(16_920_000_000)),
             started_at: Some(Instant::now()),
             started_recorded_at: recorded_now.checked_sub(Duration::from_secs(20)),
             updated_at: Some(Instant::now()),
@@ -4428,10 +4411,8 @@ mod tests {
         let started = std::time::UNIX_EPOCH + Duration::from_secs(1_000);
         let view = StageView {
             state: Some(ProgressState::Advanced),
-            unit: ProgressUnit::Bytes,
             label: "Writing verified file to device".to_owned(),
-            completed: 20_000_000,
-            total: Some(100_000_000),
+            amount: ProgressAmount::new(ProgressUnit::Bytes, 20_000_000, Some(100_000_000)),
             started_recorded_at: Some(started),
             updated_at: Some(Instant::now()),
             updated_recorded_at: Some(started + Duration::from_secs(20)),
@@ -4450,10 +4431,8 @@ mod tests {
         let now = Instant::now();
         let view = StageView {
             state: Some(ProgressState::Advanced),
-            unit: ProgressUnit::Bytes,
             label: "Writing verified file to device".to_owned(),
-            completed: 4_510_000_000,
-            total: Some(16_920_000_000),
+            amount: ProgressAmount::new(ProgressUnit::Bytes, 4_510_000_000, Some(16_920_000_000)),
             started_at: Some(now.checked_sub(Duration::from_secs(1_340)).unwrap()),
             updated_at: Some(now.checked_sub(Duration::from_secs(12)).unwrap()),
             ..StageView::default()
@@ -4512,10 +4491,8 @@ mod tests {
     fn completed_subsecond_stage_retains_a_useful_duration() {
         let view = StageView {
             state: Some(ProgressState::Completed),
-            unit: ProgressUnit::Operations,
             label: "Device finalized the MTP upload".to_owned(),
-            completed: 1,
-            total: Some(1),
+            amount: ProgressAmount::new(ProgressUnit::Operations, 1, Some(1)),
             elapsed: Some(Duration::from_millis(30)),
             ..StageView::default()
         };
@@ -4530,18 +4507,14 @@ mod tests {
     fn commit_progress_uses_the_reported_unit() {
         let bytes = StageView {
             state: Some(ProgressState::Advanced),
-            unit: ProgressUnit::Bytes,
             label: "Writing verified file to device".to_owned(),
-            completed: 370_532_364,
-            total: Some(413_298_576),
+            amount: ProgressAmount::new(ProgressUnit::Bytes, 370_532_364, Some(413_298_576)),
             ..StageView::default()
         };
         let operations = StageView {
             state: Some(ProgressState::Advanced),
-            unit: ProgressUnit::Operations,
             label: "Installed map file".to_owned(),
-            completed: 1,
-            total: Some(3),
+            amount: ProgressAmount::new(ProgressUnit::Operations, 1, Some(3)),
             ..StageView::default()
         };
 

@@ -2,13 +2,21 @@
 #[path = "../src/developer/log_buffer.rs"]
 mod log_buffer;
 
+use garmin_model::value::UnixMilliseconds;
 use std::collections::BTreeMap;
 
-use garmin_model::logging::Level;
+use garmin_model::{artifact::ByteCount, logging::Level};
 use log_buffer::Buffer;
 
 fn append(buffer: &mut Buffer, message: &str) {
-    let record = buffer.record(42, Level::Info, "test", "main", message, BTreeMap::new());
+    let record = buffer.record(
+        UnixMilliseconds::from_milliseconds_since_epoch(42),
+        Level::Info,
+        "test",
+        "main",
+        message,
+        BTreeMap::new(),
+    );
     buffer.push(record);
 }
 
@@ -16,18 +24,20 @@ fn append(buffer: &mut Buffer, message: &str) {
 fn retries_keep_identity_and_acknowledgement_preserves_new_records() {
     let mut buffer = Buffer::new("page".into());
     append(&mut buffer, "first");
-    let batch = buffer.pending(43);
-    let retry = buffer.pending(44);
+    let batch = buffer.pending(UnixMilliseconds::from_milliseconds_since_epoch(43));
+    let retry = buffer.pending(UnixMilliseconds::from_milliseconds_since_epoch(44));
     assert_eq!(batch.records[0], retry.records[0]);
     append(&mut buffer, "second");
     buffer.acknowledge(&batch);
-    let remaining = buffer.pending(45);
+    let remaining = buffer.pending(UnixMilliseconds::from_milliseconds_since_epoch(45));
     assert_eq!(remaining.records.len(), 1);
     assert_eq!(remaining.records[0].message, "second");
     assert_eq!(remaining.records[0].source_sequence, 2);
     buffer.acknowledge(&remaining);
     assert_eq!(
-        buffer.pending(46).records,
+        buffer
+            .pending(UnixMilliseconds::from_milliseconds_since_epoch(46))
+            .records,
         [] as [garmin_model::logging::Record; 0]
     );
 }
@@ -36,7 +46,7 @@ fn retries_keep_identity_and_acknowledgement_preserves_new_records() {
 fn worker_records_keep_their_original_identity_and_fields() {
     let mut worker = Buffer::new("worker-session".into());
     let record = worker.record(
-        12,
+        UnixMilliseconds::from_milliseconds_since_epoch(12),
         Level::Warn,
         "map",
         "worker",
@@ -45,7 +55,11 @@ fn worker_records_keep_their_original_identity_and_fields() {
     );
     let mut page = Buffer::new("page".into());
     page.push(record.clone());
-    assert_eq!(page.pending(13).records, vec![record]);
+    assert_eq!(
+        page.pending(UnixMilliseconds::from_milliseconds_since_epoch(13))
+            .records,
+        vec![record]
+    );
 }
 
 #[test]
@@ -54,13 +68,18 @@ fn overflow_is_bounded_and_reported_once_across_retries() {
     for _ in 0..600 {
         append(&mut buffer, "event");
     }
-    let first = buffer.pending(43);
+    let first = buffer.pending(UnixMilliseconds::from_milliseconds_since_epoch(43));
     assert_eq!(first.records.len(), 128);
     assert_eq!(first.records[0].source_sequence, 90);
-    assert_eq!(first.records, buffer.pending(44).records);
+    assert_eq!(
+        first.records,
+        buffer
+            .pending(UnixMilliseconds::from_milliseconds_since_epoch(44))
+            .records
+    );
     let mut records = Vec::new();
     loop {
-        let batch = buffer.pending(45);
+        let batch = buffer.pending(UnixMilliseconds::from_milliseconds_since_epoch(45));
         if batch.records.is_empty() {
             break;
         }
@@ -77,19 +96,25 @@ fn overflow_is_bounded_and_reported_once_across_retries() {
 fn acknowledgement_during_overflow_does_not_remove_unsent_records() {
     let mut buffer = Buffer::new("page".into());
     append(&mut buffer, "in-flight");
-    let batch = buffer.pending(43);
+    let batch = buffer.pending(UnixMilliseconds::from_milliseconds_since_epoch(43));
     for _ in 0..600 {
         append(&mut buffer, "new");
     }
     buffer.acknowledge(&batch);
-    assert_eq!(buffer.pending(44).records[0].source_sequence, 91);
+    assert_eq!(
+        buffer
+            .pending(UnixMilliseconds::from_milliseconds_since_epoch(44))
+            .records[0]
+            .source_sequence,
+        91
+    );
 }
 
 #[test]
 fn record_limits_preserve_unicode_boundaries() {
     let mut buffer = Buffer::new("page".into());
     let record = buffer.record(
-        42,
+        UnixMilliseconds::from_milliseconds_since_epoch(42),
         Level::Error,
         &"é".repeat(300),
         "main",
@@ -106,10 +131,17 @@ fn oversized_unicode_escaped_text_and_fields_do_not_block_following_records() {
     append(&mut buffer, &"🦀".repeat(4096));
     append(&mut buffer, &"\0".repeat(4096));
     let fields = BTreeMap::from([("detail".into(), "x".repeat(32 * 1024))]);
-    let record = buffer.record(42, Level::Error, "test", "main", "huge field", fields);
+    let record = buffer.record(
+        UnixMilliseconds::from_milliseconds_since_epoch(42),
+        Level::Error,
+        "test",
+        "main",
+        "huge field",
+        fields,
+    );
     buffer.push(record);
     append(&mut buffer, "valid after oversized records");
-    let batch = buffer.pending(43);
+    let batch = buffer.pending(UnixMilliseconds::from_milliseconds_since_epoch(43));
     assert_eq!(batch.records.len(), 2);
     assert_eq!(batch.records[0].message, "valid after oversized records");
     assert!(
@@ -117,17 +149,25 @@ fn oversized_unicode_escaped_text_and_fields_do_not_block_following_records() {
             .message
             .starts_with("3 invalid or oversized diagnostics dropped")
     );
-    assert_eq!(batch.records, buffer.pending(44).records);
+    assert_eq!(
+        batch.records,
+        buffer
+            .pending(UnixMilliseconds::from_milliseconds_since_epoch(44))
+            .records
+    );
     for mut record in batch.records.clone() {
         record.source = format!("browser/{}", record.source);
         record.sequence = u64::MAX;
         assert!(
-            serde_json::to_vec(&record).unwrap().len() <= garmin_model::logging::MAX_RECORD_BYTES
+            ByteCount::from_bytes(serde_json::to_vec(&record).unwrap().len() as u64)
+                <= garmin_model::logging::MAX_RECORD_BYTES
         );
     }
     buffer.acknowledge(&batch);
     assert_eq!(
-        buffer.pending(45).records,
+        buffer
+            .pending(UnixMilliseconds::from_milliseconds_since_epoch(45))
+            .records,
         [] as [garmin_model::logging::Record; 0]
     );
 }
@@ -136,11 +176,11 @@ fn oversized_unicode_escaped_text_and_fields_do_not_block_following_records() {
 fn permanent_backend_rejection_is_reported_without_retrying_the_old_batch() {
     let mut buffer = Buffer::new("page".into());
     append(&mut buffer, "sent");
-    let batch = buffer.pending(43);
+    let batch = buffer.pending(UnixMilliseconds::from_milliseconds_since_epoch(43));
     buffer.acknowledge(&batch);
     buffer.reject(1);
     append(&mut buffer, "next");
-    let next = buffer.pending(44);
+    let next = buffer.pending(UnixMilliseconds::from_milliseconds_since_epoch(44));
     assert_eq!(next.records.len(), 2);
     assert_eq!(next.records[0].message, "next");
     assert!(
@@ -150,7 +190,9 @@ fn permanent_backend_rejection_is_reported_without_retrying_the_old_batch() {
     );
     buffer.acknowledge(&next);
     assert_eq!(
-        buffer.pending(45).records,
+        buffer
+            .pending(UnixMilliseconds::from_milliseconds_since_epoch(45))
+            .records,
         [] as [garmin_model::logging::Record; 0]
     );
 }

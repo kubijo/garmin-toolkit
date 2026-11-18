@@ -88,7 +88,7 @@ pub(crate) fn validate(package: &Package) -> Report {
         let metadata = &resource.descriptor;
         if metadata
             .bytes
-            .is_some_and(|expected| expected != resource.bytes.len() as u64)
+            .is_some_and(|expected| expected != crate::buffer_size(&resource.bytes))
         {
             report.issue(&metadata.name, IssueCode::ByteCount, None);
         }

@@ -307,6 +307,10 @@
     "source": "Saved {file}",
     "translation": "Uloženo: {file}"
   },
+  "4RbbWzgKzi": {
+    "source": "Choose a period with at least two activities of the same sport.",
+    "translation": "Zvolte období s alespoň dvěma aktivitami stejného sportu."
+  },
   "4fSUVQYmNQ": {
     "source": "Cumulative",
     "translation": "Kumulativně"
@@ -934,6 +938,10 @@
     "source": "Remove",
     "translation": "Odebrat"
   },
+  "G1CJMarytf": {
+    "source": "Average pace",
+    "translation": "Průměrné tempo"
+  },
   "GLt427BDIT": {
     "source": "Known values only",
     "translation": "Pouze známé hodnoty"
@@ -1538,6 +1546,10 @@
     "source": "scroll",
     "translation": "posouvat"
   },
+  "Ru4HPFLGWm": {
+    "source": "Elevation gain",
+    "translation": "Převýšení"
+  },
   "RuQgZWAgpX": {
     "source": "Operation history",
     "translation": "Historie operace"
@@ -2058,6 +2070,10 @@
     "source": "{count, plural, one {week} other {weeks}}",
     "translation": "{count, plural, one {týdnu} few {týdnech} other {týdnech}}"
   },
+  "dCvOBVqSGC": {
+    "source": "Previous period: {covered, number} of {total, number} activities have imported FIT elevation",
+    "translation": "Předchozí období: údaje o převýšení z importu FIT má {covered, number} z {total, number} aktivit"
+  },
   "dDHiosRzUJ": {
     "source": "Reading selected device metadata…",
     "translation": "Načítání údajů vybraného zařízení…"
@@ -2073,6 +2089,10 @@
   "dXegrQ9Tbp": {
     "source": "{count, plural, one {# original FIT unavailable} other {# original FITs unavailable}}; Trends use activity summaries.",
     "translation": "{count, plural, one {# originální FIT není dostupný} few {# originální FIT nejsou dostupné} other {# originálních FIT není dostupných}}; trendy používají souhrny aktivit."
+  },
+  "dZGYNcNMXq": {
+    "source": "First activity",
+    "translation": "První aktivita"
   },
   "dbzHTNf97L": {
     "source": "Cancelling refresh…",
@@ -2310,6 +2330,10 @@
     "source": "Monthly targets only",
     "translation": "Pouze měsíční cíle"
   },
+  "iLuu2f/T0Y": {
+    "source": "Activity comparison",
+    "translation": "Porovnání aktivit"
+  },
   "iTwRWBbue8": {
     "source": "Discard removes this notice. Cache and capture files remain.",
     "translation": "Zahozením se odstraní toto oznámení. Mezipaměť a soubory záznamu zůstanou."
@@ -2545,6 +2569,10 @@
   "ncw9ezSDQN": {
     "source": "Refresh cancelled",
     "translation": "Obnovení zrušeno"
+  },
+  "nf49ymljbr": {
+    "source": "Average speed",
+    "translation": "Průměrná rychlost"
   },
   "nlC75ttuUb": {
     "source": "Toolkit ID",
@@ -2859,6 +2887,10 @@
     "source": "Garmin profile ID",
     "translation": "ID profilu Garmin"
   },
+  "t6hzpfUcpJ": {
+    "source": "Second activity",
+    "translation": "Druhá aktivita"
+  },
   "t9FrgUkP3A": {
     "source": "Import FIT",
     "translation": "Importovat FIT"
@@ -2959,6 +2991,10 @@
   "uxOZANskJB": {
     "source": "Save backup",
     "translation": "Uložit zálohu"
+  },
+  "uzbt1v7jq+": {
+    "source": "Imported FIT elevation for {covered, number} of {total, number} activities",
+    "translation": "Údaje o převýšení z importu FIT má {covered, number} z {total, number} aktivit"
   },
   "v7qVJDRhIi": {
     "source": "Return to the app tab to reconnect, or reopen the file chooser.",

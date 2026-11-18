@@ -1,6 +1,7 @@
 //! One human-readable log renderer for application stderr and diagnostics.
 
 use garmin_model::logging::{Level, Record};
+use garmin_model::value::UnixMilliseconds;
 use nu_ansi_term::{Color, Style};
 use std::fmt;
 use std::{collections::BTreeMap, fmt::Write as _, io::IsTerminal as _};
@@ -100,7 +101,7 @@ pub fn line(record: &Record, ansi: bool) -> String {
         Level::Error => ("ERROR", Color::Red),
     };
     let timestamp = time::OffsetDateTime::from_unix_timestamp_nanos(
-        i128::from(record.timestamp_ms) * 1_000_000,
+        i128::from(record.timestamp_ms.as_milliseconds_since_epoch()) * 1_000_000,
     )
     .ok()
     .and_then(|time| {
@@ -201,13 +202,11 @@ where
         }
         let record = Record {
             sequence: 0,
-            timestamp_ms: u64::try_from(
+            timestamp_ms: UnixMilliseconds::saturating_from_duration_since_epoch(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis(),
-            )
-            .unwrap_or(u64::MAX),
+                    .unwrap_or_default(),
+            ),
             level,
             component: metadata.target().into(),
             source: self.0.into(),
@@ -438,7 +437,7 @@ mod tests {
     fn retained_records_use_the_live_renderer() {
         let record = Record {
             sequence: 1,
-            timestamp_ms: 0,
+            timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(0),
             source_sequence: 1,
             level: Level::Info,
             source: "test".into(),
@@ -505,7 +504,7 @@ mod tests {
         ]);
         let mut record = Record {
             sequence: 1,
-            timestamp_ms: 0,
+            timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(0),
             source_sequence: 1,
             level: Level::Warn,
             source: "test".into(),

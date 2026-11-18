@@ -9,6 +9,7 @@ use std::{
 };
 
 use futures_util::StreamExt as _;
+use garmin_model::artifact::ByteCount;
 use reqwest::{StatusCode, header};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -19,9 +20,9 @@ use walkdir::WalkDir;
 const TILE_JSON_URL: &str = "https://tiles.openfreemap.org/planet/latest";
 const PROVIDER_HOST: &str = "tiles.openfreemap.org";
 const MAX_ZOOM: u8 = 14;
-const TILE_JSON_LIMIT: usize = 1024 * 1024;
-const TILE_LIMIT: usize = 2 * 1024 * 1024;
-const CACHE_LIMIT: u64 = 256 * 1024 * 1024;
+const TILE_JSON_LIMIT: ByteCount = ByteCount::from_mebibytes(1);
+const TILE_LIMIT: ByteCount = ByteCount::from_mebibytes(2);
+const CACHE_LIMIT: ByteCount = ByteCount::from_mebibytes(256);
 const FRESH_FOR: Duration = Duration::from_hours(168);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -59,7 +60,7 @@ impl TileId {
 pub struct Tile {
     pub bytes: Vec<u8>,
     pub etag: String,
-    pub max_age_seconds: u64,
+    pub max_age: Duration,
 }
 
 /// Cloneable, concurrency-deduplicating tile service.
@@ -187,12 +188,12 @@ impl Service {
             };
             cached.metadata.fetched_at = now_seconds()?;
             cached.metadata.accessed_at = cached.metadata.fetched_at;
-            if let Some(fresh_for_seconds) = response_max_age(response.headers()) {
-                cached.metadata.fresh_for_seconds = fresh_for_seconds.min(FRESH_FOR.as_secs());
+            if let Some(fresh_for) = response_max_age(response.headers()) {
+                cached.metadata.fresh_for = fresh_for.min(FRESH_FOR);
             }
             self.write_metadata(tile_id, &cached.metadata).await?;
-            let max_age_seconds = cached.metadata.fresh_for_seconds;
-            return Ok(cached_tile(cached, max_age_seconds));
+            let max_age = cached.metadata.fresh_for;
+            return Ok(cached_tile(cached, max_age));
         }
         if !response.status().is_success() {
             let error = Error::ProviderStatus(response.status());
@@ -208,9 +209,9 @@ impl Service {
                 .cached_or_error(tile_id, cached, Error::MalformedTile)
                 .await;
         }
-        let fresh_for_seconds = response_max_age(response.headers())
-            .unwrap_or(FRESH_FOR.as_secs())
-            .min(FRESH_FOR.as_secs());
+        let fresh_for = response_max_age(response.headers())
+            .unwrap_or(FRESH_FOR)
+            .min(FRESH_FOR);
         let upstream_etag = response
             .headers()
             .get(header::ETAG)
@@ -229,7 +230,7 @@ impl Service {
         let metadata = Metadata {
             fetched_at: now,
             accessed_at: now,
-            fresh_for_seconds,
+            fresh_for,
             etag: upstream_etag,
         };
         self.write(tile_id, &bytes, &metadata).await?;
@@ -237,7 +238,7 @@ impl Service {
         Ok(Tile {
             etag: response_etag(&bytes),
             bytes,
-            max_age_seconds: fresh_for_seconds,
+            max_age: fresh_for,
         })
     }
 
@@ -254,7 +255,7 @@ impl Service {
             cached.metadata.accessed_at = accessed_at;
             let _ignored = self.write_metadata(tile_id, &cached.metadata).await;
         }
-        Ok(cached_tile(cached, 0))
+        Ok(cached_tile(cached, Duration::ZERO))
     }
 
     async fn release_gate(&self, tile_id: TileId, tile_gate: &Arc<Mutex<()>>) {
@@ -297,20 +298,20 @@ impl Service {
         let Some(mut cached) = self.read_cached(tile_id).await? else {
             return Ok(None);
         };
-        let age = now_seconds()?.saturating_sub(cached.metadata.fetched_at);
-        if cached.metadata.fresh_for_seconds == 0 || age >= cached.metadata.fresh_for_seconds {
+        let age = Duration::from_secs(now_seconds()?.saturating_sub(cached.metadata.fetched_at));
+        if cached.metadata.fresh_for.is_zero() || age >= cached.metadata.fresh_for {
             return Ok(None);
         }
         cached.metadata.accessed_at = now_seconds()?;
         let _ignored = self.write_metadata(tile_id, &cached.metadata).await;
-        let max_age_seconds = cached.metadata.fresh_for_seconds.saturating_sub(age);
-        Ok(Some(cached_tile(cached, max_age_seconds)))
+        let max_age = cached.metadata.fresh_for.saturating_sub(age);
+        Ok(Some(cached_tile(cached, max_age)))
     }
 
     async fn read_cached(&self, tile_id: TileId) -> Result<Option<Cached>, Error> {
         let paths = CachePaths::new(self.cache_root.as_ref(), tile_id);
         let bytes = match tokio::fs::read(&paths.tile).await {
-            Ok(bytes) if bytes.len() <= TILE_LIMIT && valid_tile_payload(&bytes) => bytes,
+            Ok(bytes) if buffer_size(&bytes) <= TILE_LIMIT && valid_tile_payload(&bytes) => bytes,
             Ok(_) => {
                 remove_cache_entry(&paths).await?;
                 return Ok(None);
@@ -349,12 +350,12 @@ impl Service {
     }
 
     #[cfg(test)]
-    fn prune_to(&self, limit: u64) -> Result<(), Error> {
+    fn prune_to(&self, limit: ByteCount) -> Result<(), Error> {
         prune_cache(self.cache_root.as_ref(), limit)
     }
 }
 
-fn prune_cache(cache_root: &Path, limit: u64) -> Result<(), Error> {
+fn prune_cache(cache_root: &Path, limit: ByteCount) -> Result<(), Error> {
     let mut entries = WalkDir::new(cache_root)
         .into_iter()
         .filter_map(Result::ok)
@@ -364,7 +365,10 @@ fn prune_cache(cache_root: &Path, limit: u64) -> Result<(), Error> {
             (metadata.is_file() && path.extension().is_some_and(|value| value == "pbf")).then(
                 || {
                     let metadata_path = path.with_extension("json");
-                    let metadata_size = fs::metadata(&metadata_path).map_or(0, |value| value.len());
+                    let metadata_size = fs::metadata(&metadata_path)
+                        .map_or(ByteCount::from_bytes(0), |value| {
+                            ByteCount::from_bytes(value.len())
+                        });
                     let modified = metadata.modified().unwrap_or(UNIX_EPOCH);
                     let accessed_at = fs::read(&metadata_path)
                         .ok()
@@ -376,14 +380,18 @@ fn prune_cache(cache_root: &Path, limit: u64) -> Result<(), Error> {
                     (
                         path,
                         metadata_path,
-                        metadata.len() + metadata_size,
+                        ByteCount::from_bytes(metadata.len()).saturating_add(metadata_size),
                         accessed_at,
                     )
                 },
             )
         })
         .collect::<Vec<_>>();
-    let mut total = entries.iter().map(|(_, _, size, _)| size).sum::<u64>();
+    let mut total = entries
+        .iter()
+        .fold(ByteCount::from_bytes(0), |total, (_, _, size, _)| {
+            total.saturating_add(*size)
+        });
     if total <= limit {
         return Ok(());
     }
@@ -416,8 +424,12 @@ struct Metadata {
     fetched_at: u64,
     #[serde(default)]
     accessed_at: u64,
-    #[serde(default = "default_fresh_for_seconds")]
-    fresh_for_seconds: u64,
+    #[serde(
+        rename = "fresh_for_seconds",
+        default = "default_fresh_for",
+        with = "duration_seconds"
+    )]
+    fresh_for: Duration,
     etag: Option<String>,
 }
 
@@ -426,7 +438,7 @@ impl Default for Metadata {
         Self {
             fetched_at: 0,
             accessed_at: 0,
-            fresh_for_seconds: default_fresh_for_seconds(),
+            fresh_for: default_fresh_for(),
             etag: None,
         }
     }
@@ -437,19 +449,37 @@ struct Cached {
     metadata: Metadata,
 }
 
-fn cached_tile(cached: Cached, max_age_seconds: u64) -> Tile {
+fn cached_tile(cached: Cached, max_age: Duration) -> Tile {
     Tile {
         etag: response_etag(&cached.bytes),
         bytes: cached.bytes,
-        max_age_seconds,
+        max_age,
     }
 }
 
-const fn default_fresh_for_seconds() -> u64 {
-    FRESH_FOR.as_secs()
+const fn default_fresh_for() -> Duration {
+    FRESH_FOR
 }
 
-fn response_max_age(headers: &header::HeaderMap) -> Option<u64> {
+mod duration_seconds {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::time::Duration;
+
+    pub(super) fn serialize<S: Serializer>(
+        value: &Duration,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u64(value.as_secs())
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Duration, D::Error> {
+        u64::deserialize(deserializer).map(Duration::from_secs)
+    }
+}
+
+fn response_max_age(headers: &header::HeaderMap) -> Option<Duration> {
     headers
         .get_all(header::CACHE_CONTROL)
         .iter()
@@ -461,7 +491,12 @@ fn response_max_age(headers: &header::HeaderMap) -> Option<u64> {
             if !name.trim().eq_ignore_ascii_case("max-age") {
                 return None;
             }
-            value.trim().trim_matches('"').parse::<u64>().ok()
+            value
+                .trim()
+                .trim_matches('"')
+                .parse::<u64>()
+                .ok()
+                .map(Duration::from_secs)
         })
 }
 
@@ -587,10 +622,14 @@ impl CachePaths {
     }
 }
 
-async fn read_limited(response: reqwest::Response, limit: usize) -> Result<Vec<u8>, Error> {
+fn buffer_size(bytes: &[u8]) -> ByteCount {
+    ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+}
+
+async fn read_limited(response: reqwest::Response, limit: ByteCount) -> Result<Vec<u8>, Error> {
     if response
         .content_length()
-        .is_some_and(|length| length > u64::try_from(limit).unwrap_or(u64::MAX))
+        .is_some_and(|length| ByteCount::from_bytes(length) > limit)
     {
         return Err(Error::ResponseTooLarge(limit));
     }
@@ -598,7 +637,7 @@ async fn read_limited(response: reqwest::Response, limit: usize) -> Result<Vec<u
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-        if bytes.len().saturating_add(chunk.len()) > limit {
+        if buffer_size(&bytes).saturating_add(buffer_size(&chunk)) > limit {
             return Err(Error::ResponseTooLarge(limit));
         }
         bytes.extend_from_slice(&chunk);
@@ -687,8 +726,8 @@ pub enum Error {
     MalformedTile,
     #[error("OpenFreeMap returned HTTP {0}")]
     ProviderStatus(StatusCode),
-    #[error("map response exceeded its {0}-byte limit")]
-    ResponseTooLarge(usize),
+    #[error("map response exceeded its {0} limit")]
+    ResponseTooLarge(ByteCount),
     #[error("map cache path has no parent")]
     InvalidCachePath,
     #[error(transparent)]
@@ -865,7 +904,7 @@ mod tests {
             HeaderValue::from_static("public, Max-Age=120, immutable"),
         );
 
-        assert_eq!(response_max_age(&headers), Some(120));
+        assert_eq!(response_max_age(&headers), Some(Duration::from_secs(120)));
     }
 
     #[tokio::test]
@@ -905,9 +944,12 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let RunningFixture {
             service, server, ..
-        } = fixture(directory.path().into(), vec![0; super::TILE_LIMIT + 1])
-            .await
-            .unwrap();
+        } = fixture(
+            directory.path().into(),
+            vec![0; usize::try_from(super::TILE_LIMIT.as_bytes()).unwrap() + 1],
+        )
+        .await
+        .unwrap();
 
         let error = service
             .tile(TileId {
@@ -986,7 +1028,7 @@ mod tests {
                 &Metadata {
                     fetched_at: 0,
                     accessed_at: 0,
-                    fresh_for_seconds: 1,
+                    fresh_for: Duration::from_secs(1),
                     etag: None,
                 },
             )
@@ -997,7 +1039,7 @@ mod tests {
 
         let stale = service.tile(cached_id).await.unwrap();
         assert_eq!(stale.bytes, bytes);
-        assert_eq!(stale.max_age_seconds, 0);
+        assert_eq!(stale.max_age, Duration::ZERO);
         assert!(
             service
                 .tile(TileId {
@@ -1040,7 +1082,7 @@ mod tests {
                 serde_json::to_vec(&Metadata {
                     fetched_at: accessed_at,
                     accessed_at,
-                    fresh_for_seconds: super::FRESH_FOR.as_secs(),
+                    fresh_for: super::FRESH_FOR,
                     etag: None,
                 })
                 .unwrap(),
@@ -1048,7 +1090,7 @@ mod tests {
             .unwrap();
         }
 
-        service.prune_to(128).unwrap();
+        service.prune_to(super::ByteCount::from_bytes(128)).unwrap();
 
         let oldest = super::CachePaths::new(
             directory.path(),
@@ -1096,7 +1138,7 @@ mod tests {
             serde_json::to_vec(&Metadata {
                 fetched_at: now,
                 accessed_at: now,
-                fresh_for_seconds: super::FRESH_FOR.as_secs(),
+                fresh_for: super::FRESH_FOR,
                 etag: Some("upstream".to_owned()),
             })
             .unwrap(),

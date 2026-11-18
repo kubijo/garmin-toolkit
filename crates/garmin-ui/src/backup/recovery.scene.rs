@@ -1,4 +1,5 @@
 use gallery::prelude::*;
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::snapshots::{
     SnapshotOperation, SnapshotSource, SnapshotState, SnapshotStatus,
 };
@@ -36,8 +37,8 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                 4 => SnapshotState::Completed,
                 _ => SnapshotState::AwaitingApproval,
             },
-            transferred: 2_000_000,
-            total: Some(8_000_000),
+            transferred: ByteCount::from_bytes(2_000_000),
+            total: Some(ByteCount::from_bytes(8_000_000)),
             preview: None,
             error: None,
         },

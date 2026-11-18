@@ -1,6 +1,11 @@
 //! Immutable bytes and their acquisition and normalization provenance.
 
-use std::{fmt, num::NonZeroU32, str::FromStr};
+use std::{
+    fmt,
+    num::{NonZeroU32, NonZeroU64},
+    str::FromStr,
+    time::Duration,
+};
 
 use mediatype::MediaTypeBuf;
 use thiserror::Error;
@@ -128,13 +133,114 @@ impl fmt::Display for ArtifactDigest {
 }
 
 /// A non-negative byte count.
+#[derive(Default)]
 #[garmin_macros::portable(copy, ord, hash)]
 pub struct ByteCount(u64);
 
 impl ByteCount {
     #[must_use]
-    pub const fn from_u64(bytes: u64) -> Self {
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+
+    #[must_use]
+    pub fn format_binary(self) -> String {
+        let (value, unit) = self.format_binary_parts();
+        format!("{value} {unit}")
+    }
+
+    #[must_use]
+    pub fn format_binary_parts(self) -> (String, &'static str) {
+        let (divisor, symbol) = if self >= Self::from_gibibytes(1) {
+            (Self::from_gibibytes(1), "GiB")
+        } else if self >= Self::from_mebibytes(1) {
+            (Self::from_mebibytes(1), "MiB")
+        } else if self >= Self::from_kibibytes(1) {
+            (Self::from_kibibytes(1), "KiB")
+        } else {
+            return (self.0.to_string(), "B");
+        };
+        let divisor = u128::from(divisor.0);
+        let tenths = (u128::from(self.0) * 10 + divisor / 2) / divisor;
+        let whole = tenths / 10;
+        let fraction = tenths % 10;
+        (format!("{whole}.{fraction}"), symbol)
+    }
+
+    #[must_use]
+    pub fn format_decimal(self, precision: usize) -> String {
+        let scaled =
+            byte_unit::Byte::from_u64(self.0).get_appropriate_unit(byte_unit::UnitType::Decimal);
+        format!("{scaled:.precision$}")
+    }
+
+    #[must_use]
+    pub fn ratio_scaled(self, total: Self, scale: u16) -> u16 {
+        if total.0 == 0 {
+            return 0;
+        }
+        let used = self.min(total);
+        u16::try_from(u128::from(used.0) * u128::from(scale) / u128::from(total.0)).unwrap_or(scale)
+    }
+
+    #[must_use]
+    pub const fn saturating_sub(self, other: Self) -> Self {
+        Self(self.0.saturating_sub(other.0))
+    }
+
+    #[must_use]
+    pub const fn saturating_add(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+
+    #[must_use]
+    pub const fn saturating_mul(self, multiplier: u32) -> Self {
+        Self(self.0.saturating_mul(multiplier as u64))
+    }
+
+    #[must_use]
+    pub const fn checked_add(self, other: Self) -> Option<Self> {
+        match self.0.checked_add(other.0) {
+            Some(bytes) => Some(Self(bytes)),
+            None => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn checked_sub(self, other: Self) -> Option<Self> {
+        match self.0.checked_sub(other.0) {
+            Some(bytes) => Some(Self(bytes)),
+            None => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn from_bytes(bytes: u64) -> Self {
         Self(bytes)
+    }
+
+    /// Constructs a byte count from decimal megabytes (1,000,000 bytes each).
+    /// # Panics
+    /// Panics if the byte count exceeds `u64::MAX`.
+    #[must_use]
+    pub const fn from_megabytes(megabytes: u64) -> Self {
+        Self(
+            megabytes
+                .checked_mul(1_000_000)
+                .expect("megabyte count exceeds u64 bytes"),
+        )
+    }
+
+    /// Constructs a byte count from decimal gigabytes (1,000,000,000 bytes each).
+    /// # Panics
+    /// Panics if the byte count exceeds `u64::MAX`.
+    #[must_use]
+    pub const fn from_gigabytes(gigabytes: u64) -> Self {
+        Self(
+            gigabytes
+                .checked_mul(1_000_000_000)
+                .expect("gigabyte count exceeds u64 bytes"),
+        )
     }
 
     /// Constructs a byte count from binary kibibytes (1024 bytes each).
@@ -161,13 +267,20 @@ impl ByteCount {
         )
     }
 
+    /// Constructs a byte count from binary gibibytes (1024 mebibytes each).
+    /// # Panics
+    /// Panics if the byte count exceeds `u64::MAX`.
     #[must_use]
-    pub const fn as_u64(&self) -> u64 {
-        self.0
+    pub const fn from_gibibytes(gibibytes: u64) -> Self {
+        Self(
+            gibibytes
+                .checked_mul(1 << 30)
+                .expect("gibibyte count exceeds u64 bytes"),
+        )
     }
 
     #[must_use]
-    pub const fn into_u64(self) -> u64 {
+    pub const fn as_bytes(&self) -> u64 {
         self.0
     }
 }
@@ -175,6 +288,89 @@ impl ByteCount {
 impl fmt::Display for ByteCount {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{} B", self.0)
+    }
+}
+
+/// A transfer rate in whole bytes per second.
+#[garmin_macros::portable(copy, ord, hash)]
+pub struct ByteRate(u64);
+
+/// A transfer rate that can pace an operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NonZeroByteRate(NonZeroU64);
+
+impl NonZeroByteRate {
+    #[must_use]
+    pub const fn try_from_bytes_per_second(rate: u64) -> Option<Self> {
+        match NonZeroU64::new(rate) {
+            Some(rate) => Some(Self(rate)),
+            None => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn from_bytes_per_second(rate: NonZeroU64) -> Self {
+        Self(rate)
+    }
+
+    #[must_use]
+    pub const fn as_bytes_per_second(self) -> NonZeroU64 {
+        self.0
+    }
+
+    /// Time needed to transfer the given size, rounded up to a nanosecond.
+    #[must_use]
+    pub fn transfer_duration(self, size: ByteCount) -> Duration {
+        let rate = self.0.get();
+        let bytes = size.as_bytes();
+        let seconds = bytes / rate;
+        let nanos = (u128::from(bytes % rate) * 1_000_000_000).div_ceil(u128::from(rate));
+        Duration::from_secs(seconds)
+            + Duration::from_nanos(u64::try_from(nanos).unwrap_or(1_000_000_000))
+    }
+}
+
+impl ByteRate {
+    /// Computes the nearest whole-byte rate, saturating on overflow.
+    #[must_use]
+    pub fn from_transfer(bytes: ByteCount, elapsed: std::time::Duration) -> Self {
+        if elapsed.is_zero() {
+            return Self(0);
+        }
+        let nanoseconds = elapsed.as_nanos();
+        let numerator = u128::from(bytes.as_bytes()) * 1_000_000_000;
+        Self(u64::try_from((numerator + nanoseconds / 2) / nanoseconds).unwrap_or(u64::MAX))
+    }
+
+    #[must_use]
+    pub const fn from_bytes_per_second(bytes_per_second: u64) -> Self {
+        Self(bytes_per_second)
+    }
+
+    /// Rounds to whole bytes per second, saturating outside the nonnegative range.
+    #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the rounded rate saturates to the supported unsigned range"
+    )]
+    pub fn saturating_from_bytes_per_second_f64(bytes_per_second: f64) -> Self {
+        Self(bytes_per_second.round() as u64)
+    }
+
+    #[must_use]
+    pub const fn as_bytes_per_second(&self) -> u64 {
+        self.0
+    }
+
+    #[must_use]
+    pub fn format_decimal(self, precision: usize) -> String {
+        format!("{}/s", self.format_decimal_amount(precision))
+    }
+
+    #[must_use]
+    pub fn format_decimal_amount(self, precision: usize) -> String {
+        ByteCount::from_bytes(self.0).format_decimal(precision)
     }
 }
 
@@ -234,7 +430,7 @@ impl Artifact {
             id,
             digest: ArtifactDigest::from_bytes(bytes),
             media_type,
-            byte_count: ByteCount::from_u64(bytes.len() as u64),
+            byte_count: ByteCount::from_bytes(bytes.len() as u64),
         }
     }
 

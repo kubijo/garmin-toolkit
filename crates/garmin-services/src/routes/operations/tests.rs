@@ -189,7 +189,7 @@ async fn start(session: &RouteSession, total: u64) -> TestResult<AcquisitionOper
         session,
         RouteRequest::StartUpload {
             file_name: "walk.gpx".into(),
-            size: ByteCount::from_u64(total),
+            size: ByteCount::from_bytes(total),
         },
     )
     .await?
@@ -212,14 +212,14 @@ async fn uploads_are_bounded_ordered_idempotent_and_profile_scoped() -> TestResu
     for (name, size) in [
         ("../walk.gpx", 1),
         ("walk.gpx", 0),
-        ("walk.gpx", garmin_gpx::MAX_BYTES as u64 + 1),
+        ("walk.gpx", garmin_gpx::MAX_BYTES.as_bytes() + 1),
     ] {
         assert!(
             fixture
                 .session
                 .request(RouteRequest::StartUpload {
                     file_name: name.into(),
-                    size: ByteCount::from_u64(size)
+                    size: ByteCount::from_bytes(size)
                 })
                 .await
                 .is_err()
@@ -281,7 +281,7 @@ async fn uploads_are_bounded_ordered_idempotent_and_profile_scoped() -> TestResu
     else {
         return Err("expected upload".into());
     };
-    assert_eq!(upload.received.as_u64(), 4);
+    assert_eq!(upload.received.as_bytes(), 4);
     request(&fixture.session, RouteRequest::Cancel { operation }).await?;
     assert!(fixture.operations.pending().uploads.is_empty());
     fixture.operations.deployment.close().await;

@@ -3,6 +3,7 @@ use garmin_device::{
     DeviceStateSnapshot, DeviceStorageState, SafeRelativePath, StorageCapacity,
     storage::{DeviceIoError, DirectoryDevice},
 };
+use garmin_model::artifact::ByteCount;
 
 struct Volumes {
     internal: DirectoryDevice,
@@ -20,7 +21,10 @@ impl DeviceRead for Volumes {
                 DeviceStorageState {
                     id: "internal".to_owned(),
                     label: "Internal".to_owned(),
-                    capacity: StorageCapacity::new(100, 20),
+                    capacity: StorageCapacity::new(
+                        ByteCount::from_bytes(100),
+                        ByteCount::from_bytes(20),
+                    ),
                     writable: Some(true),
                 },
                 DeviceStorageState {
@@ -67,7 +71,7 @@ impl DeviceRead for Volumes {
         &self,
         _: &str,
         _: &SafeRelativePath,
-        _: u64,
+        _: ByteCount,
         _: garmin_device::BackupDestination,
         _: garmin_device::MountedMtpBackupProgress,
     ) -> Result<String, DeviceIoError> {
@@ -77,7 +81,7 @@ impl DeviceRead for Volumes {
         &self,
         _: &str,
         _: &SafeRelativePath,
-        _: u64,
+        _: ByteCount,
         _: &str,
     ) -> Result<(), DeviceIoError> {
         panic!("unexpected verification")
@@ -86,7 +90,7 @@ impl DeviceRead for Volumes {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        limit: u64,
+        limit: ByteCount,
     ) -> Result<Option<Vec<u8>>, DeviceIoError> {
         match storage {
             "internal" => self.internal.read_bounded_file(storage, path, limit).await,

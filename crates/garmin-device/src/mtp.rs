@@ -6,6 +6,7 @@ use crate::{
     TransportKind,
 };
 use crate::{DeviceProbeReport, UploadCompletion};
+use garmin_model::artifact::ByteCount;
 use garmin_progress::{OperationStage, ProgressReporter};
 use mtp_rs::ptp::{ObjectHandle as PtpObjectHandle, OperationCode, PtpDevice, ResponseCode};
 use mtp_rs::{ByteRange, MtpDevice, MtpDeviceBuilder, ObjectHandle, Storage};
@@ -55,7 +56,7 @@ struct ProbeReceipt {
     device_identity: String,
     storage_id: u64,
     object_name: String,
-    bytes: u64,
+    bytes: ByteCount,
     sha256: String,
 }
 
@@ -69,7 +70,7 @@ impl ProbeLease {
         root: &Path,
         device_identity: &str,
         storage_id: u64,
-        bytes: u64,
+        bytes: ByteCount,
         sha256: String,
     ) -> Result<Self, MtpError> {
         tokio::fs::create_dir_all(root).await?;
@@ -146,7 +147,11 @@ impl RawMtpSession {
     pub async fn capacity(&self) -> Result<DeviceLinkCapacity, MtpError> {
         let storages = self.device.storages().await?;
         let state = mtp_state(&storages);
-        let storage_id = select_probe_storage(storages, 0).await?.0.id().0;
+        let storage_id = select_probe_storage(storages, ByteCount::default())
+            .await?
+            .0
+            .id()
+            .0;
         Ok(DeviceLinkCapacity {
             state,
             storage_id: format!("{storage_id:016x}"),
@@ -193,7 +198,11 @@ impl DeviceLink for RawMtpLink {
         let capacity = async {
             let storages = device.storages().await.map_err(MtpError::from)?;
             let state = mtp_state(&storages);
-            let storage_id = select_probe_storage(storages, 0).await?.0.id().0;
+            let storage_id = select_probe_storage(storages, ByteCount::default())
+                .await?
+                .0
+                .id()
+                .0;
             Ok(DeviceLinkCapacity {
                 state,
                 storage_id: format!("{storage_id:016x}"),
@@ -330,7 +339,7 @@ async fn read_manifest_from_open_device(
     let Some(bytes) = manifest_bytes else {
         return Err(MtpError::MissingManifest);
     };
-    if bytes.len() > MAX_MANIFEST_BYTES {
+    if ByteCount::from_bytes(bytes.len() as u64) > MAX_MANIFEST_BYTES {
         return Err(ManifestError::TooLarge.into());
     }
     let xml = String::from_utf8(bytes)?;
@@ -440,7 +449,7 @@ async fn inventory_open_mtp(
 async fn inspect_mtp_path(
     storage: &Storage,
     relative: &SafeRelativePath,
-) -> Result<(DevicePathState, Option<u64>), MtpError> {
+) -> Result<(DevicePathState, Option<ByteCount>), MtpError> {
     let components = relative
         .as_path()
         .components()
@@ -465,7 +474,10 @@ async fn inspect_mtp_path(
         }
         if is_last {
             return Ok(if object.is_file() {
-                (DevicePathState::RegularFile, Some(object.size))
+                (
+                    DevicePathState::RegularFile,
+                    Some(ByteCount::from_bytes(object.size)),
+                )
             } else {
                 (DevicePathState::Directory, None)
             });
@@ -497,7 +509,7 @@ async fn read_manifest_with_garmin_opcode(location_id: u64) -> Result<String, Mt
     );
     let bytes = session.get_object(PtpObjectHandle(object_id)).await?;
     session.close().await?;
-    if bytes.len() > MAX_MANIFEST_BYTES {
+    if ByteCount::from_bytes(bytes.len() as u64) > MAX_MANIFEST_BYTES {
         return Err(MtpFastPathError::ManifestTooLarge);
     }
     String::from_utf8(bytes).map_err(Into::into)
@@ -545,7 +557,7 @@ async fn probe_mtp_file_with_device(
             reporter: progress.clone(),
             stage: OperationStage::Upload,
             label: "Uploading disposable map object",
-            completed_before: 0,
+            completed_before: ByteCount::from_bytes(0),
             total: active.bytes,
             path: None,
             complete_payload_stage: true,
@@ -597,21 +609,21 @@ struct ActiveProbe {
     storage: Storage,
     parent: ObjectHandle,
     lease: ProbeLease,
-    bytes: u64,
+    bytes: ByteCount,
     expected_sha256: String,
 }
 
 #[derive(Clone, Copy)]
 struct ProbeTiming {
-    upload_seconds: f64,
-    device_finalize_seconds: f64,
+    upload_elapsed: Duration,
+    device_finalize_elapsed: Duration,
 }
 
 impl ProbeTiming {
     fn new(upload: Duration, finalize: Duration) -> Self {
         Self {
-            upload_seconds: upload.as_secs_f64(),
-            device_finalize_seconds: finalize.as_secs_f64(),
+            upload_elapsed: upload,
+            device_finalize_elapsed: finalize,
         }
     }
 }
@@ -623,7 +635,7 @@ async fn prepare_probe(
     device_identity: &str,
     progress: &ProgressReporter,
 ) -> Result<PreparedProbe, MtpError> {
-    let bytes = tokio::fs::metadata(source).await?.len();
+    let bytes = ByteCount::from_bytes(tokio::fs::metadata(source).await?.len());
     let expected_sha256 = hash_probe_source(source, bytes).await?;
     let source = tokio::fs::File::open(source).await?;
     let storages = match device.storages().await {
@@ -676,7 +688,7 @@ async fn complete_acknowledged_probe(
     timing: ProbeTiming,
     progress: &ProgressReporter,
 ) -> Result<DeviceProbeReport, MtpError> {
-    let read_back_seconds = match verify_probe_file(
+    let read_back_elapsed = match verify_probe_file(
         &active.storage,
         handle,
         active.bytes,
@@ -695,7 +707,7 @@ async fn complete_acknowledged_probe(
         handle,
         timing,
         UploadCompletion::Acknowledged,
-        read_back_seconds,
+        read_back_elapsed,
         progress,
     )
     .await
@@ -749,7 +761,7 @@ async fn reconcile_ambiguous_probe(
         )
         .await;
         match read_back {
-            Ok(read_back_seconds) => {
+            Ok(read_back_elapsed) => {
                 progress.completed(
                     OperationStage::DeviceFinalize,
                     "MTP upload reconciled by SHA-256 read-back",
@@ -761,7 +773,7 @@ async fn reconcile_ambiguous_probe(
                     handle,
                     timing,
                     UploadCompletion::ReconciledAfterTimeout,
-                    read_back_seconds,
+                    read_back_elapsed,
                     progress,
                 )
                 .await;
@@ -863,7 +875,7 @@ async fn reconcile_reopened_probe(
         )
         .await;
         match read_back {
-            Ok(read_back_seconds) => {
+            Ok(read_back_elapsed) => {
                 progress.completed(
                     OperationStage::DeviceFinalize,
                     "MTP upload reconciled by SHA-256 read-back",
@@ -876,7 +888,7 @@ async fn reconcile_reopened_probe(
                     handle,
                     timing,
                     UploadCompletion::ReconciledAfterTimeout,
-                    read_back_seconds,
+                    read_back_elapsed,
                     progress,
                 )
                 .await;
@@ -983,10 +995,10 @@ async fn finish_verified_probe(
     handle: ObjectHandle,
     timing: ProbeTiming,
     completion: UploadCompletion,
-    read_back_seconds: f64,
+    read_back_elapsed: Duration,
     progress: &ProgressReporter,
 ) -> Result<DeviceProbeReport, MtpError> {
-    let cleanup_seconds = delete_probe_file(
+    let cleanup_elapsed = delete_probe_file(
         &active.storage,
         active.parent,
         &active.lease.receipt.object_name,
@@ -1003,11 +1015,11 @@ async fn finish_verified_probe(
     Ok(DeviceProbeReport {
         transport: TransportKind::Mtp,
         bytes: active.bytes,
-        upload_seconds: timing.upload_seconds,
-        device_finalize_seconds: timing.device_finalize_seconds,
+        upload_elapsed: timing.upload_elapsed,
+        device_finalize_elapsed: timing.device_finalize_elapsed,
         upload_completion: completion,
-        read_back_seconds,
-        cleanup_seconds,
+        read_back_elapsed,
+        cleanup_elapsed,
         content_verified: true,
         temporary_file_removed: true,
     })
@@ -1056,11 +1068,11 @@ async fn finish_device<T>(
 
 async fn select_probe_storage(
     storages: Vec<Storage>,
-    bytes: u64,
+    bytes: ByteCount,
 ) -> Result<(Storage, ObjectHandle), MtpError> {
     let mut selected = None;
     for storage in storages {
-        if !storage.info().is_writable || storage.info().free_space < bytes {
+        if !storage.info().is_writable || ByteCount::from_bytes(storage.info().free_space) < bytes {
             continue;
         }
         let roots = storage.list_objects(None).await?;
@@ -1207,7 +1219,10 @@ fn mtp_state(storages: &[Storage]) -> crate::DeviceStateSnapshot {
                     } else {
                         info.description.clone()
                     },
-                    capacity: crate::StorageCapacity::new(info.total_capacity, info.free_space),
+                    capacity: crate::StorageCapacity::new(
+                        ByteCount::from_bytes(info.total_capacity),
+                        ByteCount::from_bytes(info.free_space),
+                    ),
                     writable: Some(info.is_writable),
                 }
             })
@@ -1218,17 +1233,17 @@ fn mtp_state(storages: &[Storage]) -> crate::DeviceStateSnapshot {
 async fn verify_probe_file(
     storage: &Storage,
     handle: ObjectHandle,
-    bytes: u64,
+    bytes: ByteCount,
     expected_sha256: &str,
     progress: &ProgressReporter,
-) -> Result<f64, MtpError> {
+) -> Result<Duration, MtpError> {
     progress.started(
         OperationStage::DeviceVerify,
         "Reading MTP object back",
-        Some(bytes),
+        Some(bytes.as_bytes()),
     );
     let actual = match storage.get_object_info(handle).await {
-        Ok(info) => info.size,
+        Ok(info) => ByteCount::from_bytes(info.size),
         Err(error) => {
             progress.failed(OperationStage::DeviceVerify, "MTP object inspection failed");
             return Err(MtpError::Protocol(error));
@@ -1249,7 +1264,7 @@ async fn verify_probe_file(
             return Err(MtpError::Protocol(error));
         }
     };
-    let mut actual = 0_u64;
+    let mut actual = ByteCount::default();
     let mut hash = Sha256::new();
     while let Some(chunk) = download.next_chunk().await {
         if progress.is_cancelled() {
@@ -1271,7 +1286,9 @@ async fn verify_probe_file(
             }
         };
         actual = actual
-            .checked_add(u64::try_from(chunk.len()).map_err(std::io::Error::other)?)
+            .checked_add(ByteCount::from_bytes(
+                u64::try_from(chunk.len()).map_err(std::io::Error::other)?,
+            ))
             .ok_or(MtpError::SizeOverflow)?;
         if actual > bytes {
             progress.failed(OperationStage::DeviceVerify, "MTP read-back size mismatch");
@@ -1284,8 +1301,8 @@ async fn verify_probe_file(
         progress.advanced(
             OperationStage::DeviceVerify,
             "Reading MTP object back",
-            actual,
-            Some(bytes),
+            actual.as_bytes(),
+            Some(bytes.as_bytes()),
         );
     }
     if actual != bytes {
@@ -1302,19 +1319,19 @@ async fn verify_probe_file(
         );
         return Err(MtpError::ProbeChecksum);
     }
-    let read_back_seconds = verify_started.elapsed().as_secs_f64();
+    let read_back_elapsed = verify_started.elapsed();
     progress.completed(
         OperationStage::DeviceVerify,
         "Read back and SHA-256 verified",
-        actual,
-        Some(bytes),
+        actual.as_bytes(),
+        Some(bytes.as_bytes()),
     );
-    Ok(read_back_seconds)
+    Ok(read_back_elapsed)
 }
 
-async fn hash_probe_source(source: &Path, expected: u64) -> Result<String, MtpError> {
+async fn hash_probe_source(source: &Path, expected: ByteCount) -> Result<String, MtpError> {
     let mut file = tokio::fs::File::open(source).await?;
-    let mut actual = 0_u64;
+    let mut actual = ByteCount::default();
     let mut hash = Sha256::new();
     let mut buffer = vec![0_u8; 4 * 1024 * 1024];
     loop {
@@ -1323,7 +1340,9 @@ async fn hash_probe_source(source: &Path, expected: u64) -> Result<String, MtpEr
             break;
         }
         actual = actual
-            .checked_add(u64::try_from(count).map_err(std::io::Error::other)?)
+            .checked_add(ByteCount::from_bytes(
+                u64::try_from(count).map_err(std::io::Error::other)?,
+            ))
             .ok_or(MtpError::SizeOverflow)?;
         if actual > expected {
             return Err(MtpError::ProbeSize { expected, actual });
@@ -1342,7 +1361,7 @@ async fn delete_probe_file(
     object_name: &str,
     handle: ObjectHandle,
     progress: &ProgressReporter,
-) -> Result<f64, MtpError> {
+) -> Result<Duration, MtpError> {
     progress.started(
         OperationStage::Delete,
         "Removing disposable MTP object",
@@ -1362,14 +1381,14 @@ async fn delete_probe_file(
         progress.failed(OperationStage::Delete, "Disposable MTP object still exists");
         return Err(MtpError::ProbeNotRemoved);
     }
-    let deletion_seconds = delete_started.elapsed().as_secs_f64();
+    let deletion_elapsed = delete_started.elapsed();
     progress.completed(
         OperationStage::Delete,
         "Disposable MTP object removed",
         1,
         Some(1),
     );
-    Ok(deletion_seconds)
+    Ok(deletion_elapsed)
 }
 
 #[derive(Debug, Error)]
@@ -1442,7 +1461,10 @@ pub enum MtpError {
     #[error("probe source I/O failed: {0}")]
     ProbeIo(#[from] std::io::Error),
     #[error("MTP probe size mismatch: expected {expected}, observed {actual}")]
-    ProbeSize { expected: u64, actual: u64 },
+    ProbeSize {
+        expected: ByteCount,
+        actual: ByteCount,
+    },
     #[error("MTP probe read-back checksum did not match the source")]
     ProbeChecksum,
     #[error("disposable MTP object still exists after deletion")]

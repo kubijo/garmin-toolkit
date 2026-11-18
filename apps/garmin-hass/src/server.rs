@@ -384,8 +384,9 @@ async fn map_tile(
         }
     };
     let etag = HeaderValue::from_str(&tile.etag).ok();
-    let cache_control = HeaderValue::from_str(&format!("public, max-age={}", tile.max_age_seconds))
-        .unwrap_or_else(|_| HeaderValue::from_static("no-cache"));
+    let cache_control =
+        HeaderValue::from_str(&format!("public, max-age={}", tile.max_age.as_secs()))
+            .unwrap_or_else(|_| HeaderValue::from_static("no-cache"));
     if request_etag_matches(&headers, &tile.etag) {
         let mut response = StatusCode::NOT_MODIFIED.into_response();
         if let Some(etag) = etag {

@@ -4,11 +4,12 @@ use crate::{
     TransportKind,
 };
 use crate::{DeviceProbeReport, UploadCompletion};
+use garmin_model::artifact::ByteCount;
 use garmin_progress::{OperationStage, ProgressReporter};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
@@ -29,7 +30,10 @@ pub enum MassStorageError {
     #[error("device probe I/O failed: {0}")]
     ProbeIo(std::io::Error),
     #[error("device probe size mismatch: expected {expected}, observed {actual}")]
-    ProbeSize { expected: u64, actual: u64 },
+    ProbeSize {
+        expected: ByteCount,
+        actual: ByteCount,
+    },
     #[error("device probe read-back checksum did not match the source")]
     ProbeChecksum,
     #[error("device probe cancelled")]
@@ -89,7 +93,7 @@ pub async fn open_mass_storage(root: &Path) -> Result<DeviceManifest, MassStorag
             path: manifest_path.clone(),
             source,
         })?;
-    if metadata.len() > MAX_MANIFEST_BYTES as u64 {
+    if ByteCount::from_bytes(metadata.len()) > MAX_MANIFEST_BYTES {
         return Err(ManifestError::TooLarge.into());
     }
     let xml = tokio::fs::read_to_string(&manifest_path)
@@ -151,7 +155,7 @@ pub async fn inventory_mass_storage(
 async fn inspect_mass_storage_path(
     root: &Path,
     relative: &SafeRelativePath,
-) -> Result<(DevicePathState, Option<u64>), MassStorageError> {
+) -> Result<(DevicePathState, Option<ByteCount>), MassStorageError> {
     let mut current = root.to_owned();
     let component_count = relative.as_path().components().count();
     for (index, component) in relative.as_path().components().enumerate() {
@@ -174,7 +178,10 @@ async fn inspect_mass_storage_path(
         }
         if is_last {
             return Ok(if metadata.file_type().is_file() {
-                (DevicePathState::RegularFile, Some(metadata.len()))
+                (
+                    DevicePathState::RegularFile,
+                    Some(ByteCount::from_bytes(metadata.len())),
+                )
             } else if metadata.file_type().is_dir() {
                 (DevicePathState::Directory, None)
             } else {
@@ -195,31 +202,31 @@ pub async fn probe_mass_storage_file(
 ) -> Result<DeviceProbeReport, MassStorageError> {
     require_real_directory(root).await?;
     require_real_directory(&root.join("Garmin")).await?;
-    let bytes = tokio::fs::metadata(source)
+    let metadata = tokio::fs::metadata(source)
         .await
-        .map_err(MassStorageError::ProbeIo)?
-        .len();
+        .map_err(MassStorageError::ProbeIo)?;
+    let bytes = ByteCount::from_bytes(metadata.len());
     let destination = root
         .join("Garmin")
         .join(format!(".garmin-cli-probe-{}.bin", Uuid::new_v4()));
     let expected_sha256 = hash_probe_file(source, bytes, None).await?;
-    let (upload_seconds, device_finalize_seconds) =
+    let (upload_elapsed, device_finalize_elapsed) =
         copy_probe_file(source, &destination, bytes, progress).await?;
-    let read_back_seconds =
+    let read_back_elapsed =
         match verify_probe_file(&destination, bytes, &expected_sha256, progress).await {
             Ok(elapsed) => elapsed,
             Err(error) => return Err(cleanup_probe_error(&destination, error).await),
         };
-    let cleanup_seconds = delete_probe_file(&destination, progress).await?;
+    let cleanup_elapsed = delete_probe_file(&destination, progress).await?;
 
     Ok(DeviceProbeReport {
         transport: TransportKind::MassStorage,
         bytes,
-        upload_seconds,
-        device_finalize_seconds,
+        upload_elapsed,
+        device_finalize_elapsed,
         upload_completion: UploadCompletion::Acknowledged,
-        read_back_seconds,
-        cleanup_seconds,
+        read_back_elapsed,
+        cleanup_elapsed,
         content_verified: true,
         temporary_file_removed: true,
     })
@@ -238,9 +245,9 @@ async fn require_real_directory(path: &Path) -> Result<(), MassStorageError> {
 async fn copy_probe_file(
     source: &Path,
     destination: &Path,
-    bytes: u64,
+    bytes: ByteCount,
     progress: &ProgressReporter,
-) -> Result<(f64, f64), MassStorageError> {
+) -> Result<(Duration, Duration), MassStorageError> {
     let mut input = tokio::fs::File::open(source)
         .await
         .map_err(MassStorageError::ProbeIo)?;
@@ -251,9 +258,9 @@ async fn copy_probe_file(
         .await
         .map_err(MassStorageError::ProbeIo)?;
     let label = "Copying disposable map file";
-    progress.started(OperationStage::Upload, label, Some(bytes));
+    progress.started(OperationStage::Upload, label, Some(bytes.as_bytes()));
     let started = Instant::now();
-    let mut copied = 0_u64;
+    let mut copied = ByteCount::default();
     let mut buffer = vec![0_u8; 4 * 1024 * 1024];
     let transfer = async {
         loop {
@@ -269,9 +276,16 @@ async fn copy_probe_file(
             }
             output.write_all(&buffer[..count]).await?;
             copied = copied
-                .checked_add(u64::try_from(count).map_err(std::io::Error::other)?)
+                .checked_add(ByteCount::from_bytes(
+                    u64::try_from(count).map_err(std::io::Error::other)?,
+                ))
                 .ok_or_else(|| std::io::Error::other("probe byte count overflow"))?;
-            progress.advanced(OperationStage::Upload, label, copied, Some(bytes));
+            progress.advanced(
+                OperationStage::Upload,
+                label,
+                copied.as_bytes(),
+                Some(bytes.as_bytes()),
+            );
         }
         Ok::<(), std::io::Error>(())
     }
@@ -286,8 +300,13 @@ async fn copy_probe_file(
         };
         return Err(cleanup_probe_error(destination, operation).await);
     }
-    let upload_seconds = started.elapsed().as_secs_f64();
-    progress.completed(OperationStage::Upload, label, copied, Some(bytes));
+    let upload_elapsed = started.elapsed();
+    progress.completed(
+        OperationStage::Upload,
+        label,
+        copied.as_bytes(),
+        Some(bytes.as_bytes()),
+    );
     progress.started(
         OperationStage::DeviceFinalize,
         "Synchronizing disposable device file",
@@ -307,26 +326,26 @@ async fn copy_probe_file(
         drop(output);
         return Err(cleanup_probe_error(destination, MassStorageError::ProbeIo(error)).await);
     }
-    let finalize_seconds = finalize_started.elapsed().as_secs_f64();
+    let finalize_seconds = finalize_started.elapsed();
     progress.completed(
         OperationStage::DeviceFinalize,
         "Disposable device file synchronized",
         1,
         Some(1),
     );
-    Ok((upload_seconds, finalize_seconds))
+    Ok((upload_elapsed, finalize_seconds))
 }
 
 async fn verify_probe_file(
     destination: &Path,
-    expected: u64,
+    expected: ByteCount,
     expected_sha256: &str,
     progress: &ProgressReporter,
-) -> Result<f64, MassStorageError> {
+) -> Result<Duration, MassStorageError> {
     progress.started(
         OperationStage::DeviceVerify,
         "Reading device file back",
-        Some(expected),
+        Some(expected.as_bytes()),
     );
     let started = Instant::now();
     let actual_sha256 = match hash_probe_file(destination, expected, Some(progress)).await {
@@ -346,22 +365,22 @@ async fn verify_probe_file(
     progress.completed(
         OperationStage::DeviceVerify,
         "Read back and SHA-256 verified",
-        expected,
-        Some(expected),
+        expected.as_bytes(),
+        Some(expected.as_bytes()),
     );
-    Ok(started.elapsed().as_secs_f64())
+    Ok(started.elapsed())
 }
 
 async fn hash_probe_file(
     path: &Path,
-    expected: u64,
+    expected: ByteCount,
     progress: Option<&ProgressReporter>,
 ) -> Result<String, MassStorageError> {
     let mut file = tokio::fs::File::open(path)
         .await
         .map_err(MassStorageError::ProbeIo)?;
     let mut hash = Sha256::new();
-    let mut actual = 0_u64;
+    let mut actual = ByteCount::default();
     let mut buffer = vec![0_u8; 4 * 1024 * 1024];
     loop {
         if progress.is_some_and(ProgressReporter::is_cancelled) {
@@ -378,7 +397,7 @@ async fn hash_probe_file(
             .map_err(std::io::Error::other)
             .map_err(MassStorageError::ProbeIo)?;
         actual = actual
-            .checked_add(count_u64)
+            .checked_add(ByteCount::from_bytes(count_u64))
             .ok_or_else(|| std::io::Error::other("probe byte count overflow"))
             .map_err(MassStorageError::ProbeIo)?;
         if actual > expected {
@@ -389,8 +408,8 @@ async fn hash_probe_file(
             progress.advanced(
                 OperationStage::DeviceVerify,
                 "Reading device file back",
-                actual,
-                Some(expected),
+                actual.as_bytes(),
+                Some(expected.as_bytes()),
             );
         }
     }
@@ -414,7 +433,7 @@ async fn cleanup_probe_error(destination: &Path, operation: MassStorageError) ->
 async fn delete_probe_file(
     destination: &Path,
     progress: &ProgressReporter,
-) -> Result<f64, MassStorageError> {
+) -> Result<Duration, MassStorageError> {
     progress.started(
         OperationStage::Delete,
         "Removing disposable device file",
@@ -437,7 +456,7 @@ async fn delete_probe_file(
         1,
         Some(1),
     );
-    Ok(started.elapsed().as_secs_f64())
+    Ok(started.elapsed())
 }
 
 fn unescape_mount(value: &str) -> String {
@@ -490,7 +509,7 @@ mod tests {
         let events = receiver.try_iter().collect::<Vec<_>>();
 
         assert!(report.content_verified);
-        assert!(report.read_back_seconds > 0.0);
+        assert!(!report.read_back_elapsed.is_zero());
         assert!(report.temporary_file_removed);
         let upload_complete = events
             .iter()
@@ -509,7 +528,7 @@ mod tests {
         assert!(events.iter().any(|event| {
             event.stage == OperationStage::DeviceVerify
                 && event.state == ProgressState::Advanced
-                && event.completed == report.bytes
+                && event.amount.completed() == report.bytes.as_bytes()
         }));
         assert!(
             std::fs::read_dir(device.join("Garmin"))

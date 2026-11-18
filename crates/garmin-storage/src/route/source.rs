@@ -36,7 +36,7 @@ impl Storage {
         Ok(Some(RouteSource {
             artifact: row.id.parse().map_err(invalid)?,
             digest: digest(row.digest)?,
-            byte_count: ByteCount::from_u64(u64::try_from(row.byte_count).map_err(invalid)?),
+            byte_count: ByteCount::from_bytes(u64::try_from(row.byte_count).map_err(invalid)?),
             name: row.source_identity,
         }))
     }

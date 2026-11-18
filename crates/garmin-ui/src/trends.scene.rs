@@ -1,21 +1,25 @@
 use crate::SceneStateKey as _;
 use gallery::prelude::*;
 use garmin_model::{
-    activity::ActivitySport,
+    activity::{ActivityDuration, ActivitySport, Distance},
     garmin_connect::{
         CachedActivity, RemoteActivity,
         sync::{Revision, Snapshot},
-        trends::{History, Period},
+        trends::{History, Metric, Period},
     },
-    identity::ProfilePreferences,
+    identity::{MonthlyDistanceTarget, ProfilePreferences},
 };
 use garmin_ui::trends;
 
 scene_meta! { title: "Application / Trends" }
 
-thread_local! { static STATE: crate::SceneState<trends::State, 512> = const { crate::SceneState::empty() }; }
+thread_local! { static STATE: crate::SceneState<trends::State, 1024> = const { crate::SceneState::empty() }; }
 
 #[scene(default)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep the interactive fixture and its controls together"
+)]
 fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let width = ctx.slider("width", 1280.0, 320.0, 1440.0, 1.0);
     let height = ctx.slider("height", 1600.0, 480.0, 4000.0, 1.0);
@@ -28,6 +32,7 @@ fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let imperial = ctx.toggle("imperial", false);
     let cumulative = ctx.toggle("cumulative", false);
     let editor = ctx.toggle("edit targets", false);
+    let elevation = ctx.toggle("elevation comparison", false);
     let unavailable = ctx.toggle("missing original", false);
     let intl = globals.intl();
     let history = if variant == 3 {
@@ -42,12 +47,18 @@ fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                 + 16 * status
                 + 64 * usize::from(previous)
                 + 128 * usize::from(cumulative)
-                + 256 * usize::from(editor),
+                + 256 * usize::from(editor)
+                + 512 * usize::from(elevation),
             || {
                 let mut state = trends::State::from_cache(history, Revision::default())
                     .with_presentation(garmin_ui::modal::Presentation::Contained)
                     .with_cumulative(cumulative)
-                    .with_period([Period::Day, Period::Week, Period::Month, Period::Year][period]);
+                    .with_period([Period::Day, Period::Week, Period::Month, Period::Year][period])
+                    .with_comparison_metric(if elevation {
+                        Metric::Elevation
+                    } else {
+                        Metric::Distance
+                    });
                 if status >= 2 {
                     state.complete(
                         &Revision::default(),
@@ -60,7 +71,7 @@ fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                     );
                 }
                 if editor {
-                    state.edit_targets([0, 200, 0]);
+                    state.edit_targets([0, 200, 0].map(MonthlyDistanceTarget::from_kilometres));
                 }
                 state
             },
@@ -74,13 +85,16 @@ fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                     garmin_model::identity::LanguagePreference::English,
                     garmin_model::identity::ThemePreference::Auto,
                 )
-                .with_monthly_distance_targets(if partial_goals {
-                    [0, 200, 0]
-                } else if goals {
-                    [120, 750, 50]
-                } else {
-                    [0; 3]
-                });
+                .with_monthly_distance_targets(
+                    (if partial_goals {
+                        [0, 200, 0]
+                    } else if goals {
+                        [120, 750, 50]
+                    } else {
+                        [0; 3]
+                    })
+                    .map(MonthlyDistanceTarget::from_kilometres),
+                );
                 let mut sync = Snapshot {
                     progress: (status == 1).then_some(
                         garmin_model::garmin_connect::LoadProgress::Indexing {
@@ -127,10 +141,14 @@ fn fixture(variant: usize, previous: bool) -> History {
             .cloned()
             .map(|mut summary| {
                 summary.activity.id -= 100_000;
-                summary.activity.distance_metres =
-                    summary.activity.distance_metres.map(|value| value * 0.82);
-                summary.activity.duration_seconds =
-                    summary.activity.duration_seconds.map(|value| value * 0.9);
+                summary.activity.distance = summary
+                    .activity
+                    .distance
+                    .and_then(|value| Distance::try_from_metres(value.as_metres() * 0.82));
+                summary.activity.duration = summary
+                    .activity
+                    .duration
+                    .and_then(|value| ActivityDuration::try_from_seconds(value.as_seconds() * 0.9));
                 summary.started_local = summary
                     .started_local
                     .map(|date| date.replace("2026-", "2025-"));
@@ -142,13 +160,34 @@ fn fixture(variant: usize, previous: bool) -> History {
     if variant == 2 {
         for summary in &mut summaries {
             match summary.started_local.as_deref() {
-                Some("2026-11-05T06:00:00") => summary.activity.distance_metres = None,
-                Some("2026-11-10T16:00:00") => summary.activity.duration_seconds = None,
+                Some("2026-11-05T06:00:00") => summary.activity.distance = None,
+                Some("2026-11-10T16:00:00") => summary.activity.duration = None,
                 _ => {}
             }
         }
     }
-    History::from_summaries(&summaries)
+    let ascent = summaries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, summary)| {
+            let metres = if summary.activity.sport == Some(ActivitySport::Swimming) {
+                summary
+                    .started_local
+                    .as_deref()?
+                    .starts_with("2026-11-16")
+                    .then_some(0)?
+            } else if index.is_multiple_of(3) {
+                return None;
+            } else {
+                20 + u64::try_from(index % 12).expect("bounded index") * 25
+            };
+            Some((
+                summary.activity.id,
+                Distance::from_millimeters(metres * 1_000),
+            ))
+        })
+        .collect();
+    History::from_summaries_with_ascent(&summaries, &ascent)
 }
 
 fn november() -> Vec<CachedActivity> {
@@ -266,10 +305,17 @@ fn samples(year: i32, month: u8, entries: impl IntoIterator<Item = Sample>) -> V
                         + 1,
                     imported: index.is_multiple_of(4),
                     sport: Some(sport),
-                    name: String::new(),
+                    name: match sport {
+                        ActivitySport::Running => "Training run",
+                        ActivitySport::Cycling => "Road ride",
+                        ActivitySport::Swimming => "Pool swim",
+                        ActivitySport::Walking => "Evening walk",
+                        ActivitySport::Hiking => "Trail hike",
+                    }
+                    .to_owned(),
                     started_at: None,
-                    distance_metres: Some(distance * 1000.0),
-                    duration_seconds: Some(f64::from(minutes) * 60.0),
+                    distance: Distance::try_from_kilometres(distance),
+                    duration: ActivityDuration::try_from_seconds(f64::from(minutes) * 60.0),
                 },
                 description: None,
                 activity_type: None,
@@ -282,7 +328,7 @@ fn samples(year: i32, month: u8, entries: impl IntoIterator<Item = Sample>) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use garmin_model::garmin_connect::trends::{Metric, Range, Sport};
+    use garmin_model::garmin_connect::trends::{BucketValue, Range, Sport};
 
     #[test]
     fn fixture_exercises_rest_days_counts_heat_levels_and_real_period_comparisons() {
@@ -294,22 +340,31 @@ mod tests {
         assert_eq!(history.totals(range, None).activities, 25);
         assert_eq!(history.active_days(range), 14);
         let counts = history.series(range, None, Metric::Count, false);
-        for count in [0.0, 1.0, 2.0, 3.0] {
-            assert!(counts.iter().any(|day| day.value == Some(count)));
+        for count in 0..=3 {
+            assert!(
+                counts
+                    .iter()
+                    .any(|day| day.value == Some(BucketValue::Count(count)))
+            );
         }
         let durations = history.series(range, None, Metric::Duration, false);
         assert!(
             durations
                 .iter()
-                .any(|day| day.value.is_some_and(|time| time > 0.0 && time < 3600.0))
+                .any(|day| matches!(day.value, Some(BucketValue::Duration(time))
+                    if time > ActivityDuration::default() && time < ActivityDuration::from_milliseconds(3_600_000)))
         );
         assert!(
             durations
                 .iter()
-                .any(|day| day.value.is_some_and(|time| time > 7200.0))
+                .any(|day| matches!(day.value, Some(BucketValue::Duration(time))
+                    if time > ActivityDuration::from_milliseconds(7_200_000)))
         );
         let swimming = history.series(range, Some(Sport::Swimming), Metric::Distance, false);
-        assert_eq!(swimming[4].value, Some(0.0));
+        assert_eq!(
+            swimming[4].value,
+            Some(BucketValue::Distance(Distance::default()))
+        );
         let previous = Range {
             from: "2026-10-01".parse().expect("date"),
             through: "2026-10-16".parse().expect("date"),
@@ -321,8 +376,8 @@ mod tests {
             through: range.through,
         };
         let months = history.series(year, None, Metric::Count, true);
-        assert_eq!(months[1].value, Some(0.0));
-        assert!(months[0].value.is_some_and(|value| value > 0.0));
+        assert_eq!(months[1].value, Some(BucketValue::Count(0)));
+        assert!(matches!(months[0].value, Some(BucketValue::Count(count)) if count > 0));
     }
 
     #[test]

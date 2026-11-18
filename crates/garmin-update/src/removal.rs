@@ -4,13 +4,15 @@ use garmin_device::{
     SafeRelativePath, TransportKind,
     storage::{DeviceIoError, DeviceWrite},
 };
+use garmin_model::artifact::ByteCount;
 use garmin_model::map::{InstallationState, MapCatalog, MapComponent, MapFile};
+use garmin_model::value::duration_seconds;
 use garmin_progress::{OperationStage, ProgressReporter};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::io::AsyncReadExt as _;
 
@@ -39,7 +41,7 @@ pub struct RemovalComponent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemovalFile {
     pub path: SafeRelativePath,
-    pub declared_size: Option<u64>,
+    pub declared_size: Option<ByteCount>,
     pub removed_with: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preserved_for: Vec<String>,
@@ -51,7 +53,7 @@ pub struct RemovalPlan {
     pub components: Vec<RemovalComponent>,
     pub files_to_remove: Vec<RemovalFile>,
     pub files_preserved: Vec<RemovalFile>,
-    pub declared_bytes_to_remove: u64,
+    pub declared_bytes_to_remove: ByteCount,
     pub digest: String,
 }
 
@@ -60,7 +62,7 @@ pub struct RemovalExecutionFile {
     pub storage_id: String,
     pub storage_label: String,
     pub path: SafeRelativePath,
-    pub size: u64,
+    pub size: ByteCount,
     pub removed_with: Vec<String>,
 }
 
@@ -71,7 +73,7 @@ pub struct RemovalExecutionPlan {
     pub transport: TransportKind,
     pub files_to_remove: Vec<RemovalExecutionFile>,
     pub files_already_absent: Vec<SafeRelativePath>,
-    pub bytes_to_remove: u64,
+    pub bytes_to_remove: ByteCount,
     pub digest: String,
 }
 
@@ -106,11 +108,15 @@ pub struct RemovalTransactionJournal {
 pub struct RemovalApplyReport {
     pub plan_digest: String,
     pub files_removed: usize,
-    pub bytes_removed: u64,
+    pub bytes_removed: ByteCount,
     pub backup_files: usize,
-    pub backup_bytes: u64,
+    pub backup_bytes: ByteCount,
     pub backup_directory: PathBuf,
-    pub elapsed_seconds: f64,
+    #[serde(
+        rename = "elapsed_seconds",
+        serialize_with = "duration_seconds::serialize"
+    )]
+    pub elapsed: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -132,7 +138,7 @@ pub struct RemovalRecoveryReport {
 #[derive(Debug)]
 struct Ownership {
     path: SafeRelativePath,
-    sizes: BTreeSet<u64>,
+    sizes: BTreeSet<ByteCount>,
     remove_owners: BTreeSet<String>,
     keep_owners: BTreeSet<String>,
 }
@@ -213,11 +219,14 @@ impl RemovalPlan {
         if files_to_remove.is_empty() {
             return Err(RemovalPlanError::NoExclusiveFiles);
         }
-        let declared_bytes_to_remove = files_to_remove.iter().try_fold(0_u64, |total, file| {
-            total
-                .checked_add(file.declared_size.unwrap_or(0))
-                .ok_or(RemovalPlanError::TotalSizeOverflow)
-        })?;
+        let declared_bytes_to_remove =
+            files_to_remove
+                .iter()
+                .try_fold(ByteCount::default(), |total, file| {
+                    total
+                        .checked_add(file.declared_size.unwrap_or_default())
+                        .ok_or(RemovalPlanError::TotalSizeOverflow)
+                })?;
         let mut plan = Self {
             device_digest,
             components,
@@ -288,8 +297,8 @@ impl RemovalPlan {
                     {
                         return Err(RemovalPlanError::DeviceSizeMismatch {
                             path: planned.path.clone(),
-                            declared,
-                            actual: size,
+                            declared: declared.as_bytes(),
+                            actual: size.as_bytes(),
                         });
                     }
                     files_to_remove.push(RemovalExecutionFile {
@@ -305,11 +314,14 @@ impl RemovalPlan {
                 }
             }
         }
-        let bytes_to_remove = files_to_remove.iter().try_fold(0_u64, |total, file| {
-            total
-                .checked_add(file.size)
-                .ok_or(RemovalPlanError::TotalSizeOverflow)
-        })?;
+        let bytes_to_remove =
+            files_to_remove
+                .iter()
+                .try_fold(ByteCount::default(), |total, file| {
+                    total
+                        .checked_add(file.size)
+                        .ok_or(RemovalPlanError::TotalSizeOverflow)
+                })?;
         let mut plan = RemovalExecutionPlan {
             device_digest: self.device_digest.clone(),
             source_plan_digest: self.digest.clone(),
@@ -453,9 +465,9 @@ fn completed_removal_report(
         files_removed: plan.files_to_remove.len(),
         bytes_removed: plan.bytes_to_remove,
         backup_files: journal.backups.len(),
-        backup_bytes: backed_up,
+        backup_bytes: ByteCount::from_bytes(backed_up),
         backup_directory,
-        elapsed_seconds: started.elapsed().as_secs_f64(),
+        elapsed: started.elapsed(),
     }
 }
 
@@ -710,7 +722,7 @@ async fn check_restoration_space<D: DeviceWrite + ?Sized>(
         {
             DevicePathStatus::Missing => missing.push(crate::space::StorageChange {
                 storage_id: &backup.target.storage_id,
-                before_bytes: 0,
+                before_bytes: ByteCount::from_bytes(0),
                 after_bytes: backup.target.size,
             }),
             DevicePathStatus::RegularFile { size } if size == backup.target.size => {}
@@ -762,7 +774,7 @@ async fn validate_recovery_backups(
     for backup in &journal.backups {
         let path = capture_root.join(&backup.backup_file);
         let metadata = tokio::fs::symlink_metadata(&path).await?;
-        if !metadata.file_type().is_file() || metadata.len() != backup.target.size {
+        if !metadata.file_type().is_file() || metadata.len() != backup.target.size.as_bytes() {
             return Err(RemovalExecutionError::UnsafeJournal(path));
         }
         let mut source = tokio::fs::File::open(&path).await?;
@@ -836,7 +848,7 @@ async fn backup_all<D: DeviceWrite + ?Sized>(
     progress.started(
         OperationStage::Backup,
         "Backing up selected device files",
-        Some(plan.bytes_to_remove),
+        Some(plan.bytes_to_remove.as_bytes()),
     );
     let mut backed_up = 0_u64;
     for (index, target) in plan.files_to_remove.iter().enumerate() {
@@ -862,7 +874,7 @@ async fn backup_all<D: DeviceWrite + ?Sized>(
                 destination,
                 MountedMtpBackupProgress {
                     reporter: progress.clone(),
-                    completed_before: backed_up,
+                    completed_before: ByteCount::from_bytes(backed_up),
                     total: plan.bytes_to_remove,
                 },
             )
@@ -870,15 +882,15 @@ async fn backup_all<D: DeviceWrite + ?Sized>(
             .map_err(RemovalExecutionError::Device)?;
         let destination = capture.artifact_path(Path::new(&backup_file))?;
         let metadata = tokio::fs::metadata(&destination).await?;
-        if !metadata.is_file() || metadata.len() != target.size {
+        if !metadata.is_file() || metadata.len() != target.size.as_bytes() {
             return Err(RemovalExecutionError::BackupSize {
                 path: target.path.clone(),
-                expected: target.size,
+                expected: target.size.as_bytes(),
                 actual: metadata.len(),
             });
         }
         backed_up = backed_up
-            .checked_add(target.size)
+            .checked_add(target.size.as_bytes())
             .ok_or(RemovalExecutionError::ByteCountOverflow)?;
         backups.push(RemovalBackup {
             target: target.clone(),
@@ -890,14 +902,14 @@ async fn backup_all<D: DeviceWrite + ?Sized>(
             "Backed up and verified device file",
             target.path.to_string(),
             backed_up,
-            Some(plan.bytes_to_remove),
+            Some(plan.bytes_to_remove.as_bytes()),
         );
     }
     progress.completed(
         OperationStage::Backup,
         "All selected device files are backed up",
         backed_up,
-        Some(plan.bytes_to_remove),
+        Some(plan.bytes_to_remove.as_bytes()),
     );
     Ok((backups, backed_up))
 }
@@ -1126,7 +1138,7 @@ pub enum RemovalExecutionError {
     UnexpectedDeviceState {
         path: SafeRelativePath,
         state: DevicePathState,
-        size: Option<u64>,
+        size: Option<ByteCount>,
     },
     #[error("removal byte count exceeds the supported range")]
     ByteCountOverflow,
@@ -1183,7 +1195,7 @@ fn add_owner(
         remove_owners: BTreeSet::new(),
         keep_owners: BTreeSet::new(),
     });
-    if file.size_in_bytes != 0 {
+    if file.size_in_bytes.as_bytes() != 0 {
         owned.sizes.insert(file.size_in_bytes);
     }
     if remove {
@@ -1194,7 +1206,7 @@ fn add_owner(
     Ok(())
 }
 
-fn declared_size(owned: &Ownership) -> Result<Option<u64>, RemovalPlanError> {
+fn declared_size(owned: &Ownership) -> Result<Option<ByteCount>, RemovalPlanError> {
     match owned.sizes.len() {
         0 => Ok(None),
         1 => Ok(owned.sizes.first().copied()),
@@ -1226,7 +1238,7 @@ pub enum RemovalPlanError {
     #[error("Garmin reported conflicting sizes for {path}: {sizes:?}")]
     ConflictingFileSize {
         path: SafeRelativePath,
-        sizes: Vec<u64>,
+        sizes: Vec<ByteCount>,
     },
     #[error(transparent)]
     UnsafePath(#[from] PathSafetyError),
@@ -1346,8 +1358,8 @@ mod tests {
                     id: "internal".to_owned(),
                     label: "Device storage".to_owned(),
                     capacity: StorageCapacity::new(
-                        state.capacity,
-                        state.capacity.saturating_sub(used),
+                        ByteCount::from_bytes(state.capacity),
+                        ByteCount::from_bytes(state.capacity.saturating_sub(used)),
                     ),
                     writable: Some(state.writable),
                 }],
@@ -1377,7 +1389,7 @@ mod tests {
                             } else {
                                 DevicePathState::Missing
                             },
-                            size,
+                            size: size.map(ByteCount::from_bytes),
                         }
                     })
                     .collect(),
@@ -1401,7 +1413,9 @@ mod tests {
                 .get(&Self::key(storage, path))
                 .map_or(DevicePathStatus::Missing, |bytes| {
                     DevicePathStatus::RegularFile {
-                        size: u64::try_from(bytes.len()).expect("fixture size"),
+                        size: ByteCount::from_bytes(
+                            u64::try_from(bytes.len()).expect("fixture size"),
+                        ),
                     }
                 }))
         }
@@ -1410,7 +1424,7 @@ mod tests {
             &self,
             storage: &str,
             path: &SafeRelativePath,
-            _size: u64,
+            _size: ByteCount,
             destination: garmin_device::BackupDestination,
             _progress: MountedMtpBackupProgress,
         ) -> Result<String, DeviceIoError> {
@@ -1438,7 +1452,7 @@ mod tests {
             &self,
             storage: &str,
             path: &SafeRelativePath,
-            _size: u64,
+            _size: ByteCount,
             sha256: &str,
         ) -> Result<(), DeviceIoError> {
             let state = self.state.lock().expect("fixture state");
@@ -1456,7 +1470,7 @@ mod tests {
             &self,
             storage: &str,
             path: &SafeRelativePath,
-            limit: u64,
+            limit: ByteCount,
         ) -> Result<Option<Vec<u8>>, DeviceIoError> {
             let bytes = self
                 .state
@@ -1465,12 +1479,11 @@ mod tests {
                 .files
                 .get(&Self::key(storage, path))
                 .cloned();
-            if bytes
-                .as_ref()
-                .is_some_and(|bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit)
-            {
+            if bytes.as_ref().is_some_and(|bytes| {
+                u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit.as_bytes()
+            }) {
                 return Err(DeviceIoError::LimitExceeded(format!(
-                    "{path} exceeds {limit} bytes"
+                    "{path} exceeds {limit}"
                 )));
             }
             Ok(bytes)
@@ -1491,7 +1504,9 @@ mod tests {
                     (!name.contains('/')).then(|| DeviceDirectoryEntry {
                         name: name.to_owned(),
                         state: DevicePathState::RegularFile,
-                        size: Some(u64::try_from(bytes.len()).expect("fixture size")),
+                        size: Some(ByteCount::from_bytes(
+                            u64::try_from(bytes.len()).expect("fixture size"),
+                        )),
                     })
                 })
                 .collect())
@@ -1534,7 +1549,7 @@ mod tests {
             &self,
             storage: &str,
             path: &SafeRelativePath,
-            _size: u64,
+            _size: ByteCount,
             sha256: &str,
         ) -> Result<(), DeviceIoError> {
             let mut state = self.state.lock().expect("fixture state");
@@ -1556,7 +1571,7 @@ mod tests {
             &self,
             storage: &str,
             path: &SafeRelativePath,
-            size: u64,
+            size: ByteCount,
         ) -> Result<(), DeviceIoError> {
             let mut state = self.state.lock().expect("fixture state");
             if state.fail_delete.as_deref() == Some(path.to_string().as_str()) {
@@ -1566,7 +1581,7 @@ mod tests {
                 .files
                 .get(&Self::key(storage, path))
                 .ok_or_else(|| std::io::Error::other("fixture file is absent"))?;
-            if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != size {
+            if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != size.as_bytes() {
                 return Err(std::io::Error::other("device size mismatch").into());
             }
             state.files.remove(&Self::key(storage, path));
@@ -1578,7 +1593,7 @@ mod tests {
             _storage: &str,
             _path: &SafeRelativePath,
             _source: &Path,
-            _size: u64,
+            _size: ByteCount,
             _sha256: &str,
             _progress: garmin_device::MountedMtpUploadProgress,
         ) -> Result<(), DeviceIoError> {
@@ -1591,7 +1606,7 @@ mod tests {
             &self,
             storage: &str,
             path: &SafeRelativePath,
-            _size: u64,
+            _size: ByteCount,
             backup: &Path,
             sha256: &str,
         ) -> Result<(), DeviceIoError> {
@@ -1615,7 +1630,7 @@ mod tests {
                 storage_id: "internal".to_owned(),
                 storage_label: "Device storage".to_owned(),
                 path: SafeRelativePath::parse(path).expect("safe fixture path"),
-                size,
+                size: ByteCount::from_bytes(size),
                 removed_with: vec!["Optional map".to_owned()],
             })
             .collect();
@@ -1625,7 +1640,7 @@ mod tests {
             transport: TransportKind::MountedMtp,
             files_to_remove,
             files_already_absent: Vec::new(),
-            bytes_to_remove: 7,
+            bytes_to_remove: ByteCount::from_bytes(7),
             digest: "b".repeat(64),
         }
     }
@@ -1637,7 +1652,7 @@ mod tests {
             .map(|target| {
                 (
                     FakeRemovalDevice::key(&target.storage_id, &target.path),
-                    vec![0xA5; usize::try_from(target.size).expect("fixture size")],
+                    vec![0xA5; usize::try_from(target.size.as_bytes()).expect("fixture size")],
                 )
             })
             .collect();
@@ -1682,7 +1697,7 @@ mod tests {
                     destination,
                     MountedMtpBackupProgress {
                         reporter: ProgressReporter::default(),
-                        completed_before: 0,
+                        completed_before: ByteCount::from_bytes(0),
                         total: plan.bytes_to_remove,
                     },
                 )
@@ -1726,7 +1741,7 @@ mod tests {
                 .map(|(path, size)| MapFile {
                     file_name: (*path).to_owned(),
                     part_number: String::new(),
-                    size_in_bytes: *size,
+                    size_in_bytes: ByteCount::from_bytes(*size),
                     is_shared: false,
                 })
                 .collect(),
@@ -1762,7 +1777,7 @@ mod tests {
             plan.files_to_remove[0].path.to_string(),
             "Garmin/central.img"
         );
-        assert_eq!(plan.declared_bytes_to_remove, 20);
+        assert_eq!(plan.declared_bytes_to_remove.as_bytes(), 20);
         assert_eq!(plan.files_preserved.len(), 1);
         assert_eq!(plan.files_preserved[0].preserved_for, ["West"]);
     }
@@ -1812,14 +1827,14 @@ mod tests {
                 storage_label: "Device storage".to_owned(),
                 path: SafeRelativePath::parse("Garmin/map.img").unwrap(),
                 state: DevicePathState::RegularFile,
-                size: Some(20),
+                size: Some(ByteCount::from_bytes(20)),
             }],
         };
 
         let execution = plan.bind_inventory(&inventory).expect("bound inventory");
 
         assert_eq!(execution.files_to_remove.len(), 1);
-        assert_eq!(execution.bytes_to_remove, 20);
+        assert_eq!(execution.bytes_to_remove.as_bytes(), 20);
         assert_eq!(
             execution.files_already_absent,
             [] as [garmin_device::SafeRelativePath; 0]
@@ -1839,7 +1854,7 @@ mod tests {
 
         assert_eq!(device.files_len(), 0);
         assert_eq!(report.files_removed, 2);
-        assert_eq!(report.backup_bytes, 7);
+        assert_eq!(report.backup_bytes.as_bytes(), 7);
         assert!(
             capture
                 .root()
@@ -2011,7 +2026,7 @@ mod tests {
             .verify(
                 &plan.files_to_remove[1].storage_id,
                 &plan.files_to_remove[1].path,
-                4,
+                ByteCount::from_bytes(4),
                 &hex::encode(Sha256::digest([0x5A; 4])),
             )
             .await

@@ -1,16 +1,16 @@
-use byte_unit::{Byte, UnitType};
 use comrak::{
     Arena, Options, format_commonmark,
     nodes::{AstNode, NodeHeading, NodeTable, NodeValue, TableAlignment},
 };
 use garmin_device::SafeRelativePath;
+use garmin_model::artifact::ByteCount;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum FileState {
     Absent,
-    File { bytes: u64, sha256: String },
+    File { bytes: ByteCount, sha256: String },
     Unobserved { reason: String },
 }
 
@@ -176,10 +176,7 @@ fn table_row<'a>(
 fn describe(state: &FileState) -> String {
     match state {
         FileState::Absent => "absent".to_owned(),
-        FileState::File { bytes, .. } => format!(
-            "{:.2}",
-            Byte::from_u64(*bytes).get_appropriate_unit(UnitType::Decimal)
-        ),
+        FileState::File { bytes, .. } => bytes.format_decimal(2),
         FileState::Unobserved { .. } => "unobserved".to_owned(),
     }
 }
@@ -205,7 +202,7 @@ mod tests {
                 observed: ChangeKind::Added,
                 before: FileState::Absent,
                 after: FileState::File {
-                    bytes: 42,
+                    bytes: ByteCount::from_bytes(42),
                     sha256: "hash".to_owned(),
                 },
             }],

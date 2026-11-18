@@ -1,3 +1,4 @@
+use garmin_model::artifact::ByteCount;
 use garmin_model::map::{
     EmbeddedMapUnlock, InstallationState, MapAuthorization, MapCatalog, MapComponent, MapContent,
     MapDownload, MapFile, MapFileSegment, MapInstallIdentifier, MapInstallOption, MapUnlock,
@@ -504,6 +505,7 @@ pub(crate) mod wire {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use garmin_model::artifact::ByteCount;
         use garmin_model::map::{InstallationState, MapCatalog, MapFile};
 
         #[derive(Serialize)]
@@ -587,7 +589,7 @@ pub(crate) mod wire {
                 [MapFile {
                     file_name: "Garmin/Maps/old.img".to_owned(),
                     part_number: String::new(),
-                    size_in_bytes: 4,
+                    size_in_bytes: ByteCount::from_bytes(4),
                     is_shared: false,
                 }]
             );
@@ -656,7 +658,7 @@ impl From<wire::FileToRemove> for MapFile {
         Self {
             file_name: file.file_name,
             part_number: file.part_number,
-            size_in_bytes: file.size_in_bytes,
+            size_in_bytes: ByteCount::from_bytes(file.size_in_bytes),
             is_shared: file.is_shared,
         }
     }
@@ -716,7 +718,7 @@ impl From<wire::DeliverableOption> for MapDownload {
     fn from(option: wire::DeliverableOption) -> Self {
         Self {
             md5: option.md5,
-            size_in_bytes: option.size_in_bytes,
+            size_in_bytes: ByteCount::from_bytes(option.size_in_bytes),
             delivery_type: option.delivery_type,
             url: option.url,
         }

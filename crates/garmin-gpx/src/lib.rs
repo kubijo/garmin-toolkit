@@ -8,7 +8,10 @@
 
 use std::io::Cursor;
 
-use garmin_model::route::{Elevation, RouteName, RoutePlanRevision, RoutePoint, RouteShape};
+use garmin_model::{
+    artifact::ByteCount,
+    route::{Elevation, RouteName, RoutePlanRevision, RoutePoint, RouteShape},
+};
 use gpx_format::{Gpx, GpxVersion, Route, Track, TrackSegment, Waypoint};
 use thiserror::Error;
 
@@ -22,7 +25,7 @@ pub const ADAPTER_NAME: &str = "garmin-gpx";
 /// Adapter version recorded in route-revision provenance.
 pub const ADAPTER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Maximum accepted GPX source size.
-pub const MAX_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_BYTES: ByteCount = ByteCount::from_mebibytes(16);
 /// Maximum accepted points across all tracks and routes.
 pub const MAX_POINTS: usize = 1_000_000;
 
@@ -107,7 +110,7 @@ impl Document {
 /// # Errors
 /// [`enum@Error`] for oversized or malformed input.
 pub fn parse(bytes: &[u8]) -> Result<Document, Error> {
-    if bytes.len() > MAX_BYTES {
+    if ByteCount::from_bytes(bytes.len() as u64) > MAX_BYTES {
         return Err(Error::TooLarge);
     }
     let document = gpx_format::read(Cursor::new(bytes))?;
@@ -235,7 +238,7 @@ fn waypoint(point: &RoutePoint) -> Waypoint {
 pub enum Error {
     #[error("activity timestamp cannot be represented in GPX: {0}")]
     Timestamp(#[from] time::error::ComponentRange),
-    #[error("GPX input exceeds {MAX_BYTES} bytes")]
+    #[error("GPX input exceeds {MAX_BYTES}")]
     TooLarge,
     #[error("GPX input exceeds {MAX_POINTS} route points")]
     TooManyPoints,

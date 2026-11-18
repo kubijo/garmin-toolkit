@@ -1,7 +1,7 @@
+use garmin_model::artifact::{ByteCount, NonZeroByteRate};
 use std::{
     fs::File,
     future::Future as _,
-    num::NonZeroU64,
     path::Path,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -29,8 +29,8 @@ pub(crate) struct RawMtpUploadProgress {
     pub reporter: garmin_progress::ProgressReporter,
     pub stage: OperationStage,
     pub label: &'static str,
-    pub completed_before: u64,
-    pub total: u64,
+    pub completed_before: ByteCount,
+    pub total: ByteCount,
     pub path: Option<String>,
     pub complete_payload_stage: bool,
 }
@@ -58,16 +58,16 @@ pub(crate) async fn upload_mtp_file(
     parent: Option<ObjectHandle>,
     name: &str,
     source: tokio::fs::File,
-    size: u64,
+    size: ByteCount,
     progress: RawMtpUploadProgress,
-    upload_rate: Option<NonZeroU64>,
+    upload_rate: Option<NonZeroByteRate>,
 ) -> RawMtpUploadOutcome {
     report_started(
         &progress.reporter,
         progress.stage,
         progress.label,
         progress.path.as_deref(),
-        Some(progress.total),
+        Some(progress.total.as_bytes()),
     );
     let started = Instant::now();
     let payload_elapsed = Arc::new(Mutex::new(None::<Duration>));
@@ -79,7 +79,7 @@ pub(crate) async fn upload_mtp_file(
         progress.clone(),
         upload_rate,
     );
-    let upload = storage.upload(parent, NewObjectInfo::file(name, size), stream);
+    let upload = storage.upload(parent, NewObjectInfo::file(name, size.as_bytes()), stream);
     tokio::pin!(upload);
     let result = loop {
         tokio::select! {
@@ -110,13 +110,13 @@ pub(crate) async fn upload_mtp_file(
 }
 
 struct UploadPacing {
-    rate: NonZeroU64,
+    rate: NonZeroByteRate,
     next_chunk: tokio::time::Instant,
     timer: Pin<Box<tokio::time::Sleep>>,
 }
 
 impl UploadPacing {
-    fn new(rate: NonZeroU64) -> Self {
+    fn new(rate: NonZeroByteRate) -> Self {
         Self {
             rate,
             next_chunk: tokio::time::Instant::now(),
@@ -141,7 +141,7 @@ impl UploadPacing {
 
     fn sent(&mut self, bytes: usize) {
         let bytes = u64::try_from(bytes).expect("chunk fits in u64");
-        let delay = Duration::from_nanos((bytes * 1_000_000_000).div_ceil(self.rate.get()));
+        let delay = self.rate.transfer_duration(ByteCount::from_bytes(bytes));
         let now = tokio::time::Instant::now();
         self.next_chunk = now + delay;
         self.timer
@@ -152,11 +152,11 @@ impl UploadPacing {
 
 fn payload_stream(
     mut source: tokio::fs::File,
-    size: u64,
+    size: ByteCount,
     started: Instant,
     payload_elapsed: Arc<Mutex<Option<Duration>>>,
     progress: RawMtpUploadProgress,
-    upload_rate: Option<NonZeroU64>,
+    upload_rate: Option<NonZeroByteRate>,
 ) -> impl futures_util::Stream<Item = Result<Bytes, std::io::Error>> + Unpin {
     let RawMtpUploadProgress {
         reporter,
@@ -167,13 +167,13 @@ fn payload_stream(
         path,
         complete_payload_stage,
     } = progress;
-    let mut copied = 0_u64;
+    let mut copied = ByteCount::default();
     // Limit each paced chunk to roughly 100 ms of data.
     // Cancellation is checked on every wake, including
     // while the stream waits for its next chunk.
     let buffer_len = upload_rate.map_or(4 * 1024 * 1024, |rate| {
-        usize::try_from(rate.get().div_ceil(10).min(4 * 1024 * 1024))
-            .expect("paced buffer fits in usize")
+        let chunk_bytes = rate.as_bytes_per_second().get().div_ceil(10);
+        usize::try_from(chunk_bytes.min(4 * 1024 * 1024)).expect("paced buffer fits in usize")
     });
     let mut buffer = vec![0_u8; buffer_len];
     let mut pacing = upload_rate.map(UploadPacing::new);
@@ -198,8 +198,8 @@ fn payload_stream(
                         stage,
                         "MTP payload sent",
                         path.as_deref(),
-                        completed_before.saturating_add(copied),
-                        total,
+                        completed_before.saturating_add(copied).as_bytes(),
+                        total.as_bytes(),
                     );
                 }
                 report_started(
@@ -218,7 +218,7 @@ fn payload_stream(
         // one source byte for the final chunk so an exact USB packet-sized file
         // still ends in a short transfer. This preserves the declared object size
         // and works for production uploads as well as the disposable benchmark.
-        let remaining = size - copied;
+        let remaining = size.saturating_sub(copied).as_bytes();
         let read_len = if remaining == 1 {
             1
         } else {
@@ -233,7 +233,7 @@ fn payload_stream(
             Poll::Ready(Ok(())) if read_buffer.filled().is_empty() => {
                 Poll::Ready(Some(Err(std::io::Error::new(
                     std::io::ErrorKind::UnexpectedEof,
-                    format!("MTP upload source ended after {copied} of {size} bytes"),
+                    format!("MTP upload source ended after {copied} of {size}"),
                 ))))
             }
             Poll::Ready(Ok(())) => {
@@ -242,7 +242,7 @@ fn payload_stream(
                     .map_err(std::io::Error::other)
                     .and_then(|count| {
                         copied
-                            .checked_add(count)
+                            .checked_add(ByteCount::from_bytes(count))
                             .ok_or_else(|| std::io::Error::other("MTP upload byte count overflow"))
                     });
                 match count {
@@ -256,8 +256,8 @@ fn payload_stream(
                             stage,
                             label,
                             path.as_deref(),
-                            completed_before.saturating_add(copied),
-                            total,
+                            completed_before.saturating_add(copied).as_bytes(),
+                            total.as_bytes(),
                         );
                         Poll::Ready(Some(Ok(chunk)))
                     }
@@ -272,7 +272,7 @@ fn classify_upload(
     result: Result<ObjectHandle, mtp_rs::UploadError>,
     payload_elapsed: Option<Duration>,
     total_elapsed: Duration,
-    size: u64,
+    size: ByteCount,
     progress: &RawMtpUploadProgress,
 ) -> RawMtpUploadOutcome {
     match result {
@@ -284,8 +284,8 @@ fn classify_upload(
                     progress.stage,
                     progress.label,
                     progress.path.as_deref(),
-                    progress.completed_before.saturating_add(size),
-                    progress.total,
+                    progress.completed_before.saturating_add(size).as_bytes(),
+                    progress.total.as_bytes(),
                 );
             }
             report_completed(
@@ -391,7 +391,7 @@ pub struct MtpStorageDevice {
     keys: Vec<String>,
     primary: String,
     physical_ids: bool,
-    upload_rate: Option<NonZeroU64>,
+    upload_rate: Option<NonZeroByteRate>,
 }
 
 impl MtpStorageDevice {
@@ -410,7 +410,7 @@ impl MtpStorageDevice {
     /// Limit payload uploads in bytes per second.
     /// Used by simulated devices to exercise progress
     /// and cancellation without depending on host disk speed.
-    pub const fn set_upload_rate(&mut self, bytes_per_second: Option<NonZeroU64>) {
+    pub const fn set_upload_rate(&mut self, bytes_per_second: Option<NonZeroByteRate>) {
         self.upload_rate = bytes_per_second;
     }
 
@@ -546,19 +546,19 @@ async fn find(
 async fn read(
     storage: &Storage,
     path: &SafeRelativePath,
-    size: u64,
+    size: ByteCount,
     output: Option<File>,
     progress: Option<(&str, MountedMtpBackupProgress)>,
 ) -> Result<String, DeviceIoError> {
     let object = find(storage, path)
         .await?
         .ok_or_else(|| DeviceIoError::Verification(path.to_string()))?;
-    if !object.is_file() || object.size != size {
+    if !object.is_file() || ByteCount::from_bytes(object.size) != size {
         return Err(DeviceIoError::Verification(path.to_string()));
     }
     let mut download = storage.download(object.handle, ByteRange::Full).await?;
     let mut output = output.map(tokio::fs::File::from_std);
-    let mut bytes = 0_u64;
+    let mut bytes = ByteCount::default();
     let mut hash = Sha256::new();
     while let Some(chunk) = download.next_chunk().await {
         if let Some((_, progress)) = &progress
@@ -568,7 +568,9 @@ async fn read(
             return Err(DeviceIoError::Cancelled);
         }
         let chunk = chunk?;
-        bytes += chunk.len() as u64;
+        bytes = bytes
+            .checked_add(ByteCount::from_bytes(chunk.len() as u64))
+            .ok_or_else(|| DeviceIoError::LimitExceeded(path.to_string()))?;
         if bytes > size {
             return Err(DeviceIoError::Verification(path.to_string()));
         }
@@ -612,7 +614,10 @@ impl DeviceRead for MtpStorageDevice {
                     } else {
                         info.description.clone()
                     },
-                    capacity: crate::StorageCapacity::new(info.total_capacity, info.free_space),
+                    capacity: crate::StorageCapacity::new(
+                        ByteCount::from_bytes(info.total_capacity),
+                        ByteCount::from_bytes(info.free_space),
+                    ),
                     writable: Some(info.is_writable),
                 });
             }
@@ -673,7 +678,7 @@ impl DeviceRead for MtpStorageDevice {
         &self,
         key: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         destination: BackupDestination,
         progress: MountedMtpBackupProgress,
     ) -> Result<String, DeviceIoError> {
@@ -699,7 +704,7 @@ impl DeviceRead for MtpStorageDevice {
         &self,
         key: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
         let device = self.connect().await?;
@@ -717,7 +722,7 @@ impl DeviceRead for MtpStorageDevice {
         &self,
         key: &str,
         path: &SafeRelativePath,
-        limit: u64,
+        limit: ByteCount,
     ) -> Result<Option<Vec<u8>>, DeviceIoError> {
         let device = self.connect().await?;
         let result = async {
@@ -728,7 +733,7 @@ impl DeviceRead for MtpStorageDevice {
             if !object.is_file() {
                 return Err(DeviceIoError::UnsafePath(path.to_string()));
             }
-            if object.size > limit {
+            if ByteCount::from_bytes(object.size) > limit {
                 return Err(DeviceIoError::LimitExceeded(path.to_string()));
             }
             let mut download = storage.download(object.handle, ByteRange::Full).await?;
@@ -736,7 +741,7 @@ impl DeviceRead for MtpStorageDevice {
             while let Some(chunk) = download.next_chunk().await {
                 let chunk = chunk?;
                 if u64::try_from(bytes.len().saturating_add(chunk.len())).unwrap_or(u64::MAX)
-                    > limit
+                    > limit.as_bytes()
                 {
                     return Err(DeviceIoError::LimitExceeded(path.to_string()));
                 }
@@ -784,10 +789,13 @@ impl DeviceRead for MtpStorageDevice {
     }
 }
 
-fn object_state(object: Option<ObjectInfo>) -> (DevicePathState, Option<u64>) {
+fn object_state(object: Option<ObjectInfo>) -> (DevicePathState, Option<ByteCount>) {
     match object {
         None => (DevicePathState::Missing, None),
-        Some(object) if object.is_file() => (DevicePathState::RegularFile, Some(object.size)),
+        Some(object) if object.is_file() => (
+            DevicePathState::RegularFile,
+            Some(ByteCount::from_bytes(object.size)),
+        ),
         Some(object) if object.is_folder() => (DevicePathState::Directory, None),
         Some(_) => (DevicePathState::Other, None),
     }
@@ -839,12 +847,12 @@ impl DeviceWrite for MtpStorageDevice {
             key,
             path,
             temporary.path(),
-            size,
+            ByteCount::from_bytes(size),
             &sha256,
             MountedMtpUploadProgress {
                 reporter: garmin_progress::ProgressReporter::default(),
-                completed_before: 0,
-                total: size,
+                completed_before: ByteCount::from_bytes(0),
+                total: ByteCount::from_bytes(size),
             },
         )
         .await
@@ -883,7 +891,7 @@ impl DeviceWrite for MtpStorageDevice {
         &self,
         key: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
         let device = self.connect().await?;
@@ -908,14 +916,14 @@ impl DeviceWrite for MtpStorageDevice {
         &self,
         key: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
     ) -> Result<(), DeviceIoError> {
         let device = self.connect().await?;
         let result = async {
             let storage = self.storage(&device, key).await?;
             let object = find(&storage, path)
                 .await?
-                .filter(|object| object.is_file() && object.size == size)
+                .filter(|object| object.is_file() && object.size == size.as_bytes())
                 .ok_or_else(|| DeviceIoError::Verification(path.to_string()))?;
             storage.delete(object.handle).await?;
             if find(&storage, path).await?.is_some() {
@@ -931,7 +939,7 @@ impl DeviceWrite for MtpStorageDevice {
         key: &str,
         path: &SafeRelativePath,
         source: &Path,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
         progress: MountedMtpUploadProgress,
     ) -> Result<(), DeviceIoError> {
@@ -1020,7 +1028,7 @@ impl DeviceWrite for MtpStorageDevice {
         &self,
         key: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         backup: &Path,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
@@ -1032,7 +1040,7 @@ impl DeviceWrite for MtpStorageDevice {
             sha256,
             MountedMtpUploadProgress {
                 reporter: garmin_progress::ProgressReporter::default(),
-                completed_before: 0,
+                completed_before: ByteCount::from_bytes(0),
                 total: size,
             },
         )
@@ -1051,8 +1059,8 @@ mod tests {
             reporter,
             stage: OperationStage::Upload,
             label: "Uploading test payload",
-            completed_before: 0,
-            total,
+            completed_before: ByteCount::from_bytes(0),
+            total: ByteCount::from_bytes(total),
             path: None,
             complete_payload_stage: true,
         }
@@ -1068,7 +1076,7 @@ mod tests {
             }),
             Some(Duration::from_secs(16)),
             Duration::from_secs(46),
-            256,
+            ByteCount::from_bytes(256),
             &progress(reporter, 256),
         );
 
@@ -1097,7 +1105,7 @@ mod tests {
             }),
             None,
             Duration::from_secs(30),
-            256,
+            ByteCount::from_bytes(256),
             &progress(ProgressReporter::default(), 256),
         );
 
@@ -1113,7 +1121,7 @@ mod tests {
         let file = tokio::fs::File::open(path).await.unwrap();
         let mut stream = payload_stream(
             file,
-            1024,
+            ByteCount::from_bytes(1024),
             Instant::now(),
             Arc::new(Mutex::new(None)),
             progress(ProgressReporter::default(), 1024),
@@ -1138,11 +1146,11 @@ mod tests {
         let (reporter, receiver) = ProgressReporter::channel();
         let mut stream = payload_stream(
             file,
-            1024,
+            ByteCount::from_bytes(1024),
             Instant::now(),
             Arc::new(Mutex::new(None)),
             progress(reporter, 1024),
-            NonZeroU64::new(1024),
+            NonZeroByteRate::try_from_bytes_per_second(1024),
         );
         let started = tokio::time::Instant::now();
         let mut chunks = Vec::new();
@@ -1156,7 +1164,7 @@ mod tests {
         let counts = receiver
             .try_iter()
             .filter(|event| event.state == ProgressState::Advanced)
-            .map(|event| event.completed)
+            .map(|event| event.amount.completed())
             .collect::<Vec<_>>();
         assert!(
             counts
@@ -1177,11 +1185,11 @@ mod tests {
         let cancellation = reporter.cancellation_token();
         let mut stream = payload_stream(
             file,
-            3,
+            ByteCount::from_bytes(3),
             Instant::now(),
             Arc::new(Mutex::new(None)),
             progress(reporter, 3),
-            NonZeroU64::new(1),
+            NonZeroByteRate::try_from_bytes_per_second(1),
         );
         assert_eq!(stream.next().await.unwrap().unwrap().as_ref(), &[1]);
         let next = stream.next();
@@ -1208,7 +1216,7 @@ mod tests {
         let file = tokio::fs::File::open(path).await.unwrap();
         let mut stream = payload_stream(
             file,
-            5,
+            ByteCount::from_bytes(5),
             Instant::now(),
             Arc::new(Mutex::new(None)),
             progress(ProgressReporter::default(), 5),

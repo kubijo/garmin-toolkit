@@ -49,7 +49,7 @@ impl Storage {
                 super::read::parse(&row.media_type, "export media type")?,
                 &row.bytes,
             );
-            if artifact.byte_count().as_u64()
+            if artifact.byte_count().as_bytes()
                 != u64::try_from(row.byte_count)
                     .map_err(|error| super::read::invalid("export artifact byte count", error))?
                 || artifact.digest().as_blake3().as_bytes().as_slice() != row.digest

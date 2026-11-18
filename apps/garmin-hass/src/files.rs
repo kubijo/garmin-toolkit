@@ -1,5 +1,6 @@
 //! Directory-at-a-time access to the filesystem visible inside the HASS host.
 
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::{DeviceCatalogEntry, DeviceCatalogEntryKind, files::Directory};
 use std::path::Path;
 
@@ -31,7 +32,9 @@ pub(super) fn directory(path: &Path) -> Result<Directory, String> {
             } else {
                 DeviceCatalogEntryKind::File
             },
-            size: metadata.is_file().then_some(metadata.len()),
+            size: metadata
+                .is_file()
+                .then(|| ByteCount::from_bytes(metadata.len())),
         });
     }
     Ok(Directory {

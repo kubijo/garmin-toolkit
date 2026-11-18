@@ -5,6 +5,7 @@ use egui_kittest::{
     kittest::{By, NodeT as _, Queryable as _},
 };
 use garmin_i18n::{Language, Translations};
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::{
     DeviceCatalogEntry, DeviceCatalogEntryKind,
     files::{Directory, Operation},
@@ -43,7 +44,7 @@ fn harness(operation: Operation, name: &str) -> Harness<'static, Model> {
             DeviceCatalogEntry {
                 path: ".saved.tar.zst".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(800_000),
+                size: Some(ByteCount::from_bytes(800_000)),
             },
             DeviceCatalogEntry {
                 path: "Archive".into(),
@@ -53,7 +54,7 @@ fn harness(operation: Operation, name: &str) -> Harness<'static, Model> {
             DeviceCatalogEntry {
                 path: "saved.tar.zst".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(800_000),
+                size: Some(ByteCount::from_bytes(800_000)),
             },
         ],
     });

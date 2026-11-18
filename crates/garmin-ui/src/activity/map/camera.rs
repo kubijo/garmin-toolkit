@@ -7,21 +7,24 @@
     reason = "bounded zoom, tile-grid, and screen coordinates intentionally cross numeric domains"
 )]
 
+use std::time::Duration;
+
 use egui::{PointerButton, Pos2, Rect, Response, Ui, Vec2};
+use garmin_model::route::Coordinate;
 use walkers::{Position, TileId, lon_lat};
 
 use super::{MAX_VIEW_ZOOM, WALKERS_TILE_SIZE, mercator_latitude, mercator_y};
 
 const DEFAULT_ZOOM: f64 = 16.0;
 const MIN_ZOOM: f64 = 0.0;
-const INERTIA_TAU_SECONDS: f32 = 0.2;
+const INERTIA_TIME_CONSTANT: Duration = Duration::from_millis(200);
 const INERTIA_STOP_PIXELS: f32 = 0.1;
 const SOURCE_ZOOM_OFFSET: u8 = 1;
 const PREFETCH_RING: i64 = 1;
 
 #[derive(Debug, Clone)]
 pub(in crate::activity) struct MapCamera {
-    center: Position,
+    center: Coordinate,
     zoom: f64,
     min_zoom: f64,
     motion: CameraMotion,
@@ -49,7 +52,7 @@ pub(super) struct CameraInteraction {
 impl Default for MapCamera {
     fn default() -> Self {
         Self {
-            center: lon_lat(0.0, 0.0),
+            center: Coordinate::from_degrees(0.0, 0.0).expect("valid origin"),
             zoom: DEFAULT_ZOOM,
             min_zoom: MIN_ZOOM,
             motion: CameraMotion::Idle,
@@ -59,6 +62,13 @@ impl Default for MapCamera {
 
 impl MapCamera {
     pub(in crate::activity) fn center(&self) -> Position {
+        lon_lat(
+            self.center.longitude().as_degrees(),
+            self.center.latitude().as_degrees(),
+        )
+    }
+
+    pub(super) const fn coordinate(&self) -> Coordinate {
         self.center
     }
 
@@ -80,8 +90,15 @@ impl MapCamera {
         }
     }
 
-    pub(super) fn center_at(&mut self, position: Position) {
-        self.center = canonical_position(position);
+    pub(super) fn center_at(&mut self, position: Coordinate) {
+        self.center = Coordinate::from_degrees(
+            position
+                .latitude()
+                .as_degrees()
+                .clamp(-85.051_128_78, 85.051_128_78),
+            (position.longitude().as_degrees() + 180.0).rem_euclid(360.0) - 180.0,
+        )
+        .expect("validated coordinates remain valid after clamping and wrapping");
         self.motion = CameraMotion::Idle;
     }
 
@@ -129,7 +146,8 @@ impl MapCamera {
             active = self.finish_drag(delta);
         }
 
-        let delta_time = ui.input(|input| input.stable_dt);
+        let delta_time =
+            Duration::try_from_secs_f32(ui.input(|input| input.stable_dt)).unwrap_or_default();
         if self.advance_inertia(delta_time) {
             changed = true;
             active = true;
@@ -154,13 +172,14 @@ impl MapCamera {
         matches!(self.motion, CameraMotion::Inertia { .. })
     }
 
-    fn advance_inertia(&mut self, delta_time: f32) -> bool {
+    fn advance_inertia(&mut self, delta_time: Duration) -> bool {
         if let CameraMotion::Inertia { direction, amount } = self.motion {
             if amount < INERTIA_STOP_PIXELS {
                 self.motion = CameraMotion::Idle;
             } else {
                 self.shift_by_screen(direction * amount);
-                let low_pass = INERTIA_TAU_SECONDS / (delta_time + INERTIA_TAU_SECONDS);
+                let low_pass = INERTIA_TIME_CONSTANT
+                    .div_duration_f32(delta_time.saturating_add(INERTIA_TIME_CONSTANT));
                 self.motion = CameraMotion::Inertia {
                     direction,
                     amount: amount * low_pass,
@@ -203,21 +222,19 @@ impl MapCamera {
     }
 
     pub(in crate::activity) fn center_normalized(&self) -> [f64; 2] {
-        [self.center.x() / 360.0 + 0.5, mercator_y(self.center.y())]
+        [
+            self.center.longitude().as_degrees() / 360.0 + 0.5,
+            mercator_y(self.center.latitude().as_degrees()),
+        ]
     }
 
     fn set_center_normalized(&mut self, center: [f64; 2]) {
         let longitude = ((center[0] - 0.5) * 360.0 + 180.0).rem_euclid(360.0) - 180.0;
         let latitude = mercator_latitude(center[1].clamp(0.0, 1.0));
-        self.center = lon_lat(longitude, latitude);
+        if let Ok(coordinate) = Coordinate::from_degrees(latitude, longitude) {
+            self.center = coordinate;
+        }
     }
-}
-
-fn canonical_position(position: Position) -> Position {
-    lon_lat(
-        (position.x() + 180.0).rem_euclid(360.0) - 180.0,
-        position.y().clamp(-85.051_128_78, 85.051_128_78),
-    )
 }
 
 pub(in crate::activity) fn world_size(zoom: f64) -> f64 {
@@ -491,7 +508,7 @@ mod tests {
     #[test]
     fn projection_round_trips_across_the_dateline() {
         let mut camera = MapCamera::default();
-        camera.center_at(lon_lat(179.5, 60.0));
+        camera.center_at(Coordinate::from_degrees(60.0, 179.5).unwrap());
         camera.set_zoom(8.0);
         let viewport = Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 320.0));
         let projector = MapProjector::new(&camera, viewport);
@@ -506,7 +523,7 @@ mod tests {
     #[test]
     fn demand_adds_one_prefetch_ring_without_duplicates() {
         let mut camera = MapCamera::default();
-        camera.center_at(lon_lat(0.0, 0.0));
+        camera.center_at(Coordinate::from_degrees(0.0, 0.0).unwrap());
         camera.set_zoom(5.0);
         let coverage = MapViewDemand::new(
             &camera,
@@ -536,7 +553,7 @@ mod tests {
     #[test]
     fn zoom_around_pointer_preserves_the_anchored_coordinate() {
         let mut camera = MapCamera::default();
-        camera.center_at(lon_lat(24.0, 60.0));
+        camera.center_at(Coordinate::from_degrees(60.0, 24.0).unwrap());
         camera.set_zoom(10.0);
         let viewport = Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 320.0));
         let pointer = egui::pos2(510.0, 90.0);
@@ -619,7 +636,7 @@ mod tests {
     #[test]
     fn inertia_moves_and_decays_without_tile_state() {
         let mut camera = MapCamera::default();
-        camera.center_at(lon_lat(24.0, 60.0));
+        camera.center_at(Coordinate::from_degrees(60.0, 24.0).unwrap());
         camera.set_zoom(10.0);
         camera.motion = CameraMotion::Inertia {
             direction: Vec2::X,
@@ -627,7 +644,7 @@ mod tests {
         };
         let before = camera.center();
 
-        assert!(camera.advance_inertia(1.0 / 60.0));
+        assert!(camera.advance_inertia(Duration::from_secs_f64(1.0 / 60.0)));
 
         assert_ne!(camera.center(), before);
         let CameraMotion::Inertia { amount, .. } = camera.motion else {

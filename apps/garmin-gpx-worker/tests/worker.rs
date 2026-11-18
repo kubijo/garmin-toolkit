@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use garmin_gpx::worker::{CPU_SECONDS, Error, MEMORY_BYTES, Parser};
+use garmin_gpx::worker::{CPU_TIME, Error, MEMORY_BYTES, Parser};
 use garmin_model::{
     artifact::AcquisitionOperationId,
     identity::{Source, SourceId},
@@ -44,7 +44,7 @@ async fn prepare_selection(
         session,
         RouteRequest::StartUpload {
             file_name: "walk.gpx".into(),
-            size: garmin_model::artifact::ByteCount::from_u64(GPX.len() as u64),
+            size: garmin_model::artifact::ByteCount::from_bytes(GPX.len() as u64),
         },
     )
     .await?
@@ -325,7 +325,7 @@ async fn malformed_upload_is_reported_as_an_invalid_file() -> TestResult {
         &session,
         RouteRequest::StartUpload {
             file_name: "malformed.gpx".into(),
-            size: garmin_model::artifact::ByteCount::from_u64(bytes.len() as u64),
+            size: garmin_model::artifact::ByteCount::from_bytes(bytes.len() as u64),
         },
     )
     .await?
@@ -397,7 +397,7 @@ async fn worker_rejects_bad_and_excessive_input_without_poisoning_later_parses()
     ));
     assert!(matches!(
         parser
-            .parse(vec![0; garmin_gpx::MAX_BYTES + 1].into())
+            .parse(vec![0; usize::try_from(garmin_gpx::MAX_BYTES.as_bytes())? + 1].into())
             .await,
         Err(Error::InputTooLarge)
     ));
@@ -421,8 +421,8 @@ fn helper_installs_limits_before_reading_the_source() -> TestResult {
         .spawn()?;
     let limits = format!("/proc/{}/limits", child.id());
     let deadline = Instant::now() + Duration::from_secs(2);
-    let expected_memory = MEMORY_BYTES.to_string();
-    let expected_cpu = CPU_SECONDS.to_string();
+    let expected_memory = MEMORY_BYTES.as_bytes().to_string();
+    let expected_cpu = CPU_TIME.as_secs().to_string();
     let result = loop {
         let current = std::fs::read_to_string(&limits)?;
         let bounded = [

@@ -3,6 +3,7 @@ use super::{Action, Driver, Pause, SCENARIOS, SemanticNode, actions};
 use egui::Context;
 use kittest::{By, Queryable as _};
 use serde_json::{Value, json};
+use std::time::Duration;
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -166,7 +167,10 @@ impl Driver {
 
 impl Driver {
     fn pause(&mut self, now: f64) {
-        if !now.is_finite() || !self.running() {
+        let Ok(now) = Duration::try_from_secs_f64(now) else {
+            return;
+        };
+        if !self.running() {
             return;
         }
         self.paused_at = Some(now);
@@ -185,14 +189,14 @@ impl Driver {
     }
 
     fn resume(&mut self, now: f64) {
-        if !now.is_finite() {
+        let Ok(now) = Duration::try_from_secs_f64(now) else {
             return;
-        }
+        };
         if let Some(start) = self.paused_at.take() {
             let run = self.run.as_mut().expect("paused run");
             run.report.pauses.push(Pause {
-                started_seconds: run.report.elapsed_seconds,
-                duration_seconds: (now - start).max(0.0),
+                started: run.report.elapsed,
+                duration: now.saturating_sub(start),
             });
             self.resumed_at = Some(now);
         }
@@ -202,9 +206,12 @@ impl Driver {
         if self.resumed_at.take().is_some() {
             // Release first, then retry the interrupted action on a subsequent frame.
             if let Some(run) = &mut self.run {
-                run.start = input.time.map(|now| now - run.report.elapsed_seconds);
-                run.due = run.report.elapsed_seconds + 0.05;
-                run.waiting_since = run.report.elapsed_seconds;
+                run.start = input
+                    .time
+                    .and_then(|now| Duration::try_from_secs_f64(now).ok());
+                run.start_offset = run.report.elapsed;
+                run.due = run.report.elapsed + Duration::from_millis(50);
+                run.waiting_since = run.report.elapsed;
                 run.report.state = "running".into();
             }
         }

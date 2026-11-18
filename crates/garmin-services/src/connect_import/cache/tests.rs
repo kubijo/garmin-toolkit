@@ -2,9 +2,9 @@ use std::sync::Mutex;
 
 use super::*;
 use garmin_model::{
-    activity::ActivitySport,
+    activity::{ActivityDuration, ActivitySport, Distance},
     garmin_connect::{ActivityRequest, RemoteActivity},
-    identity::{Profile, Role, User, UserId},
+    identity::{MonthlyDistanceTarget, Profile, Role, User, UserId},
 };
 
 struct MockRemote {
@@ -55,8 +55,8 @@ impl MockRemote {
                             format!("Ride {id}")
                         },
                         started_at: Some("2026-11-10 07:12:38".into()),
-                        distance_metres: Some(1000.0),
-                        duration_seconds: Some(60.0),
+                        distance: Distance::try_from_metres(1000.0),
+                        duration: ActivityDuration::try_from_seconds(60.0),
                     },
                     description: Some(if id == 23 {
                         "Coastal recovery ride".into()
@@ -137,7 +137,7 @@ async fn trends_targets_survive_preferences_persistence_and_restart() {
     let root = tempfile::tempdir().expect("directory");
     let path = root.path().join("targets.sqlite3");
     let (app, user, _) = application(&path).await;
-    let targets = [160, 500, 10];
+    let targets = [160, 500, 10].map(MonthlyDistanceTarget::from_kilometres);
     app.update_profile_preferences(
         user,
         garmin_model::identity::ProfilePreferences::default()
@@ -194,7 +194,32 @@ async fn trends_read_all_published_summaries_without_imports_or_refreshes() {
         through: "2026-11-30".parse().expect("date"),
     };
     assert_eq!(report.totals(range, None).activities, 23);
+    assert_eq!(report.totals(range, None).elevation_activities, 0);
     assert_eq!(app.activities(user).await.expect("imports").len(), 0);
+    let sync_revision = app.connect_sync_status(user).await.unwrap().revision();
+    let import_revision = app.connect_trends_import_revision(user).await.unwrap();
+    import_cached_preview(&app, user).await;
+    assert_eq!(
+        app.connect_sync_status(user).await.unwrap().revision(),
+        sync_revision
+    );
+    assert_ne!(
+        app.connect_trends_import_revision(user).await.unwrap(),
+        import_revision
+    );
+    let report = app
+        .connect_trends(user)
+        .await
+        .expect("read trends")
+        .expect("published history");
+    let totals = report.totals(range, None);
+    assert_eq!(totals.activities, 23);
+    assert_eq!(totals.elevation_activities, 1);
+    let imported = app.activities(user).await.expect("FIT projections");
+    assert_eq!(
+        Some(totals.elevation_gain),
+        imported[0].summary().totals().ascent()
+    );
     assert_eq!(*remote.pages.lock().expect("pages"), [0, 20]);
     assert!(
         app.connect_trends(UserContext::new(UserId::new_v4()))

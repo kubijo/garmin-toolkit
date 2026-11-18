@@ -1,12 +1,13 @@
 //! One independently addressable device storage.
 
 use egui::{RichText, TextStyle, Ui};
+use garmin_model::artifact::ByteCount;
 
 pub struct Props<'a> {
     pub label: &'a str,
     pub detail: &'a str,
     /// Used and total bytes, when known.
-    pub bytes: Option<(u64, u64)>,
+    pub bytes: Option<(ByteCount, ByteCount)>,
 }
 
 pub fn show(ui: &mut Ui, props: &Props<'_>) {
@@ -15,12 +16,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
     if let Some((used, total)) = props.bytes.filter(|(used, total)| used <= total) {
         let palette = crate::theme::palette(ui);
         // Scale before conversion; byte counts must remain valid on WASM32.
-        let fraction = if total == 0 {
-            0
-        } else {
-            u128::from(used) * 10_000 / u128::from(total)
-        };
-        let fraction = u16::try_from(fraction).unwrap_or(10_000);
+        let fraction = used.ratio_scaled(total, 10_000);
         ui.add(
             crate::theme::progress_bar(
                 f32::from(fraction) / 10_000.0,

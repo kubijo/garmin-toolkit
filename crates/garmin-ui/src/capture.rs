@@ -1,5 +1,6 @@
 //! Bounded, correlated root-viewport readback shared by native and browser control.
 use egui::{ColorImage, Context, Event, RawInput, ViewportCommand, ViewportId};
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::control::{Capture, CaptureInfo, MAX_CAPTURE_BYTES, MAX_CAPTURE_PIXELS};
 use image::ImageEncoder as _;
 use std::{io, sync::Arc};
@@ -61,7 +62,9 @@ struct LimitedPng(Vec<u8>);
 
 impl io::Write for LimitedPng {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if bytes.len() > MAX_CAPTURE_BYTES.saturating_sub(self.0.len()) {
+        let remaining =
+            MAX_CAPTURE_BYTES.saturating_sub(ByteCount::from_bytes(self.0.len() as u64));
+        if ByteCount::from_bytes(bytes.len() as u64) > remaining {
             return Err(io::Error::other("screenshot exceeds PNG byte limit"));
         }
         self.0.extend_from_slice(bytes);
@@ -326,8 +329,9 @@ mod tests {
         };
         let rgba = pixels.rgba();
         assert_eq!(rgba, [255, 0, 0, 128]);
-        let mut output = LimitedPng(vec![0; MAX_CAPTURE_BYTES - 1]);
+        let limit = usize::try_from(MAX_CAPTURE_BYTES.as_bytes()).unwrap();
+        let mut output = LimitedPng(vec![0; limit - 1]);
         assert!(output.write_all(&[1, 2]).is_err());
-        assert_eq!(output.0.len(), MAX_CAPTURE_BYTES - 1);
+        assert_eq!(output.0.len(), limit - 1);
     }
 }

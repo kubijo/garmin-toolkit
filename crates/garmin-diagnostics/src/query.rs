@@ -1,5 +1,6 @@
 use super::response::Cursor;
 use garmin_model::logging::{Filter, Level};
+use garmin_model::value::UnixMilliseconds;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -66,8 +67,8 @@ impl Query {
         ) {
             return Err("invalid event kind".into());
         }
-        let since_ms = number("since_ms")?;
-        let until_ms = number("until_ms")?;
+        let since_ms = number("since_ms")?.map(UnixMilliseconds::from_milliseconds_since_epoch);
+        let until_ms = number("until_ms")?.map(UnixMilliseconds::from_milliseconds_since_epoch);
         if since_ms
             .zip(until_ms)
             .is_some_and(|(start, end)| start > end)

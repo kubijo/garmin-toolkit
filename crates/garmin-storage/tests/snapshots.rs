@@ -1,5 +1,6 @@
 //! Portable snapshot validation and atomic publication.
 
+use garmin_model::artifact::ByteCount;
 use std::io;
 use std::{
     error::Error,
@@ -92,7 +93,7 @@ fn restores_known_older_schema_and_defaults_new_profile_preferences() -> Result 
         let mut items = members(&bytes)?;
         let mut manifest: garmin_storage::snapshot::Manifest = serde_json::from_slice(&items[0].1)?;
         manifest.schema.truncate(1);
-        manifest.database_bytes = u64::try_from(database.len())?;
+        manifest.database_bytes = ByteCount::from_bytes(u64::try_from(database.len())?);
         manifest.database_sha256 = hex::encode(Sha256::digest(&database));
         items[0].1 = serde_json::to_vec(&manifest)?;
         items[1].1 = database;
@@ -246,12 +247,12 @@ fn bounds_compressed_input_database_and_manifest() -> Result {
         let (root, bytes, _) = fixture().await?;
         for limits in [
             Limits {
-                compressed_bytes: 32,
+                compressed_bytes: ByteCount::from_bytes(32),
                 ..Limits::default()
             },
             Limits {
-                database_bytes: 1024,
-                compressed_bytes: 1024,
+                database_bytes: ByteCount::from_bytes(1024),
+                compressed_bytes: ByteCount::from_bytes(1024),
             },
         ] {
             assert!(

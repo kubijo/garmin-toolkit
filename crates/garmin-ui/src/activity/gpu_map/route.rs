@@ -1,5 +1,6 @@
 //! Route worker protocol, CPU segmentation, and GPU publication.
 
+use garmin_model::{artifact::ByteCount, route::Coordinate};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
@@ -10,7 +11,7 @@ use crate::activity::map::mercator_y;
 
 #[derive(Clone, Copy)]
 pub(super) struct RouteSample {
-    pub(super) coordinate: Option<[f64; 2]>,
+    pub(super) coordinate: Option<Coordinate>,
     pub(super) speed: Option<f32>,
 }
 
@@ -58,7 +59,12 @@ impl BrowserRouteTask {
                 .samples
                 .iter()
                 .map(|sample| BrowserRouteSample {
-                    coordinate: sample.coordinate,
+                    coordinate: sample.coordinate.map(|coordinate| {
+                        [
+                            coordinate.longitude().as_degrees(),
+                            coordinate.latitude().as_degrees(),
+                        ]
+                    }),
                     speed: sample.speed,
                 })
                 .collect(),
@@ -143,11 +149,18 @@ pub(super) fn encode_browser_route(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let samples = request
         .samples
         .into_iter()
-        .map(|sample| RouteSample {
-            coordinate: sample.coordinate,
-            speed: sample.speed,
+        .map(|sample| {
+            let coordinate = sample
+                .coordinate
+                .map(|[longitude, latitude]| Coordinate::from_degrees(latitude, longitude))
+                .transpose()
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>(RouteSample {
+                coordinate,
+                speed: sample.speed,
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
     let (origin, segments) = match build_cpu_route(&samples, request.sample_offset) {
         Some(prepared) => (
             Some(prepared.origin),
@@ -177,7 +190,8 @@ pub(super) fn encode_browser_route(bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 pub(super) fn decode_browser_route(bytes: &[u8]) -> Result<Option<PreparedCpuRoute>, String> {
-    if bytes.len() > crate::activity::map_runtime::BrowserWorkerTaskKind::Route.result_byte_limit()
+    if ByteCount::from_bytes(bytes.len() as u64)
+        > crate::activity::map_runtime::BrowserWorkerTaskKind::Route.result_byte_limit()
     {
         return Err("prepared map route exceeded the 32 MiB browser limit".to_owned());
     }
@@ -254,10 +268,12 @@ pub(super) fn build_cpu_route(
     let mut previous_longitude: Option<f64> = None;
     let mut unwrapped_longitude = 0.0_f64;
     for sample in samples {
-        let Some([longitude, latitude]) = sample.coordinate else {
+        let Some(coordinate) = sample.coordinate else {
             points.push(None);
             continue;
         };
+        let longitude = coordinate.longitude().as_degrees();
+        let latitude = coordinate.latitude().as_degrees();
         unwrapped_longitude = previous_longitude.map_or(longitude, |previous| {
             unwrapped_longitude + (longitude - previous + 540.0).rem_euclid(360.0) - 180.0
         });

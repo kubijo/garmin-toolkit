@@ -22,6 +22,7 @@ use eframe::egui::{ColorImage, Id, TextureHandle, TextureOptions, Ui, load::Size
 use files::requests::OperationToken as DeviceBrowserOperationToken;
 use futures_util::{SinkExt as _, StreamExt as _, future};
 use garmin_i18n::{Intl, Language, Translations, format_message};
+use garmin_model::artifact::ByteCount;
 use garmin_model::identity::{LanguagePreference, ProfilePreferences, ThemePreference, UserId};
 use garmin_service_api::{
     ActivityDetailSnapshot, ApplicationService, ApplicationServiceClient, AvatarCrop, AvatarUpload,
@@ -42,10 +43,10 @@ use wasm_bindgen_futures::{JsFuture, spawn_local};
 use websocket_web::{Interface, Msg, WebSocketBuilder};
 
 const CANVAS_ID: &str = "garmin-toolkit";
-const HEARTBEAT_INTERVAL_MILLISECONDS: i32 = 3_000;
-const HEARTBEAT_TIMEOUT_MILLISECONDS: i32 = 5_000;
-const MAX_DEVICE_BROWSER_TRANSFER_BYTES: f64 = 512.0 * 1024.0 * 1024.0;
-const MAX_AVATAR_UPLOAD_BYTES: f64 = 10.0 * 1024.0 * 1024.0;
+const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(3_000);
+const HEARTBEAT_TIMEOUT: Duration = Duration::from_millis(5_000);
+const MAX_DEVICE_BROWSER_TRANSFER_BYTES: ByteCount = ByteCount::from_mebibytes(512);
+const MAX_AVATAR_UPLOAD_BYTES: ByteCount = ByteCount::from_mebibytes(10);
 
 use map_worker::BrowserMapBackend;
 
@@ -60,8 +61,11 @@ impl activity::map_runtime::MapMetricsSink for BrowserMapMetrics {
         self.upload_events
     }
 
-    fn record_upload(&self, milliseconds: f64) {
-        browser_timing::measure_duration("garmin.map.tile-upload-latency", milliseconds);
+    fn record_upload(&self, elapsed: Duration) {
+        browser_timing::measure_duration(
+            "garmin.map.tile-upload-latency",
+            elapsed.as_secs_f64() * 1_000.0,
+        );
     }
 
     fn record_upload_event(&self, event: activity::map_runtime::MapUploadEvent) {
@@ -75,7 +79,7 @@ impl activity::map_runtime::MapMetricsSink for BrowserMapMetrics {
             activity::map_runtime::MapRenderPhase::Prepare => "garmin.map.wgpu-prepare",
             activity::map_runtime::MapRenderPhase::Draw => "garmin.map.wgpu-draw",
         };
-        browser_timing::measure_duration(name, f64::from(sample.milliseconds));
+        browser_timing::measure_duration(name, sample.elapsed.as_secs_f64() * 1_000.0);
     }
 }
 
@@ -603,13 +607,8 @@ impl App {
         self.handle_shell_action(output.action, &profiles, devices);
     }
 
-    fn show_offline(&self, ui: &Ui, since_milliseconds: f64) {
-        let seconds = Duration::try_from_secs_f64(
-            (js_sys::Date::now() - since_milliseconds).max(0.0) / 1_000.0,
-        )
-        .unwrap_or_default()
-        .as_secs();
-        let duration = offline::format_duration(seconds);
+    fn show_offline(&self, ui: &Ui, since: web_time::Instant) {
+        let duration = offline::format_duration(since.elapsed());
         let title = format_message!(&self.intl, default_message: "Connection lost");
         let message = format_message!(
             &self.intl,
@@ -650,7 +649,7 @@ impl App {
                 spawn_local(async move {
                     let result = if let Some(client) = client {
                         client
-                            .connect_trends(user)
+                            .connect_trends_v2(user)
                             .await
                             .map_err(|error| error.to_string())
                             .and_then(|result| result)
@@ -663,7 +662,7 @@ impl App {
                             .trends
                             .entry(user)
                             .or_default()
-                            .complete(&revision, result);
+                            .complete_read(&revision, result);
                     }
                     context.request_repaint();
                 });
@@ -1692,7 +1691,7 @@ impl eframe::App for App {
                 state.notice.clone(),
                 state.activity_detail.as_ref().map(Rc::clone),
                 state.file_requests.catalog.loading().map(str::to_owned),
-                state.disconnected_since_milliseconds,
+                state.disconnected_since,
                 state.deployment_mode,
             )
         };
@@ -1991,7 +1990,7 @@ struct State {
     file_toasts: notification::Toasts,
     file_progress_toast: Option<notification::ToastId>,
     error: Option<String>,
-    disconnected_since_milliseconds: Option<f64>,
+    disconnected_since: Option<web_time::Instant>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -2135,7 +2134,7 @@ fn spawn_choose_avatar(
         if shared.borrow().connection_generation != generation {
             return;
         }
-        if file.inner().size() > MAX_AVATAR_UPLOAD_BYTES {
+        if browser_file_size(file.inner()).is_none_or(|size| size > MAX_AVATAR_UPLOAD_BYTES) {
             shared.borrow_mut().notice = Some(Notice::error(
                 failure,
                 "profile picture exceeds the 10 MiB limit".to_owned(),
@@ -2160,10 +2159,9 @@ fn spawn_choose_avatar(
 }
 
 fn avatar_draft(user_id: UserId, file_name: String, bytes: Vec<u8>) -> Result<AvatarDraft, String> {
-    const MAX_AVATAR_BYTES: usize = 10 * 1024 * 1024;
     const MAX_AVATAR_DIMENSION: u32 = 4_096;
-    const MAX_DECODE_ALLOCATION: u64 = 128 * 1024 * 1024;
-    if bytes.len() > MAX_AVATAR_BYTES {
+    const MAX_DECODE_ALLOCATION: ByteCount = ByteCount::from_mebibytes(128);
+    if ByteCount::from_bytes(bytes.len() as u64) > MAX_AVATAR_UPLOAD_BYTES {
         return Err("profile picture exceeds the 10 MiB limit".to_owned());
     }
     let format = image::guess_format(&bytes).map_err(|error| error.to_string())?;
@@ -2176,7 +2174,7 @@ fn avatar_draft(user_id: UserId, file_name: String, bytes: Vec<u8>) -> Result<Av
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(MAX_AVATAR_DIMENSION);
     limits.max_image_height = Some(MAX_AVATAR_DIMENSION);
-    limits.max_alloc = Some(MAX_DECODE_ALLOCATION);
+    limits.max_alloc = Some(MAX_DECODE_ALLOCATION.as_bytes());
     let mut reader = image::ImageReader::with_format(Cursor::new(&bytes), format);
     reader.limits(limits);
     let mut decoder = reader.into_decoder().map_err(|error| error.to_string())?;
@@ -2463,7 +2461,9 @@ fn spawn_device_upload(
         if shared.borrow().file_requests.active() != Some(token) {
             return;
         }
-        if file.inner().size() > MAX_DEVICE_BROWSER_TRANSFER_BYTES {
+        let Some(size) = browser_file_size(file.inner())
+            .filter(|size| *size <= MAX_DEVICE_BROWSER_TRANSFER_BYTES)
+        else {
             let mut state = shared.borrow_mut();
             if finish_device_browser_request(&mut state, token) {
                 state.file_toasts.push(
@@ -2473,21 +2473,15 @@ fn spawn_device_upload(
             }
             context.request_repaint();
             return;
-        }
+        };
         let file_name = file.file_name();
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "File.size is a nonnegative integer, checked above against the 512 MiB limit"
-        )]
-        let size = file.inner().size() as u32;
-        let (sender, receiver) = remoc::rch::io::sized::<remoc::codec::Default>(u64::from(size));
+        let (sender, receiver) = remoc::rch::io::sized::<remoc::codec::Default>(size.as_bytes());
         let request = DeviceBrowserUpload {
             device_key: device_key.clone(),
             storage_id,
             directory,
             file_name,
-            size: u64::from(size),
+            size,
         };
         let rpc = async move {
             client
@@ -2524,17 +2518,31 @@ fn spawn_device_upload(
     });
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "The browser size is validated as a nonnegative integer fitting u32"
+)]
+fn browser_file_size(file: &web_sys::File) -> Option<ByteCount> {
+    let size = file.size();
+    ((0.0..=f64::from(u32::MAX)).contains(&size) && size.fract() == 0.0)
+        .then(|| ByteCount::from_bytes(u64::from(size as u32)))
+}
+
 async fn stream_browser_upload(
     file: web_sys::File,
-    size: u32,
+    size: ByteCount,
     mut sender: remoc::rch::io::Sender,
 ) -> Result<(), String> {
-    const CHUNK_BYTES: u32 = 1024 * 1024;
-    let mut offset = 0_u32;
+    const CHUNK_BYTES: ByteCount = ByteCount::from_mebibytes(1);
+    let mut offset = ByteCount::default();
     while offset < size {
         let end = offset.saturating_add(CHUNK_BYTES).min(size);
         let blob = file
-            .slice_with_f64_and_f64(f64::from(offset), f64::from(end))
+            .slice_with_f64_and_f64(
+                f64::from(u32::try_from(offset.as_bytes()).map_err(|error| error.to_string())?),
+                f64::from(u32::try_from(end.as_bytes()).map_err(|error| error.to_string())?),
+            )
             .map_err(|error| format!("could not read the selected file: {}", js_reason(&error)))?;
         let buffer = JsFuture::from(blob.array_buffer())
             .await
@@ -2663,7 +2671,7 @@ async fn wait_for_fit_import_settled(
             .map_err(ConnectError::call)?
             .map_err(ConnectError::domain)?
         {
-            DeviceFitImportStatus::Running => wait_milliseconds(1_000).await,
+            DeviceFitImportStatus::Running => wait_for(Duration::from_millis(1_000)).await,
             status => return Ok(status),
         }
     }
@@ -2723,7 +2731,7 @@ fn reconcile_pending_fit_import(shared: Rc<RefCell<State>>, context: eframe::egu
             if !still_pending {
                 return;
             }
-            wait_milliseconds(1_000).await;
+            wait_for(Duration::from_millis(1_000)).await;
         };
         let profiles = if result.is_ok() {
             client.profiles().await.ok().and_then(Result::ok)
@@ -2892,11 +2900,11 @@ fn spawn_device_catalog(
 fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) {
     developer::forward(shared.clone(), context.clone());
     spawn_local(async move {
-        let mut retry_milliseconds = 1_000;
+        let mut retry_delay = Duration::from_secs(1);
         loop {
             match connect().await {
                 Ok((client, mut snapshots, profiles, deployment_mode, epoch)) => {
-                    retry_milliseconds = 1_000;
+                    retry_delay = Duration::from_secs(1);
                     let logs = client.logs().await.ok();
                     garmin_ui::developer::reconnect(&context);
                     garmin_ui::developer::state(&context)
@@ -2931,12 +2939,12 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                             state.profiles = Rc::new(profiles);
                             state.profiles_loaded = true;
                             state.error = None;
-                            state.disconnected_since_milliseconds = None;
+                            state.disconnected_since = None;
                         }
                         Err(error) => {
                             set_connection_error(&shared, error);
                             context.request_repaint();
-                            wait_milliseconds(retry_milliseconds).await;
+                            wait_for(retry_delay).await;
                             continue;
                         }
                     }
@@ -2960,7 +2968,7 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                                     break error.to_string();
                                 }
                                 let poll = poll_connect_sync(&client, &shared, &context);
-                                let timeout = wait_milliseconds(HEARTBEAT_TIMEOUT_MILLISECONDS);
+                                let timeout = wait_for(HEARTBEAT_TIMEOUT);
                                 futures_util::pin_mut!(poll, timeout);
                                 let _ = future::select(poll, timeout).await;
                             }
@@ -2971,8 +2979,8 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                 Err(error) => set_connection_error(&shared, error),
             }
             context.request_repaint();
-            wait_milliseconds(retry_milliseconds).await;
-            retry_milliseconds = (retry_milliseconds * 2).min(10_000);
+            wait_for(retry_delay).await;
+            retry_delay = (retry_delay * 2).min(Duration::from_secs(10));
         }
     });
 }
@@ -2986,7 +2994,7 @@ async fn next_connection_event(
     snapshots: &mut rch::watch::Receiver<Vec<DeviceSnapshot>>,
 ) -> ConnectionEvent {
     let changed = snapshots.changed();
-    let heartbeat_due = wait_milliseconds(HEARTBEAT_INTERVAL_MILLISECONDS);
+    let heartbeat_due = wait_for(HEARTBEAT_INTERVAL);
     futures_util::pin_mut!(changed, heartbeat_due);
     match future::select(changed, heartbeat_due).await {
         future::Either::Left((result, _)) => {
@@ -3018,15 +3026,15 @@ fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     state.file_requests.catalog.invalidate();
     state.reconciling_fit_import = None;
     state.connection_generation = state.connection_generation.wrapping_add(1);
-    if state.profiles_loaded && state.disconnected_since_milliseconds.is_none() {
-        state.disconnected_since_milliseconds = Some(js_sys::Date::now());
+    if state.profiles_loaded && state.disconnected_since.is_none() {
+        state.disconnected_since = Some(web_time::Instant::now());
     }
     state.error = Some(notification::normalize_error_detail(&error.to_string()));
 }
 
 async fn heartbeat(client: &ApplicationServiceClient) -> Result<(), ConnectError> {
     let call = client.heartbeat();
-    let timeout = wait_milliseconds(HEARTBEAT_TIMEOUT_MILLISECONDS);
+    let timeout = wait_for(HEARTBEAT_TIMEOUT);
     futures_util::pin_mut!(call, timeout);
     match future::select(call, timeout).await {
         future::Either::Left((result, _)) => result.map_err(ConnectError::call),
@@ -3034,7 +3042,8 @@ async fn heartbeat(client: &ApplicationServiceClient) -> Result<(), ConnectError
     }
 }
 
-async fn wait_milliseconds(milliseconds: i32) {
+async fn wait_for(duration: Duration) {
+    let milliseconds = i32::try_from(duration.as_millis()).unwrap_or(i32::MAX);
     let promise = js_sys::Promise::new(&mut |resolve, _reject| {
         let scheduled = web_sys::window().is_some_and(|window| {
             window
@@ -3127,6 +3136,11 @@ async fn poll_connect_sync(
     };
     for user in users {
         let epoch = shared.borrow().connect_cache_reads.epoch(user);
+        let import_revision = client
+            .connect_trends_import_revision(user)
+            .await
+            .ok()
+            .and_then(Result::ok);
         let Ok(Ok(snapshot)) = client
             .connect_sync(user, garmin_model::garmin_connect::sync::Request::Status)
             .await
@@ -3140,6 +3154,13 @@ async fn poll_connect_sync(
             }
             if !state.connect_cache_reads.is_current(epoch) {
                 continue;
+            }
+            if let Some(import_revision) = import_revision {
+                state
+                    .trends
+                    .entry(user)
+                    .or_default()
+                    .observe_import_revision(import_revision);
             }
             let revision = snapshot.revision();
             let changed = state.connect_cache_reads.changed(user, &revision);

@@ -1,15 +1,15 @@
 //! Memory retention and retry deduplication share one bounded horizon.
-use garmin_model::logging::Record;
+use garmin_model::{artifact::ByteCount, logging::Record};
 use std::collections::{BTreeMap, VecDeque};
 
-pub(super) const BYTE_LIMIT: usize = 32 * 1024 * 1024;
+pub(super) const BYTE_LIMIT: ByteCount = ByteCount::from_mebibytes(32);
 pub(super) const RECORD_LIMIT: usize = 16_384;
 
 #[derive(Default)]
 pub(super) struct History {
     pub records: VecDeque<Record>,
-    sizes: VecDeque<usize>,
-    bytes: usize,
+    sizes: VecDeque<ByteCount>,
+    bytes: ByteCount,
     sources: BTreeMap<(String, String), (u64, u64)>,
 }
 
@@ -20,14 +20,14 @@ impl History {
             .is_some_and(|(sequence, _)| *sequence >= record.source_sequence)
     }
 
-    pub fn push(&mut self, record: Record, bytes: usize) {
+    pub fn push(&mut self, record: Record, bytes: ByteCount) {
         self.sources.insert(
             (record.session.clone(), record.source.clone()),
             (record.source_sequence, record.sequence),
         );
         self.records.push_back(record);
         self.sizes.push_back(bytes);
-        self.bytes += bytes;
+        self.bytes = self.bytes.saturating_add(bytes);
         while self.records.len() > RECORD_LIMIT || self.bytes > BYTE_LIMIT {
             self.pop();
         }
@@ -45,7 +45,9 @@ impl History {
 
     fn pop(&mut self) {
         if let Some(record) = self.records.pop_front() {
-            self.bytes -= self.sizes.pop_front().expect("every record has a size");
+            self.bytes = self
+                .bytes
+                .saturating_sub(self.sizes.pop_front().expect("every record has a size"));
             let key = (record.session, record.source);
             if self
                 .sources

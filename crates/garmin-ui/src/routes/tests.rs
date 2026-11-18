@@ -101,7 +101,7 @@ fn library_and_detail_fit_narrow_windows_in_both_languages() {
             state.source = Some(RouteSource {
                 artifact: ArtifactId::new_v4(),
                 digest: ArtifactDigest::from_bytes(b"gpx"),
-                byte_count: ByteCount::from_u64(3),
+                byte_count: ByteCount::from_bytes(3),
                 name: "walk.gpx".into(),
             });
             state.points = [(50.0755, 14.4378), (50.0810, 14.4510)]
@@ -170,7 +170,7 @@ fn current_course_survives_history_paging_and_hides_generation() {
         encoder: ComponentVersion::from_parts("fixture", "2.0.0".parse().unwrap()).unwrap(),
         current_encoder: true,
         generated_at: route.created_at,
-        byte_count: ByteCount::from_u64(512),
+        byte_count: ByteCount::from_bytes(512),
         digest: ArtifactDigest::from_bytes(b"current"),
     };
     let mut older = current.clone();
@@ -317,8 +317,8 @@ fn import_form_and_course_versions_fit_narrow_windows() {
                 upload: Some(GpxUpload {
                     operation: AcquisitionOperationId::new_v4(),
                     file_name: "A long file name for a walking route.gpx".into(),
-                    received: ByteCount::from_u64(128),
-                    total: ByteCount::from_u64(128),
+                    received: ByteCount::from_bytes(128),
+                    total: ByteCount::from_bytes(128),
                     phase: GpxUploadPhase::Review {
                         digest: ArtifactDigest::from_bytes(b"fixture"),
                         candidates: 1,
@@ -360,7 +360,7 @@ fn import_form_and_course_versions_fit_narrow_windows() {
                 encoder: ComponentVersion::from_parts("fixture", "1.0.0".parse().unwrap()).unwrap(),
                 current_encoder: true,
                 generated_at: route.created_at,
-                byte_count: ByteCount::from_u64(512),
+                byte_count: ByteCount::from_bytes(512),
                 digest: ArtifactDigest::from_bytes(b"fixture"),
             }];
             state.detail = Some(route);
@@ -395,8 +395,8 @@ fn invalid_gpx_returns_to_routes_and_can_choose_a_replacement() {
     state.accept(RouteReply::Upload(GpxUpload {
         operation,
         file_name: "malformed.gpx".into(),
-        received: ByteCount::from_u64(17),
-        total: ByteCount::from_u64(17),
+        received: ByteCount::from_bytes(17),
+        total: ByteCount::from_bytes(17),
         phase: GpxUploadPhase::InvalidFile(raw.into()),
     }));
     assert!(state.retry.is_none());
@@ -502,8 +502,8 @@ fn review_keeps_import_button_in_place_and_can_replace_file() {
         state.upload = Some(GpxUpload {
             operation,
             file_name: "another-route.gpx".into(),
-            received: ByteCount::from_u64(128),
-            total: ByteCount::from_u64(128),
+            received: ByteCount::from_bytes(128),
+            total: ByteCount::from_bytes(128),
             phase: GpxUploadPhase::Review {
                 digest: ArtifactDigest::from_bytes(b"fixture"),
                 candidates: 0,
@@ -569,8 +569,8 @@ fn opening_another_file_does_not_shift_or_keep_the_previous_choices() {
         upload: Some(GpxUpload {
             operation: AcquisitionOperationId::new_v4(),
             file_name: "candidates.gpx".into(),
-            received: ByteCount::from_u64(761),
-            total: ByteCount::from_u64(761),
+            received: ByteCount::from_bytes(761),
+            total: ByteCount::from_bytes(761),
             phase: GpxUploadPhase::Review {
                 digest: ArtifactDigest::from_bytes(b"previous"),
                 candidates: 1,
@@ -601,8 +601,8 @@ fn opening_another_file_does_not_shift_or_keep_the_previous_choices() {
     state.begin_upload(GpxUpload {
         operation: AcquisitionOperationId::new_v4(),
         file_name: "replacement.gpx".into(),
-        received: ByteCount::from_u64(0),
-        total: ByteCount::from_u64(1024),
+        received: ByteCount::from_bytes(0),
+        total: ByteCount::from_bytes(1024),
         phase: GpxUploadPhase::Uploading,
     });
     let (output, _) = frame(&ctx, &intl, &mut view, &mut state, 800.0, vec![]);
@@ -650,8 +650,8 @@ fn failed_import_shows_the_cause_and_keeps_retry_available() {
         upload: Some(GpxUpload {
             operation,
             file_name: "demo-walk.gpx".into(),
-            received: ByteCount::from_u64(56_824),
-            total: ByteCount::from_u64(56_824),
+            received: ByteCount::from_bytes(56_824),
+            total: ByteCount::from_bytes(56_824),
             phase: GpxUploadPhase::Failed(message.into()),
         }),
         error: Some(message.into()),
@@ -734,7 +734,7 @@ fn deleting_a_course_requires_confirmation_and_cancel_preserves_it() {
         encoder: ComponentVersion::from_parts("fixture", "1.0.0".parse().unwrap()).unwrap(),
         current_encoder: true,
         generated_at: route.created_at,
-        byte_count: ByteCount::from_u64(512),
+        byte_count: ByteCount::from_bytes(512),
         digest: ArtifactDigest::from_bytes(b"fixture"),
     };
     let mut state = State {

@@ -1590,6 +1590,7 @@ impl Desktop {
         }
     }
 
+    #[expect(clippy::too_many_lines, reason = "Keep worker event dispatch in one match")]
     fn process_events(&mut self) {
         let events = self.worker.drain().collect::<Vec<_>>();
         for event in events {
@@ -1602,7 +1603,12 @@ impl Desktop {
                     .trends
                     .entry(user)
                     .or_default()
-                    .complete(&revision, result),
+                    .complete_read(&revision, result),
+                worker::Event::TrendsImportRevision(user, revision) => self
+                    .trends
+                    .entry(user)
+                    .or_default()
+                    .observe_import_revision(revision),
                 worker::Event::ConnectSyncStates(states) => self.connect_sync_states(states),
                 worker::Event::ConnectSyncFailure { user, reason } => {
                     self.connect_sync_failure(user, reason);
@@ -2140,8 +2146,7 @@ impl eframe::App for Desktop {
         self.show_toasts(ui.ctx(), toast_bounds);
         garmin_ui::window::resize(ui);
         crate::developer::update(ui.ctx(), &self.intl);
-        self.profiling
-            .record_desktop_frame(started.elapsed().as_secs_f32() * 1_000.0);
+        self.profiling.record_desktop_frame(started.elapsed());
     }
 }
 

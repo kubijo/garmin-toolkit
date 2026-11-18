@@ -16,7 +16,7 @@ use eframe::egui;
 use futures_lite::future::block_on;
 use garmin_device::attachments::Candidate as _;
 use garmin_model::{
-    artifact::{AcquisitionOperationId, ArtifactDigest, SourceIdentity},
+    artifact::{AcquisitionOperationId, ArtifactDigest, ByteCount, SourceIdentity},
     identity::{DisplayName, ProfilePreferences, Source, SourceId, User},
     observation::ObservationId,
     value::Timestamp,
@@ -133,11 +133,7 @@ impl Worker {
         });
     }
 
-    pub fn read_trends(
-        &self,
-        user: UserContext,
-        revision: garmin_model::garmin_connect::sync::Revision,
-    ) {
+    pub fn read_trends(&self, user: UserContext, revision: garmin_ui::trends::ReadRequest) {
         self.send(Command::ReadTrends { user, revision });
     }
 
@@ -259,7 +255,7 @@ enum ProfileChange {
 enum Command {
     ReadTrends {
         user: UserContext,
-        revision: garmin_model::garmin_connect::sync::Revision,
+        revision: garmin_ui::trends::ReadRequest,
     },
     ReadConnectCache {
         request: ConnectCacheRead,
@@ -308,9 +304,13 @@ pub struct ConnectCacheRead {
 pub enum Event {
     Trends {
         user: garmin_model::identity::UserId,
-        revision: garmin_model::garmin_connect::sync::Revision,
+        revision: garmin_ui::trends::ReadRequest,
         result: Result<Option<garmin_model::garmin_connect::trends::History>, String>,
     },
+    TrendsImportRevision(
+        garmin_model::identity::UserId,
+        Option<garmin_model::artifact::ArtifactDigest>,
+    ),
     ConnectSyncFailure {
         user: garmin_model::identity::UserId,
         reason: String,
@@ -488,6 +488,19 @@ fn run(
                                 .connect_sync_status(UserContext::new(user.id()))
                                 .await?;
                             snapshots.push((user.id(), state));
+                            if let Ok(revision) = application
+                                .connect_trends_import_revision(UserContext::new(user.id()))
+                                .await
+                            {
+                                let _ = emit(
+                                    &EventSender {
+                                        sender: event_tx.clone(),
+                                        epoch,
+                                    },
+                                    context,
+                                    Event::TrendsImportRevision(user.id(), revision),
+                                );
+                            }
                         }
                         Ok::<_, garmin_services::Error>(snapshots)
                     });
@@ -538,7 +551,7 @@ fn run(
 fn read_trends_command(
     application: &Application,
     user: UserContext,
-    revision: garmin_model::garmin_connect::sync::Revision,
+    revision: garmin_ui::trends::ReadRequest,
     events: &EventSender,
     context: &egui::Context,
 ) -> bool {
@@ -780,7 +793,8 @@ fn operate_device(
             if !metadata.file_type().is_file() {
                 return Err("the selected upload is not a regular file".to_owned());
             }
-            if metadata.len() > garmin_device::MAX_BROWSER_TRANSFER_BYTES {
+            let size = ByteCount::from_bytes(metadata.len());
+            if size > garmin_device::MAX_BROWSER_TRANSFER_BYTES {
                 return Err(garmin_device::DeviceBrowserOperationError::TransferLimit.to_string());
             }
             let name = source
@@ -796,7 +810,7 @@ fn operate_device(
                         directory: &directory,
                         file_name: name,
                         source: &source,
-                        size: metadata.len(),
+                        size,
                     },
                     progress,
                 ))

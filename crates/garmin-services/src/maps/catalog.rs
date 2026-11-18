@@ -4,6 +4,7 @@ use anyhow::Result;
 use garmin_capture::SessionCapture;
 use garmin_device::DeviceManifest;
 use garmin_map_service::{ClientIdentity, OmtClient};
+use garmin_model::artifact::ByteCount;
 use garmin_model::map::MapCatalog;
 use garmin_update::UpdatePlan;
 use std::path::Path;
@@ -41,7 +42,7 @@ impl CatalogSource {
                     u32::try_from(cache.total_files)?,
                 )
             } else {
-                (0, 0, 0)
+                (ByteCount::default(), 0, 0)
             };
             components.push(Component {
                 index: u32::try_from(index)?,

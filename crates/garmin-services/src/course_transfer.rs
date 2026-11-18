@@ -17,9 +17,11 @@ use garmin_device::{
     storage::{DeviceIoError, DeviceRead},
 };
 use garmin_model::{
-    artifact::ArtifactDigest, identity::UserId, route::CourseGenerationOperationId,
+    artifact::{ArtifactDigest, ByteCount},
+    identity::UserId,
+    route::CourseGenerationOperationId,
 };
-use garmin_progress::{CancellationToken, OperationStage, ProgressUnit};
+use garmin_progress::{CancellationToken, OperationStage, ProgressAmount};
 use garmin_service_api::course_transfer::{
     CourseCleanupReview, CourseTarget, CourseTransferPhase, CourseTransferPreparation,
     CourseTransferProgress, CourseTransferReview, CourseTransferStatus,
@@ -39,7 +41,7 @@ mod tests;
 
 const APPROVAL_LIFETIME: Duration = Duration::from_mins(15);
 const MAX_PENDING_APPROVALS: usize = 64;
-const MAX_RECORD_BYTES: u64 = 64 * 1024;
+const MAX_RECORD_BYTES: ByteCount = ByteCount::from_kibibytes(64);
 
 struct Prepared {
     actor: UserId,
@@ -140,7 +142,7 @@ impl CourseTransfers {
             &connection.manifest,
             &state,
             device_key,
-            record.byte_count().as_u64(),
+            record.byte_count(),
         ))
     }
 
@@ -171,7 +173,7 @@ impl CourseTransfers {
             "saved Course bytes changed"
         );
         ensure!(
-            bytes.len() as u64 == record.byte_count().as_u64(),
+            bytes.len() as u64 == record.byte_count().as_bytes(),
             "saved Course size changed"
         );
         let connection = connector.connect().await?;
@@ -179,7 +181,7 @@ impl CourseTransfers {
             &connection.manifest,
             &connection.device.state().await?,
             &device_key,
-            record.byte_count().as_u64(),
+            record.byte_count(),
         )
         .into_iter()
         .find(|target| target.storage_id == storage_id)
@@ -268,7 +270,7 @@ impl CourseTransfers {
             &connection.manifest,
             &connection.device.state().await?,
             &review.target.device_key,
-            review.byte_count.as_u64(),
+            review.byte_count,
         )
         .into_iter()
         .find(|target| {
@@ -320,8 +322,8 @@ impl CourseTransfers {
         let active = Arc::new(ActiveTransfer {
             cancellation: CancellationToken::default(),
             progress: Mutex::new(CourseTransferProgress {
-                bytes_sent: 0,
-                total_bytes: intent.review.byte_count.as_u64(),
+                bytes_sent: ByteCount::default(),
+                total_bytes: intent.review.byte_count,
                 finishing: false,
             }),
         });
@@ -413,7 +415,7 @@ impl CourseTransfers {
             .await?
         {
             DevicePathStatus::Missing => CourseTransferPhase::Missing,
-            DevicePathStatus::RegularFile { size } if size == intent.review.byte_count.as_u64() => {
+            DevicePathStatus::RegularFile { size } if size == intent.review.byte_count => {
                 match connection
                     .device
                     .verify(
@@ -583,9 +585,7 @@ impl CourseTransfers {
             .inspect(&intent.review.target.storage_id, &intent.path)
             .await?
         {
-            DevicePathStatus::RegularFile { size } if size < intent.review.byte_count.as_u64() => {
-                size
-            }
+            DevicePathStatus::RegularFile { size } if size < intent.review.byte_count => size,
             _ => bail!("no partial Course upload is available for cleanup"),
         };
         let bytes = connection
@@ -595,7 +595,7 @@ impl CourseTransfers {
             .context("partial Course upload disappeared")?;
         let payload = fs::read(directory.join("payload.fit"))?;
         ensure!(
-            payload.len() as u64 == intent.review.byte_count.as_u64()
+            payload.len() as u64 == intent.review.byte_count.as_bytes()
                 && hex::encode(Sha256::digest(&payload)) == intent.sha256
                 && bytes.len() <= payload.len()
                 && bytes == payload[..bytes.len()],
@@ -684,9 +684,9 @@ impl CourseTransfers {
             .context("partial Course upload disappeared")?;
         let payload = fs::read(directory.join("payload.fit"))?;
         ensure!(
-            payload.len() as u64 == intent.review.byte_count.as_u64()
+            payload.len() as u64 == intent.review.byte_count.as_bytes()
                 && hex::encode(Sha256::digest(&payload)) == intent.sha256
-                && bytes.len() as u64 == review.byte_count
+                && bytes.len() as u64 == review.byte_count.as_bytes()
                 && bytes.len() <= payload.len()
                 && bytes == payload[..bytes.len()],
             "partial Course upload changed since review"
@@ -757,7 +757,7 @@ impl CourseTransfers {
             match device.inspect(&target.storage_id, &intent.path).await? {
                 DevicePathStatus::Missing => {}
                 DevicePathStatus::RegularFile { size }
-                    if size == intent.review.byte_count.as_u64()
+                    if size == intent.review.byte_count
                         && device
                             .verify(&target.storage_id, &intent.path, size, &intent.sha256)
                             .await
@@ -784,7 +784,7 @@ fn targets_for(
     manifest: &garmin_device::DeviceManifest,
     state: &garmin_device::DeviceStateSnapshot,
     device_key: &str,
-    bytes: u64,
+    bytes: ByteCount,
 ) -> Vec<CourseTarget> {
     let sample = format!("gt-{}.fit", Uuid::nil());
     let mut targets = Vec::new();
@@ -847,7 +847,7 @@ async fn reviewed_bytes(
         .context("saved Course bytes were removed")?;
     ensure!(
         ArtifactDigest::from_bytes(&bytes) == review.digest
-            && bytes.len() as u64 == review.byte_count.as_u64(),
+            && bytes.len() as u64 == review.byte_count.as_bytes(),
         "saved Course bytes changed since review"
     );
     Ok(bytes)
@@ -870,12 +870,14 @@ async fn upload_and_verify(
     let reporter = garmin_progress::ProgressReporter::default()
         .with_cancellation(active.cancellation.clone())
         .observe(move |event| {
-            if event.stage == OperationStage::Commit && event.unit == ProgressUnit::Bytes {
+            if event.stage == OperationStage::Commit
+                && let ProgressAmount::Bytes { completed, .. } = event.amount
+            {
                 let mut value = progress
                     .progress
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner);
-                value.bytes_sent = value.bytes_sent.max(event.completed.min(value.total_bytes));
+                value.bytes_sent = value.bytes_sent.max(completed.min(value.total_bytes));
             } else if matches!(
                 event.stage,
                 OperationStage::DeviceFinalize | OperationStage::DeviceVerify
@@ -893,12 +895,12 @@ async fn upload_and_verify(
             &target.storage_id,
             &intent.path,
             &directory.join("payload.fit"),
-            intent.review.byte_count.as_u64(),
+            intent.review.byte_count,
             &intent.sha256,
             garmin_device::MountedMtpUploadProgress {
                 reporter,
-                completed_before: 0,
-                total: intent.review.byte_count.as_u64(),
+                completed_before: ByteCount::from_bytes(0),
+                total: intent.review.byte_count,
             },
         )
         .await
@@ -916,7 +918,7 @@ async fn upload_and_verify(
         .verify(
             &target.storage_id,
             &intent.path,
-            intent.review.byte_count.as_u64(),
+            intent.review.byte_count,
             &intent.sha256,
         )
         .await
@@ -956,7 +958,7 @@ fn status(intent: &Intent, phase: CourseTransferPhase) -> CourseTransferStatus {
 fn read_intent(directory: &Path) -> Result<Intent> {
     let bytes = fs::read(directory.join("intent.json"))?;
     ensure!(
-        bytes.len() as u64 <= MAX_RECORD_BYTES,
+        ByteCount::from_bytes(bytes.len() as u64) <= MAX_RECORD_BYTES,
         "Course transfer intent is oversized"
     );
     let intent: Intent = serde_json::from_slice(&bytes)?;
@@ -1001,7 +1003,7 @@ fn read_outcome(directory: &Path) -> Result<Option<Outcome>> {
         Err(error) => return Err(error.into()),
     };
     ensure!(
-        bytes.len() as u64 <= MAX_RECORD_BYTES,
+        ByteCount::from_bytes(bytes.len() as u64) <= MAX_RECORD_BYTES,
         "Course transfer outcome is oversized"
     );
     let outcome: Outcome = serde_json::from_slice(&bytes)?;

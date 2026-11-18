@@ -1,6 +1,9 @@
 //! Responsive log filters and records within the panel's single scroll area.
 use egui::Ui;
-use garmin_model::logging::{Filter, Level, Record};
+use garmin_model::{
+    logging::{Filter, Level, Record},
+    value::UnixMilliseconds,
+};
 
 use super::{Request, State, panel};
 use crate::{Size, button, input, select};
@@ -151,7 +154,7 @@ fn filters(ui: &mut Ui, filter: &mut Filter) {
     });
 }
 
-fn time_filter(ui: &mut Ui, label: &str, value: &mut Option<u64>) {
+fn time_filter(ui: &mut Ui, label: &str, value: &mut Option<UnixMilliseconds>) {
     ui.push_id(label, |ui| {
         let mut enabled = value.is_some();
         ui.scope(|ui| {
@@ -160,17 +163,19 @@ fn time_filter(ui: &mut Ui, label: &str, value: &mut Option<u64>) {
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .changed()
             {
-                *value = enabled.then_some(0);
+                *value = enabled.then_some(UnixMilliseconds::default());
             }
         });
         if let Some(value) = value {
+            let mut milliseconds = value.as_milliseconds_since_epoch();
             input::show_number(
                 ui,
-                value,
+                &mut milliseconds,
                 input::NumberProps::new("Milliseconds since Unix epoch")
                     .size(Size::Small)
                     .steppers(false),
             );
+            *value = UnixMilliseconds::from_milliseconds_since_epoch(milliseconds);
         }
     });
 }

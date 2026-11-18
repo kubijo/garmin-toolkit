@@ -16,9 +16,9 @@ use crate::RouteImportRequest;
 
 impl RouteSession {
     pub(super) fn start(&self, file_name: String, size: ByteCount) -> Result<RouteReply> {
-        let total = usize::try_from(size.as_u64())
+        let total = usize::try_from(size.as_bytes())
             .map_err(|_| failure(Kind::Limit, "GPX file is too large"))?;
-        if total == 0 || total > garmin_gpx::MAX_BYTES {
+        if size.is_zero() || size > garmin_gpx::MAX_BYTES {
             return Err(failure(
                 Kind::Limit,
                 "GPX file must be between 1 byte and 16 MiB",
@@ -296,7 +296,9 @@ impl RouteSession {
                 "the GPX selection belongs to different bytes",
             ));
         }
-        if selection.name.as_str().len() > garmin_gpx::worker::MAX_NAME_BYTES {
+        if ByteCount::from_bytes(selection.name.as_str().len() as u64)
+            > garmin_gpx::worker::MAX_NAME_BYTES
+        {
             return Err(failure(Kind::Limit, "route name is too long"));
         }
         let request = RouteImportRequest::from_parts(

@@ -105,7 +105,7 @@ impl Renderer {
         }
         self.metrics.record_render(MapRenderPerformanceSample {
             phase: MapRenderPhase::Prepare,
-            milliseconds: started.elapsed().as_secs_f32() * 1_000.0,
+            elapsed: started.elapsed(),
         });
     }
 
@@ -194,7 +194,7 @@ impl Renderer {
         }
         self.metrics.record_render(MapRenderPerformanceSample {
             phase: MapRenderPhase::Draw,
-            milliseconds: started.elapsed().as_secs_f32() * 1_000.0,
+            elapsed: started.elapsed(),
         });
     }
 }

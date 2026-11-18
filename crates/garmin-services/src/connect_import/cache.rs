@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use garmin_model::{
     garmin_connect::{
         AccountFacts, ActivityDetails, ActivityFailure, ActivityFilters, ActivityResponse,
@@ -229,6 +231,7 @@ impl Application {
             garmin_storage::CacheSnapshot {
                 activities: summaries,
                 coverage,
+                ascent: BTreeMap::new(),
             },
             start,
             filters,

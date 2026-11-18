@@ -1,6 +1,7 @@
 //! Opt-in remote map boundary: immutable route revisions and small camera/selection updates.
 //! Both hosts use the production tile runtime, GPU renderer, labels and marker painting.
 
+use garmin_model::{artifact::ByteCount, route::Coordinate};
 use std::sync::Arc;
 
 use super::samples::{MapSample, Samples};
@@ -12,10 +13,10 @@ use super::{
 };
 use crate::activity::map_runtime::MapRuntimeHandle;
 
-const MAX_ROUTE_BYTES: usize =
+const MAX_ROUTE_BYTES: ByteCount =
     crate::activity::map_runtime::BrowserWorkerTaskKind::Route.result_byte_limit();
-const MAX_ROUTE_SAMPLES: usize = MAX_ROUTE_BYTES / std::mem::size_of::<MapSample>();
-const MAX_VIEW_BYTES: usize = 1536;
+const MAX_ROUTE_SAMPLES: u64 = MAX_ROUTE_BYTES.as_bytes() / std::mem::size_of::<MapSample>() as u64;
+const MAX_VIEW_BYTES: ByteCount = ByteCount::from_bytes(1536);
 
 /// Main-thread integration. Browser objects must remain outside this typed plugin.
 pub trait Host: Send + Sync + 'static {
@@ -56,7 +57,7 @@ impl RemoteMapPlugin {
         camera: &MapCamera,
         rect: Rect,
         route: &gpu_map::RouteScene<'_>,
-        selected: Option<(f64, f64)>,
+        selected: Option<Coordinate>,
     ) {
         let source = (
             route.key.to_owned(),
@@ -65,7 +66,7 @@ impl RemoteMapPlugin {
             route.sample_offset,
         );
         if self.source.as_ref() != Some(&source) {
-            if route.samples.len() > MAX_ROUTE_SAMPLES {
+            if route.samples.len() as u64 > MAX_ROUTE_SAMPLES {
                 self.host
                     .fail("remote route exceeded its sample retention limit");
                 return;
@@ -75,7 +76,7 @@ impl RemoteMapPlugin {
                 return;
             };
             let bytes = match postcard::to_allocvec(&route.samples.iter().collect::<Vec<_>>()) {
-                Ok(bytes) if bytes.len() <= MAX_ROUTE_BYTES => bytes,
+                Ok(bytes) if ByteCount::from_bytes(bytes.len() as u64) <= MAX_ROUTE_BYTES => bytes,
                 _ => {
                     self.host.fail("remote route exceeded its transfer limit");
                     return;
@@ -87,7 +88,7 @@ impl RemoteMapPlugin {
         }
         let view = View {
             revision: self.revision,
-            center: [camera.center().x(), camera.center().y()],
+            center: camera.coordinate(),
             zoom: camera.zoom(),
             size: [rect.width(), rect.height()],
             pixels_per_point: ui.ctx().pixels_per_point(),
@@ -97,10 +98,12 @@ impl RemoteMapPlugin {
                 .highlighted_range
                 .as_ref()
                 .map(|r| [*r.start(), *r.end()]),
-            selected: selected.map(|(x, y)| [x, y]),
+            selected,
         };
         match serde_json::to_string(&view) {
-            Ok(json) if json.len() <= MAX_VIEW_BYTES => self.host.view(&json),
+            Ok(json) if ByteCount::from_bytes(json.len() as u64) <= MAX_VIEW_BYTES => {
+                self.host.view(&json);
+            }
             _ => self
                 .host
                 .fail("remote map view exceeded its transfer limit"),
@@ -126,28 +129,75 @@ impl egui::plugin::Plugin for RemoteMapPlugin {
 #[serde(deny_unknown_fields)]
 struct View {
     revision: u32,
-    center: [f64; 2],
+    #[serde(with = "coordinate_wire")]
+    center: Coordinate,
     zoom: f64,
     size: [f32; 2],
     pixels_per_point: f32,
     dark: bool,
     offset: usize,
     highlighted: Option<[usize; 2]>,
-    selected: Option<[f64; 2]>,
+    #[serde(
+        default,
+        serialize_with = "coordinate_wire::serialize_optional",
+        deserialize_with = "coordinate_wire::deserialize_optional"
+    )]
+    selected: Option<Coordinate>,
+}
+
+mod coordinate_wire {
+    use garmin_model::route::Coordinate;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
+
+    fn decode([longitude, latitude]: [f64; 2]) -> Result<Coordinate, garmin_model::route::Error> {
+        Coordinate::from_degrees(latitude, longitude)
+    }
+
+    fn encode(coordinate: Coordinate) -> [f64; 2] {
+        [
+            coordinate.longitude().as_degrees(),
+            coordinate.latitude().as_degrees(),
+        ]
+    }
+
+    pub(super) fn serialize<S: Serializer>(
+        value: &Coordinate,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        encode(*value).serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Coordinate, D::Error> {
+        decode(<[f64; 2]>::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
+
+    #[expect(clippy::ref_option, reason = "Serde requires the field by reference")]
+    pub(super) fn serialize_optional<S: Serializer>(
+        value: &Option<Coordinate>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.map(encode).serialize(serializer)
+    }
+
+    pub(super) fn deserialize_optional<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Coordinate>, D::Error> {
+        Option::<[f64; 2]>::deserialize(deserializer)?
+            .map(decode)
+            .transpose()
+            .map_err(D::Error::custom)
+    }
 }
 
 impl View {
     fn decode(json: &str) -> Result<Self, String> {
-        if json.len() > MAX_VIEW_BYTES {
+        if ByteCount::from_bytes(json.len() as u64) > MAX_VIEW_BYTES {
             return Err("remote view is too large".to_owned());
         }
         let view: Self = serde_json::from_str(json).map_err(|e| e.to_string())?;
-        let coordinate = |v: [f64; 2]| {
-            v[0].is_finite() && v[1].is_finite() && v[0].abs() <= 180.0 && v[1].abs() <= 90.0
-        };
         if view.revision == 0
-            || !coordinate(view.center)
-            || view.selected.is_some_and(|v| !coordinate(v))
             || !view.zoom.is_finite()
             || !(0.0..=f64::from(super::MAX_VIEW_ZOOM)).contains(&view.zoom)
             || view
@@ -197,12 +247,14 @@ impl MapSurface {
     pub fn update(&mut self, json: &str, route: Option<&[u8]>) -> Result<(), String> {
         let view = View::decode(json)?;
         if let Some(bytes) = route {
-            if bytes.len() > MAX_ROUTE_BYTES || view.revision <= self.revision {
+            if ByteCount::from_bytes(bytes.len() as u64) > MAX_ROUTE_BYTES
+                || view.revision <= self.revision
+            {
                 return Err("invalid remote route replacement".to_owned());
             }
             let (count, _) =
                 postcard::take_from_bytes::<usize>(bytes).map_err(|e| e.to_string())?;
-            if count > MAX_ROUTE_SAMPLES {
+            if count as u64 > MAX_ROUTE_SAMPLES {
                 return Err("remote route exceeded its sample retention limit".to_owned());
             }
             let (samples, trailing) =
@@ -243,7 +295,7 @@ impl MapSurface {
         let rect = Rect::from_min_size(origin, egui::vec2(view.size[0], view.size[1]));
         ui.set_clip_rect(rect);
         let mut camera = MapCamera::default();
-        camera.center_at(walkers::lon_lat(view.center[0], view.center[1]));
+        camera.center_at(view.center);
         camera.set_zoom(view.zoom);
         let colors = MapColors::new(ui);
         let route = gpu_map::RouteScene {
@@ -272,7 +324,7 @@ impl MapSurface {
                 gpu_enabled: true,
                 route: &route,
                 colors,
-                selected_coordinate: view.selected.map(|[x, y]| (x, y)),
+                selected_coordinate: view.selected,
             },
         );
     }
@@ -293,7 +345,7 @@ mod tests {
     fn view(revision: u32) -> String {
         serde_json::to_string(&View {
             revision,
-            center: [-0.1, 51.5],
+            center: Coordinate::from_degrees(51.5, -0.1).unwrap(),
             zoom: 10.0,
             size: [600.0, 400.0],
             pixels_per_point: 1.0,
@@ -358,7 +410,10 @@ mod tests {
             input[key] = value;
             assert!(View::decode(&input.to_string()).is_err(), "accepted {key}");
         }
-        assert!(View::decode(&" ".repeat(MAX_VIEW_BYTES + 1)).is_err());
+        assert!(
+            View::decode(&" ".repeat(usize::try_from(MAX_VIEW_BYTES.as_bytes()).unwrap() + 1))
+                .is_err()
+        );
         assert!(view(1).len() < 2048);
     }
 }

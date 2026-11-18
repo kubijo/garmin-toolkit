@@ -1,3 +1,4 @@
+use garmin_model::artifact::ByteCount;
 use std::{error::Error as StdError, fs::File, path::Path, process::Command, sync::Arc};
 
 use garmin_storage::{
@@ -513,7 +514,7 @@ async fn progress_remains_readable_while_the_application_is_exclusively_locked()
     let SnapshotReply::Status(started) = session
         .execute(SnapshotRequest::BeginRestore {
             operation: uuid::Uuid::new_v4(),
-            bytes: 10,
+            bytes: ByteCount::from_bytes(10),
         })
         .await
         .expect("upload starts")

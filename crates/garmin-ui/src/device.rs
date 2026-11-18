@@ -3,11 +3,12 @@
 use cint::ColorInterop;
 use egui::{Id, RichText, TextStyle, Ui};
 use garmin_i18n::{Intl, format_message};
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::{
     DeviceCapability, DeviceDataType, DeviceSnapshot, InspectionState, TransferDirection,
 };
 
-use crate::{Size, button, icons, modal, text::format_bytes};
+use crate::{Size, button, icons, modal};
 
 #[cfg(test)]
 mod acceptance;
@@ -516,7 +517,7 @@ fn transfer_views(capabilities: &[DeviceCapability], intl: &Intl) -> Vec<Transfe
 struct StorageView {
     label: String,
     detail: String,
-    bytes: Option<(u64, u64)>,
+    bytes: Option<(ByteCount, ByteCount)>,
 }
 
 impl StorageView {
@@ -531,7 +532,7 @@ impl StorageView {
             storage.label.clone()
         };
         let measured = storage.capacity.bytes();
-        let bytes = measured.map(|(total, free)| (total - free, total));
+        let bytes = measured.map(|(total, free)| (total.saturating_sub(free), total));
         let detail = measured.map_or_else(
             || {
                 let reason = match &storage.capacity {
@@ -553,9 +554,9 @@ impl StorageView {
                     intl,
                     default_message: "{used} used · {free} free · {total} total",
                     values: {
-                        used: format_bytes(total - free),
-                        free: format_bytes(free),
-                        total: format_bytes(total),
+                        used: total.saturating_sub(free).format_decimal(2),
+                        free: free.format_decimal(2),
+                        total: total.format_decimal(2),
                     },
                 )
             },

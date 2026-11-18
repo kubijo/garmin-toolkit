@@ -5,6 +5,7 @@ use garmin_device::{
     DeviceManifest, DevicePathState, MountedMtpUploadProgress, storage::DeviceWrite,
 };
 use garmin_fit::fixture::{integrity::Header, workout};
+use garmin_model::artifact::ByteCount;
 
 #[tokio::test]
 async fn workout_delivery_and_course_cleanup_use_verified_bytes() -> Result<()> {
@@ -148,7 +149,7 @@ async fn cleanup_course<D: DeviceWrite + ?Sized>(
     );
     let payload = fs::read(transfer.join("payload.fit"))?;
     ensure!(
-        payload.len() as u64 == intent.review.byte_count.as_u64()
+        payload.len() as u64 == intent.review.byte_count.as_bytes()
             && hex::encode(Sha256::digest(&payload)) == intent.sha256,
         "retained Course payload changed"
     );
@@ -178,7 +179,9 @@ async fn cleanup_course<D: DeviceWrite + ?Sized>(
         );
         for entry in entries {
             if entry.state != DevicePathState::RegularFile
-                || entry.size.is_none_or(|size| size > 1024 * 1024)
+                || entry
+                    .size
+                    .is_none_or(|size| size > ByteCount::from_mebibytes(1))
             {
                 continue;
             }
@@ -193,7 +196,7 @@ async fn cleanup_course<D: DeviceWrite + ?Sized>(
         let DevicePathStatus::RegularFile { size } = device.inspect(storage, &path).await? else {
             continue;
         };
-        if size > 1024 * 1024 {
+        if size > ByteCount::from_mebibytes(1) {
             continue;
         }
         let Some(bytes) = device.read_bounded_file(storage, &path, size).await? else {
@@ -266,21 +269,26 @@ async fn deliver_workout<D: DeviceWrite + ?Sized>(
             &storage,
             path,
             &source,
-            bytes.len() as u64,
+            ByteCount::from_bytes(bytes.len() as u64),
             &sha256,
             MountedMtpUploadProgress {
                 reporter: garmin_progress::ProgressReporter::default(),
-                completed_before: 0,
-                total: bytes.len() as u64,
+                completed_before: ByteCount::from_bytes(0),
+                total: ByteCount::from_bytes(bytes.len() as u64),
             },
         )
         .await?;
     device
-        .verify(&storage, path, bytes.len() as u64, &sha256)
+        .verify(
+            &storage,
+            path,
+            ByteCount::from_bytes(bytes.len() as u64),
+            &sha256,
+        )
         .await?;
     ensure!(
         device
-            .read_bounded_file(&storage, path, bytes.len() as u64)
+            .read_bounded_file(&storage, path, ByteCount::from_bytes(bytes.len() as u64))
             .await?
             == Some(bytes),
         "workout readback differs"

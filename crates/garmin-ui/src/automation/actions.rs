@@ -1,6 +1,7 @@
 //! Parsing for individual actions and ordered functional checks.
 use super::{Action, Step, scenarios::DragStop};
 use serde_json::Value;
+use std::time::Duration;
 
 pub(super) fn parse(argument: &Value) -> Result<Vec<Step>, String> {
     let kind = argument["kind"].as_str().ok_or("action requires kind")?;
@@ -86,14 +87,14 @@ pub(super) fn parse(argument: &Value) -> Result<Vec<Step>, String> {
             phase: "action",
             target: target.into(),
             action: Action::Click,
-            after: 0.05,
+            after: Duration::from_millis(50),
         });
     }
     steps.push(Step {
         phase: "action",
         target: target.into(),
         action,
-        after: 0.0,
+        after: Duration::from_millis(0),
     });
     Ok(steps)
 }

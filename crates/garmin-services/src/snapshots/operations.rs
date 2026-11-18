@@ -1,3 +1,4 @@
+use garmin_model::artifact::ByteCount;
 use garmin_progress::CancellationToken;
 use std::collections::HashMap;
 use std::io;
@@ -150,19 +151,19 @@ pub struct SnapshotDownload {
     session: Arc<SnapshotSession>,
     operation: Uuid,
     instance: Uuid,
-    size: u64,
+    size: ByteCount,
 }
 
 impl SnapshotDownload {
     #[must_use]
-    pub const fn size(&self) -> u64 {
+    pub const fn size(&self) -> ByteCount {
         self.size
     }
 
     /// Reads a bounded chunk from the original operation.
     /// # Errors
     /// Rejects revoked sessions, released operations, and invalid read bounds.
-    pub async fn read(&self, offset: u64, max_bytes: u32) -> Result<SnapshotReply> {
+    pub async fn read(&self, offset: ByteCount, max_bytes: ByteCount) -> Result<SnapshotReply> {
         self.session.authorize().await?;
         self.session
             .read(self.operation, offset, max_bytes, Some(self.instance))
@@ -259,7 +260,7 @@ impl SnapshotSession {
                 }
                 let reply = self.begin(
                     operation,
-                    Some(metadata.len()),
+                    Some(ByteCount::from_bytes(metadata.len())),
                     source,
                     None,
                     cancel.clone(),
@@ -408,12 +409,14 @@ impl SnapshotSession {
     fn begin(
         &self,
         operation: Uuid,
-        upload: Option<u64>,
+        upload: Option<ByteCount>,
         source: SnapshotSource,
         destination: Option<worker::Destination>,
         cancel: CancellationToken,
     ) -> Result<SnapshotReply> {
-        if upload.is_some_and(|size| size == 0 || size > self.operations.limits.compressed_bytes) {
+        if upload
+            .is_some_and(|size| size.is_zero() || size > self.operations.limits.compressed_bytes)
+        {
             return Err(failure(
                 FailureKind::Limit,
                 "snapshot upload exceeds its size limit",
@@ -448,7 +451,7 @@ impl SnapshotSession {
             } else {
                 SnapshotState::BackingUp
             },
-            transferred: 0,
+            transferred: ByteCount::default(),
             total: upload,
             preview: None,
             error: None,
@@ -483,17 +486,18 @@ impl SnapshotSession {
         Ok(SnapshotReply::Status(status))
     }
 
-    fn upload(&self, operation: Uuid, offset: u64, bytes: &[u8]) -> Result<SnapshotReply> {
-        if bytes.is_empty() || bytes.len() > MAX_SNAPSHOT_CHUNK as usize {
+    fn upload(&self, operation: Uuid, offset: ByteCount, bytes: &[u8]) -> Result<SnapshotReply> {
+        let chunk_size = ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+        if chunk_size.is_zero() || chunk_size > MAX_SNAPSHOT_CHUNK {
             return Err(failure(FailureKind::Limit, "invalid snapshot chunk size"));
         }
         let mut entries = self.operations.entries();
         let entry = self.entry(&mut entries, operation)?;
         require_state(entry, SnapshotState::Uploading)?;
         let end = offset
-            .checked_add(bytes.len() as u64)
+            .checked_add(chunk_size)
             .ok_or_else(|| failure(FailureKind::Limit, "snapshot offset overflow"))?;
-        if offset != entry.status.transferred || end > entry.status.total.unwrap_or(0) {
+        if offset != entry.status.transferred || end > entry.status.total.unwrap_or_default() {
             return Err(failure(
                 FailureKind::Limit,
                 "snapshot chunks must be contiguous and fit the declared length",
@@ -648,11 +652,11 @@ impl SnapshotSession {
     fn read(
         &self,
         operation: Uuid,
-        offset: u64,
-        max_bytes: u32,
+        offset: ByteCount,
+        max_bytes: ByteCount,
         instance: Option<Uuid>,
     ) -> Result<SnapshotReply> {
-        if max_bytes == 0 || max_bytes > MAX_SNAPSHOT_CHUNK {
+        if max_bytes.is_zero() || max_bytes > MAX_SNAPSHOT_CHUNK {
             return Err(failure(FailureKind::Limit, "invalid download chunk size"));
         }
         let mut entries = self.operations.entries();
@@ -663,21 +667,22 @@ impl SnapshotSession {
             return Err(failure(FailureKind::Stale, "database changed"));
         }
         let file = entry.file.as_mut().ok_or_else(missing_file)?;
-        let total = file.metadata().map_err(io_failure)?.len();
+        let total = ByteCount::from_bytes(file.metadata().map_err(io_failure)?.len());
         if offset > total {
             return Err(failure(
                 FailureKind::Limit,
                 "download offset exceeds snapshot length",
             ));
         }
-        file.seek(SeekFrom::Start(offset)).map_err(io_failure)?;
+        file.seek(SeekFrom::Start(offset.as_bytes()))
+            .map_err(io_failure)?;
         let mut bytes = vec![
             0;
-            usize::try_from((total - offset).min(u64::from(max_bytes)))
+            usize::try_from(total.saturating_sub(offset).min(max_bytes).as_bytes())
                 .map_err(io_failure)?
         ];
         file.read_exact(&mut bytes).map_err(io_failure)?;
-        let end = offset + bytes.len() as u64;
+        let end = offset.saturating_add(ByteCount::from_bytes(bytes.len() as u64));
         entry.status.transferred = entry.status.transferred.max(end);
         Ok(SnapshotReply::Chunk {
             offset,

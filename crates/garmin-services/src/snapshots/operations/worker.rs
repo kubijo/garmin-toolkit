@@ -2,6 +2,7 @@ use super::{
     Arc, CancellationToken, File, PreparedRestore, Read, SnapshotOperations, SnapshotPreview,
     SnapshotState, TempDir, UserContext, Uuid, io,
 };
+use garmin_model::artifact::ByteCount;
 use std::{io::Write as _, path::PathBuf};
 
 pub(super) struct Destination {
@@ -27,8 +28,8 @@ impl Destination {
 }
 
 enum Output {
-    Download(File, u64),
-    Saved(tempfile::NamedTempFile, Destination, u64),
+    Download(File, ByteCount),
+    Saved(tempfile::NamedTempFile, Destination, ByteCount),
 }
 
 pub(super) fn backup(
@@ -59,7 +60,8 @@ pub(super) fn backup(
                 ))
                 .map_err(|error| error.to_string())?;
             let file = File::open(path).map_err(|error| error.to_string())?;
-            let length = file.metadata().map_err(|error| error.to_string())?.len();
+            let length =
+                ByteCount::from_bytes(file.metadata().map_err(|error| error.to_string())?.len());
             if let Some(destination) = destination {
                 let parent = destination
                     .path
@@ -141,8 +143,12 @@ pub(super) fn import_file(
                     entry.status.total.ok_or("missing file length")?,
                 )
             };
-            let mut bytes = vec![0; super::MAX_SNAPSHOT_CHUNK as usize];
-            let mut transferred = 0;
+            let mut bytes = vec![
+                0;
+                usize::try_from(super::MAX_SNAPSHOT_CHUNK.as_bytes())
+                    .expect("snapshot chunk fits usize")
+            ];
+            let mut transferred = ByteCount::default();
             loop {
                 if worker_cancel.is_cancelled() {
                     return Err("backup reading cancelled".into());
@@ -151,7 +157,7 @@ pub(super) fn import_file(
                 if count == 0 {
                     break;
                 }
-                transferred += count as u64;
+                transferred = transferred.saturating_add(ByteCount::from_bytes(count as u64));
                 if transferred > total {
                     return Err("backup file changed while reading".into());
                 }

@@ -1,5 +1,6 @@
 //! Runtime composition supplies a destination, never a transaction engine.
 
+use garmin_model::artifact::NonZeroByteRate;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -79,7 +80,7 @@ impl TargetSession for PhysicalTarget {
 pub struct SimulatedTarget {
     pub source: Box<dyn DeviceRead>,
     pub fixture: Option<PathBuf>,
-    pub write_bytes_per_second: Option<std::num::NonZeroU64>,
+    pub write_bytes_per_second: Option<NonZeroByteRate>,
 }
 
 #[async_trait]

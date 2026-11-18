@@ -407,7 +407,7 @@ async fn upload(
     let RouteReply::Upload(upload) = session
         .request(RouteRequest::StartUpload {
             file_name: file.file_name(),
-            size: ByteCount::from_u64(size),
+            size: ByteCount::from_bytes(size),
         })
         .await
         .map_err(|error| error.message)?

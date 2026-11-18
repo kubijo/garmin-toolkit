@@ -7,6 +7,7 @@ use garmin_device::{
     MountedMtpUploadProgress, SafeRelativePath, StorageCapacity,
     storage::{BackupDestination, DeviceDirectoryEntry, DeviceIoError, DeviceRead, DeviceWrite},
 };
+use garmin_model::artifact::ByteCount;
 use std::path::Path;
 
 #[async_trait]
@@ -56,7 +57,7 @@ impl DeviceRead for Shadow {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         destination: BackupDestination,
         progress: MountedMtpBackupProgress,
     ) -> Result<String, DeviceIoError> {
@@ -69,7 +70,7 @@ impl DeviceRead for Shadow {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
         self.registered
@@ -82,7 +83,7 @@ impl DeviceRead for Shadow {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        limit: u64,
+        limit: ByteCount,
     ) -> Result<Option<Vec<u8>>, DeviceIoError> {
         self.registered
             .device()
@@ -139,7 +140,7 @@ impl DeviceWrite for Shadow {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
         self.registered
@@ -151,7 +152,7 @@ impl DeviceWrite for Shadow {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
     ) -> Result<(), DeviceIoError> {
         self.registered
             .device()
@@ -163,7 +164,7 @@ impl DeviceWrite for Shadow {
         storage: &str,
         path: &SafeRelativePath,
         source: &Path,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
         progress: MountedMtpUploadProgress,
     ) -> Result<(), DeviceIoError> {
@@ -176,7 +177,7 @@ impl DeviceWrite for Shadow {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         backup: &Path,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
@@ -191,6 +192,7 @@ impl DeviceWrite for Shadow {
 mod tests {
     use super::*;
     use crate::shadow::{Snapshot, Volume, register};
+    use garmin_model::artifact::ByteCount;
     use sha2::{Digest as _, Sha256};
 
     #[tokio::test]
@@ -208,7 +210,10 @@ mod tests {
                 key: "storage-001".to_owned(),
                 source_id: "internal".to_owned(),
                 label: "Internal storage".to_owned(),
-                capacity: Some(StorageCapacity::new(1_000, 100)),
+                capacity: Some(StorageCapacity::new(
+                    ByteCount::from_bytes(1_000),
+                    ByteCount::from_bytes(100),
+                )),
                 writable: Some(true),
             }],
         };
@@ -218,7 +223,7 @@ mod tests {
         };
         assert_eq!(
             shadow.device().state().await?.storages[0].capacity.bytes(),
-            Some((1_000, 100))
+            Some((ByteCount::from_bytes(1_000), ByteCount::from_bytes(100)))
         );
         let payload = root.path().join("new.img");
         std::fs::write(&payload, b"new map")?;
@@ -228,18 +233,18 @@ mod tests {
                 "internal",
                 &SafeRelativePath::parse("new.img")?,
                 &payload,
-                7,
+                ByteCount::from_bytes(7),
                 &hex::encode(Sha256::digest(b"new map")),
                 MountedMtpUploadProgress {
                     reporter: garmin_progress::ProgressReporter::default(),
-                    completed_before: 0,
-                    total: 7,
+                    completed_before: ByteCount::from_bytes(0),
+                    total: ByteCount::from_bytes(7),
                 },
             )
             .await?;
         assert_eq!(
             shadow.device().state().await?.storages[0].capacity.bytes(),
-            Some((1_000, 93))
+            Some((ByteCount::from_bytes(1_000), ByteCount::from_bytes(93)))
         );
         shadow.snapshot.volumes[0].capacity = Some(StorageCapacity::unavailable(
             "source did not report capacity",

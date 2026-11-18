@@ -1,4 +1,5 @@
 use garmin_device::storage::DeviceWrite;
+use garmin_model::artifact::NonZeroByteRate;
 use garmin_model::{
     artifact::{AcquisitionOperationId, ArtifactDigest, SourceIdentity},
     device::{InspectionSection, ProfileMarkerInspection},
@@ -248,7 +249,7 @@ impl Host {
     pub(super) fn with_simulation_write_rate(
         mut source: Box<dyn Source>,
         deployment: Arc<Deployment>,
-        bytes_per_second: Option<std::num::NonZeroU64>,
+        bytes_per_second: Option<NonZeroByteRate>,
     ) -> Arc<Self> {
         let (snapshots, _receiver) = rch::watch::channel(source.snapshot());
         let operations = SnapshotOperations::new(
@@ -971,12 +972,35 @@ impl ApplicationService for Host {
     async fn connect_trends(
         &self,
         user_id: garmin_model::identity::UserId,
+    ) -> Result<Result<Option<garmin_service_api::trends::LegacyHistory>, String>, rtc::CallError>
+    {
+        Ok(self
+            .connect_trends_v2(user_id)
+            .await?
+            .map(|history| history.map(Into::into)))
+    }
+
+    async fn connect_trends_v2(
+        &self,
+        user_id: garmin_model::identity::UserId,
     ) -> Result<Result<Option<garmin_model::garmin_connect::trends::History>, String>, rtc::CallError>
     {
         Ok(self
             .application()
             .await?
             .connect_trends(UserContext::new(user_id))
+            .await
+            .map_err(|error| error.to_string()))
+    }
+
+    async fn connect_trends_import_revision(
+        &self,
+        user_id: garmin_model::identity::UserId,
+    ) -> Result<Result<Option<ArtifactDigest>, String>, rtc::CallError> {
+        Ok(self
+            .application()
+            .await?
+            .connect_trends_import_revision(UserContext::new(user_id))
             .await
             .map_err(|error| error.to_string()))
     }
@@ -1404,7 +1428,7 @@ async fn receive_browser_upload(
     if request.size > garmin_device::MAX_BROWSER_TRANSFER_BYTES {
         return Err("the device upload exceeds the 512 MiB browser limit".to_owned());
     }
-    if contents.size() != Some(request.size) {
+    if contents.size() != Some(request.size.as_bytes()) {
         return Err("the device upload stream size does not match its request".to_owned());
     }
     let temporary = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
@@ -1421,10 +1445,10 @@ async fn receive_browser_upload(
         .sync_all()
         .await
         .map_err(|error| error.to_string())?;
-    if copied != request.size {
+    if copied != request.size.as_bytes() {
         return Err(format!(
             "the device upload ended after {copied} bytes; expected {}",
-            request.size
+            request.size.as_bytes()
         ));
     }
     Ok(temporary.into_temp_path())
@@ -1750,6 +1774,7 @@ mod tests {
         },
     };
     use garmin_fit::fixture;
+    use garmin_model::artifact::ByteCount;
     use garmin_progress::ProgressReporter;
     use garmin_service_api::{
         ApplicationService as _, ApplicationServiceClient, ApplicationServiceServerShared,
@@ -1829,7 +1854,7 @@ mod tests {
                 storage_id: DEMO_STORAGE_ID.to_owned(),
                 directory: directory.into(),
                 file_name: file_name.to_owned(),
-                size,
+                size: ByteCount::from_bytes(size),
             },
             receiver,
         );
@@ -2096,7 +2121,7 @@ mod tests {
         assert!(catalog.storages[0].entries.iter().any(|entry| {
             entry.path == "Garmin/Activity/History/2026/city-ride.fit"
                 && entry.kind == DeviceCatalogEntryKind::File
-                && entry.size.is_some_and(|size| size > 0)
+                && entry.size.is_some_and(|size| size > ByteCount::default())
         }));
     }
 
@@ -2128,7 +2153,7 @@ mod tests {
         assert!(uploaded.storages[0].entries.iter().any(|entry| {
             entry.path == "Garmin/Inbox/payload.bin"
                 && entry.kind == DeviceCatalogEntryKind::File
-                && entry.size == Some(11)
+                && entry.size == Some(ByteCount::from_bytes(11))
         }));
 
         let downloaded = demo_download(

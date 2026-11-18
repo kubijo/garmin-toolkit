@@ -8,8 +8,12 @@ use datapackage::{
 };
 
 use garmin_model::{
-    activity::{ActivityMetrics, ActivitySport, ActivityTotals, TimeRange, TimerState},
+    activity::{
+        ActivityDuration, ActivityMetrics, ActivitySport, ActivityTotals, Cadence, Distance,
+        Energy, HeartRate, Power, Speed, Temperature, TimeRange, TimerState,
+    },
     observation::ObservationId,
+    route::{Coordinate, Elevation, Latitude, Longitude},
 };
 use garmin_storage::ActivityExport;
 use serde::{Deserialize, Serialize};
@@ -90,27 +94,19 @@ impl Scalar for String {
 impl Scalar for ObservationId {
     const KIND: &'static str = "string";
 }
-impl Scalar for u64 {
-    const KIND: &'static str = "integer";
-}
-impl Scalar for u32 {
-    const KIND: &'static str = "integer";
-}
-impl Scalar for u16 {
-    const KIND: &'static str = "integer";
-}
-impl Scalar for i32 {
-    const KIND: &'static str = "integer";
-}
 impl Scalar for i64 {
     const KIND: &'static str = "integer";
 }
 impl Scalar for usize {
     const KIND: &'static str = "integer";
 }
-impl Scalar for f64 {
-    const KIND: &'static str = "number";
+macro_rules! scalar_quantities {
+    ($kind:literal: $($quantity:ty),+ $(,)?) => {
+        $(impl Scalar for $quantity { const KIND: &'static str = $kind; })+
+    };
 }
+scalar_quantities!("integer": ActivityDuration, Distance, Energy, HeartRate, Power, Speed, Temperature);
+scalar_quantities!("number": Cadence, Elevation, Latitude, Longitude);
 impl<T: Scalar> Scalar for Option<T> {
     const KIND: &'static str = T::KIND;
     const REQUIRED: bool = false;
@@ -140,20 +136,20 @@ table!(Aggregate {
     sport: String => "",
     start_ms: i64 => "unix millisecond",
     end_ms: i64 => "unix millisecond",
-    elapsed_ms: u64 => "ms",
-    timer_ms: u64 => "ms",
-    distance_mm: Option<u64> => "mm",
-    energy_kcal: Option<u32> => "kcal",
-    ascent_mm: Option<u64> => "mm",
-    descent_mm: Option<u64> => "mm",
-    average_speed_mm_s: Option<u32> => "mm/s",
-    maximum_speed_mm_s: Option<u32> => "mm/s",
-    average_heart_rate_bpm: Option<u16> => "beats/min",
-    maximum_heart_rate_bpm: Option<u16> => "beats/min",
-    average_cadence_rpm: Option<f64> => "rev/min",
-    maximum_cadence_rpm: Option<f64> => "rev/min",
-    average_power_w: Option<u32> => "W",
-    maximum_power_w: Option<u32> => "W",
+    elapsed_ms: ActivityDuration => "ms",
+    timer_ms: ActivityDuration => "ms",
+    distance_mm: Option<Distance> => "mm",
+    energy_kcal: Option<Energy> => "kcal",
+    ascent_mm: Option<Distance> => "mm",
+    descent_mm: Option<Distance> => "mm",
+    average_speed_mm_s: Option<Speed> => "mm/s",
+    maximum_speed_mm_s: Option<Speed> => "mm/s",
+    average_heart_rate_bpm: Option<HeartRate> => "beats/min",
+    maximum_heart_rate_bpm: Option<HeartRate> => "beats/min",
+    average_cadence_rpm: Option<Cadence> => "rev/min",
+    maximum_cadence_rpm: Option<Cadence> => "rev/min",
+    average_power_w: Option<Power> => "W",
+    maximum_power_w: Option<Power> => "W",
 });
 
 impl Aggregate {
@@ -178,32 +174,20 @@ impl Aggregate {
             .to_owned(),
             start_ms: time.start().as_unix_milliseconds(),
             end_ms: time.end().as_unix_milliseconds(),
-            elapsed_ms: totals.elapsed().as_milliseconds(),
-            timer_ms: totals.timer().as_milliseconds(),
-            distance_mm: totals.distance().map(|v| v.as_millimeters()),
-            energy_kcal: totals.energy().map(|v| v.as_kilocalories()),
-            ascent_mm: totals.ascent().map(|v| v.as_millimeters()),
-            descent_mm: totals.descent().map(|v| v.as_millimeters()),
-            average_speed_mm_s: metrics
-                .average_speed()
-                .map(|v| v.as_millimeters_per_second()),
-            maximum_speed_mm_s: metrics
-                .maximum_speed()
-                .map(|v| v.as_millimeters_per_second()),
-            average_heart_rate_bpm: metrics
-                .average_heart_rate()
-                .map(|v| v.as_beats_per_minute()),
-            maximum_heart_rate_bpm: metrics
-                .maximum_heart_rate()
-                .map(|v| v.as_beats_per_minute()),
-            average_cadence_rpm: metrics
-                .average_cadence()
-                .map(|v| v.as_revolutions_per_minute()),
-            maximum_cadence_rpm: metrics
-                .maximum_cadence()
-                .map(|v| v.as_revolutions_per_minute()),
-            average_power_w: metrics.average_power().map(|v| v.as_watts()),
-            maximum_power_w: metrics.maximum_power().map(|v| v.as_watts()),
+            elapsed_ms: totals.elapsed(),
+            timer_ms: totals.timer(),
+            distance_mm: totals.distance(),
+            energy_kcal: totals.energy(),
+            ascent_mm: totals.ascent(),
+            descent_mm: totals.descent(),
+            average_speed_mm_s: metrics.average_speed(),
+            maximum_speed_mm_s: metrics.maximum_speed(),
+            average_heart_rate_bpm: metrics.average_heart_rate(),
+            maximum_heart_rate_bpm: metrics.maximum_heart_rate(),
+            average_cadence_rpm: metrics.average_cadence(),
+            maximum_cadence_rpm: metrics.maximum_cadence(),
+            average_power_w: metrics.average_power(),
+            maximum_power_w: metrics.maximum_power(),
         }
     }
 }
@@ -212,15 +196,15 @@ table!(Sample {
     observation_id: ObservationId => "",
     position: usize => "",
     timestamp_ms: i64 => "unix millisecond",
-    latitude_degrees: Option<f64> => "degree",
-    longitude_degrees: Option<f64> => "degree",
-    elevation_m: Option<f64> => "m",
-    distance_mm: Option<u64> => "mm",
-    speed_mm_s: Option<u32> => "mm/s",
-    heart_rate_bpm: Option<u16> => "beats/min",
-    cadence_rpm: Option<f64> => "rev/min",
-    power_w: Option<u32> => "W",
-    temperature_millicelsius: Option<i32> => "milli degree Celsius",
+    latitude_degrees: Option<Latitude> => "degree",
+    longitude_degrees: Option<Longitude> => "degree",
+    elevation_m: Option<Elevation> => "m",
+    distance_mm: Option<Distance> => "mm",
+    speed_mm_s: Option<Speed> => "mm/s",
+    heart_rate_bpm: Option<HeartRate> => "beats/min",
+    cadence_rpm: Option<Cadence> => "rev/min",
+    power_w: Option<Power> => "W",
+    temperature_millicelsius: Option<Temperature> => "milli degree Celsius",
 });
 table!(Event { observation_id: ObservationId => "", position: usize => "", timestamp_ms: i64 => "unix millisecond", state: String => "" });
 
@@ -283,15 +267,15 @@ impl Rows {
                 observation_id: id,
                 position,
                 timestamp_ms: point.timestamp().as_unix_milliseconds(),
-                latitude_degrees: point.coordinate().map(|v| v.latitude().as_degrees()),
-                longitude_degrees: point.coordinate().map(|v| v.longitude().as_degrees()),
-                elevation_m: point.elevation().map(|v| v.as_meters()),
-                distance_mm: point.distance().map(|v| v.as_millimeters()),
-                speed_mm_s: metrics.speed().map(|v| v.as_millimeters_per_second()),
-                heart_rate_bpm: metrics.heart_rate().map(|v| v.as_beats_per_minute()),
-                cadence_rpm: metrics.cadence().map(|v| v.as_revolutions_per_minute()),
-                power_w: metrics.power().map(|v| v.as_watts()),
-                temperature_millicelsius: metrics.temperature().map(|v| v.as_millicelsius()),
+                latitude_degrees: point.coordinate().as_ref().map(Coordinate::latitude),
+                longitude_degrees: point.coordinate().as_ref().map(Coordinate::longitude),
+                elevation_m: point.elevation(),
+                distance_mm: point.distance(),
+                speed_mm_s: metrics.speed(),
+                heart_rate_bpm: metrics.heart_rate(),
+                cadence_rpm: metrics.cadence(),
+                power_w: metrics.power(),
+                temperature_millicelsius: metrics.temperature(),
             });
         }
         self.events.extend(

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use cint::ColorInterop;
 use egui::{Align, Align2, Id, Layout, Order, RichText, Sense, Ui};
 use garmin_color::theme;
@@ -98,7 +100,8 @@ pub fn show(ui: &Ui, id: Id, props: &Props<'_>) {
 }
 
 #[must_use]
-pub fn format_duration(seconds: u64) -> String {
+pub fn format_duration(duration: Duration) -> String {
+    let seconds = duration.as_secs();
     let hours = seconds / 3_600;
     let minutes = seconds % 3_600 / 60;
     let seconds = seconds % 60;
@@ -112,6 +115,7 @@ pub fn format_duration(seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::format_duration;
+    use std::time::Duration;
 
     #[test]
     fn reconnect_card_stays_inside_narrow_viewports_in_both_themes() {
@@ -152,8 +156,8 @@ mod tests {
 
     #[test]
     fn elapsed_duration_uses_a_stable_clock() {
-        assert_eq!(format_duration(0), "00:00");
-        assert_eq!(format_duration(61), "01:01");
-        assert_eq!(format_duration(3_661), "01:01:01");
+        assert_eq!(format_duration(Duration::ZERO), "00:00");
+        assert_eq!(format_duration(Duration::from_secs(61)), "01:01");
+        assert_eq!(format_duration(Duration::from_secs(3_661)), "01:01:01");
     }
 }

@@ -316,7 +316,7 @@ fn connect(shared: Rc<RefCell<crate::State>>, context: Context) {
                 }
                 context.request_repaint();
                 loop {
-                    crate::wait_milliseconds(1_000).await;
+                    crate::wait_for(Duration::from_millis(1_000)).await;
                     crate::heartbeat(&client)
                         .await
                         .map_err(|error| error.to_string())?;
@@ -327,7 +327,7 @@ fn connect(shared: Rc<RefCell<crate::State>>, context: Context) {
                 crate::set_connection_error(&shared, error);
             }
             context.request_repaint();
-            crate::wait_milliseconds(1_000).await;
+            crate::wait_for(Duration::from_millis(1_000)).await;
         }
     });
 }

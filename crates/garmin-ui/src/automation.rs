@@ -1,6 +1,10 @@
 //! AccessKit-targeted input for demos and headless tests.
 
 use egui::{Context, Event, Modifiers, PointerButton, Pos2, RawInput, Rect};
+use garmin_model::value::{duration_milliseconds, duration_seconds};
+use std::time::Duration;
+
+const INPUT_FRAME: Duration = Duration::from_nanos(16_666_667);
 use kittest::{By, Queryable as _};
 use serde::{Deserialize, Serialize};
 
@@ -140,13 +144,16 @@ pub struct Report {
     pub completed: usize,
     pub total: usize,
     pub failure: Option<String>,
-    pub elapsed_seconds: f64,
+    #[serde(rename = "elapsed_seconds", with = "duration_seconds")]
+    pub elapsed: Duration,
     pub viewport: [f32; 2],
     pub pixels_per_point: f32,
     pub viewport_changes: Vec<ViewportChange>,
     pub resize_request: Option<ResizeRequest>,
-    pub driver_milliseconds: f64,
-    pub tree_milliseconds: f64,
+    #[serde(rename = "driver_milliseconds", with = "duration_milliseconds")]
+    pub driver_elapsed: Duration,
+    #[serde(rename = "tree_milliseconds", with = "duration_milliseconds")]
+    pub tree_elapsed: Duration,
     pub readiness: Option<String>,
     pub actions: Vec<ActionTiming>,
     pub input_events: usize,
@@ -161,9 +168,12 @@ pub struct ActionTiming {
     pub phase: String,
     pub kind: String,
     pub target: String,
-    pub scheduled_seconds: f64,
-    pub actual_seconds: f64,
-    pub lateness_seconds: f64,
+    #[serde(rename = "scheduled_seconds", with = "duration_seconds")]
+    pub scheduled: Duration,
+    #[serde(rename = "actual_seconds", with = "duration_seconds")]
+    pub actual: Duration,
+    #[serde(rename = "lateness_seconds", with = "duration_seconds")]
+    pub lateness: Duration,
     pub target_bounds: [f32; 4],
     pub pointer_position: Option<[f32; 2]>,
 }
@@ -221,14 +231,17 @@ pub fn status_view(
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Pause {
-    pub started_seconds: f64,
-    pub duration_seconds: f64,
+    #[serde(rename = "started_seconds", with = "duration_seconds")]
+    pub started: Duration,
+    #[serde(rename = "duration_seconds", with = "duration_seconds")]
+    pub duration: Duration,
 }
 
 /// Geometry changes observed during a functional run.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ViewportChange {
-    pub elapsed_seconds: f64,
+    #[serde(rename = "elapsed_seconds", with = "duration_seconds")]
+    pub elapsed: Duration,
     pub previous_viewport: [f32; 2],
     pub viewport: [f32; 2],
     pub previous_pixels_per_point: f32,
@@ -239,31 +252,32 @@ struct Run {
     background: bool,
     steps: Vec<Step>,
     report: Report,
-    start: Option<f64>,
-    due: f64,
-    waiting_since: f64,
+    start: Option<Duration>,
+    start_offset: Duration,
+    due: Duration,
+    waiting_since: Duration,
     gesture: Option<(Pos2, usize)>,
-    input_layout_since: Option<f64>,
+    input_layout_since: Option<Duration>,
     target_geometry: Option<(Rect, bool)>,
-    stabilizing_since: Option<f64>,
-    ready_since: Option<f64>,
+    stabilizing_since: Option<Duration>,
+    ready_since: Option<Duration>,
     recovering_layout: bool,
-    resize_ready_since: Option<f64>,
+    resize_ready_since: Option<Duration>,
     restore_viewport: bool,
 }
 
 impl Run {
-    fn input_layout_ready(&mut self, elapsed: f64) -> bool {
+    fn input_layout_ready(&mut self, elapsed: Duration) -> bool {
         let Some(started) = self.input_layout_since.take() else {
             return true;
         };
         // The input-delivery frame can still publish pre-click widget state.
         // Allow a fresh layout before reading targets for the next action.
-        self.due += elapsed - started;
+        self.due += elapsed.saturating_sub(started);
         false
     }
 
-    fn complete_step(&mut self, elapsed: f64, after: f64, waiting: bool) {
+    fn complete_step(&mut self, elapsed: Duration, after: Duration, waiting: bool) {
         self.report.completed += 1;
         self.gesture = None;
         self.target_geometry = None;
@@ -276,7 +290,7 @@ impl Run {
         }
     }
 
-    fn pointer_ready(&mut self, action: &Action, rect: Rect, elapsed: f64) -> bool {
+    fn pointer_ready(&mut self, action: &Action, rect: Rect, elapsed: Duration) -> bool {
         if !action.uses_pointer() || self.gesture.is_some() {
             return true;
         }
@@ -291,19 +305,19 @@ impl Run {
         }
         if let Some(started) = self.stabilizing_since.take() {
             // Readiness waits shift scheduling without consuming later actions' deadlines.
-            self.due += elapsed - started;
+            self.due += elapsed.saturating_sub(started);
         }
         true
     }
 
-    fn layout_ready(&mut self, action: &Action, value: Option<&str>, elapsed: f64) -> bool {
+    fn layout_ready(&mut self, action: &Action, value: Option<&str>, elapsed: Duration) -> bool {
         if !self.recovering_layout {
             return true;
         }
         if matches!(action, Action::Observe(_))
             && value != Some("ready")
             && !value.is_some_and(|value| value.starts_with("failed:"))
-            && elapsed - self.waiting_since <= 30.0
+            && elapsed.saturating_sub(self.waiting_since) <= Duration::from_secs(30)
         {
             return false;
         }
@@ -312,37 +326,40 @@ impl Run {
         true
     }
 
-    fn should_wait_for_target(&self, step: &Step, elapsed: f64) -> bool {
-        let missing_for = elapsed - self.waiting_since;
+    fn should_wait_for_target(&self, step: &Step, elapsed: Duration) -> bool {
+        let missing_for = elapsed.saturating_sub(self.waiting_since);
         if self.recovering_layout
             || matches!(step.action, Action::Wait | Action::Ready | Action::Reveal)
         {
-            return missing_for <= 30.0;
+            return missing_for <= Duration::from_secs(30);
         }
         step.action.uses_pointer()
             && self.gesture.is_none()
-            && missing_for <= 1.0
+            && missing_for <= Duration::from_secs(1)
             && self.report.completed.checked_sub(1).is_some_and(|index| {
                 let previous = &self.steps[index];
                 previous.target == step.target && matches!(previous.action, Action::Wait)
             })
     }
 
-    fn map_ready(&mut self, value: Option<&str>, elapsed: f64) -> Result<bool, String> {
+    fn map_ready(&mut self, value: Option<&str>, elapsed: Duration) -> Result<bool, String> {
         if let Some(failure) = value.filter(|value| value.starts_with("failed:")) {
             return Err(failure.into());
         }
         if value != Some("ready") {
             self.ready_since = None;
-            if elapsed - self.waiting_since > 30.0 {
+            if elapsed.saturating_sub(self.waiting_since) > Duration::from_secs(30) {
                 return Err("visible map preparation/upload readiness timed out".into());
             }
             return Ok(false);
         }
-        Ok(elapsed - *self.ready_since.get_or_insert(elapsed) >= 0.5)
+        Ok(
+            elapsed.saturating_sub(*self.ready_since.get_or_insert(elapsed))
+                >= Duration::from_millis(500),
+        )
     }
 
-    fn recover_layout(&mut self, input: &mut RawInput, held: &mut Option<Pos2>, elapsed: f64) {
+    fn recover_layout(&mut self, input: &mut RawInput, held: &mut Option<Pos2>, elapsed: Duration) {
         // The target tree still describes the old layout.
         // Release outside controls, then retry the unfinished action after egui lays out the new size.
         if self.gesture.take().is_some()
@@ -355,7 +372,7 @@ impl Run {
             release_buttons(input, &[PointerButton::Primary]);
             self.report.input_events += input.events.len() - before;
         }
-        self.due = elapsed + 1.0 / 60.0;
+        self.due = elapsed + INPUT_FRAME;
         self.waiting_since = elapsed;
         self.ready_since = None;
         self.target_geometry = None;
@@ -368,21 +385,27 @@ impl Run {
         &mut self,
         ctx: &Context,
         input: &RawInput,
-    ) -> Result<(f64, Rect, bool), String> {
+    ) -> Result<(Duration, Rect, bool), String> {
         let now = input
             .time
             .ok_or("automation requires a monotonic input clock")?;
+        let now = Duration::try_from_secs_f64(now)
+            .map_err(|_| "automation clock moved backwards or became invalid")?;
         let epoch = *self.start.get_or_insert(now);
-        let elapsed = now - epoch;
-        if !elapsed.is_finite() || elapsed + 0.000_001 < self.report.elapsed_seconds {
+        let tolerance = Duration::from_micros(1);
+        let elapsed = self.start_offset.saturating_add(now.saturating_sub(epoch));
+        if now.saturating_add(tolerance) < epoch
+            || elapsed.saturating_add(tolerance) < self.report.elapsed
+        {
             return Err("automation clock moved backwards or became invalid".into());
         }
-        let elapsed = elapsed.max(self.report.elapsed_seconds);
-        if !self.background && elapsed - self.report.elapsed_seconds > 2.0 {
+        let elapsed = elapsed.max(self.report.elapsed);
+        if !self.background && elapsed.saturating_sub(self.report.elapsed) > Duration::from_secs(2)
+        {
             return Err("automation frame missed its two second deadline".into());
         }
-        self.report.elapsed_seconds = elapsed;
-        if elapsed > 120.0 {
+        self.report.elapsed = elapsed;
+        if elapsed > Duration::from_secs(120) {
             return Err("scenario exceeded its 120 second deadline".into());
         }
         let screen = input.screen_rect.unwrap_or_else(|| {
@@ -401,7 +424,7 @@ impl Run {
         if changed {
             self.report.performance_eligible = false;
             self.report.viewport_changes.push(ViewportChange {
-                elapsed_seconds: elapsed,
+                elapsed,
                 previous_viewport: self.report.viewport,
                 viewport,
                 previous_pixels_per_point: self.report.pixels_per_point,
@@ -432,8 +455,8 @@ pub struct Driver {
     reset_modifiers: bool,
     launch_request: Option<&'static str>,
     pub launch_error: Option<String>,
-    paused_at: Option<f64>,
-    resumed_at: Option<f64>,
+    paused_at: Option<Duration>,
+    resumed_at: Option<Duration>,
 }
 
 impl Driver {
@@ -502,13 +525,13 @@ impl Driver {
                 completed: 0,
                 total: steps.len(),
                 failure: None,
-                elapsed_seconds: 0.0,
+                elapsed: Duration::ZERO,
                 viewport: [0.0; 2],
                 pixels_per_point: 1.0,
                 viewport_changes: Vec::new(),
                 resize_request: None,
-                driver_milliseconds: 0.0,
-                tree_milliseconds: 0.0,
+                driver_elapsed: Duration::ZERO,
+                tree_elapsed: Duration::ZERO,
                 readiness: None,
                 actions: Vec::with_capacity(steps.len()),
                 input_events: 0,
@@ -518,8 +541,9 @@ impl Driver {
             },
             steps,
             start: None,
-            due: 0.0,
-            waiting_since: 0.0,
+            start_offset: Duration::ZERO,
+            due: Duration::ZERO,
+            waiting_since: Duration::ZERO,
             gesture: None,
             input_layout_since: None,
             target_geometry: None,
@@ -704,7 +728,7 @@ impl Driver {
         if matches!(step.action, Action::Ready) && !run.map_ready(value.as_deref(), elapsed)? {
             return Ok(());
         }
-        if !run.background && !waiting && elapsed - run.due > 2.0 {
+        if !run.background && !waiting && elapsed.saturating_sub(run.due) > Duration::from_secs(2) {
             return Err(format!("action missed its deadline: {}", step.target));
         }
         if !run.pointer_ready(&step.action, rect, elapsed) {
@@ -732,7 +756,7 @@ impl Driver {
                     "map lost readiness during stationary observation: {value:?}"
                 ));
             }
-            if elapsed - run.due < seconds {
+            if elapsed.saturating_sub(run.due) < seconds {
                 return Ok(());
             }
         }
@@ -769,15 +793,15 @@ impl Driver {
                 + if let Action::Observe(seconds) = step.action {
                     seconds
                 } else {
-                    0.0
+                    Duration::ZERO
                 };
             run.report.actions.push(ActionTiming {
                 phase: step.phase.into(),
                 kind: step.action.name().into(),
                 target: step.target,
-                scheduled_seconds: scheduled,
-                actual_seconds: elapsed,
-                lateness_seconds: (elapsed - scheduled).max(0.0),
+                scheduled,
+                actual: elapsed,
+                lateness: elapsed.saturating_sub(scheduled),
                 target_bounds: [rect.left(), rect.top(), rect.right(), rect.bottom()],
                 pointer_position,
             });
@@ -795,7 +819,7 @@ impl Driver {
             run.complete_step(elapsed, step.after, waiting);
         } else {
             run.gesture = Some((start, frame + 1));
-            run.due += 1.0 / 60.0;
+            run.due += INPUT_FRAME;
         }
         Ok(())
     }
@@ -1146,7 +1170,7 @@ impl egui::plugin::Plugin for Driver {
             crate::diagnostics::automation(ctx, "root", self.report());
         }
         if was_running && let Some(run) = &mut self.run {
-            run.report.driver_milliseconds += started.elapsed().as_secs_f64() * 1000.0;
+            run.report.driver_elapsed += started.elapsed();
         }
         if self.running() || self.release || self.reset_modifiers || self.paused_at.is_some() {
             ctx.request_repaint_of(self.viewport);
@@ -1181,7 +1205,7 @@ impl egui::plugin::Plugin for Driver {
                         (rect, stable)
                     });
             }
-            run.report.tree_milliseconds += started.elapsed().as_secs_f64() * 1000.0;
+            run.report.tree_elapsed += started.elapsed();
         }
     }
 }

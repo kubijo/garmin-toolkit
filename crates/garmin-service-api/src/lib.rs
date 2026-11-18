@@ -7,17 +7,19 @@ pub mod logging;
 pub mod maps;
 pub mod routes;
 pub mod snapshots;
+pub mod trends;
 
 use camino::Utf8PathBuf;
+use garmin_model::artifact::ByteCount;
 use garmin_model::{
     activity::{
         Activity, ActivityMetrics, ActivitySummary, ActivityTotals, Cadence, Distance, HeartRate,
-        Power, Speed, TimeRange, TimerState,
+        Power, Speed, Temperature, TimeRange, TimerState,
     },
     device::DeviceStorageState,
     identity::User,
     observation::ObservationId,
-    route::Coordinate,
+    route::{Coordinate, Elevation},
     value::Timestamp,
 };
 #[garmin_macros::portable(eq)]
@@ -50,7 +52,7 @@ pub struct DeviceCatalogStorage {
 pub struct DeviceCatalogEntry {
     pub path: Utf8PathBuf,
     pub kind: DeviceCatalogEntryKind,
-    pub size: Option<u64>,
+    pub size: Option<ByteCount>,
 }
 
 #[garmin_macros::portable(copy, eq)]
@@ -103,7 +105,7 @@ pub struct DeviceBrowserUpload {
     pub storage_id: String,
     pub directory: Utf8PathBuf,
     pub file_name: String,
-    pub size: u64,
+    pub size: ByteCount,
 }
 
 /// Single-use, same-origin HTTP download capability. Contains no host path.
@@ -288,13 +290,15 @@ pub struct ActivityLapSnapshot {
 pub struct ActivitySampleSnapshot {
     pub timestamp: Timestamp,
     pub coordinate: Option<Coordinate>,
-    pub elevation_meters: Option<f64>,
+    #[serde(rename = "elevation_meters")]
+    pub elevation: Option<Elevation>,
     pub distance: Option<Distance>,
     pub speed: Option<Speed>,
     pub heart_rate: Option<HeartRate>,
     pub cadence: Option<Cadence>,
     pub power: Option<Power>,
-    pub temperature_millicelsius: Option<i32>,
+    #[serde(rename = "temperature_millicelsius")]
+    pub temperature: Option<Temperature>,
 }
 
 #[garmin_macros::portable(copy, eq)]
@@ -329,15 +333,13 @@ impl From<&Activity> for ActivityRecordingSnapshot {
                     ActivitySampleSnapshot {
                         timestamp: sample.timestamp(),
                         coordinate: sample.coordinate(),
-                        elevation_meters: sample.elevation().map(|value| value.as_meters()),
+                        elevation: sample.elevation(),
                         distance: sample.distance(),
                         speed: measurements.speed(),
                         heart_rate: measurements.heart_rate(),
                         cadence: measurements.cadence(),
                         power: measurements.power(),
-                        temperature_millicelsius: measurements
-                            .temperature()
-                            .map(|temperature| temperature.as_millicelsius()),
+                        temperature: measurements.temperature(),
                     }
                 })
                 .collect(),
@@ -509,10 +511,7 @@ mod rpc {
         async fn connect_trends(
             &self,
             user_id: UserId,
-        ) -> Result<
-            Result<Option<garmin_model::garmin_connect::trends::History>, String>,
-            rtc::CallError,
-        >;
+        ) -> Result<Result<Option<crate::trends::LegacyHistory>, String>, rtc::CallError>;
         async fn read_connect_cache(
             &self,
             user_id: UserId,
@@ -551,6 +550,17 @@ mod rpc {
             browser: String,
             client: crate::control::BrowserControlClient,
         ) -> Result<Result<Option<crate::control::ControlSession>, String>, rtc::CallError>;
+        async fn connect_trends_v2(
+            &self,
+            user_id: UserId,
+        ) -> Result<
+            Result<Option<garmin_model::garmin_connect::trends::History>, String>,
+            rtc::CallError,
+        >;
+        async fn connect_trends_import_revision(
+            &self,
+            user_id: UserId,
+        ) -> Result<Result<Option<garmin_model::artifact::ArtifactDigest>, String>, rtc::CallError>;
     }
 }
 
@@ -565,8 +575,8 @@ mod tests {
     use garmin_model::{
         activity::{
             Activity, ActivityDuration, ActivityMetrics, ActivityTotals, Cadence, Distance,
-            HeartRate, Lap, Power, Speed, TimeRange, TimerEvent, TimerState, TrackMeasurements,
-            TrackPoint,
+            HeartRate, Lap, Power, Speed, Temperature, TimeRange, TimerEvent, TimerState,
+            TrackMeasurements, TrackPoint,
         },
         route::{Coordinate, Elevation, Latitude, Longitude},
         value::Timestamp,
@@ -647,8 +657,14 @@ mod tests {
 
         assert_eq!(recording.laps.len(), 1);
         assert_eq!(recording.samples.len(), 2);
-        assert_eq!(recording.samples[0].elevation_meters, Some(52.5));
-        assert_eq!(recording.samples[0].temperature_millicelsius, Some(18_500));
+        assert_eq!(
+            recording.samples[0].elevation,
+            Elevation::from_meters(52.5).ok()
+        );
+        assert_eq!(
+            recording.samples[0].temperature,
+            Some(Temperature::from_millicelsius(18_500))
+        );
         assert_eq!(
             recording.samples[0]
                 .heart_rate

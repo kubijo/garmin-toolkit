@@ -1,5 +1,6 @@
 //! Explicitly approved preservation of empty, journal-bound interrupted uploads.
 
+use garmin_model::artifact::ByteCount;
 use std::path::{Path, PathBuf};
 
 use garmin_device::{
@@ -76,8 +77,12 @@ pub async fn review_assisted_recovery<D: DeviceWrite + ?Sized>(
         let observed = device
             .inspect_with_progress(&write.target.storage_id, &write.target.path, progress)
             .await?;
-        let empty = observed.into_parts() == (DevicePathState::RegularFile, Some(0));
-        if empty && write.target.size > 0 && checkpoints[index] == OperationCheckpoint::Started {
+        let empty =
+            observed.into_parts() == (DevicePathState::RegularFile, Some(ByteCount::from_bytes(0)));
+        if empty
+            && !write.target.size.is_zero()
+            && checkpoints[index] == OperationCheckpoint::Started
+        {
             let payload = recovery_file(
                 root,
                 write
@@ -198,7 +203,12 @@ pub async fn approve_assisted_recovery<D: DeviceWrite + ?Sized>(
     for file in &reviewed.files {
         require_running(progress)?;
         device
-            .delete_size_checked_with_progress(&file.storage_id, &file.path, 0, progress)
+            .delete_size_checked_with_progress(
+                &file.storage_id,
+                &file.path,
+                ByteCount::from_bytes(0),
+                progress,
+            )
             .await?;
     }
     progress.completed(
@@ -237,12 +247,12 @@ async fn preserve_empty_uploads<D: DeviceWrite + ?Sized>(
             .backup(
                 &file.storage_id,
                 &file.path,
-                0,
+                ByteCount::default(),
                 garmin_device::BackupDestination::new(path.clone(), output)?,
                 MountedMtpBackupProgress {
                     reporter: progress.clone(),
-                    completed_before: 0,
-                    total: 0,
+                    completed_before: ByteCount::from_bytes(0),
+                    total: ByteCount::from_bytes(0),
                 },
             )
             .await?;

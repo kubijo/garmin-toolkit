@@ -6,6 +6,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use std::time::Duration;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(module = "/window-control.js")]
@@ -48,7 +49,7 @@ pub(super) fn subscribe(context: &Context, active: Arc<AtomicBool>) -> rch::mpsc
             if active.load(Ordering::Acquire) {
                 break;
             }
-            crate::wait_milliseconds(100).await;
+            crate::wait_for(Duration::from_millis(100)).await;
         }
         let mut revision = None;
         while active.load(Ordering::Acquire) && !sender.is_closed() {
@@ -64,7 +65,7 @@ pub(super) fn subscribe(context: &Context, active: Arc<AtomicBool>) -> rch::mpsc
                     break;
                 }
             }
-            crate::wait_milliseconds(100).await;
+            crate::wait_for(Duration::from_millis(100)).await;
         }
     });
     receiver

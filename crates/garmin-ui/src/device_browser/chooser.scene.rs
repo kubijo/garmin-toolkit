@@ -1,5 +1,6 @@
 use crate::SceneStateKey as _;
 use gallery::prelude::*;
+use garmin_model::artifact::ByteCount;
 
 scene_meta! { title: "Components / File chooser" }
 
@@ -91,7 +92,7 @@ fn directory() -> garmin_service_api::files::Directory {
             DeviceCatalogEntry {
                 path: ".previous.tar.zst".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(40_000_000),
+                size: Some(ByteCount::from_bytes(40_000_000)),
             },
             DeviceCatalogEntry {
                 path: "Archive".into(),
@@ -101,12 +102,12 @@ fn directory() -> garmin_service_api::files::Directory {
             DeviceCatalogEntry {
                 path: "garmin-backup-2026-09-28.tar.zst".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(80_000_000),
+                size: Some(ByteCount::from_bytes(80_000_000)),
             },
             DeviceCatalogEntry {
                 path: "garmin-backup-2026-09-29.tar.zst".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(84_000_000),
+                size: Some(ByteCount::from_bytes(84_000_000)),
             },
         ],
     }

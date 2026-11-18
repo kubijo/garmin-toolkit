@@ -1,7 +1,9 @@
 //! Browser map worker transport and local fallback.
 
+use std::time::Duration;
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
+use garmin_model::artifact::ByteCount;
 use garmin_ui::activity;
 use wasm_bindgen::{JsCast as _, prelude::*};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
@@ -10,8 +12,8 @@ mod admission;
 mod codec;
 use admission::Step as BrowserTileAdmissionStep;
 
-const MAP_WORKER_INITIALIZATION_TIMEOUT_MILLISECONDS: i32 = 10_000;
-const MAP_WORKER_TASK_TIMEOUT_MILLISECONDS: i32 = 20_000;
+const MAP_WORKER_INITIALIZATION_TIMEOUT: Duration = Duration::from_millis(10_000);
+const MAP_WORKER_TASK_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[wasm_bindgen(module = "/browser-assets.js")]
 extern "C" {
@@ -40,8 +42,10 @@ pub fn prepare_map_tile(
     dark_mode: bool,
     bytes: &js_sys::Uint8Array,
 ) -> Result<js_sys::Array, JsValue> {
-    activity::map_runtime::BrowserTileLimits::check_encoded_bytes(bytes.length() as usize)
-        .map_err(|error| js_error(&error))?;
+    activity::map_runtime::BrowserTileLimits::check_encoded_bytes(ByteCount::from_bytes(
+        u64::from(bytes.length()),
+    ))
+    .map_err(|error| js_error(&error))?;
     let bytes = bytes.to_vec();
     let prepared = activity::map_runtime::prepare_tile_for_browser_worker(zoom, dark_mode, &bytes)
         .map_err(|error| js_error(&error))?;
@@ -80,7 +84,7 @@ fn check_data_result(
     kind: activity::map_runtime::BrowserWorkerTaskKind,
     bytes: usize,
 ) -> Result<(), JsValue> {
-    if bytes > kind.result_byte_limit() {
+    if ByteCount::from_bytes(bytes as u64) > kind.result_byte_limit() {
         return Err(js_error("prepared map data exceeded its transfer limit"));
     }
     Ok(())
@@ -133,7 +137,9 @@ async fn fetch_map_tile_bytes(
         .await
         .map_err(map_fetch_error)?;
     let bytes = js_sys::Uint8Array::new(&buffer);
-    activity::map_runtime::BrowserTileLimits::check_encoded_bytes(bytes.length() as usize)?;
+    activity::map_runtime::BrowserTileLimits::check_encoded_bytes(ByteCount::from_bytes(
+        u64::from(bytes.length()),
+    ))?;
     Ok(bytes.to_vec())
 }
 
@@ -364,9 +370,10 @@ impl PendingBrowserTile {
         }
         *offset = end;
         Ok(BrowserTileAdmissionStep::Copied {
-            bytes: length,
-            text_milliseconds: text_started
-                .map_or(0.0, |started| crate::browser_timing::now() - started),
+            bytes: ByteCount::from_bytes(length as u64),
+            text_elapsed: text_started
+                .map(crate::browser_timing::elapsed_since)
+                .unwrap_or_default(),
         })
     }
 
@@ -390,17 +397,19 @@ impl PendingBrowserTile {
 type BrowserTileAdmission = admission::Admission<PendingBrowserTile>;
 
 impl admission::Work for PendingBrowserTile {
-    fn retained_bytes(&self) -> usize {
-        self.builder.retained_bytes()
+    fn retained_bytes(&self) -> ByteCount {
+        ByteCount::from_bytes(self.builder.retained_bytes() as u64)
     }
     fn is_complete(&self) -> bool {
         self.is_complete()
     }
     fn advance(
         &mut self,
-        maximum: usize,
+        maximum: ByteCount,
         scratch: &mut Vec<u8>,
     ) -> Result<admission::Step, String> {
+        let maximum = usize::try_from(maximum.as_bytes())
+            .map_err(|_| "browser tile admission limit exceeds addressable memory".to_owned())?;
         self.advance(maximum, scratch)
     }
 }
@@ -462,7 +471,7 @@ impl BrowserMapWorkerShared {
         }
         let shared = Rc::downgrade(self);
         spawn_local(async move {
-            wait_milliseconds(MAP_WORKER_TASK_TIMEOUT_MILLISECONDS).await;
+            wait_for(MAP_WORKER_TASK_TIMEOUT).await;
             if let Some(shared) = shared.upgrade() {
                 shared.task_timeout(id);
             }
@@ -493,7 +502,7 @@ impl BrowserMapWorkerShared {
                 result,
             } => {
                 if let Ok(BrowserWorkerResult::Data(bytes)) = &result
-                    && bytes.length() as usize <= kind.result_byte_limit()
+                    && ByteCount::from_bytes(u64::from(bytes.length())) <= kind.result_byte_limit()
                 {
                     let receipt = self.state.borrow_mut().receive(version, id, kind);
                     match receipt {
@@ -613,11 +622,11 @@ impl BrowserMapWorkerShared {
         let frame = self
             .admission
             .borrow_mut()
-            .advance_frame(started, crate::browser_timing::now);
-        if frame.text_milliseconds > 0.0 {
+            .advance_frame(|| crate::browser_timing::elapsed_since(started));
+        if !frame.text_elapsed.is_zero() {
             crate::browser_timing::measure_duration(
                 "garmin.map.tile-text-reconstruction",
-                frame.text_milliseconds,
+                frame.text_elapsed.as_secs_f64() * 1_000.0,
             );
         }
         let tile_work = frame.did_work;
@@ -822,7 +831,7 @@ impl BrowserMapWorker {
 
         let timeout_shared = Rc::downgrade(&shared);
         spawn_local(async move {
-            wait_milliseconds(MAP_WORKER_INITIALIZATION_TIMEOUT_MILLISECONDS).await;
+            wait_for(MAP_WORKER_INITIALIZATION_TIMEOUT).await;
             if let Some(shared) = timeout_shared.upgrade() {
                 shared.initialization_timeout();
             }
@@ -927,7 +936,8 @@ impl activity::map_runtime::Backend for BrowserMapBackend {
     }
 }
 
-async fn wait_milliseconds(milliseconds: i32) {
+async fn wait_for(duration: Duration) {
+    let milliseconds = i32::try_from(duration.as_millis()).unwrap_or(i32::MAX);
     let _ignored = JsFuture::from(wait_on_clock(milliseconds)).await;
 }
 

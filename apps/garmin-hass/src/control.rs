@@ -7,9 +7,11 @@ use axum::{
     response::{IntoResponse as _, Response},
     routing::{get, post},
 };
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::control;
 use garmin_service_api::control::{
     BrowserControl as _, BrowserControlClient, ControlCommand, ControlDispatch, ControlSession,
+    ControlTime,
 };
 use remoc::rtc::Client as _;
 use serde::Deserialize;
@@ -100,15 +102,18 @@ impl Broker {
         self.0.diagnostics.stop();
     }
 
-    fn now_ms(&self) -> u64 {
-        u64::try_from(self.0.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    fn now(&self) -> ControlTime {
+        ControlTime::saturating_from_elapsed(self.0.started.elapsed())
     }
 
     pub(super) fn routes(&self) -> Router {
         Router::new()
             .route("/api/control", post(control_request))
             .route("/api/capabilities", get(capabilities))
-            .layer(DefaultBodyLimit::max(control::MAX_COMMAND_BYTES))
+            .layer(DefaultBodyLimit::max(
+                usize::try_from(control::MAX_COMMAND_BYTES.as_bytes())
+                    .expect("command limit fits usize"),
+            ))
             .layer(middleware::from_fn(local_only))
             .with_state(self.clone())
             .merge(self.0.diagnostics.routes())
@@ -149,7 +154,7 @@ impl Connection {
         let info = ControlSession {
             id: self.0.id.clone(),
             browser,
-            server_time_ms: self.0.broker.now_ms(),
+            server_time_ms: self.0.broker.now(),
         };
         let telemetry = self.observe(&client, &info.id);
         sessions.insert(
@@ -362,7 +367,7 @@ async fn capture(broker: Broker, headers: HeaderMap, request: Envelope) -> Respo
         )
         .into_response();
     }
-    let deadline = broker.now_ms().saturating_add(TIMEOUT.as_secs() * 1_000);
+    let deadline = broker.now().saturating_add(TIMEOUT);
     let mut response =
         match tokio::time::timeout(TIMEOUT, session.client.capture(deadline, request.window)).await
         {
@@ -421,10 +426,12 @@ async fn dispatch(
     let pending = session.client.execute(ControlDispatch {
         request_id,
         command_json,
-        expires_at_ms: broker.now_ms().saturating_add(TIMEOUT.as_secs() * 1_000),
+        expires_at_ms: broker.now().saturating_add(TIMEOUT),
     });
     let mut response = match tokio::time::timeout(TIMEOUT, pending).await {
-        Ok(Ok(Ok(reply))) if reply.len() <= control::MAX_REPLY_BYTES => {
+        Ok(Ok(Ok(reply)))
+            if ByteCount::from_bytes(reply.len() as u64) <= control::MAX_REPLY_BYTES =>
+        {
             match serde_json::from_str::<Value>(&reply) {
                 Ok(value)
                     if value.is_object()

@@ -73,7 +73,7 @@ impl From<&ActivityExport> for ActivityExportProvenance {
             fingerprint_blake3: recording.fingerprint.digest().to_hex().to_string(),
             media_type: recording.artifact.media_type().to_string(),
             artifact_blake3: recording.artifact.digest().to_string(),
-            byte_count: recording.artifact.byte_count().as_u64(),
+            byte_count: recording.artifact.byte_count().as_bytes(),
         }
     }
 }

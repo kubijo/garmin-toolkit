@@ -2,12 +2,14 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use garmin_capture::SessionCapture;
 use garmin_device::{PathSafetyError, SafeRelativePath};
-use garmin_model::map::MapAuthorization;
+use garmin_model::{
+    artifact::{ByteCount, ByteRate, NonZeroByteRate},
+    map::MapAuthorization,
+};
 use garmin_progress::{OperationStage, ProgressReporter};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -18,13 +20,13 @@ use crate::{DownloadProgress, UpdatePlan};
 const JOURNAL_FILE_NAME: &str = ".garmin-cli-transaction-v1.json";
 const JOURNAL_NEXT_FILE_NAME: &str = ".garmin-cli-transaction-v1.next";
 const JOURNAL_VERSION: u8 = 1;
-const MAX_JOURNAL_BYTES: u64 = 1024 * 1024;
+const MAX_JOURNAL_BYTES: ByteCount = ByteCount::from_mebibytes(1);
 const MAX_JOURNAL_OPERATIONS: usize = 2048;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ApplyReport {
     pub files_written: usize,
-    pub bytes_written: u64,
+    pub bytes_written: ByteCount,
     pub files_removed: usize,
     pub unlocks_written: usize,
     pub backup_policy: crate::BackupPolicy,
@@ -43,43 +45,30 @@ pub enum RecoveryOutcome {
 
 impl ApplyReport {
     #[must_use]
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "an approximate transfer rate is intentionally represented as f64"
-    )]
-    pub fn bytes_per_second(&self) -> f64 {
-        if self.elapsed.is_zero() {
-            0.0
-        } else {
-            self.bytes_written as f64 / self.elapsed.as_secs_f64()
-        }
+    pub fn rate(&self) -> ByteRate {
+        ByteRate::from_transfer(self.bytes_written, self.elapsed)
     }
 }
 
 /// Timing imposed by a device transport implementation.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DeviceTiming {
-    bytes_per_second: Option<NonZeroU64>,
+    bytes_per_second: Option<NonZeroByteRate>,
     operation_latency: Duration,
 }
 
 impl DeviceTiming {
     #[must_use]
-    pub const fn limited(bytes_per_second: NonZeroU64, operation_latency: Duration) -> Self {
+    pub const fn limited(bytes_per_second: NonZeroByteRate, operation_latency: Duration) -> Self {
         Self {
             bytes_per_second: Some(bytes_per_second),
             operation_latency,
         }
     }
 
-    async fn after_write(self, bytes: u64) {
-        if let Some(bytes_per_second) = self.bytes_per_second {
-            #[expect(
-                clippy::cast_precision_loss,
-                reason = "simulated transport timing is intentionally approximate"
-            )]
-            let seconds = bytes as f64 / bytes_per_second.get() as f64;
-            tokio::time::sleep(Duration::from_secs_f64(seconds)).await;
+    async fn after_write(self, bytes: ByteCount) {
+        if let Some(rate) = self.bytes_per_second {
+            tokio::time::sleep(rate.transfer_duration(bytes)).await;
         }
     }
 
@@ -101,7 +90,7 @@ struct PendingFile {
 enum PendingContent {
     Staged {
         path: PathBuf,
-        size: u64,
+        size: ByteCount,
         md5: String,
     },
     Bytes(Vec<u8>),
@@ -109,8 +98,8 @@ enum PendingContent {
 
 struct CopyProgress<'a> {
     reporter: &'a ProgressReporter,
-    completed_before: u64,
-    total: u64,
+    completed_before: ByteCount,
+    total: ByteCount,
     relative: &'a SafeRelativePath,
     timing: DeviceTiming,
 }
@@ -283,7 +272,7 @@ async fn require_sidecars_absent_if_reachable(
 
 async fn verify_staged_payload(
     path: &Path,
-    expected_size: u64,
+    expected_size: ByteCount,
     expected_md5: &str,
 ) -> Result<(), ApplyError> {
     let mut file = tokio::fs::File::open(path).await?;
@@ -291,15 +280,15 @@ async fn verify_staged_payload(
     if !metadata.is_file() {
         return Err(ApplyError::UnsafeStagedFile(path.to_owned()));
     }
-    if metadata.len() != expected_size {
+    if ByteCount::from_bytes(metadata.len()) != expected_size {
         return Err(ApplyError::StagedSize {
             path: path.to_owned(),
             expected: expected_size,
-            actual: metadata.len(),
+            actual: ByteCount::from_bytes(metadata.len()),
         });
     }
     let mut hash = Md5::new();
-    let mut copied = 0_u64;
+    let mut copied = ByteCount::default();
     let mut buffer = vec![0_u8; 4 * 1024 * 1024];
     loop {
         let count = file.read(&mut buffer).await?;
@@ -307,7 +296,9 @@ async fn verify_staged_payload(
             break;
         }
         copied = copied
-            .checked_add(u64::try_from(count).map_err(|_| ApplyError::StagedSizeOverflow)?)
+            .checked_add(ByteCount::from_bytes(
+                u64::try_from(count).map_err(|_| ApplyError::StagedSizeOverflow)?,
+            ))
             .ok_or(ApplyError::StagedSizeOverflow)?;
         hash.update(&buffer[..count]);
     }
@@ -445,7 +436,7 @@ fn required_update_space(
     activation
         .unlocks
         .iter()
-        .try_fold(plan.total_bytes, |required, unlock| {
+        .try_fold(plan.total_bytes.as_bytes(), |required, unlock| {
             let encoded =
                 u64::try_from(unlock.gma.len()).map_err(|_| ApplyError::RequiredSpaceOverflow)?;
             required
@@ -620,21 +611,21 @@ async fn stage_pending_files(
     progress: &ProgressReporter,
     timing: DeviceTiming,
 ) -> Result<(), ApplyError> {
-    let total = pending.iter().try_fold(0_u64, |sum, item| {
+    let total = pending.iter().try_fold(ByteCount::default(), |sum, item| {
         let size = match &item.content {
             PendingContent::Staged { size, .. } => *size,
-            PendingContent::Bytes(bytes) => {
-                u64::try_from(bytes.len()).map_err(|_| ApplyError::StagedSizeOverflow)?
-            }
+            PendingContent::Bytes(bytes) => ByteCount::from_bytes(
+                u64::try_from(bytes.len()).map_err(|_| ApplyError::StagedSizeOverflow)?,
+            ),
         };
         sum.checked_add(size).ok_or(ApplyError::StagedSizeOverflow)
     })?;
     progress.started(
         OperationStage::Stage,
         "Copying verified files to transaction sidecars",
-        Some(total),
+        Some(total.as_bytes()),
     );
-    let mut completed = 0_u64;
+    let mut completed = ByteCount::default();
     for item in pending {
         if progress.is_cancelled() {
             return Err(ApplyError::Cancelled);
@@ -661,8 +652,9 @@ async fn stage_pending_files(
             }
             PendingContent::Bytes(bytes) => {
                 write_fsynced(&item.partial, bytes).await?;
-                let size =
-                    u64::try_from(bytes.len()).map_err(|_| ApplyError::StagedSizeOverflow)?;
+                let size = ByteCount::from_bytes(
+                    u64::try_from(bytes.len()).map_err(|_| ApplyError::StagedSizeOverflow)?,
+                );
                 timing.after_write(size).await;
                 completed = completed
                     .checked_add(size)
@@ -671,8 +663,8 @@ async fn stage_pending_files(
                     OperationStage::Stage,
                     "Staged transaction file",
                     item.relative.to_string(),
-                    completed,
-                    Some(total),
+                    completed.as_bytes(),
+                    Some(total.as_bytes()),
                 );
             }
         }
@@ -681,8 +673,8 @@ async fn stage_pending_files(
     progress.completed(
         OperationStage::Stage,
         "All files staged and synced on the device",
-        total,
-        Some(total),
+        total.as_bytes(),
+        Some(total.as_bytes()),
     );
     Ok(())
 }
@@ -832,7 +824,7 @@ fn sidecar_path(destination: &Path, role: &str, digest: &str) -> Result<PathBuf,
 async fn copy_verified(
     source: &Path,
     destination: &Path,
-    expected_size: u64,
+    expected_size: ByteCount,
     expected_md5: &str,
     progress: CopyProgress<'_>,
 ) -> Result<(), ApplyError> {
@@ -842,11 +834,11 @@ async fn copy_verified(
     if !metadata.is_file() {
         return Err(ApplyError::UnsafeStagedFile(source_path));
     }
-    if metadata.len() != expected_size {
+    if ByteCount::from_bytes(metadata.len()) != expected_size {
         return Err(ApplyError::StagedSize {
             path: source_path,
             expected: expected_size,
-            actual: metadata.len(),
+            actual: ByteCount::from_bytes(metadata.len()),
         });
     }
     let mut source = BufReader::with_capacity(4 * 1024 * 1024, source_file);
@@ -856,15 +848,18 @@ async fn copy_verified(
         .open(destination)
         .await?;
     let mut hash = Md5::new();
-    let mut copied = 0_u64;
+    let mut copied = ByteCount::default();
     let mut buffer = vec![0_u8; 4 * 1024 * 1024];
     loop {
         let count = source.read(&mut buffer).await?;
         if count == 0 {
             break;
         }
+        let chunk_size = ByteCount::from_bytes(
+            u64::try_from(count).map_err(|_| ApplyError::StagedSizeOverflow)?,
+        );
         copied = copied
-            .checked_add(u64::try_from(count).map_err(|_| ApplyError::StagedSizeOverflow)?)
+            .checked_add(chunk_size)
             .ok_or(ApplyError::StagedSizeOverflow)?;
         if copied > expected_size {
             return Err(ApplyError::StagedSize {
@@ -874,10 +869,7 @@ async fn copy_verified(
             });
         }
         destination.write_all(&buffer[..count]).await?;
-        progress
-            .timing
-            .after_write(u64::try_from(count).map_err(|_| ApplyError::StagedSizeOverflow)?)
-            .await;
+        progress.timing.after_write(chunk_size).await;
         hash.update(&buffer[..count]);
         progress.reporter.advanced_with_path(
             OperationStage::Stage,
@@ -886,8 +878,9 @@ async fn copy_verified(
             progress
                 .completed_before
                 .checked_add(copied)
-                .ok_or(ApplyError::StagedSizeOverflow)?,
-            Some(progress.total),
+                .ok_or(ApplyError::StagedSizeOverflow)?
+                .as_bytes(),
+            Some(progress.total.as_bytes()),
         );
     }
     if copied != expected_size {
@@ -1059,7 +1052,9 @@ async fn write_journal_file(path: &Path, journal: &TransactionJournal) -> Result
     validate_journal(journal)?;
     let mut bytes = serde_json::to_vec(journal)?;
     bytes.push(b'\n');
-    if u64::try_from(bytes.len()).map_or(true, |length| length > MAX_JOURNAL_BYTES) {
+    if u64::try_from(bytes.len()).map_or(true, |length| {
+        ByteCount::from_bytes(length) > MAX_JOURNAL_BYTES
+    }) {
         return Err(ApplyError::JournalTooLarge);
     }
     write_fsynced(path, &bytes).await?;
@@ -1073,15 +1068,22 @@ async fn read_journal(root: &Path) -> Result<Option<TransactionJournal>, ApplyEr
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    if !metadata.file_type().is_file() || metadata.len() > MAX_JOURNAL_BYTES {
+    if !metadata.file_type().is_file() || ByteCount::from_bytes(metadata.len()) > MAX_JOURNAL_BYTES
+    {
         return Err(ApplyError::UnsafeJournal(path));
     }
     let file = tokio::fs::File::open(&path).await?;
     let mut bytes = Vec::new();
-    file.take(MAX_JOURNAL_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .await?;
-    if u64::try_from(bytes.len()).map_or(true, |length| length > MAX_JOURNAL_BYTES) {
+    file.take(
+        MAX_JOURNAL_BYTES
+            .saturating_add(ByteCount::from_bytes(1))
+            .as_bytes(),
+    )
+    .read_to_end(&mut bytes)
+    .await?;
+    if u64::try_from(bytes.len()).map_or(true, |length| {
+        ByteCount::from_bytes(length) > MAX_JOURNAL_BYTES
+    }) {
         return Err(ApplyError::JournalTooLarge);
     }
     let journal = serde_json::from_slice(&bytes)?;
@@ -1294,8 +1296,8 @@ pub enum ApplyError {
     #[error("staged file size mismatch for {path}: expected {expected}, received {actual}")]
     StagedSize {
         path: PathBuf,
-        expected: u64,
-        actual: u64,
+        expected: ByteCount,
+        actual: ByteCount,
     },
     #[error("staged file size exceeds the supported range")]
     StagedSizeOverflow,
@@ -1325,6 +1327,7 @@ pub enum ApplyError {
 mod tests {
     use super::*;
     use garmin_device::SafeRelativePath;
+    use garmin_model::artifact::ByteCount;
     use std::os::unix::fs::symlink;
 
     const PLAN_DIGEST: &str = "0123456789abcdef0123456789abcdef";
@@ -1349,20 +1352,20 @@ mod tests {
                 requires_garmin_token: false,
                 destination: SafeRelativePath::parse("Garmin/map.img").unwrap(),
                 cache_name: "00".repeat(16),
-                size: 3,
+                size: ByteCount::from_bytes(3),
                 md5: "00".repeat(16),
             }],
             files_to_remove: Vec::new(),
             identifiers: Vec::new(),
-            total_bytes: 3,
+            total_bytes: ByteCount::from_bytes(3),
             backup_policy: crate::BackupPolicy::Verified,
             digest: PLAN_DIGEST.to_owned(),
         };
         let staged = [DownloadProgress {
             path: staged_path,
-            bytes: 3,
+            bytes: ByteCount::from_bytes(3),
             elapsed: Duration::ZERO,
-            resumed_at: 0,
+            resumed_at: ByteCount::default(),
             from_cache: false,
         }];
 
@@ -1391,20 +1394,20 @@ mod tests {
                 requires_garmin_token: false,
                 destination: SafeRelativePath::parse("Garmin/map.img").unwrap(),
                 cache_name: "00".repeat(16),
-                size: 3,
+                size: ByteCount::from_bytes(3),
                 md5: hex::encode(Md5::digest(b"map")),
             }],
             files_to_remove: Vec::new(),
             identifiers: Vec::new(),
-            total_bytes: 3,
+            total_bytes: ByteCount::from_bytes(3),
             backup_policy: crate::BackupPolicy::Verified,
             digest: PLAN_DIGEST.to_owned(),
         };
         let staged = [DownloadProgress {
             path: staged_path,
-            bytes: 3,
+            bytes: ByteCount::from_bytes(3),
             elapsed: Duration::ZERO,
-            resumed_at: 0,
+            resumed_at: ByteCount::default(),
             from_cache: false,
         }];
 

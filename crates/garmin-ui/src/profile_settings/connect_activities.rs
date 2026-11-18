@@ -1,6 +1,9 @@
 use egui::Ui;
 use garmin_i18n::format_message;
-use garmin_model::garmin_connect::{ActivityRequest, ActivityResponse, RemoteActivity};
+use garmin_model::{
+    activity::ActivityDuration,
+    garmin_connect::{ActivityRequest, ActivityResponse, RemoteActivity},
+};
 
 use super::Props;
 use crate::{Size, activity, button, icons, select};
@@ -512,14 +515,16 @@ impl Row {
             let imported = format_message!(props.intl, default_message: "Imported");
             subtitle = format!("{imported} · {subtitle}");
         }
-        let distance = remote.distance_metres.map(|metres| {
-            activity::format_distance(millimeters(metres), props.preferences.unit_system())
+        let distance = remote.distance.map(|value| {
+            value.format(
+                props.preferences.unit_system(),
+                2,
+                props.intl.decimal_formatter(),
+            )
         });
         let duration = remote
-            .duration_seconds
-            .and_then(|seconds| std::time::Duration::try_from_secs_f64(seconds).ok())
-            .and_then(|duration| u64::try_from(duration.as_millis()).ok())
-            .map_or_else(String::new, activity::duration);
+            .duration
+            .map_or_else(String::new, ActivityDuration::format_compact);
         Self {
             icon,
             subtitle,
@@ -537,15 +542,6 @@ impl Row {
             duration: &self.duration,
         }
     }
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "remote nonnegative metres are rounded to canonical millimetres; oversized values saturate"
-)]
-fn millimeters(metres: f64) -> u64 {
-    (metres * 1000.0).round() as u64
 }
 
 fn progress(ui: &mut Ui, props: &Props<'_>) -> bool {

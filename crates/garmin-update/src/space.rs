@@ -3,20 +3,21 @@
 use std::{collections::BTreeMap, path::Path};
 
 use garmin_device::{DeviceStateSnapshot, StorageCapacity, filesystem_capacity};
+use garmin_model::artifact::ByteCount;
 use serde::Serialize;
 use thiserror::Error;
 
 /// A replacement deletes its original before writing the new object.
 pub struct StorageChange<'a> {
     pub storage_id: &'a str,
-    pub before_bytes: u64,
-    pub after_bytes: u64,
+    pub before_bytes: ByteCount,
+    pub after_bytes: ByteCount,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StorageSpaceRequirement {
     pub storage_id: String,
-    pub required_free_bytes: u64,
+    pub required_free_bytes: ByteCount,
 }
 
 /// Computes peak additional bytes without crediting later removals.
@@ -29,8 +30,8 @@ pub fn storage_requirements<'a>(
     for change in changes {
         let (current, peak) = usage.entry(change.storage_id.to_owned()).or_default();
         *current = current
-            .checked_sub(i128::from(change.before_bytes))
-            .and_then(|value| value.checked_add(i128::from(change.after_bytes)))
+            .checked_sub(i128::from(change.before_bytes.as_bytes()))
+            .and_then(|value| value.checked_add(i128::from(change.after_bytes.as_bytes())))
             .ok_or(SpaceError::Overflow)?;
         *peak = (*peak).max(*current);
     }
@@ -39,7 +40,9 @@ pub fn storage_requirements<'a>(
         .map(|(storage_id, (_, peak))| {
             Ok(StorageSpaceRequirement {
                 storage_id,
-                required_free_bytes: u64::try_from(peak).map_err(|_| SpaceError::Overflow)?,
+                required_free_bytes: ByteCount::from_bytes(
+                    u64::try_from(peak).map_err(|_| SpaceError::Overflow)?,
+                ),
             })
         })
         .collect()
@@ -111,7 +114,7 @@ pub fn check_device_writable<'a>(
 fn check_capacity(
     label: &str,
     capacity: &StorageCapacity,
-    required: u64,
+    required: ByteCount,
 ) -> Result<(), SpaceError> {
     let Some((_, available)) = capacity.bytes() else {
         return Err(SpaceError::Unavailable {
@@ -135,8 +138,10 @@ fn check_capacity(
 /// Checks host space with transaction headroom.
 /// # Errors
 /// Host capacity is unknown or insufficient.
-pub async fn check_host_space(path: &Path, bytes: u64) -> Result<(), SpaceError> {
-    let required = bytes.checked_add(1024 * 1024).ok_or(SpaceError::Overflow)?;
+pub async fn check_host_space(path: &Path, bytes: ByteCount) -> Result<(), SpaceError> {
+    let required = bytes
+        .checked_add(ByteCount::from_mebibytes(1))
+        .ok_or(SpaceError::Overflow)?;
     let path = path.to_owned();
     tokio::task::spawn_blocking(move || {
         check_capacity(
@@ -152,11 +157,8 @@ pub async fn check_host_space(path: &Path, bytes: u64) -> Result<(), SpaceError>
     })?
 }
 
-fn size(bytes: u64) -> String {
-    format!(
-        "{:.2}",
-        byte_unit::Byte::from_u64(bytes).get_appropriate_unit(byte_unit::UnitType::Decimal)
-    )
+fn size(bytes: ByteCount) -> String {
+    bytes.format_decimal(2)
 }
 
 #[derive(Debug, Error)]
@@ -164,8 +166,8 @@ pub enum SpaceError {
     #[error("{label} needs {}; only {} is free", size(*required), size(*available))]
     Insufficient {
         label: String,
-        required: u64,
-        available: u64,
+        required: ByteCount,
+        available: ByteCount,
     },
     #[error("{0} is read-only")]
     ReadOnly(String),
@@ -186,15 +188,15 @@ mod tests {
         let requirements = storage_requirements(changes.into_iter().map(
             |(storage_id, before_bytes, after_bytes)| StorageChange {
                 storage_id,
-                before_bytes,
-                after_bytes,
+                before_bytes: ByteCount::from_bytes(before_bytes),
+                after_bytes: ByteCount::from_bytes(after_bytes),
             },
         ))
         .unwrap();
         assert_eq!(
             requirements
                 .iter()
-                .map(|r| (r.storage_id.as_str(), r.required_free_bytes))
+                .map(|r| (r.storage_id.as_str(), r.required_free_bytes.as_bytes()))
                 .collect::<Vec<_>>(),
             [("a", 60), ("b", 90)]
         );
@@ -203,13 +205,19 @@ mod tests {
                 DeviceStorageState {
                     id: "a".to_owned(),
                     label: "Internal".to_owned(),
-                    capacity: StorageCapacity::new(1000, 60),
+                    capacity: StorageCapacity::new(
+                        ByteCount::from_bytes(1000),
+                        ByteCount::from_bytes(60),
+                    ),
                     writable: Some(true),
                 },
                 DeviceStorageState {
                     id: "b".to_owned(),
                     label: "Card".to_owned(),
-                    capacity: StorageCapacity::new(1000, 89),
+                    capacity: StorageCapacity::new(
+                        ByteCount::from_bytes(1000),
+                        ByteCount::from_bytes(89),
+                    ),
                     writable: Some(true),
                 },
             ],
@@ -217,12 +225,13 @@ mod tests {
         assert!(matches!(
             check_device_space(&snapshot, &requirements),
             Err(SpaceError::Insufficient {
-                required: 90,
-                available: 89,
+                required,
+                available,
                 ..
-            })
+            }) if required.as_bytes() == 90 && available.as_bytes() == 89
         ));
-        snapshot.storages[1].capacity = StorageCapacity::new(1000, 90);
+        snapshot.storages[1].capacity =
+            StorageCapacity::new(ByteCount::from_bytes(1000), ByteCount::from_bytes(90));
         check_device_space(&snapshot, &requirements).unwrap();
         snapshot.storages[1].writable = Some(false);
         assert!(matches!(
@@ -230,7 +239,8 @@ mod tests {
             Err(SpaceError::ReadOnly(_))
         ));
         snapshot.storages[1].writable = None;
-        snapshot.storages[1].capacity = StorageCapacity::new(100, 101);
+        snapshot.storages[1].capacity =
+            StorageCapacity::new(ByteCount::from_bytes(100), ByteCount::from_bytes(101));
         assert!(matches!(
             check_device_space(&snapshot, &requirements),
             Err(SpaceError::Unavailable { .. })

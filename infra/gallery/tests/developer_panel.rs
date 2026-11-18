@@ -5,6 +5,7 @@ use egui_kittest::{
 };
 use gallery::egui;
 use garmin_model::logging::{Level, Record};
+use garmin_model::value::UnixMilliseconds;
 use garmin_ui::developer;
 
 struct Preview {
@@ -32,7 +33,7 @@ fn panel(size: [f32; 2], dark: bool) -> Harness<'static, Preview> {
                 native: true,
                 connected: true,
                 logs: vec![Record {
-                    sequence: 1, timestamp_ms: 1_790_166_467_209, level: Level::Info,
+                    sequence: 1, timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(1_790_166_467_209), level: Level::Info,
                     component: "app".into(), source: "desktop".into(), session: "linux-preview".into(),
                     source_sequence: 1, message: "Application started".into(),
                     fields: std::collections::BTreeMap::from([("details".into(), "A diagnostic value that must wrap inside the panel without adding a nested scroll area or widening the window.".into())]),

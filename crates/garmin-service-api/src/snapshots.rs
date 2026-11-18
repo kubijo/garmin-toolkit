@@ -5,10 +5,11 @@
     reason = "Remoc generates serialized RPC requests"
 )]
 
+use garmin_model::artifact::ByteCount;
 use remoc::rtc;
 use uuid::Uuid;
 
-pub const MAX_SNAPSHOT_CHUNK: u32 = 64 * 1024;
+pub const MAX_SNAPSHOT_CHUNK: ByteCount = ByteCount::from_kibibytes(64);
 
 #[garmin_macros::portable(copy, eq)]
 pub enum SnapshotState {
@@ -28,7 +29,7 @@ pub struct SnapshotPreview {
     pub format_version: u32,
     pub app_version: String,
     pub created_at: i64,
-    pub database_bytes: u64,
+    pub database_bytes: ByteCount,
     pub database_sha256: String,
     /// Single-use approval, bound to this verified upload and current client session.
     pub approval: Uuid,
@@ -39,8 +40,8 @@ pub struct SnapshotStatus {
     pub operation: Uuid,
     pub epoch: Uuid,
     pub state: SnapshotState,
-    pub transferred: u64,
-    pub total: Option<u64>,
+    pub transferred: ByteCount,
+    pub total: Option<ByteCount>,
     pub preview: Option<SnapshotPreview>,
     pub error: Option<String>,
 }
@@ -71,11 +72,11 @@ pub enum SnapshotRequest {
     },
     BeginRestore {
         operation: Uuid,
-        bytes: u64,
+        bytes: ByteCount,
     },
     Upload {
         operation: Uuid,
-        offset: u64,
+        offset: ByteCount,
         bytes: Vec<u8>,
     },
     Verify {
@@ -101,8 +102,8 @@ pub enum SnapshotRequest {
     },
     Read {
         operation: Uuid,
-        offset: u64,
-        max_bytes: u32,
+        offset: ByteCount,
+        max_bytes: ByteCount,
     },
     Release {
         operation: Uuid,
@@ -114,7 +115,7 @@ pub enum SnapshotReply {
     Operations(Vec<SnapshotOperation>),
     Status(SnapshotStatus),
     Chunk {
-        offset: u64,
+        offset: ByteCount,
         bytes: Vec<u8>,
         end: bool,
     },

@@ -1,3 +1,4 @@
+use garmin_model::artifact::ByteCount;
 use std::{
     path::{Path, PathBuf},
     sync::{Mutex, PoisonError},
@@ -153,26 +154,32 @@ impl DeviceLink for DirectoryDevice {
     }
 }
 
-pub(super) async fn hash_file(path: &Path) -> Result<(u64, String), DeviceIoError> {
+async fn hash_file(path: &Path) -> Result<(ByteCount, String), DeviceIoError> {
     if !tokio::fs::symlink_metadata(path).await?.is_file() {
         return Err(DeviceIoError::UnsafePath(path.display().to_string()));
     }
     let mut file = tokio::fs::File::open(path).await?;
     let mut buffer = vec![0_u8; 1024 * 1024];
     let mut hash = Sha256::new();
-    let mut size = 0;
+    let mut size = ByteCount::default();
     loop {
         let n = file.read(&mut buffer).await?;
         if n == 0 {
             break;
         }
-        size += n as u64;
+        size = size
+            .checked_add(ByteCount::from_bytes(n as u64))
+            .ok_or_else(|| DeviceIoError::LimitExceeded(path.display().to_string()))?;
         hash.update(&buffer[..n]);
     }
     Ok((size, hex::encode(hash.finalize())))
 }
 
-pub(super) async fn verify_file(path: &Path, size: u64, sha256: &str) -> Result<(), DeviceIoError> {
+pub(super) async fn verify_file(
+    path: &Path,
+    size: ByteCount,
+    sha256: &str,
+) -> Result<(), DeviceIoError> {
     if hash_file(path).await? != (size, sha256.to_owned()) {
         return Err(DeviceIoError::Verification(path.display().to_string()));
     }
@@ -235,7 +242,9 @@ impl DeviceRead for DirectoryDevice {
     ) -> Result<DevicePathStatus, DeviceIoError> {
         let resolved = self.resolve(storage, path, false).await?;
         match tokio::fs::symlink_metadata(resolved).await {
-            Ok(meta) if meta.is_file() => Ok(DevicePathStatus::RegularFile { size: meta.len() }),
+            Ok(meta) if meta.is_file() => Ok(DevicePathStatus::RegularFile {
+                size: ByteCount::from_bytes(meta.len()),
+            }),
             Ok(meta) if meta.is_dir() => Ok(DevicePathStatus::Directory),
             Ok(_) => Ok(DevicePathStatus::Other),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -248,7 +257,7 @@ impl DeviceRead for DirectoryDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         destination: BackupDestination,
         progress: MountedMtpBackupProgress,
     ) -> Result<String, DeviceIoError> {
@@ -257,7 +266,7 @@ impl DeviceRead for DirectoryDevice {
         let (destination_path, destination) = destination.into_parts();
         let mut output = tokio::fs::File::from_std(destination);
         let mut hash = Sha256::new();
-        let mut bytes = 0_u64;
+        let mut bytes = ByteCount::default();
         let mut buffer = vec![0; 1024 * 1024];
         loop {
             if progress.reporter.is_cancelled() {
@@ -268,7 +277,9 @@ impl DeviceRead for DirectoryDevice {
                 break;
             }
             output.write_all(&buffer[..n]).await?;
-            bytes += n as u64;
+            bytes = bytes
+                .checked_add(ByteCount::from_bytes(n as u64))
+                .ok_or_else(|| DeviceIoError::LimitExceeded(path.to_string()))?;
             hash.update(&buffer[..n]);
             progress.advanced(storage, path, bytes, size);
         }
@@ -286,7 +297,7 @@ impl DeviceRead for DirectoryDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
         if !self.verify_delay.is_zero() {
@@ -325,7 +336,7 @@ impl DeviceRead for DirectoryDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        limit: u64,
+        limit: ByteCount,
     ) -> Result<Option<Vec<u8>>, DeviceIoError> {
         let resolved = self.resolve(storage, path, false).await?;
         let metadata = match tokio::fs::symlink_metadata(&resolved).await {
@@ -336,16 +347,16 @@ impl DeviceRead for DirectoryDevice {
         if !metadata.file_type().is_file() {
             return Err(DeviceIoError::UnsafePath(path.to_string()));
         }
-        if metadata.len() > limit {
+        if ByteCount::from_bytes(metadata.len()) > limit {
             return Err(DeviceIoError::LimitExceeded(path.to_string()));
         }
         let mut bytes = Vec::new();
         tokio::fs::File::open(resolved)
             .await?
-            .take(limit.saturating_add(1))
+            .take(limit.saturating_add(ByteCount::from_bytes(1)).as_bytes())
             .read_to_end(&mut bytes)
             .await?;
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
+        if ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX)) > limit {
             return Err(DeviceIoError::LimitExceeded(path.to_string()));
         }
         Ok(Some(bytes))
@@ -377,7 +388,11 @@ impl DeviceRead for DirectoryDevice {
             } else {
                 (crate::DevicePathState::Other, None)
             };
-            result.push(DeviceDirectoryEntry { name, state, size });
+            result.push(DeviceDirectoryEntry {
+                name,
+                state,
+                size: size.map(ByteCount::from_bytes),
+            });
         }
         result.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(result)
@@ -482,7 +497,7 @@ impl DeviceWrite for DirectoryDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
         self.verify(storage, path, size, sha256).await?;
@@ -496,11 +511,11 @@ impl DeviceWrite for DirectoryDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
     ) -> Result<(), DeviceIoError> {
         let target = self.resolve(storage, path, false).await?;
         let metadata = tokio::fs::symlink_metadata(&target).await?;
-        if !metadata.file_type().is_file() || metadata.len() != size {
+        if !metadata.file_type().is_file() || metadata.len() != size.as_bytes() {
             return Err(DeviceIoError::Verification(path.to_string()));
         }
         tokio::fs::remove_file(target).await?;
@@ -514,7 +529,7 @@ impl DeviceWrite for DirectoryDevice {
         storage: &str,
         path: &SafeRelativePath,
         source: &Path,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
         progress: MountedMtpUploadProgress,
     ) -> Result<(), DeviceIoError> {
@@ -531,7 +546,7 @@ impl DeviceWrite for DirectoryDevice {
             }
             let mut source = tokio::fs::File::open(source).await?;
             let mut buffer = vec![0; 1024 * 1024];
-            let mut bytes = 0_u64;
+            let mut bytes = ByteCount::default();
             loop {
                 if progress.reporter.is_cancelled() {
                     return Err(DeviceIoError::Cancelled);
@@ -541,13 +556,15 @@ impl DeviceWrite for DirectoryDevice {
                     break;
                 }
                 output.write_all(&buffer[..n]).await?;
-                bytes += n as u64;
+                bytes = bytes
+                    .checked_add(ByteCount::from_bytes(n as u64))
+                    .ok_or_else(|| DeviceIoError::LimitExceeded(path.to_string()))?;
                 progress.reporter.advanced_with_path(
                     OperationStage::Commit,
                     "Writing update file",
                     path.to_string(),
-                    progress.completed_before + bytes,
-                    Some(progress.total),
+                    progress.completed_before.saturating_add(bytes).as_bytes(),
+                    Some(progress.total.as_bytes()),
                 );
             }
             output.flush().await?;
@@ -570,7 +587,7 @@ impl DeviceWrite for DirectoryDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         backup: &Path,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
@@ -582,7 +599,7 @@ impl DeviceWrite for DirectoryDevice {
             sha256,
             MountedMtpUploadProgress {
                 reporter: garmin_progress::ProgressReporter::default(),
-                completed_before: 0,
+                completed_before: ByteCount::from_bytes(0),
                 total: size,
             },
         )

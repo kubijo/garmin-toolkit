@@ -1,4 +1,5 @@
 use garmin_capture::{CaptureError, SessionCapture};
+use garmin_model::artifact::ByteCount;
 use garmin_progress::{OperationStage, ProgressReporter};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -11,21 +12,21 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub struct BackupReport {
     pub source: PathBuf,
     pub destination: PathBuf,
-    pub bytes: u64,
+    pub bytes: ByteCount,
     pub files: Vec<BackupFile>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BackupFile {
     pub path: PathBuf,
-    pub bytes: u64,
+    pub bytes: ByteCount,
     pub sha256: String,
 }
 
 struct SourceFile {
     source: PathBuf,
     relative: PathBuf,
-    bytes: u64,
+    bytes: ByteCount,
 }
 
 /// Copy and independently verify every regular file on a mounted device.
@@ -48,7 +49,7 @@ pub async fn backup_mass_storage(
     }
 
     let (directories, files, total) = inventory(&source).await?;
-    let available = fs2::available_space(&capture_root)?;
+    let available = ByteCount::from_bytes(fs2::available_space(&capture_root)?);
     if available < total {
         return Err(BackupError::InsufficientSpace {
             required: total,
@@ -65,9 +66,9 @@ pub async fn backup_mass_storage(
     progress.started(
         OperationStage::Backup,
         "Copying the complete device before installation",
-        Some(total),
+        Some(total.as_bytes()),
     );
-    let mut completed = 0_u64;
+    let mut completed = ByteCount::default();
     let mut backed_up = Vec::with_capacity(files.len());
     for file in files {
         if progress.is_cancelled() {
@@ -82,8 +83,8 @@ pub async fn backup_mass_storage(
             OperationStage::Backup,
             "Backed up device file",
             file.relative.display().to_string(),
-            completed,
-            Some(total),
+            completed.as_bytes(),
+            Some(total.as_bytes()),
         );
         backed_up.push(BackupFile {
             path: file.relative,
@@ -94,8 +95,8 @@ pub async fn backup_mass_storage(
     progress.completed(
         OperationStage::Backup,
         "Complete device backup copied and verified",
-        total,
-        Some(total),
+        total.as_bytes(),
+        Some(total.as_bytes()),
     );
     Ok(BackupReport {
         source,
@@ -105,11 +106,11 @@ pub async fn backup_mass_storage(
     })
 }
 
-async fn inventory(root: &Path) -> Result<(Vec<PathBuf>, Vec<SourceFile>, u64), BackupError> {
+async fn inventory(root: &Path) -> Result<(Vec<PathBuf>, Vec<SourceFile>, ByteCount), BackupError> {
     let mut pending = VecDeque::from([PathBuf::new()]);
     let mut directories = Vec::new();
     let mut files = Vec::new();
-    let mut total = 0_u64;
+    let mut total = ByteCount::default();
     while let Some(relative_directory) = pending.pop_front() {
         let mut entries = tokio::fs::read_dir(root.join(&relative_directory)).await?;
         while let Some(entry) = entries.next_entry().await? {
@@ -123,12 +124,12 @@ async fn inventory(root: &Path) -> Result<(Vec<PathBuf>, Vec<SourceFile>, u64), 
                 pending.push_back(relative);
             } else if metadata.is_file() {
                 total = total
-                    .checked_add(metadata.len())
+                    .checked_add(ByteCount::from_bytes(metadata.len()))
                     .ok_or(BackupError::SizeOverflow)?;
                 files.push(SourceFile {
                     source: entry.path(),
                     relative,
-                    bytes: metadata.len(),
+                    bytes: ByteCount::from_bytes(metadata.len()),
                 });
             } else {
                 return Err(BackupError::UnsupportedEntry(entry.path()));
@@ -144,18 +145,18 @@ async fn copy_and_verify(
     source: &Path,
     capture: &SessionCapture,
     destination: &Path,
-    expected_bytes: u64,
+    expected_bytes: ByteCount,
     progress: &ProgressReporter,
 ) -> Result<String, BackupError> {
     let mut input = tokio::fs::File::open(source).await?;
-    if input.metadata().await?.len() != expected_bytes {
+    if ByteCount::from_bytes(input.metadata().await?.len()) != expected_bytes {
         return Err(BackupError::SourceChanged(source.to_owned()));
     }
     let destination_path = capture.artifact_path(destination)?;
     let mut output = capture.create_file(destination).await?;
     let mut source_hash = Sha256::new();
     let mut buffer = vec![0_u8; 4 * 1024 * 1024];
-    let mut copied = 0_u64;
+    let mut copied = ByteCount::default();
     loop {
         if progress.is_cancelled() {
             return Err(BackupError::Cancelled);
@@ -165,7 +166,7 @@ async fn copy_and_verify(
             break;
         }
         copied = copied
-            .checked_add(u64::try_from(count).map_err(|_| BackupError::SizeOverflow)?)
+            .checked_add(ByteCount::from_bytes(count as u64))
             .ok_or(BackupError::SizeOverflow)?;
         if copied > expected_bytes {
             return Err(BackupError::SourceChanged(source.to_owned()));
@@ -217,7 +218,10 @@ pub enum BackupError {
     #[error("backup verification failed: {0}")]
     Verification(PathBuf),
     #[error("backup requires {required} bytes but only {available} are available")]
-    InsufficientSpace { required: u64, available: u64 },
+    InsufficientSpace {
+        required: ByteCount,
+        available: ByteCount,
+    },
     #[error("backup byte count exceeds u64")]
     SizeOverflow,
     #[error("device backup I/O failed: {0}")]
@@ -257,7 +261,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(report.files.len(), 2);
-        assert_eq!(report.bytes, 17);
+        assert_eq!(report.bytes, ByteCount::from_bytes(17));
         assert_eq!(
             tokio::fs::read(destination.join("GarminDevice.xml"))
                 .await

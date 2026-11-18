@@ -1,4 +1,5 @@
 use gallery::prelude::*;
+use garmin_model::artifact::ByteCount;
 use garmin_ui::{capacity, device, icons};
 
 scene_meta! { title: "Components / Device state / Storage capacity" }
@@ -38,12 +39,18 @@ fn show(ctx: &mut SceneCtx<'_>, ui: &mut Ui, unavailable: bool, long: bool) {
                     } else {
                         "23.40 GB used · 8.60 GB free · 32.00 GB total"
                     },
-                    bytes: (!unavailable).then_some((23_400_000_000, 32_000_000_000)),
+                    bytes: (!unavailable).then_some((
+                        ByteCount::from_megabytes(23_400),
+                        ByteCount::from_gigabytes(32),
+                    )),
                 },
                 capacity::Props {
                     label: "Memory card · read-only",
                     detail: "12.00 GB used · 52.00 GB free · 64.00 GB total",
-                    bytes: Some((12_000_000_000, 64_000_000_000)),
+                    bytes: Some((
+                        ByteCount::from_gigabytes(12),
+                        ByteCount::from_gigabytes(64),
+                    )),
                 },
             ];
             device::show(

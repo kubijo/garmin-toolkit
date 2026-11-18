@@ -3,7 +3,10 @@ use futures_util::StreamExt;
 use garmin_capture::{
     CaptureError, HttpExchange, HttpHeader, HttpRequestHead, HttpResponseHead, SessionCapture,
 };
-use garmin_progress::{OperationStage, ProgressEvent, ProgressReporter, ProgressState};
+use garmin_model::artifact::{ByteCount, ByteRate};
+use garmin_progress::{
+    OperationStage, ProgressAmount, ProgressEvent, ProgressReporter, ProgressState,
+};
 use md5::{Digest, Md5};
 use reqwest::header::{ACCEPT, CONTENT_RANGE, RANGE};
 use std::collections::{HashMap, HashSet};
@@ -16,7 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-const MAX_ERROR_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_ERROR_RESPONSE_BYTES: ByteCount = ByteCount::from_mebibytes(16);
 /// Supplies authorization for a protected download URL.
 ///
 /// Applications inject service policy without replacing download, verification,
@@ -51,8 +54,8 @@ pub struct Downloader {
 pub struct ArtifactCacheSummary {
     pub cached_files: usize,
     pub total_files: usize,
-    pub cached_bytes: u64,
-    pub total_bytes: u64,
+    pub cached_bytes: ByteCount,
+    pub total_bytes: ByteCount,
 }
 
 impl ArtifactCacheSummary {
@@ -84,7 +87,9 @@ pub async fn inspect_artifact_cache(
             .ok_or(DownloadError::TotalSizeOverflow)?;
         let path = cache_path(cache, spec)?;
         match tokio::fs::symlink_metadata(&path).await {
-            Ok(metadata) if metadata.file_type().is_file() && metadata.len() == spec.size => {
+            Ok(metadata)
+                if metadata.file_type().is_file() && metadata.len() == spec.size.as_bytes() =>
+            {
                 summary.cached_files += 1;
                 summary.cached_bytes = summary
                     .cached_bytes
@@ -170,7 +175,7 @@ impl Downloader {
     ) -> Result<Vec<DownloadProgress>, DownloadError> {
         tokio::fs::create_dir_all(cache).await?;
         let total = total_download_bytes(specs)?;
-        let mut needed = 0_u64;
+        let mut needed = ByteCount::default();
         let mut counted = HashSet::new();
         for spec in specs {
             let cached = cache_path(cache, spec)?;
@@ -187,15 +192,15 @@ impl Downloader {
         progress.started(
             OperationStage::Download,
             format!("Downloading {} map files", specs.len()),
-            Some(total),
+            Some(total.as_bytes()),
         );
         progress.started(
             OperationStage::Verify,
             "Waiting to verify downloaded files",
-            Some(total),
+            Some(total.as_bytes()),
         );
-        let downloaded = Arc::new(Mutex::new(vec![0_u64; specs.len()]));
-        let verified = Arc::new(Mutex::new(vec![0_u64; specs.len()]));
+        let downloaded = Arc::new(Mutex::new(vec![ByteCount::default(); specs.len()]));
+        let verified = Arc::new(Mutex::new(vec![ByteCount::default(); specs.len()]));
         let semaphore = Arc::new(Semaphore::new(self.concurrency));
         let mut tasks = JoinSet::new();
         for (index, spec) in specs.iter().cloned().enumerate() {
@@ -251,14 +256,14 @@ impl Downloader {
         progress.completed(
             OperationStage::Download,
             completed_download_label(specs.len(), cached),
-            total,
-            Some(total),
+            total.as_bytes(),
+            Some(total.as_bytes()),
         );
         progress.completed(
             OperationStage::Verify,
             completed_verification_label(specs.len(), cached),
-            total,
-            Some(total),
+            total.as_bytes(),
+            Some(total.as_bytes()),
         );
         Ok(completed
             .into_iter()
@@ -293,7 +298,7 @@ impl Downloader {
             OperationStage::Download,
             &label,
             &display_path,
-            Some(spec.size),
+            Some(spec.size.as_bytes()),
         );
         let cache_lock = self.cache_lock(&spec.cache_name);
         let _cache_guard = cache_lock.lock().await;
@@ -347,14 +352,14 @@ impl Downloader {
             OperationStage::Download,
             &label,
             &display_path,
-            bytes,
-            Some(spec.size),
+            bytes.as_bytes(),
+            Some(spec.size.as_bytes()),
         );
         progress.started_with_path(
             OperationStage::Verify,
             "Checking Garmin MD5",
             &display_path,
-            Some(spec.size),
+            Some(spec.size.as_bytes()),
         );
         let actual_md5 = hex::encode(hash.finalize());
         if !actual_md5.eq_ignore_ascii_case(&spec.md5) {
@@ -370,8 +375,8 @@ impl Downloader {
             OperationStage::Verify,
             "Garmin MD5 verified",
             &display_path,
-            bytes,
-            Some(spec.size),
+            bytes.as_bytes(),
+            Some(spec.size.as_bytes()),
         );
         publish_cache_artifact(&partial, &final_path, exchange, resumed_at, bytes).await?;
         Ok(DownloadProgress {
@@ -388,22 +393,17 @@ async fn publish_cache_artifact(
     partial: &Path,
     final_path: &Path,
     exchange: Option<HttpExchange>,
-    resumed_at: u64,
-    bytes: u64,
+    resumed_at: ByteCount,
+    bytes: ByteCount,
 ) -> Result<(), DownloadError> {
     tokio::fs::rename(partial, final_path).await?;
     let mut permissions = tokio::fs::metadata(final_path).await?.permissions();
     permissions.set_readonly(true);
     tokio::fs::set_permissions(final_path, permissions).await?;
-    if resumed_at == 0
+    if resumed_at.is_zero()
         && let Some(exchange) = exchange
     {
-        exchange
-            .retain_response_body(
-                final_path,
-                usize::try_from(bytes).map_err(|_| DownloadError::SizeOverflow)?,
-            )
-            .await?;
+        exchange.retain_response_body(final_path, bytes).await?;
     }
     Ok(())
 }
@@ -411,9 +411,9 @@ async fn publish_cache_artifact(
 fn forward_file_progress(
     event: ProgressEvent,
     index: usize,
-    total: u64,
-    downloaded: &Mutex<Vec<u64>>,
-    verified: &Mutex<Vec<u64>>,
+    total: ByteCount,
+    downloaded: &Mutex<Vec<ByteCount>>,
+    verified: &Mutex<Vec<ByteCount>>,
     parent: &ProgressReporter,
 ) {
     let values = match event.stage {
@@ -425,8 +425,14 @@ fn forward_file_progress(
     match event.state {
         ProgressState::Advanced | ProgressState::Completed => {
             let mut values = values.lock().unwrap_or_else(PoisonError::into_inner);
-            values[index] = event.completed;
-            let completed = values.iter().copied().sum();
+            let ProgressAmount::Bytes { completed, .. } = event.amount else {
+                return;
+            };
+            values[index] = completed;
+            let completed = values
+                .iter()
+                .copied()
+                .fold(ByteCount::default(), ByteCount::saturating_add);
             let action = match event.stage {
                 OperationStage::Verify => "Verifying",
                 _ => "Downloading",
@@ -434,8 +440,8 @@ fn forward_file_progress(
             parent.advanced(
                 event.stage,
                 format!("{action} {} map files", values.len()),
-                completed,
-                Some(total),
+                completed.as_bytes(),
+                Some(total.as_bytes()),
             );
         }
         ProgressState::Failed => parent.failed(event.stage, event.label),
@@ -456,7 +462,7 @@ mod progress_tests {
             requires_garmin_token: false,
             destination: garmin_device::SafeRelativePath::parse("Garmin/map.img").unwrap(),
             cache_name: md5.to_owned(),
-            size,
+            size: ByteCount::from_bytes(size),
             md5: md5.to_owned(),
         }
     }
@@ -465,8 +471,8 @@ mod progress_tests {
     fn file_lifecycles_and_aggregate_counters_are_independent() {
         let (parent, receiver) = ProgressReporter::channel();
         let (child, incoming) = ProgressReporter::channel();
-        let downloaded = Mutex::new(vec![0; 2]);
-        let verified = Mutex::new(vec![0; 2]);
+        let downloaded = Mutex::new(vec![ByteCount::default(); 2]);
+        let verified = Mutex::new(vec![ByteCount::default(); 2]);
         for index in 0..2 {
             let item = child.for_item(index.to_string());
             item.started_with_path(
@@ -479,7 +485,14 @@ mod progress_tests {
             item.started(OperationStage::Verify, "Verifying", Some(100));
             item.completed(OperationStage::Verify, "Verified", 100, Some(100));
             for event in incoming.try_iter() {
-                forward_file_progress(event, index, 200, &downloaded, &verified, &parent);
+                forward_file_progress(
+                    event,
+                    index,
+                    ByteCount::from_bytes(200),
+                    &downloaded,
+                    &verified,
+                    &parent,
+                );
             }
         }
         let events = receiver.try_iter().collect::<Vec<_>>();
@@ -498,7 +511,7 @@ mod progress_tests {
             assert_eq!(
                 totals
                     .iter()
-                    .map(|event| event.completed)
+                    .map(|event| event.amount.completed())
                     .collect::<Vec<_>>(),
                 [100, 200]
             );
@@ -507,7 +520,7 @@ mod progress_tests {
                     .iter()
                     .all(|event| event.state == ProgressState::Advanced
                         && event.path.is_none()
-                        && event.total == Some(200))
+                        && event.amount.total() == Some(200))
             );
         }
     }
@@ -530,8 +543,8 @@ mod progress_tests {
 
         assert_eq!(summary.cached_files, 1);
         assert_eq!(summary.total_files, 2);
-        assert_eq!(summary.cached_bytes, 4);
-        assert_eq!(summary.total_bytes, 12);
+        assert_eq!(summary.cached_bytes, ByteCount::from_bytes(4));
+        assert_eq!(summary.total_bytes, ByteCount::from_bytes(12));
         assert!(!summary.is_complete());
     }
 
@@ -549,8 +562,8 @@ mod progress_tests {
     }
 }
 
-fn total_download_bytes(specs: &[DownloadSpec]) -> Result<u64, DownloadError> {
-    specs.iter().try_fold(0_u64, |sum, spec| {
+fn total_download_bytes(specs: &[DownloadSpec]) -> Result<ByteCount, DownloadError> {
+    specs.iter().try_fold(ByteCount::default(), |sum, spec| {
         sum.checked_add(spec.size)
             .ok_or(DownloadError::TotalSizeOverflow)
     })
@@ -585,17 +598,27 @@ async fn request_download(
     capture: Option<&SessionCapture>,
     progress: &ProgressReporter,
     display_path: &str,
-) -> Result<(reqwest::Response, u64, Md5, bool, Option<HttpExchange>), DownloadError> {
-    let mut resumed_at = tokio::fs::metadata(partial)
-        .await
-        .map_or(0, |metadata| metadata.len());
+) -> Result<
+    (
+        reqwest::Response,
+        ByteCount,
+        Md5,
+        bool,
+        Option<HttpExchange>,
+    ),
+    DownloadError,
+> {
+    let mut resumed_at = tokio::fs::metadata(partial).await.map_or_else(
+        |_| ByteCount::default(),
+        |metadata| ByteCount::from_bytes(metadata.len()),
+    );
     if resumed_at > spec.size {
         tokio::fs::remove_file(partial).await?;
-        resumed_at = 0;
+        resumed_at = ByteCount::default();
     }
 
     let mut hash = Md5::new();
-    if resumed_at > 0 {
+    if !resumed_at.is_zero() {
         hash_existing(partial, &mut hash).await?;
     }
     let candidates = std::iter::once(&spec.source)
@@ -617,8 +640,8 @@ async fn request_download(
             (*source).clone()
         };
         let mut request = http.get(source).header(ACCEPT, "*/*");
-        if resumed_at > 0 {
-            request = request.header(RANGE, format!("bytes={resumed_at}-"));
+        if !resumed_at.is_zero() {
+            request = request.header(RANGE, format!("bytes={}-", resumed_at.as_bytes()));
         }
         let request = request.build()?;
         let exchange = begin_download_capture(capture, &request).await?;
@@ -686,19 +709,19 @@ async fn request_download(
         break;
     }
     let (response, exchange) = selected.expect("download candidates are never empty");
-    let append = resumed_at > 0
+    let append = !resumed_at.is_zero()
         && response.status() == reqwest::StatusCode::PARTIAL_CONTENT
         && content_range_starts_at(&response, resumed_at);
-    if resumed_at > 0 && !append {
-        resumed_at = 0;
+    if !resumed_at.is_zero() && !append {
+        resumed_at = ByteCount::default();
         hash = Md5::new();
     }
     if let Some(length) = response.content_length()
-        && length > spec.size.saturating_sub(resumed_at)
+        && ByteCount::from_bytes(length) > spec.size.saturating_sub(resumed_at)
     {
         let error = DownloadError::Size {
             expected: spec.size,
-            actual: resumed_at.saturating_add(length),
+            actual: resumed_at.saturating_add(ByteCount::from_bytes(length)),
             path: partial.to_owned(),
         };
         if let Some(exchange) = &exchange {
@@ -714,16 +737,16 @@ fn report_download_pivot(
     failed_host: &str,
     next_source: &url::Url,
     display_path: &str,
-    completed: u64,
-    total: u64,
+    completed: ByteCount,
+    total: ByteCount,
 ) {
     let next_host = download_host(next_source);
     progress.advanced_with_path(
         OperationStage::Download,
         format!("{failed_host} unavailable; trying {next_host}"),
         display_path,
-        completed,
-        Some(total),
+        completed.as_bytes(),
+        Some(total.as_bytes()),
     );
 }
 
@@ -798,12 +821,12 @@ async fn capture_error_response_body(
         return Ok(status);
     };
     let mut output = exchange.response_body_file().await?;
-    let mut received = 0_u64;
+    let mut received = ByteCount::default();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         received = received
-            .checked_add(u64::try_from(chunk.len()).map_err(|_| DownloadError::SizeOverflow)?)
+            .checked_add(ByteCount::from_bytes(chunk.len() as u64))
             .ok_or(DownloadError::SizeOverflow)?;
         if received > MAX_ERROR_RESPONSE_BYTES {
             return Err(DownloadError::ErrorResponseTooLarge);
@@ -812,9 +835,7 @@ async fn capture_error_response_body(
     }
     output.flush().await?;
     output.sync_all().await?;
-    exchange
-        .complete_response_body(usize::try_from(received).map_err(|_| DownloadError::SizeOverflow)?)
-        .await?;
+    exchange.complete_response_body(received).await?;
     Ok(status)
 }
 
@@ -829,24 +850,20 @@ struct TransferTarget<'a> {
 
 async fn write_response(
     response: reqwest::Response,
-    resumed_at: u64,
+    resumed_at: ByteCount,
     hash: Md5,
     append: bool,
     target: TransferTarget<'_>,
-) -> Result<(u64, Md5, Duration), DownloadError> {
+) -> Result<(ByteCount, Md5, Duration), DownloadError> {
     let exchange = target.exchange.clone();
     let partial = target.partial.to_owned();
     let result = write_response_body(response, resumed_at, hash, append, target).await;
     if let (Err(error), Some(exchange)) = (&result, exchange) {
-        if resumed_at == 0 && !matches!(error, DownloadError::Capture(_)) {
+        if resumed_at.is_zero() && !matches!(error, DownloadError::Capture(_)) {
             match tokio::fs::symlink_metadata(&partial).await {
                 Ok(metadata) if metadata.file_type().is_file() => {
                     exchange
-                        .copy_response_body(
-                            &partial,
-                            usize::try_from(metadata.len())
-                                .map_err(|_| DownloadError::SizeOverflow)?,
-                        )
+                        .copy_response_body(&partial, ByteCount::from_bytes(metadata.len()))
                         .await?;
                 }
                 Ok(_) | Err(_) => {}
@@ -859,11 +876,11 @@ async fn write_response(
 
 async fn write_response_body(
     response: reqwest::Response,
-    resumed_at: u64,
+    resumed_at: ByteCount,
     mut hash: Md5,
     append: bool,
     target: TransferTarget<'_>,
-) -> Result<(u64, Md5, Duration), DownloadError> {
+) -> Result<(ByteCount, Md5, Duration), DownloadError> {
     let mut output = tokio::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -872,8 +889,8 @@ async fn write_response_body(
         .open(target.partial)
         .await?;
     let mut captured_body = match (&target.exchange, resumed_at) {
-        (Some(exchange), 1..) => Some(exchange.response_body_file().await?),
-        (None, _) | (Some(_), 0) => None,
+        (Some(exchange), offset) if !offset.is_zero() => Some(exchange.response_body_file().await?),
+        _ => None,
     };
     let started = Instant::now();
     let mut bytes = resumed_at;
@@ -884,7 +901,7 @@ async fn write_response_body(
         }
         let chunk = chunk?;
         let next = bytes
-            .checked_add(u64::try_from(chunk.len()).map_err(|_| DownloadError::SizeOverflow)?)
+            .checked_add(ByteCount::from_bytes(chunk.len() as u64))
             .ok_or(DownloadError::SizeOverflow)?;
         if next > target.spec.size {
             target.progress.failed(
@@ -907,8 +924,8 @@ async fn write_response_body(
             OperationStage::Download,
             target.label,
             target.display_path,
-            bytes,
-            Some(target.spec.size),
+            bytes.as_bytes(),
+            Some(target.spec.size.as_bytes()),
         );
     }
     output.flush().await?;
@@ -918,10 +935,9 @@ async fn write_response_body(
         captured_body.sync_all().await?;
     }
     if let Some(exchange) = &target.exchange
-        && resumed_at > 0
+        && !resumed_at.is_zero()
     {
-        let response_bytes = usize::try_from(bytes.saturating_sub(resumed_at))
-            .map_err(|_| DownloadError::SizeOverflow)?;
+        let response_bytes = bytes.saturating_sub(resumed_at);
         exchange.complete_response_body(response_bytes).await?;
     }
     Ok((bytes, hash, started.elapsed()))
@@ -929,19 +945,14 @@ async fn write_response_body(
 
 async fn capture_rejected_response(
     exchange: Option<&HttpExchange>,
-    resumed_at: u64,
+    resumed_at: ByteCount,
     partial: &Path,
-    bytes: u64,
+    bytes: ByteCount,
 ) -> Result<(), DownloadError> {
-    if resumed_at == 0
+    if resumed_at.is_zero()
         && let Some(exchange) = exchange
     {
-        exchange
-            .copy_response_body(
-                partial,
-                usize::try_from(bytes).map_err(|_| DownloadError::SizeOverflow)?,
-            )
-            .await?;
+        exchange.copy_response_body(partial, bytes).await?;
     }
     Ok(())
 }
@@ -973,7 +984,7 @@ async fn require_cache_directory(path: &Path) -> Result<(), DownloadError> {
     Ok(())
 }
 
-fn content_range_starts_at(response: &reqwest::Response, expected: u64) -> bool {
+fn content_range_starts_at(response: &reqwest::Response, expected: ByteCount) -> bool {
     response
         .headers()
         .get(CONTENT_RANGE)
@@ -981,7 +992,7 @@ fn content_range_starts_at(response: &reqwest::Response, expected: u64) -> bool 
         .and_then(|value| value.strip_prefix("bytes "))
         .and_then(|value| value.split_once('-'))
         .and_then(|(start, _)| start.parse::<u64>().ok())
-        == Some(expected)
+        == Some(expected.as_bytes())
 }
 
 async fn cached_download(
@@ -1010,8 +1021,8 @@ async fn cached_download(
         OperationStage::Download,
         "Already cached",
         spec.destination.as_path().display().to_string(),
-        spec.size,
-        Some(spec.size),
+        spec.size.as_bytes(),
+        Some(spec.size.as_bytes()),
     );
     let cached_verification = progress
         .clone()
@@ -1020,8 +1031,8 @@ async fn cached_download(
         OperationStage::Verify,
         "Cached MD5 verified",
         spec.destination.as_path().display().to_string(),
-        spec.size,
-        Some(spec.size),
+        spec.size.as_bytes(),
+        Some(spec.size.as_bytes()),
     );
     Ok(Some(DownloadProgress {
         path: final_path.to_owned(),
@@ -1089,7 +1100,7 @@ async fn hash_existing(path: &Path, digest: &mut Md5) -> Result<(), std::io::Err
 
 async fn verify_file(path: &Path, spec: &DownloadSpec) -> Result<bool, std::io::Error> {
     let metadata = tokio::fs::metadata(path).await?;
-    if metadata.len() != spec.size {
+    if metadata.len() != spec.size.as_bytes() {
         return Ok(false);
     }
     let mut hash = Md5::new();
@@ -1100,23 +1111,16 @@ async fn verify_file(path: &Path, spec: &DownloadSpec) -> Result<bool, std::io::
 #[derive(Debug, Clone)]
 pub struct DownloadProgress {
     pub path: PathBuf,
-    pub bytes: u64,
+    pub bytes: ByteCount,
     pub elapsed: Duration,
-    pub resumed_at: u64,
+    pub resumed_at: ByteCount,
     pub from_cache: bool,
 }
 
 impl DownloadProgress {
     #[must_use]
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "an approximate transfer rate is intentionally represented as f64"
-    )]
-    pub fn bytes_per_second(&self) -> f64 {
-        if self.elapsed.is_zero() {
-            return 0.0;
-        }
-        self.bytes as f64 / self.elapsed.as_secs_f64()
+    pub fn rate(&self) -> ByteRate {
+        ByteRate::from_transfer(self.bytes, self.elapsed)
     }
 }
 
@@ -1142,8 +1146,8 @@ pub enum DownloadError {
     Io(#[from] std::io::Error),
     #[error("downloaded size mismatch for {path}: expected {expected}, received {actual}")]
     Size {
-        expected: u64,
-        actual: u64,
+        expected: ByteCount,
+        actual: ByteCount,
         path: PathBuf,
     },
     #[error("downloaded checksum mismatch for {path}: expected {expected}, received {actual}")]

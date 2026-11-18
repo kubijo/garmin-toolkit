@@ -1,7 +1,9 @@
 use gallery::prelude::*;
+use garmin_model::artifact::{ByteCount, ByteRate};
 use garmin_service_api::maps::{
     Action, Choice, Component, Phase, Plan, Progress, ProgressStatus, Recovery, State,
 };
+use std::time::Duration;
 
 scene_meta! { title: "Application / Manage maps" }
 
@@ -75,7 +77,7 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         event.completed = event.total.unwrap_or(event.completed);
         event.status = ProgressStatus::Completed;
         event.bytes_per_second = None;
-        event.remaining_seconds = None;
+        event.remaining = None;
         state.events.push(event);
         state.history = [
             (Phase::Completed, "Removal completed"),
@@ -140,19 +142,19 @@ fn progress_steps(state: &mut State, rollback: bool) {
     "All affected device files are backed up".clone_into(&mut backup.label);
     backup.completed = 8_000_000;
     backup.total = Some(8_000_000);
-    backup.elapsed_ms = 18_000;
+    backup.elapsed = Duration::from_secs(18);
     backup.bytes_per_second = None;
-    backup.remaining_seconds = None;
+    backup.remaining = None;
     backup.status = ProgressStatus::Completed;
     let mut verified = backup.clone();
     "Verify".clone_into(&mut verified.stage);
     "Device transaction validated".clone_into(&mut verified.label);
-    verified.elapsed_ms = 2_000;
+    verified.elapsed = Duration::from_millis(2_000);
     let mut write = backup.clone();
     "Commit".clone_into(&mut write.stage);
     "Writing update file".clone_into(&mut write.label);
     write.completed = 4_194_304;
-    write.elapsed_ms = 66_000;
+    write.elapsed = Duration::from_secs(66);
     write.path = Some("Garmin/Mock/europe-routing.img".to_owned());
     write.status = ProgressStatus::Running;
     write.stalled = rollback;
@@ -200,7 +202,7 @@ fn fixture() -> State {
                 can_install: true,
                 can_remove: true,
                 choice: Choice::Install,
-                download_bytes: 2_400_000_000,
+                download_bytes: ByteCount::from_megabytes(2_400),
                 cached_files: 1,
                 total_files: 3,
             },
@@ -213,7 +215,7 @@ fn fixture() -> State {
                 can_install: true,
                 can_remove: false,
                 choice: Choice::Keep,
-                download_bytes: 48_000_000,
+                download_bytes: ByteCount::from_megabytes(48),
                 cached_files: 0,
                 total_files: 1,
             },
@@ -225,8 +227,8 @@ fn fixture() -> State {
             id: "internal".to_owned(),
             label: "Internal storage".to_owned(),
             capacity: garmin_model::device::StorageCapacity::Available {
-                total_bytes: 32_000_000_000,
-                free_bytes: 12_000_000_000,
+                total_bytes: ByteCount::from_gigabytes(32),
+                free_bytes: ByteCount::from_gigabytes(12),
             },
             writable: Some(true),
         }],
@@ -235,17 +237,17 @@ fn fixture() -> State {
             digest: "8e51d6f093b27a4c6d9e02f1a748c35be690d124f7a3c85d21906e4b5f8a732c".to_owned(),
             removal: false,
             components: vec!["TopoActive Europe — Central and Western Europe".to_owned()],
-            download_bytes: 2_400_000_000,
+            download_bytes: ByteCount::from_megabytes(2_400),
             write_count: 3,
             remove_count: 2,
-            remove_bytes: 1_800_000_000,
+            remove_bytes: ByteCount::from_megabytes(1_800),
             paths: vec![
                 "Garmin/Mock/europe.img".to_owned(),
                 "Garmin/Mock/europe-routing.img".to_owned(),
             ],
             storage_requirements: vec![garmin_service_api::maps::StorageRequirement {
                 storage: "internal".to_owned(),
-                required_free_bytes: 1_000_000_000,
+                required_free_bytes: ByteCount::from_gigabytes(1),
             }],
         }),
         recovery: Some(Recovery {
@@ -261,9 +263,9 @@ fn fixture() -> State {
             completed: 1_200_000_000,
             total: Some(2_400_000_000),
             bytes: true,
-            elapsed_ms: 12_000,
-            bytes_per_second: Some(100_000_000),
-            remaining_seconds: Some(12),
+            elapsed: Duration::from_secs(12),
+            bytes_per_second: Some(ByteRate::from_bytes_per_second(100_000_000)),
+            remaining: Some(Duration::from_secs(12)),
             stalled: false,
             path: None,
             status: garmin_service_api::maps::ProgressStatus::Running,

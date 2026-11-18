@@ -40,7 +40,7 @@ impl<'a> RouteImport<'a> {
         revision: &'a RoutePlanRevision,
     ) -> Result<Self, RoutePersistenceError> {
         if artifact.digest() != ArtifactDigest::from_bytes(bytes)
-            || artifact.byte_count() != ByteCount::from_u64(bytes.len() as u64)
+            || artifact.byte_count() != ByteCount::from_bytes(bytes.len() as u64)
         {
             return Err(RoutePersistenceError::ArtifactBytesMismatch);
         }

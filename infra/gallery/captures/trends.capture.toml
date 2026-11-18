@@ -5,6 +5,12 @@ report = "capture.json"
 settle = false
 
 [[shot]]
+name = "elevation-coverage"
+scene = "trends::Overview"
+[shot.knobs]
+"elevation comparison" = true
+
+[[shot]]
 name = "partial-targets"
 scene = "trends::Overview"
 [shot.knobs]

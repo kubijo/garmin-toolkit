@@ -6,9 +6,10 @@ use std::{
     io::{self, BufWriter, Write as _},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use garmin_model::value::duration_milliseconds;
 use garmin_ui::activity::map_runtime::{
     MapMetricsSink, MapPerformanceSample, MapRenderPerformanceSample,
 };
@@ -38,24 +39,48 @@ struct State {
 struct Header<'a> {
     kind: &'a str,
     schema_version: u8,
-    started_unix_milliseconds: f64,
+    #[serde(
+        rename = "started_unix_milliseconds",
+        serialize_with = "duration_milliseconds::serialize"
+    )]
+    started_since_epoch: Duration,
 }
 
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum RuntimeEvent {
     DesktopFrame {
-        elapsed_milliseconds: f64,
-        frame_milliseconds: Option<f32>,
-        ui_milliseconds: f32,
+        #[serde(
+            rename = "elapsed_milliseconds",
+            serialize_with = "duration_milliseconds::serialize"
+        )]
+        elapsed: Duration,
+        #[serde(
+            rename = "frame_milliseconds",
+            serialize_with = "duration_milliseconds::serialize_optional"
+        )]
+        frame_elapsed: Option<Duration>,
+        #[serde(
+            rename = "ui_milliseconds",
+            serialize_with = "duration_milliseconds::serialize"
+        )]
+        ui_elapsed: Duration,
     },
     MapFrame {
-        elapsed_milliseconds: f64,
+        #[serde(
+            rename = "elapsed_milliseconds",
+            serialize_with = "duration_milliseconds::serialize"
+        )]
+        elapsed: Duration,
         #[serde(flatten)]
         sample: MapPerformanceSample,
     },
     MapRender {
-        elapsed_milliseconds: f64,
+        #[serde(
+            rename = "elapsed_milliseconds",
+            serialize_with = "duration_milliseconds::serialize"
+        )]
+        elapsed: Duration,
         #[serde(flatten)]
         sample: MapRenderPerformanceSample,
     },
@@ -75,11 +100,9 @@ impl RuntimeMetricsRecorder {
 
     fn open(path: &Path) -> Result<Self, Error> {
         let started = Instant::now();
-        let started_unix_milliseconds = SystemTime::now()
+        let started_since_epoch = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(Error::Clock)?
-            .as_secs_f64()
-            * 1_000.0;
+            .map_err(Error::Clock)?;
         let file = OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -94,7 +117,7 @@ impl RuntimeMetricsRecorder {
             &Header {
                 kind: "header",
                 schema_version: METRICS_SCHEMA_VERSION,
-                started_unix_milliseconds,
+                started_since_epoch,
             },
         )?;
         writer.flush()?;
@@ -127,7 +150,7 @@ impl RuntimeMetricsRecorder {
     }
 
     /// Record the complete desktop immediate-mode UI pass.
-    pub fn record_desktop_frame(&self, ui_milliseconds: f32) {
+    pub fn record_desktop_frame(&self, ui_elapsed: Duration) {
         let Some(recorder) = &self.0 else {
             return;
         };
@@ -138,16 +161,15 @@ impl RuntimeMetricsRecorder {
         if state.finished {
             return;
         }
-        let frame_milliseconds = state
+        let frame_elapsed = state
             .previous_desktop_frame
             .replace(now)
             .map(|previous| now - previous)
-            .filter(|elapsed| *elapsed <= std::time::Duration::from_millis(250))
-            .map(|elapsed| elapsed.as_secs_f32() * 1_000.0);
+            .filter(|elapsed| *elapsed <= Duration::from_millis(250));
         state.events.push(RuntimeEvent::DesktopFrame {
-            elapsed_milliseconds: recorder.started.elapsed().as_secs_f64() * 1_000.0,
-            frame_milliseconds,
-            ui_milliseconds,
+            elapsed: recorder.started.elapsed(),
+            frame_elapsed,
+            ui_elapsed,
         });
     }
 }
@@ -164,7 +186,7 @@ impl MapMetricsSink for RuntimeMetricsRecorder {
             return;
         }
         state.events.push(RuntimeEvent::MapFrame {
-            elapsed_milliseconds: recorder.started.elapsed().as_secs_f64() * 1_000.0,
+            elapsed: recorder.started.elapsed(),
             sample,
         });
     }
@@ -180,7 +202,7 @@ impl MapMetricsSink for RuntimeMetricsRecorder {
             return;
         }
         state.events.push(RuntimeEvent::MapRender {
-            elapsed_milliseconds: recorder.started.elapsed().as_secs_f64() * 1_000.0,
+            elapsed: recorder.started.elapsed(),
             sample,
         });
     }
@@ -209,23 +231,24 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use garmin_model::artifact::ByteCount;
 
     fn sample() -> MapPerformanceSample {
         MapPerformanceSample {
-            frame_milliseconds: Some(16.0),
-            interaction_frame_milliseconds: Some(16.0),
+            frame_elapsed: Some(Duration::from_secs_f64(16.0 / 1_000.0)),
+            interaction_frame_elapsed: Some(Duration::from_secs_f64(16.0 / 1_000.0)),
             camera_active: true,
-            ui_milliseconds: 2.0,
-            scene_milliseconds: 0.5,
-            route_query_microseconds: 12.0,
-            label_milliseconds: 0.2,
+            ui_elapsed: Duration::from_secs_f64(2.0 / 1_000.0),
+            scene_elapsed: Duration::from_secs_f64(0.5 / 1_000.0),
+            route_query_elapsed: Duration::from_secs_f64(12.0 / 1_000_000.0),
+            label_elapsed: Duration::from_secs_f64(0.2 / 1_000.0),
             label_backlog: 1,
             stale_work: 2,
             visible_tiles: 6,
             ready_tiles: 5,
             pending_tiles: 1,
-            queued_upload_bytes: 256,
-            uploaded_bytes: 128,
+            queued_upload_bytes: ByteCount::from_bytes(256),
+            uploaded_bytes: ByteCount::from_bytes(128),
         }
     }
 
@@ -235,7 +258,7 @@ mod tests {
         let path = directory.path().join("metrics.ndjson");
         let recorder = RuntimeMetricsRecorder::open(&path).unwrap();
         recorder.record(sample());
-        recorder.record_desktop_frame(4.0);
+        recorder.record_desktop_frame(Duration::from_millis(4));
         recorder.finish().unwrap();
 
         let lines = std::fs::read_to_string(path).unwrap();

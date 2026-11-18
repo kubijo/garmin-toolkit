@@ -1,6 +1,7 @@
 use ansi_to_tui::IntoText as _;
 use gallery::prelude::*;
 use garmin_model::logging::{Level, Record};
+use garmin_model::value::UnixMilliseconds;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -53,7 +54,7 @@ fn samples(ansi: bool) -> String {
 fn append(output: &mut String, ansi: bool, level: Level, message: &str, fields: &[(&str, &str)]) {
     let record = Record {
         sequence: 1,
-        timestamp_ms: 1_790_417_762_456,
+        timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(1_790_417_762_456),
         level,
         component: "garmin::server".into(),
         source: "hass".into(),

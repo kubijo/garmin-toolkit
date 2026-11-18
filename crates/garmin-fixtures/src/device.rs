@@ -1,5 +1,6 @@
 //! Disposable directory-backed Garmin device used by demo deployments.
 
+use garmin_model::artifact::ByteCount;
 use std::{
     collections::BTreeSet,
     ffi::OsStr,
@@ -40,14 +41,15 @@ const MAX_DEPTH: usize = 32;
 const MAX_ENTRIES: usize = 4_096;
 const ROOT_MARKER: &str = ".garmin-toolkit-demo-device";
 const ROOT_MARKER_CONTENTS: &[u8] = b"garmin-toolkit demo device v1\n";
-const MAX_TRANSFER_DELAY_MS: u64 = 10_000;
+const MAX_TRANSFER_DELAY: Duration = Duration::from_secs(10);
 
 fn transfer_delay(environment: &str) -> Duration {
     std::env::var(environment)
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
-        .filter(|milliseconds| *milliseconds <= MAX_TRANSFER_DELAY_MS)
-        .map_or(Duration::ZERO, Duration::from_millis)
+        .map(Duration::from_millis)
+        .filter(|delay| *delay <= MAX_TRANSFER_DELAY)
+        .unwrap_or_default()
 }
 
 /// A safely owned fake device tree.
@@ -196,7 +198,10 @@ pub fn state() -> DeviceStateSnapshot {
         storages: vec![DeviceStorageState {
             id: STORAGE_ID.to_owned(),
             label: "Internal storage".to_owned(),
-            capacity: StorageCapacity::new(32_000_000_000, 8_600_000_000),
+            capacity: StorageCapacity::new(
+                ByteCount::from_gigabytes(32),
+                ByteCount::from_megabytes(8_600),
+            ),
             writable: Some(true),
         }],
     }
@@ -357,7 +362,7 @@ fn scan_catalog(root: &Path) -> Result<DeviceCatalog, String> {
             entries.push(DeviceCatalogEntry {
                 path: safe.into_utf8_path_buf(),
                 kind,
-                size,
+                size: size.map(ByteCount::from_bytes),
             });
         }
     }

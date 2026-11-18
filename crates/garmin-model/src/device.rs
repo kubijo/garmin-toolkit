@@ -2,17 +2,24 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::artifact::ByteCount;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StorageCapacity {
-    Available { total_bytes: u64, free_bytes: u64 },
-    Unavailable { reason: String },
+    Available {
+        total_bytes: ByteCount,
+        free_bytes: ByteCount,
+    },
+    Unavailable {
+        reason: String,
+    },
 }
 
 impl StorageCapacity {
     #[must_use]
-    pub fn new(total_bytes: u64, free_bytes: u64) -> Self {
-        if free_bytes > total_bytes || total_bytes == u64::MAX || free_bytes == u64::MAX {
+    pub fn new(total_bytes: ByteCount, free_bytes: ByteCount) -> Self {
+        if free_bytes > total_bytes || total_bytes == ByteCount::from_bytes(u64::MAX) {
             return Self::unavailable("The device reported invalid storage totals");
         }
         Self::Available {
@@ -30,12 +37,12 @@ impl StorageCapacity {
 
     /// Validated total and free bytes.
     #[must_use]
-    pub const fn bytes(&self) -> Option<(u64, u64)> {
+    pub fn bytes(&self) -> Option<(ByteCount, ByteCount)> {
         match *self {
             Self::Available {
                 total_bytes,
                 free_bytes,
-            } if free_bytes <= total_bytes && total_bytes != u64::MAX => {
+            } if free_bytes <= total_bytes && total_bytes != ByteCount::from_bytes(u64::MAX) => {
                 Some((total_bytes, free_bytes))
             }
             _ => None,
@@ -151,7 +158,7 @@ impl DeviceInspection {
 
 #[cfg(test)]
 mod tests {
-    use super::{DeviceStateSnapshot, DeviceStorageState, StorageCapacity};
+    use super::{ByteCount, DeviceStateSnapshot, DeviceStorageState, StorageCapacity};
 
     #[test]
     fn device_state_round_trips_through_postcard() {
@@ -160,7 +167,10 @@ mod tests {
                 DeviceStorageState {
                     id: "internal".to_owned(),
                     label: "Internal storage".to_owned(),
-                    capacity: StorageCapacity::new(32_000_000_000, 8_600_000_000),
+                    capacity: StorageCapacity::new(
+                        ByteCount::from_gigabytes(32),
+                        ByteCount::from_megabytes(8_600),
+                    ),
                     writable: Some(true),
                 },
                 DeviceStorageState {

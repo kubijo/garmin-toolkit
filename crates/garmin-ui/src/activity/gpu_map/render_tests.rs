@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::activity::map::camera::MapCamera;
+use garmin_model::route::Coordinate;
 
 const WIDTH: u32 = 768;
 const HEIGHT: u32 = 256;
@@ -65,7 +66,7 @@ fn adjacent_tile_backgrounds_have_no_seams_at_fractional_zoom_and_scale() {
             for scale in [1.0, 1.25, 2.0] {
                 let mut camera = MapCamera::default();
                 camera.set_zoom(zoom);
-                camera.center_at(walkers::lon_lat(0.137, 0.321));
+                camera.center_at(Coordinate::from_degrees(0.321, 0.137).unwrap());
                 let viewport = Rect::from_min_size(
                     pos2(0.0, 0.0),
                     egui::vec2(WIDTH as f32 / scale, HEIGHT as f32 / scale),
@@ -180,7 +181,7 @@ fn world_copies_render_across_the_viewport_and_honor_nonzero_first_instances() {
     let mut camera = MapCamera::default();
     camera.set_zoom(0.0);
     for longitude in [-179.9, -0.1, 0.0, 0.1, 179.9] {
-        camera.center_at(walkers::lon_lat(longitude, 0.0));
+        camera.center_at(Coordinate::from_degrees(0.0, longitude).unwrap());
         let pixels = render_row(
             &handle,
             &queue,
@@ -201,7 +202,7 @@ fn world_copies_render_across_the_viewport_and_honor_nonzero_first_instances() {
     }
 
     camera.set_zoom(2.0);
-    camera.center_at(walkers::lon_lat(176.4, 0.0));
+    camera.center_at(Coordinate::from_degrees(0.0, 176.4).unwrap());
     let pixels = render_row(
         &handle,
         &queue,

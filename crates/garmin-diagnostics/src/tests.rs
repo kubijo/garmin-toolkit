@@ -6,6 +6,7 @@ use axum::{
 };
 use futures_util::StreamExt as _;
 use garmin_model::diagnostics::Observation;
+use garmin_model::value::UnixMilliseconds;
 use std::{collections::BTreeMap, net::SocketAddr};
 use tower::ServiceExt as _;
 
@@ -182,7 +183,7 @@ async fn filtered_streams_ignore_unmatched_records_and_still_deliver_matches() {
                     store
                         .append(vec![Record {
                             sequence: 0,
-                            timestamp_ms: sequence,
+                            timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(sequence),
                             level,
                             component: "test".into(),
                             source: "test".into(),
@@ -292,7 +293,7 @@ fn snapshot_stays_current_while_history_pages_and_time_filters_apply() {
     let last = events.read(&query);
     assert!(!last.more);
     assert_eq!(last.records[0].observation.fields["message"], "third");
-    query.logs.until_ms = Some(0);
+    query.logs.until_ms = Some(UnixMilliseconds::default());
     let filtered = events.read(&query);
     assert!(filtered.records.is_empty());
     assert_eq!(filtered.state.unwrap().len(), 1);
@@ -338,7 +339,7 @@ fn logs_take_the_latest_matching_records_and_advance_past_nonmatches() {
     let records = (1..=100)
         .map(|index| Record {
             sequence: 0,
-            timestamp_ms: index,
+            timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(index),
             level: Level::Info,
             component: "test".into(),
             source: "test".into(),
@@ -351,7 +352,10 @@ fn logs_take_the_latest_matching_records_and_advance_past_nonmatches() {
     store.append(records).unwrap();
     let (batch, more) = store.recent(&Filter::default(), None, 100);
     assert!(!more);
-    assert_eq!(batch.records.last().unwrap().timestamp_ms, 100);
+    assert_eq!(
+        batch.records.last().unwrap().timestamp_ms,
+        UnixMilliseconds::from_milliseconds_since_epoch(100)
+    );
     assert!(batch.records.len() < 100);
     let filter = Filter {
         text: "never matches".into(),
@@ -581,7 +585,7 @@ async fn ansi_get_and_stream_preserve_plain_text_and_escape_record_controls() {
                 .into_iter()
                 .map(|level| Record {
                     sequence: 0,
-                    timestamp_ms: 1234,
+                    timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(1234),
                     level,
                     component: hostile.into(),
                     source: hostile.into(),

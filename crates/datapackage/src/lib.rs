@@ -6,6 +6,7 @@ use std::{
     path::Path,
 };
 
+use byte_unit::Byte;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
@@ -41,17 +42,17 @@ pub enum Error {
 /// Limits applied to local files and decompressed ZIP members.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
-    pub bytes: u64,
+    pub bytes: Byte,
     pub members: usize,
-    pub descriptor_bytes: u64,
+    pub descriptor_bytes: Byte,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            bytes: 1024 * 1024 * 1024,
+            bytes: Byte::GIBIBYTE,
             members: 4096,
-            descriptor_bytes: 4 * 1024 * 1024,
+            descriptor_bytes: Byte::from_u64(4 * Byte::MEBIBYTE.as_u64()),
         }
     }
 }
@@ -121,7 +122,7 @@ impl Package {
         mut resolve: impl FnMut(&str) -> Result<Vec<u8>, Error>,
     ) -> Result<Self, Error> {
         ensure(
-            descriptor.len() as u64 <= limits.descriptor_bytes,
+            buffer_size(descriptor) <= limits.descriptor_bytes,
             "descriptor exceeds size limit",
         )?;
         let descriptor: Descriptor = serde_json::from_slice(descriptor)?;
@@ -138,7 +139,7 @@ impl Package {
         )?;
         let mut names = BTreeSet::new();
         let mut resources = Vec::new();
-        let mut total = 0_u64;
+        let mut total = Byte::default();
         for metadata in &descriptor.resources {
             ensure(
                 !metadata.name.is_empty() && names.insert(&metadata.name),
@@ -157,7 +158,7 @@ impl Package {
                 }
             };
             total = total
-                .checked_add(bytes.len() as u64)
+                .add(buffer_size(&bytes))
                 .ok_or_else(|| Error::Invalid("resource size overflow".to_owned()))?;
             ensure(total <= limits.bytes, "package exceeds size limit")?;
             resources.push(Resource {
@@ -214,13 +215,17 @@ pub(crate) fn safe_path(path: &str) -> bool {
             .all(|part| !part.is_empty() && part != "." && part != ".." && !part.starts_with('~'))
 }
 
-fn read_limited(mut source: impl Read, limit: u64) -> Result<Vec<u8>, Error> {
+fn buffer_size(bytes: &[u8]) -> Byte {
+    Byte::from_u64(u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+}
+
+fn read_limited(mut source: impl Read, limit: Byte) -> Result<Vec<u8>, Error> {
     let mut bytes = Vec::new();
     source
         .by_ref()
-        .take(limit.saturating_add(1))
+        .take(limit.add(Byte::BYTE).unwrap_or(limit).as_u64())
         .read_to_end(&mut bytes)?;
-    ensure(bytes.len() as u64 <= limit, "resource exceeds size limit")?;
+    ensure(buffer_size(&bytes) <= limit, "resource exceeds size limit")?;
     Ok(bytes)
 }
 

@@ -5,7 +5,10 @@ use egui_kittest::{
 };
 use gallery::egui;
 use garmin_color::{Color, swatch};
-use garmin_model::identity::ProfilePreferences;
+use garmin_model::{
+    activity::{ActivityDuration, Distance},
+    identity::{MonthlyDistanceTarget, ProfilePreferences},
+};
 use garmin_ui::profile_settings::{self, Action};
 
 enum RequestState {
@@ -296,8 +299,8 @@ fn browsing_cloud_activities_only_requests_a_preview_until_explicit_import() {
             sport: Some(garmin_model::activity::ActivitySport::Cycling),
             name: "Road ride".into(),
             started_at: Some("2026-11-10 10:00:00".into()),
-            distance_metres: Some(13230.0),
-            duration_seconds: Some(3600.0),
+            distance: Distance::try_from_metres(13230.0),
+            duration: ActivityDuration::try_from_seconds(3600.0),
         }],
     });
     view.run();
@@ -359,8 +362,8 @@ fn cloud_page(start: u32) -> garmin_model::garmin_connect::ActivityResponse {
                     index + 1
                 ),
                 started_at: Some("2026-11-10 07:12:38".into()),
-                distance_metres: Some(13230.0),
-                duration_seconds: Some(4320.0),
+                distance: Distance::try_from_metres(13230.0),
+                duration: ActivityDuration::try_from_seconds(4320.0),
             })
             .collect(),
     }
@@ -1125,7 +1128,7 @@ fn window_and_theme_changes_preserve_other_profile_preferences() {
 #[test]
 fn changing_units_language_and_theme_preserves_monthly_distance_targets() {
     let mut view = harness();
-    let targets = [160, 500, 10];
+    let targets = [160, 500, 10].map(MonthlyDistanceTarget::from_kilometres);
     view.state_mut().preferences = view
         .state()
         .preferences

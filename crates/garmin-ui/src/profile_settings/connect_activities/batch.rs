@@ -227,8 +227,8 @@ mod tests {
             name: format!("Ride {id}"),
             sport: None,
             started_at: None,
-            distance_metres: None,
-            duration_seconds: None,
+            distance: None,
+            duration: None,
         }
     }
 

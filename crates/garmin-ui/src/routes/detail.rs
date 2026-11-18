@@ -263,7 +263,7 @@ fn version_row(
     enabled: bool,
     deleting: &mut Option<CourseVersion>,
 ) -> Option<Action> {
-    let title = format_message!(intl, default_message: "Course version {version} · {size}", values: { version: u64::from(version.version.get()), size: crate::text::format_bytes(version.byte_count.as_u64()) });
+    let title = format_message!(intl, default_message: "Course version {version} · {size}", values: { version: u64::from(version.version.get()), size: version.byte_count.format_decimal(2) });
     let date = intl.dates().datetime(
         version
             .generated_at
@@ -705,10 +705,7 @@ fn transfer_review(
                     .size(12.0)
                     .color(muted),
             );
-            ui.label(
-                typography::semibold(crate::text::format_bytes(review.byte_count.as_u64()))
-                    .size(16.0),
-            );
+            ui.label(typography::semibold(review.byte_count.format_decimal(2)).size(16.0));
             ui.add(egui::Label::new(egui::RichText::new(&review.file_name).color(muted)).wrap());
         });
     ui.add_space(16.0);
@@ -727,8 +724,10 @@ fn transfer_cleanup(
     cleanup: &garmin_service_api::course_transfer::CourseCleanupReview,
 ) {
     ui.label(format!(
-        "{} / {} · {} bytes",
-        cleanup.target.directory, cleanup.file_name, cleanup.byte_count
+        "{} / {} · {}",
+        cleanup.target.directory,
+        cleanup.file_name,
+        cleanup.byte_count.format_binary()
     ));
 }
 

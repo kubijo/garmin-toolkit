@@ -40,7 +40,7 @@ impl<'a> Ingestion<'a> {
         activity_projections: &'a [ActivityProjection<'a>],
     ) -> Result<Self, IngestionError> {
         if artifact.digest() != ArtifactDigest::from_bytes(bytes)
-            || artifact.byte_count() != ByteCount::from_u64(bytes.len() as u64)
+            || artifact.byte_count() != ByteCount::from_bytes(bytes.len() as u64)
         {
             return Err(IngestionError::ArtifactBytesMismatch);
         }
@@ -209,7 +209,7 @@ pub async fn persist_blob(
 ) -> Result<(), crate::Error> {
     let artifact_digest = artifact.digest();
     let digest: &[u8] = artifact_digest.as_blake3().as_bytes();
-    let byte_count = i64::try_from(artifact.byte_count().as_u64())
+    let byte_count = i64::try_from(artifact.byte_count().as_bytes())
         .map_err(|_| IngestionError::ArtifactTooLarge)?;
     let stored = sqlx::query_file!("queries/persist-blob.sql", digest, byte_count, bytes,)
         .fetch_optional(&mut **transaction)

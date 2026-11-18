@@ -1,6 +1,7 @@
 //! Native snapshot files and HASS transfers share the same portable data contract.
 
 use super::*;
+use garmin_model::artifact::ByteCount;
 use garmin_model::{
     artifact::{
         Acquisition, AcquisitionId, AcquisitionOperationId, Artifact, ArtifactId,
@@ -71,7 +72,7 @@ async fn native_fixture(path: &Path) -> anyhow::Result<(Vec<User>, Artifact)> {
         .await?;
     drop(bytes);
     let manifest = storage.snapshot(path, Limits::default()).await?;
-    assert!(manifest.database_bytes > ARTIFACT_BYTES as u64);
+    assert!(manifest.database_bytes > ByteCount::from_bytes(ARTIFACT_BYTES as u64));
     assert!(std::fs::metadata(path)?.len() > ARTIFACT_BYTES as u64);
     let users = storage.users().await?;
     storage.close().await;
@@ -84,12 +85,12 @@ async fn upload_file(session: &SnapshotServiceClient, path: &Path) -> anyhow::Re
     session
         .execute(Request::BeginRestore {
             operation,
-            bytes: file.metadata()?.len(),
+            bytes: ByteCount::from_bytes(file.metadata()?.len()),
         })
         .await?
         .map_err(|error| anyhow::anyhow!(error.message))?;
-    let mut buffer = vec![0; MAX_SNAPSHOT_CHUNK as usize];
-    let mut offset = 0;
+    let mut buffer = vec![0; usize::try_from(MAX_SNAPSHOT_CHUNK.as_bytes()).unwrap_or(usize::MAX)];
+    let mut offset = ByteCount::default();
     loop {
         let count = file.read(&mut buffer)?;
         if count == 0 {
@@ -103,9 +104,9 @@ async fn upload_file(session: &SnapshotServiceClient, path: &Path) -> anyhow::Re
             })
             .await?
             .map_err(|error| anyhow::anyhow!(error.message))?;
-        offset += count as u64;
+        offset = offset.saturating_add(ByteCount::from_bytes(count as u64));
     }
-    assert_eq!(offset, file.metadata()?.len());
+    assert_eq!(offset.as_bytes(), file.metadata()?.len());
     session
         .execute(Request::Verify { operation })
         .await?

@@ -255,7 +255,7 @@ impl Application {
 // A small, typed failure is returned instead of invoking Remoc's threaded large-item path.
 fn bounded_preview(preview: ConnectFitPreview) -> Result<ConnectActivityResult, Error> {
     let result = ConnectActivityResult::Preview(preview);
-    let limit = usize::try_from(PREVIEW_LIMIT.into_u64())
+    let limit = usize::try_from(PREVIEW_LIMIT.as_bytes())
         .map_err(|_| Error::GarminConnectPreviewTooLarge)?;
     // Remoc's default Postbag codec requires a connection context. Use its wire configuration
     // directly here, without field omission, to obtain a conservative bound outside that context.
@@ -364,15 +364,15 @@ fn original_fit(bytes: &[u8]) -> Result<Vec<u8>, Error> {
                 .to_ascii_lowercase()
                 .ends_with(".fit")
             || found.is_some()
-            || file.size() > FIT_LIMIT.into_u64()
+            || file.size() > FIT_LIMIT.as_bytes()
         {
             return Err(invalid());
         }
         let mut fit = Vec::new();
-        file.take(FIT_LIMIT.into_u64() + 1)
+        file.take(FIT_LIMIT.as_bytes() + 1)
             .read_to_end(&mut fit)
             .map_err(|_| invalid())?;
-        if fit.len() as u64 > FIT_LIMIT.into_u64() {
+        if fit.len() as u64 > FIT_LIMIT.as_bytes() {
             return Err(invalid());
         }
         found = Some(fit);
@@ -410,7 +410,7 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         use garmin_service_api::{ActivitySampleSnapshot, DeviceFitPreviewContent};
         let _codec_guard = remoc::codec::allow_outside();
-        let limit = usize::try_from(PREVIEW_LIMIT.into_u64())?;
+        let limit = usize::try_from(PREVIEW_LIMIT.as_bytes())?;
         assert!(limit + 1024 < garmin_service_api::control::transport_config().max_data_size);
         assert!(limit < remoc::rch::DEFAULT_MAX_ITEM_SIZE);
         let bytes = garmin_fit::fixture::activity(garmin_fit::fixture::Sport::Cycling)?;
@@ -438,13 +438,13 @@ mod tests {
         let sample = ActivitySampleSnapshot {
             timestamp: Timestamp::from_jiff("2026-11-12T12:00:00Z".parse()?),
             coordinate: None,
-            elevation_meters: None,
+            elevation: None,
             distance: None,
             speed: None,
             heart_rate: None,
             cadence: None,
             power: None,
-            temperature_millicelsius: None,
+            temperature: None,
         };
         let mut sample_bytes = Vec::new();
         <remoc::codec::Default as remoc::codec::Codec>::serialize_active(
@@ -456,7 +456,7 @@ mod tests {
             panic!("activity fixture");
         };
         activities[0].recording.samples =
-            vec![sample; usize::try_from(PREVIEW_LIMIT.into_u64())? / size + 1];
+            vec![sample; usize::try_from(PREVIEW_LIMIT.as_bytes())? / size + 1];
         // Even this recording can be prepared for import without sending its samples to the browser.
         let receipt = prepared(preview.clone(), false);
         let mut receipt_bytes = Vec::new();

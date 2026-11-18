@@ -1,6 +1,10 @@
 //! Platform backend and per-surface completion boundary for activity maps.
 
-use std::sync::{Arc, OnceLock};
+use garmin_model::{artifact::ByteCount, value::duration_milliseconds};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 #[path = "map_runtime/browser_worker.rs"]
 mod browser_worker;
@@ -34,19 +38,43 @@ type SharedBackend = Shared<dyn Backend>;
 #[derive(Clone, Copy, Debug, serde::Serialize)]
 pub struct MapPerformanceSample {
     /// Time since the previous rendered map frame.
-    pub frame_milliseconds: Option<f32>,
+    #[serde(
+        rename = "frame_milliseconds",
+        serialize_with = "duration_milliseconds::serialize_optional"
+    )]
+    pub frame_elapsed: Option<Duration>,
     /// Time since the previous map frame when that frame requested continued camera motion.
-    pub interaction_frame_milliseconds: Option<f32>,
+    #[serde(
+        rename = "interaction_frame_milliseconds",
+        serialize_with = "duration_milliseconds::serialize_optional"
+    )]
+    pub interaction_frame_elapsed: Option<Duration>,
     /// Whether dragging, zooming, or inertial camera movement affected this frame.
     pub camera_active: bool,
     /// CPU time spent in the map's immediate-mode UI pass.
-    pub ui_milliseconds: f32,
+    #[serde(
+        rename = "ui_milliseconds",
+        serialize_with = "duration_milliseconds::serialize"
+    )]
+    pub ui_elapsed: Duration,
     /// CPU time spent assembling the render-ready GPU frame.
-    pub scene_milliseconds: f32,
+    #[serde(
+        rename = "scene_milliseconds",
+        serialize_with = "duration_milliseconds::serialize"
+    )]
+    pub scene_elapsed: Duration,
     /// CPU time spent querying the route spatial index.
-    pub route_query_microseconds: f32,
+    #[serde(
+        rename = "route_query_microseconds",
+        serialize_with = "duration_milliseconds::serialize_microseconds"
+    )]
+    pub route_query_elapsed: Duration,
     /// CPU time spent preparing the current label layout.
-    pub label_milliseconds: f32,
+    #[serde(
+        rename = "label_milliseconds",
+        serialize_with = "duration_milliseconds::serialize"
+    )]
+    pub label_elapsed: Duration,
     /// Whether label preparation is waiting for worker completion.
     pub label_backlog: usize,
     /// Total superseded or stale asynchronous work discarded by this surface.
@@ -58,9 +86,9 @@ pub struct MapPerformanceSample {
     /// Tile requests awaiting completion.
     pub pending_tiles: usize,
     /// Bytes of prepared GPU data still awaiting upload.
-    pub queued_upload_bytes: usize,
+    pub queued_upload_bytes: ByteCount,
     /// Bytes uploaded during this frame.
-    pub uploaded_bytes: usize,
+    pub uploaded_bytes: ByteCount,
 }
 
 /// CPU duration of one WGPU callback phase.
@@ -69,7 +97,11 @@ pub struct MapRenderPerformanceSample {
     /// WGPU callback phase being measured.
     pub phase: MapRenderPhase,
     /// CPU time spent in that callback.
-    pub milliseconds: f32,
+    #[serde(
+        rename = "milliseconds",
+        serialize_with = "duration_milliseconds::serialize"
+    )]
+    pub elapsed: Duration,
 }
 
 /// Named WGPU callback phases emitted by the activity map.
@@ -91,11 +123,19 @@ pub struct MapUploadEvent {
     pub zoom: u8,
     pub x: u32,
     pub y: u32,
-    pub elapsed_ms: f64,
+    #[serde(
+        rename = "elapsed_ms",
+        serialize_with = "duration_milliseconds::serialize"
+    )]
+    pub elapsed: Duration,
     pub event: MapUploadPhase,
     /// CPU time in allocation/write steps since the previous progress event.
-    pub work_ms: f64,
-    pub bytes: usize,
+    #[serde(
+        rename = "work_ms",
+        serialize_with = "duration_milliseconds::serialize"
+    )]
+    pub work: Duration,
+    pub bytes: ByteCount,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -120,7 +160,7 @@ pub trait MapMetricsSink: Send + Sync {
     fn record_render(&self, _sample: MapRenderPerformanceSample) {}
 
     /// Wall time from enqueueing a tile for upload to GPU resource publication, not screen presentation.
-    fn record_upload(&self, _milliseconds: f64) {}
+    fn record_upload(&self, _elapsed: Duration) {}
 
     /// Record a bounded upload lifecycle event, without retaining it in the renderer.
     fn record_upload_event(&self, _event: MapUploadEvent) {}
@@ -168,8 +208,8 @@ impl MapMetrics {
     }
 
     #[cfg(any(target_arch = "wasm32", test))]
-    pub(super) fn record_upload(&self, milliseconds: f64) {
-        self.0.record_upload(milliseconds);
+    pub(super) fn record_upload(&self, elapsed: Duration) {
+        self.0.record_upload(elapsed);
     }
 
     #[cfg(any(target_arch = "wasm32", test))]

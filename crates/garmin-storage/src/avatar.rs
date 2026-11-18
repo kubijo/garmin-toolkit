@@ -223,7 +223,7 @@ impl Storage {
 
 fn validate_bytes(artifact: &Artifact, bytes: &[u8]) -> Result<(), AvatarPersistenceError> {
     if artifact.digest() != ArtifactDigest::from_bytes(bytes)
-        || artifact.byte_count() != ByteCount::from_u64(bytes.len() as u64)
+        || artifact.byte_count() != ByteCount::from_bytes(bytes.len() as u64)
     {
         return Err(AvatarPersistenceError::ArtifactBytesMismatch);
     }

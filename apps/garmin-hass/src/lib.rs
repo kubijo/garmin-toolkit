@@ -5,6 +5,7 @@
     reason = "FIT fixtures and SQLx currently require incompatible transitive releases"
 )]
 
+use garmin_model::artifact::NonZeroByteRate;
 use std::{
     env,
     path::{Path, PathBuf},
@@ -44,7 +45,7 @@ pub struct BrowserOptions {
     /// Expose localhost-only automation routes on the HTTP listener (demo only).
     pub control_server: bool,
     /// Limit retained-copy payload uploads in bytes per second (demo only).
-    pub simulation_write_bytes_per_second: Option<std::num::NonZeroU64>,
+    pub simulation_write_bytes_per_second: Option<NonZeroByteRate>,
 }
 
 impl Default for BrowserOptions {
@@ -156,6 +157,7 @@ pub enum Error {
 
 #[cfg(test)]
 mod tests {
+    use garmin_model::artifact::NonZeroByteRate;
     use std::path::Path;
 
     use super::{DATA_BASE, configured_data_base};
@@ -203,7 +205,9 @@ mod tests {
     #[test]
     fn simulation_pacing_requires_a_demo_build() {
         let paced = super::BrowserOptions {
-            simulation_write_bytes_per_second: std::num::NonZeroU64::new(1_000_000),
+            simulation_write_bytes_per_second: NonZeroByteRate::try_from_bytes_per_second(
+                1_000_000,
+            ),
             ..super::BrowserOptions::default()
         };
         assert_eq!(paced.validate().is_ok(), cfg!(feature = "demo"));

@@ -25,8 +25,8 @@ The [device matrix](../research/device-capabilities.md) records established oper
 
 ## Future features
 
-- **Activity trends:** add activity comparisons and FIT-derived metrics with coverage shown. Define duplicate handling
-  before merging account and local history. Reports stay in the app. See the [Trends plan](activity-trends.md).
+- **Activity trends:** add more FIT-derived metrics with coverage shown. Define duplicate handling before merging
+  account and local history. Reports stay in the app. See the [Trends plan](activity-trends.md).
 
 ## Deferred
 

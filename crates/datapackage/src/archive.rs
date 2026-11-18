@@ -5,10 +5,12 @@ use std::{
     io::{Read, Seek, Write},
 };
 
+use byte_unit::Byte;
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 use crate::{
-    Descriptor, Error, Limits, Package, ResourceDescriptor, ensure, hash, read_limited, safe_path,
+    Descriptor, Error, Limits, Package, ResourceDescriptor, buffer_size, ensure, hash,
+    read_limited, safe_path,
 };
 
 /// A ZIP writer that owns resource metadata and computes resource integrity fields.
@@ -49,7 +51,7 @@ impl<W: Write + Seek> Writer<W> {
             .start_file(path, SimpleFileOptions::default())?;
         self.archive.write_all(bytes)?;
         descriptor.hash = Some(hash(bytes));
-        descriptor.bytes = Some(bytes.len() as u64);
+        descriptor.bytes = Some(buffer_size(bytes));
         self.resources.push(descriptor);
         Ok(())
     }
@@ -75,7 +77,7 @@ pub(crate) fn read(source: impl Read + Seek, limits: Limits) -> Result<Package, 
     let mut archive = ZipArchive::new(source)?;
     ensure(archive.len() <= limits.members, "too many ZIP members")?;
     let mut members = BTreeSet::new();
-    let mut total = 0_u64;
+    let mut total = Byte::default();
     for index in 0..archive.len() {
         let file = archive.by_index(index)?;
         let name = file.name()?;
@@ -89,7 +91,7 @@ pub(crate) fn read(source: impl Read + Seek, limits: Limits) -> Result<Package, 
         ensure(safe_path(&name) && !file.is_symlink(), "unsafe ZIP member")?;
         ensure(members.insert(name.into_owned()), "duplicate ZIP member")?;
         total = total
-            .checked_add(file.size())
+            .add(Byte::from_u64(file.size()))
             .ok_or_else(|| Error::Invalid("archive size overflow".to_owned()))?;
         ensure(total <= limits.bytes, "archive exceeds size limit")?;
     }

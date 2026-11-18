@@ -10,7 +10,7 @@ fn cursor(store: &Store, sequence: u64) -> Cursor {
 fn record(sequence: u64, message: &str) -> Record {
     Record {
         sequence: 0,
-        timestamp_ms: sequence,
+        timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(sequence),
         level: Level::Info,
         component: "test".into(),
         source: "test".into(),
@@ -230,7 +230,7 @@ fn large_records_hit_the_byte_limit_before_the_record_limit() {
         .iter()
         .map(|record| serde_json::to_vec(record).unwrap().len() + 1)
         .sum();
-    assert!(bytes <= history::BYTE_LIMIT);
+    assert!(ByteCount::from_bytes(bytes as u64) <= history::BYTE_LIMIT);
 }
 
 #[test]

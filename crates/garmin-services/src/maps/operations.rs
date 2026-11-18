@@ -1,5 +1,6 @@
 //! Host/device ownership is independent of the profile and client connection.
 
+use garmin_model::artifact::NonZeroByteRate;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, PoisonError},
@@ -13,7 +14,7 @@ pub struct Operations {
     mutations: Arc<MutationLocks>,
     deployment: Option<Arc<crate::deployment::Deployment>>,
     simulator: tokio::sync::OnceCell<garmin_simulator::MockServer>,
-    simulation_write_bytes_per_second: Option<std::num::NonZeroU64>,
+    simulation_write_bytes_per_second: Option<NonZeroByteRate>,
 }
 
 impl Operations {
@@ -30,7 +31,7 @@ impl Operations {
     #[must_use]
     pub const fn with_simulation_write_rate(
         mut self,
-        bytes_per_second: Option<std::num::NonZeroU64>,
+        bytes_per_second: Option<NonZeroByteRate>,
     ) -> Self {
         self.simulation_write_bytes_per_second = bytes_per_second;
         self

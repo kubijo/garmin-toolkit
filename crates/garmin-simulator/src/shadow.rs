@@ -12,7 +12,10 @@ use garmin_device::{
     DeviceInventory, DeviceManifest, DevicePathInspection, DevicePathState,
     MountedMtpBackupProgress, SafeRelativePath,
 };
-use garmin_model::map::MapAuthorization;
+use garmin_model::{
+    artifact::{ByteCount, NonZeroByteRate},
+    map::MapAuthorization,
+};
 use garmin_progress::{OperationStage, ProgressReporter};
 use garmin_update::UpdatePlan;
 use indoc::indoc;
@@ -127,24 +130,27 @@ impl Shadow {
             volumes,
             files: Vec::new(),
         };
-        let total = inventory.paths.iter().try_fold(0_u64, |sum, item| {
-            sum.checked_add(item.size.unwrap_or(0))
-                .context("snapshot size overflow")
-        })?;
+        let total = inventory
+            .paths
+            .iter()
+            .try_fold(ByteCount::default(), |sum, item| {
+                sum.checked_add(item.size.unwrap_or_default())
+                    .context("snapshot size overflow")
+            })?;
         garmin_update::space::check_host_space(
             capture.root(),
-            total.checked_mul(2).context("snapshot size overflow")?,
+            total.checked_add(total).context("snapshot size overflow")?,
         )
         .await?;
         progress.started(
             OperationStage::Backup,
             "Copying source files into an isolated virtual device",
-            Some(total),
+            Some(total.as_bytes()),
         );
         capture
             .write_json(Path::new("simulation/source-inventory.json"), &inventory)
             .await?;
-        let mut copied = 0_u64;
+        let mut copied = ByteCount::default();
         for volume in &snapshot.volumes {
             capture
                 .create_directory(&PathBuf::from("simulation/device").join(&volume.key))
@@ -164,7 +170,9 @@ impl Shadow {
                 let before =
                     copy_original(source, item, volume, capture, progress, copied, total).await?;
                 if let FileState::File { bytes, .. } = &before {
-                    copied += bytes;
+                    copied = copied
+                        .checked_add(*bytes)
+                        .context("snapshot size overflow")?;
                 }
                 snapshot.files.push(SnapshotFile {
                     storage: volume.key.clone(),
@@ -184,8 +192,8 @@ impl Shadow {
         progress.completed(
             OperationStage::Backup,
             "Source snapshot retained; physical device remains read-only",
-            copied,
-            Some(total),
+            copied.as_bytes(),
+            Some(total.as_bytes()),
         );
         Ok(Self {
             registered,
@@ -200,7 +208,7 @@ impl Shadow {
 
     /// Apply a runtime upload rate; reopening retained evidence uses the default rate.
     #[must_use]
-    pub fn with_upload_rate(mut self, bytes_per_second: Option<std::num::NonZeroU64>) -> Self {
+    pub fn with_upload_rate(mut self, bytes_per_second: Option<NonZeroByteRate>) -> Self {
         self.registered = self.registered.with_upload_rate(bytes_per_second);
         self
     }
@@ -329,8 +337,8 @@ async fn copy_original(
     volume: &Volume,
     capture: &SessionCapture,
     progress: &ProgressReporter,
-    copied: u64,
-    total: u64,
+    copied: ByteCount,
+    total: ByteCount,
 ) -> Result<FileState> {
     match (item.state, item.size) {
         (DevicePathState::Missing, None) => Ok(FileState::Absent),
@@ -408,12 +416,12 @@ fn register(root: &Path, snapshot: &Snapshot) -> Result<VirtualDevice> {
                         .capacity
                         .as_ref()
                         .and_then(garmin_device::StorageCapacity::bytes)
-                        .map_or(0, |(_, free)| free),
+                        .map_or_else(ByteCount::default, |(_, free)| free),
                     |total, file| {
                         total
                             .checked_add(match file.before {
                                 FileState::File { bytes, .. } => bytes,
-                                _ => 0,
+                                _ => ByteCount::default(),
                             })
                             .context("virtual capacity overflow")
                     },
@@ -440,14 +448,16 @@ async fn observe(path: &Path) -> FileState {
         }
         let mut file = tokio::fs::File::open(path).await?;
         let mut buffer = vec![0; 1024 * 1024];
-        let mut bytes = 0;
+        let mut bytes = ByteCount::default();
         let mut hash = Sha256::new();
         loop {
             let n = file.read(&mut buffer).await?;
             if n == 0 {
                 break;
             }
-            bytes += n as u64;
+            bytes = bytes
+                .checked_add(ByteCount::from_bytes(n as u64))
+                .ok_or_else(|| std::io::Error::other("snapshot size overflow"))?;
             hash.update(&buffer[..n]);
         }
         Ok(FileState::File {

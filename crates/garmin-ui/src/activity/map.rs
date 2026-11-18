@@ -4,7 +4,7 @@ use std::{collections::VecDeque, time::Duration};
 
 use cint::ColorInterop;
 use egui::{Align2, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2};
-use garmin_model::route::Coordinate;
+use garmin_model::{artifact::ByteCount, route::Coordinate};
 pub(crate) mod samples;
 use samples::Samples;
 use walkers::{lon_lat, sources::Attribution};
@@ -47,7 +47,7 @@ const ENDPOINT_PAIR_DISTANCE: f32 = 16.0;
 pub(crate) struct Props<'a> {
     pub label: &'a str,
     pub samples: Samples<'a>,
-    pub selected_coordinate: Option<(f64, f64)>,
+    pub selected_coordinate: Option<Coordinate>,
     pub sample_range: std::ops::RangeInclusive<usize>,
     pub highlighted_range: Option<std::ops::RangeInclusive<usize>>,
     pub fit_key: &'a str,
@@ -126,9 +126,9 @@ impl ActivityMap {
         let performance = self.frame_timing.sample(MapPerfSample {
             camera_active: rendered.camera_active,
             ui_elapsed: ui_started.elapsed(),
-            scene_milliseconds: rendered.scene.milliseconds,
-            route_query_microseconds: rendered.route_query_microseconds,
-            label_milliseconds: rendered.scene.label_milliseconds,
+            scene_elapsed: rendered.scene.elapsed,
+            route_query_elapsed: rendered.route_query_elapsed,
+            label_elapsed: rendered.scene.label_elapsed,
             label_backlog: rendered.scene.label_backlog,
             stale_work: rendered
                 .scene
@@ -142,7 +142,7 @@ impl ActivityMap {
             pending_upload_tiles: rendered.scene.pending_upload_tiles,
             partial_upload_tiles: rendered.scene.partial_upload_tiles,
             completed_upload_tiles: rendered.scene.completed_upload_tiles,
-            upload_milliseconds: rendered.scene.upload_milliseconds,
+            upload_elapsed: rendered.scene.upload_elapsed,
             upload_budget_overruns: rendered.scene.upload_budget_overruns,
         });
         self.surface.record_performance(performance.sample);
@@ -254,7 +254,7 @@ impl ActivityMap {
         RenderedMap {
             interaction: output.interaction,
             rect: response.rect,
-            route_query_microseconds: output.query_microseconds,
+            route_query_elapsed: output.query_elapsed,
             camera_active: zoom_policy.active
                 || camera_interaction.active
                 || camera_interaction.changed
@@ -422,7 +422,7 @@ struct OverlayInput<'frame, 'recording> {
     gpu_enabled: bool,
     route: &'frame gpu_map::RouteScene<'recording>,
     colors: MapColors,
-    selected_coordinate: Option<(f64, f64)>,
+    selected_coordinate: Option<Coordinate>,
 }
 
 #[derive(Clone, Copy)]
@@ -431,19 +431,19 @@ struct MapRenderInput<'recording> {
     size: Vec2,
     route: &'recording gpu_map::RouteScene<'recording>,
     colors: MapColors,
-    selected_coordinate: Option<(f64, f64)>,
+    selected_coordinate: Option<Coordinate>,
     failure_label: &'recording str,
 }
 
 struct OverlayOutput {
     interaction: RouteInteraction,
-    query_microseconds: f32,
+    query_elapsed: Duration,
 }
 
 struct RenderedMap {
     interaction: RouteInteraction,
     rect: Rect,
-    route_query_microseconds: f32,
+    route_query_elapsed: Duration,
     camera_active: bool,
     scene: gpu_map::ScenePerf,
     snapshot: MapScene,
@@ -477,7 +477,7 @@ fn paint_route_overlay(
             route_index.query(world_pointer, world_pixels, 14.0)
         })
     });
-    let query_microseconds = query_started.elapsed().as_secs_f32() * 1_000_000.0;
+    let query_elapsed = query_started.elapsed();
     let mut hit_test = HitTest {
         pointer,
         hovered: indexed_hover.flatten(),
@@ -496,7 +496,7 @@ fn paint_route_overlay(
             clicked: response.clicked().then_some(hit_test.hovered).flatten(),
             empty_clicked: response.clicked() && hit_test.hovered.is_none(),
         },
-        query_microseconds,
+        query_elapsed,
     }
 }
 
@@ -604,11 +604,8 @@ fn paint_route_markers(overlay: &mut Ui, projector: &MapProjector, input: Overla
             1.0,
         );
     }
-    if let Some((longitude, latitude)) = input.selected_coordinate {
-        let position = projector.project(lon_lat(
-            wrapped_longitude(longitude, input.projection_center_longitude),
-            latitude,
-        ));
+    if let Some(coordinate) = input.selected_coordinate {
+        let position = project_coordinate(projector, coordinate, input.projection_center_longitude);
         overlay
             .painter()
             .circle_filled(position, 5.0, input.colors.marker_fill);
@@ -1028,20 +1025,20 @@ struct FrameTiming {
 struct MapPerfSample {
     camera_active: bool,
     ui_elapsed: Duration,
-    scene_milliseconds: f32,
-    route_query_microseconds: f32,
-    label_milliseconds: f32,
+    scene_elapsed: Duration,
+    route_query_elapsed: Duration,
+    label_elapsed: Duration,
     label_backlog: usize,
     stale_work: u64,
     visible_tiles: usize,
     ready_tiles: usize,
     pending_tiles: usize,
-    queued_upload_bytes: usize,
-    uploaded_bytes: usize,
+    queued_upload_bytes: ByteCount,
+    uploaded_bytes: ByteCount,
     pending_upload_tiles: usize,
     partial_upload_tiles: usize,
     completed_upload_tiles: usize,
-    upload_milliseconds: f32,
+    upload_elapsed: Duration,
     upload_budget_overruns: u64,
 }
 
@@ -1055,9 +1052,9 @@ impl FrameTiming {
         let MapPerfSample {
             camera_active,
             ui_elapsed,
-            scene_milliseconds,
-            route_query_microseconds,
-            label_milliseconds,
+            scene_elapsed,
+            route_query_elapsed,
+            label_elapsed,
             label_backlog,
             stale_work,
             visible_tiles,
@@ -1068,7 +1065,7 @@ impl FrameTiming {
             pending_upload_tiles,
             partial_upload_tiles,
             completed_upload_tiles,
-            upload_milliseconds,
+            upload_elapsed,
             upload_budget_overruns,
         } = sample;
         let now = Instant::now();
@@ -1086,14 +1083,13 @@ impl FrameTiming {
                 }));
         }
         let sample = MapPerformanceSample {
-            frame_milliseconds: redraw_elapsed.map(|elapsed| elapsed.as_secs_f32() * 1_000.0),
-            interaction_frame_milliseconds: interaction_elapsed
-                .map(|elapsed| elapsed.as_secs_f32() * 1_000.0),
+            frame_elapsed: redraw_elapsed,
+            interaction_frame_elapsed: interaction_elapsed,
             camera_active,
-            ui_milliseconds: ui_elapsed.as_secs_f32() * 1_000.0,
-            scene_milliseconds,
-            route_query_microseconds,
-            label_milliseconds,
+            ui_elapsed,
+            scene_elapsed,
+            route_query_elapsed,
+            label_elapsed,
             label_backlog,
             stale_work,
             visible_tiles,
@@ -1118,8 +1114,14 @@ impl FrameTiming {
             .filter(|milliseconds| *milliseconds > 0.0)
             .map(|milliseconds| {
                 format!(
-                    "{:.0} FPS · UI {ui_p50:.1}/{ui_p95:.1} ms · scene {scene_milliseconds:.2} ms · labels {label_milliseconds:.1} ms/{label_backlog} · route {route_query_microseconds:.0} µs · tiles {visible_tiles}/{ready_tiles}+{pending_tiles} · upload {uploaded_bytes}/{queued_upload_bytes} B {partial_upload_tiles}/{pending_upload_tiles} partial {completed_upload_tiles} ready {upload_milliseconds:.2} ms/{upload_budget_overruns} over · stale {stale_work}",
+                    "{:.0} FPS · UI {ui_p50:.1}/{ui_p95:.1} ms · scene {scene_ms:.2} ms · labels {label_ms:.1} ms/{label_backlog} · route {route_us:.0} µs · tiles {visible_tiles}/{ready_tiles}+{pending_tiles} · upload {uploaded}/{queued} B {partial_upload_tiles}/{pending_upload_tiles} partial {completed_upload_tiles} ready {upload_ms:.2} ms/{upload_budget_overruns} over · stale {stale_work}",
                     1_000.0 / milliseconds,
+                    scene_ms = scene_elapsed.as_secs_f64() * 1_000.0,
+                    label_ms = label_elapsed.as_secs_f64() * 1_000.0,
+                    route_us = route_query_elapsed.as_secs_f64() * 1_000_000.0,
+                    upload_ms = upload_elapsed.as_secs_f64() * 1_000.0,
+                    uploaded = uploaded_bytes.as_bytes(),
+                    queued = queued_upload_bytes.as_bytes(),
                 )
             })
         });
@@ -1225,7 +1227,10 @@ fn fit(camera: &mut MapCamera, samples: Samples<'_>, size: Vec2) {
     let center_y = f64::midpoint(min_y, max_y);
     let center_lon = (center_x * 360.0 + 180.0).rem_euclid(360.0) - 180.0;
     let center_lat = mercator_latitude(center_y);
-    camera.center_at(lon_lat(center_lon, center_lat));
+    let Ok(center) = Coordinate::from_degrees(center_lat, center_lon) else {
+        return;
+    };
+    camera.center_at(center);
     let usable_width = f64::from((size.x - 48.0).max(1.0));
     let usable_height = f64::from((size.y - 48.0).max(1.0));
     let scale_x = usable_width / ((max_x - min_x).abs().max(1.0e-9) * f64::from(WALKERS_TILE_SIZE));
@@ -1288,11 +1293,11 @@ mod tests {
     use super::samples::Samples;
     use egui::{Event, MouseWheelUnit, RawInput, Rect, TouchPhase, pos2, vec2};
     use garmin_model::{
+        artifact::ByteCount,
         route::{Coordinate, Latitude, Longitude},
         value::Timestamp,
     };
     use garmin_service_api::ActivitySampleSnapshot;
-    use walkers::lon_lat;
 
     use super::{
         FitState, FrameTiming, MapCamera, MapPerfSample, MapViewDemand, RouteIndexCache,
@@ -1315,13 +1320,13 @@ mod tests {
                     Longitude::from_degrees(longitude).unwrap(),
                 )
             }),
-            elevation_meters: None,
+            elevation: None,
             distance: None,
             speed: None,
             heart_rate: None,
             cadence: None,
             power: None,
-            temperature_millicelsius: None,
+            temperature: None,
         }
     }
 
@@ -1329,20 +1334,20 @@ mod tests {
         MapPerfSample {
             camera_active,
             ui_elapsed: Duration::from_millis(1),
-            scene_milliseconds: 0.01,
-            route_query_microseconds: 1.0,
-            label_milliseconds: 2.0,
+            scene_elapsed: Duration::from_micros(10),
+            route_query_elapsed: Duration::from_micros(1),
+            label_elapsed: Duration::from_millis(2),
             label_backlog: 0,
             stale_work: 0,
             visible_tiles: 4,
             ready_tiles: 4,
             pending_tiles: 0,
-            queued_upload_bytes: 0,
-            uploaded_bytes: 0,
+            queued_upload_bytes: ByteCount::default(),
+            uploaded_bytes: ByteCount::default(),
             pending_upload_tiles: 0,
             partial_upload_tiles: 0,
             completed_upload_tiles: 0,
-            upload_milliseconds: 0.0,
+            upload_elapsed: Duration::ZERO,
             upload_budget_overruns: 0,
         }
     }
@@ -1431,10 +1436,10 @@ mod tests {
         timing.previous = Instant::now().checked_sub(Duration::from_millis(16));
         let inactive = timing.sample(performance_sample(false));
 
-        assert!(first.sample.interaction_frame_milliseconds.is_none());
-        assert!(continuous.sample.interaction_frame_milliseconds.is_some());
-        assert!(stopped.sample.interaction_frame_milliseconds.is_some());
-        assert!(inactive.sample.interaction_frame_milliseconds.is_none());
+        assert!(first.sample.interaction_frame_elapsed.is_none());
+        assert!(continuous.sample.interaction_frame_elapsed.is_some());
+        assert!(stopped.sample.interaction_frame_elapsed.is_some());
+        assert!(inactive.sample.interaction_frame_elapsed.is_none());
     }
 
     #[test]
@@ -1447,12 +1452,12 @@ mod tests {
 
         let terminal = timing.sample(performance_sample(false));
 
-        assert!(terminal.sample.frame_milliseconds.is_none());
+        assert!(terminal.sample.frame_elapsed.is_none());
         assert!(
             terminal
                 .sample
-                .interaction_frame_milliseconds
-                .is_some_and(|milliseconds| milliseconds >= 499.0)
+                .interaction_frame_elapsed
+                .is_some_and(|elapsed| elapsed >= Duration::from_millis(499))
         );
     }
 
@@ -1684,7 +1689,7 @@ mod tests {
     fn assert_outward_wheel_is_consumed(at_maximum: bool) {
         let context = egui::Context::default();
         let mut camera = MapCamera::default();
-        let map_center = lon_lat(27.2, 60.6);
+        let map_center = Coordinate::from_degrees(60.6, 27.2).unwrap();
         camera.center_at(map_center);
         camera.set_viewport_size(vec2(320.0, 240.0));
         let bound = if at_maximum {
@@ -1799,7 +1804,7 @@ mod tests {
     #[test]
     fn tile_priority_wraps_across_the_dateline() {
         let mut camera = MapCamera::default();
-        camera.center_at(lon_lat(179.5, 0.0));
+        camera.center_at(Coordinate::from_degrees(0.0, 179.5).unwrap());
         camera.set_zoom(5.0);
         let demand = MapViewDemand::new(
             &camera,

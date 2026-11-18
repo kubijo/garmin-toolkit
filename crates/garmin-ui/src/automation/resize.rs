@@ -2,6 +2,7 @@
 use super::{ActionTiming, Driver, Run};
 use egui::{Context, RawInput, Rect};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Host adapter for resizing the root view in logical egui points.
 pub type ResizeHandler = fn(&Context, ResizeCommand) -> Result<(), String>;
@@ -85,7 +86,11 @@ impl Driver {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ResizeRequest {
     pub viewport: [f32; 2],
-    pub started_seconds: f64,
+    #[serde(
+        rename = "started_seconds",
+        with = "garmin_model::value::duration_seconds"
+    )]
+    pub started: Duration,
 }
 
 impl Run {
@@ -95,14 +100,14 @@ impl Run {
         viewport: egui::ViewportId,
         handler: Option<ResizeHandler>,
         size: [f32; 2],
-        elapsed: f64,
+        elapsed: Duration,
         screen: Rect,
     ) -> Result<(), String> {
         if self.report.resize_request.is_none() {
             resize_viewport(context, viewport, handler, size)?;
             self.report.resize_request = Some(ResizeRequest {
                 viewport: size,
-                started_seconds: elapsed,
+                started: elapsed,
             });
             self.report.performance_eligible = false;
             self.resize_ready_since = None;
@@ -113,7 +118,7 @@ impl Run {
             .resize_request
             .as_ref()
             .expect("resize requested");
-        if elapsed - request.started_seconds > 5.0 {
+        if elapsed.saturating_sub(request.started) > Duration::from_secs(5) {
             return Err(format!(
                 "resize timed out: requested {} × {}, observed {} × {} logical points",
                 size[0],
@@ -126,16 +131,18 @@ impl Run {
             self.resize_ready_since = None;
             return Ok(());
         }
-        if elapsed - *self.resize_ready_since.get_or_insert(elapsed) < 0.05 {
+        if elapsed.saturating_sub(*self.resize_ready_since.get_or_insert(elapsed))
+            < Duration::from_millis(50)
+        {
             return Ok(());
         }
         self.report.actions.push(ActionTiming {
             phase: self.steps[self.report.completed].phase.into(),
             kind: "resize".into(),
             target: "viewport".into(),
-            scheduled_seconds: request.started_seconds,
-            actual_seconds: elapsed,
-            lateness_seconds: elapsed - request.started_seconds,
+            scheduled: request.started,
+            actual: elapsed,
+            lateness: elapsed.saturating_sub(request.started),
             target_bounds: [screen.left(), screen.top(), screen.right(), screen.bottom()],
             pointer_position: None,
         });

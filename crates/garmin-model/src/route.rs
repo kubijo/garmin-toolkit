@@ -5,6 +5,7 @@ use std::fmt;
 use thiserror::Error;
 
 use crate::{
+    activity::Distance,
     artifact::ArtifactId,
     identity::UserId,
     value::{Timestamp, Transformation},
@@ -75,8 +76,8 @@ impl Latitude {
     /// Validates decimal degrees in the inclusive `-90..=90` range.
     /// # Errors
     /// [`Error::InvalidLatitude`] for non-finite or out-of-range values.
-    pub fn from_degrees(degrees: f64) -> Result<Self, Error> {
-        if !degrees.is_finite() || !(-90.0..=90.0).contains(&degrees) {
+    pub const fn from_degrees(degrees: f64) -> Result<Self, Error> {
+        if !degrees.is_finite() || degrees < -90.0 || degrees > 90.0 {
             return Err(Error::InvalidLatitude);
         }
         Ok(Self(degrees))
@@ -117,8 +118,8 @@ impl Longitude {
     /// Validates decimal degrees in the inclusive `-180..=180` range.
     /// # Errors
     /// [`Error::InvalidLongitude`] for non-finite or out-of-range values.
-    pub fn from_degrees(degrees: f64) -> Result<Self, Error> {
-        if !degrees.is_finite() || !(-180.0..=180.0).contains(&degrees) {
+    pub const fn from_degrees(degrees: f64) -> Result<Self, Error> {
+        if !degrees.is_finite() || degrees < -180.0 || degrees > 180.0 {
             return Err(Error::InvalidLongitude);
         }
         Ok(Self(degrees))
@@ -169,6 +170,11 @@ impl Elevation {
     }
 
     #[must_use]
+    pub fn as_feet(&self) -> f64 {
+        self.0 / Distance::METRES_PER_FOOT
+    }
+
+    #[must_use]
     pub const fn into_meters(self) -> f64 {
         self.0
     }
@@ -188,6 +194,21 @@ pub struct Coordinate {
 }
 
 impl Coordinate {
+    /// Constructs a coordinate from latitude and longitude in decimal degrees.
+    /// # Errors
+    /// Either angle is outside its supported range.
+    pub const fn from_degrees(latitude: f64, longitude: f64) -> Result<Self, Error> {
+        let latitude = match Latitude::from_degrees(latitude) {
+            Ok(latitude) => latitude,
+            Err(error) => return Err(error),
+        };
+        let longitude = match Longitude::from_degrees(longitude) {
+            Ok(longitude) => longitude,
+            Err(error) => return Err(error),
+        };
+        Ok(Self::from_parts(latitude, longitude))
+    }
+
     #[must_use]
     pub const fn from_parts(latitude: Latitude, longitude: Longitude) -> Self {
         Self {
@@ -200,10 +221,7 @@ impl Coordinate {
     /// # Errors
     /// An error when either component is invalid.
     pub fn from_geo(coordinate: geo_types::Coord<f64>) -> Result<Self, Error> {
-        Ok(Self {
-            latitude: Latitude::from_degrees(coordinate.y)?,
-            longitude: Longitude::from_degrees(coordinate.x)?,
-        })
+        Self::from_degrees(coordinate.y, coordinate.x)
     }
 
     #[must_use]

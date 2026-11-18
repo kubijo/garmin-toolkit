@@ -1,6 +1,8 @@
 //! Portable snapshots are reduced on the host;
 //! clients never replay an event stream.
 
+use std::time::Duration;
+
 use garmin_progress::{
     OperationStage, ProgressReceiver, ProgressUnit,
     metrics::metrics,
@@ -60,9 +62,9 @@ impl Observation {
                 completed: 0,
                 total: None,
                 bytes: false,
-                elapsed_ms: event.duration.map_or(0, millis),
+                elapsed: elapsed_for_snapshot(event.duration.unwrap_or_default()),
                 bytes_per_second: None,
-                remaining_seconds: None,
+                remaining: None,
                 stalled: false,
                 path: event.path.clone(),
                 status: status(event.state),
@@ -92,16 +94,22 @@ fn snapshot(stage: OperationStage, view: &StageView) -> Progress {
     Progress {
         stage: format!("{stage:?}"),
         label: view.label.clone(),
-        completed: view.completed,
-        total: view.total,
-        bytes: view.unit == ProgressUnit::Bytes,
-        elapsed_ms: observation.elapsed.map_or(0, millis),
+        completed: view.amount.completed(),
+        total: view.amount.total(),
+        bytes: view.amount.unit() == ProgressUnit::Bytes,
+        elapsed: elapsed_for_snapshot(observation.elapsed.unwrap_or_default()),
         bytes_per_second: observation.bytes_per_second,
-        remaining_seconds: observation.remaining.map(|value| value.as_secs()),
+        remaining: observation
+            .remaining
+            .map(|remaining| Duration::from_secs(remaining.as_secs())),
         stalled: observation.idle.is_some(),
         path: view.path.clone(),
         status: status(view.state),
     }
+}
+
+fn elapsed_for_snapshot(elapsed: Duration) -> Duration {
+    Duration::from_millis(u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
 }
 
 fn status(state: Option<garmin_progress::ProgressState>) -> ProgressStatus {
@@ -112,8 +120,4 @@ fn status(state: Option<garmin_progress::ProgressState>) -> ProgressStatus {
         Some(ProgressState::Completed) => ProgressStatus::Completed,
         Some(ProgressState::Failed) => ProgressStatus::Failed,
     }
-}
-
-fn millis(value: std::time::Duration) -> u64 {
-    u64::try_from(value.as_millis()).unwrap_or(u64::MAX)
 }

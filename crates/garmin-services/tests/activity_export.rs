@@ -322,23 +322,12 @@ fn activity_package_is_owned_and_never_replaces_an_existing_file() -> TestResult
         assert_eq!(package.laps.len(), expected.laps().len());
         for (row, point) in package.samples.iter().zip(expected.track()) {
             assert_eq!(row.timestamp_ms, point.timestamp().as_unix_milliseconds());
-            assert_eq!(
-                row.distance_mm,
-                point.distance().map(|value| value.as_millimeters())
-            );
+            assert_eq!(row.distance_mm, point.distance());
             assert_eq!(
                 row.latitude_degrees,
-                point
-                    .coordinate()
-                    .map(|value| value.latitude().as_degrees())
+                point.coordinate().map(|value| value.latitude())
             );
-            assert_eq!(
-                row.heart_rate_bpm,
-                point
-                    .measurements()
-                    .heart_rate()
-                    .map(|value| value.as_beats_per_minute())
-            );
+            assert_eq!(row.heart_rate_bpm, point.measurements().heart_rate());
         }
         if let Some(directory) = std::env::var_os("GARMIN_EXPORT_CONFORMANCE_DIR") {
             std::fs::create_dir_all(&directory)?;

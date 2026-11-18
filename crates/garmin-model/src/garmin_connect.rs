@@ -4,6 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 use thiserror::Error;
 
+use crate::activity::{ActivityDuration, Distance};
+
 pub mod sync;
 pub mod trends;
 
@@ -36,9 +38,46 @@ pub struct RemoteActivity {
     pub sport: Option<crate::activity::ActivitySport>,
     pub name: String,
     pub started_at: Option<String>,
-    pub distance_metres: Option<f64>,
-    pub duration_seconds: Option<f64>,
+    #[serde(rename = "distance_metres", default, with = "distance_wire")]
+    pub distance: Option<Distance>,
+    #[serde(rename = "duration_seconds", default, with = "duration_wire")]
+    pub duration: Option<ActivityDuration>,
 }
+
+// Published cache rows and the RPC transport retain their existing numeric representation.
+macro_rules! measurement_wire {
+    ($module:ident, $ty:ident, $constructor:ident, $value:ident) => {
+        mod $module {
+            use crate::activity::$ty;
+            use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+            #[expect(
+                clippy::ref_option,
+                reason = "Serde field adapters require a reference to the field type"
+            )]
+            pub(super) fn serialize<S: Serializer>(
+                value: &Option<$ty>,
+                serializer: S,
+            ) -> Result<S::Ok, S::Error> {
+                value.map($ty::$value).serialize(serializer)
+            }
+
+            pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+                deserializer: D,
+            ) -> Result<Option<$ty>, D::Error> {
+                Ok(Option::<f64>::deserialize(deserializer)?.and_then($ty::$constructor))
+            }
+        }
+    };
+}
+
+measurement_wire!(distance_wire, Distance, try_from_metres, as_metres);
+measurement_wire!(
+    duration_wire,
+    ActivityDuration,
+    try_from_seconds,
+    as_seconds
+);
 
 /// Searchable cloud metadata, independent of imported activity observations.
 #[garmin_macros::portable]
@@ -262,8 +301,8 @@ mod tests {
                     sport: None,
                     name: id.to_string(),
                     started_at: None,
-                    distance_metres: None,
-                    duration_seconds: None,
+                    distance: None,
+                    duration: None,
                 })
                 .to_vec(),
             has_more: true,
@@ -319,8 +358,8 @@ mod tests {
                 sport: None,
                 name: "Ride".into(),
                 started_at: None,
-                distance_metres: None,
-                duration_seconds: None,
+                distance: None,
+                duration: None,
             }],
         };
         page.merge(ActivityResponse::Imported {

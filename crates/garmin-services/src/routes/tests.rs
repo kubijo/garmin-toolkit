@@ -144,7 +144,7 @@ fn generations_remain_bound_to_historical_revisions() -> TestResult {
         assert_ne!(first.serial(), current.serial());
         assert_eq!(first.encoder().name(), garmin_fit::course::ENCODER_NAME);
         assert_eq!(first.generated_at(), time());
-        assert_eq!(first.byte_count().as_u64(), original.len() as u64);
+        assert_eq!(first.byte_count().as_bytes(), original.len() as u64);
         let decoded = garmin_fit::course::decode(&original)?;
         assert_eq!(decoded.sport(), RouteSport::Walking);
         assert_eq!(decoded.name().as_str(), "Morning walk");

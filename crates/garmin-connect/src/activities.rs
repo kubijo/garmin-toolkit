@@ -1,4 +1,5 @@
 use garmin_model::{
+    activity::{ActivityDuration, Distance},
     artifact::ByteCount,
     garmin_connect::{
         AccountFacts, ActivityDetails, CachedActivity, PersonalApiKey, RemoteActivity,
@@ -82,12 +83,10 @@ impl Session {
                         sport: activity_type.as_deref().and_then(sport),
                         name: fact(summary.activity_name).unwrap_or_else(|| id.to_string()),
                         started_at: fact(summary.start_time_gmt),
-                        distance_metres: summary
-                            .distance
-                            .filter(|value| value.is_finite() && *value >= 0.0),
-                        duration_seconds: summary
+                        distance: summary.distance.and_then(Distance::try_from_metres),
+                        duration: summary
                             .duration
-                            .filter(|value| value.is_finite() && *value >= 0.0),
+                            .and_then(ActivityDuration::try_from_seconds),
                     },
                     description: summary.description.filter(|text| !text.trim().is_empty()),
                     activity_type,

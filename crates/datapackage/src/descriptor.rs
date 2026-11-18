@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use byte_unit::Byte;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -43,14 +44,37 @@ pub struct ResourceDescriptor {
     pub format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mediatype: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bytes: Option<u64>,
+    #[serde(
+        default,
+        with = "optional_bytes",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub bytes: Option<Byte>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<TableSchema>,
     #[serde(flatten)]
     pub metadata: Metadata,
+}
+
+mod optional_bytes {
+    use byte_unit::Byte;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[expect(clippy::ref_option, reason = "Serde requires the field by reference")]
+    pub(super) fn serialize<S: Serializer>(
+        bytes: &Option<Byte>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        bytes.map(Byte::as_u64).serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Byte>, D::Error> {
+        Option::<u64>::deserialize(deserializer).map(|bytes| bytes.map(Byte::from_u64))
+    }
 }
 
 /// Table Schema for CSV and inline tables.

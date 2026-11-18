@@ -1,6 +1,10 @@
 //! Bounded, backend-owned structured log history and typed subscriptions.
 
-use garmin_model::logging::{Cursor, Filter, IngestReport, Level, MAX_RECORD_BYTES, Record};
+use garmin_model::value::UnixMilliseconds;
+use garmin_model::{
+    artifact::ByteCount,
+    logging::{Cursor, Filter, IngestReport, Level, MAX_RECORD_BYTES, Record},
+};
 use garmin_service_api::logging::{Batch, LogService, LogServiceClient, LogServiceServerShared};
 use remoc::{rch, rtc, rtc::ServerShared as _};
 use std::{
@@ -26,7 +30,7 @@ mod query;
 #[cfg(test)]
 mod tests;
 
-const SEGMENT_BYTES: u64 = 8 * 1024 * 1024;
+const SEGMENT_BYTES: ByteCount = ByteCount::from_mebibytes(8);
 const BATCH_LIMIT: usize = 256;
 static GLOBAL: OnceLock<Store> = OnceLock::new();
 
@@ -52,7 +56,7 @@ struct State {
     history: history::History,
     segments: VecDeque<u64>,
     next: u64,
-    bytes: u64,
+    bytes: ByteCount,
     file: File,
     error: Option<String>,
     disk_available: bool,
@@ -90,7 +94,7 @@ impl Store {
                         first = false;
                     }
                     next = next.max(record.sequence + 1);
-                    history.push(record, line.len() + 1);
+                    history.push(record, ByteCount::from_bytes((line.len() + 1) as u64));
                 }
             }
         }
@@ -98,8 +102,8 @@ impl Store {
             .create(true)
             .append(true)
             .open(directory.join("log-0.jsonl"))?;
-        let bytes = file.metadata()?.len();
-        if bytes > 0 {
+        let bytes = ByteCount::from_bytes(file.metadata()?.len());
+        if !bytes.is_zero() {
             use std::io::{Read as _, Seek as _};
             let mut tail = File::open(directory.join("log-0.jsonl"))?;
             tail.seek(io::SeekFrom::End(-1))?;
@@ -109,7 +113,7 @@ impl Store {
                 file.write_all(b"\n")?;
             }
         }
-        let bytes = file.metadata()?.len();
+        let bytes = ByteCount::from_bytes(file.metadata()?.len());
         if segments.is_empty() {
             segments.push_back(next);
         }
@@ -350,7 +354,7 @@ impl LogService for Store {
             // reject a record after accepting part of the batch.
             record.sequence = u64::MAX;
             if record.source_sequence == 0
-                || !matches!(serde_json::to_vec(&record), Ok(encoded) if encoded.len() <= MAX_RECORD_BYTES)
+                || !matches!(serde_json::to_vec(&record), Ok(encoded) if ByteCount::from_bytes(encoded.len() as u64) <= MAX_RECORD_BYTES)
             {
                 report.rejected += 1;
             } else {
@@ -377,13 +381,11 @@ impl<S: tracing::Subscriber> Layer<S> for Store {
         };
         let record = Record {
             sequence: 0,
-            timestamp_ms: u64::try_from(
+            timestamp_ms: UnixMilliseconds::saturating_from_duration_since_epoch(
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis(),
-            )
-            .unwrap_or(u64::MAX),
+                    .unwrap_or_default(),
+            ),
             level,
             component: event.metadata().target().into(),
             source: self.0.source.clone(),
@@ -432,7 +434,7 @@ fn append_records(
     let mut state = state.lock().map_err(|error| error.to_string())?;
     for mut record in records {
         let mut encoded = serde_json::to_vec(&record).map_err(|error| error.to_string())?;
-        if encoded.len() > MAX_RECORD_BYTES {
+        if ByteCount::from_bytes(encoded.len() as u64) > MAX_RECORD_BYTES {
             return Err("log record exceeds 16 KiB".into());
         }
         if record.source_sequence == 0 {
@@ -444,11 +446,12 @@ fn append_records(
         record.sequence = state.next;
         encoded = serde_json::to_vec(&record).map_err(|error| error.to_string())?;
         encoded.push(b'\n');
+        let encoded_size = ByteCount::from_bytes(encoded.len() as u64);
         let result = (|| -> io::Result<()> {
             if !state.disk_available {
                 return Ok(());
             }
-            if state.bytes + encoded.len() as u64 > SEGMENT_BYTES {
+            if state.bytes.saturating_add(encoded_size) > SEGMENT_BYTES {
                 state.file.flush()?;
                 let oldest = directory.join("log-3.jsonl");
                 if oldest.exists() {
@@ -464,7 +467,7 @@ fn append_records(
                     .create(true)
                     .append(true)
                     .open(directory.join("log-0.jsonl"))?;
-                state.bytes = 0;
+                state.bytes = ByteCount::default();
                 state.segments.push_back(record.sequence);
                 if state.segments.len() > 4 {
                     state.segments.pop_front();
@@ -474,7 +477,7 @@ fn append_records(
                 }
             }
             state.file.write_all(&encoded)?;
-            state.bytes += encoded.len() as u64;
+            state.bytes = state.bytes.saturating_add(encoded_size);
             Ok(())
         })();
         if let Err(error) = result {
@@ -484,7 +487,7 @@ fn append_records(
             state.disk_available = false;
         }
         state.next += 1;
-        state.history.push(record, encoded.len());
+        state.history.push(record, encoded_size);
     }
     Ok(())
 }

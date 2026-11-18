@@ -1,20 +1,22 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::Duration};
+
+use garmin_model::artifact::ByteCount;
 
 pub(super) struct Limits {
-    chunk_bytes: usize,
-    frame_bytes: usize,
-    frame_milliseconds: f64,
-    retained_bytes: usize,
+    chunk_bytes: ByteCount,
+    frame_bytes: ByteCount,
+    frame_duration: Duration,
+    retained_bytes: ByteCount,
     pending: usize,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            chunk_bytes: 256 * 1024,
-            frame_bytes: 4 * 1024 * 1024,
-            frame_milliseconds: 1.5,
-            retained_bytes: 64 * 1024 * 1024,
+            chunk_bytes: ByteCount::from_kibibytes(256),
+            frame_bytes: ByteCount::from_mebibytes(4),
+            frame_duration: Duration::from_micros(1_500),
+            retained_bytes: ByteCount::from_mebibytes(64),
             pending: 64,
         }
     }
@@ -25,20 +27,20 @@ pub(super) enum Step {
     /// The next indivisible element does not fit the remaining frame budget.
     Deferred,
     Copied {
-        bytes: usize,
-        text_milliseconds: f64,
+        bytes: ByteCount,
+        text_elapsed: Duration,
     },
 }
 
 pub(super) trait Work {
-    fn retained_bytes(&self) -> usize;
+    fn retained_bytes(&self) -> ByteCount;
     fn is_complete(&self) -> bool;
-    fn advance(&mut self, maximum: usize, scratch: &mut Vec<u8>) -> Result<Step, String>;
+    fn advance(&mut self, maximum: ByteCount, scratch: &mut Vec<u8>) -> Result<Step, String>;
 }
 
 pub(super) struct Frame<T> {
     pub completed: Vec<(T, Result<(), String>)>,
-    pub text_milliseconds: f64,
+    pub text_elapsed: Duration,
     pub did_work: bool,
 }
 
@@ -46,7 +48,7 @@ pub(super) struct Admission<T> {
     limits: Limits,
     pending: VecDeque<T>,
     scratch: Vec<u8>,
-    retained: usize,
+    retained: ByteCount,
     scheduled: bool,
 }
 
@@ -56,7 +58,7 @@ impl<T> Default for Admission<T> {
             limits: Limits::default(),
             pending: VecDeque::new(),
             scratch: Vec::new(),
-            retained: 0,
+            retained: ByteCount::default(),
             scheduled: false,
         }
     }
@@ -85,20 +87,19 @@ impl<T: Work> Admission<T> {
 
     fn pop(&mut self) -> T {
         let work = self.pending.pop_front().expect("front was present");
-        self.retained -= work.retained_bytes();
+        self.retained = self.retained.saturating_sub(work.retained_bytes());
         work
     }
 
-    pub fn advance_frame(&mut self, started: f64, mut now: impl FnMut() -> f64) -> Frame<T> {
+    pub fn advance_frame(&mut self, mut elapsed: impl FnMut() -> Duration) -> Frame<T> {
         self.scheduled = false;
         let mut frame = Frame {
             completed: Vec::new(),
-            text_milliseconds: 0.0,
+            text_elapsed: Duration::ZERO,
             did_work: false,
         };
-        let mut admitted = 0;
-        while admitted < self.limits.frame_bytes && now() - started < self.limits.frame_milliseconds
-        {
+        let mut admitted = ByteCount::default();
+        while admitted < self.limits.frame_bytes && elapsed() < self.limits.frame_duration {
             let Some(work) = self.pending.front_mut() else {
                 break;
             };
@@ -110,16 +111,16 @@ impl<T: Work> Admission<T> {
             let maximum = self
                 .limits
                 .chunk_bytes
-                .min(self.limits.frame_bytes - admitted);
+                .min(self.limits.frame_bytes.saturating_sub(admitted));
             match work.advance(maximum, &mut self.scratch) {
                 Ok(Step::Allocated) => {}
-                Ok(Step::Deferred) if admitted > 0 => break,
+                Ok(Step::Deferred) if !admitted.is_zero() => break,
                 Ok(Step::Copied {
                     bytes,
-                    text_milliseconds,
-                }) if bytes > 0 && bytes <= maximum => {
-                    admitted += bytes;
-                    frame.text_milliseconds += text_milliseconds;
+                    text_elapsed,
+                }) if !bytes.is_zero() && bytes <= maximum => {
+                    admitted = admitted.saturating_add(bytes);
+                    frame.text_elapsed += text_elapsed;
                 }
                 result => {
                     let error = result
@@ -148,13 +149,13 @@ mod tests {
         cost: f64,
     }
     impl Work for Job {
-        fn retained_bytes(&self) -> usize {
-            self.retained
+        fn retained_bytes(&self) -> ByteCount {
+            ByteCount::from_bytes(self.retained as u64)
         }
         fn is_complete(&self) -> bool {
             !self.allocation && self.remaining == 0
         }
-        fn advance(&mut self, maximum: usize, _: &mut Vec<u8>) -> Result<Step, String> {
+        fn advance(&mut self, maximum: ByteCount, _: &mut Vec<u8>) -> Result<Step, String> {
             self.clock.set(self.clock.get() + self.cost);
             if self.fail {
                 return Err("injected failure".to_owned());
@@ -162,15 +163,17 @@ mod tests {
             if std::mem::take(&mut self.allocation) {
                 return Ok(Step::Allocated);
             }
-            let bytes = maximum.min(self.remaining);
+            let bytes = usize::try_from(maximum.as_bytes())
+                .unwrap()
+                .min(self.remaining);
             let bytes = bytes - bytes % self.alignment;
             if bytes == 0 {
                 return Ok(Step::Deferred);
             }
             self.remaining -= bytes;
             Ok(Step::Copied {
-                bytes,
-                text_milliseconds: 0.25,
+                bytes: ByteCount::from_bytes(bytes as u64),
+                text_elapsed: Duration::from_micros(250),
             })
         }
     }
@@ -188,10 +191,10 @@ mod tests {
     fn queue() -> Admission<Job> {
         Admission {
             limits: Limits {
-                chunk_bytes: 4,
-                frame_bytes: 8,
-                frame_milliseconds: 1.5,
-                retained_bytes: 32,
+                chunk_bytes: ByteCount::from_bytes(4),
+                frame_bytes: ByteCount::from_bytes(8),
+                frame_duration: Duration::from_micros(1_500),
+                retained_bytes: ByteCount::from_bytes(32),
                 pending: 2,
             },
             ..Default::default()
@@ -203,7 +206,7 @@ mod tests {
         let clock = Rc::new(Cell::new(0.0));
         let mut fast = Admission::default();
         assert!(fast.enqueue(job(&clock, 5 * 1024 * 1024)).is_ok());
-        let frame = fast.advance_frame(0.0, || clock.get());
+        let frame = fast.advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0));
         assert!(frame.completed.is_empty());
         assert_eq!(fast.pending.front().unwrap().remaining, 1024 * 1024);
 
@@ -211,7 +214,7 @@ mod tests {
         let mut work = job(&clock, 5 * 1024 * 1024);
         work.cost = 1.0;
         assert!(slow.enqueue(work).is_ok());
-        let frame = slow.advance_frame(0.0, || clock.get());
+        let frame = slow.advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0));
         assert!(frame.completed.is_empty());
         assert_eq!(
             slow.pending.front().unwrap().remaining,
@@ -227,15 +230,15 @@ mod tests {
         record.alignment = 4;
         assert!(queue.enqueue(job(&clock, 7)).is_ok());
         assert!(queue.enqueue(record).is_ok());
-        let frame = queue.advance_frame(0.0, || clock.get());
+        let frame = queue.advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0));
         assert_eq!(frame.completed.len(), 1);
         assert!(frame.completed[0].1.is_ok());
-        assert_eq!(queue.retained, 4);
+        assert_eq!(queue.retained, ByteCount::from_bytes(4));
         assert!(queue.schedule(false));
-        let frame = queue.advance_frame(0.0, || clock.get());
+        let frame = queue.advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0));
         assert_eq!(frame.completed.len(), 1);
         assert!(frame.completed[0].1.is_ok());
-        assert_eq!(queue.retained, 0);
+        assert_eq!(queue.retained, ByteCount::from_bytes(0));
     }
 
     #[test]
@@ -245,10 +248,10 @@ mod tests {
         let mut work = job(&clock, 8);
         work.alignment = 8;
         assert!(queue.enqueue(work).is_ok());
-        let frame = queue.advance_frame(0.0, || clock.get());
+        let frame = queue.advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0));
         assert_eq!(frame.completed.len(), 1);
         assert!(frame.completed[0].1.is_err());
-        assert_eq!(queue.retained, 0);
+        assert_eq!(queue.retained, ByteCount::from_bytes(0));
         assert!(!queue.schedule(false));
     }
 
@@ -259,23 +262,19 @@ mod tests {
         assert!(queue.enqueue(job(&clock, 10)).is_ok());
         assert!(queue.schedule(false));
         assert!(!queue.schedule(false));
-        let first = queue.advance_frame(0.0, || clock.get());
+        let first = queue.advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0));
         assert!(first.completed.is_empty());
         assert_eq!(queue.pending.front().unwrap().remaining, 2);
-        assert!(
-            (first.text_milliseconds - 0.5).abs() < f64::EPSILON,
-            "expected 0.5 ms of text work, got {}",
-            first.text_milliseconds
-        );
+        assert_eq!(first.text_elapsed, Duration::from_micros(500));
         assert!(queue.schedule(false));
-        let second = queue.advance_frame(0.0, || clock.get());
+        let second = queue.advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0));
         assert_eq!(second.completed.len(), 1);
         assert!(second.completed[0].1.is_ok());
-        assert_eq!(queue.retained, 0);
+        assert_eq!(queue.retained, ByteCount::from_bytes(0));
         assert!(!queue.schedule(false));
         assert!(
             queue
-                .advance_frame(0.0, || clock.get())
+                .advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0))
                 .completed
                 .is_empty()
         );
@@ -291,7 +290,7 @@ mod tests {
         assert!(queue.enqueue(work).is_ok());
         assert!(
             queue
-                .advance_frame(0.0, || clock.get())
+                .advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0))
                 .completed
                 .is_empty()
         );
@@ -299,7 +298,7 @@ mod tests {
         assert!(!queue.pending.front().unwrap().allocation);
         assert!(
             queue
-                .advance_frame(0.0, || clock.get())
+                .advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0))
                 .completed
                 .is_empty()
         );
@@ -312,11 +311,19 @@ mod tests {
         let clock = Rc::new(Cell::new(0.0));
         let mut queue = queue();
         assert!(queue.schedule(true));
-        assert!(!queue.advance_frame(0.0, || clock.get()).did_work);
+        assert!(
+            !queue
+                .advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0))
+                .did_work
+        );
         assert!(queue.enqueue(job(&clock, 4)).is_ok());
         clock.set(2.0);
-        assert!(!queue.advance_frame(0.0, || clock.get()).did_work);
-        let frame = queue.advance_frame(2.0, || clock.get());
+        assert!(
+            !queue
+                .advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0))
+                .did_work
+        );
+        let frame = queue.advance_frame(|| Duration::from_secs_f64((clock.get() - 2.0) / 1_000.0));
         assert!(frame.did_work);
         assert_eq!(frame.completed.len(), 1);
     }
@@ -331,14 +338,14 @@ mod tests {
         assert!(queue.enqueue(job(&clock, 13)).is_err());
         assert!(queue.enqueue(job(&clock, 0)).is_ok());
         assert!(queue.enqueue(job(&clock, 0)).is_err());
-        let frame = queue.advance_frame(0.0, || clock.get());
+        let frame = queue.advance_frame(|| Duration::from_secs_f64(clock.get() / 1_000.0));
         assert_eq!(frame.completed.len(), 2);
         assert_eq!(
             frame.completed[0].1.as_ref().unwrap_err(),
             "injected failure"
         );
         assert!(frame.completed[1].1.is_ok());
-        assert_eq!(queue.retained, 0);
+        assert_eq!(queue.retained, ByteCount::from_bytes(0));
         assert!(queue.enqueue(job(&clock, 32)).is_ok());
     }
 }

@@ -6,6 +6,7 @@ mod model;
 
 use std::path::Path;
 
+use garmin_model::artifact::ByteCount;
 use quick_xml::{events::Event, name::ResolveResult, reader::NsReader};
 
 use crate::{DeviceManifest, DeviceSummary, TransportKind};
@@ -16,11 +17,11 @@ pub use model::{
     OperationHandle, ParsedManifest, SoftwareVersion, TransferDirection,
 };
 
-pub(crate) const MAX_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const MAX_MANIFEST_BYTES: ByteCount = ByteCount::from_mebibytes(4);
 
 /// Parse a metadata document into transport-neutral device metadata.
 pub(crate) fn parse_document(raw_document: &str) -> Result<ParsedManifest, ManifestError> {
-    if raw_document.len() > MAX_MANIFEST_BYTES {
+    if ByteCount::from_bytes(raw_document.len() as u64) > MAX_MANIFEST_BYTES {
         return Err(ManifestError::TooLarge);
     }
     match detect_format(raw_document)? {
@@ -123,7 +124,7 @@ mod tests {
 
     #[test]
     fn rejects_an_oversized_document_before_detection() {
-        let xml = " ".repeat(MAX_MANIFEST_BYTES + 1);
+        let xml = " ".repeat(usize::try_from(MAX_MANIFEST_BYTES.as_bytes()).unwrap() + 1);
         assert!(matches!(parse_document(&xml), Err(ManifestError::TooLarge)));
     }
 

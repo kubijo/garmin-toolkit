@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::{
-    OperationStage, ProgressEvent, ProgressEventKind, ProgressScope, ProgressState, ProgressUnit,
+    OperationStage, ProgressAmount, ProgressEvent, ProgressEventKind, ProgressScope, ProgressState,
 };
 
 const MAX_HISTORY_ENTRIES: usize = 2_048;
@@ -12,11 +12,9 @@ const MAX_HISTORY_ENTRIES: usize = 2_048;
 #[derive(Debug, Clone)]
 pub struct StageView {
     pub state: Option<ProgressState>,
-    pub unit: ProgressUnit,
+    pub amount: ProgressAmount,
     pub label: String,
     pub path: Option<String>,
-    pub completed: u64,
-    pub total: Option<u64>,
     pub started_at: Option<Instant>,
     pub started_recorded_at: Option<SystemTime>,
     pub updated_at: Option<Instant>,
@@ -29,11 +27,9 @@ impl Default for StageView {
     fn default() -> Self {
         Self {
             state: None,
-            unit: ProgressUnit::default(),
+            amount: ProgressAmount::default(),
             label: "Waiting".to_owned(),
             path: None,
-            completed: 0,
-            total: None,
             started_at: None,
             started_recorded_at: None,
             updated_at: None,
@@ -47,11 +43,9 @@ impl Default for StageView {
 impl StageView {
     fn apply(&mut self, event: &ProgressEvent) {
         self.state = Some(event.state);
-        self.unit = event.unit;
+        self.amount = event.amount;
         event.label.clone_into(&mut self.label);
         self.path.clone_from(&event.path);
-        self.completed = event.completed;
-        self.total = event.total;
         let now = Instant::now();
         self.updated_at = Some(now);
         self.updated_recorded_at = Some(event.recorded_at);
@@ -210,10 +204,8 @@ impl ProgressModel {
             .find(|(candidate, _)| *candidate == stage)
         {
             view.state = Some(ProgressState::Completed);
-            view.unit = stage.progress_unit();
+            view.amount = ProgressAmount::new(stage.progress_unit(), 0, None);
             label.clone_into(&mut view.label);
-            view.completed = 0;
-            view.total = None;
             view.aggregate_owned = true;
         }
     }
@@ -336,11 +328,13 @@ mod tests {
             stage,
             state: progress_state,
             kind: ProgressEventKind::Generic,
-            unit: stage.progress_unit(),
             label: label.to_owned(),
             path: None,
-            completed: u64::from(progress_state == ProgressState::Completed),
-            total: Some(1),
+            amount: ProgressAmount::new(
+                stage.progress_unit(),
+                u64::from(progress_state == ProgressState::Completed),
+                Some(1),
+            ),
         }
     }
 
@@ -460,8 +454,8 @@ mod tests {
             backup.label,
             "Skipped by user; automatic rollback is unavailable"
         );
-        assert_eq!(backup.completed, 0);
-        assert_eq!(backup.total, None);
+        assert_eq!(backup.amount.completed(), 0);
+        assert_eq!(backup.amount.total(), None);
         assert_eq!(backup.started_at, None);
         assert_eq!(backup.elapsed, None);
 
@@ -527,12 +521,12 @@ mod tests {
         );
         assert_eq!(
             rows.iter()
-                .map(|item| item.view.completed)
+                .map(|item| item.view.amount.completed())
                 .collect::<Vec<_>>(),
             [40, 80]
         );
-        assert_eq!(model.stages[0].1.completed, 120);
-        assert_eq!(model.stages[0].1.total, Some(300));
+        assert_eq!(model.stages[0].1.amount.completed(), 120);
+        assert_eq!(model.stages[0].1.amount.total(), Some(300));
         assert!(model.stages[0].1.path.is_none());
         assert!(model.history.is_empty());
 

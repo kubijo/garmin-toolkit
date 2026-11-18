@@ -1,4 +1,6 @@
 use anyhow::{Context as _, Result, bail};
+use garmin_model::artifact::ByteCount;
+use garmin_model::value::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::fs::File;
@@ -6,7 +8,7 @@ use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 const REGISTRY_VERSION: u8 = 1;
-const MAX_RECEIPT_BYTES: u64 = 64 * 1024;
+const MAX_RECEIPT_BYTES: ByteCount = ByteCount::from_kibibytes(64);
 const UPDATE_JOURNAL: &str = "mounted-update/transaction/000000-prepared.json";
 const REMOVAL_JOURNAL: &str = "removal-transaction/000000-prepared.json";
 
@@ -33,7 +35,7 @@ pub struct PendingRecovery {
     pub transaction: PathBuf,
     device_digest: String,
     pub plan_digest: String,
-    registered_unix_seconds: u64,
+    registered_at: Timestamp,
 }
 
 impl PendingRecovery {
@@ -54,10 +56,11 @@ impl PendingRecovery {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(error) => return Err(error.into()),
         };
-        if !metadata.is_file() || metadata.len() > MAX_RECEIPT_BYTES {
+        if !metadata.is_file() || ByteCount::from_bytes(metadata.len()) > MAX_RECEIPT_BYTES {
             bail!("unsafe workflow target evidence");
         }
-        let target: Target = serde_json::from_reader(File::open(path)?.take(MAX_RECEIPT_BYTES))?;
+        let target: Target =
+            serde_json::from_reader(File::open(path)?.take(MAX_RECEIPT_BYTES.as_bytes()))?;
         if target.version != 1
             || target.device != self.device_digest
             || target.plan != self.plan_digest
@@ -93,7 +96,29 @@ struct RecoveryReceipt {
     transaction: PathBuf,
     device_digest: String,
     plan_digest: String,
-    registered_unix_seconds: u64,
+    #[serde(rename = "registered_unix_seconds", with = "timestamp_seconds")]
+    registered_at: Timestamp,
+}
+
+mod timestamp_seconds {
+    use garmin_model::value::Timestamp;
+    use serde::{Deserialize, Deserializer, Serializer, de::Error as _};
+
+    pub(super) fn serialize<S: Serializer>(
+        timestamp: &Timestamp,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u64(
+            u64::try_from(timestamp.as_unix_seconds()).map_err(serde::ser::Error::custom)?,
+        )
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Timestamp, D::Error> {
+        let seconds = i64::try_from(u64::deserialize(deserializer)?).map_err(D::Error::custom)?;
+        Timestamp::from_unix_seconds(seconds).map_err(D::Error::custom)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,17 +190,18 @@ impl PendingRecoveryStore {
         }) {
             return Ok(existing);
         }
-        let registered_unix_seconds = std::time::SystemTime::now()
+        let seconds = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .context("system time is before the Unix epoch")?
             .as_secs();
+        let registered_at = Timestamp::from_unix_seconds(i64::try_from(seconds)?)?;
         let receipt = RecoveryReceipt {
             version: REGISTRY_VERSION,
             kind,
             transaction,
             device_digest: device_digest.to_owned(),
             plan_digest: plan_digest.to_owned(),
-            registered_unix_seconds,
+            registered_at,
         };
         self.write_receipt(&receipt)
     }
@@ -206,7 +232,7 @@ impl PendingRecoveryStore {
             .into_iter()
             .filter(|recovery| recovery.device_digest == device_digest)
             .collect::<Vec<_>>();
-        recoveries.sort_by_key(|recovery| std::cmp::Reverse(recovery.registered_unix_seconds));
+        recoveries.sort_by_key(|recovery| std::cmp::Reverse(recovery.registered_at));
         Ok(recoveries)
     }
 
@@ -334,14 +360,20 @@ impl PendingRecoveryStore {
     fn read_receipt(path: &Path) -> Result<PendingRecovery> {
         let metadata = fs::symlink_metadata(path)
             .with_context(|| format!("cannot inspect recovery receipt {}", path.display()))?;
-        if !metadata.file_type().is_file() || metadata.len() > MAX_RECEIPT_BYTES {
+        if !metadata.file_type().is_file()
+            || ByteCount::from_bytes(metadata.len()) > MAX_RECEIPT_BYTES
+        {
             bail!("unsafe pending-recovery receipt {}", path.display());
         }
         let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or_default());
         File::open(path)?
-            .take(MAX_RECEIPT_BYTES + 1)
+            .take(
+                MAX_RECEIPT_BYTES
+                    .saturating_add(ByteCount::from_bytes(1))
+                    .as_bytes(),
+            )
             .read_to_end(&mut bytes)?;
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_RECEIPT_BYTES {
+        if ByteCount::from_bytes(bytes.len() as u64) > MAX_RECEIPT_BYTES {
             bail!("pending-recovery receipt is too large: {}", path.display());
         }
         let receipt: RecoveryReceipt = serde_json::from_slice(&bytes)
@@ -361,7 +393,7 @@ fn stored_recovery(path: PathBuf, receipt: &RecoveryReceipt) -> PendingRecovery 
         transaction: receipt.transaction.clone(),
         device_digest: receipt.device_digest.clone(),
         plan_digest: receipt.plan_digest.clone(),
-        registered_unix_seconds: receipt.registered_unix_seconds,
+        registered_at: receipt.registered_at,
     }
 }
 

@@ -11,12 +11,13 @@ use std::{
 
 use eframe::egui;
 use serde::Serialize;
+use std::time::Duration;
 
 use super::Result;
 
 struct Capture {
     frame: u64,
-    seconds: f64,
+    elapsed: Duration,
     pixels: egui::ColorImage,
 }
 
@@ -54,14 +55,14 @@ impl Recording {
         self.summary.queued < self.maximum
     }
 
-    pub fn offer(&mut self, frame: u64, seconds: f64, pixels: egui::ColorImage) -> Result<()> {
+    pub fn offer(&mut self, frame: u64, elapsed: Duration, pixels: egui::ColorImage) -> Result<()> {
         if !self.has_capacity() {
             self.summary.dropped += 1;
             return Ok(());
         }
         match self.sender.try_send(Capture {
             frame,
-            seconds,
+            elapsed,
             pixels,
         }) {
             Ok(()) => self.summary.queued += 1,
@@ -111,7 +112,7 @@ fn write_frames(
             &mut index,
             &serde_json::json!({
                 "file": format!("frames/{file}"), "frame": capture.frame,
-                "seconds": capture.seconds, "width": width, "height": height,
+                "seconds": capture.elapsed.as_secs_f64(), "width": width, "height": height,
             }),
         )?;
         writeln!(index)?;
@@ -129,8 +130,8 @@ mod tests {
         let output = tempfile::tempdir()?;
         let mut recording = Recording::new(output.path(), 1)?;
         let pixels = egui::ColorImage::new([2, 1], vec![egui::Color32::RED, egui::Color32::BLUE]);
-        recording.offer(7, 1.25, pixels.clone())?;
-        recording.offer(12, 2.5, pixels)?;
+        recording.offer(7, Duration::from_millis(1_250), pixels.clone())?;
+        recording.offer(12, Duration::from_millis(2_500), pixels)?;
         let summary = recording.finish()?;
         assert_eq!(summary.queued, 1);
         assert_eq!(summary.dropped, 1);

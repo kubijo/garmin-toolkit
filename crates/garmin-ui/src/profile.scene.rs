@@ -1,5 +1,6 @@
 use gallery::prelude::*;
 use garmin_color::{Color, swatch};
+use garmin_model::artifact::ByteCount;
 use garmin_ui::profile;
 
 scene_meta! { title: "Application / Profiles" }
@@ -95,8 +96,8 @@ fn chooser(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         garmin_ui::backup::SelectedFile::RestoreSource("garmin-backup.tar.zst".to_owned());
     let restored_state = garmin_ui::backup::State::Restored(garmin_ui::backup::RestoreSummary {
         elapsed: Some(std::time::Duration::from_secs(18)),
-        archive_bytes: Some(1_200_000),
-        database_bytes: Some(8_000_000),
+        archive_bytes: Some(ByteCount::from_bytes(1_200_000)),
+        database_bytes: Some(ByteCount::from_bytes(8_000_000)),
         created_at: Some(1_790_640_000),
     });
     stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {

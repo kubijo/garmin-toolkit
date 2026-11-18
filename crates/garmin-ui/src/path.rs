@@ -3,6 +3,7 @@
 use cint::ColorInterop;
 use egui::{Align2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use garmin_color::theme;
+use garmin_model::route::Coordinate;
 
 use crate::theme::{PANEL_RADIUS, color32};
 
@@ -11,17 +12,10 @@ const PADDING: f32 = 16.0;
 const PATH_WIDTH: f32 = 3.0;
 const ENDPOINT_RADIUS: f32 = 4.0;
 
-/// One latitude/longitude pair in decimal degrees.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Point {
-    pub latitude: f64,
-    pub longitude: f64,
-}
-
 /// One continuous path segment.
 #[derive(Clone, Copy, Debug)]
 pub struct Segment<'a> {
-    pub points: &'a [Point],
+    pub points: &'a [Coordinate],
 }
 
 /// Path-preview inputs.
@@ -112,7 +106,7 @@ impl Bounds {
         clippy::cast_possible_truncation,
         reason = "fitted viewport coordinates are intentionally narrowed to egui's f32 space"
     )]
-    fn project(self, point: Point, target: Rect) -> egui::Pos2 {
+    fn project(self, point: Coordinate, target: Rect) -> egui::Pos2 {
         let point = Projected::from_point(point);
         let source_width = (self.maximum_x - self.minimum_x).max(f64::EPSILON);
         let source_height = (self.maximum_y - self.minimum_y).max(f64::EPSILON);
@@ -136,14 +130,15 @@ struct Projected {
 }
 
 impl Projected {
-    fn from_point(point: Point) -> Self {
+    fn from_point(point: Coordinate) -> Self {
         const MAX_LATITUDE: f64 = 85.051_128_78;
         let latitude = point
-            .latitude
+            .latitude()
+            .as_degrees()
             .clamp(-MAX_LATITUDE, MAX_LATITUDE)
             .to_radians();
         Self {
-            x: point.longitude.to_radians(),
+            x: point.longitude().as_degrees().to_radians(),
             y: -latitude.tan().asinh(),
         }
     }
@@ -157,14 +152,8 @@ mod tests {
     fn projection_preserves_geographic_orientation() {
         let rect = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(200.0, 100.0));
         let points = [
-            Point {
-                latitude: 50.0,
-                longitude: 14.0,
-            },
-            Point {
-                latitude: 51.0,
-                longitude: 15.0,
-            },
+            Coordinate::from_degrees(50.0, 14.0).unwrap(),
+            Coordinate::from_degrees(51.0, 15.0).unwrap(),
         ];
         let segment = Segment { points: &points };
         let bounds = Bounds::from_segments(&[&segment]).expect("the segment has two points");

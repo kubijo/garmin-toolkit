@@ -1,3 +1,5 @@
+use garmin_model::artifact::ByteCount;
+use garmin_model::artifact::NonZeroByteRate;
 use std::{
     path::Path,
     path::PathBuf,
@@ -163,7 +165,7 @@ impl DeviceRead for FaultDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         destination: BackupDestination,
         progress: MountedMtpBackupProgress,
     ) -> Result<String, DeviceIoError> {
@@ -183,7 +185,7 @@ impl DeviceRead for FaultDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
         self.inner.verify(storage, path, size, sha256).await
@@ -193,7 +195,7 @@ impl DeviceRead for FaultDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        limit: u64,
+        limit: ByteCount,
     ) -> Result<Option<Vec<u8>>, DeviceIoError> {
         self.inner.read_bounded_file(storage, path, limit).await
     }
@@ -238,7 +240,7 @@ impl DeviceWrite for FaultDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
         if matches!(self.fault, Fault::ClearTransaction)
@@ -265,7 +267,7 @@ impl DeviceWrite for FaultDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
     ) -> Result<(), DeviceIoError> {
         if matches!(self.fault, Fault::ChangedBeforeDelete)
             && path
@@ -283,7 +285,7 @@ impl DeviceWrite for FaultDevice {
         storage: &str,
         path: &SafeRelativePath,
         source: &Path,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
         progress: MountedMtpUploadProgress,
     ) -> Result<(), DeviceIoError> {
@@ -315,7 +317,7 @@ impl DeviceWrite for FaultDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         backup: &Path,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
@@ -453,7 +455,7 @@ async fn cancelled_writes_clear_recovery_only_after_verified_rollback() -> Resul
     for (simulated, write_bytes_per_second) in [
         (false, None),
         (true, None),
-        (true, std::num::NonZeroU64::new(1_000_000)),
+        (true, NonZeroByteRate::try_from_bytes_per_second(1_000_000)),
     ] {
         let fixture = Fixture::new(MockAuthorization::Supported).await?;
         let receipts = PendingRecoveryStore::new(fixture.root.path().join("receipts"));
@@ -651,7 +653,7 @@ fn cancelling_commit_progress() -> ProgressReporter {
     progress.observe(move |event| {
         if event.stage == OperationStage::Commit
             && event.state == ProgressState::Advanced
-            && event.completed > 0
+            && event.amount.completed() > 0
             && event.path.is_some()
         {
             cancellation.cancel();

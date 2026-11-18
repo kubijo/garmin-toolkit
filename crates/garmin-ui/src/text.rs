@@ -1,11 +1,9 @@
 use egui::{RichText, TextStyle, TextWrapMode, Ui, WidgetText};
+use garmin_model::artifact::ByteCount;
 use std::borrow::Cow;
 
 pub(crate) fn format_bytes(bytes: u64) -> String {
-    format!(
-        "{:.2}",
-        byte_unit::Byte::from_u64(bytes).get_appropriate_unit(byte_unit::UnitType::Decimal)
-    )
+    ByteCount::from_bytes(bytes).format_decimal(2)
 }
 
 pub(crate) fn balanced<'a>(

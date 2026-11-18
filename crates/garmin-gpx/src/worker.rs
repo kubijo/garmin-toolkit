@@ -13,7 +13,10 @@ use std::{
     time::Duration,
 };
 
-use garmin_model::{artifact::ArtifactDigest, value::ComponentVersion};
+use garmin_model::{
+    artifact::{ArtifactDigest, ByteCount},
+    value::ComponentVersion,
+};
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
     process::Command,
@@ -23,13 +26,13 @@ use tokio::{
 use crate::Document;
 
 /// Bounds parser address space; this is not the host's memory limit.
-pub const MEMORY_BYTES: u64 = 512 * 1024 * 1024;
+pub const MEMORY_BYTES: ByteCount = ByteCount::from_mebibytes(512);
 /// Bounds parser CPU even when the parent process exits.
-pub const CPU_SECONDS: u64 = 5;
+pub const CPU_TIME: Duration = Duration::from_secs(5);
 /// Bounds IPC output and pending geometry retained by the host.
-pub const MAX_REPLY_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_REPLY_BYTES: ByteCount = ByteCount::from_mebibytes(32);
 pub const MAX_CANDIDATES: usize = 128;
-pub const MAX_NAME_BYTES: usize = 4096;
+pub const MAX_NAME_BYTES: ByteCount = ByteCount::from_kibibytes(4);
 const WALL_TIME: Duration = Duration::from_secs(10);
 static PARSER_SLOT: Semaphore = Semaphore::const_new(1);
 
@@ -95,7 +98,7 @@ impl Parser {
     /// # Errors
     /// [`Error`] for busy capacity, input rejection, process failure, or protocol violations.
     pub async fn parse(&self, bytes: Arc<[u8]>) -> Result<PreparedGpx, Error> {
-        if bytes.len() > crate::MAX_BYTES {
+        if ByteCount::from_bytes(bytes.len() as u64) > crate::MAX_BYTES {
             return Err(Error::InputTooLarge);
         }
         let _slot = PARSER_SLOT.try_acquire().map_err(|_| Error::Busy)?;
@@ -124,13 +127,17 @@ impl Parser {
             let receive = async {
                 let mut output = Vec::new();
                 stdout
-                    .take((MAX_REPLY_BYTES + 1) as u64)
+                    .take(
+                        MAX_REPLY_BYTES
+                            .saturating_add(ByteCount::from_bytes(1))
+                            .as_bytes(),
+                    )
                     .read_to_end(&mut output)
                     .await?;
                 Ok::<_, std::io::Error>(output)
             };
             let ((), output) = tokio::try_join!(send, receive)?;
-            if output.len() > MAX_REPLY_BYTES {
+            if ByteCount::from_bytes(output.len() as u64) > MAX_REPLY_BYTES {
                 return Err(Error::ReplyTooLarge);
             }
             let status = child.wait().await?;
@@ -167,10 +174,14 @@ pub fn run_worker() -> Result<(), Box<dyn std::error::Error>> {
     let mut bytes = Vec::new();
     std::io::stdin()
         .lock()
-        .take((crate::MAX_BYTES + 1) as u64)
+        .take(
+            crate::MAX_BYTES
+                .saturating_add(ByteCount::from_bytes(1))
+                .as_bytes(),
+        )
         .read_to_end(&mut bytes)?;
     let output = protocol::encode(&bytes)?;
-    if output.len() > MAX_REPLY_BYTES {
+    if ByteCount::from_bytes(output.len() as u64) > MAX_REPLY_BYTES {
         return Err("GPX worker reply exceeds its limit".into());
     }
     std::io::stdout().lock().write_all(&output)?;

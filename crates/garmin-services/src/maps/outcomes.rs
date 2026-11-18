@@ -1,6 +1,7 @@
 //! Bounded last outcomes, independent of connection and process lifetime.
 
 use anyhow::{Result, bail};
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::maps::Outcome;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -13,7 +14,7 @@ use super::pending_recovery::{
     set_private_directory_permissions, set_private_file_permissions, sync_directory,
 };
 
-const MAX_BYTES: u64 = 1024 * 1024;
+const MAX_BYTES: ByteCount = ByteCount::from_mebibytes(1);
 pub(super) const MAX_OUTCOMES: usize = 64;
 
 #[derive(Serialize, Deserialize)]
@@ -32,14 +33,18 @@ pub(super) fn read(root: &Path, device: &str) -> Result<Vec<Outcome>> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error.into()),
     };
-    if !metadata.is_file() || metadata.len() > MAX_BYTES {
+    if !metadata.is_file() || ByteCount::from_bytes(metadata.len()) > MAX_BYTES {
         bail!("invalid map outcome record");
     }
     let mut bytes = Vec::new();
     File::open(path)?
-        .take(MAX_BYTES + 1)
+        .take(
+            MAX_BYTES
+                .saturating_add(ByteCount::from_bytes(1))
+                .as_bytes(),
+        )
         .read_to_end(&mut bytes)?;
-    if u64::try_from(bytes.len())? > MAX_BYTES {
+    if ByteCount::from_bytes(u64::try_from(bytes.len())?) > MAX_BYTES {
         bail!("map outcome record is too large");
     }
     let record: Record = serde_json::from_slice(&bytes)?;
@@ -57,7 +62,7 @@ pub(super) fn write(root: &Path, device: &str, outcomes: Vec<Outcome>) -> Result
         outcomes,
     };
     let bytes = serde_json::to_vec(&record)?;
-    if u64::try_from(bytes.len())? > MAX_BYTES {
+    if ByteCount::from_bytes(u64::try_from(bytes.len())?) > MAX_BYTES {
         bail!("map outcome record is too large");
     }
     fs::create_dir_all(root)?;

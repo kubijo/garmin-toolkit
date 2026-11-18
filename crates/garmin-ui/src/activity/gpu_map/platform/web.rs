@@ -4,6 +4,7 @@ use std::{
     time::Duration,
 };
 
+use garmin_model::artifact::ByteCount;
 use web_time::Instant;
 
 use super::super::upload_trace::UploadTrace;
@@ -17,11 +18,11 @@ use crate::activity::map_runtime::MapMetrics;
 #[cfg(test)]
 use super::super::Vertex;
 
-const BROWSER_UPLOAD_CHUNK_BYTES: usize = 256 * 1024;
-const BROWSER_UPLOAD_FRAME_BYTES: usize = 4 * 1024 * 1024;
+const BROWSER_UPLOAD_CHUNK_BYTES: ByteCount = ByteCount::from_kibibytes(256);
+const BROWSER_UPLOAD_FRAME_BYTES: ByteCount = ByteCount::from_mebibytes(4);
 const BROWSER_UPLOAD_FRAME_TIME: Duration = Duration::from_micros(1_500);
 const RETAINED_UPLOAD_LIMIT: usize = 32;
-const RETAINED_UPLOAD_BYTES: usize = 16 * 1024 * 1024;
+const RETAINED_UPLOAD_BYTES: ByteCount = ByteCount::from_mebibytes(16);
 
 pub(in crate::activity) struct ResourceCreationGate;
 
@@ -389,23 +390,23 @@ impl BrowserUploadQueue {
             let result = upload.advance(context, queue, id, budget.chunk_bytes());
             if let (Some(trace), Some(work_started)) = (&upload.trace, work_started) {
                 trace.work(
-                    work_started.elapsed().as_secs_f64() * 1_000.0,
+                    work_started.elapsed(),
                     if let UploadAdvance::Wrote(bytes) = result {
-                        bytes
+                        ByteCount::from_bytes(bytes as u64)
                     } else {
-                        0
+                        ByteCount::default()
                     },
                 );
             }
             match result {
                 UploadAdvance::Advanced => {}
                 UploadAdvance::Wrote(0) => break,
-                UploadAdvance::Wrote(bytes) => budget.record(bytes),
+                UploadAdvance::Wrote(bytes) => budget.record(ByteCount::from_bytes(bytes as u64)),
                 UploadAdvance::Published => {
                     if let Some(trace) = &upload.trace {
                         trace.published();
                     }
-                    metrics.record_upload(upload.queued_at.elapsed().as_secs_f64() * 1_000.0);
+                    metrics.record_upload(upload.queued_at.elapsed());
                     completed_tiles += 1;
                     self.entries.remove(&id);
                     self.priority.pop_front();
@@ -424,16 +425,17 @@ impl BrowserUploadQueue {
         self.last_frame = UploadFrameStats {
             uploaded_bytes: budget.uploaded_bytes,
             completed_tiles,
-            milliseconds: elapsed.as_secs_f32() * 1_000.0,
+            elapsed,
         };
     }
 
     fn stats(&self) -> UploadStats {
-        let mut queued_bytes = 0;
+        let mut queued_bytes = ByteCount::default();
         let mut pending_tiles = 0;
         let mut partial_tiles = 0;
         for upload in self.priority.iter().filter_map(|id| self.entries.get(id)) {
-            queued_bytes += upload.remaining_bytes();
+            queued_bytes =
+                queued_bytes.saturating_add(ByteCount::from_bytes(upload.remaining_bytes() as u64));
             pending_tiles += 1;
             partial_tiles += usize::from(upload.is_partial());
         }
@@ -443,7 +445,7 @@ impl BrowserUploadQueue {
             pending_tiles,
             partial_tiles,
             completed_tiles: self.last_frame.completed_tiles,
-            milliseconds: self.last_frame.milliseconds,
+            elapsed: self.last_frame.elapsed,
             budget_overruns: self.budget_overruns,
         }
     }
@@ -453,12 +455,15 @@ impl BrowserUploadQueue {
             .entries
             .iter()
             .filter(|(id, _upload)| !current.contains(id))
-            .fold((0_usize, 0_usize), |(count, bytes), (_id, upload)| {
-                (
-                    count.saturating_add(1),
-                    bytes.saturating_add(upload.retained_bytes()),
-                )
-            });
+            .fold(
+                (0_usize, ByteCount::default()),
+                |(count, bytes), (_id, upload)| {
+                    (
+                        count.saturating_add(1),
+                        bytes.saturating_add(ByteCount::from_bytes(upload.retained_bytes() as u64)),
+                    )
+                },
+            );
         if retained_count <= RETAINED_UPLOAD_LIMIT && retained_bytes <= RETAINED_UPLOAD_BYTES {
             return;
         }
@@ -486,14 +491,14 @@ impl BrowserUploadQueue {
             }
             self.entries.remove(&id);
             retained_count = retained_count.saturating_sub(1);
-            retained_bytes = retained_bytes.saturating_sub(bytes);
+            retained_bytes = retained_bytes.saturating_sub(ByteCount::from_bytes(bytes as u64));
         }
     }
 }
 
 #[derive(Default)]
 struct UploadBudget {
-    uploaded_bytes: usize,
+    uploaded_bytes: ByteCount,
 }
 
 impl UploadBudget {
@@ -501,12 +506,12 @@ impl UploadBudget {
         self.uploaded_bytes < BROWSER_UPLOAD_FRAME_BYTES && elapsed < BROWSER_UPLOAD_FRAME_TIME
     }
 
-    fn chunk_bytes(&self) -> usize {
+    fn chunk_bytes(&self) -> ByteCount {
         BROWSER_UPLOAD_CHUNK_BYTES
             .min(BROWSER_UPLOAD_FRAME_BYTES.saturating_sub(self.uploaded_bytes))
     }
 
-    fn record(&mut self, bytes: usize) {
+    fn record(&mut self, bytes: ByteCount) {
         debug_assert!(bytes <= self.chunk_bytes());
         self.uploaded_bytes = self.uploaded_bytes.saturating_add(bytes);
     }
@@ -514,9 +519,9 @@ impl UploadBudget {
 
 #[derive(Clone, Copy, Default)]
 struct UploadFrameStats {
-    uploaded_bytes: usize,
+    uploaded_bytes: ByteCount,
     completed_tiles: usize,
-    milliseconds: f32,
+    elapsed: Duration,
 }
 
 struct TileUpload {
@@ -578,7 +583,7 @@ impl TileUpload {
         context: &UploadContext,
         queue: &wgpu::Queue,
         id: walkers::TileId,
-        maximum_bytes: usize,
+        maximum_bytes: ByteCount,
     ) -> UploadAdvance {
         let state = std::mem::replace(&mut self.state, TileUploadState::Ready);
         match state {
@@ -606,7 +611,9 @@ impl TileUpload {
                 UploadAdvance::Advanced
             }
             TileUploadState::Uploading(mut upload) if upload.remaining_bytes() > 0 => {
-                let written = upload.write_next(queue, maximum_bytes);
+                let limit = usize::try_from(maximum_bytes.as_bytes())
+                    .expect("chunk upload budget fits usize");
+                let written = upload.write_next(queue, limit);
                 self.state = TileUploadState::Uploading(upload);
                 UploadAdvance::Wrote(written)
             }
@@ -767,12 +774,12 @@ mod tests {
 
         while budget.can_advance(Duration::ZERO) {
             let chunk = budget.chunk_bytes();
-            assert!(chunk > 0 && chunk <= 256 * 1024);
+            assert!(!chunk.is_zero() && chunk <= BROWSER_UPLOAD_CHUNK_BYTES);
             budget.record(chunk);
         }
 
-        assert_eq!(budget.uploaded_bytes, 4 * 1024 * 1024);
-        assert_eq!(budget.chunk_bytes(), 0);
+        assert_eq!(budget.uploaded_bytes, BROWSER_UPLOAD_FRAME_BYTES);
+        assert!(budget.chunk_bytes().is_zero());
         assert!(!budget.can_advance(Duration::ZERO));
     }
 
@@ -791,8 +798,7 @@ mod tests {
             fn record_upload_event(&self, _: MapUploadEvent) {
                 panic!("disabled telemetry emitted an event");
             }
-            fn record_upload(&self, milliseconds: f64) {
-                assert!(milliseconds.is_finite() && milliseconds >= 0.0);
+            fn record_upload(&self, _elapsed: Duration) {
                 self.0.fetch_add(1, Ordering::Relaxed);
             }
         }
@@ -814,29 +820,36 @@ mod tests {
             metrics: metrics.clone(),
             ..BrowserUploadQueue::default()
         };
-        let candidate = tile(1, BROWSER_UPLOAD_CHUNK_BYTES + 16);
+        let candidate = tile(
+            1,
+            usize::try_from(BROWSER_UPLOAD_CHUNK_BYTES.as_bytes()).unwrap() + 16,
+        );
         uploads.reconcile(std::slice::from_ref(&candidate));
         assert!(uploads.entries[&candidate.id].trace.is_none());
         uploads.reconcile(&[]);
         uploads.advance(&context, &gpu_queue, &metrics);
-        assert_eq!(uploads.stats().uploaded_bytes, 0);
+        assert!(uploads.stats().uploaded_bytes.is_zero());
         uploads.reconcile(&[candidate.clone(), candidate.clone()]);
         let mut written = 0;
         for _ in 0..128 {
             uploads.advance(&context, &gpu_queue, &metrics);
-            written += uploads.stats().uploaded_bytes;
+            written += uploads.stats().uploaded_bytes.as_bytes();
             if candidate.tile.is_publishable() {
                 break;
             }
         }
         assert!(candidate.tile.is_publishable());
-        assert_eq!(written, upload_bytes(&candidate.tile.mesh));
+        assert_eq!(written, upload_bytes(&candidate.tile.mesh) as u64);
         assert_eq!(sink.0.load(Ordering::Relaxed), 1);
         assert!(candidate.tile.gpu.load_full().unwrap().first_draw.is_none());
         assert!(uploads.entries.is_empty());
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "The sequence verifies a single upload across visibility changes"
+    )]
     fn partially_written_upload_survives_hidden_frames_and_resumes_without_reupload() {
         use crate::activity::map::gpu_map::upload_trace::tests::Capture;
         use crate::activity::map_runtime::MapUploadPhase;
@@ -859,12 +872,16 @@ mod tests {
             ..BrowserUploadQueue::default()
         };
         // Exceed a frame's byte allowance, independently of machine speed.
-        let candidate = tile(1, BROWSER_UPLOAD_FRAME_BYTES + BROWSER_UPLOAD_CHUNK_BYTES);
+        let candidate = tile(
+            1,
+            usize::try_from(BROWSER_UPLOAD_FRAME_BYTES.as_bytes()).unwrap()
+                + usize::try_from(BROWSER_UPLOAD_CHUNK_BYTES.as_bytes()).unwrap(),
+        );
         let total = upload_bytes(&candidate.tile.mesh);
         uploads.reconcile(std::slice::from_ref(&candidate));
         for _ in 0..128 {
             uploads.advance(&context, &gpu_queue, &metrics);
-            if uploads.stats().uploaded_bytes > 0 {
+            if !uploads.stats().uploaded_bytes.is_zero() {
                 break;
             }
         }
@@ -887,7 +904,7 @@ mod tests {
         .advance_clock(Duration::from_millis(2_600));
         for _ in 0..10 {
             uploads.advance(&context, &gpu_queue, &metrics);
-            assert_eq!(uploads.stats().uploaded_bytes, 0);
+            assert!(uploads.stats().uploaded_bytes.is_zero());
             assert_eq!(uploads.stats().pending_tiles, 0);
         }
         assert_eq!(capture.0.lock().unwrap().len(), before_hidden_frames);
@@ -926,7 +943,13 @@ mod tests {
                 MapUploadPhase::Published,
             ]
         );
-        assert_eq!(events.iter().map(|event| event.bytes).sum::<usize>(), total);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.bytes.as_bytes())
+                .sum::<u64>(),
+            total as u64
+        );
         let hidden = events
             .iter()
             .find(|event| event.event == MapUploadPhase::Hidden)
@@ -936,8 +959,8 @@ mod tests {
             .find(|event| event.event == MapUploadPhase::Visible)
             .unwrap();
         let published = events.last().unwrap();
-        assert!(returned.elapsed_ms - hidden.elapsed_ms >= 2_600.0);
-        assert!(published.elapsed_ms >= returned.elapsed_ms);
+        assert!(returned.elapsed.saturating_sub(hidden.elapsed) >= Duration::from_millis(2_600));
+        assert!(published.elapsed >= returned.elapsed);
     }
 
     #[test]
@@ -948,47 +971,53 @@ mod tests {
             budget.record(budget.chunk_bytes());
             elapsed += Duration::from_millis(1);
         }
-        assert_eq!(budget.uploaded_bytes, 512 * 1024);
+        assert_eq!(budget.uploaded_bytes, ByteCount::from_kibibytes(512));
         assert!(!budget.can_advance(elapsed));
         assert!(budget.can_advance(Duration::ZERO));
     }
 
     #[test]
     fn upload_cursor_never_crosses_a_buffer_or_chunk_boundary() {
-        let vertex_bytes = BROWSER_UPLOAD_CHUNK_BYTES + 16;
+        let vertex_bytes = usize::try_from(BROWSER_UPLOAD_CHUNK_BYTES.as_bytes()).unwrap() + 16;
         let mut cursor = UploadCursor::new(vertex_bytes, 32);
 
         assert_eq!(
-            cursor.take(BROWSER_UPLOAD_CHUNK_BYTES),
+            cursor.take(usize::try_from(BROWSER_UPLOAD_CHUNK_BYTES.as_bytes()).unwrap()),
             Some(UploadChunk {
                 buffer: TileBuffer::Vertices,
                 offset: 0,
-                length: BROWSER_UPLOAD_CHUNK_BYTES,
+                length: usize::try_from(BROWSER_UPLOAD_CHUNK_BYTES.as_bytes()).unwrap(),
             })
         );
         assert_eq!(
-            cursor.take(BROWSER_UPLOAD_CHUNK_BYTES),
+            cursor.take(usize::try_from(BROWSER_UPLOAD_CHUNK_BYTES.as_bytes()).unwrap()),
             Some(UploadChunk {
                 buffer: TileBuffer::Vertices,
-                offset: BROWSER_UPLOAD_CHUNK_BYTES,
+                offset: usize::try_from(BROWSER_UPLOAD_CHUNK_BYTES.as_bytes()).unwrap(),
                 length: 16,
             })
         );
         assert_eq!(
-            cursor.take(BROWSER_UPLOAD_CHUNK_BYTES),
+            cursor.take(usize::try_from(BROWSER_UPLOAD_CHUNK_BYTES.as_bytes()).unwrap()),
             Some(UploadChunk {
                 buffer: TileBuffer::Indices,
                 offset: 0,
                 length: 32,
             })
         );
-        assert_eq!(cursor.take(BROWSER_UPLOAD_CHUNK_BYTES), None);
+        assert_eq!(
+            cursor.take(usize::try_from(BROWSER_UPLOAD_CHUNK_BYTES.as_bytes()).unwrap()),
+            None
+        );
         assert_eq!(cursor.remaining_bytes(), 0);
     }
 
     #[test]
     fn newly_queued_tile_is_not_publishable() {
-        let candidate = tile(1, BROWSER_UPLOAD_CHUNK_BYTES + 64);
+        let candidate = tile(
+            1,
+            usize::try_from(BROWSER_UPLOAD_CHUNK_BYTES.as_bytes()).unwrap() + 64,
+        );
         let mut queue = BrowserUploadQueue::default();
 
         queue.reconcile(std::slice::from_ref(&candidate));
@@ -1014,6 +1043,6 @@ mod tests {
 
         assert_eq!(queue.entries.len(), RETAINED_UPLOAD_LIMIT);
         assert_eq!(stats.pending_tiles, 0);
-        assert_eq!(stats.queued_bytes, 0);
+        assert!(stats.queued_bytes.is_zero());
     }
 }

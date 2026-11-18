@@ -1,11 +1,11 @@
-//! Account-summary analytics, independent of downloaded or imported originals.
+//! Account-summary analytics with optional imported FIT measurements.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use jiff::civil::Date;
 
 use super::CachedActivity;
-use crate::activity::ActivitySport;
+use crate::activity::{ActivityDuration, ActivitySport, Distance};
 
 #[garmin_macros::portable(copy, eq, ord)]
 pub enum Sport {
@@ -31,8 +31,10 @@ impl Sport {
 #[garmin_macros::portable(default)]
 pub struct Totals {
     pub activities: usize,
-    pub distance_metres: f64,
-    pub duration_seconds: f64,
+    pub distance: Distance,
+    pub duration: ActivityDuration,
+    pub elevation_gain: Distance,
+    pub elevation_activities: usize,
     pub missing_distance: usize,
     pub missing_duration: usize,
 }
@@ -40,8 +42,10 @@ pub struct Totals {
 impl Totals {
     pub fn add(&mut self, other: &Self) {
         self.activities += other.activities;
-        self.distance_metres += other.distance_metres;
-        self.duration_seconds += other.duration_seconds;
+        self.distance = self.distance.saturating_add(other.distance);
+        self.duration = self.duration.saturating_add(other.duration);
+        self.elevation_gain = self.elevation_gain.saturating_add(other.elevation_gain);
+        self.elevation_activities += other.elevation_activities;
         self.missing_distance += other.missing_distance;
         self.missing_duration += other.missing_duration;
     }
@@ -54,20 +58,29 @@ pub struct Day {
     pub totals: Totals,
 }
 
+/// Measurements available for a dated activity in a supported sport.
+#[garmin_macros::portable]
+pub struct ActivitySummary {
+    pub id: i64,
+    pub date: Date,
+    pub sport: Sport,
+    pub name: String,
+    pub distance: Option<Distance>,
+    pub duration: Option<ActivityDuration>,
+    pub elevation_gain: Option<Distance>,
+}
+
 /// Only published generations are exposed. No incomplete refresh is interpreted as zero activity.
 #[garmin_macros::portable(default)]
 pub struct History {
     pub days: Vec<Day>,
+    pub activities: Vec<ActivitySummary>,
     pub undated: usize,
     pub summaries: usize,
 }
 
 impl History {
     #[must_use]
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "Chart samples use floating coordinates; exact counts remain in Totals."
-    )]
     pub fn series(
         &self,
         range: Range,
@@ -96,13 +109,18 @@ impl History {
                 let totals = self.totals(bucket, sport);
                 let value = match metric {
                     Metric::Distance if totals.missing_distance == 0 => {
-                        Some(totals.distance_metres)
+                        Some(BucketValue::Distance(totals.distance))
                     }
                     Metric::Duration if totals.missing_duration == 0 => {
-                        Some(totals.duration_seconds)
+                        Some(BucketValue::Duration(totals.duration))
                     }
-                    Metric::Count => Some(totals.activities as f64),
-                    Metric::ActiveDays => Some(self.active_days_for(bucket, sport) as f64),
+                    Metric::Count => Some(BucketValue::Count(totals.activities)),
+                    Metric::ActiveDays => {
+                        Some(BucketValue::Count(self.active_days_for(bucket, sport)))
+                    }
+                    Metric::Elevation if totals.elevation_activities == totals.activities => {
+                        Some(BucketValue::Distance(totals.elevation_gain))
+                    }
                     _ => None,
                 };
                 Bucket { date, value }
@@ -112,9 +130,18 @@ impl History {
 
     #[must_use]
     pub fn from_summaries(summaries: &[CachedActivity]) -> Self {
+        Self::from_summaries_with_ascent(summaries, &BTreeMap::new())
+    }
+
+    #[must_use]
+    pub fn from_summaries_with_ascent(
+        summaries: &[CachedActivity],
+        ascent: &BTreeMap<i64, Distance>,
+    ) -> Self {
         let mut grouped = BTreeMap::<(Date, Sport), Totals>::new();
         let mut seen = BTreeSet::new();
         let mut undated = 0;
+        let mut activities = Vec::new();
         for summary in summaries {
             if !seen.insert(summary.activity.id) {
                 continue;
@@ -138,17 +165,36 @@ impl History {
             };
             let totals = grouped.entry((date, sport)).or_default();
             totals.activities += 1;
-            if let Some(value) = valid_measure(summary.activity.distance_metres) {
-                totals.distance_metres += value;
+            let distance = summary.activity.distance;
+            let duration = summary.activity.duration;
+            let elevation_gain = ascent.get(&summary.activity.id).copied();
+            if let Some(gain) = elevation_gain {
+                totals.elevation_gain = totals.elevation_gain.saturating_add(gain);
+                totals.elevation_activities += 1;
+            }
+            if let Some(value) = distance {
+                totals.distance = totals.distance.saturating_add(value);
             } else {
                 totals.missing_distance += 1;
             }
-            if let Some(value) = valid_measure(summary.activity.duration_seconds) {
-                totals.duration_seconds += value;
+            if let Some(value) = duration {
+                totals.duration = totals.duration.saturating_add(value);
             } else {
                 totals.missing_duration += 1;
             }
+            if sport != Sport::Other {
+                activities.push(ActivitySummary {
+                    id: summary.activity.id,
+                    date,
+                    sport,
+                    name: summary.activity.name.clone(),
+                    distance,
+                    duration,
+                    elevation_gain,
+                });
+            }
         }
+        activities.sort_unstable_by_key(|activity| std::cmp::Reverse((activity.date, activity.id)));
         Self {
             days: grouped
                 .into_iter()
@@ -158,6 +204,7 @@ impl History {
                     totals,
                 })
                 .collect(),
+            activities,
             undated,
             summaries: seen.len(),
         }
@@ -189,10 +236,6 @@ impl History {
     }
 }
 
-fn valid_measure(value: Option<f64>) -> Option<f64> {
-    value.filter(|value| value.is_finite() && *value >= 0.0)
-}
-
 #[garmin_macros::portable(copy, default, eq)]
 pub enum Metric {
     #[default]
@@ -200,19 +243,49 @@ pub enum Metric {
     Duration,
     Count,
     ActiveDays,
+    Elevation,
 }
 
 #[garmin_macros::portable]
 pub struct Bucket {
     pub date: Date,
-    pub value: Option<f64>,
+    pub value: Option<BucketValue>,
+}
+
+#[garmin_macros::portable(copy, eq)]
+pub enum BucketValue {
+    Distance(Distance),
+    Duration(ActivityDuration),
+    Count(usize),
+}
+
+impl BucketValue {
+    fn add(self, other: Self) -> Option<Self> {
+        match (self, other) {
+            (Self::Distance(total), Self::Distance(value)) => {
+                Some(Self::Distance(total.saturating_add(value)))
+            }
+            (Self::Duration(total), Self::Duration(value)) => {
+                Some(Self::Duration(total.saturating_add(value)))
+            }
+            (Self::Count(total), Self::Count(value)) => {
+                Some(Self::Count(total.saturating_add(value)))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Unknown measurements make subsequent cumulative totals unknown too.
 pub fn cumulative(values: &mut [Bucket]) {
-    let mut total = Some(0.0);
-    for bucket in values {
-        total = total.zip(bucket.value).map(|(total, value)| total + value);
+    let Some((first, remaining)) = values.split_first_mut() else {
+        return;
+    };
+    let mut total = first.value;
+    for bucket in remaining {
+        total = total
+            .zip(bucket.value)
+            .and_then(|(total, value)| total.add(value));
         bucket.value = total;
     }
 }

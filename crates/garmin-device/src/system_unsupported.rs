@@ -1,5 +1,6 @@
 //! Fallback host adapter for systems without desktop-mounted MTP integration.
 
+use garmin_model::artifact::ByteCount;
 use std::path::{Path, PathBuf};
 
 use garmin_progress::ProgressReporter;
@@ -134,7 +135,7 @@ pub async fn inspect_mounted_mtp_object(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
-) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+) -> Result<(DevicePathState, Option<ByteCount>), MountedMtpError> {
     unsupported().await
 }
 
@@ -143,7 +144,7 @@ pub async fn inspect_mounted_mtp_object_with_progress(
     _storage_id: &str,
     _path: &SafeRelativePath,
     _progress: &ProgressReporter,
-) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+) -> Result<(DevicePathState, Option<ByteCount>), MountedMtpError> {
     unsupported().await
 }
 
@@ -151,7 +152,7 @@ pub async fn read_bounded_mounted_mtp_file(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
-    _limit: u64,
+    _limit: ByteCount,
 ) -> Result<Option<Vec<u8>>, MountedMtpError> {
     unsupported().await
 }
@@ -211,7 +212,7 @@ pub async fn backup_mounted_mtp_object(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
-    _expected_size: u64,
+    _expected_size: ByteCount,
     _destination: BackupDestination,
     _progress: MountedMtpBackupProgress,
 ) -> Result<String, MountedMtpError> {
@@ -222,7 +223,7 @@ pub async fn delete_mounted_mtp_object(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
-    _expected_size: u64,
+    _expected_size: ByteCount,
     _expected_sha256: &str,
 ) -> Result<(), MountedMtpError> {
     unsupported().await
@@ -232,7 +233,7 @@ pub async fn delete_mounted_mtp_object_with_progress(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
-    _expected_size: u64,
+    _expected_size: ByteCount,
     _expected_sha256: &str,
     _progress: &ProgressReporter,
 ) -> Result<(), MountedMtpError> {
@@ -243,7 +244,7 @@ pub async fn delete_size_checked_mounted_mtp_object(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
-    _expected_size: u64,
+    _expected_size: ByteCount,
 ) -> Result<(), MountedMtpError> {
     unsupported().await
 }
@@ -252,7 +253,7 @@ pub async fn delete_size_checked_mounted_mtp_object_with_progress(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
-    _expected_size: u64,
+    _expected_size: ByteCount,
     _progress: &ProgressReporter,
 ) -> Result<(), MountedMtpError> {
     unsupported().await
@@ -262,7 +263,7 @@ pub async fn verify_mounted_mtp_object(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
-    _expected_size: u64,
+    _expected_size: ByteCount,
     _expected_sha256: &str,
 ) -> Result<(), MountedMtpError> {
     unsupported().await
@@ -272,7 +273,7 @@ pub async fn verify_mounted_mtp_object_with_progress(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
-    _expected_size: u64,
+    _expected_size: ByteCount,
     _expected_sha256: &str,
     _progress: MountedMtpVerifyProgress,
 ) -> Result<(), MountedMtpError> {
@@ -283,7 +284,7 @@ pub async fn restore_mounted_mtp_object(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
-    _expected_size: u64,
+    _expected_size: ByteCount,
     _backup: &Path,
     _expected_sha256: &str,
 ) -> Result<(), MountedMtpError> {
@@ -294,7 +295,7 @@ pub async fn restore_mounted_mtp_object_with_progress(
     _mount_id: &str,
     _storage_id: &str,
     _path: &SafeRelativePath,
-    _expected_size: u64,
+    _expected_size: ByteCount,
     _backup: &Path,
     _expected_sha256: &str,
     _progress: &ProgressReporter,
@@ -307,7 +308,7 @@ pub async fn upload_mounted_mtp_object(
     _storage_id: &str,
     _path: &SafeRelativePath,
     _source: &Path,
-    _expected_size: u64,
+    _expected_size: ByteCount,
     _expected_sha256: &str,
     _progress: MountedMtpUploadProgress,
 ) -> Result<(), MountedMtpError> {

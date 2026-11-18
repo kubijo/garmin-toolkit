@@ -6,6 +6,7 @@ use garmin_service_api::{
     maps::{Command, MapService as _, MapServiceClient, Request, State as Snapshot},
 };
 use garmin_ui::maps::ClientError;
+use std::time::Duration;
 use std::{cell::RefCell, rc::Rc};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
@@ -186,7 +187,7 @@ fn fail(
         let context = context.clone();
         context.request_repaint();
         spawn_local(async move {
-            super::wait_milliseconds(2_000).await;
+            super::wait_for(Duration::from_millis(2_000)).await;
             let retry = {
                 let state = shared.borrow();
                 state.maps.generation == generation

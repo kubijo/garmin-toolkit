@@ -7,7 +7,8 @@
     reason = "bounded GPU coordinates, indices, and grid cells intentionally use f32/i32"
 )]
 
-use std::{marker::PhantomData, num::NonZeroU64, sync::Arc};
+use garmin_model::artifact::ByteCount;
+use std::{marker::PhantomData, num::NonZeroU64, sync::Arc, time::Duration};
 
 use super::samples::Samples;
 use arc_swap::ArcSwapOption;
@@ -251,7 +252,7 @@ impl BrowserTilePacketBuilder {
             .and_then(|bytes| bytes.checked_add(text_record_bytes))
             .and_then(|bytes| bytes.checked_add(string_bytes))
             .ok_or_else(|| "browser tile transfer length overflowed".to_owned())?;
-        BrowserTileLimits::check_upload(total)?;
+        BrowserTileLimits::check_upload(ByteCount::from_bytes(total as u64))?;
         let mut builder = Self {
             expected: BrowserTileLengths {
                 vertices: vertex_bytes,
@@ -530,7 +531,7 @@ struct BrowserTextRecord {
 
 impl BrowserTextRecord {
     fn to_text(self, strings: &[u8]) -> Result<walkers::Text, String> {
-        BrowserTileLimits::check_text(self.string_length as usize)?;
+        BrowserTileLimits::check_text(ByteCount::from_bytes(u64::from(self.string_length)))?;
         let start = self.string_offset as usize;
         let end = start
             .checked_add(self.string_length as usize)
@@ -592,7 +593,7 @@ fn tessellate_browser_tile(tile: DecodedTile) -> Result<BrowserTileGeometry, Str
     let mut budget = TileBudget::default();
     budget.shapes(&shapes)?;
     for text in &texts {
-        budget.text(text.text.len())?;
+        budget.text(ByteCount::from_bytes(text.text.len() as u64))?;
     }
     let (vertices, indices) = tessellate_tile(shapes, |mesh| budget.mesh(mesh))?;
     Ok(BrowserTileGeometry {
@@ -914,12 +915,12 @@ impl WgpuRuntime {
 
 #[derive(Clone, Copy, Default)]
 struct UploadStats {
-    queued_bytes: usize,
-    uploaded_bytes: usize,
+    queued_bytes: ByteCount,
+    uploaded_bytes: ByteCount,
     pending_tiles: usize,
     partial_tiles: usize,
     completed_tiles: usize,
-    milliseconds: f32,
+    elapsed: Duration,
     budget_overruns: u64,
 }
 
@@ -937,17 +938,17 @@ pub(in crate::activity) struct RouteScene<'a> {
 #[derive(Default)]
 pub(in crate::activity) struct ScenePerf {
     pub route_ready: bool,
-    pub milliseconds: f32,
+    pub elapsed: Duration,
     pub visible_tiles: usize,
-    pub label_milliseconds: f32,
+    pub label_elapsed: Duration,
     pub label_backlog: usize,
     pub stale_work: u64,
-    pub queued_upload_bytes: usize,
-    pub uploaded_bytes: usize,
+    pub queued_upload_bytes: ByteCount,
+    pub uploaded_bytes: ByteCount,
     pub pending_upload_tiles: usize,
     pub partial_upload_tiles: usize,
     pub completed_upload_tiles: usize,
-    pub upload_milliseconds: f32,
+    pub upload_elapsed: Duration,
     pub upload_budget_overruns: u64,
 }
 
@@ -1082,9 +1083,9 @@ impl GpuMapRuntime {
         let label_metrics = self.labels.metrics();
         let perf = ScenePerf {
             route_ready,
-            milliseconds: started.elapsed().as_secs_f32() * 1_000.0,
+            elapsed: started.elapsed(),
             visible_tiles,
-            label_milliseconds: label_metrics.milliseconds,
+            label_elapsed: label_metrics.elapsed,
             label_backlog: label_metrics.backlog.max(usize::from(labels_pending)),
             stale_work: label_metrics.stale_work,
             queued_upload_bytes: upload.queued_bytes,
@@ -1092,7 +1093,7 @@ impl GpuMapRuntime {
             pending_upload_tiles: upload.pending_tiles,
             partial_upload_tiles: upload.partial_tiles,
             completed_upload_tiles: upload.completed_tiles,
-            upload_milliseconds: upload.milliseconds,
+            upload_elapsed: upload.elapsed,
             upload_budget_overruns: upload.budget_overruns,
         };
         (prepared, perf)
@@ -1157,12 +1158,7 @@ impl GpuMapRuntime {
             .samples
             .iter()
             .map(|sample| RouteSample {
-                coordinate: sample.coordinate.map(|coordinate| {
-                    [
-                        coordinate.longitude().as_degrees(),
-                        coordinate.latitude().as_degrees(),
-                    ]
-                }),
+                coordinate: sample.coordinate,
                 speed: sample.speed.and_then(|speed| {
                     speed_bounds.map(|(minimum, maximum)| {
                         ((f64::from(speed.as_millimeters_per_second()) - minimum)
@@ -1765,6 +1761,7 @@ fn color_target(format: wgpu::TextureFormat) -> wgpu::ColorTargetState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use garmin_model::route::Coordinate;
 
     fn labelled_world_tile() -> Arc<PreparedGpuTile> {
         prepare_local_browser_tile(DecodedTile {
@@ -1836,7 +1833,7 @@ mod tests {
         };
         let tile = labelled_world_tile();
         let mut camera = super::super::camera::MapCamera::default();
-        camera.center_at(walkers::lon_lat(176.4, 0.0));
+        camera.center_at(Coordinate::from_degrees(0.0, 176.4).unwrap());
         camera.set_zoom(3.0);
         let viewport = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(256.0, 512.0));
         let frame = assemble_tile_frame([(&west, &tile), (&east, &tile)], &camera, viewport);
@@ -1987,7 +1984,9 @@ mod tests {
             encode_browser_tile(tile(
                 vec![
                     Shape::Noop;
-                    BrowserTileLimits::BROWSER.prepared_bytes / std::mem::size_of::<Shape>() + 1
+                    usize::try_from(BrowserTileLimits::BROWSER.prepared_bytes.as_bytes()).unwrap()
+                        / std::mem::size_of::<Shape>()
+                        + 1
                 ],
                 vec![]
             ))
@@ -1999,7 +1998,9 @@ mod tests {
         );
         assert!(encode_browser_tile(tile(vec![path], vec![])).is_err());
         let text = walkers::Text {
-            text: "x".repeat(BrowserTileLimits::BROWSER.text_bytes + 1),
+            text: "x".repeat(
+                usize::try_from(BrowserTileLimits::BROWSER.text_bytes.as_bytes()).unwrap() + 1,
+            ),
             position: pos2(0.0, 0.0),
             font_size: 12.0,
             text_color: Color32::WHITE,
@@ -2100,8 +2101,9 @@ mod tests {
     fn browser_protocol_rejects_oversized_worker_completions_before_decoding() {
         assert_eq!(
             BrowserTilePacketBuilder::new(
-                BrowserTileLimits::BROWSER.upload_bytes
-                    - BrowserTileLimits::BROWSER.upload_bytes % std::mem::size_of::<Vertex>()
+                usize::try_from(BrowserTileLimits::BROWSER.upload_bytes.as_bytes()).unwrap()
+                    - usize::try_from(BrowserTileLimits::BROWSER.upload_bytes.as_bytes()).unwrap()
+                        % std::mem::size_of::<Vertex>()
                     + std::mem::size_of::<Vertex>(),
                 0,
                 0,
@@ -2162,10 +2164,17 @@ mod tests {
 
         let oversized = BrowserTextRecord {
             string_offset: 0,
-            string_length: u32::try_from(BrowserTileLimits::BROWSER.text_bytes + 1).unwrap(),
+            string_length: u32::try_from(
+                usize::try_from(BrowserTileLimits::BROWSER.text_bytes.as_bytes()).unwrap() + 1,
+            )
+            .unwrap(),
             ..invalid_utf8
         };
-        let strings = vec![b'a'; BrowserTileLimits::BROWSER.text_bytes + 1];
+        let strings =
+            vec![
+                b'a';
+                usize::try_from(BrowserTileLimits::BROWSER.text_bytes.as_bytes()).unwrap() + 1
+            ];
         let mut builder = BrowserTilePacketBuilder::new(
             0,
             0,
@@ -2471,7 +2480,7 @@ mod tests {
             generation: first.generation,
             view,
             outcome: LabelOutcome::Ready {
-                milliseconds: 2.0,
+                elapsed: Duration::from_millis(2),
                 shapes: vec![Shape::circle_filled(pos2(10.0, 10.0), 2.0, Color32::WHITE)],
                 texture: None,
             },
@@ -2479,7 +2488,7 @@ mod tests {
 
         let metrics = cache.metrics();
         assert_eq!(metrics.stale_work, 1);
-        assert!(metrics.milliseconds.abs() < f32::EPSILON);
+        assert!(metrics.elapsed.is_zero());
         assert_eq!(metrics.backlog, 1);
     }
 
@@ -2498,7 +2507,7 @@ mod tests {
                 generation: task.generation,
                 view: anchor,
                 outcome: LabelOutcome::Ready {
-                    milliseconds: 0.0,
+                    elapsed: Duration::from_millis(0),
                     shapes: vec![Shape::circle_filled(pos2(x, 20.0), 2.0, Color32::GREEN)],
                     texture: None,
                 },
@@ -2567,12 +2576,12 @@ mod tests {
             generation: ready.generation,
             view,
             outcome: LabelOutcome::Ready {
-                milliseconds: 4.0,
+                elapsed: Duration::from_millis(4),
                 shapes: Vec::new(),
                 texture: None,
             },
         });
-        assert!((cache.metrics().milliseconds - 4.0).abs() < f32::EPSILON);
+        assert_eq!(cache.metrics().elapsed, Duration::from_millis(4));
         assert_eq!(cache.metrics().backlog, 0);
         cache.record_discarded_work();
         assert_eq!(cache.metrics().stale_work, 1);

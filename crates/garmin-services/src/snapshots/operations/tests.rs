@@ -1,3 +1,4 @@
+use garmin_model::artifact::ByteCount;
 use std::{error::Error, sync::Arc, time::Duration};
 
 use garmin_service_api::snapshots::{
@@ -57,8 +58,8 @@ async fn removed_owner_can_reconnect_only_to_its_restore_outcome() -> Result {
         reconnected
             .execute(Request::Read {
                 operation,
-                offset: 0,
-                max_bytes: 1
+                offset: ByteCount::from_bytes(0),
+                max_bytes: ByteCount::from_bytes(1)
             })
             .await
             .is_err()
@@ -214,7 +215,7 @@ async fn start_response_can_be_lost_without_duplicating_the_operation() -> Resul
     session
         .execute(Request::BeginRestore {
             operation,
-            bytes: 1,
+            bytes: ByteCount::from_bytes(1),
         })
         .await
         .map_err(debug_error)?;
@@ -222,7 +223,7 @@ async fn start_response_can_be_lost_without_duplicating_the_operation() -> Resul
         session
             .execute(Request::BeginRestore {
                 operation,
-                bytes: 1
+                bytes: ByteCount::from_bytes(1)
             })
             .await
             .is_err()
@@ -320,7 +321,7 @@ async fn backup(session: &SnapshotSession) -> Result<Vec<u8>> {
         let reply = session
             .execute(Request::Read {
                 operation,
-                offset: bytes.len() as u64,
+                offset: ByteCount::from_bytes(bytes.len() as u64),
                 max_bytes: MAX_SNAPSHOT_CHUNK,
             })
             .await
@@ -348,18 +349,19 @@ async fn upload(session: &SnapshotSession, bytes: &[u8]) -> Result<Uuid> {
         session
             .execute(Request::BeginRestore {
                 operation: uuid::Uuid::new_v4(),
-                bytes: bytes.len() as u64,
+                bytes: ByteCount::from_bytes(bytes.len() as u64),
             })
             .await
             .map_err(debug_error)?,
     )?
     .operation;
     let mut offset = 0;
-    for chunk in bytes.chunks(MAX_SNAPSHOT_CHUNK as usize) {
+    for chunk in bytes.chunks(usize::try_from(MAX_SNAPSHOT_CHUNK.as_bytes()).unwrap_or(usize::MAX))
+    {
         session
             .execute(Request::Upload {
                 operation,
-                offset,
+                offset: ByteCount::from_bytes(offset),
                 bytes: chunk.to_vec(),
             })
             .await
@@ -507,7 +509,7 @@ async fn rejects_members_invalid_chunks_and_incomplete_uploads() -> Result {
         session
             .execute(Request::BeginRestore {
                 operation: uuid::Uuid::new_v4(),
-                bytes: 0
+                bytes: ByteCount::from_bytes(0)
             })
             .await
             .is_err()
@@ -516,7 +518,7 @@ async fn rejects_members_invalid_chunks_and_incomplete_uploads() -> Result {
         session
             .execute(Request::BeginRestore {
                 operation: uuid::Uuid::new_v4(),
-                bytes: u64::MAX
+                bytes: ByteCount::from_bytes(u64::MAX)
             })
             .await
             .is_err()
@@ -525,7 +527,7 @@ async fn rejects_members_invalid_chunks_and_incomplete_uploads() -> Result {
         session
             .execute(Request::BeginRestore {
                 operation: uuid::Uuid::new_v4(),
-                bytes: 10,
+                bytes: ByteCount::from_bytes(10),
             })
             .await
             .map_err(debug_error)?,
@@ -534,14 +536,17 @@ async fn rejects_members_invalid_chunks_and_incomplete_uploads() -> Result {
     for (offset, bytes) in [
         (1, vec![1]),
         (0, vec![]),
-        (0, vec![1; MAX_SNAPSHOT_CHUNK as usize + 1]),
+        (
+            0,
+            vec![1; usize::try_from(MAX_SNAPSHOT_CHUNK.as_bytes()).unwrap_or(usize::MAX) + 1],
+        ),
         (0, vec![1; 11]),
     ] {
         assert!(
             session
                 .execute(Request::Upload {
                     operation,
-                    offset,
+                    offset: ByteCount::from_bytes(offset),
                     bytes
                 })
                 .await
@@ -562,7 +567,7 @@ async fn rejects_members_invalid_chunks_and_incomplete_uploads() -> Result {
         session
             .execute(Request::Upload {
                 operation,
-                offset: 0,
+                offset: ByteCount::from_bytes(0),
                 bytes: vec![1]
             })
             .await
@@ -593,8 +598,10 @@ async fn download_handles_cannot_read_or_release_a_reused_operation_id() -> Resu
         .map_err(debug_error)?;
     wait(&session, operation, State::DownloadReady).await?;
     let old = session.download(operation).await.map_err(debug_error)?;
-    assert!(old.size() > 0);
-    old.read(0, MAX_SNAPSHOT_CHUNK).await.map_err(debug_error)?;
+    assert!(!old.size().is_zero());
+    old.read(ByteCount::default(), MAX_SNAPSHOT_CHUNK)
+        .await
+        .map_err(debug_error)?;
     session
         .execute(Request::Release { operation })
         .await
@@ -606,7 +613,7 @@ async fn download_handles_cannot_read_or_release_a_reused_operation_id() -> Resu
         .map_err(debug_error)?;
     wait(&session, operation, State::DownloadReady).await?;
     assert_eq!(
-        old.read(0, MAX_SNAPSHOT_CHUNK)
+        old.read(ByteCount::default(), MAX_SNAPSHOT_CHUNK)
             .await
             .expect_err("old download is stale")
             .kind,
@@ -618,7 +625,7 @@ async fn download_handles_cannot_read_or_release_a_reused_operation_id() -> Resu
     );
     let current = session.download(operation).await.map_err(debug_error)?;
     current
-        .read(0, MAX_SNAPSHOT_CHUNK)
+        .read(ByteCount::default(), MAX_SNAPSHOT_CHUNK)
         .await
         .map_err(debug_error)?;
     // Cleanup also releases an explicitly cancelled original operation.
@@ -641,13 +648,15 @@ async fn cancelled_workers_cannot_update_a_reused_operation_id() -> Result {
         session
             .begin(
                 operation,
-                Some(1),
+                Some(ByteCount::from_bytes(1)),
                 super::SnapshotSource::Upload,
                 None,
                 cancel.clone(),
             )
             .map_err(debug_error)?;
-        session.upload(operation, 0, &[0]).map_err(debug_error)?;
+        session
+            .upload(operation, ByteCount::default(), &[0])
+            .map_err(debug_error)?;
         let directory = operations.entries()[&operation]
             .directory
             .as_ref()
@@ -678,7 +687,7 @@ async fn cancelled_workers_cannot_update_a_reused_operation_id() -> Result {
         session
             .begin(
                 operation,
-                Some(3),
+                Some(ByteCount::from_bytes(3)),
                 super::SnapshotSource::Upload,
                 None,
                 garmin_progress::CancellationToken::default(),
@@ -696,10 +705,10 @@ async fn cancelled_workers_cannot_update_a_reused_operation_id() -> Result {
             State::Uploading,
             "old {worker} changed replacement state"
         );
-        assert_eq!(current.transferred, 0);
-        assert_eq!(current.total, Some(3));
+        assert_eq!(current.transferred, ByteCount::from_bytes(0));
+        assert_eq!(current.total, Some(ByteCount::from_bytes(3)));
         session
-            .upload(operation, 0, &[1, 2, 3])
+            .upload(operation, ByteCount::default(), &[1, 2, 3])
             .map_err(debug_error)?;
         session.cancel(operation).map_err(debug_error)?;
         session.release(operation, None).map_err(debug_error)?;
@@ -794,7 +803,7 @@ async fn remote_service_uses_the_same_operation_engine() -> Result {
         client
             .execute(Request::BeginRestore {
                 operation: uuid::Uuid::new_v4(),
-                bytes: 10,
+                bytes: ByteCount::from_bytes(10),
             })
             .await?
             .map_err(debug_error)?,
@@ -823,7 +832,7 @@ async fn verification_cancellation_cannot_publish_a_late_approval() -> Result {
         session
             .execute(Request::BeginRestore {
                 operation: uuid::Uuid::new_v4(),
-                bytes: 4,
+                bytes: ByteCount::from_bytes(4),
             })
             .await
             .map_err(debug_error)?,
@@ -832,7 +841,7 @@ async fn verification_cancellation_cannot_publish_a_late_approval() -> Result {
     session
         .execute(Request::Upload {
             operation,
-            offset: 0,
+            offset: ByteCount::from_bytes(0),
             bytes: vec![1, 2, 3, 4],
         })
         .await
@@ -908,8 +917,8 @@ async fn registry_and_host_limits_are_bounded() -> Result {
         SnapshotOperations::new(
             Arc::clone(&deployment),
             Limits {
-                database_bytes: 0,
-                compressed_bytes: 1
+                database_bytes: ByteCount::from_bytes(0),
+                compressed_bytes: ByteCount::from_bytes(1)
             }
         )
         .is_err()
@@ -921,7 +930,7 @@ async fn registry_and_host_limits_are_bounded() -> Result {
                 session
                     .execute(Request::BeginRestore {
                         operation: uuid::Uuid::new_v4(),
-                        bytes: 1,
+                        bytes: ByteCount::from_bytes(1),
                     })
                     .await
                     .map_err(debug_error)?,
@@ -933,7 +942,7 @@ async fn registry_and_host_limits_are_bounded() -> Result {
         session
             .execute(Request::BeginRestore {
                 operation: uuid::Uuid::new_v4(),
-                bytes: 1
+                bytes: ByteCount::from_bytes(1)
             })
             .await
             .expect_err("registry is full")
@@ -954,7 +963,7 @@ async fn registry_and_host_limits_are_bounded() -> Result {
         session
             .execute(Request::BeginRestore {
                 operation: uuid::Uuid::new_v4(),
-                bytes: 1
+                bytes: ByteCount::from_bytes(1)
             })
             .await
             .is_ok()
@@ -970,7 +979,7 @@ async fn reconnect_can_discover_and_release_abandoned_uploads() -> Result {
         session
             .execute(Request::BeginRestore {
                 operation: uuid::Uuid::new_v4(),
-                bytes: 10,
+                bytes: ByteCount::from_bytes(10),
             })
             .await
             .map_err(debug_error)?,
@@ -1017,7 +1026,7 @@ async fn recovery_reclaims_a_full_registry_without_stealing_live_work() -> Resul
         client
             .execute(Request::BeginRestore {
                 operation: Uuid::new_v4(),
-                bytes: 10,
+                bytes: ByteCount::from_bytes(10),
             })
             .await?
             .map_err(debug_error)?;
@@ -1045,7 +1054,7 @@ async fn recovery_reclaims_a_full_registry_without_stealing_live_work() -> Resul
         observer
             .execute(Request::BeginRestore {
                 operation: Uuid::new_v4(),
-                bytes: 10
+                bytes: ByteCount::from_bytes(10)
             })
             .await
             .is_err()
@@ -1076,7 +1085,7 @@ async fn recovery_reclaims_a_full_registry_without_stealing_live_work() -> Resul
     observer
         .execute(Request::BeginRestore {
             operation: Uuid::new_v4(),
-            bytes: 10,
+            bytes: ByteCount::from_bytes(10),
         })
         .await
         .map_err(debug_error)?;

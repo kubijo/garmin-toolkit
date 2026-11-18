@@ -140,6 +140,21 @@ impl Deref for Intl {
 }
 
 impl Intl {
+    /// Supplies locale-aware decimal formatting to typed measurements.
+    pub fn decimal_formatter(&self) -> impl Fn(f64, usize) -> String + '_ {
+        |value, digits| self.decimal(value, digits)
+    }
+
+    /// Formats a number with the active locale and a fixed number of fractional digits.
+    #[must_use]
+    pub fn decimal(&self, value: f64, digits: usize) -> String {
+        let ascii = format!("{value:.digits$}");
+        ascii.parse::<icu_decimal::input::Decimal>().map_or_else(
+            |_| ascii.clone(),
+            |decimal| self.dates.day.format_to_string(&decimal),
+        )
+    }
+
     #[must_use]
     pub const fn dates(&self) -> &DateFormats {
         &self.dates
