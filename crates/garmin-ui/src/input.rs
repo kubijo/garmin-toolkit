@@ -179,6 +179,14 @@ impl<'a, N> NumberProps<'a, N> {
 
 /// Renders a controlled single-line text input.
 pub fn show(ui: &mut Ui, value: &mut String, props: Props<'_>) -> Response {
+    show_with_action(ui, value, props).0
+}
+
+pub(crate) fn show_with_action(
+    ui: &mut Ui,
+    value: &mut String,
+    props: Props<'_>,
+) -> (Response, Option<Response>) {
     let size = props.size.unwrap_or_default();
     let disabled = props.disabled.unwrap_or_default();
     let metrics = metrics(size);
@@ -191,7 +199,8 @@ pub fn show(ui: &mut Ui, value: &mut String, props: Props<'_>) -> Response {
     } else {
         0
     };
-    field(
+    let mut action_response = None;
+    let response = field(
         ui,
         FieldProps {
             label: props.label,
@@ -234,11 +243,13 @@ pub fn show(ui: &mut Ui, value: &mut String, props: Props<'_>) -> Response {
                         .show(ui)
                     })
                     .inner;
-                response = response.union(action);
+                response = response.union(action.clone());
+                action_response = Some(action);
             }
             response
         },
-    )
+    );
+    (response, action_response)
 }
 
 /// Renders a controlled numeric input.

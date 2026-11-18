@@ -5,13 +5,9 @@ This is the canonical work list. It contains unfinished outcomes, not completed 
 limits. Follow the [development workflow](../development.md) when taking an item. An unsupported case or measurement
 limit is not automatically scheduled work.
 
-## Local work
-
-- Finish [Garmin Connect qualification](garmin-connect-import.md#qualification): compare downloaded FIT bytes with
-  manual original exports and verify live credential expiry/revocation.
-
 ## Hardware and owner access
 
+- Confirm Garmin's response to an [expired or revoked Personal API key](garmin-connect-import.md#qualification).
 - Complete Venu 3S explorer acceptance and establish Edge 850 support for manifest-declared operations. Record the
   device, firmware, host, and adapter; retain host/GVFS defect evidence.
 - Confirm the fēnix raw-MTP upload correction after a usable fresh session. The known `OpenSession` failure and
@@ -29,10 +25,8 @@ The [device matrix](../research/device-capabilities.md) records established oper
 
 ## Future features
 
-- **Further statistics and insights:** extend [account activity trends](activity-trends.md) with custom date ranges,
-  activity comparisons, elevation, and available performance metrics. Define coexistence with local-only history and
-  cross-source duplicate handling before combining sources; show coverage for FIT-derived metrics. Reports stay in the
-  app; no email delivery.
+- **Activity trends:** add activity comparisons and FIT-derived metrics with coverage shown. Define duplicate handling
+  before merging account and local history. Reports stay in the app. See the [Trends plan](activity-trends.md).
 
 ## Deferred
 

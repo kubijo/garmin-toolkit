@@ -39,6 +39,8 @@ pub struct State {
     read: ReadState,
     period: Period,
     anchor: Option<Date>,
+    custom_range: Option<(Range, Range)>,
+    range_draft: Option<[String; 2]>,
     cumulative: bool,
     sport: usize,
     comparison_initialized: bool,
@@ -49,6 +51,10 @@ pub struct State {
 }
 
 impl State {
+    fn is_preset(&self, period: Period) -> bool {
+        self.custom_range.is_none() && self.period == period
+    }
+
     fn initialize_comparison(&mut self, range: Range) {
         if self.comparison_initialized {
             return;
@@ -215,7 +221,9 @@ fn header_metadata(ui: &mut Ui, state: &State, props: &Props<'_>, range: Range) 
         ui.spacing_mut().interact_size.y = 0.0;
         ui.spacing_mut().item_spacing = egui::vec2(16.0, 4.0);
         ui.horizontal_wrapped(|ui| {
-        metadata_item(ui, range_label(props.intl, range), false);
+        let response = metadata_item(ui, range_label(props.intl, range), false);
+        crate::semantics::target(ui, &response, "trends.range.active");
+        crate::semantics::value(&response, format!("{}/{}", range.from, range.through));
         if let Some(last) = props.sync.and_then(|sync| sync.state.last_success) {
             metadata_item(ui, format_message!(props.intl, default_message: "Last successful sync: {date}", values: { date: props.intl.dates().datetime(last.as_jiff().to_zoned(jiff::tz::TimeZone::system()).datetime()) }), true);
         }
@@ -226,7 +234,7 @@ fn header_metadata(ui: &mut Ui, state: &State, props: &Props<'_>, range: Range) 
     });
 }
 
-fn metadata_item(ui: &mut Ui, text: String, weak: bool) {
+fn metadata_item(ui: &mut Ui, text: String, weak: bool) -> egui::Response {
     let text = egui::RichText::new(text);
     let text = if weak { text.weak() } else { text };
     let galley = egui::WidgetText::from(text.clone()).into_galley(
@@ -238,7 +246,7 @@ fn metadata_item(ui: &mut Ui, text: String, weak: bool) {
     ui.add_sized(
         egui::vec2(galley.size().x.min(ui.max_rect().width()), galley.size().y),
         egui::Label::new(text).wrap(),
-    );
+    )
 }
 
 fn unit(preferences: ProfilePreferences) -> (&'static str, f64) {
@@ -258,11 +266,11 @@ fn values(
     range: Range,
     sport: Option<Sport>,
     metric: Metric,
-    period: Period,
+    monthly: bool,
     accumulated: bool,
     preferences: ProfilePreferences,
 ) -> (Vec<String>, Vec<Option<f64>>) {
-    let mut buckets = history.series(range, sport, metric, period == Period::Year);
+    let mut buckets = history.series(range, sport, metric, monthly);
     if accumulated {
         cumulative(&mut buckets);
     }
@@ -305,7 +313,9 @@ pub fn show(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Action>
             ui.label(format_message!(props.intl, default_message: "Distance, time and consistency across your sports."));
             ui.add_space(8.0);
             output = controls::toolbar(ui, state, props);
-            let Ok((range, previous)) = state.period.ranges_with_week_start(state.anchor.unwrap_or(props.today), props.today, props.intl.dates().week_start()) else { return; };
+            let Ok(preset) = state.period.ranges_with_week_start(state.anchor.unwrap_or(props.today), props.today, props.intl.dates().week_start()) else { return; };
+            controls::custom_range_editor(ui, state, props);
+            let (range, previous) = state.custom_range.unwrap_or(preset);
             header_metadata(ui, state, props, range);
             if let Some(action) = controls::sync_feedback(ui, props) { output = Some(action); }
             if let ReadState::Failed(error) = &state.read {
@@ -404,8 +414,8 @@ fn top_widgets(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) 
 fn targets(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
     card(ui, "targets", |ui| {
         let goals = props.preferences.monthly_distance_targets();
-        let monthly_goals = (state.period == Period::Month).then_some(goals);
-        let has_goals = state.period == Period::Month && goals.iter().any(|goal| *goal > 0);
+        let monthly_goals = state.is_preset(Period::Month).then_some(goals);
+        let has_goals = monthly_goals.is_some() && goals.iter().any(|goal| *goal > 0);
         ui.strong(if has_goals {
             format_message!(props.intl, default_message: "Distance targets")
         } else {
@@ -639,7 +649,7 @@ fn distances(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
                 range,
                 Some(sport),
                 Metric::Distance,
-                state.period,
+                state.is_preset(Period::Year),
                 state.cumulative,
                 props.preferences,
             );
@@ -675,7 +685,7 @@ fn distance_header(ui: &mut Ui, state: &mut State, intl: &Intl) {
     let choices = [
         (
             false,
-            if state.period == Period::Year {
+            if state.is_preset(Period::Year) {
                 format_message!(intl, default_message: "Monthly")
             } else {
                 format_message!(intl, default_message: "Daily")
@@ -773,7 +783,7 @@ fn metrics(ui: &mut Ui, state: &State, props: &Props<'_>, range: Range, previous
                 range,
                 None,
                 *metric,
-                state.period,
+                state.is_preset(Period::Year),
                 false,
                 props.preferences,
             );
@@ -871,7 +881,7 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
             range,
             Some(sport),
             state.metric,
-            state.period,
+            state.is_preset(Period::Year),
             true,
             props.preferences,
         );
@@ -880,7 +890,7 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
             previous,
             Some(sport),
             state.metric,
-            state.period,
+            state.is_preset(Period::Year),
             true,
             props.preferences,
         );
@@ -942,7 +952,7 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
             trend_chart::Props {
                 labels: &labels,
                 series: &series,
-                kind: if state.period == Period::Day {
+                kind: if range.from == range.through {
                     trend_chart::Kind::Bars
                 } else {
                     trend_chart::Kind::Lines

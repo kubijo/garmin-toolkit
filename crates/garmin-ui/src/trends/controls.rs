@@ -4,7 +4,12 @@ use super::{Action, Props, ReadState, State};
 use crate::{Size, button, icons, input, modal, segments};
 use egui::Ui;
 use garmin_i18n::format_message;
-use garmin_model::garmin_connect::{LoadProgress, sync::Outcome, trends::Period};
+use garmin_model::garmin_connect::{
+    LoadProgress,
+    sync::Outcome,
+    trends::{Period, Range},
+};
+use jiff::civil::Date;
 
 pub(super) fn button(
     ui: &mut Ui,
@@ -65,33 +70,167 @@ pub(super) fn toolbar(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Opti
 }
 
 fn period_selector(ui: &mut Ui, state: &mut State, props: &Props<'_>) {
-    let old = state.period;
+    let old = if state.custom_range.is_some() {
+        None
+    } else {
+        Some(state.period)
+    };
+    let mut selected = old;
     segments::show(
         ui,
-        &mut state.period,
+        &mut selected,
         &[
             (
-                Period::Day,
+                Some(Period::Day),
                 format_message!(props.intl, default_message: "Day"),
             ),
             (
-                Period::Week,
+                Some(Period::Week),
                 format_message!(props.intl, default_message: "Week"),
             ),
             (
-                Period::Month,
+                Some(Period::Month),
                 format_message!(props.intl, default_message: "Month"),
             ),
             (
-                Period::Year,
+                Some(Period::Year),
                 format_message!(props.intl, default_message: "Year"),
             ),
+            (None, format_message!(props.intl, default_message: "Custom")),
         ],
         "trends.period",
     );
-    if old != state.period {
-        state.anchor = None;
+    if old != selected {
+        if let Some(period) = selected {
+            state.period = period;
+            state.anchor = None;
+            state.custom_range = None;
+            state.range_draft = None;
+        } else {
+            open_range_editor(state, props);
+        }
     }
+}
+
+fn open_range_editor(state: &mut State, props: &Props<'_>) {
+    let range = state.custom_range.map(|(range, _)| range).or_else(|| {
+        state
+            .period
+            .ranges_with_week_start(
+                state.anchor.unwrap_or(props.today),
+                props.today,
+                props.intl.dates().week_start(),
+            )
+            .ok()
+            .map(|(range, _)| range)
+    });
+    if let Some(range) = range {
+        state.range_draft = Some([range.from.to_string(), range.through.to_string()]);
+    }
+}
+
+fn custom_ranges(draft: &[String; 2], today: Date) -> Option<(Range, Range)> {
+    let from: Date = draft[0].trim().parse().ok()?;
+    let through: Date = draft[1].trim().parse().ok()?;
+    if from > through || through > today {
+        return None;
+    }
+    let days = from.until(through).ok()?.get_days() + 1;
+    if days > 366 {
+        return None;
+    }
+    Some((
+        Range { from, through },
+        Range {
+            from: from.checked_sub(jiff::Span::new().days(days)).ok()?,
+            through: from.checked_sub(jiff::Span::new().days(1)).ok()?,
+        },
+    ))
+}
+
+#[cfg(test)]
+#[test]
+fn custom_comparison_uses_the_immediately_preceding_equal_window() {
+    let today = "2024-03-01".parse().expect("today");
+    let dates = |from: &str, through: &str| [from.to_owned(), through.to_owned()];
+    let (range, previous) =
+        custom_ranges(&dates("2024-02-28", "2024-03-01"), today).expect("valid leap-day range");
+    assert_eq!(range.dates().len(), 3);
+    assert_eq!(previous.dates().len(), 3);
+    assert_eq!(previous.from.to_string(), "2024-02-25");
+    assert_eq!(previous.through.to_string(), "2024-02-27");
+    assert!(custom_ranges(&dates("2023-03-01", "2024-03-01"), today).is_none());
+    assert!(custom_ranges(&dates("2024-03-01", "2024-02-28"), today).is_none());
+    assert!(custom_ranges(&dates("2024-02-28", "2024-03-02"), today).is_none());
+    assert!(custom_ranges(&dates("", "2024-03-01"), today).is_none());
+}
+
+pub(super) fn custom_range_editor(ui: &mut Ui, state: &mut State, props: &Props<'_>) {
+    let Some(draft) = &mut state.range_draft else {
+        return;
+    };
+    let width = ui.available_width().min(224.0);
+    ui.horizontal_wrapped(|ui| {
+        let label = format_message!(props.intl, default_message: "From date");
+        custom_date_field(ui, props, width, 0, &label, &mut draft[0]);
+        let label = format_message!(props.intl, default_message: "Through date");
+        custom_date_field(ui, props, width, 1, &label, &mut draft[1]);
+    });
+    let ranges = custom_ranges(draft, props.today);
+    if ranges.is_none() {
+        ui.weak(format_message!(props.intl, default_message: "Choose up to 366 days ending today or earlier, with enough room for the preceding period."));
+    }
+    ui.horizontal_wrapped(|ui| {
+        if button(
+            ui,
+            &format_message!(props.intl, default_message: "Apply date range"),
+            icons::CALENDAR,
+            button::Kind::Primary,
+            ranges.is_some(),
+            "trends.range.apply",
+        )
+        .clicked()
+        {
+            state.custom_range = ranges;
+            state.selected = None;
+            state.range_draft = None;
+        }
+        if button(
+            ui,
+            &format_message!(props.intl, default_message: "Cancel"),
+            icons::X,
+            button::Kind::Ghost,
+            true,
+            "trends.range.cancel",
+        )
+        .clicked()
+        {
+            state.range_draft = None;
+        }
+    });
+}
+
+fn custom_date_field(
+    ui: &mut Ui,
+    props: &Props<'_>,
+    width: f32,
+    index: usize,
+    label: &str,
+    value: &mut String,
+) {
+    let target = ["trends.range.from", "trends.range.through"][index];
+    let id = ui.id().with(target);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 72.0), egui::Sense::hover());
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+        |ui| {
+            let response =
+                crate::date_input::show(ui, id, value, props.intl, label, true, props.today);
+            crate::semantics::target(ui, &response, target);
+        },
+    );
 }
 
 fn cloud_actions(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Action> {
@@ -136,6 +275,21 @@ fn cloud_actions(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Ac
 }
 
 fn period_navigation(ui: &mut Ui, state: &mut State, props: &Props<'_>) {
+    if state.custom_range.is_some() {
+        if button(
+            ui,
+            &format_message!(props.intl, default_message: "Edit date range"),
+            icons::CALENDAR,
+            button::Kind::Ghost,
+            true,
+            "trends.range.edit",
+        )
+        .clicked()
+        {
+            open_range_editor(state, props);
+        }
+        return;
+    }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         let anchor = state.anchor.unwrap_or(props.today);

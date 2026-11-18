@@ -39,6 +39,10 @@ handling are confirmed on the owner's account.
 
 ### Owner acceptance
 
+The
+[HASS browser backup and restore CI job](https://github.com/kubijo/garmin-toolkit/actions/runs/44121268213/job/134172957236)
+passed on the deployment-lease deadlock fix (`16b1d06e`).
+
 On 15–16 November 2026, the owner supplied live desktop and Home Assistant observations and explicitly confirmed that
 the HASS browser remained closed during a successful scheduled run. Times below are the local times displayed by the
 clients.
@@ -56,9 +60,14 @@ clients.
   successful completion advanced the persisted last-success time and the regular cadence.
 
 These observations qualify the tested account and hosts, not other regions or a guaranteed historical coverage window.
-They do not establish a numerical request quota or verify expiry/revocation. Original-file byte comparison with manual
-exports remains outstanding. Overdue catch-up, disabling a running schedule and HASS process-restart behavior retain
-automated coverage but were not confirmed in this live acceptance sequence.
+They do not establish a numerical request quota or verify expiry or revocation. Overdue catch-up, disabling a running
+schedule and HASS process-restart behavior retain automated coverage but were not confirmed in this live acceptance
+sequence.
+
+On 18 November 2026, a manual desktop sync with a synthetic invalid key in an isolated database copy received HTTP 401
+from Garmin during key exchange. Toolkit recorded a credential failure, preserved the last successful sync time, and
+retained all 438 cached summaries on disk. The cache was unavailable to the synthetic key because cache reads are scoped
+to the saved credential. This covers live rejection of an invalid key. Expiry and revocation remain unverified.
 
 [ADR 0008](../decisions/0008-official-garmin-connect-boundary.md) owns the connector boundary;
 [the plan](../plans/garmin-connect-import.md) owns remaining implementation. The unofficial login clients and private

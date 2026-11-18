@@ -137,7 +137,7 @@ fn day_year_and_missing_measurement_views_keep_integer_counts() {
         range,
         Some(Sport::Running),
         Metric::Distance,
-        Period::Day,
+        false,
         true,
         ProfilePreferences::default(),
     );
@@ -146,7 +146,7 @@ fn day_year_and_missing_measurement_views_keep_integer_counts() {
         range,
         Some(Sport::Running),
         Metric::Count,
-        Period::Day,
+        false,
         true,
         ProfilePreferences::default(),
     );
