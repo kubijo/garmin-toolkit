@@ -35,8 +35,30 @@ which does not declare security schemes.
 ## Live qualification
 
 Key exchange, profile facts, activity listing/paging, original FIT download, preview, explicit import and duplicate
-handling are confirmed on the owner's account. Manual-export byte comparison, other regions, expiry/revocation, service
-limits and historical reach remain unqualified.
+handling are confirmed on the owner's account.
+
+### Owner acceptance
+
+On 15–16 November 2026, the owner supplied live desktop and Home Assistant observations and explicitly confirmed that
+the HASS browser remained closed during a successful scheduled run. Times below are the local times displayed by the
+clients.
+
+- Desktop cancellation cleared progress and deferred the next automatic attempt. A subsequent refresh encountered HTTP
+  429, retained downloaded files and exposed a deferred retry instead of recording success.
+- Desktop subsequently recorded a successful refresh at **15 November, 21:48**, with one unavailable FIT file and the
+  next attempt at **22:48**. Both times persisted after restart, without an immediate repeated sync.
+- Desktop continued scheduled execution overnight: the next day's view recorded success at **16 November, 08:49** and
+  the next attempt at **09:49**.
+- HASS displayed a rate-limited attempt and a deferred retry, then recorded success at **16 November, 21:11**, with one
+  unavailable FIT file and the next attempt at **22:11**. The owner confirmed the browser stayed closed during that run,
+  establishing that the server owns execution independently of the browser.
+- Both clients distinguished an incomplete rate-limited attempt from a completed refresh with an unavailable original;
+  successful completion advanced the persisted last-success time and the regular cadence.
+
+These observations qualify the tested account and hosts, not other regions or a guaranteed historical coverage window.
+They do not establish a numerical request quota or verify expiry/revocation. Original-file byte comparison with manual
+exports remains outstanding. Overdue catch-up, disabling a running schedule and HASS process-restart behavior retain
+automated coverage but were not confirmed in this live acceptance sequence.
 
 [ADR 0008](../decisions/0008-official-garmin-connect-boundary.md) owns the connector boundary;
 [the plan](../plans/garmin-connect-import.md) owns remaining implementation. The unofficial login clients and private

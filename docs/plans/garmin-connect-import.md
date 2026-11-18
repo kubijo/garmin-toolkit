@@ -55,9 +55,21 @@ including **Refresh**, retries the local list. Changing pages or refreshing clea
 
 ## Qualification
 
-- Compare downloaded FIT bytes with a manual original export. Account/region differences, service limits and historical
-  reach remain unqualified.
+Owner acceptance on 15–16 November 2026 confirmed desktop scheduling, restart persistence, rate-limit recovery and HASS
+execution with the browser closed. These are completed checks, recorded in the
+[live evidence](../research/garmin-connect.md#owner-acceptance).
+
+Remaining owner qualification:
+
+- Compare downloaded FIT bytes with a manual original export.
 - Verify expiry/revocation against the live service. Explicit requests currently obtain fresh access tokens.
+
+Other accounts/regions, a guaranteed historical coverage window and numerical request quotas remain limits of the
+available evidence, rather than completed checks inferred from this account's acceptance.
+
+As of 16 November 2026, a CI rerun of the HASS browser backup/restore workflow with the core job runner enabled remains
+pending after the deployment-lease deadlock fix. Native regression tests cover the fix; successful live account sync
+does not qualify that separate browser workflow.
 
 ## Configurable auto-sync
 
