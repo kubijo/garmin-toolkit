@@ -2,6 +2,7 @@
 
 use crate::manifest::{ManifestFormat, ManifestQuirk, ParsedManifest};
 use camino::{Utf8Path, Utf8PathBuf};
+use garmin_model::artifact::ByteCount;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -25,7 +26,7 @@ pub struct DevicePathInspection {
     pub path: SafeRelativePath,
     pub state: DevicePathState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<u64>,
+    pub size: Option<ByteCount>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,7 +42,7 @@ pub enum DevicePathState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DevicePathStatus {
     Missing,
-    RegularFile { size: u64 },
+    RegularFile { size: ByteCount },
     Directory,
     Other,
     Ambiguous,
@@ -49,7 +50,7 @@ pub enum DevicePathStatus {
 
 impl DevicePathStatus {
     #[must_use]
-    pub const fn from_parts(state: DevicePathState, size: Option<u64>) -> Option<Self> {
+    pub const fn from_parts(state: DevicePathState, size: Option<ByteCount>) -> Option<Self> {
         match (state, size) {
             (DevicePathState::Missing, None) => Some(Self::Missing),
             (DevicePathState::RegularFile, Some(size)) => Some(Self::RegularFile { size }),
@@ -72,7 +73,7 @@ impl DevicePathStatus {
     }
 
     #[must_use]
-    pub const fn size(self) -> Option<u64> {
+    pub const fn size(self) -> Option<ByteCount> {
         match self {
             Self::RegularFile { size } => Some(size),
             Self::Missing | Self::Directory | Self::Other | Self::Ambiguous => None,
@@ -80,7 +81,7 @@ impl DevicePathStatus {
     }
 
     #[must_use]
-    pub const fn into_parts(self) -> (DevicePathState, Option<u64>) {
+    pub const fn into_parts(self) -> (DevicePathState, Option<ByteCount>) {
         (self.state(), self.size())
     }
 }

@@ -110,10 +110,10 @@ fn header(ui: &mut Ui, intl: &Intl, state: &State, upload: &GpxUpload, can_cance
                         if has_progress {
                             typography::body(
                                 ui,
-                                &format_message!(intl, default_message: "{received} of {total}", values: { received: crate::text::format_bytes(upload.received.as_u64()), total: crate::text::format_bytes(upload.total.as_u64()) }),
+                                &format_message!(intl, default_message: "{received} of {total}", values: { received: upload.received.format_decimal(2), total: upload.total.format_decimal(2) }),
                             );
                         } else {
-                            typography::body(ui, &format_message!(intl, default_message: "File size: {size}", values: { size: crate::text::format_bytes(upload.total.as_u64()) }));
+                            typography::body(ui, &format_message!(intl, default_message: "File size: {size}", values: { size: upload.total.format_decimal(2) }));
                         }
                     },
                 );

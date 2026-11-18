@@ -5,7 +5,7 @@ use egui::{Align2, FontId, Rect, Response, Sense, Stroke, Ui, Vec2};
 use garmin_color::theme;
 use garmin_i18n::{Intl, format_message};
 use garmin_model::{
-    activity::{ActivitySport, ActivitySummary, Distance, HeartRate},
+    activity::{ActivitySport, ActivitySummary, HeartRate},
     identity::UnitSystem,
 };
 use garmin_service_api::ActivitySnapshot;
@@ -75,13 +75,11 @@ impl Presentation {
         let started_at = *summary.time().start().as_jiff();
         let local_start = started_at.to_zoned(jiff::tz::TimeZone::system()).datetime();
         let start_label = calendar::date_time_label(intl, local_start);
-        let timer_milliseconds = summary.totals().timer().into_milliseconds();
-        let distance_millimeters = summary.totals().distance().map(Distance::into_millimeters);
+        let totals = summary.totals();
         let average_heart_rate = summary
             .metrics()
             .average_heart_rate()
             .map(HeartRate::into_beats_per_minute);
-        let ascent_millimeters = summary.totals().ascent().map(Distance::into_millimeters);
         let title = sport_title(sport, intl);
         let subtitle = format_message!(
             intl,
@@ -91,8 +89,11 @@ impl Presentation {
                 source: source,
             },
         );
-        let distance = distance_millimeters.map(|value| format_distance(value, units));
-        let duration = duration(timer_milliseconds);
+        let decimal = intl.decimal_formatter();
+        let distance = totals
+            .distance()
+            .map(|value| value.format(units, 2, &decimal));
+        let duration = totals.timer().format_compact();
         let mut metrics = Vec::with_capacity(4);
         if let Some(distance) = &distance {
             metrics.push(Metric {
@@ -110,10 +111,10 @@ impl Presentation {
                 value: heart_rate.to_string(),
             });
         }
-        if let Some(ascent) = ascent_millimeters {
+        if let Some(ascent) = totals.ascent() {
             metrics.push(Metric {
                 label: format_message!(intl, default_message: "Ascent"),
-                value: format_distance(ascent, units),
+                value: ascent.format(units, 2, decimal),
             });
         }
         Self {
@@ -178,48 +179,6 @@ impl Metric {
             label: &self.label,
             value: &self.value,
         }
-    }
-}
-
-pub(crate) fn format_distance(millimeters: u64, units: UnitSystem) -> String {
-    match units {
-        UnitSystem::Metric => metric_distance(millimeters),
-        UnitSystem::Imperial => imperial_distance(millimeters),
-    }
-}
-
-fn metric_distance(millimeters: u64) -> String {
-    let millimeters = u128::from(millimeters);
-    if millimeters >= 1_000_000 {
-        let hundredths = (millimeters + 5_000) / 10_000;
-        format!("{}.{:02} km", hundredths / 100, hundredths % 100)
-    } else {
-        format!("{} m", (millimeters + 500) / 1_000)
-    }
-}
-
-fn imperial_distance(millimeters: u64) -> String {
-    const MILLIMETERS_PER_MILE: u128 = 1_609_344;
-    let millimeters = u128::from(millimeters);
-    if millimeters >= MILLIMETERS_PER_MILE {
-        let hundredths = (millimeters * 100 + MILLIMETERS_PER_MILE / 2) / MILLIMETERS_PER_MILE;
-        format!("{}.{:02} mi", hundredths / 100, hundredths % 100)
-    } else {
-        let feet = (millimeters * 10 + 1_524) / 3_048;
-        format!("{feet} ft")
-    }
-}
-
-pub(crate) fn duration(milliseconds: u64) -> String {
-    let seconds = milliseconds.saturating_add(500) / 1_000;
-    let hours = seconds / 3_600;
-    let minutes = seconds % 3_600 / 60;
-    if hours > 0 {
-        format!("{hours} h {minutes} min")
-    } else if minutes > 0 {
-        format!("{minutes} min")
-    } else {
-        format!("{seconds} s")
     }
 }
 
@@ -656,21 +615,39 @@ fn paint_metrics(ui: &Ui, rect: Rect, top: f32, metrics: &[MetricProps<'_>]) {
 
 #[cfg(test)]
 mod presentation_tests {
-    use super::{duration, format_distance};
-    use garmin_model::identity::UnitSystem;
+    use garmin_model::{
+        activity::{ActivityDuration, Distance},
+        identity::UnitSystem,
+    };
 
     #[test]
     fn units_change_distance_rendering_without_changing_the_value() {
-        let value = 10_000_000;
+        let value = Distance::from_millimeters(10_000_000);
+        let decimal = |value: f64, digits: usize| format!("{value:.digits$}");
 
-        assert_eq!(format_distance(value, UnitSystem::Metric), "10.00 km");
-        assert_eq!(format_distance(value, UnitSystem::Imperial), "6.21 mi");
+        assert_eq!(
+            value.format(UnitSystem::Metric, 2, decimal),
+            "10.00\u{a0}km"
+        );
+        assert_eq!(
+            value.format(UnitSystem::Imperial, 2, decimal),
+            "6.21\u{a0}mi"
+        );
     }
 
     #[test]
     fn activity_duration_is_compact() {
-        assert_eq!(duration(42_000), "42 s");
-        assert_eq!(duration(3_180_000), "53 min");
-        assert_eq!(duration(7_500_000), "2 h 5 min");
+        assert_eq!(
+            ActivityDuration::from_milliseconds(42_000).format_compact(),
+            "42 s"
+        );
+        assert_eq!(
+            ActivityDuration::from_milliseconds(3_180_000).format_compact(),
+            "53 min"
+        );
+        assert_eq!(
+            ActivityDuration::from_milliseconds(7_500_000).format_compact(),
+            "2 h 5 min"
+        );
     }
 }

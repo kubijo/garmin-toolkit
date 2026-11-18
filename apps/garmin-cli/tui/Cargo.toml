@@ -13,7 +13,6 @@ gallery = []
 
 [dependencies]
 anyhow.workspace = true
-byte-unit.workspace = true
 crossterm.workspace = true
 garmin-device.workspace = true
 garmin-i18n.workspace = true

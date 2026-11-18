@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use garmin_capture::SessionCapture;
 use garmin_device::{DeviceManifest, DeviceSummary};
 use garmin_map_service::{GARMIN_EXPRESS_USER_AGENT, OmtClient};
-use garmin_model::map::MapAuthorization;
+use garmin_model::{artifact::ByteCount, map::MapAuthorization, value::duration_seconds};
 use garmin_progress::{OperationStage, ProgressReporter};
 use garmin_update::{
     BackupPolicy, DownloadError, DownloadProgress, DownloadUrlAuthorizer, Downloader, UpdatePlan,
@@ -14,7 +14,7 @@ use serde::Serialize;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 mod catalog;
@@ -178,7 +178,7 @@ fn verification_report(
         authorization_files: prepared.authorization.unlocks.len(),
         embedded_authorizations: prepared.authorization.embedded_unlocks.len(),
         signed_storage_data: prepared.authorization.signed_sd_card_bytes.is_some(),
-        elapsed_seconds: started.elapsed().as_secs_f64(),
+        elapsed: started.elapsed(),
         device_modified: false,
     }
 }
@@ -189,11 +189,15 @@ struct VerificationReport {
     backup_policy: BackupPolicy,
     plan_id: String,
     files_verified: usize,
-    bytes_verified: u64,
+    bytes_verified: ByteCount,
     authorization_files: usize,
     embedded_authorizations: usize,
     signed_storage_data: bool,
-    elapsed_seconds: f64,
+    #[serde(
+        rename = "elapsed_seconds",
+        serialize_with = "duration_seconds::serialize"
+    )]
+    elapsed: Duration,
     device_modified: bool,
 }
 

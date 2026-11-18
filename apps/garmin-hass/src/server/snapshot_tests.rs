@@ -1,5 +1,6 @@
 use super::*;
 use crate::devices::{Host, demo::DemoSource};
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::{
     ApplicationService as _,
     files::{Operation, Selection},
@@ -38,14 +39,14 @@ async fn reloaded_connection_can_discard_an_abandoned_upload() -> anyhow::Result
     session
         .execute(Request::BeginRestore {
             operation,
-            bytes: 4096,
+            bytes: ByteCount::from_bytes(4096),
         })
         .await?
         .expect("begin upload");
     session
         .execute(Request::Upload {
             operation,
-            offset: 0,
+            offset: ByteCount::from_bytes(0),
             bytes: vec![1; 128],
         })
         .await?
@@ -81,7 +82,7 @@ async fn reloaded_connection_can_discard_an_abandoned_upload() -> anyhow::Result
                 anyhow::bail!("missing operations");
             };
             assert_eq!(operations.len(), 1);
-            assert_eq!(operations[0].status.transferred, 128);
+            assert_eq!(operations[0].status.transferred, ByteCount::from_bytes(128));
             if !operations[0].active {
                 break;
             }

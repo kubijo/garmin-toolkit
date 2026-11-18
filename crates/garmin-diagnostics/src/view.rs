@@ -11,7 +11,7 @@ use axum::{
     response::{Html, IntoResponse as _, Response},
 };
 use garmin_logging::console::Text;
-use garmin_model::logging::Record;
+use garmin_model::{artifact::ByteCount, logging::Record};
 use nu_ansi_term::Color;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -182,7 +182,10 @@ pub(crate) fn page(reply: &Reply, logs: bool, live: bool) -> Response {
         content: Content::from_reply(reply, false),
     };
     match template.render() {
-        Ok(html) if html.len() <= garmin_service_api::control::MAX_REPLY_BYTES => {
+        Ok(html)
+            if ByteCount::from_bytes(html.len() as u64)
+                <= garmin_service_api::control::MAX_REPLY_BYTES =>
+        {
             Html(html).into_response()
         }
         Ok(_) => (
@@ -221,11 +224,12 @@ impl Update {
             .map_err(std::io::Error::other)?,
             status: content.status,
         };
-        if serde_json::to_vec(&update)
-            .map_err(std::io::Error::other)?
-            .len()
-            > garmin_service_api::control::MAX_REPLY_BYTES
-        {
+        let size = ByteCount::from_bytes(
+            serde_json::to_vec(&update)
+                .map_err(std::io::Error::other)?
+                .len() as u64,
+        );
+        if size > garmin_service_api::control::MAX_REPLY_BYTES {
             return Err(std::io::Error::other(
                 "diagnostic view exceeds reply limit; narrow the filters",
             ));

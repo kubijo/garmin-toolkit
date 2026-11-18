@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use garmin_model::{
-    artifact::ArtifactDigest,
+    artifact::{ArtifactDigest, ByteCount},
     route::{Coordinate, Elevation, RoutePoint, RouteShape},
     value::ComponentVersion,
 };
@@ -12,6 +12,8 @@ use super::{Error, MAX_CANDIDATES, MAX_NAME_BYTES};
 use crate::{Candidate, CandidateSource, Document, RejectedCandidate};
 
 const VERSION: u32 = 1;
+const MAX_REJECTION_CHARACTERS: usize = 4096;
+const MAX_REJECTION_BYTES: ByteCount = ByteCount::from_kibibytes(16);
 
 #[cfg(test)]
 mod tests;
@@ -45,7 +47,13 @@ struct WireRejected {
 pub(super) fn encode(bytes: &[u8]) -> Result<Vec<u8>, postcard::Error> {
     let reply = match crate::parse(bytes) {
         Ok(document) => encode_document(bytes, document),
-        Err(error) => Reply::Rejected(error.to_string().chars().take(MAX_NAME_BYTES).collect()),
+        Err(error) => Reply::Rejected(
+            error
+                .to_string()
+                .chars()
+                .take(MAX_REJECTION_CHARACTERS)
+                .collect(),
+        ),
     };
     postcard::to_stdvec(&reply)
 }
@@ -58,7 +66,7 @@ fn encode_document(bytes: &[u8], document: Document) -> Reply {
         candidate
             .suggested_name
             .as_ref()
-            .is_some_and(|name| name.as_str().len() > MAX_NAME_BYTES)
+            .is_some_and(|name| ByteCount::from_bytes(name.as_str().len() as u64) > MAX_NAME_BYTES)
     }) {
         return Reply::Rejected("GPX candidate name exceeds its size limit".to_owned());
     }
@@ -119,7 +127,7 @@ pub(super) fn decode(
         let Reply::Rejected(reason) = reply else {
             return Err(Error::Protocol);
         };
-        if reason.len() > MAX_NAME_BYTES * 4 {
+        if ByteCount::from_bytes(reason.len() as u64) > MAX_REJECTION_BYTES {
             return Err(Error::Protocol);
         }
         return Err(Error::Rejected(reason));
@@ -179,7 +187,7 @@ fn decode_candidate(candidate: WireCandidate) -> Result<Candidate, Error> {
     if candidate
         .name
         .as_ref()
-        .is_some_and(|name| name.len() > MAX_NAME_BYTES)
+        .is_some_and(|name| ByteCount::from_bytes(name.len() as u64) > MAX_NAME_BYTES)
     {
         return Err(Error::Protocol);
     }

@@ -1,5 +1,6 @@
 use gallery::prelude::*;
 use garmin_i18n::format_message;
+use garmin_model::artifact::ByteCount;
 use garmin_ui::{device, icons, modal, notification};
 
 scene_meta! { title: "Application / Devices" }
@@ -144,7 +145,10 @@ fn partial_inspection(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
     let storage = DeviceStorageState {
         id: "internal".to_owned(),
         label: "Internal storage".to_owned(),
-        capacity: StorageCapacity::new(32_000_000_000, 8_600_000_000),
+        capacity: StorageCapacity::new(
+            ByteCount::from_gigabytes(32),
+            ByteCount::from_megabytes(8_600),
+        ),
         writable: Some(true),
     };
     let snapshot = DeviceSnapshot {

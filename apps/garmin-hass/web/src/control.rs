@@ -2,9 +2,13 @@
 use eframe::egui::{Context, Id};
 use futures_util::FutureExt as _;
 use futures_util::future::{AbortHandle, Abortable};
-use garmin_service_api::control::{BrowserControl, BrowserControlServerShared, ControlDispatch};
+use garmin_model::artifact::ByteCount;
+use garmin_service_api::control::{
+    BrowserControl, BrowserControlServerShared, ControlDispatch, ControlTime,
+};
 use garmin_service_api::{ApplicationService as _, ApplicationServiceClient};
 use remoc::{codec, rtc, rtc::ServerShared as _};
+use std::time::Duration;
 use std::{
     fmt::Write as _,
     sync::{
@@ -41,8 +45,12 @@ pub(super) fn install_window_capture(context: &Context) {
             if !milliseconds.is_finite() || !(0.0..=5_000.0).contains(&milliseconds) {
                 return Err(JsValue::from_str("invalid screenshot deadline"));
             }
-            let deadline = monotonic_ms().unwrap_or(f64::INFINITY) + milliseconds;
-            let result = capture(context, Arc::new(AtomicBool::new(true)), 0.0, deadline)
+            let clock = ClockSample::default();
+            let now = clock
+                .now()
+                .ok_or_else(|| JsValue::from_str("screenshot clock unavailable"))?;
+            let deadline = now.saturating_add(Duration::from_secs_f64(milliseconds / 1_000.0));
+            let result = capture(context, Arc::new(AtomicBool::new(true)), clock, deadline)
                 .await
                 .map_err(|error| JsValue::from_str(&error))?;
             let info = serde_json::to_string(&result.info)
@@ -62,7 +70,7 @@ pub(super) fn install_window_capture(context: &Context) {
 
 struct Handler {
     active: Arc<AtomicBool>,
-    clock_offset_ms: Mutex<f64>,
+    clock: Mutex<ClockSample>,
     context: Context,
 }
 
@@ -89,8 +97,21 @@ impl Drop for CompositionCapture {
     }
 }
 
-fn monotonic_ms() -> Option<f64> {
-    Some(web_sys::window()?.performance()?.now())
+fn monotonic_time() -> Option<Duration> {
+    Duration::try_from_secs_f64(web_sys::window()?.performance()?.now() / 1_000.0).ok()
+}
+
+#[derive(Clone, Copy, Default)]
+struct ClockSample {
+    browser: Duration,
+    server: Duration,
+}
+
+impl ClockSample {
+    fn now(self) -> Option<Duration> {
+        let elapsed = monotonic_time()?.checked_sub(self.browser)?;
+        Some(self.server.saturating_add(elapsed))
+    }
 }
 
 impl BrowserControl for Handler {
@@ -109,40 +130,36 @@ impl BrowserControl for Handler {
     }
     fn capture(
         &self,
-        expires_at_ms: u64,
+        expires_at_ms: ControlTime,
         window: Option<String>,
     ) -> impl Future<Output = Result<Result<garmin_service_api::control::Capture, String>, rtc::CallError>>
     {
         let context = self.context.clone();
         let active = Arc::clone(&self.active);
-        let offset = *self
-            .clock_offset_ms
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let clock = *self.clock.lock().unwrap_or_else(PoisonError::into_inner);
         // The RPC future stays Send; DOM/WASM futures run only on the browser executor.
         let (task, result) =
-            capture_selected(context, active, offset, expires_at_ms, window).remote_handle();
+            capture_selected(context, active, clock, expires_at_ms.as_elapsed(), window)
+                .remote_handle();
         wasm_bindgen_futures::spawn_local(task);
         async move { Ok(result.await) }
     }
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "Monotonic milliseconds fit exactly in f64 for practical session lifetimes"
-    )]
     fn execute(
         &self,
         request: ControlDispatch,
     ) -> impl Future<Output = Result<Result<String, String>, rtc::CallError>> {
-        let server_now = monotonic_ms().unwrap_or(f64::INFINITY)
-            + *self
-                .clock_offset_ms
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
+        let server_now = self
+            .clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .now();
         let result = if !self.active.load(Ordering::Acquire) {
             Err("control connection is inactive".into())
-        } else if server_now >= request.expires_at_ms as f64 {
+        } else if server_now.is_none_or(|now| now >= request.expires_at_ms.as_elapsed()) {
             Err("command expired before browser dispatch".into())
-        } else if request.command_json.len() > garmin_service_api::control::MAX_COMMAND_BYTES {
+        } else if ByteCount::from_bytes(request.command_json.len() as u64)
+            > garmin_service_api::control::MAX_COMMAND_BYTES
+        {
             Err("command exceeds size limit".into())
         } else {
             execute(&request.command_json).map_err(|error| crate::js_reason(&error))
@@ -163,10 +180,6 @@ impl Drop for Registration {
     }
 }
 
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "Monotonic milliseconds fit exactly in f64 for practical session lifetimes"
-)]
 pub(super) async fn register(
     client: &ApplicationServiceClient,
     context: &Context,
@@ -191,7 +204,7 @@ pub(super) async fn register(
     };
     let handler = Arc::new(Handler {
         active: Arc::new(AtomicBool::new(false)),
-        clock_offset_ms: Mutex::new(0.0),
+        clock: Mutex::new(ClockSample::default()),
         context: context.clone(),
     });
     let (server, reverse_client) =
@@ -201,9 +214,9 @@ pub(super) async fn register(
     wasm_bindgen_futures::spawn_local(async move {
         let _ = Abortable::new(server.serve(), aborted).await;
     });
-    let started = monotonic_ms()?;
+    let started = monotonic_time()?;
     let request = client.register_control(browser, reverse_client);
-    let timeout = crate::wait_milliseconds(5_000);
+    let timeout = crate::wait_for(Duration::from_millis(5_000));
     futures_util::pin_mut!(request, timeout);
     let reply = match futures_util::future::select(request, timeout).await {
         futures_util::future::Either::Left((reply, _)) => reply,
@@ -228,9 +241,12 @@ pub(super) async fn register(
     // transport latency cannot extend a command's dispatch deadline.
     *registration
         .handler
-        .clock_offset_ms
+        .clock
         .lock()
-        .unwrap_or_else(PoisonError::into_inner) = info.server_time_ms as f64 - started;
+        .unwrap_or_else(PoisonError::into_inner) = ClockSample {
+        browser: started,
+        server: info.server_time_ms.as_elapsed(),
+    };
     registration.handler.active.store(true, Ordering::Release);
     let endpoint = web_sys::window()
         .and_then(|window| {
@@ -248,29 +264,25 @@ pub(super) async fn register(
     Some(registration)
 }
 
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "Monotonic milliseconds fit exactly in f64 for practical session lifetimes"
-)]
 async fn capture_selected(
     context: Context,
     active: Arc<AtomicBool>,
-    offset: f64,
-    deadline: u64,
+    clock: ClockSample,
+    deadline: Duration,
     window: Option<String>,
 ) -> Result<garmin_service_api::control::Capture, String> {
-    let deadline = deadline as f64;
     let Some(window) = window.filter(|window| window != "root") else {
-        return capture(context, active, offset, deadline).await;
+        return capture(context, active, clock, deadline).await;
     };
-    validate_capture(&active, offset, deadline)?;
-    let remaining =
-        (deadline - monotonic_ms().unwrap_or(f64::INFINITY) - offset).clamp(0.0, 5_000.0);
-    let promise = capture_window(&window, remaining).map_err(|error| crate::js_reason(&error))?;
+    validate_capture(&active, clock, deadline)?;
+    let now = clock.now().ok_or("screenshot clock unavailable")?;
+    let remaining = deadline.saturating_sub(now).min(Duration::from_secs(5));
+    let promise = capture_window(&window, remaining.as_secs_f64() * 1_000.0)
+        .map_err(|error| crate::js_reason(&error))?;
     let value = wasm_bindgen_futures::JsFuture::from(promise)
         .await
         .map_err(|error| crate::js_reason(&error))?;
-    validate_capture(&active, offset, deadline)?;
+    validate_capture(&active, clock, deadline)?;
     let values = value
         .dyn_into::<js_sys::Array>()
         .map_err(|_| "invalid window screenshot reply")?;
@@ -282,7 +294,9 @@ async fn capture_selected(
         .get(1)
         .dyn_into::<js_sys::Uint8Array>()
         .map_err(|_| "missing window screenshot pixels")?;
-    if png.length() as usize > garmin_service_api::control::MAX_CAPTURE_BYTES {
+    if ByteCount::from_bytes(u64::from(png.length()))
+        > garmin_service_api::control::MAX_CAPTURE_BYTES
+    {
         return Err("screenshot exceeds PNG byte limit".into());
     }
     let capture = garmin_service_api::control::Capture {
@@ -293,11 +307,15 @@ async fn capture_selected(
     Ok(capture)
 }
 
-fn validate_capture(active: &AtomicBool, offset: f64, deadline: f64) -> Result<(), String> {
+fn validate_capture(
+    active: &AtomicBool,
+    clock: ClockSample,
+    deadline: Duration,
+) -> Result<(), String> {
     if !active.load(Ordering::Acquire) {
         return Err("control connection is inactive".into());
     }
-    if monotonic_ms().unwrap_or(f64::INFINITY) + offset >= deadline {
+    if clock.now().is_none_or(|now| now >= deadline) {
         return Err("screenshot deadline expired".into());
     }
     Ok(())
@@ -306,10 +324,10 @@ fn validate_capture(active: &AtomicBool, offset: f64, deadline: f64) -> Result<(
 async fn capture(
     context: Context,
     active: Arc<AtomicBool>,
-    offset: f64,
-    deadline: f64,
+    clock: ClockSample,
+    deadline: Duration,
 ) -> Result<garmin_service_api::control::Capture, String> {
-    let valid = || validate_capture(&active, offset, deadline);
+    let valid = || validate_capture(&active, clock, deadline);
     valid()?;
     let composition =
         CompositionCapture(begin_screenshot().map_err(|error| crate::js_reason(&error))?);
@@ -320,7 +338,7 @@ async fn capture(
             break result?;
         }
         context.request_repaint();
-        crate::wait_milliseconds(16).await;
+        crate::wait_for(Duration::from_millis(16)).await;
     };
     let promise = finish_screenshot(
         &composition.0,
@@ -329,7 +347,7 @@ async fn capture(
         pixels.info.height,
     )
     .map_err(|error| crate::js_reason(&error))?;
-    let timeout = crate::wait_milliseconds(3_000);
+    let timeout = crate::wait_for(Duration::from_millis(3_000));
     let complete = wasm_bindgen_futures::JsFuture::from(promise);
     futures_util::pin_mut!(complete, timeout);
     let value = match futures_util::future::select(complete, timeout).await {
@@ -342,7 +360,9 @@ async fn capture(
     };
     valid()?;
     let png = js_sys::Uint8Array::new(&value);
-    if png.length() as usize > garmin_service_api::control::MAX_CAPTURE_BYTES {
+    if ByteCount::from_bytes(u64::from(png.length()))
+        > garmin_service_api::control::MAX_CAPTURE_BYTES
+    {
         return Err("screenshot exceeds PNG byte limit".into());
     }
     let capture = garmin_service_api::control::Capture {

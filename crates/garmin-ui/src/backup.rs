@@ -1,5 +1,6 @@
 //! Deployment-wide backup and restore presentation.
 
+use garmin_model::artifact::ByteCount;
 use std::time::Duration;
 
 use crate::{Size, button, icons, modal, progress};
@@ -41,9 +42,9 @@ pub struct RestoreSummary {
     /// Time spent applying the approved restore, excluding the approval wait.
     pub elapsed: Option<Duration>,
     /// Size of the compressed backup file.
-    pub archive_bytes: Option<u64>,
+    pub archive_bytes: Option<ByteCount>,
     /// Size of the verified database inside the backup.
-    pub database_bytes: Option<u64>,
+    pub database_bytes: Option<ByteCount>,
     /// Creation time from the verified backup manifest.
     pub created_at: Option<i64>,
 }
@@ -380,7 +381,7 @@ fn show_restore_summary(ui: &mut Ui, intl: &Intl, summary: &RestoreSummary) {
         let duration = if elapsed.as_secs() == 0 {
             format_message!(intl, default_message: "Less than a second")
         } else {
-            crate::offline::format_duration(elapsed.as_secs())
+            crate::offline::format_duration(elapsed)
         };
         facts.push((
             format_message!(intl, default_message: "Restore time"),
@@ -390,13 +391,13 @@ fn show_restore_summary(ui: &mut Ui, intl: &Intl, summary: &RestoreSummary) {
     if let Some(bytes) = summary.archive_bytes {
         facts.push((
             format_message!(intl, default_message: "Backup size"),
-            crate::text::format_bytes(bytes),
+            bytes.format_decimal(2),
         ));
     }
     if let Some(bytes) = summary.database_bytes {
         facts.push((
             format_message!(intl, default_message: "Database size"),
-            crate::text::format_bytes(bytes),
+            bytes.format_decimal(2),
         ));
     }
     if let Some(created_at) = summary.created_at {
@@ -582,7 +583,7 @@ fn show_preview(ui: &mut Ui, intl: &Intl, preview: &SnapshotPreview) {
                 .datetime(time.as_jiff().to_zoned(jiff::tz::TimeZone::UTC).datetime())
         },
     );
-    let size = crate::text::format_bytes(preview.database_bytes);
+    let size = preview.database_bytes.format_decimal(2);
     let facts = [
         (
             format_message!(intl, default_message: "Created (UTC)"),
@@ -648,8 +649,8 @@ fn show_status(ui: &mut Ui, intl: &Intl, status: &SnapshotStatus) -> Option<Acti
             .total
             .and_then(|total| {
                 Some(progress::Value::Determinate {
-                    completed: usize::try_from(status.transferred).ok()?,
-                    total: usize::try_from(total).ok()?,
+                    completed: usize::try_from(status.transferred.as_bytes()).ok()?,
+                    total: usize::try_from(total.as_bytes()).ok()?,
                 })
             })
             .unwrap_or(progress::Value::Indeterminate),

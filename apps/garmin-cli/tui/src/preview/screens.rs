@@ -1,5 +1,6 @@
 use garmin_device::{DeviceSummary, TransportKind};
 use garmin_i18n::format_message;
+use garmin_model::artifact::ByteCount;
 use garmin_model::map::MapOperation;
 use garmin_progress::{OperationStage, ProgressEventKind, ProgressState};
 use indoc::indoc;
@@ -184,14 +185,20 @@ pub(super) fn storage_fixture(unavailable: bool) -> garmin_device::DeviceStateSn
                 capacity: if unavailable {
                     StorageCapacity::unavailable("The mount did not report capacity")
                 } else {
-                    StorageCapacity::new(32_000_000_000, 8_600_000_000)
+                    StorageCapacity::new(
+                        ByteCount::from_gigabytes(32),
+                        ByteCount::from_megabytes(8_600),
+                    )
                 },
             },
             DeviceStorageState {
                 id: "card".to_owned(),
                 label: "Memory card".to_owned(),
                 writable: Some(false),
-                capacity: StorageCapacity::new(64_000_000_000, 52_000_000_000),
+                capacity: StorageCapacity::new(
+                    ByteCount::from_gigabytes(64),
+                    ByteCount::from_gigabytes(52),
+                ),
             },
         ],
     }

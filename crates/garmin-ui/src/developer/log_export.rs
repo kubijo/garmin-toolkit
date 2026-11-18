@@ -35,12 +35,13 @@ impl Export {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use garmin_model::value::UnixMilliseconds;
 
     fn batch() -> Batch {
         Batch {
             records: vec![garmin_model::logging::Record {
                 sequence: 1,
-                timestamp_ms: 42,
+                timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(42),
                 level: garmin_model::logging::Level::Info,
                 component: "test".into(),
                 source: "test".into(),

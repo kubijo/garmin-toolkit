@@ -1,5 +1,6 @@
 use super::*;
 use futures_lite::future::block_on;
+use garmin_model::artifact::ByteCount;
 
 fn wait(controller: &mut Controller, ready: impl Fn(&State) -> bool) {
     let deadline = std::time::Instant::now() + Duration::from_secs(15);
@@ -64,8 +65,11 @@ fn native_backup_confirmation_restore_and_restart() -> Result<(), Box<dyn std::e
         let State::Restored(summary) = &controller.state else {
             unreachable!("restore completed");
         };
-        assert_eq!(summary.archive_bytes, Some(std::fs::metadata(&path)?.len()));
-        assert!(summary.database_bytes.is_some_and(|bytes| bytes > 0));
+        assert_eq!(
+            summary.archive_bytes,
+            Some(ByteCount::from_bytes(std::fs::metadata(&path)?.len()))
+        );
+        assert!(summary.database_bytes.is_some_and(|bytes| !bytes.is_zero()));
         assert!(summary.elapsed.is_some());
         assert!(deployment.application(epoch).await.is_err());
         let restored = deployment.epoch();

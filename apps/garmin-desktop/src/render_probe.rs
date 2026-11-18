@@ -201,11 +201,7 @@ fn drive(
                     image: std::sync::Arc::new(pixels.clone()),
                 });
             }
-            recording.offer(
-                frame_number,
-                tick.duration_since(started).as_secs_f64(),
-                pixels,
-            )?;
+            recording.offer(frame_number, tick.duration_since(started), pixels)?;
         }
         if scenarios.advance(options, context)? {
             return Ok(());

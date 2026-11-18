@@ -20,21 +20,23 @@ mod archive;
 
 const FORMAT: &str = "garmin-toolkit-snapshot";
 const FORMAT_VERSION: u32 = 1;
-const MAX_MANIFEST: u64 = 16 * 1024;
+use garmin_model::artifact::ByteCount;
+
+const MAX_MANIFEST: ByteCount = ByteCount::from_kibibytes(16);
 const WINDOW_LOG: u32 = 23;
 
 /// Resource limits applied before publishing or restoring a snapshot.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
-    pub database_bytes: u64,
-    pub compressed_bytes: u64,
+    pub database_bytes: ByteCount,
+    pub compressed_bytes: ByteCount,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            database_bytes: 1024 * 1024 * 1024,
-            compressed_bytes: 1024 * 1024 * 1024,
+            database_bytes: ByteCount::from_gibibytes(1),
+            compressed_bytes: ByteCount::from_gibibytes(1),
         }
     }
 }
@@ -45,18 +47,20 @@ impl Limits {
     /// Rejects zero or unsupported size limits.
     pub fn validate(self) -> Result<(), Error> {
         // Version 1 uses the POSIX base headers without extended size records.
-        if self.database_bytes == 0
-            || self.database_bytes > 0o77_777_777_777
-            || self.compressed_bytes == 0
-            || self.compressed_bytes > self.database_bytes + MAX_MANIFEST + 4096
+        if self.database_bytes.is_zero()
+            || self.database_bytes > ByteCount::from_bytes(0o77_777_777_777)
+            || self.compressed_bytes.is_zero()
+            || self.compressed_bytes > self.archive_bytes()
         {
             return Err(Error::Invalid("invalid snapshot limits"));
         }
         Ok(())
     }
 
-    fn archive_bytes(self) -> u64 {
-        self.database_bytes + MAX_MANIFEST + 4096
+    fn archive_bytes(self) -> ByteCount {
+        self.database_bytes
+            .saturating_add(MAX_MANIFEST)
+            .saturating_add(ByteCount::from_kibibytes(4))
     }
 }
 
@@ -69,7 +73,7 @@ pub struct Manifest {
     pub app_version: String,
     pub created_at: i64,
     pub schema: Vec<Migration>,
-    pub database_bytes: u64,
+    pub database_bytes: ByteCount,
     pub database_sha256: String,
 }
 
@@ -102,7 +106,7 @@ impl Manifest {
         if semver::Version::parse(&self.app_version).is_err() || self.created_at < 0 {
             return Err(Error::Invalid("invalid snapshot version or timestamp"));
         }
-        if self.database_bytes == 0 || self.database_bytes > limits.database_bytes {
+        if self.database_bytes.is_zero() || self.database_bytes > limits.database_bytes {
             return Err(Error::Invalid("snapshot database exceeds its size limit"));
         }
         Ok(())
@@ -127,7 +131,9 @@ impl Storage {
             .fetch_one(&self.pool)
             .await?
             .ok_or(Error::Invalid("SQLite did not report the database size"))?;
-        if u64::try_from(size).map_or(true, |size| size > limits.database_bytes) {
+        if u64::try_from(size).map_or(true, |size| {
+            ByteCount::from_bytes(size) > limits.database_bytes
+        }) {
             return Err(Error::Invalid("database exceeds snapshot size limit"));
         }
         let path = database
@@ -157,7 +163,7 @@ impl Storage {
             app_version: env!("CARGO_PKG_VERSION").to_owned(),
             created_at: time::OffsetDateTime::now_utc().unix_timestamp(),
             schema: schema(),
-            database_bytes: database_file.metadata()?.len(),
+            database_bytes: ByteCount::from_bytes(database_file.metadata()?.len()),
             database_sha256: digest(&mut database_file)?,
         };
         manifest.validate(limits)?;

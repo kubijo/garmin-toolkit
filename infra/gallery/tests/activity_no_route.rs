@@ -9,6 +9,7 @@ use garmin_model::{
         TimeRange,
     },
     identity::UnitSystem,
+    route::Elevation,
     value::Timestamp,
 };
 use garmin_service_api::{ActivityRecordingSnapshot, ActivitySampleSnapshot};
@@ -59,13 +60,13 @@ fn harness() -> (Harness<'static, ()>, Arc<AtomicUsize>) {
                 timestamp: Timestamp::from_unix_seconds(i64::from(seconds))
                     .expect("fixture sample"),
                 coordinate: None,
-                elevation_meters: Some(40.0 + f64::from(seconds % 10)),
+                elevation: Elevation::from_meters(40.0 + f64::from(seconds % 10)).ok(),
                 distance: None,
                 speed: None,
                 heart_rate: None,
                 cadence: None,
                 power: None,
-                temperature_millicelsius: None,
+                temperature: None,
             })
             .collect(),
     };

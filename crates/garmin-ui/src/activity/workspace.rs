@@ -7,14 +7,18 @@
     reason = "plot coordinates and pixel-sized render budgets intentionally use f64/f32/usize"
 )]
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use cint::ColorInterop;
 use egui::{Align, Id, Key, Layout, RichText, ScrollArea, Sense, Ui, Vec2};
 use egui_plot::{Line, Plot, PlotPoint, Points, Span, VLine};
 use garmin_color::theme;
 use garmin_i18n::{Intl, format_message};
-use garmin_model::{activity::ActivitySport, identity::UnitSystem};
+use garmin_model::{
+    activity::{ActivitySport, Distance},
+    identity::UnitSystem,
+    route::Coordinate,
+};
 use garmin_service_api::{
     ActivityRecordingSnapshot, ActivitySampleSnapshot, ActivityTimerStateSnapshot,
 };
@@ -32,7 +36,7 @@ const CHART_GAP: f32 = 4.0;
 const CHART_SUMMARY_WIDTH: f32 = 200.0;
 const CHART_SIDE_SUMMARY_MIN_WIDTH: f32 = 640.0;
 const CHART_VIEWPORT_OVERSCAN: f32 = 64.0;
-const PLAYBACK_SECONDS: f64 = 30.0;
+const PLAYBACK_DURATION: Duration = Duration::from_secs(30);
 const NAVIGATION_WIDTH: f32 = 300.0;
 
 type MapSidebar<'a> = dyn FnMut(&mut Ui, &mut Viewer) + 'a;
@@ -273,11 +277,11 @@ enum InteractionCursor {
     Hover(usize),
     Pinned {
         sample_index: usize,
-        playback_position: Option<f64>,
+        playback_position: Option<Duration>,
     },
     Playback {
         sample_index: usize,
-        position: Option<f64>,
+        position: Option<Duration>,
     },
 }
 
@@ -307,7 +311,7 @@ impl InteractionCursor {
         self.public().sample_index
     }
 
-    const fn playback_position(self) -> Option<f64> {
+    const fn playback_position(self) -> Option<Duration> {
         match self {
             Self::Pinned {
                 playback_position, ..
@@ -416,7 +420,7 @@ impl ViewerInteraction {
         matches!(self.cursor, InteractionCursor::Playback { .. })
     }
 
-    const fn playback_position(&self) -> Option<f64> {
+    const fn playback_position(&self) -> Option<Duration> {
         self.cursor.playback_position()
     }
 
@@ -490,7 +494,7 @@ impl ViewerInteraction {
         range: std::ops::RangeInclusive<usize>,
     ) {
         let active = active_positions(recording);
-        let start = active.get(*range.start()).copied().unwrap_or(0.0);
+        let start = active.get(*range.start()).copied().unwrap_or_default();
         let end = active.get(*range.end()).copied().unwrap_or(start);
         let current = self
             .playback_position()
@@ -505,7 +509,7 @@ impl ViewerInteraction {
         } else {
             current.max(start)
         };
-        let sample_index = nearest_value_index(&active, position, range);
+        let sample_index = nearest_sample_index(&active, position, range, Duration::abs_diff);
         self.cursor = if end > start {
             sample_index.map_or(InteractionCursor::Idle, |sample_index| {
                 InteractionCursor::Playback {
@@ -527,7 +531,7 @@ impl ViewerInteraction {
         &mut self,
         recording: &ActivityRecordingSnapshot,
         range: std::ops::RangeInclusive<usize>,
-        delta_seconds: f64,
+        frame_elapsed: Duration,
     ) -> bool {
         if !self.is_playing() {
             return false;
@@ -537,7 +541,7 @@ impl ViewerInteraction {
             return false;
         }
         let active = active_positions(recording);
-        let start = *active.get(*range.start()).unwrap_or(&0.0);
+        let start = active.get(*range.start()).copied().unwrap_or_default();
         let end = *active.get(*range.end()).unwrap_or(&start);
         let current_index = self
             .cursor
@@ -547,7 +551,11 @@ impl ViewerInteraction {
         let position = self
             .playback_position()
             .unwrap_or_else(|| active.get(current_index).copied().unwrap_or(start));
-        let next = position + playback_delta(end - start, delta_seconds, self.playback_speed);
+        let next = position.saturating_add(playback_delta(
+            end.saturating_sub(start),
+            frame_elapsed,
+            self.playback_speed,
+        ));
         if next >= end {
             self.cursor = InteractionCursor::Pinned {
                 sample_index: *range.end(),
@@ -555,7 +563,9 @@ impl ViewerInteraction {
             };
             false
         } else {
-            if let Some(sample_index) = nearest_value_index(&active, next, range) {
+            if let Some(sample_index) =
+                nearest_sample_index(&active, next, range, Duration::abs_diff)
+            {
                 self.cursor = InteractionCursor::Playback {
                     sample_index,
                     position: Some(next),
@@ -1157,10 +1167,11 @@ impl Viewer {
 
     fn advance_playback(&mut self, ui: &Ui, recording: &ActivityRecordingSnapshot) {
         let range = self.sample_range(recording);
-        let delta_seconds = f64::from(ui.ctx().input(|input| input.stable_dt));
+        let frame_elapsed = Duration::try_from_secs_f32(ui.ctx().input(|input| input.stable_dt))
+            .unwrap_or_default();
         if self
             .interaction
-            .advance_playback(recording, range, delta_seconds)
+            .advance_playback(recording, range, frame_elapsed)
         {
             ui.ctx().request_repaint();
         }
@@ -1200,7 +1211,7 @@ impl Viewer {
                 format_message!(intl, default_message: "Distance"),
                 sample.and_then(|sample| sample.distance).map_or_else(
                     || "—".to_owned(),
-                    |distance| format_distance(distance.as_millimeters(), props.units),
+                    |distance| distance.format_major(props.units, 2, intl.decimal_formatter()),
                 ),
             ));
         }
@@ -1239,7 +1250,7 @@ impl Viewer {
             for (index, lap) in recording.laps.iter().enumerate() {
                 let distance = lap.totals.distance().map_or_else(
                     || "—".to_owned(),
-                    |distance| format_distance(distance.as_millimeters(), units),
+                    |distance| distance.format_major(units, 2, intl.decimal_formatter()),
                 );
                 let number = u64::try_from(index + 1).unwrap_or(u64::MAX);
                 let label = format_message!(
@@ -1247,7 +1258,7 @@ impl Viewer {
                     default_message: "Lap {number}",
                     values: { number: number },
                 );
-                let duration = super::duration(lap.totals.timer().into_milliseconds());
+                let duration = lap.totals.timer().format_compact();
                 let selected_lap = self.interaction.selected_lap();
                 let selected = selected_lap == Some(index)
                     || (selected_lap.is_none() && active_lap == Some(index));
@@ -2222,11 +2233,7 @@ fn distance_domain(samples: &[ActivitySampleSnapshot], units: UnitSystem) -> Opt
     let anchors = samples
         .iter()
         .enumerate()
-        .filter_map(|(index, sample)| {
-            sample
-                .distance
-                .map(|distance| (index, distance.as_millimeters()))
-        })
+        .filter_map(|(index, sample)| sample.distance.map(|distance| (index, distance)))
         .collect::<Vec<_>>();
     if anchors.len() < 2
         || anchors.windows(2).any(|pair| pair[1].1 < pair[0].1)
@@ -2234,10 +2241,12 @@ fn distance_domain(samples: &[ActivitySampleSnapshot], units: UnitSystem) -> Opt
     {
         return None;
     }
-    let mut values = vec![anchors[0].1 as f64; samples.len()];
+    let mut values = vec![plot_distance(anchors[0].1, units); samples.len()];
     for pair in anchors.windows(2) {
         let (start_index, start_value) = pair[0];
         let (end_index, end_value) = pair[1];
+        let start_value = plot_distance(start_value, units);
+        let end_value = plot_distance(end_value, units);
         let count = (end_index - start_index) as f64;
         for (offset, value) in values[start_index..=end_index].iter_mut().enumerate() {
             let fraction = if count > 0.0 {
@@ -2245,14 +2254,11 @@ fn distance_domain(samples: &[ActivitySampleSnapshot], units: UnitSystem) -> Opt
             } else {
                 0.0
             };
-            *value = ((end_value - start_value) as f64).mul_add(fraction, start_value as f64);
+            *value = (end_value - start_value).mul_add(fraction, start_value);
         }
     }
     let (last_index, last_value) = *anchors.last()?;
-    values[last_index..].fill(last_value as f64);
-    for value in &mut values {
-        *value = display_distance(*value, units);
-    }
+    values[last_index..].fill(plot_distance(last_value, units));
     Some(values)
 }
 
@@ -2283,8 +2289,13 @@ impl PlaybackSpeed {
     }
 }
 
-fn playback_delta(active_span: f64, frame_seconds: f64, speed: PlaybackSpeed) -> f64 {
-    active_span / PLAYBACK_SECONDS * frame_seconds * speed.factor()
+fn playback_delta(
+    active_span: Duration,
+    frame_elapsed: Duration,
+    speed: PlaybackSpeed,
+) -> Duration {
+    let fraction = frame_elapsed.div_duration_f64(PLAYBACK_DURATION) * speed.factor();
+    active_span.mul_f64(fraction.min(1.0))
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -2622,9 +2633,9 @@ impl ChartKind {
         units: UnitSystem,
     ) -> Option<f64> {
         match self {
-            Self::Elevation => sample.elevation_meters.map(|elevation| match units {
-                UnitSystem::Metric => elevation,
-                UnitSystem::Imperial => elevation * 3.280_839_895,
+            Self::Elevation => sample.elevation.map(|elevation| match units {
+                UnitSystem::Metric => elevation.as_meters(),
+                UnitSystem::Imperial => elevation.as_feet(),
             }),
             Self::PaceSpeed if sport == ActivitySport::Running => {
                 let speed = f64::from(sample.speed?.as_millimeters_per_second()) / 1_000.0;
@@ -2643,13 +2654,10 @@ impl ChartKind {
             Self::HeartRate => Some(f64::from(sample.heart_rate?.as_beats_per_minute())),
             Self::Cadence => Some(sample.cadence?.as_revolutions_per_minute()),
             Self::Power => Some(f64::from(sample.power?.as_watts())),
-            Self::Temperature => {
-                let celsius = f64::from(sample.temperature_millicelsius?) / 1_000.0;
-                Some(match units {
-                    UnitSystem::Metric => celsius,
-                    UnitSystem::Imperial => celsius.mul_add(9.0 / 5.0, 32.0),
-                })
-            }
+            Self::Temperature => sample.temperature.map(|temperature| match units {
+                UnitSystem::Metric => temperature.as_celsius(),
+                UnitSystem::Imperial => temperature.as_fahrenheit(),
+            }),
         }
     }
 
@@ -2807,6 +2815,17 @@ fn nearest_index(
     needle: f64,
     range: std::ops::RangeInclusive<usize>,
 ) -> Option<usize> {
+    nearest_sample_index(values, needle, range, |value, needle| {
+        (value - needle).abs()
+    })
+}
+
+fn nearest_sample_index<T: PartialOrd + Copy, D: PartialOrd>(
+    values: &[T],
+    needle: T,
+    range: std::ops::RangeInclusive<usize>,
+    distance: impl Fn(T, T) -> D,
+) -> Option<usize> {
     let start = *range.start();
     let end = (*range.end()).min(values.len().checked_sub(1)?);
     if start > end {
@@ -2819,7 +2838,7 @@ fn nearest_index(
         value if value >= slice.len() => Some(end),
         value => {
             let before = value - 1;
-            let selected = if (slice[value] - needle).abs() < (slice[before] - needle).abs() {
+            let selected = if distance(slice[value], needle) < distance(slice[before], needle) {
                 value
             } else {
                 before
@@ -2827,14 +2846,6 @@ fn nearest_index(
             Some(start + selected)
         }
     }
-}
-
-fn nearest_value_index(
-    values: &[f64],
-    needle: f64,
-    range: std::ops::RangeInclusive<usize>,
-) -> Option<usize> {
-    nearest_index(values, needle, range)
 }
 
 fn lap_sample_range(
@@ -2870,7 +2881,7 @@ fn lap_x_bounds(
     Some((*x_values.get(*range.start())?, *x_values.get(*range.end())?))
 }
 
-fn active_positions(recording: &ActivityRecordingSnapshot) -> Vec<f64> {
+fn active_positions(recording: &ActivityRecordingSnapshot) -> Vec<Duration> {
     let Some(first) = recording.samples.first() else {
         return Vec::new();
     };
@@ -2882,7 +2893,7 @@ fn active_positions(recording: &ActivityRecordingSnapshot) -> Vec<f64> {
     {
         state = event.state;
     }
-    let mut active = 0_i64;
+    let mut active = Duration::ZERO;
     let mut positions = Vec::with_capacity(recording.samples.len());
     for sample in &recording.samples {
         let timestamp = sample.timestamp.as_unix_milliseconds().max(previous);
@@ -2891,30 +2902,26 @@ fn active_positions(recording: &ActivityRecordingSnapshot) -> Vec<f64> {
         {
             let transition = event.timestamp.as_unix_milliseconds().max(previous);
             if state == ActivityTimerStateSnapshot::Running {
-                active += transition - previous;
+                active =
+                    active.saturating_add(Duration::from_millis(transition.abs_diff(previous)));
             }
             previous = transition;
             state = event.state;
         }
         if state == ActivityTimerStateSnapshot::Running {
-            active += timestamp - previous;
+            active = active.saturating_add(Duration::from_millis(timestamp.abs_diff(previous)));
         }
         previous = timestamp;
-        positions.push(active.max(0) as f64);
+        positions.push(active);
     }
     positions
 }
 
-fn display_distance(millimeters: f64, units: UnitSystem) -> f64 {
+fn plot_distance(distance: Distance, units: UnitSystem) -> f64 {
     match units {
-        UnitSystem::Metric => millimeters / 1_000_000.0,
-        UnitSystem::Imperial => millimeters / 1_609_344.0,
+        UnitSystem::Metric => distance.as_kilometres(),
+        UnitSystem::Imperial => distance.as_miles(),
     }
-}
-
-fn format_distance(millimeters: u64, units: UnitSystem) -> String {
-    let distance = display_distance(millimeters as f64, units);
-    format!("{distance:.2} {}", distance_unit(units))
 }
 
 fn format_domain_tick(value: f64, axis: Axis, units: UnitSystem) -> String {
@@ -2962,16 +2969,13 @@ const fn elevation_unit(units: UnitSystem) -> &'static str {
 fn selected_route_coordinate(
     recording: &ActivityRecordingSnapshot,
     cursor: ActivityCursor,
-    playback_position: Option<f64>,
+    playback_position: Option<Duration>,
     range: std::ops::RangeInclusive<usize>,
-) -> Option<(f64, f64)> {
+) -> Option<Coordinate> {
     let selected = cursor.sample_index?;
     let selected_coordinate = recording.samples.get(selected)?.coordinate?;
     if cursor.mode != CursorMode::Playback {
-        return Some((
-            selected_coordinate.longitude().as_degrees(),
-            selected_coordinate.latitude().as_degrees(),
-        ));
+        return Some(selected_coordinate);
     }
     let position = playback_position?;
     let active = active_positions(recording);
@@ -2980,10 +2984,7 @@ fn selected_route_coordinate(
     let values = active.get(start..=end)?;
     let after = values.partition_point(|value| *value <= position);
     if after == 0 || after >= values.len() {
-        return Some((
-            selected_coordinate.longitude().as_degrees(),
-            selected_coordinate.latitude().as_degrees(),
-        ));
+        return Some(selected_coordinate);
     }
     let before_index = start + after - 1;
     let after_index = start + after;
@@ -2992,13 +2993,12 @@ fn selected_route_coordinate(
     let before_position = active[before_index];
     let after_position = active[after_index];
     if after_position <= before_position {
-        return Some((
-            selected_coordinate.longitude().as_degrees(),
-            selected_coordinate.latitude().as_degrees(),
-        ));
+        return Some(selected_coordinate);
     }
-    let fraction =
-        ((position - before_position) / (after_position - before_position)).clamp(0.0, 1.0);
+    let fraction = position
+        .saturating_sub(before_position)
+        .div_duration_f64(after_position.saturating_sub(before_position))
+        .clamp(0.0, 1.0);
     let before_longitude = before.longitude().as_degrees();
     let longitude_delta =
         (after.longitude().as_degrees() - before_longitude + 540.0).rem_euclid(360.0) - 180.0;
@@ -3006,20 +3006,21 @@ fn selected_route_coordinate(
         (longitude_delta.mul_add(fraction, before_longitude) + 180.0).rem_euclid(360.0) - 180.0;
     let latitude = (after.latitude().as_degrees() - before.latitude().as_degrees())
         .mul_add(fraction, before.latitude().as_degrees());
-    Some((longitude, latitude))
+    Coordinate::from_degrees(latitude, longitude).ok()
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     use egui_plot::PlotPoint;
     use garmin_model::{
         activity::{
-            ActivityDuration, ActivityMetrics, ActivitySport, ActivityTotals, Distance, TimeRange,
+            ActivityDuration, ActivityMetrics, ActivitySport, ActivityTotals, Distance,
+            Temperature, TimeRange,
         },
         identity::UnitSystem,
-        route::{Coordinate, Latitude, Longitude},
+        route::{Coordinate, Elevation, Latitude, Longitude},
         value::Timestamp,
     };
     use garmin_service_api::{
@@ -3074,13 +3075,13 @@ mod tests {
                     Longitude::from_degrees(longitude).unwrap(),
                 )
             }),
-            elevation_meters,
+            elevation: elevation_meters.and_then(|metres| Elevation::from_meters(metres).ok()),
             distance: distance_millimeters.map(Distance::from_millimeters),
             speed: None,
             heart_rate: None,
             cadence: None,
             power: None,
-            temperature_millicelsius: None,
+            temperature: None,
         }
     }
 
@@ -3245,7 +3246,7 @@ mod tests {
         first.speed = Some(garmin_model::activity::Speed::from_millimeters_per_second(
             1_000,
         ));
-        first.temperature_millicelsius = Some(0);
+        first.temperature = Some(Temperature::from_millicelsius(0));
         let second = sample(1_000, Some(1_609_344), Some(20.0), None);
         let samples = [first, second];
 
@@ -3564,18 +3565,30 @@ mod tests {
 
         assert_eq!(
             active_positions(&recording),
-            vec![0.0, 10_000.0, 10_000.0, 20_000.0]
+            vec![
+                Duration::ZERO,
+                Duration::from_secs(10),
+                Duration::from_secs(10),
+                Duration::from_secs(20)
+            ]
         );
     }
 
     #[test]
     fn playback_speed_scales_the_thirty_second_timeline() {
-        assert!((playback_delta(90.0, 1.0, super::PlaybackSpeed::Half) - 1.5).abs() < f64::EPSILON);
-        assert!(
-            (playback_delta(90.0, 1.0, super::PlaybackSpeed::Normal) - 3.0).abs() < f64::EPSILON
+        let active = Duration::from_secs(90);
+        let frame = Duration::from_secs(1);
+        assert_eq!(
+            playback_delta(active, frame, super::PlaybackSpeed::Half),
+            Duration::from_millis(1_500)
         );
-        assert!(
-            (playback_delta(90.0, 1.0, super::PlaybackSpeed::Double) - 6.0).abs() < f64::EPSILON
+        assert_eq!(
+            playback_delta(active, frame, super::PlaybackSpeed::Normal),
+            Duration::from_secs(3)
+        );
+        assert_eq!(
+            playback_delta(active, frame, super::PlaybackSpeed::Double),
+            Duration::from_secs(6)
         );
     }
 
@@ -4004,13 +4017,13 @@ mod tests {
                 sample_index: Some(0),
                 mode: CursorMode::Playback,
             },
-            Some(5_000.0),
+            Some(Duration::from_secs(5)),
             0..=1,
         )
         .unwrap();
 
-        assert!((coordinate.0.abs() - 180.0).abs() < 1.0e-9);
-        assert!((coordinate.1 - 61.0).abs() < 1.0e-9);
+        assert!((coordinate.longitude().as_degrees().abs() - 180.0).abs() < 1.0e-9);
+        assert!((coordinate.latitude().as_degrees() - 61.0).abs() < 1.0e-9);
     }
 
     #[test]
@@ -4172,17 +4185,20 @@ mod tests {
         interaction.start_playback(&recording, 0..=2);
         assert!(interaction.is_playing());
         assert_eq!(interaction.cursor().mode, CursorMode::Playback);
-        assert_eq!(interaction.playback_position(), Some(0.0));
+        assert_eq!(interaction.playback_position(), Some(Duration::ZERO));
 
         interaction.pause();
         assert!(!interaction.is_playing());
         assert_eq!(interaction.cursor().mode, CursorMode::Pinned);
-        assert_eq!(interaction.playback_position(), Some(0.0));
+        assert_eq!(interaction.playback_position(), Some(Duration::ZERO));
 
         interaction.start_playback(&recording, 0..=2);
-        assert!(interaction.advance_playback(&recording, 0..=2, 15.0));
+        assert!(interaction.advance_playback(&recording, 0..=2, Duration::from_secs(15)));
         assert_eq!(interaction.cursor().sample_index, Some(1));
-        assert_eq!(interaction.playback_position(), Some(10_000.0));
+        assert_eq!(
+            interaction.playback_position(),
+            Some(Duration::from_secs(10))
+        );
 
         assert!(interaction.apply_pointer(Some(2), Some(2)));
         assert!(!interaction.is_playing());
@@ -4196,10 +4212,13 @@ mod tests {
         assert_eq!(interaction.playback_position(), None);
 
         interaction.start_playback(&recording, 0..=2);
-        assert!(!interaction.advance_playback(&recording, 0..=2, 30.0));
+        assert!(!interaction.advance_playback(&recording, 0..=2, Duration::from_secs(30)));
         assert!(!interaction.is_playing());
         assert_eq!(interaction.cursor().sample_index, Some(2));
-        assert_eq!(interaction.playback_position(), Some(20_000.0));
+        assert_eq!(
+            interaction.playback_position(),
+            Some(Duration::from_secs(20))
+        );
 
         interaction.start_playback(&recording, 0..=2);
         assert!(interaction.is_playing());

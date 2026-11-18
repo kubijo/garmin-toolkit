@@ -6,16 +6,72 @@ use thiserror::Error;
 
 use crate::{
     activity_fingerprint,
+    identity::UnitSystem,
     observation::{SemanticFingerprint, SemanticFingerprintError},
     route::{Coordinate, Elevation},
     value::Timestamp,
 };
 
 /// Elapsed time stored canonically in milliseconds.
-#[garmin_macros::portable(copy, hash, ord)]
+#[garmin_macros::portable(copy, default, hash, ord)]
 pub struct ActivityDuration(u64);
 
 impl ActivityDuration {
+    #[must_use]
+    pub fn format_compact(self) -> String {
+        let seconds = self.0 / 1_000 + u64::from(self.0 % 1_000 >= 500);
+        let hours = seconds / 3_600;
+        let minutes = seconds % 3_600 / 60;
+        if hours > 0 {
+            format!("{hours} h {minutes} min")
+        } else if minutes > 0 {
+            format!("{minutes} min")
+        } else {
+            format!("{seconds} s")
+        }
+    }
+
+    #[must_use]
+    pub fn format_clock(self) -> String {
+        let seconds = self.0 / 1_000 + u64::from(self.0 % 1_000 >= 500);
+        let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+        if hours > 0 {
+            format!("{hours}:{minutes:02}:{seconds:02}")
+        } else {
+            format!("{minutes}:{seconds:02}")
+        }
+    }
+
+    #[must_use]
+    pub fn format_hours_minutes(self) -> String {
+        let minutes = self.0 / 60_000 + u64::from(self.0 % 60_000 >= 30_000);
+        format!("{}h {:02}m", minutes / 60, minutes % 60)
+    }
+
+    #[must_use]
+    pub fn try_from_seconds(seconds: f64) -> Option<Self> {
+        rounded_measurement(seconds * 1_000.0).map(Self)
+    }
+
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Floating conversion is for presentation and analysis"
+    )]
+    pub fn as_seconds(self) -> f64 {
+        self.0 as f64 / 1_000.0
+    }
+
+    #[must_use]
+    pub fn as_hours(self) -> f64 {
+        self.as_seconds() / 3_600.0
+    }
+
+    #[must_use]
+    pub const fn saturating_add(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+
     #[must_use]
     pub const fn from_milliseconds(milliseconds: u64) -> Self {
         Self(milliseconds)
@@ -39,10 +95,104 @@ impl fmt::Display for ActivityDuration {
 }
 
 /// Distance stored canonically in millimeters.
-#[garmin_macros::portable(copy, hash, ord)]
+#[garmin_macros::portable(copy, default, hash, ord)]
 pub struct Distance(u64);
 
 impl Distance {
+    pub const METRES_PER_FOOT: f64 = 0.3048;
+
+    /// Elevation is typically reported in metres or feet.
+    #[must_use]
+    pub fn format_elevation(
+        self,
+        units: UnitSystem,
+        decimal: impl Fn(f64, usize) -> String,
+    ) -> String {
+        let (value, symbol) = match units {
+            UnitSystem::Metric => (self.as_metres(), "m"),
+            UnitSystem::Imperial => (self.as_feet(), "ft"),
+        };
+        format!("{}\u{a0}{symbol}", decimal(value, 0))
+    }
+
+    #[must_use]
+    pub fn as_feet(self) -> f64 {
+        self.as_metres() / Self::METRES_PER_FOOT
+    }
+
+    /// Display short distances in metres or feet and longer distances in kilometres or miles.
+    #[must_use]
+    pub fn format(
+        self,
+        units: UnitSystem,
+        digits: usize,
+        decimal: impl Fn(f64, usize) -> String,
+    ) -> String {
+        match units {
+            UnitSystem::Metric if self.0 < 1_000_000 => {
+                format!("{}\u{a0}m", decimal(self.as_metres(), 0))
+            }
+            UnitSystem::Imperial if self.0 < 1_609_344 => {
+                format!("{}\u{a0}ft", decimal(self.as_feet(), 0))
+            }
+            _ => self.format_major(units, digits, decimal),
+        }
+    }
+
+    /// Keep kilometres or miles fixed for a shared scale.
+    #[must_use]
+    pub fn format_major(
+        self,
+        units: UnitSystem,
+        digits: usize,
+        decimal: impl Fn(f64, usize) -> String,
+    ) -> String {
+        let (value, symbol) = match units {
+            UnitSystem::Metric => (self.as_kilometres(), "km"),
+            UnitSystem::Imperial => (self.as_miles(), "mi"),
+        };
+        format!("{}\u{a0}{symbol}", decimal(value, digits))
+    }
+
+    #[must_use]
+    pub fn try_from_metres(metres: f64) -> Option<Self> {
+        rounded_measurement(metres * 1_000.0).map(Self)
+    }
+
+    #[must_use]
+    pub fn try_from_kilometres(kilometres: f64) -> Option<Self> {
+        Self::try_from_metres(kilometres * 1_000.0)
+    }
+
+    #[must_use]
+    pub fn try_from_miles(miles: f64) -> Option<Self> {
+        Self::try_from_metres(miles * 1_609.344)
+    }
+
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Floating conversion is for presentation and analysis"
+    )]
+    pub fn as_metres(self) -> f64 {
+        self.0 as f64 / 1_000.0
+    }
+
+    #[must_use]
+    pub fn as_kilometres(self) -> f64 {
+        self.as_metres() / 1_000.0
+    }
+
+    #[must_use]
+    pub fn as_miles(self) -> f64 {
+        self.as_metres() / 1_609.344
+    }
+
+    #[must_use]
+    pub const fn saturating_add(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+
     #[must_use]
     pub const fn from_millimeters(millimeters: u64) -> Self {
         Self(millimeters)
@@ -59,6 +209,20 @@ impl Distance {
     }
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Validate the rounded value before converting to the canonical integer"
+)]
+fn rounded_measurement(value: f64) -> Option<u64> {
+    let rounded = value.round();
+    if value >= 0.0 && rounded < 18_446_744_073_709_551_616.0 {
+        Some(rounded as u64)
+    } else {
+        None
+    }
+}
+
 impl fmt::Display for Distance {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}.{:03} m", self.0 / 1_000, self.0 % 1_000)
@@ -70,6 +234,56 @@ impl fmt::Display for Distance {
 pub struct Speed(u32);
 
 impl Speed {
+    #[must_use]
+    pub fn format(
+        self,
+        units: UnitSystem,
+        digits: usize,
+        decimal: impl Fn(f64, usize) -> String,
+    ) -> String {
+        let (value, symbol) = match units {
+            UnitSystem::Metric => (self.as_kilometres_per_hour(), "km/h"),
+            UnitSystem::Imperial => (self.as_miles_per_hour(), "mph"),
+        };
+        format!("{}\u{a0}{symbol}", decimal(value, digits))
+    }
+
+    #[must_use]
+    pub fn from_distance_and_duration(
+        distance: Distance,
+        duration: ActivityDuration,
+    ) -> Option<Self> {
+        let seconds = duration.as_seconds();
+        if seconds == 0.0 || distance.as_millimeters() == 0 {
+            return None;
+        }
+        let millimetres_per_second = rounded_measurement(distance.as_metres() * 1_000.0 / seconds)?;
+        u32::try_from(millimetres_per_second)
+            .ok()
+            .filter(|value| *value > 0)
+            .map(Self)
+    }
+
+    #[must_use]
+    pub fn as_metres_per_second(self) -> f64 {
+        f64::from(self.0) / 1_000.0
+    }
+
+    #[must_use]
+    pub fn as_kilometres_per_hour(self) -> f64 {
+        self.as_metres_per_second() * 3.6
+    }
+
+    #[must_use]
+    pub fn as_miles_per_hour(self) -> f64 {
+        self.as_metres_per_second() * 3600.0 / 1_609.344
+    }
+
+    #[must_use]
+    pub fn time_for(self, distance: Distance) -> Option<ActivityDuration> {
+        ActivityDuration::try_from_seconds(distance.as_metres() / self.as_metres_per_second())
+    }
+
     #[must_use]
     pub const fn from_millimeters_per_second(value: u32) -> Self {
         Self(value)
@@ -216,7 +430,7 @@ impl fmt::Display for Energy {
 }
 
 /// Temperature stored canonically in millidegrees Celsius.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[garmin_macros::portable(copy, ord, hash)]
 pub struct Temperature(i32);
 
 impl Temperature {
@@ -228,6 +442,16 @@ impl Temperature {
     #[must_use]
     pub const fn as_millicelsius(&self) -> i32 {
         self.0
+    }
+
+    #[must_use]
+    pub fn as_celsius(&self) -> f64 {
+        f64::from(self.0) / 1_000.0
+    }
+
+    #[must_use]
+    pub fn as_fahrenheit(&self) -> f64 {
+        self.as_celsius().mul_add(9.0 / 5.0, 32.0)
     }
 
     #[must_use]

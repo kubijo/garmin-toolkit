@@ -1,3 +1,4 @@
+use garmin_model::artifact::ByteCount;
 use std::collections::BTreeMap;
 
 /// Wire-protocol version shared by the browser map worker and its host.
@@ -17,11 +18,11 @@ pub enum BrowserWorkerTaskKind {
 impl BrowserWorkerTaskKind {
     /// Maximum serialized completion size, checked before copying into WASM memory.
     #[must_use]
-    pub const fn result_byte_limit(self) -> usize {
+    pub const fn result_byte_limit(self) -> ByteCount {
         match self {
             Self::Tile => super::BrowserTileLimits::upload_byte_limit(),
-            Self::Labels => 16 * 1024 * 1024,
-            Self::Route => 32 * 1024 * 1024,
+            Self::Labels => ByteCount::from_mebibytes(16),
+            Self::Route => ByteCount::from_mebibytes(32),
         }
     }
 

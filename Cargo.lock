@@ -1587,6 +1587,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 name = "datapackage"
 version = "0.1.0"
 dependencies = [
+ "byte-unit",
  "clap",
  "csv",
  "hex",
@@ -2585,6 +2586,7 @@ dependencies = [
 name = "garmin-capture"
 version = "0.1.6"
 dependencies = [
+ "garmin-model",
  "har",
  "serde",
  "serde_json",
@@ -2638,7 +2640,6 @@ name = "garmin-cli-tui"
 version = "0.1.6"
 dependencies = [
  "anyhow",
- "byte-unit",
  "crossterm",
  "garmin-device",
  "garmin-i18n",
@@ -2997,6 +2998,7 @@ dependencies = [
  "axum",
  "blake3",
  "futures-util",
+ "garmin-model",
  "reqwest",
  "serde",
  "serde_json",
@@ -3012,6 +3014,7 @@ name = "garmin-model"
 version = "0.1.6"
 dependencies = [
  "blake3",
+ "byte-unit",
  "garmin-color",
  "garmin-macros",
  "geo-types",
@@ -3031,6 +3034,7 @@ version = "0.1.6"
 dependencies = [
  "garmin-model",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3050,10 +3054,12 @@ dependencies = [
  "garmin-color",
  "garmin-macros",
  "garmin-model",
+ "jiff",
  "postcard",
  "remoc",
  "serde",
  "serde_json",
+ "tokio",
  "uuid",
 ]
 
@@ -3115,7 +3121,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
- "byte-unit",
  "clap",
  "comrak",
  "futures-util",
@@ -3169,7 +3174,6 @@ version = "0.1.6"
 dependencies = [
  "arc-swap",
  "buffa",
- "byte-unit",
  "bytemuck",
  "camino",
  "cint",
@@ -3212,7 +3216,6 @@ version = "0.1.6"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
- "byte-unit",
  "fs2",
  "futures-util",
  "garmin-capture",

@@ -1,5 +1,6 @@
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use garmin_i18n::format_message;
+use garmin_progress::ProgressAmount;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Style};
@@ -10,9 +11,9 @@ use ratatui::widgets::{
 
 use super::progress_state::{OperationView, ProgressModel};
 use super::{
-    ProgressInput, ProgressPhase, ProgressPresentation, decimal_bytes, history_prefix,
-    operation_line, operation_text, path_style, progress_metrics, render_progress_footer,
-    render_progress_gauge, selected_formatter, stage_name, stale_byte_progress, state_icon,
+    ProgressInput, ProgressPhase, ProgressPresentation, history_prefix, operation_line,
+    operation_text, path_style, progress_metrics, render_progress_footer, render_progress_gauge,
+    selected_formatter, stage_name, stale_byte_progress, state_icon,
 };
 const ACTIVE_MAX_HEIGHT: u16 = 10;
 
@@ -263,16 +264,23 @@ fn active_text(model: &ProgressModel, complete: bool) -> Text<'static> {
     let mut lines = Vec::new();
     for item in model.active() {
         let view = &item.view;
-        let progress = view.total.map_or_else(
-            || decimal_bytes(view.completed),
-            |total| {
-                format!(
-                    "{} / {}",
-                    decimal_bytes(view.completed),
-                    decimal_bytes(total)
-                )
-            },
-        );
+        let progress = match view.amount {
+            ProgressAmount::Bytes { completed, total } => {
+                let completed = completed.format_decimal(2);
+                match total {
+                    Some(total) => format!("{completed} / {}", total.format_decimal(2)),
+                    None => completed,
+                }
+            }
+            ProgressAmount::Operations {
+                completed,
+                total: Some(total),
+            } => format!("{completed} / {total}"),
+            ProgressAmount::Operations {
+                completed,
+                total: None,
+            } => completed.to_string(),
+        };
         let mut summary = vec![Span::raw(format!(
             "▸ {:<8}  {progress}",
             stage_name(item.stage)

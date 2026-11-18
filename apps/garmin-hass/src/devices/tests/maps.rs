@@ -1,5 +1,7 @@
 //! Connection lifetime and browser-write exclusion through the real host service.
 
+use garmin_model::artifact::ByteCount;
+use garmin_model::artifact::NonZeroByteRate;
 use std::{path::Path, time::Duration};
 
 use garmin_service_api::{
@@ -115,7 +117,7 @@ async fn assert_browser_writes_blocked(host: &Host, device: &Path) {
                 storage_id: DEMO_STORAGE_ID.into(),
                 directory: "Garmin".into(),
                 file_name: "blocked.bin".into(),
-                size: 1,
+                size: ByteCount::from_bytes(1),
             },
             receiver,
         ),
@@ -215,7 +217,7 @@ async fn paced_simulation_continues_progress_after_reconnect() {
     let host = Host::with_simulation_write_rate(
         demo_source(&directory),
         storage,
-        std::num::NonZeroU64::new(11_000_000),
+        NonZeroByteRate::try_from_bytes_per_second(11_000_000),
     );
     let (approval, running) = start_then_disconnect(&host, true).await;
     let before_disconnect = {

@@ -68,8 +68,8 @@ fn invalid_gpx_upload_phase_survives_postcard() {
     let reply = RouteReply::Upload(GpxUpload {
         operation: AcquisitionOperationId::new_v4(),
         file_name: "malformed.gpx".into(),
-        received: ByteCount::from_u64(17),
-        total: ByteCount::from_u64(17),
+        received: ByteCount::from_bytes(17),
+        total: ByteCount::from_bytes(17),
         phase: GpxUploadPhase::InvalidFile("missing GPX version".into()),
     });
     let bytes = postcard::to_stdvec(&reply).expect("encode upload status");

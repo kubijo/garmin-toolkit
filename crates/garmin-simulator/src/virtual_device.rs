@@ -7,12 +7,13 @@ use mtp_rs::{
 };
 
 use garmin_device::storage::{DeviceIoError, MtpStorageDevice};
+use garmin_model::artifact::{ByteCount, NonZeroByteRate};
 
 pub struct VirtualVolume {
     pub key: String,
     pub label: String,
     pub directory: PathBuf,
-    pub capacity: u64,
+    pub capacity: ByteCount,
     pub read_only: bool,
 }
 
@@ -47,7 +48,7 @@ impl VirtualDevice {
                 .into_iter()
                 .map(|volume| VirtualStorageConfig {
                     description: volume.label,
-                    capacity: volume.capacity,
+                    capacity: volume.capacity.as_bytes(),
                     backing_dir: volume.directory,
                     read_only: volume.read_only,
                 })
@@ -71,7 +72,7 @@ impl VirtualDevice {
     /// Pace uploads for this registration only;
     /// retained files are unchanged.
     #[must_use]
-    pub fn with_upload_rate(mut self, bytes_per_second: Option<std::num::NonZeroU64>) -> Self {
+    pub fn with_upload_rate(mut self, bytes_per_second: Option<NonZeroByteRate>) -> Self {
         self.device.set_upload_rate(bytes_per_second);
         self
     }

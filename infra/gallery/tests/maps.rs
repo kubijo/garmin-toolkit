@@ -4,7 +4,9 @@ use egui_kittest::{
     kittest::{By, NodeT as _, Queryable as _},
 };
 use garmin_i18n::{Language, Translations};
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::maps::{Action, CatalogService, Command, Phase, Plan, Recovery, State};
+use std::time::Duration;
 
 struct Model {
     state: State,
@@ -32,10 +34,10 @@ fn fixture() -> State {
             digest: "a".repeat(64),
             removal: false,
             components: vec!["TopoActive Europe".into()],
-            download_bytes: 100,
+            download_bytes: ByteCount::from_bytes(100),
             write_count: 1,
             remove_count: 1,
-            remove_bytes: 50,
+            remove_bytes: ByteCount::from_bytes(50),
             paths: vec!["Garmin/Maps/europe.img".into()],
             storage_requirements: Vec::new(),
         }),
@@ -108,9 +110,9 @@ fn map_disclosures_share_cursor_and_keyboard_expansion() {
             completed: 100,
             total: Some(100),
             bytes: true,
-            elapsed_ms: 1_000,
+            elapsed: Duration::from_millis(1_000),
             bytes_per_second: None,
-            remaining_seconds: None,
+            remaining: None,
             stalled: false,
             path: None,
             status: ProgressStatus::Completed,
@@ -184,7 +186,7 @@ fn narrow_catalog_has_unique_named_actions_and_dispatches_the_matching_component
             can_install: true,
             can_remove: true,
             choice: Choice::Keep,
-            download_bytes: 100,
+            download_bytes: ByteCount::from_bytes(100),
             cached_files: 0,
             total_files: 1,
         });

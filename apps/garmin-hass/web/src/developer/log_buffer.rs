@@ -1,7 +1,11 @@
 //! Bounded delivery state, independent of browser APIs and backend storage.
+use garmin_model::value::UnixMilliseconds;
 use std::collections::{BTreeMap, VecDeque};
 
-use garmin_model::logging::{Level, MAX_RECORD_BYTES, Record};
+use garmin_model::{
+    artifact::ByteCount,
+    logging::{Level, MAX_RECORD_BYTES, Record},
+};
 
 const CAPACITY: usize = 512;
 const BATCH_SIZE: usize = 128;
@@ -34,7 +38,7 @@ impl Buffer {
 
     pub fn record(
         &mut self,
-        timestamp_ms: u64,
+        timestamp_ms: UnixMilliseconds,
         level: Level,
         component: &str,
         source: &str,
@@ -62,7 +66,7 @@ impl Buffer {
         encoded_record.sequence = u64::MAX;
         encoded_record.source = format!("browser/{}", record.source.trim_start_matches("browser/"));
         if record.source_sequence == 0
-            || !matches!(serde_json::to_vec(&encoded_record), Ok(bytes) if bytes.len() <= MAX_RECORD_BYTES)
+            || !matches!(serde_json::to_vec(&encoded_record), Ok(bytes) if ByteCount::from_bytes(bytes.len() as u64) <= MAX_RECORD_BYTES)
         {
             self.rejected += 1;
             return;
@@ -75,7 +79,7 @@ impl Buffer {
         self.queue.push_back((self.next_id, record));
     }
 
-    pub fn pending(&mut self, timestamp_ms: u64) -> Batch {
+    pub fn pending(&mut self, timestamp_ms: UnixMilliseconds) -> Batch {
         if self.rejected > 0 {
             let count = std::mem::take(&mut self.rejected);
             let warning = self.record(

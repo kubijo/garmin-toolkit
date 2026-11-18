@@ -435,7 +435,7 @@ impl CourseRow {
             )
             .map_err(invalid)?,
             generated_at: self.generated_at.parse().map_err(invalid)?,
-            byte_count: ByteCount::from_u64(u64::try_from(self.byte_count).map_err(invalid)?),
+            byte_count: ByteCount::from_bytes(u64::try_from(self.byte_count).map_err(invalid)?),
             digest: decode_digest(self.digest)?,
         })
     }

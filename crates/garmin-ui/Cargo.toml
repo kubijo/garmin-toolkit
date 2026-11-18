@@ -19,7 +19,6 @@ uuid.workspace = true
 arc-swap.workspace = true
 bytemuck.workspace = true
 buffa.workspace = true
-byte-unit.workspace = true
 camino.workspace = true
 garmin-brand.workspace = true
 cint.workspace = true

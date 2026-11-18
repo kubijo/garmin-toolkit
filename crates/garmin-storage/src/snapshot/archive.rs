@@ -1,3 +1,5 @@
+use garmin_model::artifact::ByteCount;
+
 use super::{
     Error, File, Limits, MAX_MANIFEST, Manifest, NamedTempFile, Path, Read, Seek, WINDOW_LOG,
     Write, digest, io,
@@ -16,7 +18,7 @@ pub(super) fn encode(
     append(
         &mut archive,
         "manifest.json",
-        metadata.len() as u64,
+        ByteCount::from_bytes(metadata.len() as u64),
         metadata.as_slice(),
     )?;
     append(
@@ -32,14 +34,14 @@ pub(super) fn encode(
 fn append<W: Write>(
     archive: &mut tar::Builder<W>,
     name: &str,
-    size: u64,
+    size: ByteCount,
     input: impl Read,
 ) -> Result<(), Error> {
     // POSIX pax needs no extension records for these fixed names and bounded sizes.
     let mut header = tar::Header::new_ustar();
     header.set_entry_type(tar::EntryType::Regular);
     header.set_mode(0o600);
-    header.set_size(size);
+    header.set_size(size.as_bytes());
     header.set_cksum();
     archive.append_data(&mut header, name, input)?;
     Ok(())
@@ -81,13 +83,13 @@ pub(super) fn decode(
         .next()
         .ok_or(Error::Invalid("missing snapshot database"))??;
     validate_entry(&entry, b"storage.sqlite3", limits.database_bytes)?;
-    if entry.size() != manifest.database_bytes {
+    if ByteCount::from_bytes(entry.size()) != manifest.database_bytes {
         return Err(Error::Invalid(
             "snapshot database length does not match its manifest",
         ));
     }
     let mut database = NamedTempFile::new_in(staging)?;
-    if io::copy(&mut entry, &mut database)? != manifest.database_bytes {
+    if ByteCount::from_bytes(io::copy(&mut entry, &mut database)?) != manifest.database_bytes {
         return Err(Error::Invalid("truncated snapshot database"));
     }
     drop(entry);
@@ -105,21 +107,21 @@ pub(super) fn decode(
 fn validate_entry<R: Read>(
     entry: &tar::Entry<'_, R>,
     name: &[u8],
-    limit: u64,
+    limit: ByteCount,
 ) -> Result<(), Error> {
     if entry.header().as_ustar().is_none()
         || entry.header().entry_type() != tar::EntryType::Regular
         || entry.header().path_bytes().as_ref() != name
         || entry.header().link_name_bytes().is_some()
-        || entry.size() > limit
+        || ByteCount::from_bytes(entry.size()) > limit
     {
         return Err(Error::Invalid("invalid snapshot archive entry"));
     }
     Ok(())
 }
 
-fn bounded_copy(input: impl Read, output: &mut impl Write, limit: u64) -> Result<(), Error> {
-    if io::copy(&mut input.take(limit + 1), output)? > limit {
+fn bounded_copy(input: impl Read, output: &mut impl Write, limit: ByteCount) -> Result<(), Error> {
+    if ByteCount::from_bytes(io::copy(&mut input.take(limit.as_bytes() + 1), output)?) > limit {
         return Err(Error::Invalid("snapshot exceeds its size limit"));
     }
     Ok(())

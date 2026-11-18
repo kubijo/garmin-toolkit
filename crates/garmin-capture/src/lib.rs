@@ -1,5 +1,6 @@
 //! Lossless, fail-closed session evidence capture.
 
+use garmin_model::artifact::ByteCount;
 use har::v1_2 as har12;
 use har::{Har, Spec};
 use serde::{Deserialize, Serialize};
@@ -340,7 +341,7 @@ impl SessionCapture {
                         comment: Some(format!("Exact bytes: {request_body}")),
                     }),
                     headers_size: -1,
-                    body_size: har_size(body.len()),
+                    body_size: har_size(ByteCount::from_bytes(body.len() as u64)),
                     comment: Some(format!(
                         "Exact body: {request_body}; exact header bytes: {request_head}"
                     )),
@@ -539,7 +540,8 @@ impl HttpExchange {
     /// Body write or sync failure.
     pub async fn response_body(&self, bytes: &[u8]) -> Result<(), CaptureError> {
         write_bytes_at(&self.directory.join("response-body.bin"), bytes).await?;
-        self.complete_response_body(bytes.len()).await
+        self.complete_response_body(ByteCount::from_bytes(bytes.len() as u64))
+            .await
     }
 
     /// Retain a complete immutable response body from an existing file.
@@ -548,7 +550,7 @@ impl HttpExchange {
     pub async fn retain_response_body(
         &self,
         source: &Path,
-        bytes: usize,
+        bytes: ByteCount,
     ) -> Result<(), CaptureError> {
         self.capture
             .retain_http_body(&self.directory.join("response-body.bin"), source)
@@ -562,7 +564,7 @@ impl HttpExchange {
     pub async fn copy_response_body(
         &self,
         source: &Path,
-        bytes: usize,
+        bytes: ByteCount,
     ) -> Result<(), CaptureError> {
         self.capture
             .copy_http_body(&self.directory.join("response-body.bin"), source)
@@ -573,7 +575,7 @@ impl HttpExchange {
     /// Mark a separately streamed response body as complete in the HAR index.
     /// # Errors
     /// Missing exchange or HAR sync failure.
-    pub async fn complete_response_body(&self, bytes: usize) -> Result<(), CaptureError> {
+    pub async fn complete_response_body(&self, bytes: ByteCount) -> Result<(), CaptureError> {
         {
             let mut entries = self
                 .capture
@@ -670,8 +672,8 @@ fn header_value(headers: &[HttpHeader], name: &str) -> String {
         })
 }
 
-fn har_size(bytes: usize) -> i64 {
-    i64::try_from(bytes).unwrap_or(i64::MAX)
+fn har_size(bytes: ByteCount) -> i64 {
+    i64::try_from(bytes.as_bytes()).unwrap_or(i64::MAX)
 }
 
 async fn write_json_at(path: &Path, value: &impl Serialize) -> Result<(), CaptureError> {
@@ -862,7 +864,10 @@ mod tests {
             )
             .await
             .unwrap();
-        exchange.retain_response_body(&source, 13).await.unwrap();
+        exchange
+            .retain_response_body(&source, ByteCount::from_bytes(13))
+            .await
+            .unwrap();
         tokio::fs::remove_file(source).await.unwrap();
 
         assert_eq!(

@@ -1,8 +1,25 @@
 use super::*;
+use garmin_model::activity::Distance;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
 };
+
+#[test]
+fn legacy_measurements_decode_to_canonical_units_and_keep_wire_names() {
+    use garmin_model::garmin_connect::RemoteActivity;
+
+    let row = r#"{"id":7,"imported":false,"sport":null,"name":"Morning run","started_at":null,"distance_metres":1609.344,"duration_seconds":300.125}"#;
+    let activity: RemoteActivity = serde_json::from_str(row).expect("legacy summary");
+    assert_eq!(activity.distance, Distance::try_from_miles(1.0));
+    assert_eq!(
+        activity.duration.map(|value| value.as_milliseconds()),
+        Some(300_125)
+    );
+    let wire = serde_json::to_value(activity).expect("encode summary");
+    assert_eq!(wire["distance_metres"], 1609.344);
+    assert_eq!(wire["duration_seconds"], 300.125);
+}
 
 async fn server(responses: Vec<(u16, Vec<u8>)>) -> (Client, tokio::task::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -280,7 +297,10 @@ async fn activity_pages_use_bearer_auth_and_explicit_pagination() {
         activities[0].sport,
         Some(garmin_model::activity::ActivitySport::Cycling)
     );
-    assert_eq!(activities[0].distance_metres, Some(13230.0));
+    assert_eq!(
+        activities[0].distance.map(Distance::as_metres),
+        Some(13230.0)
+    );
     let requests = peer.await.unwrap();
     assert!(requests[2].starts_with("GET /activitylist-service/activities/search/activities?"));
     assert!(requests[2].contains("start=20"));

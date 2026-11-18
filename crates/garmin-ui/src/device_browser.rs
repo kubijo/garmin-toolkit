@@ -1,5 +1,6 @@
 //! Explorer window for files exposed by a connected device.
 
+use garmin_model::artifact::ByteCount;
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
@@ -123,7 +124,7 @@ pub struct Selection {
     pub storage_label: String,
     pub path: Utf8PathBuf,
     pub kind: DeviceCatalogEntryKind,
-    pub size: Option<u64>,
+    pub size: Option<ByteCount>,
 }
 
 impl Selection {
@@ -3205,7 +3206,7 @@ fn show_entry_location(ui: &mut Ui, selection: &Selection) {
         ui.add(egui::Label::new(RichText::new(&selection.storage_label).weak()).selectable(false));
         if let Some(size) = selection.size {
             ui.label(RichText::new("·").weak());
-            ui.label(RichText::new(format_bytes(size)).weak());
+            ui.label(RichText::new(size.format_binary()).weak());
         }
     });
 }
@@ -4016,14 +4017,14 @@ fn prepare_entry_cell(ui: &mut Ui) {
     ui.add_space(ENTRY_INLINE_PADDING);
 }
 
-fn show_table_size(ui: &mut Ui, bytes: Option<u64>) {
+fn show_table_size(ui: &mut Ui, bytes: Option<ByteCount>) {
     ui.spacing_mut().item_spacing.x = 0.0;
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         ui.add_space(ENTRY_INLINE_PADDING);
         let Some(bytes) = bytes else {
             return;
         };
-        let (value, unit) = format_byte_parts(bytes);
+        let (value, unit) = bytes.format_binary_parts();
         ui.allocate_ui_with_layout(
             egui::vec2(SIZE_UNIT_SLOT_WIDTH, ui.available_height()),
             Layout::left_to_right(Align::Center),
@@ -4087,7 +4088,7 @@ fn compare_entries(left: &DeviceCatalogEntry, right: &DeviceCatalogEntry) -> std
 
 fn populate_directory_sizes(catalog: &mut DeviceCatalogSnapshot) {
     for storage in &mut catalog.storages {
-        let mut sizes = HashMap::<Utf8PathBuf, Option<u64>>::new();
+        let mut sizes = HashMap::<Utf8PathBuf, Option<ByteCount>>::new();
         for entry in &storage.entries {
             if entry.kind != DeviceCatalogEntryKind::File {
                 continue;
@@ -4108,7 +4109,10 @@ fn populate_directory_sizes(catalog: &mut DeviceCatalogSnapshot) {
         }
         for entry in &mut storage.entries {
             if entry.kind == DeviceCatalogEntryKind::Directory {
-                entry.size = sizes.get(&entry.path).copied().unwrap_or(Some(0));
+                entry.size = sizes
+                    .get(&entry.path)
+                    .copied()
+                    .unwrap_or(Some(ByteCount::default()));
             }
         }
     }
@@ -4214,33 +4218,6 @@ fn file_name(path: &Utf8Path) -> &str {
     path.file_name().unwrap_or(path.as_str())
 }
 
-fn format_bytes(bytes: u64) -> String {
-    let (value, unit) = format_byte_parts(bytes);
-    format!("{value} {unit}")
-}
-
-fn format_byte_parts(bytes: u64) -> (String, &'static str) {
-    const KIB: u64 = 1024;
-    const MIB: u64 = KIB * 1024;
-    const GIB: u64 = MIB * 1024;
-    if bytes >= GIB {
-        (format_scaled_bytes(bytes, GIB), "GiB")
-    } else if bytes >= MIB {
-        (format_scaled_bytes(bytes, MIB), "MiB")
-    } else if bytes >= KIB {
-        (format_scaled_bytes(bytes, KIB), "KiB")
-    } else {
-        (bytes.to_string(), "B")
-    }
-}
-
-fn format_scaled_bytes(bytes: u64, unit_bytes: u64) -> String {
-    let tenths = (u128::from(bytes) * 10 + u128::from(unit_bytes) / 2) / u128::from(unit_bytes);
-    let whole = tenths / 10;
-    let fraction = tenths % 10;
-    format!("{whole}.{fraction}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4277,12 +4254,12 @@ mod tests {
                 DeviceCatalogEntry {
                     path: "Garmin/Courses/ccc".into(),
                     kind: DeviceCatalogEntryKind::Directory,
-                    size: Some(0),
+                    size: Some(ByteCount::from_bytes(0)),
                 },
                 DeviceCatalogEntry {
                     path: "Garmin/Courses/route.fit".into(),
                     kind: DeviceCatalogEntryKind::File,
-                    size: Some(42),
+                    size: Some(ByteCount::from_bytes(42)),
                 },
             ]),
             &intl,
@@ -4296,7 +4273,7 @@ mod tests {
             storage_label: "Internal storage".to_owned(),
             path: "Garmin/Courses/route.fit".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(42),
+            size: Some(ByteCount::from_bytes(42)),
         };
         browser.dragged = Some(DraggedEntries {
             selections: vec![selection.clone()],
@@ -4347,12 +4324,12 @@ mod tests {
                 DeviceCatalogEntry {
                     path: "Garmin/Courses/route.fit".into(),
                     kind: DeviceCatalogEntryKind::File,
-                    size: Some(42),
+                    size: Some(ByteCount::from_bytes(42)),
                 },
                 DeviceCatalogEntry {
                     path: "Garmin/Courses/ccc/route.fit".into(),
                     kind: DeviceCatalogEntryKind::File,
-                    size: Some(42),
+                    size: Some(ByteCount::from_bytes(42)),
                 },
             ]),
             &intl,
@@ -4367,7 +4344,7 @@ mod tests {
                 storage_label: "Internal storage".to_owned(),
                 path: "Garmin/Courses/ccc/route.fit".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(42),
+                size: Some(ByteCount::from_bytes(42)),
             }],
         });
         let parent = DirectoryId {
@@ -4441,7 +4418,7 @@ mod tests {
             .map(|path| DeviceCatalogEntry {
                 path: path.into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(1),
+                size: Some(ByteCount::from_bytes(1)),
             })
             .collect::<Vec<_>>();
         let mut browser = Browser::open(catalog(rows.clone()), &intl, "Mock device").unwrap();
@@ -4450,7 +4427,7 @@ mod tests {
             storage_label: "Internal storage".to_owned(),
             path: rows[index].path.clone(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(1),
+            size: Some(ByteCount::from_bytes(1)),
         };
         browser.select_entry(&rows, selected(0), SelectionIntent::Replace);
         browser.select_entry(&rows, selected(2), SelectionIntent::Range { add: false });
@@ -4534,7 +4511,7 @@ mod tests {
         let value = catalog(vec![DeviceCatalogEntry {
             path: "Garmin/../secrets".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(1),
+            size: Some(ByteCount::from_bytes(1)),
         }]);
         assert!(validate_catalog(&value).is_err());
     }
@@ -4544,7 +4521,7 @@ mod tests {
         let value = catalog(vec![DeviceCatalogEntry {
             path: "Garmin/Activity/ride.fit".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(1),
+            size: Some(ByteCount::from_bytes(1)),
         }]);
         assert!(validate_catalog(&value).is_err());
     }
@@ -4589,12 +4566,12 @@ mod tests {
             DeviceCatalogEntry {
                 path: "Garmin/Activities/2026/ride.fit".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(1_024),
+                size: Some(ByteCount::from_bytes(1_024)),
             },
             DeviceCatalogEntry {
                 path: "Garmin/Activities/summary.fit".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(512),
+                size: Some(ByteCount::from_bytes(512)),
             },
             DeviceCatalogEntry {
                 path: "Garmin/Empty".into(),
@@ -4612,11 +4589,20 @@ mod tests {
                 .find(|entry| entry.path == path)
                 .and_then(|entry| entry.size)
         };
-        assert_eq!(size("Garmin"), Some(1_536));
-        assert_eq!(size("Garmin/Activities"), Some(1_536));
-        assert_eq!(size("Garmin/Activities/2026"), Some(1_024));
-        assert_eq!(size("Garmin/Empty"), Some(0));
-        assert_eq!(size("Garmin/Activities/2026/ride.fit"), Some(1_024));
+        assert_eq!(size("Garmin"), Some(ByteCount::from_bytes(1_536)));
+        assert_eq!(
+            size("Garmin/Activities"),
+            Some(ByteCount::from_bytes(1_536))
+        );
+        assert_eq!(
+            size("Garmin/Activities/2026"),
+            Some(ByteCount::from_bytes(1_024))
+        );
+        assert_eq!(size("Garmin/Empty"), Some(ByteCount::from_bytes(0)));
+        assert_eq!(
+            size("Garmin/Activities/2026/ride.fit"),
+            Some(ByteCount::from_bytes(1_024))
+        );
     }
 
     #[test]
@@ -4640,12 +4626,12 @@ mod tests {
             DeviceCatalogEntry {
                 path: "Overflow/large.bin".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(u64::MAX),
+                size: Some(ByteCount::from_bytes(u64::MAX)),
             },
             DeviceCatalogEntry {
                 path: "Overflow/extra.bin".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(1),
+                size: Some(ByteCount::from_bytes(1)),
             },
         ]);
 
@@ -4824,7 +4810,7 @@ mod tests {
                 DeviceCatalogEntry {
                     path: "Garmin/file.bin".into(),
                     kind: DeviceCatalogEntryKind::File,
-                    size: Some(size),
+                    size: Some(ByteCount::from_bytes(size)),
                 },
             ])
         };
@@ -4835,7 +4821,7 @@ mod tests {
             storage_label: "Internal storage".to_owned(),
             path: "Garmin".into(),
             kind: DeviceCatalogEntryKind::Directory,
-            size: Some(1),
+            size: Some(ByteCount::from_bytes(1)),
         });
 
         browser
@@ -4847,7 +4833,7 @@ mod tests {
                 .selected
                 .as_ref()
                 .and_then(|selection| selection.size),
-            Some(2)
+            Some(ByteCount::from_bytes(2))
         );
     }
 
@@ -4900,7 +4886,7 @@ mod tests {
             storage_label: "Internal storage".to_owned(),
             path: "Garmin/Activity/RIDE.FIT".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(1),
+            size: Some(ByteCount::from_bytes(1)),
         };
         assert!(selection.is_fit_file());
     }
@@ -4969,7 +4955,7 @@ mod tests {
             storage_label: "Internal storage".to_owned(),
             path: "Garmin/Courses/route.fit".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(42),
+            size: Some(ByteCount::from_bytes(42)),
         };
         assert_eq!(
             browser.handle_item_action(ItemAction::Rename, selection.clone()),
@@ -4994,7 +4980,7 @@ mod tests {
             storage_label: "Internal storage".to_owned(),
             path: "Garmin/Activity/ride.fit".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(42),
+            size: Some(ByteCount::from_bytes(42)),
         };
 
         assert_eq!(activated_item_action(&selection), Some(ItemAction::Open));
@@ -5262,10 +5248,10 @@ mod tests {
 
     #[test]
     fn formats_binary_file_sizes_without_lossy_float_casts() {
-        assert_eq!(format_bytes(1023), "1023 B");
-        assert_eq!(format_bytes(1024), "1.0 KiB");
-        assert_eq!(format_bytes(1536), "1.5 KiB");
-        assert_eq!(format_bytes(1024 * 1024), "1.0 MiB");
+        assert_eq!(ByteCount::from_bytes(1023).format_binary(), "1023 B");
+        assert_eq!(ByteCount::from_kibibytes(1).format_binary(), "1.0 KiB");
+        assert_eq!(ByteCount::from_bytes(1536).format_binary(), "1.5 KiB");
+        assert_eq!(ByteCount::from_mebibytes(1).format_binary(), "1.0 MiB");
     }
 
     #[test]
@@ -5312,12 +5298,12 @@ mod tests {
                     DeviceCatalogEntry {
                         path: "a.fit".into(),
                         kind: DeviceCatalogEntryKind::File,
-                        size: Some(1),
+                        size: Some(ByteCount::from_bytes(1)),
                     },
                     DeviceCatalogEntry {
                         path: "b.fit".into(),
                         kind: DeviceCatalogEntryKind::File,
-                        size: Some(1),
+                        size: Some(ByteCount::from_bytes(1)),
                     },
                 ]),
                 &intl,
@@ -5329,7 +5315,7 @@ mod tests {
                 storage_label: "Internal storage".into(),
                 path: "a.fit".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(1),
+                size: Some(ByteCount::from_bytes(1)),
             });
             let context = egui::Context::default();
             crate::install(&context);

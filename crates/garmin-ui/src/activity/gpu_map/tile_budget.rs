@@ -1,32 +1,33 @@
 use egui::Shape;
 use fast_mvt::{MvtFeatureRef, MvtReaderRef, MvtValueRef};
+use garmin_model::artifact::ByteCount;
 use geo_types::{CoordNum, Geometry};
 
 use super::{BrowserTextRecord, Vertex};
 
 /// Resource policy shared by browser tile preparation and admission.
 pub struct BrowserTileLimits {
-    encoded_bytes: usize,
-    pub(super) upload_bytes: usize,
-    pub(super) text_bytes: usize,
-    pub(super) prepared_bytes: usize,
+    encoded_bytes: ByteCount,
+    pub(super) upload_bytes: ByteCount,
+    pub(super) text_bytes: ByteCount,
+    pub(super) prepared_bytes: ByteCount,
     points: usize,
     pub(super) path_points: usize,
     polygon_points: usize,
     features: usize,
     layers: usize,
-    metadata_bytes: usize,
+    metadata_bytes: ByteCount,
     properties: usize,
-    property_bytes: usize,
+    property_bytes: ByteCount,
 }
 
 impl BrowserTileLimits {
     // Real city overviews exceed 64K input points and 8 MiB after antialiasing; see map fixtures.
     pub(super) const BROWSER: Self = Self {
-        encoded_bytes: 2 * 1024 * 1024,
-        upload_bytes: 16 * 1024 * 1024,
-        text_bytes: 4 * 1024,
-        prepared_bytes: 8 * 1024 * 1024,
+        encoded_bytes: ByteCount::from_mebibytes(2),
+        upload_bytes: ByteCount::from_mebibytes(16),
+        text_bytes: ByteCount::from_kibibytes(4),
+        prepared_bytes: ByteCount::from_mebibytes(8),
         points: 131_072,
         path_points: 4_096,
         polygon_points: 8_192,
@@ -35,31 +36,31 @@ impl BrowserTileLimits {
         layers: 64,
         // Low-zoom multilingual dictionaries need ~4 MiB of borrowed protobuf structs.
         // This bounds codec element storage, not encoded strings or styled output.
-        metadata_bytes: 8 * 1024 * 1024,
+        metadata_bytes: ByteCount::from_mebibytes(8),
         // The Asia overview has 68,387 references to its multilingual value dictionary.
         properties: 131_072,
-        property_bytes: 8 * 1024 * 1024,
+        property_bytes: ByteCount::from_mebibytes(8),
     };
 
     /// Reject an oversized fetch before copying its bytes into WASM.
     ///
     /// # Errors
     /// Returns an error when the encoded tile exceeds the browser input limit.
-    pub fn check_encoded_bytes(bytes: usize) -> Result<(), String> {
+    pub fn check_encoded_bytes(bytes: ByteCount) -> Result<(), String> {
         if bytes > Self::BROWSER.encoded_bytes {
             return Err("map tile exceeded the 2 MiB browser limit".to_owned());
         }
         Ok(())
     }
 
-    pub(super) fn check_upload(bytes: usize) -> Result<(), String> {
+    pub(super) fn check_upload(bytes: ByteCount) -> Result<(), String> {
         if bytes > Self::BROWSER.upload_bytes {
             return Err("prepared map tile exceeded the 16 MiB upload limit".to_owned());
         }
         Ok(())
     }
 
-    pub(super) fn check_text(bytes: usize) -> Result<(), String> {
+    pub(super) fn check_text(bytes: ByteCount) -> Result<(), String> {
         if bytes > Self::BROWSER.text_bytes {
             return Err("browser tile text exceeded the 4 KiB limit".to_owned());
         }
@@ -67,12 +68,18 @@ impl BrowserTileLimits {
     }
 
     pub(in crate::activity) fn read(bytes: &[u8]) -> Result<MvtReaderRef<'_>, String> {
-        Self::check_encoded_bytes(bytes.len())?;
+        Self::check_encoded_bytes(ByteCount::from_bytes(bytes.len() as u64))?;
         let reader = MvtReaderRef::with_decode_options(
             bytes,
             &buffa::DecodeOptions::new()
-                .with_max_message_size(Self::BROWSER.encoded_bytes)
-                .with_element_memory_limit(Self::BROWSER.metadata_bytes),
+                .with_max_message_size(
+                    usize::try_from(Self::BROWSER.encoded_bytes.as_bytes())
+                        .expect("encoded tile limit fits usize"),
+                )
+                .with_element_memory_limit(
+                    usize::try_from(Self::BROWSER.metadata_bytes.as_bytes())
+                        .expect("tile metadata limit fits usize"),
+                ),
         )
         .map_err(|error| error.to_string())?;
         let features = reader.layers().try_fold(0usize, |count, layer| {
@@ -86,7 +93,7 @@ impl BrowserTileLimits {
         Ok(reader)
     }
 
-    pub(in crate::activity) const fn upload_byte_limit() -> usize {
+    pub(in crate::activity) const fn upload_byte_limit() -> ByteCount {
         Self::BROWSER.upload_bytes
     }
 }
@@ -95,7 +102,7 @@ impl BrowserTileLimits {
 pub(in crate::activity) struct TileDecodeBudget {
     points: usize,
     command_words: usize,
-    property_bytes: usize,
+    property_bytes: ByteCount,
     properties: usize,
 }
 
@@ -114,7 +121,7 @@ impl TileDecodeBudget {
             let (key, value) = property.map_err(|error| error.to_string())?;
             let bytes = match value {
                 MvtValueRef::String(value) => {
-                    BrowserTileLimits::check_text(value.len())?;
+                    BrowserTileLimits::check_text(ByteCount::from_bytes(value.len() as u64))?;
                     value.len()
                 }
                 _ => std::mem::size_of::<MvtValueRef<'_>>(),
@@ -122,8 +129,8 @@ impl TileDecodeBudget {
             self.properties = self.properties.saturating_add(1);
             self.property_bytes = self
                 .property_bytes
-                .saturating_add(key.len())
-                .saturating_add(bytes);
+                .saturating_add(ByteCount::from_bytes(key.len() as u64))
+                .saturating_add(ByteCount::from_bytes(bytes as u64));
             if self.properties > BrowserTileLimits::BROWSER.properties
                 || self.property_bytes > BrowserTileLimits::BROWSER.property_bytes
             {
@@ -185,9 +192,9 @@ impl TileDecodeBudget {
 /// Byte accounting for styled geometry and final GPU output.
 #[derive(Default)]
 pub(in crate::activity) struct TileBudget {
-    prepared: usize,
-    text: usize,
-    mesh: usize,
+    prepared: ByteCount,
+    text: ByteCount,
+    mesh: ByteCount,
 }
 
 impl TileBudget {
@@ -221,8 +228,8 @@ impl TileBudget {
             };
             self.prepared = self
                 .prepared
-                .saturating_add(std::mem::size_of::<Shape>())
-                .saturating_add(heap_bytes);
+                .saturating_add(ByteCount::from_bytes(std::mem::size_of::<Shape>() as u64))
+                .saturating_add(ByteCount::from_bytes(heap_bytes as u64));
             self.check_prepared()?;
         }
         Ok(())
@@ -235,20 +242,20 @@ impl TileBudget {
         Ok(())
     }
 
-    pub(in crate::activity) fn text(&mut self, bytes: usize) -> Result<(), String> {
+    pub(in crate::activity) fn text(&mut self, bytes: ByteCount) -> Result<(), String> {
         self.repeated_text(bytes, 1)
     }
 
     pub(in crate::activity) fn repeated_text(
         &mut self,
-        bytes: usize,
+        bytes: ByteCount,
         count: usize,
     ) -> Result<(), String> {
         BrowserTileLimits::check_text(bytes)?;
         self.text = self.text.saturating_add(
-            std::mem::size_of::<BrowserTextRecord>()
+            ByteCount::from_bytes(std::mem::size_of::<BrowserTextRecord>() as u64)
                 .saturating_add(bytes)
-                .saturating_mul(count),
+                .saturating_mul(u32::try_from(count).unwrap_or(u32::MAX)),
         );
         self.check_prepared()?;
         BrowserTileLimits::check_upload(self.text.saturating_add(self.mesh))
@@ -259,15 +266,17 @@ impl TileBudget {
     }
 }
 
-fn mesh_bytes(mesh: &egui::Mesh) -> usize {
-    mesh.vertices
-        .len()
-        .saturating_mul(std::mem::size_of::<Vertex>())
-        .saturating_add(
-            mesh.indices
-                .len()
-                .saturating_mul(std::mem::size_of::<u32>()),
-        )
+fn mesh_bytes(mesh: &egui::Mesh) -> ByteCount {
+    ByteCount::from_bytes(
+        mesh.vertices
+            .len()
+            .saturating_mul(std::mem::size_of::<Vertex>())
+            .saturating_add(
+                mesh.indices
+                    .len()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            ) as u64,
+    )
 }
 
 #[cfg(test)]
@@ -308,7 +317,9 @@ mod tests {
         );
         let path_bytes = std::mem::size_of::<Shape>() + 1024 * std::mem::size_of::<egui::Pos2>();
         let mut budget = TileBudget::default();
-        for _ in 0..BrowserTileLimits::BROWSER.prepared_bytes / path_bytes {
+        for _ in 0..usize::try_from(BrowserTileLimits::BROWSER.prepared_bytes.as_bytes()).unwrap()
+            / path_bytes
+        {
             budget.shapes(std::slice::from_ref(&path)).unwrap();
         }
         assert_eq!(
@@ -326,10 +337,17 @@ mod tests {
         };
         let mut budget = TileBudget::default();
         budget.shapes(&[Shape::mesh(mesh)]).unwrap();
-        assert!(budget.repeated_text(4096, 2048).is_err());
+        assert!(
+            budget
+                .repeated_text(ByteCount::from_kibibytes(4), 2048)
+                .is_err()
+        );
         let mesh = egui::Mesh {
             vertices: vec![egui::epaint::Vertex::default(); 3],
-            indices: [0, 1, 2].repeat(BrowserTileLimits::BROWSER.upload_bytes / 12 + 1),
+            indices: [0, 1, 2].repeat(
+                usize::try_from(BrowserTileLimits::BROWSER.upload_bytes.as_bytes()).unwrap() / 12
+                    + 1,
+            ),
             ..Default::default()
         };
         assert!(TileBudget::default().shapes(&[Shape::mesh(mesh)]).is_err());
@@ -350,7 +368,10 @@ mod tests {
         assert!(
             BrowserTileLimits::read(&bytes.repeat(BrowserTileLimits::BROWSER.layers + 1)).is_err()
         );
-        assert!(BrowserTileLimits::check_encoded_bytes(2 * 1024 * 1024 + 1).is_err());
+        assert!(
+            BrowserTileLimits::check_encoded_bytes(ByteCount::from_bytes(2 * 1024 * 1024 + 1))
+                .is_err()
+        );
         let line = Geometry::LineString(geo_types::LineString::from(vec![
             (0.0, 0.0);
             BrowserTileLimits::BROWSER.path_points
@@ -368,7 +389,7 @@ mod tests {
     fn browser_producer_checks_total_output_before_transfer_allocation() {
         let mut budget = TileBudget::default();
         for _ in 0..2_048 {
-            if budget.text(4096).is_err() {
+            if budget.text(ByteCount::from_kibibytes(4)).is_err() {
                 return;
             }
         }

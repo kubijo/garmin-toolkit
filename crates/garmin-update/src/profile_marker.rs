@@ -1,5 +1,6 @@
 //! Portable, consent-gated profile association in the device-state directory.
 
+use garmin_model::artifact::ByteCount;
 use std::str::FromStr as _;
 
 use garmin_device::storage::{DeviceIoError, DeviceRead, DeviceWrite};
@@ -12,7 +13,7 @@ use uuid::Uuid;
 use crate::device_state::{DEVICE_STATE_MAGIC, DEVICE_STATE_VERSION, NAMESPACE};
 
 pub const PROFILE_MARKER_PATH: &str = "GARMIN-TOOLKIT/pairing.toml";
-const PROFILE_MARKER_LIMIT: u64 = 16 * 1024;
+const PROFILE_MARKER_LIMIT: ByteCount = ByteCount::from_kibibytes(16);
 const MAX_REVISIONS: u32 = 64;
 const KIND: &str = "pairing";
 
@@ -61,7 +62,9 @@ impl ProfileMarker {
     /// # Errors
     /// Malformed, oversized, or unsupported documents are rejected.
     pub fn parse(bytes: &[u8]) -> Result<Self, ProfileMarkerError> {
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > PROFILE_MARKER_LIMIT {
+        if ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+            > PROFILE_MARKER_LIMIT
+        {
             return Err(ProfileMarkerError::TooLarge);
         }
         let text = std::str::from_utf8(bytes).map_err(|_| ProfileMarkerError::Invalid)?;
@@ -163,7 +166,9 @@ impl ProfileMarker {
     /// The document must fit the marker limit.
     pub fn bytes(&self) -> Result<Vec<u8>, ProfileMarkerError> {
         let bytes = self.document.to_string().into_bytes();
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > PROFILE_MARKER_LIMIT {
+        if ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+            > PROFILE_MARKER_LIMIT
+        {
             return Err(ProfileMarkerError::TooLarge);
         }
         Ok(bytes)

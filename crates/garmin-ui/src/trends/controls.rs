@@ -9,6 +9,7 @@ use garmin_model::garmin_connect::{
     sync::Outcome,
     trends::{Period, Range},
 };
+use garmin_model::identity::MonthlyDistanceTarget;
 use jiff::civil::Date;
 
 pub(super) fn button(
@@ -359,9 +360,10 @@ pub(super) fn targets_dialog(ui: &mut Ui, state: &mut State, props: &Props<'_>) 
                 |ui| {
                     ui.spacing_mut().item_spacing.y = 16.0;
                     for (index, value) in draft.iter_mut().enumerate() {
+                        let mut kilometres = value.as_kilometres();
                         let response = input::show_number(
                             ui,
-                            value,
+                            &mut kilometres,
                             input::NumberProps::new(&super::sport_label(
                                 props.intl,
                                 super::Sport::ALL[index],
@@ -371,6 +373,7 @@ pub(super) fn targets_dialog(ui: &mut Ui, state: &mut State, props: &Props<'_>) 
                             .step(1)
                             .disabled(!props.enabled),
                         );
+                        *value = MonthlyDistanceTarget::from_kilometres(kilometres);
                         crate::semantics::target(
                             ui,
                             &response,

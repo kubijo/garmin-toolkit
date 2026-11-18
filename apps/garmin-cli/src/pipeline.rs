@@ -6,11 +6,13 @@ use garmin_device::{
     storage::{DeviceLink, DeviceProbeRequest, DirectoryDevice},
 };
 use garmin_map_service::GARMIN_EXPRESS_USER_AGENT;
+use garmin_model::artifact::{ByteCount, ByteRate};
 use garmin_model::map::MapCatalog;
+use garmin_model::value::duration_seconds;
 use garmin_progress::{OperationStage, ProgressReporter};
 use garmin_services::maps::GarminDownloadAuthorizer;
 use garmin_update::{DownloadSpec, Downloader, space::StorageSpaceRequirement};
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use std::time::{Duration, Instant};
 use std::{path::PathBuf, sync::Arc};
 use url::Url;
@@ -21,16 +23,64 @@ pub struct PipelineReport {
     pub device: DeviceSummary,
     pub map_name: String,
     pub destination: PathBuf,
-    pub bytes: u64,
-    pub inspect_seconds: f64,
-    pub query_seconds: f64,
-    pub planning_seconds: f64,
-    pub download_seconds: f64,
-    pub download_bytes_per_second: f64,
+    pub bytes: ByteCount,
+    #[serde(
+        rename = "inspect_seconds",
+        serialize_with = "duration_seconds::serialize"
+    )]
+    pub inspect_elapsed: Duration,
+    #[serde(
+        rename = "query_seconds",
+        serialize_with = "duration_seconds::serialize"
+    )]
+    pub query_elapsed: Duration,
+    #[serde(
+        rename = "planning_seconds",
+        serialize_with = "duration_seconds::serialize"
+    )]
+    pub planning_elapsed: Duration,
+    #[serde(
+        rename = "download_seconds",
+        serialize_with = "duration_seconds::serialize"
+    )]
+    pub download_elapsed: Duration,
+    #[serde(rename = "download_bytes_per_second")]
+    pub download_rate: DownloadRate,
     pub md5_verified: bool,
     pub device_probe: DeviceProbeReport,
-    pub total_seconds: f64,
+    #[serde(
+        rename = "total_seconds",
+        serialize_with = "duration_seconds::serialize"
+    )]
+    pub total_elapsed: Duration,
     pub host_staging_removed: bool,
+}
+
+#[derive(Debug)]
+pub struct DownloadRate {
+    bytes: ByteCount,
+    elapsed: Duration,
+}
+
+impl DownloadRate {
+    pub fn display(&self) -> String {
+        ByteRate::from_transfer(self.bytes, self.elapsed).format_decimal(2)
+    }
+}
+
+impl Serialize for DownloadRate {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "the JSON benchmark rate is approximate"
+    )]
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let rate = if self.elapsed.is_zero() {
+            0.0
+        } else {
+            self.bytes.as_bytes() as f64 / self.elapsed.as_secs_f64()
+        };
+        serializer.serialize_f64(rate)
+    }
 }
 
 pub async fn run(
@@ -113,14 +163,17 @@ pub async fn run(
         map_name: selected.map_name.clone(),
         destination: selected.destination.as_path().to_owned(),
         bytes: selected.size,
-        inspect_seconds: inspect_elapsed.as_secs_f64(),
-        query_seconds: query_elapsed.as_secs_f64(),
-        planning_seconds: planning_elapsed.as_secs_f64(),
-        download_seconds: transfer.download_elapsed.as_secs_f64(),
-        download_bytes_per_second: bytes_per_second(selected.size, transfer.download_elapsed),
+        inspect_elapsed,
+        query_elapsed,
+        planning_elapsed,
+        download_elapsed: transfer.download_elapsed,
+        download_rate: DownloadRate {
+            bytes: selected.size,
+            elapsed: transfer.download_elapsed,
+        },
         md5_verified: true,
         device_probe: transfer.device_probe,
-        total_seconds: total_started.elapsed().as_secs_f64(),
+        total_elapsed: total_started.elapsed(),
         host_staging_removed,
     };
     if let Some(capture) = &capture {
@@ -172,7 +225,7 @@ fn select_probe_plan(
         let Some((download_index, download)) = matching_download(&plan.downloads, filter) else {
             continue;
         };
-        let download_size = download.size;
+        let download_size = download.size.as_bytes();
         if selected
             .as_ref()
             .is_none_or(|(_, _, selected_size)| download_size > *selected_size)
@@ -293,7 +346,7 @@ pub(crate) async fn probe_device_link(
             &capacity.state,
             &[StorageSpaceRequirement {
                 storage_id: capacity.storage_id,
-                required_free_bytes: required,
+                required_free_bytes: ByteCount::from_bytes(required),
             }],
         )?;
     }
@@ -325,7 +378,7 @@ pub(crate) async fn probe_raw_mtp_session(
         &capacity.state,
         &[StorageSpaceRequirement {
             storage_id: capacity.storage_id,
-            required_free_bytes: required,
+            required_free_bytes: ByteCount::from_bytes(required),
         }],
     )?;
     Ok(session
@@ -384,23 +437,12 @@ fn matching_download<'a>(
         .max_by_key(|(_, download)| download.size)
 }
 
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "an approximate transfer rate is intentionally represented as f64"
-)]
-fn bytes_per_second(bytes: u64, elapsed: Duration) -> f64 {
-    if elapsed.is_zero() {
-        0.0
-    } else {
-        bytes as f64 / elapsed.as_secs_f64()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{matching_download, select_probe_plan};
     use crate::MapService;
     use garmin_device::SafeRelativePath;
+    use garmin_model::artifact::ByteCount;
     use garmin_model::map::{MapCatalog, MapComponent, MapContent, MapDownload, MapInstallOption};
     use garmin_update::DownloadSpec;
     use url::Url;
@@ -413,7 +455,7 @@ mod tests {
             requires_garmin_token: false,
             destination: SafeRelativePath::parse(destination).unwrap(),
             cache_name: "cache".to_owned(),
-            size,
+            size: ByteCount::from_bytes(size),
             md5: String::new(),
         }
     }
@@ -424,7 +466,14 @@ mod tests {
             download("Small map", "Garmin/small.img", 10),
             download("Large map", "Garmin/large.img", 20),
         ];
-        assert_eq!(matching_download(&downloads, None).unwrap().1.size, 20);
+        assert_eq!(
+            matching_download(&downloads, None)
+                .unwrap()
+                .1
+                .size
+                .as_bytes(),
+            20
+        );
     }
 
     #[test]
@@ -460,7 +509,7 @@ mod tests {
                         file_name: "Garmin/shared.img".to_owned(),
                         downloads: vec![MapDownload {
                             md5: "00".repeat(16),
-                            size_in_bytes: 10,
+                            size_in_bytes: ByteCount::from_bytes(10),
                             delivery_type: Some("Full".to_owned()),
                             url: "https://download.garmin.com/shared.img".to_owned(),
                         }],

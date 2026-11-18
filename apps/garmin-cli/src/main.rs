@@ -5,7 +5,7 @@ mod pending_recovery;
 mod pipeline;
 
 use anyhow::{Context, Result, bail};
-use byte_unit::{Byte, UnitType};
+use byte_unit::Byte;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use crossterm::style::{Color as AnsiColor, Stylize as _};
 use garmin_capture::SessionCapture;
@@ -20,7 +20,10 @@ use garmin_device::{
 };
 use garmin_i18n::Language;
 use garmin_map_service::OmtClient;
-use garmin_model::map::{MapCatalog, MapComponent, MapVersionStatus};
+use garmin_model::{
+    artifact::ByteCount,
+    map::{MapCatalog, MapComponent, MapVersionStatus},
+};
 use garmin_progress::ProgressReporter;
 use garmin_services::maps::{
     GarminDownloadAuthorizer, PhysicalTarget, RecoveryExecution, RemovalPlanReport,
@@ -356,7 +359,7 @@ struct BenchmarkLinkArgs {
     target: OptionalTargetArgs,
     /// Payload size, such as 500MB or 2GB.
     #[arg(long, default_value = "256MB", value_parser = parse_byte_size)]
-    size: Byte,
+    size: ByteCount,
     #[command(flatten)]
     write_consent: DeviceWriteConsent,
 }
@@ -1375,10 +1378,10 @@ fn space_failure_presentation(
             FailureField::new("Storage", label, FailureValueTone::Neutral),
             FailureField::new(
                 "Required",
-                format_bytes(*required),
+                required.format_decimal(2),
                 FailureValueTone::Neutral,
             ),
-            FailureField::new("Free", format_bytes(*available), FailureValueTone::Error),
+            FailureField::new("Free", available.format_decimal(2), FailureValueTone::Error),
         ]
     } else {
         vec![FailureField::new(
@@ -1729,16 +1732,8 @@ fn pipeline_failure_presentation(error: &anyhow::Error, capture: &str) -> Failur
                 "Device verification failed",
                 "The disposable device copy has an unexpected size.",
                 vec![
-                    FailureField::new(
-                        "Expected",
-                        format!("{expected} bytes"),
-                        FailureValueTone::Neutral,
-                    ),
-                    FailureField::new(
-                        "Received",
-                        format!("{actual} bytes"),
-                        FailureValueTone::Error,
-                    ),
+                    FailureField::new("Expected", expected.to_string(), FailureValueTone::Neutral),
+                    FailureField::new("Received", actual.to_string(), FailureValueTone::Error),
                 ],
             ),
             Some(MountedMtpProbeFailure::Checksum) => (
@@ -2668,7 +2663,7 @@ async fn execute_removal_report(
         &report.execution_plan.digest,
         removed_components.join(", "),
         report.execution_plan.files_to_remove.len(),
-        format_bytes(report.execution_plan.bytes_to_remove),
+        report.execution_plan.bytes_to_remove.format_decimal(2),
         capture.root().display().to_string(),
     );
     authorize_device_write_details(
@@ -2730,7 +2725,11 @@ fn print_removal_apply_report(
             "{} {} totaling {}; verified backups remain in {}.",
             palette.paint("Removed", AnsiColor::Green, true),
             palette.paint(file_count(report.files_removed), AnsiColor::White, true),
-            palette.paint(format_bytes(report.bytes_removed), AnsiColor::White, true),
+            palette.paint(
+                report.bytes_removed.format_decimal(2),
+                AnsiColor::White,
+                true
+            ),
             palette.paint(report.backup_directory.display(), AnsiColor::Cyan, false)
         );
     }
@@ -2841,7 +2840,7 @@ fn authorize_selected_update(
                     &selection.components,
                     &selection.plan.digest,
                     selection.plan.downloads.len(),
-                    format_bytes(selection.plan.total_bytes),
+                    selection.plan.total_bytes.format_decimal(2),
                     selection.plan.files_to_remove.len(),
                     capture.root().display().to_string(),
                 )
@@ -2951,8 +2950,8 @@ fn print_apply_report(
     println!(
         "wrote {} files ({}) at {}; removed {}; wrote {} unlocks",
         report.files_written,
-        format_bytes(report.bytes_written),
-        format_rate(report.bytes_per_second()),
+        report.bytes_written.format_decimal(2),
+        report.rate().format_decimal(2),
         report.files_removed,
         report.unlocks_written
     );
@@ -2980,11 +2979,11 @@ fn captured_progress(capture: SessionCapture, downstream: &ProgressReporter) -> 
             scope = ?event.scope,
             stage = ?event.stage,
             state = ?event.state,
-            unit = ?event.unit,
+            unit = ?event.amount.unit(),
             label = %event.label,
             path = ?event.path,
-            completed = event.completed,
-            total = ?event.total,
+            completed = event.amount.completed(),
+            total = ?event.amount.total(),
             "pipeline progress"
         );
         let _ = capture.append_event(event);
@@ -3021,7 +3020,6 @@ async fn benchmark_link(
         LINK_BENCHMARK_WARNING,
         session.as_mut(),
     )?;
-    let bytes = args.size.as_u64();
     let staging = cache_dir()?.join("link-probes");
     tokio::fs::create_dir_all(&staging).await?;
     let source = staging.join(format!("{}.bin", uuid::Uuid::new_v4()));
@@ -3030,7 +3028,7 @@ async fn benchmark_link(
         .write(true)
         .open(&source)
         .await?;
-    file.set_len(bytes).await?;
+    file.set_len(args.size.as_bytes()).await?;
     drop(file);
     let device_identity = manifest.identity_digest();
     let recovery_root = cache_dir()?.join("link-probes").join("pending");
@@ -3109,13 +3107,13 @@ fn print_link_benchmark(report: &DeviceProbeReport) {
     println!("Device link benchmark");
     println!(
         "  Upload       {} ({} in {:.2}s)",
-        format_rate(report.upload_bytes_per_second()),
-        format_bytes(report.bytes),
-        report.upload_seconds
+        report.upload_rate().format_decimal(2),
+        report.bytes.format_decimal(2),
+        report.upload_elapsed.as_secs_f64()
     );
     println!(
         "  Finalize     {:.2}s ({})",
-        report.device_finalize_seconds,
+        report.device_finalize_elapsed.as_secs_f64(),
         match report.upload_completion {
             garmin_device::UploadCompletion::Acknowledged => "device acknowledged",
             garmin_device::UploadCompletion::ReconciledAfterTimeout => {
@@ -3125,13 +3123,13 @@ fn print_link_benchmark(report: &DeviceProbeReport) {
     );
     println!(
         "  Read back    {} ({} in {:.2}s; SHA-256 verified)",
-        format_rate(report.read_back_bytes_per_second()),
-        format_bytes(report.bytes),
-        report.read_back_seconds
+        report.read_back_rate().format_decimal(2),
+        report.bytes.format_decimal(2),
+        report.read_back_elapsed.as_secs_f64()
     );
     println!(
         "  Cleanup      {:.2}s; temporary file removed",
-        report.cleanup_seconds
+        report.cleanup_elapsed.as_secs_f64()
     );
 }
 
@@ -3219,23 +3217,23 @@ fn print_pipeline_report(report: &pipeline::PipelineReport) {
     println!("File: {}", report.destination.display());
     println!(
         "Download: {} at {} in {:.2}s (MD5 verified)",
-        format_bytes(report.bytes),
-        format_rate(report.download_bytes_per_second),
-        report.download_seconds
+        report.bytes.format_decimal(2),
+        report.download_rate.display(),
+        report.download_elapsed.as_secs_f64()
     );
     println!(
         "Device upload: {} at {} in {:.2}s ({:?})",
-        format_bytes(report.device_probe.bytes),
-        format_rate(report.device_probe.upload_bytes_per_second()),
-        report.device_probe.upload_seconds,
+        report.device_probe.bytes.format_decimal(2),
+        report.device_probe.upload_rate().format_decimal(2),
+        report.device_probe.upload_elapsed.as_secs_f64(),
         report.device_probe.transport
     );
     println!(
         "Query {:.2}s; device verify {:.2}s; delete {:.2}s; total {:.2}s",
-        report.query_seconds,
-        report.device_probe.read_back_seconds,
-        report.device_probe.cleanup_seconds,
-        report.total_seconds
+        report.query_elapsed.as_secs_f64(),
+        report.device_probe.read_back_elapsed.as_secs_f64(),
+        report.device_probe.cleanup_elapsed.as_secs_f64(),
+        report.total_elapsed.as_secs_f64()
     );
     println!("Disposable host and device files removed.");
 }
@@ -3993,7 +3991,7 @@ fn print_removal_plan(report: &RemovalPlanReport, json: bool) -> Result<()> {
             palette.paint("Remove", AnsiColor::Yellow, true),
             palette.paint(&file.storage_label, AnsiColor::DarkGrey, false),
             palette.paint(&file.path, AnsiColor::Cyan, false),
-            palette.paint(format_bytes(file.size), AnsiColor::White, true)
+            palette.paint(file.size.format_decimal(2), AnsiColor::White, true)
         );
     }
     for path in &execution.files_already_absent {
@@ -4020,7 +4018,7 @@ fn print_removal_plan(report: &RemovalPlanReport, json: bool) -> Result<()> {
         "{} {} from {}.",
         palette.paint("Would remove", AnsiColor::Yellow, true),
         palette.paint(
-            format_bytes(execution.bytes_to_remove),
+            execution.bytes_to_remove.format_decimal(2),
             AnsiColor::White,
             true
         ),
@@ -4144,12 +4142,12 @@ fn map_choices(response: &MapCatalog) -> Vec<tui::MapChoice> {
                             .or_else(|| content.downloads.first())
                     })
                     .map(|delivery| delivery.size_in_bytes)
-                    .sum();
+                    .fold(ByteCount::default(), ByteCount::saturating_add);
                 details.push(format!(
                     "{} file{} · {}",
                     option.files.len(),
                     if option.files.len() == 1 { "" } else { "s" },
-                    format_bytes(bytes)
+                    bytes.format_decimal(2)
                 ));
                 if !option.display_name.is_empty() && option.display_name != map.display_name {
                     details.push(option.display_name.clone());
@@ -4211,7 +4209,7 @@ fn print_plan(plan: &UpdatePlan, json: bool) -> Result<()> {
     );
     println!(
         "Download: {} in {} files",
-        format_bytes(plan.total_bytes),
+        plan.total_bytes.format_decimal(2),
         plan.downloads.len()
     );
     for item in &plan.downloads {
@@ -4288,8 +4286,10 @@ fn color_enabled(
     }
 }
 
-fn parse_byte_size(value: &str) -> std::result::Result<Byte, String> {
-    Byte::parse_str(value, true).map_err(|error| error.to_string())
+fn parse_byte_size(value: &str) -> std::result::Result<ByteCount, String> {
+    Byte::parse_str(value, true)
+        .map(|size| ByteCount::from_bytes(size.as_u64()))
+        .map_err(|error| error.to_string())
 }
 
 fn parse_concurrency(value: &str) -> std::result::Result<usize, String> {
@@ -4300,34 +4300,18 @@ fn parse_concurrency(value: &str) -> std::result::Result<usize, String> {
         .ok_or_else(|| "concurrency must be between 1 and 32".to_owned())
 }
 
-fn format_bytes(bytes: u64) -> String {
-    let bytes = Byte::from_u64(bytes);
-    format!("{:.2}", bytes.get_appropriate_unit(UnitType::Decimal))
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "the non-negative rounded rate is saturated for display as a byte count"
-)]
-fn format_rate(bytes_per_second: f64) -> String {
-    format!(
-        "{}/s",
-        format_bytes(bytes_per_second.max(0.0).round() as u64)
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         ApplyArgs, BackupChoice, Cli, ColorChoice, Command, LanguageChoice, MapSelectionArgs,
         MockCommand, UpdateCommand, UpdatePlanArgs, cancellation_step, color_enabled,
-        device_identification, format_bytes, map_choices, mock_command,
-        mounted_install_failure_presentation, parse_byte_size, resolve_cache_dir, resolve_language,
-        select_maps, selected_map_actions, should_prompt, tui, write_json,
+        device_identification, map_choices, mock_command, mounted_install_failure_presentation,
+        parse_byte_size, resolve_cache_dir, resolve_language, select_maps, selected_map_actions,
+        should_prompt, tui, write_json,
     };
     use clap::Parser;
     use garmin_device::{TransportKind, parse_manifest};
+    use garmin_model::artifact::ByteCount;
     use garmin_model::map::{MapCatalog, MapComponent, MapFile, MapOperation};
 
     #[tokio::test]
@@ -4447,8 +4431,8 @@ mod tests {
 
     #[test]
     fn parses_sizes_with_library_units() {
-        assert_eq!(parse_byte_size("256MB").unwrap().as_u64(), 256_000_000);
-        assert_eq!(parse_byte_size("1GiB").unwrap().as_u64(), 1_073_741_824);
+        assert_eq!(parse_byte_size("256MB").unwrap().as_bytes(), 256_000_000);
+        assert_eq!(parse_byte_size("1GiB").unwrap().as_bytes(), 1_073_741_824);
     }
 
     #[test]
@@ -4525,9 +4509,12 @@ mod tests {
 
     #[test]
     fn human_readable_output_uses_appropriate_decimal_unit() {
-        assert_eq!(format_bytes(999), "999 B");
-        assert_eq!(format_bytes(1_500), "1.50 KB");
-        assert_eq!(format_bytes(1_500_000_000), "1.50 GB");
+        assert_eq!(ByteCount::from_bytes(999).format_decimal(2), "999 B");
+        assert_eq!(ByteCount::from_bytes(1_500).format_decimal(2), "1.50 KB");
+        assert_eq!(
+            ByteCount::from_bytes(1_500_000_000).format_decimal(2),
+            "1.50 GB"
+        );
     }
 
     #[test]
@@ -4874,7 +4861,7 @@ mod tests {
         let installed_file = || MapFile {
             file_name: "Garmin/map.img".to_owned(),
             part_number: String::new(),
-            size_in_bytes: 42_000_000,
+            size_in_bytes: ByteCount::from_megabytes(42),
             is_shared: false,
         };
         let response = MapCatalog {

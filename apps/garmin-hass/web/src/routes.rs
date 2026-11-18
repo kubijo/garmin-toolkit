@@ -372,7 +372,7 @@ async fn upload(
         client,
         RouteRequest::StartUpload {
             file_name: file.name(),
-            size: ByteCount::from_u64(u64::from(size)),
+            size: ByteCount::from_bytes(u64::from(size)),
         },
     )
     .await?

@@ -217,7 +217,7 @@ fn rejects_invalid_input_and_foreign_sources_without_mutation() -> TestResult {
         let importer = AvatarImporter::new(&storage);
         let operation = AcquisitionOperationId::new_v4();
 
-        let oversized = vec![0_u8; MAX_AVATAR_BYTES + 1];
+        let oversized = vec![0_u8; usize::try_from(MAX_AVATAR_BYTES.as_bytes())? + 1];
         assert!(matches!(
             importer
                 .import(fixture.request(operation, &oversized)?)

@@ -3,6 +3,7 @@
 use base64::Engine as _;
 use garmin_device::storage::{DeviceIoError, DeviceWrite};
 use garmin_device::{DevicePathState, DevicePathStatus, SafeRelativePath};
+use garmin_model::artifact::ByteCount;
 use garmin_model::map::MapInstallIdentifier;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -22,13 +23,13 @@ const TRANSACTIONS: &str = "GARMIN-TOOLKIT/transactions";
 const MANIFEST: &str = "GARMIN-TOOLKIT/manifest.toml";
 const IDENTITY: &str = "GARMIN-TOOLKIT/identity.toml";
 const ACTIVE: &str = "GARMIN-TOOLKIT/active.json";
-const MANIFEST_LIMIT: u64 = 64 * 1024;
-const IDENTITY_LIMIT: u64 = 64 * 1024;
-const ACTIVE_LIMIT: u64 = 64 * 1024;
-const PREPARED_LIMIT: u64 = 512 * 1024;
-const EVENT_LIMIT: u64 = 8 * 1024;
-const COMPLETION_LIMIT: u64 = 64 * 1024;
-const NAMESPACE_LIMIT: u64 = 8 * 1024 * 1024;
+const MANIFEST_LIMIT: ByteCount = ByteCount::from_kibibytes(64);
+const IDENTITY_LIMIT: ByteCount = ByteCount::from_kibibytes(64);
+const ACTIVE_LIMIT: ByteCount = ByteCount::from_kibibytes(64);
+const PREPARED_LIMIT: ByteCount = ByteCount::from_kibibytes(512);
+const EVENT_LIMIT: ByteCount = ByteCount::from_kibibytes(8);
+const COMPLETION_LIMIT: ByteCount = ByteCount::from_kibibytes(64);
+const NAMESPACE_LIMIT: ByteCount = ByteCount::from_mebibytes(8);
 const MAX_EVENTS: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,7 +69,7 @@ pub(crate) struct PortableDownloadIdentity {
     alternate_sources: Vec<url::Url>,
     cache_name: String,
     destination: SafeRelativePath,
-    size: u64,
+    size: ByteCount,
     md5: String,
     sha256: String,
     requires_device_authorization: bool,
@@ -77,7 +78,7 @@ pub(crate) struct PortableDownloadIdentity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PortableEmbeddedPayload {
     destination: SafeRelativePath,
-    size: u64,
+    size: ByteCount,
     sha256: String,
     base64: String,
 }
@@ -113,12 +114,12 @@ impl DeviceOperationTarget {
 }
 
 pub(crate) struct DeviceContentIdentity {
-    size: u64,
+    size: ByteCount,
     sha256: String,
 }
 
 impl DeviceContentIdentity {
-    pub(crate) fn new(size: u64, sha256: String) -> Self {
+    pub(crate) fn new(size: ByteCount, sha256: String) -> Self {
         Self { size, sha256 }
     }
 }
@@ -126,7 +127,7 @@ impl DeviceContentIdentity {
 pub(crate) enum DeviceOriginalState {
     Missing,
     Verified(DeviceContentIdentity),
-    Unverified { size: u64 },
+    Unverified { size: ByteCount },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,9 +137,9 @@ pub(crate) struct DeviceTransactionOperation {
     storage_id: String,
     storage_label: String,
     path: SafeRelativePath,
-    expected_size: Option<u64>,
+    expected_size: Option<ByteCount>,
     expected_sha256: Option<String>,
-    original_size: Option<u64>,
+    original_size: Option<ByteCount>,
     original_sha256: Option<String>,
 }
 
@@ -183,7 +184,11 @@ impl DeviceTransactionOperation {
         }
     }
 
-    fn remove_unverified(index: u32, target: DeviceOperationTarget, original_size: u64) -> Self {
+    fn remove_unverified(
+        index: u32,
+        target: DeviceOperationTarget,
+        original_size: ByteCount,
+    ) -> Self {
         Self {
             index,
             kind: DeviceTransactionOperationKind::Remove,
@@ -296,7 +301,7 @@ impl PortableTransaction {
     pub(crate) fn add_unverified_removal(
         &mut self,
         target: DeviceOperationTarget,
-        original_size: u64,
+        original_size: ByteCount,
     ) -> Result<(), DeviceStateError> {
         let index = self.next_operation_index()?;
         self.0
@@ -432,7 +437,7 @@ impl PortableTransaction {
         for download in &self.0.downloads {
             if download.map_name.is_empty()
                 || download.cache_name.is_empty()
-                || download.size == 0
+                || download.size.is_zero()
                 || !is_md5(&download.md5)
                 || !is_sha256(&download.sha256)
                 || !portable_source(&download.source)
@@ -451,9 +456,9 @@ impl PortableTransaction {
     }
 
     fn validate_embedded_payloads(&self) -> Result<(), DeviceStateError> {
-        let mut embedded_bytes = 0_u64;
+        let mut embedded_bytes = ByteCount::default();
         for payload in &self.0.embedded_payloads {
-            if payload.size == 0 || !is_sha256(&payload.sha256) {
+            if payload.size.is_zero() || !is_sha256(&payload.sha256) {
                 return Err(DeviceStateError::InvalidTransaction(format!(
                     "embedded payload for {} is incomplete",
                     payload.destination
@@ -467,7 +472,7 @@ impl PortableTransaction {
                         payload.destination
                     ))
                 })?;
-            if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != payload.size
+            if ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX)) != payload.size
                 || hex::encode(Sha256::digest(&bytes)) != payload.sha256
             {
                 return Err(DeviceStateError::InvalidTransaction(format!(
@@ -479,7 +484,7 @@ impl PortableTransaction {
                 .checked_add(payload.size)
                 .ok_or(DeviceStateError::NamespaceTooLarge)?;
         }
-        if embedded_bytes > 1024 * 1024 {
+        if embedded_bytes > ByteCount::from_mebibytes(1) {
             return Err(DeviceStateError::InvalidTransaction(
                 "embedded recovery payloads exceed 1 MiB".to_owned(),
             ));
@@ -838,7 +843,7 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
             .await?;
         let prepared_path = prepared_path(transaction.transaction_id())?;
         let bytes = transaction.encode()?;
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > PREPARED_LIMIT {
+        if ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX)) > PREPARED_LIMIT {
             return Err(DeviceStateError::DocumentTooLarge(
                 prepared_path.to_string(),
             ));
@@ -919,7 +924,7 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
         self.ensure_namespace(identity.device_digest()).await?;
         let path = SafeRelativePath::parse(IDENTITY)?;
         let bytes = identity.to_bytes();
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > IDENTITY_LIMIT {
+        if ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX)) > IDENTITY_LIMIT {
             return Err(DeviceStateError::DocumentTooLarge(IDENTITY.to_owned()));
         }
         self.create_or_validate(&path, &bytes).await
@@ -1045,7 +1050,7 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
         &self,
         transaction: &PortableTransaction,
     ) -> Result<(), DeviceStateError> {
-        let mut size = 0_u64;
+        let mut size = ByteCount::default();
         for (path, limit) in [
             (SafeRelativePath::parse(MANIFEST)?, MANIFEST_LIMIT),
             (SafeRelativePath::parse(ACTIVE)?, ACTIVE_LIMIT),
@@ -1089,11 +1094,11 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
         &self,
         path: &SafeRelativePath,
         value: &T,
-        limit: u64,
+        limit: ByteCount,
     ) -> Result<(), DeviceStateError> {
         let mut bytes = serde_json::to_vec_pretty(value)?;
         bytes.push(b'\n');
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
+        if ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX)) > limit {
             return Err(DeviceStateError::DocumentTooLarge(path.to_string()));
         }
         self.create_or_validate(path, &bytes).await
@@ -1104,10 +1109,8 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
         path: &SafeRelativePath,
         bytes: &[u8],
     ) -> Result<(), DeviceStateError> {
-        match self
-            .read(path.clone(), u64::try_from(bytes.len()).unwrap_or(u64::MAX))
-            .await?
-        {
+        let size = ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+        match self.read(path.clone(), size).await? {
             Some(observed) if observed == bytes => Ok(()),
             Some(_) => Err(DeviceStateError::ConflictingDocument(path.to_string())),
             None => {
@@ -1115,7 +1118,7 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
                     .create_verified_file(&self.storage, path, bytes)
                     .await?;
                 let observed = self
-                    .read(path.clone(), u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+                    .read(path.clone(), size)
                     .await?
                     .ok_or_else(|| DeviceStateError::MissingDocument(path.to_string()))?;
                 if observed != bytes {
@@ -1129,7 +1132,7 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
     async fn read(
         &self,
         path: SafeRelativePath,
-        limit: u64,
+        limit: ByteCount,
     ) -> Result<Option<Vec<u8>>, DeviceStateError> {
         Ok(self
             .device
@@ -1151,7 +1154,7 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
             .map_err(|_| DeviceStateError::DocumentTooLarge(path.to_string()))?;
         let sha256 = hex::encode(Sha256::digest(bytes));
         self.device
-            .delete(&self.storage, path, size, &sha256)
+            .delete(&self.storage, path, ByteCount::from_bytes(size), &sha256)
             .await?;
         Ok(())
     }
@@ -1296,6 +1299,7 @@ pub enum DeviceStateError {
 mod tests {
     use super::*;
     use garmin_device::storage::DirectoryDevice;
+    use garmin_model::artifact::ByteCount;
     use std::path::PathBuf;
 
     fn digest(byte: char) -> String {
@@ -1317,7 +1321,7 @@ mod tests {
                 requires_garmin_token: false,
                 destination: SafeRelativePath::parse("Garmin/map.img").unwrap(),
                 cache_name: "map.img".to_owned(),
-                size: 3,
+                size: ByteCount::from_bytes(3),
                 md5: std::iter::repeat_n('c', 32).collect(),
             },
             digest('d'),
@@ -1329,7 +1333,7 @@ mod tests {
                     "Internal storage".to_owned(),
                     SafeRelativePath::parse("Garmin/map.img").unwrap(),
                 ),
-                DeviceContentIdentity::new(3, digest('d')),
+                DeviceContentIdentity::new(ByteCount::from_bytes(3), digest('d')),
                 DeviceOriginalState::Missing,
             )
             .unwrap();

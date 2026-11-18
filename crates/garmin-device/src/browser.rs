@@ -1,5 +1,6 @@
 //! Bounded device contents and explicit explorer operations.
 
+use garmin_model::artifact::ByteCount;
 use std::{
     collections::HashSet,
     io::{Read as _, Write},
@@ -18,7 +19,7 @@ use crate::{
     storage::{DeviceIoError, DeviceRead, DeviceWrite},
 };
 
-pub const MAX_BROWSER_TRANSFER_BYTES: u64 = 512 * 1024 * 1024;
+pub const MAX_BROWSER_TRANSFER_BYTES: ByteCount = ByteCount::from_mebibytes(512);
 const TOOLKIT_ROOT: &str = "GARMIN-TOOLKIT";
 
 /// One device file-system snapshot.
@@ -40,7 +41,7 @@ pub struct DeviceCatalogStorage {
 pub struct DeviceCatalogEntry {
     pub path: Utf8PathBuf,
     pub kind: DeviceCatalogEntryKind,
-    pub size: Option<u64>,
+    pub size: Option<ByteCount>,
 }
 
 /// File-system entry kind retained by the browser.
@@ -64,7 +65,7 @@ pub struct BrowserFileUpload<'a> {
     pub directory: &'a Utf8Path,
     pub file_name: &'a str,
     pub source: &'a Path,
-    pub size: u64,
+    pub size: ByteCount,
 }
 
 /// A bounded device download retained in a temporary file.
@@ -74,7 +75,7 @@ pub struct BrowserFileUpload<'a> {
 #[derive(Debug)]
 pub struct PreparedDeviceBrowserDownload {
     pub file_name: String,
-    pub size: u64,
+    pub size: ByteCount,
     contents: tempfile::TempPath,
 }
 
@@ -95,7 +96,7 @@ impl PreparedDeviceBrowserDownload {
         }
         Ok(Self {
             file_name,
-            size: metadata.len(),
+            size: ByteCount::from_bytes(metadata.len()),
             contents,
         })
     }
@@ -144,6 +145,10 @@ pub enum DeviceBrowserOperationError {
 /// Prepare one validated file, or one directory as a ZIP archive, in bounded temporary storage.
 /// # Errors
 /// Unknown, stale, unsafe, oversized, cancelled, or unreadable targets are rejected.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep bounded archive preparation and cleanup together"
+)]
 pub async fn prepare_browser_download<R>(
     device: &R,
     catalog: &DeviceCatalog,
@@ -159,7 +164,15 @@ where
         let size = entry
             .size
             .ok_or_else(|| DeviceBrowserOperationError::MissingSize(entry.path.to_string()))?;
-        let contents = backup_entry(device, &target.storage_id, entry, 0, size, progress).await?;
+        let contents = backup_entry(
+            device,
+            &target.storage_id,
+            entry,
+            ByteCount::default(),
+            size,
+            progress,
+        )
+        .await?;
         return Ok(PreparedDeviceBrowserDownload {
             file_name: entry_name(&target.path).to_owned(),
             size,
@@ -177,7 +190,7 @@ where
     let total = descendants
         .iter()
         .filter(|entry| entry.kind == DeviceCatalogEntryKind::File)
-        .try_fold(0_u64, |total, entry| {
+        .try_fold(ByteCount::default(), |total, entry| {
             total
                 .checked_add(entry.size.ok_or_else(|| {
                     DeviceBrowserOperationError::MissingSize(entry.path.to_string())
@@ -210,7 +223,7 @@ where
             directory_options,
         )?;
     }
-    let mut completed = 0_u64;
+    let mut completed = ByteCount::default();
     for entry in descendants
         .into_iter()
         .filter(|entry| entry.kind == DeviceCatalogEntryKind::File)
@@ -241,7 +254,7 @@ where
     }
     let archive_file = writer.finish()?;
     archive_file.sync_all()?;
-    let size = archive_file.metadata()?.len();
+    let size = ByteCount::from_bytes(archive_file.metadata()?.len());
     if size > MAX_BROWSER_TRANSFER_BYTES {
         return Err(DeviceBrowserOperationError::TransferLimit);
     }
@@ -277,7 +290,7 @@ where
         return Err(DeviceBrowserOperationError::TransferLimit);
     }
     let metadata = tokio::fs::symlink_metadata(source).await?;
-    if !metadata.file_type().is_file() || metadata.len() != size {
+    if !metadata.file_type().is_file() || metadata.len() != size.as_bytes() {
         return Err(DeviceBrowserOperationError::Device(
             DeviceIoError::Verification(source.display().to_string()),
         ));
@@ -298,7 +311,7 @@ where
             &sha256,
             crate::MountedMtpUploadProgress {
                 reporter: progress.clone(),
-                completed_before: 0,
+                completed_before: ByteCount::from_bytes(0),
                 total: size,
             },
         )
@@ -564,7 +577,7 @@ where
         (entry.kind == DeviceCatalogEntryKind::File, path_depth(path))
     });
     let transfer_total = total.saturating_mul(2);
-    let mut completed = 0_u64;
+    let mut completed = ByteCount::default();
     for (storage_id, entry, destination_path) in planned {
         let path = SafeRelativePath::parse(&destination_path)?;
         if entry.kind == DeviceCatalogEntryKind::Directory {
@@ -630,8 +643,8 @@ struct BrowserReplacement<'a> {
     source: &'a DeviceCatalogEntry,
     existing: &'a DeviceCatalogEntry,
     path: SafeRelativePath,
-    source_size: u64,
-    existing_size: u64,
+    source_size: ByteCount,
+    existing_size: ByteCount,
 }
 
 fn validate_browser_replacement<'a>(
@@ -695,6 +708,10 @@ fn validate_browser_replacement<'a>(
 /// The old file is backed up before deletion and restored if the new upload fails.
 /// # Errors
 /// Rejects stale, unsafe, protected, or non-file targets; reports a recovery error if rollback fails.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep the replacement and rollback sequence together"
+)]
 pub async fn replace_browser_file_with_progress<W>(
     device: &W,
     catalog: &DeviceCatalog,
@@ -719,14 +736,21 @@ where
         source_size,
         existing_size,
     } = validate_browser_replacement(catalog, target, destination_storage_id, destination)?;
-    let source_backup =
-        backup_entry(device, &target.storage_id, source, 0, source_size, progress).await?;
+    let source_backup = backup_entry(
+        device,
+        &target.storage_id,
+        source,
+        ByteCount::default(),
+        source_size,
+        progress,
+    )
+    .await?;
     let source_digest = hash_local_file(source_backup.as_ref(), source_size, progress).await?;
     let existing_backup = backup_entry(
         device,
         destination_storage_id,
         existing,
-        0,
+        ByteCount::default(),
         existing_size,
         progress,
     )
@@ -810,7 +834,7 @@ async fn delete_replaced_file<W>(
     device: &W,
     storage_id: &str,
     path: &SafeRelativePath,
-    size: u64,
+    size: ByteCount,
     backup: &Path,
     digest: &str,
 ) -> Result<(), DeviceBrowserOperationError>
@@ -840,7 +864,7 @@ async fn restore_browser_file<W>(
     device: &W,
     storage_id: &str,
     path: &SafeRelativePath,
-    size: u64,
+    size: ByteCount,
     backup: &Path,
     digest: &str,
 ) -> Result<(), DeviceIoError>
@@ -873,13 +897,13 @@ fn plan_browser_transfer(
     destination_storage_id: &str,
     destination: &Utf8Path,
     root_name: Option<&str>,
-) -> Result<(Vec<PlannedTransfer>, u64), DeviceBrowserOperationError> {
+) -> Result<(Vec<PlannedTransfer>, ByteCount), DeviceBrowserOperationError> {
     let destination_storage = validate_directory(catalog, destination_storage_id, destination)?;
     ensure_mutable(destination)?;
     validate_disjoint_targets(catalog, targets)?;
     let mut planned = Vec::new();
     let mut names = HashSet::new();
-    let mut total = 0_u64;
+    let mut total = ByteCount::default();
     for target in targets {
         if target.storage_id == destination_storage_id
             && target.kind == DeviceCatalogEntryKind::Directory
@@ -963,8 +987,8 @@ async fn backup_entry<R>(
     device: &R,
     storage_id: &str,
     entry: &DeviceCatalogEntry,
-    completed_before: u64,
-    total: u64,
+    completed_before: ByteCount,
+    total: ByteCount,
     progress: &ProgressReporter,
 ) -> Result<tempfile::TempPath, DeviceBrowserOperationError>
 where
@@ -1029,12 +1053,12 @@ fn copy_local_file(
 
 async fn hash_local_file(
     source_path: &Path,
-    expected_size: u64,
+    expected_size: ByteCount,
     progress: &ProgressReporter,
 ) -> Result<String, DeviceBrowserOperationError> {
     let mut source = tokio::fs::File::open(source_path).await?;
     let mut hash = Sha256::new();
-    let mut observed = 0_u64;
+    let mut observed = ByteCount::default();
     let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         if progress.is_cancelled() {
@@ -1047,9 +1071,9 @@ async fn hash_local_file(
             break;
         }
         observed = observed
-            .checked_add(
+            .checked_add(ByteCount::from_bytes(
                 u64::try_from(count).map_err(|_| DeviceBrowserOperationError::TransferLimit)?,
-            )
+            ))
             .ok_or(DeviceBrowserOperationError::TransferLimit)?;
         if observed > expected_size {
             return Err(DeviceBrowserOperationError::Device(
@@ -1254,7 +1278,7 @@ mod tests {
                     DeviceCatalogEntry {
                         path: "Garmin/Activity/ride.fit".into(),
                         kind: DeviceCatalogEntryKind::File,
-                        size: Some(4),
+                        size: Some(ByteCount::from_bytes(4)),
                     },
                     DeviceCatalogEntry {
                         path: "GARMIN-TOOLKIT".into(),
@@ -1320,7 +1344,7 @@ mod tests {
             .unwrap();
             assert_eq!(download.file_name, file_name);
             let file = std::fs::File::open(download.path()).unwrap();
-            assert_eq!(download.size, file.metadata().unwrap().len());
+            assert_eq!(download.size.as_bytes(), file.metadata().unwrap().len());
             let mut archive = zip::ZipArchive::new(file).unwrap();
             assert_eq!(
                 archive.file_names().collect::<Result<Vec<_>, _>>().unwrap(),
@@ -1362,7 +1386,7 @@ mod tests {
                 directory: Utf8Path::new("Garmin/New"),
                 file_name: "payload.bin",
                 source: upload.path(),
-                size: 7,
+                size: ByteCount::from_bytes(7),
             },
             &ProgressReporter::default(),
         )
@@ -1377,7 +1401,7 @@ mod tests {
         current.storages[0].entries.push(DeviceCatalogEntry {
             path: "Garmin/New/payload.bin".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(7),
+            size: Some(ByteCount::from_bytes(7)),
         });
         remove_browser_target(
             &device,
@@ -1424,7 +1448,7 @@ mod tests {
         current.storages[0].entries.push(DeviceCatalogEntry {
             path: "Garmin/ride.fit".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(4),
+            size: Some(ByteCount::from_bytes(4)),
         });
         transfer_browser_targets_with_progress(
             &device,
@@ -1454,7 +1478,7 @@ mod tests {
         current.storages[0].entries.push(DeviceCatalogEntry {
             path: "Garmin/ride.fit".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(4),
+            size: Some(ByteCount::from_bytes(4)),
         });
         replace_browser_file_with_progress(
             &device,
@@ -1490,7 +1514,7 @@ mod tests {
         current.storages[0].entries.push(DeviceCatalogEntry {
             path: "Garmin/ride.fit".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(4),
+            size: Some(ByteCount::from_bytes(4)),
         });
         replace_browser_file_with_progress(
             &device,
@@ -1578,14 +1602,18 @@ mod tests {
         tokio::fs::write(&destination, b"new!").await.unwrap();
         let backup = tempfile::NamedTempFile::new().unwrap();
         tokio::fs::write(backup.path(), b"old!").await.unwrap();
-        let digest = hash_local_file(backup.path(), 4, &ProgressReporter::default())
-            .await
-            .unwrap();
+        let digest = hash_local_file(
+            backup.path(),
+            ByteCount::from_bytes(4),
+            &ProgressReporter::default(),
+        )
+        .await
+        .unwrap();
         restore_browser_file(
             &device,
             "primary",
             &SafeRelativePath::parse(Utf8Path::new("Garmin/ride.fit")).unwrap(),
-            4,
+            ByteCount::from_bytes(4),
             backup.path(),
             &digest,
         )

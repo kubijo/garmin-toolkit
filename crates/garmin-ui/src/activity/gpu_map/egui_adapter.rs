@@ -127,6 +127,7 @@ fn pixels(rect: &egui::epaint::ViewportInPixels) -> Option<[u32; 4]> {
 mod tests {
     use super::*;
     use egui::pos2;
+    use garmin_model::route::Coordinate;
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -550,7 +551,7 @@ mod tests {
         let viewport = Rect::from_min_max(pos2(0.0, 0.0), pos2(768.0, 256.0));
         let mut camera = MapCamera::default();
         camera.set_zoom(0.0);
-        camera.center_at(walkers::lon_lat(0.0, 0.0));
+        camera.center_at(Coordinate::from_degrees(0.0, 0.0).unwrap());
         let assembly = assemble_tile_frame([(&id, &tile)], &camera, viewport);
         let mut latest = Arc::new(Frame {
             camera: assembly.camera,

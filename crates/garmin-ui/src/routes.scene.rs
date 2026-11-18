@@ -111,8 +111,8 @@ fn review(mode: usize) -> routes::State {
         upload: Some(GpxUpload {
             operation: AcquisitionOperationId::from_u128(1),
             file_name: "candidates.gpx".into(),
-            received: ByteCount::from_u64(1024),
-            total: ByteCount::from_u64(1024),
+            received: ByteCount::from_bytes(1024),
+            total: ByteCount::from_bytes(1024),
             phase: GpxUploadPhase::Review {
                 digest: ArtifactDigest::from_bytes(b"gallery"),
                 candidates: 1,
@@ -165,8 +165,8 @@ fn review(mode: usize) -> routes::State {
         state.begin_upload(GpxUpload {
             operation: AcquisitionOperationId::from_u128(4),
             file_name: "replacement.gpx".into(),
-            received: ByteCount::from_u64(0),
-            total: ByteCount::from_u64(4_096),
+            received: ByteCount::from_bytes(0),
+            total: ByteCount::from_bytes(4_096),
             phase: GpxUploadPhase::Uploading,
         });
     }
@@ -206,8 +206,8 @@ fn show_path_chooser(state: &mut routes::State) {
     state.sport = None;
     if let Some(upload) = &mut state.upload {
         upload.file_name = "weekend-adventure.gpx".into();
-        upload.received = ByteCount::from_u64(58_184);
-        upload.total = ByteCount::from_u64(58_184);
+        upload.received = ByteCount::from_bytes(58_184);
+        upload.total = ByteCount::from_bytes(58_184);
         upload.phase = GpxUploadPhase::Review {
             digest: ArtifactDigest::from_bytes(b"gallery"),
             candidates: 2,
@@ -264,7 +264,7 @@ fn show_course_version(state: &mut routes::State) {
         .expect("fixture encoder is valid"),
         current_encoder: true,
         generated_at: route.created_at,
-        byte_count: ByteCount::from_u64(9_380),
+        byte_count: ByteCount::from_bytes(9_380),
         digest: ArtifactDigest::from_bytes(b"gallery course"),
     }];
 }
@@ -296,7 +296,7 @@ fn show_transfer_storage(state: &mut routes::State) {
         storage_id: "internal".into(),
         storage_label: "Internal Storage".into(),
         directory: "/Garmin/NewFiles".into(),
-        free_bytes: Some(1_000_000),
+        free_bytes: Some(ByteCount::from_megabytes(1)),
     };
     transfer.targets = vec![target];
 }
@@ -322,7 +322,7 @@ fn show_transfer_review(state: &mut routes::State) {
             storage_id: "internal".into(),
             storage_label: "Internal Storage".into(),
             directory: "/Garmin/NewFiles".into(),
-            free_bytes: Some(1_000_000),
+            free_bytes: Some(ByteCount::from_megabytes(1)),
         },
         file_name: "gf-fe04fceb-0928-4b15-8e93-61075289222b.fit".into(),
     });
@@ -339,8 +339,8 @@ fn show_transfer_running(state: &mut routes::State) {
         file_name: review.file_name,
         phase: CourseTransferPhase::Running,
         progress: Some(CourseTransferProgress {
-            bytes_sent: 4_690,
-            total_bytes: 9_380,
+            bytes_sent: ByteCount::from_bytes(4_690),
+            total_bytes: ByteCount::from_bytes(9_380),
             finishing: false,
         }),
     });
@@ -356,7 +356,7 @@ fn show_transfer_cleanup(state: &mut routes::State) {
         transfer: status.transfer,
         target: status.target.clone(),
         file_name: status.file_name.clone(),
-        byte_count: 9_380,
+        byte_count: ByteCount::from_bytes(9_380),
     });
 }
 

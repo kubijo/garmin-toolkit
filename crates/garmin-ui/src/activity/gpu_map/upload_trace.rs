@@ -1,9 +1,11 @@
 //! Transition-only upload telemetry; no per-frame history or unbounded identity registry.
 
+use garmin_model::artifact::ByteCount;
 use std::sync::{
     Mutex,
     atomic::{AtomicUsize, Ordering},
 };
+use std::time::Duration;
 use web_time::Instant;
 
 use crate::activity::map_runtime::{MapMetrics, MapUploadEvent, MapUploadPhase};
@@ -22,8 +24,8 @@ pub(super) struct UploadTrace {
 struct State {
     hidden: bool,
     phase: Phase,
-    work_ms: f64,
-    bytes: usize,
+    work: Duration,
+    bytes: ByteCount,
     steps: usize,
 }
 
@@ -45,12 +47,17 @@ impl UploadTrace {
             started: Instant::now(),
             state: Mutex::new(State::default()),
         };
-        trace.emit(MapUploadPhase::Queued, 0.0, 0.0, 0);
+        trace.emit(
+            MapUploadPhase::Queued,
+            Duration::ZERO,
+            Duration::ZERO,
+            ByteCount::default(),
+        );
         trace
     }
 
-    fn elapsed(&self) -> f64 {
-        self.started.elapsed().as_secs_f64() * 1_000.0
+    fn elapsed(&self) -> Duration {
+        self.started.elapsed()
     }
 
     #[cfg(test)]
@@ -58,16 +65,16 @@ impl UploadTrace {
         self.started -= duration;
     }
 
-    fn emit(&self, event: MapUploadPhase, elapsed_ms: f64, work_ms: f64, bytes: usize) {
+    fn emit(&self, event: MapUploadPhase, elapsed: Duration, work: Duration, bytes: ByteCount) {
         self.metrics.record_upload_event(MapUploadEvent {
             version: 1,
             upload_id: self.id,
             zoom: self.tile.zoom,
             x: self.tile.x,
             y: self.tile.y,
-            elapsed_ms,
+            elapsed,
             event,
-            work_ms,
+            work,
             bytes,
         });
     }
@@ -86,8 +93,8 @@ impl UploadTrace {
                     MapUploadPhase::Hidden
                 },
                 self.elapsed(),
-                0.0,
-                0,
+                Duration::ZERO,
+                ByteCount::default(),
             );
         }
     }
@@ -99,17 +106,22 @@ impl UploadTrace {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.phase == Phase::Queued {
             state.phase = Phase::Working;
-            self.emit(MapUploadPhase::FirstWork, self.elapsed(), 0.0, 0);
+            self.emit(
+                MapUploadPhase::FirstWork,
+                self.elapsed(),
+                Duration::ZERO,
+                ByteCount::default(),
+            );
         }
     }
 
-    pub(super) fn work(&self, milliseconds: f64, bytes: usize) {
+    pub(super) fn work(&self, elapsed: Duration, bytes: ByteCount) {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.work_ms += milliseconds;
-        state.bytes += bytes;
+        state.work = state.work.saturating_add(elapsed);
+        state.bytes = state.bytes.saturating_add(bytes);
         state.steps += 1;
     }
 
@@ -122,11 +134,11 @@ impl UploadTrace {
             self.emit(
                 MapUploadPhase::Progress,
                 self.elapsed(),
-                state.work_ms,
+                state.work,
                 state.bytes,
             );
-            state.work_ms = 0.0;
-            state.bytes = 0;
+            state.work = Duration::ZERO;
+            state.bytes = ByteCount::default();
             state.steps = 0;
         }
     }
@@ -139,7 +151,12 @@ impl UploadTrace {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.phase == Phase::Working {
             state.phase = Phase::Published;
-            self.emit(MapUploadPhase::Published, self.elapsed(), 0.0, 0);
+            self.emit(
+                MapUploadPhase::Published,
+                self.elapsed(),
+                Duration::ZERO,
+                ByteCount::default(),
+            );
         }
     }
 
@@ -150,7 +167,12 @@ impl UploadTrace {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.phase == Phase::Published {
             state.phase = Phase::Drawn;
-            self.emit(MapUploadPhase::FirstDraw, self.elapsed(), 0.0, 0);
+            self.emit(
+                MapUploadPhase::FirstDraw,
+                self.elapsed(),
+                Duration::ZERO,
+                ByteCount::default(),
+            );
         }
     }
 }
@@ -165,7 +187,12 @@ impl Drop for UploadTrace {
             .phase
             != Phase::Drawn
         {
-            self.emit(MapUploadPhase::Released, self.elapsed(), 0.0, 0);
+            self.emit(
+                MapUploadPhase::Released,
+                self.elapsed(),
+                Duration::ZERO,
+                ByteCount::default(),
+            );
         }
     }
 }
@@ -200,8 +227,8 @@ pub(in crate::activity) mod tests {
         trace.visible(true);
         trace.begin_work();
         trace.begin_work();
-        trace.work(0.25, 256);
-        trace.work(0.5, 128);
+        trace.work(Duration::from_micros(250), ByteCount::from_bytes(256));
+        trace.work(Duration::from_micros(500), ByteCount::from_bytes(128));
         trace.flush();
         trace.flush();
         trace.visible(false);
@@ -231,12 +258,12 @@ pub(in crate::activity) mod tests {
                 .all(|event| event.upload_id == events[0].upload_id
                     && (event.zoom, event.x, event.y) == (3, 4, 2))
         );
-        assert_eq!(events[2].bytes, 384);
-        assert!((events[2].work_ms - 0.75).abs() < f64::EPSILON);
+        assert_eq!(events[2].bytes, ByteCount::from_bytes(384));
+        assert_eq!(events[2].work, Duration::from_micros(750));
         assert!(
             events
                 .windows(2)
-                .all(|pair| pair[0].elapsed_ms <= pair[1].elapsed_ms)
+                .all(|pair| pair[0].elapsed <= pair[1].elapsed)
         );
     }
 

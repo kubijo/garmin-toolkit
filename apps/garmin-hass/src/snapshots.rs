@@ -2,6 +2,7 @@
 
 use axum::body::Bytes;
 use futures_util::{FutureExt as _, StreamExt as _};
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::snapshots::{MAX_SNAPSHOT_CHUNK, SnapshotReply};
 use garmin_services::snapshots::{SnapshotDownload, SnapshotSession};
 use std::sync::Arc;
@@ -21,7 +22,7 @@ pub(super) async fn prepare(
     let source = Download {
         handle: Arc::clone(&download),
         size,
-        offset: 0,
+        offset: ByteCount::default(),
     };
     let stream = futures_util::stream::try_unfold(source, |mut source| async move {
         Ok::<_, std::io::Error>(
@@ -47,8 +48,8 @@ pub(super) async fn prepare(
 
 struct Download {
     handle: Arc<SnapshotDownload>,
-    size: u64,
-    offset: u64,
+    size: ByteCount,
+    offset: ByteCount,
 }
 
 impl Download {
@@ -64,10 +65,11 @@ impl Download {
         let SnapshotReply::Chunk { offset, bytes, end } = reply else {
             return Err(std::io::Error::other("snapshot chunk was not returned"));
         };
-        if offset != self.offset || bytes.is_empty() || bytes.len() > MAX_SNAPSHOT_CHUNK as usize {
+        let chunk_size = ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+        if offset != self.offset || chunk_size.is_zero() || chunk_size > MAX_SNAPSHOT_CHUNK {
             return Err(std::io::Error::other("invalid snapshot download chunk"));
         }
-        self.offset += bytes.len() as u64;
+        self.offset = self.offset.saturating_add(chunk_size);
         if self.offset > self.size || end != (self.offset == self.size) {
             return Err(std::io::Error::other("snapshot download length changed"));
         }

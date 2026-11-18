@@ -15,7 +15,7 @@ use std::{
     time::Duration,
 };
 
-const MAX_DELAY_MS: u64 = 30_000;
+const MAX_DELAY: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Default)]
 pub(super) struct Faults(Arc<Mutex<Option<Rule>>>);
@@ -75,7 +75,10 @@ async fn configure(
             path,
             effect: Effect::Fail,
         }),
-        Command::Delay { path, milliseconds } if (1..=MAX_DELAY_MS).contains(&milliseconds) => {
+        Command::Delay { path, milliseconds }
+            if (Duration::from_millis(1)..=MAX_DELAY)
+                .contains(&Duration::from_millis(milliseconds)) =>
+        {
             Some(Rule {
                 path,
                 effect: Effect::Delay(Duration::from_millis(milliseconds)),

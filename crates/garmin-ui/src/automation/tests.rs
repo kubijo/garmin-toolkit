@@ -514,7 +514,7 @@ fn hidpi_clicks_use_logical_bounds_and_reach_the_target() {
                             phase: "click",
                             target: target.into(),
                             action,
-                            after: 0.1,
+                            after: Duration::from_millis(100),
                         })
                         .collect(),
                     )
@@ -553,9 +553,9 @@ fn target_highlight_does_not_capture_clicks() {
         phase: "setup".into(),
         kind: "click".into(),
         target: "profile.0".into(),
-        scheduled_seconds: 0.0,
-        actual_seconds: 0.0,
-        lateness_seconds: 0.0,
+        scheduled: Duration::from_millis(0),
+        actual: Duration::from_millis(0),
+        lateness: Duration::from_millis(0),
         target_bounds: [100.0, 100.0, 300.0, 150.0],
         pointer_position: Some([200.0, 125.0]),
     };
@@ -1437,7 +1437,7 @@ fn hidden_pause_releases_a_click_and_excludes_suspended_time() {
     assert_eq!(report.state, "running", "{:?}", report.failure);
     assert_eq!(report.pauses.len(), 1);
     assert!(!report.performance_eligible);
-    assert!(report.elapsed_seconds < 1.0);
+    assert!(report.elapsed < Duration::from_secs(1));
     assert!(driver.held.is_none());
     assert!(!context.input(|input| input.pointer.primary_down()));
 }
@@ -1469,13 +1469,13 @@ fn check_layout_change(action: &Action, change_at: usize, resize: bool, scale: f
                     phase: "test",
                     target: "target".into(),
                     action: Action::Wait,
-                    after: 0.0,
+                    after: Duration::from_millis(0),
                 },
                 Step {
                     phase: "test",
                     target: "target".into(),
                     action: action.clone(),
-                    after: 0.0,
+                    after: Duration::from_millis(0),
                 },
             ],
         )
@@ -1559,8 +1559,8 @@ fn resized_stationary_observation_waits_for_readiness_and_restarts_its_interval(
             vec![Step {
                 phase: "stationary",
                 target: "map".into(),
-                action: Action::Observe(0.2),
-                after: 0.0,
+                action: Action::Observe(Duration::from_millis(200)),
+                after: Duration::from_millis(0),
             }],
         )
         .unwrap();
@@ -1587,7 +1587,7 @@ fn resized_stationary_observation_waits_for_readiness_and_restarts_its_interval(
     assert_eq!(report.viewport_changes.len(), 1);
     assert!(!report.performance_eligible);
     assert_eq!(report.actions.len(), 1);
-    assert!(report.elapsed_seconds >= 0.35);
+    assert!(report.elapsed >= Duration::from_millis(350));
 }
 
 #[test]

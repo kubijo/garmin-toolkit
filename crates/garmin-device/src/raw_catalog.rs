@@ -1,5 +1,6 @@
 //! Direct USB MTP attachment discovery and bounded browser snapshots.
 
+use garmin_model::artifact::ByteCount;
 use std::collections::BTreeSet;
 
 use garmin_progress::ProgressReporter;
@@ -175,7 +176,11 @@ async fn browse_storage(
             } else {
                 continue;
             };
-            entries.push(DeviceCatalogEntry { path, kind, size });
+            entries.push(DeviceCatalogEntry {
+                path,
+                kind,
+                size: size.map(ByteCount::from_bytes),
+            });
         }
     }
     entries.sort_by(|left, right| left.path.cmp(&right.path));
@@ -277,7 +282,7 @@ mod tests {
         assert_eq!(entries[0].kind, DeviceCatalogEntryKind::Directory);
         assert_eq!(entries[1].path.as_str(), "Garmin/course.fit");
         assert_eq!(entries[1].kind, DeviceCatalogEntryKind::File);
-        assert_eq!(entries[1].size, Some(9));
+        assert_eq!(entries[1].size, Some(ByteCount::from_bytes(9)));
         device.close().await?;
         Ok(())
     }

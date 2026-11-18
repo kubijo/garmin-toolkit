@@ -18,7 +18,15 @@ use std::{
 
 use gallery::{CatalogGlobals, Checkerboard, GlobalControls, Icon, StageSpec};
 use garmin_i18n::{Intl, Language as IntlLanguage, Translations};
+use garmin_model::route::Coordinate;
 use serde::{Deserialize, Serialize};
+
+const fn fixture_coordinate(latitude: f64, longitude: f64) -> Coordinate {
+    match Coordinate::from_degrees(latitude, longitude) {
+        Ok(coordinate) => coordinate,
+        Err(_) => panic!("invalid scene coordinate"),
+    }
+}
 
 pub(crate) struct SceneState<T, const N: usize = 1>(RefCell<[Option<T>; N]>);
 

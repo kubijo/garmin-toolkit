@@ -2,6 +2,7 @@
 
 use super::*;
 use garmin_device::storage::DeviceRead;
+use garmin_model::artifact::ByteCount;
 use garmin_model::device::{
     IdentityInspection, InspectionFailure, InspectionFailureKind, InspectionSection,
     ProfileMarkerInspection, StorageInspection, TransactionInspection, TransactionKind,
@@ -88,14 +89,14 @@ async fn read<D: DeviceRead + ?Sized>(
     device: &D,
     storage: &str,
     path: &str,
-    limit: u64,
+    limit: ByteCount,
 ) -> Result<Option<Vec<u8>>, DeviceStateError> {
     let bytes = device
         .read_bounded_file(storage, &SafeRelativePath::parse(path)?, limit)
         .await?;
     if bytes
         .as_ref()
-        .is_some_and(|bytes| bytes.len() as u64 > limit)
+        .is_some_and(|bytes| ByteCount::from_bytes(bytes.len() as u64) > limit)
     {
         return Err(DeviceStateError::DocumentTooLarge(path.to_owned()));
     }

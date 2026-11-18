@@ -1,6 +1,7 @@
 //! Native pickers hand paths to this adapter; the shared service receives only bounded bytes.
 
 use eframe::egui;
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::snapshots::{
     MAX_SNAPSHOT_CHUNK, SnapshotReply, SnapshotRequest, SnapshotState, SnapshotStatus,
 };
@@ -233,7 +234,7 @@ impl Transfer<'_> {
         let parent = path.parent().ok_or("backup destination has no parent")?;
         let mut output =
             tempfile::NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
-        let mut offset = 0;
+        let mut offset = ByteCount::default();
         loop {
             if self.cancelled() {
                 return Ok(State::Cancelled);
@@ -251,7 +252,7 @@ impl Transfer<'_> {
             output
                 .write_all(&bytes)
                 .map_err(|error| error.to_string())?;
-            offset += bytes.len() as u64;
+            offset = offset.saturating_add(ByteCount::from_bytes(bytes.len() as u64));
             status.transferred = offset;
             self.report(&status);
             if end {
@@ -281,12 +282,13 @@ impl Transfer<'_> {
         let mut current = status(
             self.execute(SnapshotRequest::BeginRestore {
                 operation: uuid::Uuid::new_v4(),
-                bytes: metadata.len(),
+                bytes: ByteCount::from_bytes(metadata.len()),
             })
             .await?,
         )?;
         self.operation = Some(current.operation);
-        let mut buffer = vec![0; MAX_SNAPSHOT_CHUNK as usize];
+        let mut buffer =
+            vec![0; usize::try_from(MAX_SNAPSHOT_CHUNK.as_bytes()).unwrap_or(usize::MAX)];
         loop {
             if self.cancelled() {
                 return Ok(State::Cancelled);
@@ -333,7 +335,7 @@ impl Transfer<'_> {
         if current.state == SnapshotState::Completed {
             Ok(State::Restored(RestoreSummary {
                 elapsed: Some(restore_started.elapsed()),
-                archive_bytes: Some(metadata.len()),
+                archive_bytes: Some(ByteCount::from_bytes(metadata.len())),
                 database_bytes,
                 created_at,
             }))

@@ -52,6 +52,10 @@ pub use system::{
     MountedMtpVerifyProgress, discover_garmin_usb_sysfs, discover_mounted_mtp,
 };
 
+use std::time::Duration;
+
+use garmin_model::artifact::{ByteCount, ByteRate};
+use garmin_model::value::duration_seconds;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,40 +115,40 @@ fn push_distinct_device(devices: &mut Vec<DeviceManifest>, candidate: DeviceMani
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceProbeReport {
     pub transport: TransportKind,
-    pub bytes: u64,
-    pub upload_seconds: f64,
-    pub device_finalize_seconds: f64,
+    pub bytes: ByteCount,
+    #[serde(
+        rename = "upload_seconds",
+        serialize_with = "duration_seconds::serialize"
+    )]
+    pub upload_elapsed: Duration,
+    #[serde(
+        rename = "device_finalize_seconds",
+        serialize_with = "duration_seconds::serialize"
+    )]
+    pub device_finalize_elapsed: Duration,
     pub upload_completion: UploadCompletion,
-    pub read_back_seconds: f64,
-    pub cleanup_seconds: f64,
+    #[serde(
+        rename = "read_back_seconds",
+        serialize_with = "duration_seconds::serialize"
+    )]
+    pub read_back_elapsed: Duration,
+    #[serde(
+        rename = "cleanup_seconds",
+        serialize_with = "duration_seconds::serialize"
+    )]
+    pub cleanup_elapsed: Duration,
     pub content_verified: bool,
     pub temporary_file_removed: bool,
 }
 
 impl DeviceProbeReport {
     #[must_use]
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "an approximate transfer rate is intentionally represented as f64"
-    )]
-    pub fn upload_bytes_per_second(&self) -> f64 {
-        if self.upload_seconds == 0.0 {
-            0.0
-        } else {
-            self.bytes as f64 / self.upload_seconds
-        }
+    pub fn upload_rate(&self) -> ByteRate {
+        ByteRate::from_transfer(self.bytes, self.upload_elapsed)
     }
 
     #[must_use]
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "an approximate transfer rate is intentionally represented as f64"
-    )]
-    pub fn read_back_bytes_per_second(&self) -> f64 {
-        if self.read_back_seconds == 0.0 {
-            0.0
-        } else {
-            self.bytes as f64 / self.read_back_seconds
-        }
+    pub fn read_back_rate(&self) -> ByteRate {
+        ByteRate::from_transfer(self.bytes, self.read_back_elapsed)
     }
 }

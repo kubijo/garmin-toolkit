@@ -11,7 +11,6 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 anyhow.workspace = true
-byte-unit.workspace = true
 garmin-capture.workspace = true
 garmin-device.workspace = true
 mtp-rs = { workspace = true, features = ["virtual-device"] }

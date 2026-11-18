@@ -1,5 +1,6 @@
 use super::*;
 use garmin_i18n::{Language, Translations};
+use garmin_model::artifact::ByteCount;
 use garmin_model::device::{
     DeviceInspection, DeviceStateSnapshot, DeviceStorageState, IdentityInspection,
     InspectionFailure, InspectionFailureKind, InspectionSection, StorageCapacity,
@@ -10,7 +11,10 @@ fn snapshot() -> DeviceSnapshot {
     let storage = DeviceStorageState {
         id: "internal".to_owned(),
         label: "Internal storage".to_owned(),
-        capacity: StorageCapacity::new(32_000_000_000, 8_600_000_000),
+        capacity: StorageCapacity::new(
+            ByteCount::from_gigabytes(32),
+            ByteCount::from_megabytes(8_600),
+        ),
         writable: Some(true),
     };
     DeviceSnapshot {

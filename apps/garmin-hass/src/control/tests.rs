@@ -87,7 +87,7 @@ async fn maximum_screenshot_crosses_the_real_transport_and_leaves_rpc_usable() -
     use remoc::ConnectExt as _;
     let browser = Arc::new(Browser {
         windows: Mutex::new(Vec::new()),
-        capture_bytes: control::MAX_CAPTURE_BYTES,
+        capture_bytes: usize::try_from(control::MAX_CAPTURE_BYTES.as_bytes()).unwrap(),
         label: "after screenshot",
         calls: AtomicUsize::new(0),
         block: AtomicBool::new(false),
@@ -105,18 +105,21 @@ async fn maximum_screenshot_crosses_the_real_transport_and_leaves_rpc_usable() -
         .await?;
     let capture = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        client.capture(u64::MAX, None),
+        client.capture(ControlTime::from_millis(u64::MAX), None),
     )
     .await??
     .map_err(anyhow::Error::msg)?;
     capture.validate().map_err(anyhow::Error::msg)?;
-    assert_eq!(capture.png.len(), control::MAX_CAPTURE_BYTES);
+    assert_eq!(
+        ByteCount::from_bytes(capture.png.len() as u64),
+        control::MAX_CAPTURE_BYTES
+    );
     assert!(capture.png.len() > remoc::Cfg::default().max_data_size);
     let reply = client
         .execute(ControlDispatch {
             request_id: 2,
             command_json: r#"{"operation":"status"}"#.into(),
-            expires_at_ms: u64::MAX,
+            expires_at_ms: ControlTime::from_millis(u64::MAX),
         })
         .await?
         .map_err(anyhow::Error::msg)?;
@@ -226,7 +229,7 @@ impl BrowserControl for Browser {
     }
     fn capture(
         &self,
-        _expires_at_ms: u64,
+        _expires_at_ms: ControlTime,
         window: Option<String>,
     ) -> impl Future<Output = Result<Result<control::Capture, String>, rtc::CallError>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
@@ -325,9 +328,12 @@ async fn screenshots_are_binary_correlated_and_share_command_admission() {
     assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
     assert!(!response.headers().contains_key("x-garmin-session"));
     assert_eq!(response.headers()["x-garmin-request-id"], "1");
-    let body = axum::body::to_bytes(response.into_body(), control::MAX_CAPTURE_BYTES)
-        .await
-        .expect("PNG body");
+    let body = axum::body::to_bytes(
+        response.into_body(),
+        usize::try_from(control::MAX_CAPTURE_BYTES.as_bytes()).unwrap(),
+    )
+    .await
+    .expect("PNG body");
     assert_eq!(&body[..8], b"\x89PNG\r\n\x1a\n");
     assert_eq!(
         control_request(State(broker.clone()), headers(), Json(capture_request(1)))

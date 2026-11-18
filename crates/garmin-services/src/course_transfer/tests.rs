@@ -259,7 +259,7 @@ async fn demo_partial_file_fault_opens_cleanup_review() -> TestResult {
     let cleanup = transfers
         .prepare_cleanup(owner, review.transfer, connector.as_ref())
         .await?;
-    assert_eq!(cleanup.byte_count, 0);
+    assert!(cleanup.byte_count.is_zero());
     assert_eq!(
         fs::metadata(watch.root().join("Garmin/Courses").join(&review.file_name))?.len(),
         0
@@ -390,7 +390,7 @@ async fn sends_owned_course_without_pairing_and_recovers_exact_copy() -> TestRes
             .progress
             .as_ref()
             .map(|progress| progress.total_bytes),
-        Some(review.byte_count.as_u64())
+        Some(review.byte_count)
     );
     assert!(transfers.approve(owner, review.approval).await.is_err());
     let verified = settled_transfer(&transfers, owner, review.transfer, connector.as_ref()).await?;
@@ -406,7 +406,7 @@ async fn sends_owned_course_without_pairing_and_recovers_exact_copy() -> TestRes
     assert_eq!(fs::read(watch.root().join(PROFILE_MARKER_PATH))?, before);
     assert_eq!(
         fs::read(watch.root().join("Garmin/Courses").join(&review.file_name))?.len() as u64,
-        review.byte_count.as_u64()
+        review.byte_count.as_bytes()
     );
     assert!(matches!(
         transfers
@@ -459,7 +459,7 @@ async fn cleanup_requires_exact_partial_bytes_and_separate_approval() -> TestRes
         artifact: garmin_model::artifact::ArtifactId::new_v4(),
         version: 1,
         digest: ArtifactDigest::from_bytes(b"abcdefgh"),
-        byte_count: garmin_model::artifact::ByteCount::from_u64(8),
+        byte_count: garmin_model::artifact::ByteCount::from_bytes(8),
         target,
         file_name: file_name.clone(),
     };
@@ -498,7 +498,7 @@ async fn cleanup_requires_exact_partial_bytes_and_separate_approval() -> TestRes
     let cleanup = operations
         .prepare_cleanup(owner, transfer, connector.as_ref())
         .await?;
-    assert_eq!(cleanup.byte_count, 4);
+    assert_eq!(cleanup.byte_count, ByteCount::from_bytes(4));
     fs::write(&device_file, b"abce")?;
     assert!(
         operations

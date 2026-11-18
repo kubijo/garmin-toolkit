@@ -1,5 +1,6 @@
 use crate::SceneStateKey as _;
 use gallery::prelude::*;
+use garmin_model::value::UnixMilliseconds;
 use garmin_ui::developer;
 
 scene_meta! { title: "Application / Developer tools" }
@@ -105,7 +106,7 @@ fn sample(slot: usize) -> developer::State {
             (Level::Warn, "map-worker", "Tile request failed; retrying after the connection becomes available"),
         ].into_iter().enumerate().map(|(index, (level, component, message))| Record {
             sequence: index as u64 + 1,
-            timestamp_ms: 1_790_166_467_209,
+            timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(1_790_166_467_209),
             level,
             component: component.into(),
             source: if slot == 0 { "browser/worker" } else { "desktop" }.into(),

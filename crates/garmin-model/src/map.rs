@@ -1,6 +1,8 @@
 //! Source-neutral map catalog and authorization data.
 
 use serde::{Deserialize, Serialize};
+
+use crate::artifact::ByteCount;
 use std::fmt;
 
 /// Available map components and device cleanup targets.
@@ -133,7 +135,7 @@ pub struct InstalledMapFile {
 pub struct MapFile {
     pub file_name: String,
     pub part_number: String,
-    pub size_in_bytes: u64,
+    pub size_in_bytes: ByteCount,
     pub is_shared: bool,
 }
 
@@ -143,7 +145,7 @@ impl MapFile {
         Self {
             file_name: path.into(),
             part_number: String::new(),
-            size_in_bytes: 0,
+            size_in_bytes: ByteCount::from_bytes(0),
             is_shared: false,
         }
     }
@@ -245,7 +247,7 @@ pub struct MapContent {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct MapDownload {
     pub md5: String,
-    pub size_in_bytes: u64,
+    pub size_in_bytes: ByteCount,
     pub delivery_type: Option<String>,
     pub url: String,
 }
@@ -289,6 +291,8 @@ pub struct MapFileSegment {
 
 #[cfg(test)]
 mod tests {
+    use crate::artifact::ByteCount;
+
     use super::{
         InstallationState, InstalledMapFile, MapCatalog, MapComponent, MapFile, MapOperation,
         MapVersion, MapVersionStatus,
@@ -327,7 +331,7 @@ mod tests {
             files_to_remove: vec![MapFile {
                 file_name: "Garmin/map.img".to_owned(),
                 part_number: part_number.to_owned(),
-                size_in_bytes: 1,
+                size_in_bytes: ByteCount::from_bytes(1),
                 is_shared: false,
             }],
             ..MapComponent::default()

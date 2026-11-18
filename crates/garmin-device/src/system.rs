@@ -1,5 +1,6 @@
 //! Host-selected adapters for desktop-owned Garmin device access.
 
+use garmin_model::artifact::ByteCount;
 use std::path::Path;
 
 use garmin_progress::{OperationStage, ProgressReporter};
@@ -61,19 +62,25 @@ pub use implementation::{
 #[derive(Debug, Clone)]
 pub struct MountedMtpBackupProgress {
     pub reporter: ProgressReporter,
-    pub completed_before: u64,
-    pub total: u64,
+    pub completed_before: ByteCount,
+    pub total: ByteCount,
 }
 
 impl MountedMtpBackupProgress {
-    pub fn advanced(&self, storage_id: &str, path: &SafeRelativePath, completed: u64, total: u64) {
+    pub fn advanced(
+        &self,
+        storage_id: &str,
+        path: &SafeRelativePath,
+        completed: ByteCount,
+        total: ByteCount,
+    ) {
         let display_path = path.to_string();
         self.reporter.advanced_with_path(
             OperationStage::Backup,
             "Backing up selected device file",
             &display_path,
-            self.completed_before.saturating_add(completed),
-            Some(self.total),
+            self.completed_before.saturating_add(completed).as_bytes(),
+            Some(self.total.as_bytes()),
         );
         self.reporter
             .for_item(format!("backup:{storage_id}:{display_path}"))
@@ -81,12 +88,12 @@ impl MountedMtpBackupProgress {
                 OperationStage::Backup,
                 "Backing up device file",
                 display_path,
-                completed,
-                Some(total),
+                completed.as_bytes(),
+                Some(total.as_bytes()),
             );
     }
 
-    pub fn completed(&self, storage_id: &str, path: &SafeRelativePath, total: u64) {
+    pub fn completed(&self, storage_id: &str, path: &SafeRelativePath, total: ByteCount) {
         let display_path = path.to_string();
         self.reporter
             .for_item(format!("backup:{storage_id}:{display_path}"))
@@ -94,8 +101,8 @@ impl MountedMtpBackupProgress {
                 OperationStage::Backup,
                 "Device file backed up",
                 display_path,
-                total,
-                Some(total),
+                total.as_bytes(),
+                Some(total.as_bytes()),
             );
     }
 }
@@ -104,25 +111,25 @@ impl MountedMtpBackupProgress {
 #[derive(Debug, Clone)]
 pub struct MountedMtpUploadProgress {
     pub reporter: ProgressReporter,
-    pub completed_before: u64,
-    pub total: u64,
+    pub completed_before: ByteCount,
+    pub total: ByteCount,
 }
 
 #[derive(Debug, Clone)]
 pub struct MountedMtpVerifyProgress {
     pub reporter: ProgressReporter,
-    pub completed_before: u64,
-    pub total: u64,
+    pub completed_before: ByteCount,
+    pub total: ByteCount,
 }
 
 impl MountedMtpVerifyProgress {
-    pub fn advanced(&self, path: &SafeRelativePath, completed: u64) {
+    pub fn advanced(&self, path: &SafeRelativePath, completed: ByteCount) {
         self.reporter.advanced_with_path(
             OperationStage::DeviceVerify,
             "Verifying existing device file",
             path.to_string(),
-            self.completed_before.saturating_add(completed),
-            Some(self.total),
+            self.completed_before.saturating_add(completed).as_bytes(),
+            Some(self.total.as_bytes()),
         );
     }
 }
@@ -130,10 +137,20 @@ impl MountedMtpVerifyProgress {
 /// Structured details for a disposable mounted-MTP probe failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MountedMtpProbeFailure {
-    Upload { reason: String },
-    UploadCleanup { upload: String, cleanup: String },
-    ReadBack { reason: String },
-    Size { expected: u64, actual: u64 },
+    Upload {
+        reason: String,
+    },
+    UploadCleanup {
+        upload: String,
+        cleanup: String,
+    },
+    ReadBack {
+        reason: String,
+    },
+    Size {
+        expected: ByteCount,
+        actual: ByteCount,
+    },
     Checksum,
     NotRemoved,
 }
@@ -198,7 +215,7 @@ impl MountedMtpDevice {
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
-    ) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+    ) -> Result<(DevicePathState, Option<ByteCount>), MountedMtpError> {
         implementation::inspect_mounted_mtp_object(&self.mount_id, storage_id, path).await
     }
 
@@ -207,7 +224,7 @@ impl MountedMtpDevice {
         storage_id: &str,
         path: &SafeRelativePath,
         progress: &ProgressReporter,
-    ) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+    ) -> Result<(DevicePathState, Option<ByteCount>), MountedMtpError> {
         implementation::inspect_mounted_mtp_object_with_progress(
             &self.mount_id,
             storage_id,
@@ -221,7 +238,7 @@ impl MountedMtpDevice {
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
-        limit: u64,
+        limit: ByteCount,
     ) -> Result<Option<Vec<u8>>, MountedMtpError> {
         implementation::read_bounded_mounted_mtp_file(&self.mount_id, storage_id, path, limit).await
     }
@@ -294,7 +311,7 @@ impl MountedMtpDevice {
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
-        expected_size: u64,
+        expected_size: ByteCount,
         destination: BackupDestination,
         progress: MountedMtpBackupProgress,
     ) -> Result<String, MountedMtpError> {
@@ -313,7 +330,7 @@ impl MountedMtpDevice {
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
-        expected_size: u64,
+        expected_size: ByteCount,
         expected_sha256: &str,
     ) -> Result<(), MountedMtpError> {
         implementation::delete_mounted_mtp_object(
@@ -330,7 +347,7 @@ impl MountedMtpDevice {
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
-        expected_size: u64,
+        expected_size: ByteCount,
         expected_sha256: &str,
         progress: &ProgressReporter,
     ) -> Result<(), MountedMtpError> {
@@ -349,7 +366,7 @@ impl MountedMtpDevice {
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
-        expected_size: u64,
+        expected_size: ByteCount,
     ) -> Result<(), MountedMtpError> {
         implementation::delete_size_checked_mounted_mtp_object(
             &self.mount_id,
@@ -364,7 +381,7 @@ impl MountedMtpDevice {
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
-        expected_size: u64,
+        expected_size: ByteCount,
         progress: &ProgressReporter,
     ) -> Result<(), MountedMtpError> {
         implementation::delete_size_checked_mounted_mtp_object_with_progress(
@@ -381,7 +398,7 @@ impl MountedMtpDevice {
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
-        expected_size: u64,
+        expected_size: ByteCount,
         expected_sha256: &str,
     ) -> Result<(), MountedMtpError> {
         implementation::verify_mounted_mtp_object(
@@ -398,7 +415,7 @@ impl MountedMtpDevice {
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
-        expected_size: u64,
+        expected_size: ByteCount,
         expected_sha256: &str,
         progress: MountedMtpVerifyProgress,
     ) -> Result<(), MountedMtpError> {
@@ -417,7 +434,7 @@ impl MountedMtpDevice {
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
-        expected_size: u64,
+        expected_size: ByteCount,
         backup: &Path,
         expected_sha256: &str,
     ) -> Result<(), MountedMtpError> {
@@ -436,7 +453,7 @@ impl MountedMtpDevice {
         &self,
         storage_id: &str,
         path: &SafeRelativePath,
-        expected_size: u64,
+        expected_size: ByteCount,
         backup: &Path,
         expected_sha256: &str,
         progress: &ProgressReporter,
@@ -458,7 +475,7 @@ impl MountedMtpDevice {
         storage_id: &str,
         path: &SafeRelativePath,
         source: &Path,
-        expected_size: u64,
+        expected_size: ByteCount,
         expected_sha256: &str,
         progress: MountedMtpUploadProgress,
     ) -> Result<(), MountedMtpError> {

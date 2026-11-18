@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
-pub const MAX_RECORD_BYTES: usize = 16 * 1024;
+use crate::{artifact::ByteCount, value::UnixMilliseconds};
+
+pub const MAX_RECORD_BYTES: ByteCount = ByteCount::from_kibibytes(16);
 
 /// A sequence is meaningful only within the store incarnation that issued it.
 #[garmin_macros::portable(copy, default, eq)]
@@ -30,7 +32,7 @@ pub enum Level {
 #[garmin_macros::portable]
 pub struct Record {
     pub sequence: u64,
-    pub timestamp_ms: u64,
+    pub timestamp_ms: UnixMilliseconds,
     pub level: Level,
     pub component: String,
     pub source: String,
@@ -47,8 +49,8 @@ pub struct Filter {
     pub source: String,
     pub session: String,
     pub text: String,
-    pub since_ms: Option<u64>,
-    pub until_ms: Option<u64>,
+    pub since_ms: Option<UnixMilliseconds>,
+    pub until_ms: Option<UnixMilliseconds>,
 }
 
 impl Filter {
@@ -95,7 +97,7 @@ mod tests {
     fn records_and_filters_round_trip_through_postcard() {
         let record = Record {
             sequence: 7,
-            timestamp_ms: 1234,
+            timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(1234),
             level: Level::Warn,
             component: "map".into(),
             source: "worker".into(),
@@ -113,8 +115,8 @@ mod tests {
             source: "worker".into(),
             session: "session".into(),
             text: "TILE".into(),
-            since_ms: Some(1000),
-            until_ms: Some(2000),
+            since_ms: Some(UnixMilliseconds::from_milliseconds_since_epoch(1000)),
+            until_ms: Some(UnixMilliseconds::from_milliseconds_since_epoch(2000)),
         };
         let decoded: Filter = postcard::from_bytes(&postcard::to_stdvec(&filter).unwrap()).unwrap();
         assert_eq!(filter, decoded);

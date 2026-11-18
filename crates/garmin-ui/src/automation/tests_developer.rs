@@ -18,7 +18,7 @@ fn start(context: &Context) {
                 phase: "setup",
                 target: "pending-target".into(),
                 action: Action::Wait,
-                after: 0.1,
+                after: Duration::from_millis(100),
             }],
         )
         .unwrap();

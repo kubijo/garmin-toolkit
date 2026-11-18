@@ -6,6 +6,7 @@ use axum::{
     response::Response,
 };
 use futures_util::{StreamExt as _, future::BoxFuture, stream::BoxStream};
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::DownloadTicket;
 use std::{
     collections::HashMap,
@@ -18,18 +19,18 @@ use uuid::Uuid;
 
 const TTL: Duration = Duration::from_secs(60);
 const MAX_DOWNLOADS: usize = 8;
-const CHUNK_BYTES: usize = 64 * 1024;
+const CHUNK_BYTES: ByteCount = ByteCount::from_kibibytes(64);
 
 #[cfg(test)]
 mod tests;
 
 pub(super) struct Prepared {
     file_name: String,
-    size: u64,
+    size: ByteCount,
     media_type: &'static str,
     stream: BoxStream<'static, io::Result<Bytes>>,
     operation: Option<Uuid>,
-    staged_bytes: u64,
+    staged_bytes: ByteCount,
     cleanup: Option<BoxFuture<'static, ()>>,
     #[cfg(feature = "demo")]
     integration_gate: Option<Arc<garmin_services::integration_gate::IntegrationGate>>,
@@ -70,7 +71,7 @@ impl Prepared {
 
     pub fn new(
         file_name: String,
-        size: u64,
+        size: ByteCount,
         media_type: &'static str,
         stream: BoxStream<'static, io::Result<Bytes>>,
     ) -> Self {
@@ -80,7 +81,7 @@ impl Prepared {
             media_type,
             stream,
             operation: None,
-            staged_bytes: 0,
+            staged_bytes: ByteCount::default(),
             cleanup: None,
             #[cfg(feature = "demo")]
             integration_gate: None,
@@ -98,13 +99,17 @@ impl Prepared {
 
     pub fn from_file(
         file_name: String,
-        size: u64,
+        size: ByteCount,
         file: tokio::fs::File,
         owner: impl Send + 'static,
     ) -> Self {
         let stream =
             futures_util::stream::try_unfold((file, owner), |(mut file, owner)| async move {
-                let mut bytes = vec![0; CHUNK_BYTES];
+                let mut bytes = vec![
+                    0;
+                    usize::try_from(CHUNK_BYTES.as_bytes())
+                        .expect("download chunk fits usize")
+                ];
                 let count = file.read(&mut bytes).await?;
                 if count == 0 {
                     return Ok::<_, io::Error>(None);
@@ -138,7 +143,7 @@ struct Pending {
 }
 struct Reservation {
     operation: Option<Uuid>,
-    staged_bytes: u64,
+    staged_bytes: ByteCount,
 }
 
 impl Downloads {
@@ -249,7 +254,7 @@ impl Drop for Lease {
 
 pub(super) struct Download {
     prepared: Prepared,
-    remaining: u64,
+    remaining: ByteCount,
     #[cfg(feature = "demo")]
     pending_bytes: Bytes,
     lease: Option<Lease>,
@@ -272,7 +277,7 @@ impl Download {
         #[cfg(not(feature = "demo"))]
         let bytes = self.prepared.stream.next().await.transpose()?;
         let Some(bytes) = bytes else {
-            if self.remaining != 0 {
+            if self.remaining != ByteCount::default() {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
                     "download ended before its declared length",
@@ -288,14 +293,15 @@ impl Download {
             }
             bytes
         };
-        if bytes.is_empty() || bytes.len() > CHUNK_BYTES {
+        let chunk_size = ByteCount::from_bytes(bytes.len() as u64);
+        if chunk_size.is_zero() || chunk_size > CHUNK_BYTES {
             return Err(io::Error::other("invalid download chunk length"));
         }
         #[cfg(feature = "demo")]
         let first_chunk = self.remaining == self.prepared.size;
         self.remaining = self
             .remaining
-            .checked_sub(bytes.len() as u64)
+            .checked_sub(chunk_size)
             .ok_or_else(|| io::Error::other("download exceeded its declared length"))?;
         #[cfg(feature = "demo")]
         if first_chunk && let Some(gate) = self.prepared.integration_gate.clone() {
@@ -317,7 +323,7 @@ impl Download {
             header::CONTENT_DISPOSITION,
             HeaderValue::from_static("attachment"),
         );
-        headers.insert(header::CONTENT_LENGTH, HeaderValue::from(size));
+        headers.insert(header::CONTENT_LENGTH, HeaderValue::from(size.as_bytes()));
         headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
         headers.insert(
             header::X_CONTENT_TYPE_OPTIONS,

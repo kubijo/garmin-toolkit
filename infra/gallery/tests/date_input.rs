@@ -38,8 +38,7 @@ fn selecting_a_day_updates_the_value_and_closes_the_popup() {
     let mut view = harness(true);
     view.run();
     assert_eq!(view.state(), "");
-    view.get(By::new().predicate(|node| node.author_id() == Some("date-test.field")))
-        .click();
+    view.get_by_label("Choose date for From date").click();
     view.run();
     view.get_by_label("Previous month").click();
     view.run();

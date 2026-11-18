@@ -2,7 +2,10 @@
 #[path = "../src/files/protocol.rs"]
 mod protocol;
 
-use garmin_model::identity::{ProfilePreferences, UserId};
+use garmin_model::{
+    artifact::ByteCount,
+    identity::{ProfilePreferences, UserId},
+};
 use garmin_service_api::{DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceCatalogStorage};
 use garmin_ui::{
     device_browser::{Action, Selection},
@@ -44,7 +47,7 @@ fn command(snapshot: &Snapshot) -> Command {
             storage_label: "Internal".into(),
             path: "Activities/ride.fit".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(123),
+            size: Some(ByteCount::from_bytes(123)),
         })),
     }
 }

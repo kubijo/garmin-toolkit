@@ -1,9 +1,9 @@
 use md5::{Digest as _, Md5};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use url::Url;
 
-const TOKEN_LIFETIME_SECONDS: u64 = 24 * 60 * 60;
+const TOKEN_LIFETIME: Duration = Duration::from_hours(24);
 const TOKEN_PARAMETER: &str = "garmindlm";
 const TOKEN_SALT: &[u8] = b"XQVM5coEWp8QJ";
 
@@ -19,10 +19,10 @@ pub fn authorize_download_url(source: &Url) -> Result<Url, DownloadAuthorization
     }
     let expires = SystemTime::now()
         .duration_since(UNIX_EPOCH)?
-        .as_secs()
-        .checked_add(TOKEN_LIFETIME_SECONDS)
+        .checked_add(TOKEN_LIFETIME)
         .ok_or(DownloadAuthorizationError::ExpiryOverflow)?;
-    let expires = u32::try_from(expires).map_err(|_| DownloadAuthorizationError::ExpiryOverflow)?;
+    let expires =
+        u32::try_from(expires.as_secs()).map_err(|_| DownloadAuthorizationError::ExpiryOverflow)?;
     Ok(tokenized_url(source, expires))
 }
 

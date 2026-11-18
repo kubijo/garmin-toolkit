@@ -48,7 +48,14 @@ missing-field variant removes one distance and one duration while preserving act
 Custom ranges include both endpoints, cover up to 366 days, and compare against the immediately preceding window of
 equal length. Monthly goals apply to the Month preset.
 
+Activity comparison pairs two dated activities of the same supported sport within the selected period. Distance and
+duration come from cached summaries and use the canonical measurement types. Their formatting methods use profile units
+and locale-aware decimals. Pace or speed is unavailable when either input is missing or zero.
+
+Elevation gain comes from imported FIT projections linked to the same Garmin account and activity ID. Trends reports
+coverage and leaves incomplete chart buckets unknown. A downloaded original contributes after import. Reload cached
+history to pick up newly imported measurements.
+
 ## Remaining scope
 
-Local-only history, cross-source deduplication, activity comparisons, and FIT-derived elevation and performance metrics
-remain separate work.
+Local-only history, cross-source deduplication, and other FIT-derived performance metrics remain separate work.

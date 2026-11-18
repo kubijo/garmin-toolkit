@@ -7,11 +7,12 @@ use egui_kittest::{
     kittest::{By, Queryable as _},
 };
 use garmin_model::{
+    activity::{ActivityDuration, Distance},
     garmin_connect::{
         sync::{Outcome, Revision, Snapshot},
         trends::History,
     },
-    identity::ProfilePreferences,
+    identity::{MonthlyDistanceTarget, ProfilePreferences},
 };
 use garmin_ui::trends::{Action, Props, State};
 
@@ -59,7 +60,7 @@ fn harness() -> Harness<'static, Model> {
                             model.reads += 1;
                             model
                                 .state
-                                .complete(&revision, Ok(Some(History::default())));
+                                .complete_read(&revision, Ok(Some(History::default())));
                         }
                         Action::Sync => model.syncs += 1,
                         Action::Cancel(_) => {}
@@ -143,6 +144,87 @@ fn custom_dates_apply_locally_and_return_to_a_preset() {
 }
 
 #[test]
+fn activity_comparison_changes_both_selections_when_the_sport_changes() {
+    use garmin_model::{
+        activity::ActivitySport::{Cycling, Running},
+        garmin_connect::{CachedActivity, RemoteActivity},
+    };
+
+    let activity = |id, name: &str, sport, day, seconds: Option<f64>| CachedActivity {
+        activity: RemoteActivity {
+            id,
+            name: name.to_owned(),
+            sport: Some(sport),
+            imported: false,
+            started_at: None,
+            distance: Distance::try_from_metres(10_000.0),
+            duration: seconds.and_then(ActivityDuration::try_from_seconds),
+        },
+        started_local: Some(format!("2026-11-{day:02}")),
+        description: None,
+        activity_type: None,
+    };
+    let summaries = [
+        activity(4, "Hill ride", Cycling, 16, Some(1800.0)),
+        activity(3, "Flat ride", Cycling, 15, None),
+        activity(2, "Long run", Running, 14, Some(3600.0)),
+        activity(1, "Easy run", Running, 13, Some(4200.0)),
+    ];
+    let history = History::from_summaries_with_ascent(
+        &summaries,
+        &std::collections::BTreeMap::from([(4, Distance::from_millimeters(420_000))]),
+    );
+    let first = || By::new().predicate(|node| node.author_id() == Some("trends.activity.first"));
+    let second = || By::new().predicate(|node| node.author_id() == Some("trends.activity.second"));
+    let mut view = harness();
+    view.set_size(egui::vec2(760.0, 3200.0));
+    view.state_mut().state = State::from_cache(Some(history), Revision::default());
+    view.run();
+    let initial_reads = view.state().reads;
+    assert!(
+        view.get(first())
+            .value()
+            .is_some_and(|label| label.starts_with("Hill ride ·"))
+    );
+    assert!(
+        view.get(second())
+            .value()
+            .is_some_and(|label| label.starts_with("Flat ride ·"))
+    );
+    assert!(view.query_by_label("20.0\u{a0}km/h").is_some());
+    assert!(view.query_by_label("420\u{a0}m").is_some());
+    view.get(By::new().predicate(|node| node.author_id() == Some("trends.sport.1")))
+        .click();
+    view.run();
+    view.get(By::new().predicate(|node| node.author_id() == Some("trends.metric")))
+        .click();
+    view.run();
+    view.get(By::new().predicate(|node| node.author_id() == Some("trends.metric.elevation")))
+        .click();
+    view.run();
+    assert!(
+        view.query_by_label("Imported FIT elevation for 1 of 2 activities")
+            .is_some()
+    );
+    view.get(first()).click();
+    view.run();
+    view.get(By::new().predicate(|node| {
+        node.label()
+            .is_some_and(|label| label.starts_with("Long run ·"))
+    }))
+    .click();
+    view.run();
+    assert!(
+        view.get(second())
+            .value()
+            .is_some_and(|label| label.starts_with("Easy run ·"))
+    );
+    assert!(view.query_by_label("6:00 / km").is_some());
+    assert_eq!(view.state().reads, initial_reads);
+    assert_eq!(view.state().syncs, 0);
+}
+
+#[test]
 fn published_empty_history_is_not_a_missing_cache_and_reload_is_explicit() {
     let mut view = harness();
     view.run();
@@ -170,13 +252,16 @@ fn target_editor_saves_only_on_confirmation_and_cancel_discards_the_draft() {
     view.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
     view.get(running()).type_text("120");
     view.run();
-    assert_eq!(view.state().preferences.monthly_distance_targets(), [0; 3]);
+    assert_eq!(
+        view.state().preferences.monthly_distance_targets(),
+        [MonthlyDistanceTarget::UNSET; 3]
+    );
     view.get(By::new().predicate(|node| node.author_id() == Some("modal.primary")))
         .click();
     view.run();
     assert_eq!(
         view.state().preferences.monthly_distance_targets(),
-        [120, 0, 0]
+        [120, 0, 0].map(MonthlyDistanceTarget::from_kilometres)
     );
     view.get_by_label("Edit monthly distance targets").click();
     view.run();
@@ -190,7 +275,7 @@ fn target_editor_saves_only_on_confirmation_and_cancel_discards_the_draft() {
     view.run();
     assert_eq!(
         view.state().preferences.monthly_distance_targets(),
-        [120, 0, 0]
+        [120, 0, 0].map(MonthlyDistanceTarget::from_kilometres)
     );
     assert_eq!(view.state().syncs, 0);
     assert_eq!(view.state().reads, 1);
@@ -274,11 +359,13 @@ fn year_view_labels_monthly_buckets_and_keeps_long_duration_on_one_line() {
                 sport: garmin_model::garmin_connect::trends::Sport::Running,
                 totals: garmin_model::garmin_connect::trends::Totals {
                     activities: 1,
-                    duration_seconds: 1_045_380.0,
+                    duration: ActivityDuration::try_from_seconds(1_045_380.0)
+                        .expect("fixture measurement"),
                     ..Default::default()
                 },
             }],
             summaries: 1,
+            activities: Vec::new(),
             undated: 0,
         }),
         Revision::default(),

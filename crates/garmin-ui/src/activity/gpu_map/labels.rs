@@ -1,5 +1,6 @@
 //! Label projection, collision placement, worker protocol, and cache publication.
 
+use garmin_model::artifact::ByteCount;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
@@ -71,7 +72,7 @@ pub(super) struct LabelCache {
     requested: Option<RequestedLabels>,
     published: Option<Arc<PublishedLabels>>,
     next_generation: u64,
-    last_milliseconds: f32,
+    last_elapsed: Duration,
     stale_work: u64,
     motion: LabelMotion,
 }
@@ -136,7 +137,7 @@ impl LabelSnapshot {
 
 #[derive(Clone, Copy)]
 pub(super) struct LabelCacheMetrics {
-    pub(super) milliseconds: f32,
+    pub(super) elapsed: Duration,
     pub(super) backlog: usize,
     pub(super) stale_work: u64,
 }
@@ -198,11 +199,11 @@ impl LabelCache {
         }
         match result.outcome {
             LabelOutcome::Ready {
-                milliseconds,
+                elapsed,
                 shapes,
                 texture,
             } => {
-                self.last_milliseconds = milliseconds;
+                self.last_elapsed = elapsed;
                 self.published = Some(Arc::new(PublishedLabels {
                     generation: result.generation,
                     anchor: result.view,
@@ -231,7 +232,7 @@ impl LabelCache {
                 .is_none_or(|published| published.generation != requested.generation)
         });
         LabelCacheMetrics {
-            milliseconds: self.last_milliseconds,
+            elapsed: self.last_elapsed,
             backlog: usize::from(backlog),
             stale_work: self.stale_work,
         }
@@ -253,7 +254,7 @@ pub(super) struct LabelResult {
 
 pub(super) enum LabelOutcome {
     Ready {
-        milliseconds: f32,
+        elapsed: Duration,
         shapes: Vec<Shape>,
         texture: Option<egui::TextureHandle>,
     },
@@ -282,7 +283,7 @@ impl BrowserLabelTask {
         });
         let outcome = match completed {
             Ok(payload) => LabelOutcome::Ready {
-                milliseconds: payload.milliseconds,
+                elapsed: payload.elapsed,
                 shapes: payload.shapes,
                 texture: Some(payload.texture),
             },
@@ -335,7 +336,7 @@ pub(super) struct BrowserLabelVertex {
 }
 
 pub(super) struct DecodedBrowserLabels {
-    milliseconds: f32,
+    elapsed: Duration,
     shapes: Vec<Shape>,
     texture: egui::TextureHandle,
 }
@@ -430,7 +431,7 @@ pub(super) fn build_label_result(task: &LabelTask) -> LabelResult {
         generation: task.generation,
         view: task.view,
         outcome: LabelOutcome::Ready {
-            milliseconds: started.elapsed().as_secs_f32() * 1_000.0,
+            elapsed: started.elapsed(),
             shapes,
             texture: None,
         },
@@ -630,7 +631,8 @@ pub(super) fn decode_browser_labels(
     context: &egui::Context,
     expected_generation: u64,
 ) -> Result<DecodedBrowserLabels, String> {
-    if bytes.len() > crate::activity::map_runtime::BrowserWorkerTaskKind::Labels.result_byte_limit()
+    if ByteCount::from_bytes(bytes.len() as u64)
+        > crate::activity::map_runtime::BrowserWorkerTaskKind::Labels.result_byte_limit()
     {
         return Err("prepared map labels exceeded the 16 MiB browser limit".to_owned());
     }
@@ -697,7 +699,8 @@ pub(super) fn decode_browser_labels(
         .into_iter()
         .collect();
     Ok(DecodedBrowserLabels {
-        milliseconds: result.milliseconds,
+        elapsed: Duration::try_from_secs_f32(result.milliseconds / 1_000.0)
+            .map_err(|_| "invalid worker label duration".to_owned())?,
         shapes,
         texture,
     })

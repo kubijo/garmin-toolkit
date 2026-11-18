@@ -1,15 +1,15 @@
 //! Canonical activity fingerprint payload.
 
 use semver::Version;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use crate::{
     activity::{
-        Activity, ActivityMetrics, ActivitySport, ActivityTotals, Distance, Energy, HeartRate, Lap,
-        Power, Speed, Temperature, TimerEvent, TimerState, TrackPoint,
+        Activity, ActivityDuration, ActivityMetrics, ActivitySport, ActivityTotals, Distance,
+        Energy, HeartRate, Lap, Power, Speed, Temperature, TimerEvent, TimerState, TrackPoint,
     },
     observation::{FingerprintSchema, SemanticFingerprint, SemanticFingerprintError},
-    value::ComponentVersion,
+    value::{ComponentVersion, Timestamp},
 };
 
 const SCHEMA_NAME: &str = "activity-known-semantics";
@@ -61,8 +61,10 @@ impl From<&Activity> for CanonicalActivity {
 #[derive(Serialize)]
 struct CanonicalSummary {
     sport: CanonicalSport,
-    start_ms: i64,
-    end_ms: i64,
+    #[serde(serialize_with = "timestamp_milliseconds")]
+    start_ms: Timestamp,
+    #[serde(serialize_with = "timestamp_milliseconds")]
+    end_ms: Timestamp,
     totals: CanonicalTotals,
     metrics: CanonicalMetrics,
 }
@@ -71,8 +73,8 @@ impl From<crate::activity::ActivitySummary> for CanonicalSummary {
     fn from(summary: crate::activity::ActivitySummary) -> Self {
         Self {
             sport: CanonicalSport::from(summary.sport()),
-            start_ms: summary.time().start().as_unix_milliseconds(),
-            end_ms: summary.time().end().as_unix_milliseconds(),
+            start_ms: summary.time().start(),
+            end_ms: summary.time().end(),
             totals: CanonicalTotals::from(summary.totals()),
             metrics: CanonicalMetrics::from(summary.metrics()),
         }
@@ -102,70 +104,64 @@ impl From<ActivitySport> for CanonicalSport {
 
 #[derive(Serialize)]
 struct CanonicalTotals {
-    elapsed_ms: u64,
-    timer_ms: u64,
-    distance_mm: Option<u64>,
-    energy_kcal: Option<u32>,
-    ascent_mm: Option<u64>,
-    descent_mm: Option<u64>,
+    elapsed_ms: ActivityDuration,
+    timer_ms: ActivityDuration,
+    distance_mm: Option<Distance>,
+    energy_kcal: Option<Energy>,
+    ascent_mm: Option<Distance>,
+    descent_mm: Option<Distance>,
 }
 
 impl From<ActivityTotals> for CanonicalTotals {
     fn from(totals: ActivityTotals) -> Self {
         Self {
-            elapsed_ms: totals.elapsed().into_milliseconds(),
-            timer_ms: totals.timer().into_milliseconds(),
-            distance_mm: totals.distance().map(Distance::into_millimeters),
-            energy_kcal: totals.energy().map(Energy::into_kilocalories),
-            ascent_mm: totals.ascent().map(Distance::into_millimeters),
-            descent_mm: totals.descent().map(Distance::into_millimeters),
+            elapsed_ms: totals.elapsed(),
+            timer_ms: totals.timer(),
+            distance_mm: totals.distance(),
+            energy_kcal: totals.energy(),
+            ascent_mm: totals.ascent(),
+            descent_mm: totals.descent(),
         }
     }
 }
 
 #[derive(Serialize)]
 struct CanonicalMetrics {
-    average_speed_mm_s: Option<u32>,
-    maximum_speed_mm_s: Option<u32>,
-    average_heart_rate_bpm: Option<u16>,
-    maximum_heart_rate_bpm: Option<u16>,
+    average_speed_mm_s: Option<Speed>,
+    maximum_speed_mm_s: Option<Speed>,
+    average_heart_rate_bpm: Option<HeartRate>,
+    maximum_heart_rate_bpm: Option<HeartRate>,
     average_cadence_rpm: Option<f64>,
     maximum_cadence_rpm: Option<f64>,
-    average_power_w: Option<u32>,
-    maximum_power_w: Option<u32>,
+    average_power_w: Option<Power>,
+    maximum_power_w: Option<Power>,
 }
 
 impl From<ActivityMetrics> for CanonicalMetrics {
     fn from(metrics: ActivityMetrics) -> Self {
         Self {
-            average_speed_mm_s: metrics
-                .average_speed()
-                .map(Speed::into_millimeters_per_second),
-            maximum_speed_mm_s: metrics
-                .maximum_speed()
-                .map(Speed::into_millimeters_per_second),
-            average_heart_rate_bpm: metrics
-                .average_heart_rate()
-                .map(HeartRate::into_beats_per_minute),
-            maximum_heart_rate_bpm: metrics
-                .maximum_heart_rate()
-                .map(HeartRate::into_beats_per_minute),
+            average_speed_mm_s: metrics.average_speed(),
+            maximum_speed_mm_s: metrics.maximum_speed(),
+            average_heart_rate_bpm: metrics.average_heart_rate(),
+            maximum_heart_rate_bpm: metrics.maximum_heart_rate(),
             average_cadence_rpm: metrics
                 .average_cadence()
                 .map(|value| canonical_float(value.into_revolutions_per_minute())),
             maximum_cadence_rpm: metrics
                 .maximum_cadence()
                 .map(|value| canonical_float(value.into_revolutions_per_minute())),
-            average_power_w: metrics.average_power().map(Power::into_watts),
-            maximum_power_w: metrics.maximum_power().map(Power::into_watts),
+            average_power_w: metrics.average_power(),
+            maximum_power_w: metrics.maximum_power(),
         }
     }
 }
 
 #[derive(Serialize)]
 struct CanonicalLap {
-    start_ms: i64,
-    end_ms: i64,
+    #[serde(serialize_with = "timestamp_milliseconds")]
+    start_ms: Timestamp,
+    #[serde(serialize_with = "timestamp_milliseconds")]
+    end_ms: Timestamp,
     totals: CanonicalTotals,
     metrics: CanonicalMetrics,
 }
@@ -173,8 +169,8 @@ struct CanonicalLap {
 impl From<Lap> for CanonicalLap {
     fn from(lap: Lap) -> Self {
         Self {
-            start_ms: lap.time().start().as_unix_milliseconds(),
-            end_ms: lap.time().end().as_unix_milliseconds(),
+            start_ms: lap.time().start(),
+            end_ms: lap.time().end(),
             totals: CanonicalTotals::from(lap.totals()),
             metrics: CanonicalMetrics::from(lap.metrics()),
         }
@@ -183,16 +179,17 @@ impl From<Lap> for CanonicalLap {
 
 #[derive(Serialize)]
 struct CanonicalTrackPoint {
-    timestamp_ms: i64,
+    #[serde(serialize_with = "timestamp_milliseconds")]
+    timestamp_ms: Timestamp,
     latitude_degrees: Option<f64>,
     longitude_degrees: Option<f64>,
     elevation_m: Option<f64>,
-    distance_mm: Option<u64>,
-    speed_mm_s: Option<u32>,
-    heart_rate_bpm: Option<u16>,
+    distance_mm: Option<Distance>,
+    speed_mm_s: Option<Speed>,
+    heart_rate_bpm: Option<HeartRate>,
     cadence_rpm: Option<f64>,
-    power_w: Option<u32>,
-    temperature_millicelsius: Option<i32>,
+    power_w: Option<Power>,
+    temperature_millicelsius: Option<Temperature>,
 }
 
 impl From<TrackPoint> for CanonicalTrackPoint {
@@ -206,31 +203,28 @@ impl From<TrackPoint> for CanonicalTrackPoint {
             });
         let measurements = point.measurements();
         Self {
-            timestamp_ms: point.timestamp().as_unix_milliseconds(),
+            timestamp_ms: point.timestamp(),
             latitude_degrees,
             longitude_degrees,
             elevation_m: point
                 .elevation()
                 .map(|value| canonical_float(value.into_meters())),
-            distance_mm: point.distance().map(Distance::into_millimeters),
-            speed_mm_s: measurements.speed().map(Speed::into_millimeters_per_second),
-            heart_rate_bpm: measurements
-                .heart_rate()
-                .map(HeartRate::into_beats_per_minute),
+            distance_mm: point.distance(),
+            speed_mm_s: measurements.speed(),
+            heart_rate_bpm: measurements.heart_rate(),
             cadence_rpm: measurements
                 .cadence()
                 .map(|value| canonical_float(value.into_revolutions_per_minute())),
-            power_w: measurements.power().map(Power::into_watts),
-            temperature_millicelsius: measurements
-                .temperature()
-                .map(Temperature::into_millicelsius),
+            power_w: measurements.power(),
+            temperature_millicelsius: measurements.temperature(),
         }
     }
 }
 
 #[derive(Serialize)]
 struct CanonicalTimerEvent {
-    timestamp_ms: i64,
+    #[serde(serialize_with = "timestamp_milliseconds")]
+    timestamp_ms: Timestamp,
     state: CanonicalTimerState,
 }
 
@@ -238,7 +232,7 @@ impl From<TimerEvent> for CanonicalTimerEvent {
     fn from(event: TimerEvent) -> Self {
         let (timestamp, state) = event.into_parts();
         Self {
-            timestamp_ms: timestamp.as_unix_milliseconds(),
+            timestamp_ms: timestamp,
             state: CanonicalTimerState::from(state),
         }
     }
@@ -261,4 +255,11 @@ impl From<TimerState> for CanonicalTimerState {
 
 const fn canonical_float(value: f64) -> f64 {
     if value == 0.0 { 0.0 } else { value }
+}
+
+fn timestamp_milliseconds<S: Serializer>(
+    value: &Timestamp,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_i64(value.as_unix_milliseconds())
 }

@@ -1,4 +1,5 @@
 use gallery::prelude::*;
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::snapshots::{SnapshotPreview, SnapshotState, SnapshotStatus};
 use garmin_ui::backup;
 
@@ -40,14 +41,14 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             5 => SnapshotState::Restoring,
             _ => SnapshotState::Uploading,
         },
-        transferred: 2_000_000,
-        total: Some(8_000_000),
+        transferred: ByteCount::from_bytes(2_000_000),
+        total: Some(ByteCount::from_bytes(8_000_000)),
         error: None,
         preview: (state == 4).then(|| SnapshotPreview {
             format_version: 1,
             app_version: "0.1.0".into(),
             created_at: 1_790_640_000,
-            database_bytes: 8_000_000,
+            database_bytes: ByteCount::from_bytes(8_000_000),
             database_sha256: "a".repeat(64),
             approval: "00000000-0000-4000-8000-000000000003"
                 .parse()
@@ -74,8 +75,8 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         8 => backup::State::Failed("The selected backup failed its database integrity check. Your current data is unchanged.".into()),
         9 => backup::State::Restored(backup::RestoreSummary {
             elapsed: Some(std::time::Duration::from_secs(18)),
-            archive_bytes: Some(1_200_000),
-            database_bytes: Some(8_000_000),
+            archive_bytes: Some(ByteCount::from_bytes(1_200_000)),
+            database_bytes: Some(ByteCount::from_bytes(8_000_000)),
             created_at: Some(1_790_640_000),
         }),
         11 => backup::State::DownloadStarted,

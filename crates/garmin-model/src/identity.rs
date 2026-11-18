@@ -3,7 +3,7 @@
 use garmin_color::Color;
 use thiserror::Error;
 
-use crate::artifact::ArtifactId;
+use crate::{activity::Distance, artifact::ArtifactId};
 
 define_id!(
     UserIdKind,
@@ -102,6 +102,33 @@ pub enum ThemePreference {
     Light,
 }
 
+/// A monthly target in whole kilometres, with zero representing an unset target.
+#[garmin_macros::portable(copy, default, ord, hash)]
+pub struct MonthlyDistanceTarget(u32);
+
+impl MonthlyDistanceTarget {
+    pub const UNSET: Self = Self(0);
+
+    #[must_use]
+    pub const fn from_kilometres(kilometres: u32) -> Self {
+        Self(kilometres)
+    }
+
+    #[must_use]
+    pub const fn as_kilometres(&self) -> u32 {
+        self.0
+    }
+
+    #[must_use]
+    pub const fn distance(&self) -> Option<Distance> {
+        if self.0 == 0 {
+            None
+        } else {
+            Some(Distance::from_millimeters(self.0 as u64 * 1_000_000))
+        }
+    }
+}
+
 /// Portable profile presentation preferences.
 #[garmin_macros::portable(copy, default, hash)]
 pub struct ProfilePreferences {
@@ -113,17 +140,20 @@ pub struct ProfilePreferences {
     #[serde(default)]
     inline_file_windows: bool,
     #[serde(default)]
-    monthly_distance_targets: [u32; 3],
+    monthly_distance_targets: [MonthlyDistanceTarget; 3],
 }
 
 impl ProfilePreferences {
     #[must_use]
-    pub const fn monthly_distance_targets(self) -> [u32; 3] {
+    pub const fn monthly_distance_targets(self) -> [MonthlyDistanceTarget; 3] {
         self.monthly_distance_targets
     }
 
     #[must_use]
-    pub const fn with_monthly_distance_targets(mut self, targets: [u32; 3]) -> Self {
+    pub const fn with_monthly_distance_targets(
+        mut self,
+        targets: [MonthlyDistanceTarget; 3],
+    ) -> Self {
         self.monthly_distance_targets = targets;
         self
     }
@@ -140,7 +170,7 @@ impl ProfilePreferences {
             theme,
             show_hidden_files: false,
             inline_file_windows: false,
-            monthly_distance_targets: [0; 3],
+            monthly_distance_targets: [MonthlyDistanceTarget::UNSET; 3],
         }
     }
 
@@ -465,6 +495,13 @@ mod tests {
         let encoded = postcard::to_stdvec(&preferences).unwrap();
         let decoded = postcard::from_bytes::<ProfilePreferences>(&encoded).unwrap();
         assert_eq!(decoded, preferences);
+        let raw = [0_u32, 120, u32::MAX];
+        let targets = raw.map(MonthlyDistanceTarget::from_kilometres);
+        assert_eq!(
+            postcard::to_stdvec(&targets).unwrap(),
+            postcard::to_stdvec(&raw).unwrap()
+        );
+        assert_eq!(targets[0].distance(), None);
         Ok(())
     }
 

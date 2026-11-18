@@ -6,6 +6,9 @@
     reason = "Remoc generates serialized RPC requests"
 )]
 
+use std::time::Duration;
+
+use garmin_model::artifact::{ByteCount, ByteRate};
 use remoc::rtc;
 use uuid::Uuid;
 
@@ -62,7 +65,7 @@ pub struct Component {
     pub can_install: bool,
     pub can_remove: bool,
     pub choice: Choice,
-    pub download_bytes: u64,
+    pub download_bytes: ByteCount,
     pub cached_files: u32,
     pub total_files: u32,
 }
@@ -73,10 +76,10 @@ pub struct Plan {
     pub digest: String,
     pub removal: bool,
     pub components: Vec<String>,
-    pub download_bytes: u64,
+    pub download_bytes: ByteCount,
     pub write_count: u32,
     pub remove_count: u32,
-    pub remove_bytes: u64,
+    pub remove_bytes: ByteCount,
     pub paths: Vec<String>,
     pub storage_requirements: Vec<StorageRequirement>,
 }
@@ -84,7 +87,7 @@ pub struct Plan {
 #[garmin_macros::portable(eq)]
 pub struct StorageRequirement {
     pub storage: String,
-    pub required_free_bytes: u64,
+    pub required_free_bytes: ByteCount,
 }
 
 #[garmin_macros::portable(eq)]
@@ -115,12 +118,51 @@ pub struct Progress {
     pub completed: u64,
     pub total: Option<u64>,
     pub bytes: bool,
-    pub elapsed_ms: u64,
-    pub bytes_per_second: Option<u64>,
-    pub remaining_seconds: Option<u64>,
+    #[serde(rename = "elapsed_ms", with = "elapsed_milliseconds")]
+    pub elapsed: Duration,
+    pub bytes_per_second: Option<ByteRate>,
+    #[serde(rename = "remaining_seconds", with = "optional_seconds")]
+    pub remaining: Option<Duration>,
     pub stalled: bool,
     pub path: Option<String>,
     pub status: ProgressStatus,
+}
+
+mod elapsed_milliseconds {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::time::Duration;
+
+    pub(super) fn serialize<S: Serializer>(
+        value: &Duration,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u64(u64::try_from(value.as_millis()).unwrap_or(u64::MAX))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Duration, D::Error> {
+        u64::deserialize(deserializer).map(Duration::from_millis)
+    }
+}
+
+mod optional_seconds {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::time::Duration;
+
+    #[expect(clippy::ref_option, reason = "Serde requires the field by reference")]
+    pub(super) fn serialize<S: Serializer>(
+        value: &Option<Duration>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.map(|elapsed| elapsed.as_secs()).serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Duration>, D::Error> {
+        Option::<u64>::deserialize(deserializer).map(|value| value.map(Duration::from_secs))
+    }
 }
 
 #[garmin_macros::portable(copy, eq)]

@@ -1,5 +1,7 @@
 //! Built-in interaction workloads.
 
+use std::time::Duration;
+
 pub const SCENARIOS: &[&str] = &[
     "stationary-arrival",
     "warm-interaction",
@@ -32,7 +34,7 @@ pub(super) enum Action {
     DragPath(Vec<DragStop>),
     Wheel(f32),
     Scroll(f32),
-    Observe(f64),
+    Observe(Duration),
     Value(String),
     Key {
         key: egui::Key,
@@ -90,7 +92,7 @@ pub(super) struct Step {
     pub phase: &'static str,
     pub target: String,
     pub action: Action,
-    pub after: f64,
+    pub after: Duration,
 }
 
 pub(super) fn return_to_chooser(menu_open: bool) -> Vec<Step> {
@@ -107,11 +109,15 @@ pub(super) fn return_to_chooser(menu_open: bool) -> Vec<Step> {
         phase: "reset",
         target: target.into(),
         action,
-        after: 0.2,
+        after: Duration::from_millis(200),
     })
     .collect()
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "The scenario registry keeps each named sequence together"
+)]
 pub(super) fn steps(name: &str) -> Option<Vec<Step>> {
     if !SCENARIOS.contains(&name) {
         return None;
@@ -133,41 +139,111 @@ pub(super) fn steps(name: &str) -> Option<Vec<Step>> {
                 width: 1100.0,
                 height: 720.0,
             },
-            0.1,
+            Duration::from_millis(100),
         );
     }
-    add("setup", "profile.0", Action::Wait, 0.1);
-    add("setup", "profile.0", Action::Click, 0.2);
-    add("setup", "activity.list.toggle", Action::Wait, 0.1);
-    add("setup", "activity.list.toggle", Action::Click, 0.1);
-    add("setup", "activity.0", Action::Wait, 0.1);
-    add("setup", "activity.0", Action::Click, 0.2);
+    add(
+        "setup",
+        "profile.0",
+        Action::Wait,
+        Duration::from_millis(100),
+    );
+    add(
+        "setup",
+        "profile.0",
+        Action::Click,
+        Duration::from_millis(200),
+    );
+    add(
+        "setup",
+        "activity.list.toggle",
+        Action::Wait,
+        Duration::from_millis(100),
+    );
+    add(
+        "setup",
+        "activity.list.toggle",
+        Action::Click,
+        Duration::from_millis(100),
+    );
+    add(
+        "setup",
+        "activity.0",
+        Action::Wait,
+        Duration::from_millis(100),
+    );
+    add(
+        "setup",
+        "activity.0",
+        Action::Click,
+        Duration::from_millis(200),
+    );
     add(
         "setup",
         "activity.selection",
         Action::Value("0".into()),
-        0.1,
+        Duration::from_millis(100),
     );
-    add("setup", "activity.viewer", Action::Wait, 0.1);
-    add("setup", "activity.viewer", Action::Scroll(100_000.0), 0.3);
-    add("setup", "map.fit", Action::Reveal, 0.1);
-    add("setup", "map.fit", Action::Click, 0.2);
-    add("arrival", "map", Action::Ready, 0.2);
+    add(
+        "setup",
+        "activity.viewer",
+        Action::Wait,
+        Duration::from_millis(100),
+    );
+    add(
+        "setup",
+        "activity.viewer",
+        Action::Scroll(100_000.0),
+        Duration::from_millis(300),
+    );
+    add(
+        "setup",
+        "map.fit",
+        Action::Reveal,
+        Duration::from_millis(100),
+    );
+    add(
+        "setup",
+        "map.fit",
+        Action::Click,
+        Duration::from_millis(200),
+    );
+    add("arrival", "map", Action::Ready, Duration::from_millis(200));
     if name == "responsive-layout" {
         steps.extend(responsive_steps());
         return Some(steps);
     }
     if name == "stationary-arrival" {
-        add("stationary", "map", Action::Observe(8.0), 0.0);
+        add(
+            "stationary",
+            "map",
+            Action::Observe(Duration::from_secs(8)),
+            Duration::from_millis(0),
+        );
     }
     if name != "stationary-arrival" {
         for _ in 0..4 {
-            add("warm", "map", Action::Drag { x: 0.7, y: 0.6 }, 0.3);
-            add("warm", "map", Action::Wheel(100.0), 0.5);
-            add("warm", "map", Action::Wheel(-100.0), 0.5);
-            add("warm", "map.fit", Action::Click, 0.5);
+            add(
+                "warm",
+                "map",
+                Action::Drag { x: 0.7, y: 0.6 },
+                Duration::from_millis(300),
+            );
+            add(
+                "warm",
+                "map",
+                Action::Wheel(100.0),
+                Duration::from_millis(500),
+            );
+            add(
+                "warm",
+                "map",
+                Action::Wheel(-100.0),
+                Duration::from_millis(500),
+            );
+            add("warm", "map.fit", Action::Click, Duration::from_millis(500));
         }
-        add("return", "map", Action::Ready, 0.2);
+        add("return", "map", Action::Ready, Duration::from_millis(200));
     }
     if name == "activity-smoke" {
         steps.extend(activity_smoke_steps());
@@ -175,70 +251,154 @@ pub(super) fn steps(name: &str) -> Option<Vec<Step>> {
     Some(steps)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "The steps describe a single activity scenario in order"
+)]
 fn activity_smoke_steps() -> Vec<Step> {
     [
-        ("playback", "playback.toggle", Action::Click, 0.3),
+        (
+            "playback",
+            "playback.toggle",
+            Action::Click,
+            Duration::from_millis(300),
+        ),
         (
             "playback",
             "playback.toggle",
             Action::Value("playing".into()),
-            0.1,
+            Duration::from_millis(100),
         ),
-        ("playback", "playback.speed.2", Action::Click, 0.3),
+        (
+            "playback",
+            "playback.speed.2",
+            Action::Click,
+            Duration::from_millis(300),
+        ),
         (
             "playback",
             "playback.speed",
             Action::Value("2×".into()),
-            0.2,
+            Duration::from_millis(200),
         ),
-        ("playback", "playback.toggle", Action::Click, 0.3),
+        (
+            "playback",
+            "playback.toggle",
+            Action::Click,
+            Duration::from_millis(300),
+        ),
         (
             "playback",
             "playback.toggle",
             Action::Value("stopped".into()),
-            0.1,
+            Duration::from_millis(100),
         ),
-        ("lap", "activity.viewer", Action::Scroll(-100_000.0), 0.5),
-        ("lap", "lap.0", Action::Click, 0.3),
-        ("lap", "activity.viewer", Action::Scroll(100_000.0), 0.3),
-        ("lap", "map.full-activity", Action::Wait, 0.1),
-        ("lap", "map.full-activity", Action::Click, 0.3),
-        ("chart", "activity.viewer", Action::Scroll(-320.0), 0.5),
-        ("chart", "chart.0", Action::Wait, 0.1),
-        ("chart", "chart.0", Action::Drag { x: 0.75, y: 0.5 }, 0.3),
-        ("chart", "activity.viewer", Action::Scroll(320.0), 0.5),
+        (
+            "lap",
+            "activity.viewer",
+            Action::Scroll(-100_000.0),
+            Duration::from_millis(500),
+        ),
+        ("lap", "lap.0", Action::Click, Duration::from_millis(300)),
+        (
+            "lap",
+            "activity.viewer",
+            Action::Scroll(100_000.0),
+            Duration::from_millis(300),
+        ),
+        (
+            "lap",
+            "map.full-activity",
+            Action::Wait,
+            Duration::from_millis(100),
+        ),
+        (
+            "lap",
+            "map.full-activity",
+            Action::Click,
+            Duration::from_millis(300),
+        ),
+        (
+            "chart",
+            "activity.viewer",
+            Action::Scroll(-320.0),
+            Duration::from_millis(500),
+        ),
+        ("chart", "chart.0", Action::Wait, Duration::from_millis(100)),
+        (
+            "chart",
+            "chart.0",
+            Action::Drag { x: 0.75, y: 0.5 },
+            Duration::from_millis(300),
+        ),
+        (
+            "chart",
+            "activity.viewer",
+            Action::Scroll(320.0),
+            Duration::from_millis(500),
+        ),
         (
             "replacement",
             "activity.viewer",
             Action::Scroll(100_000.0),
-            0.3,
+            Duration::from_millis(300),
         ),
-        ("replacement", "activity.list.toggle", Action::Click, 0.2),
-        ("replacement", "activity.1", Action::Click, 0.3),
+        (
+            "replacement",
+            "activity.list.toggle",
+            Action::Click,
+            Duration::from_millis(200),
+        ),
+        (
+            "replacement",
+            "activity.1",
+            Action::Click,
+            Duration::from_millis(300),
+        ),
         (
             "replacement",
             "activity.selection",
             Action::Value("1".into()),
-            0.1,
+            Duration::from_millis(100),
         ),
         // The second fixture has no GPS data.
-        ("replacement", "map.empty", Action::Wait, 0.1),
+        (
+            "replacement",
+            "map.empty",
+            Action::Wait,
+            Duration::from_millis(100),
+        ),
         (
             "replacement",
             "map.empty",
             Action::Value("empty".into()),
-            0.1,
+            Duration::from_millis(100),
         ),
-        ("restore", "activity.viewer", Action::Scroll(100_000.0), 0.3),
-        ("restore", "activity.list.toggle", Action::Click, 0.2),
-        ("restore", "activity.0", Action::Click, 0.3),
+        (
+            "restore",
+            "activity.viewer",
+            Action::Scroll(100_000.0),
+            Duration::from_millis(300),
+        ),
+        (
+            "restore",
+            "activity.list.toggle",
+            Action::Click,
+            Duration::from_millis(200),
+        ),
+        (
+            "restore",
+            "activity.0",
+            Action::Click,
+            Duration::from_millis(300),
+        ),
         (
             "restore",
             "activity.selection",
             Action::Value("0".into()),
-            0.1,
+            Duration::from_millis(100),
         ),
-        ("restore", "map", Action::Ready, 0.2),
+        ("restore", "map", Action::Ready, Duration::from_millis(200)),
     ]
     .into_iter()
     .map(|(phase, target, action, after)| Step {
@@ -255,14 +415,14 @@ fn responsive_steps() -> Vec<Step> {
         phase: "setup",
         target: "playback.speed.2".into(),
         action: Action::Click,
-        after: 0.1,
+        after: Duration::from_millis(100),
     }];
     for (phase, width, height) in [("narrow", 720.0, 640.0), ("wide", 1100.0, 720.0)] {
         steps.push(Step {
             phase,
             target: "viewport".into(),
             action: Action::Resize { width, height },
-            after: 0.1,
+            after: Duration::from_millis(100),
         });
         steps.extend(responsive_selection_steps(phase));
         for (target, action) in [
@@ -289,7 +449,7 @@ fn responsive_steps() -> Vec<Step> {
                 phase,
                 target: target.into(),
                 action,
-                after: 0.1,
+                after: Duration::from_millis(100),
             });
         }
     }
@@ -312,7 +472,7 @@ pub(super) fn responsive_selection_steps(phase: &'static str) -> Vec<Step> {
             phase,
             target: target.into(),
             action,
-            after: 0.1,
+            after: Duration::from_millis(100),
         })
         .collect()
 }

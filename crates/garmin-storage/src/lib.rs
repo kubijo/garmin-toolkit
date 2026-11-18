@@ -6,8 +6,8 @@ use garmin_color::Color;
 use garmin_model::{
     artifact::ArtifactId,
     identity::{
-        AvatarArtifactId, Device, DisplayName, LanguagePreference, Profile, ProfilePreferences,
-        Role, Source, ThemePreference, UnitSystem, User, UserId,
+        AvatarArtifactId, Device, DisplayName, LanguagePreference, MonthlyDistanceTarget, Profile,
+        ProfilePreferences, Role, Source, ThemePreference, UnitSystem, User, UserId,
     },
 };
 use sqlx::{
@@ -110,8 +110,9 @@ impl Storage {
         let theme = encode_theme(preferences.theme());
         let show_hidden_files = preferences.show_hidden_files();
         let inline_file_windows = preferences.inline_file_windows();
-        let [running_target_km, cycling_target_km, swimming_target_km] =
-            preferences.monthly_distance_targets().map(i64::from);
+        let [running_target_km, cycling_target_km, swimming_target_km] = preferences
+            .monthly_distance_targets()
+            .map(|target| i64::from(target.as_kilometres()));
         let stored = sqlx::query_file!(
             "queries/save-user.sql",
             id,
@@ -234,10 +235,12 @@ fn decode_user(row: UserRow) -> Result<User, Error> {
         row.swimming_target_km,
     ]
     .map(|value| {
-        u32::try_from(value).map_err(|error| Error::InvalidData {
-            field: "monthly distance target",
-            reason: error.to_string(),
-        })
+        u32::try_from(value)
+            .map(MonthlyDistanceTarget::from_kilometres)
+            .map_err(|error| Error::InvalidData {
+                field: "monthly distance target",
+                reason: error.to_string(),
+            })
     });
     let [running, cycling, swimming] = targets;
     let targets = [running?, cycling?, swimming?];

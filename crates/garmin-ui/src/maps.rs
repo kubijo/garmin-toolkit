@@ -6,6 +6,7 @@ use garmin_service_api::maps::{
     Action, Choice, Command, Component, Failure, FailureKind, Phase, Progress, ProgressStatus,
     State,
 };
+use std::time::Duration;
 
 use crate::{Size, button, icons, radio, text::format_bytes, typography};
 
@@ -103,7 +104,7 @@ pub fn show(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Command> {
                 for storage in &state.storages {
                     let detail = storage.capacity.bytes().map_or_else(
                         || format_message!(intl, default_message: "Capacity unavailable"),
-                        |(_, free)| format_message!(intl, default_message: "{free} available", values: { free: format_bytes(free) }),
+                        |(_, free)| format_message!(intl, default_message: "{free} available", values: { free: free.format_decimal(2) }),
                     );
                     crate::capacity::show(ui, &crate::capacity::Props { label: &storage.label, detail: &detail,
                         bytes: storage.capacity.bytes().map(|(total, free)| (total.saturating_sub(free), total)) });
@@ -319,7 +320,7 @@ fn component_details(ui: &mut Ui, intl: &Intl, component: &Component) {
     let installed_label = format_message!(intl, default_message: "Installed version");
     let available_label = format_message!(intl, default_message: "Available version");
     let download_label = format_message!(intl, default_message: "Download size");
-    let download = format_bytes(component.download_bytes);
+    let download = component.download_bytes.format_decimal(2);
     let rows = [
         (installed_label, installed),
         (available_label, available),
@@ -420,7 +421,7 @@ fn review(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Command> {
     let remove_label = format_message!(intl, default_message: "Files to remove");
     let backup_label = format_message!(intl, default_message: "Recovery backup");
     let mut rows = vec![
-        (download_label, format_bytes(plan.download_bytes)),
+        (download_label, plan.download_bytes.format_decimal(2)),
         (write_label, plan.write_count.to_string()),
         (remove_label, plan.remove_count.to_string()),
         (backup_label, backup),
@@ -436,7 +437,7 @@ fn review(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Command> {
         rows.push((
             label.to_owned(),
             format_message!(intl, default_message: "{space} free space required", values: {
-                space: format_bytes(requirement.required_free_bytes)
+                space: requirement.required_free_bytes.format_decimal(2)
             }),
         ));
     }
@@ -585,9 +586,9 @@ fn progress_panel(ui: &mut Ui, intl: &Intl, progress: &Progress) {
             },
         );
         let detail = if detail.is_empty() {
-            elapsed(progress.elapsed_ms)
+            elapsed(progress.elapsed)
         } else {
-            format!("{detail} · {}", elapsed(progress.elapsed_ms))
+            format!("{detail} · {}", elapsed(progress.elapsed))
         };
         if running {
             crate::progress::show(
@@ -620,10 +621,10 @@ fn progress_panel(ui: &mut Ui, intl: &Intl, progress: &Progress) {
                 &format_message!(intl, default_message: "No recent progress; the device may be finalizing or stalled."),
             );
         } else if running && let Some(rate) = progress.bytes_per_second {
-            ui.label(format_message!(intl, default_message: "Average {rate}/s", values: { rate: format_bytes(rate) }));
+            ui.label(format_message!(intl, default_message: "Average {rate}/s", values: { rate: rate.format_decimal_amount(2) }));
         }
-        if running && let Some(remaining) = progress.remaining_seconds {
-            ui.label(format_message!(intl, default_message: "About {seconds} seconds remaining", values: { seconds: remaining }));
+        if running && let Some(remaining) = progress.remaining {
+            ui.label(format_message!(intl, default_message: "About {seconds} seconds remaining", values: { seconds: remaining.as_secs() }));
         }
     });
 }
@@ -876,7 +877,7 @@ fn history(ui: &mut Ui, intl: &Intl, state: &State) {
                                 ui.label(typography::semibold(&event.label));
                             });
                             ui.label(
-                                egui::RichText::new(elapsed(event.elapsed_ms))
+                                egui::RichText::new(elapsed(event.elapsed))
                                     .size(12.0)
                                     .weak(),
                             );
@@ -928,8 +929,8 @@ fn outcome_row(ui: &mut Ui, intl: &Intl, outcome: &garmin_service_api::maps::Out
     );
 }
 
-fn elapsed(milliseconds: u64) -> String {
-    let seconds = milliseconds / 1_000;
+fn elapsed(duration: Duration) -> String {
+    let seconds = duration.as_secs();
     format!(
         "{:02}:{:02}:{:02}",
         seconds / 3_600,

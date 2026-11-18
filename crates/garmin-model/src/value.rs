@@ -1,10 +1,100 @@
 //! Shared scalar value objects.
 
-use std::{fmt, str::FromStr};
+use std::{fmt, str::FromStr, time::Duration};
 
 use semver::Version;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use thiserror::Error;
+
+/// Serde adapter for reports that encode elapsed time as fractional seconds.
+pub mod duration_seconds {
+    use serde::{Deserialize, Deserializer, Serializer, de::Error as _};
+    use std::time::Duration;
+
+    /// Serializes a duration without changing the report's numeric schema.
+    /// # Errors
+    /// Returns errors from the output serializer.
+    pub fn serialize<S: Serializer>(value: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_f64(value.as_secs_f64())
+    }
+
+    /// Reads a duration from fractional seconds.
+    /// # Errors
+    /// Rejects negative, non-finite, or out-of-range durations.
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration, D::Error> {
+        Duration::try_from_secs_f64(f64::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
+}
+
+/// Serde adapters for performance reports that encode fractional milliseconds.
+pub mod duration_milliseconds {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
+    use std::time::Duration;
+
+    /// Serializes a duration in milliseconds.
+    /// # Errors
+    /// Returns errors from the output serializer.
+    pub fn serialize<S: Serializer>(value: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_f64(value.as_secs_f64() * 1_000.0)
+    }
+
+    /// Serializes an optional duration in milliseconds.
+    /// # Errors
+    /// Returns errors from the output serializer.
+    pub fn serialize_optional<S: Serializer>(
+        value: &Option<Duration>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value
+            .map(|elapsed| elapsed.as_secs_f64() * 1_000.0)
+            .serialize(serializer)
+    }
+
+    /// Serializes a duration in microseconds.
+    /// # Errors
+    /// Returns errors from the output serializer.
+    pub fn serialize_microseconds<S: Serializer>(
+        value: &Duration,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_f64(value.as_secs_f64() * 1_000_000.0)
+    }
+
+    /// Reads a duration from fractional milliseconds.
+    /// # Errors
+    /// Rejects negative, non-finite, or out-of-range durations.
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration, D::Error> {
+        Duration::try_from_secs_f64(f64::deserialize(deserializer)? / 1_000.0)
+            .map_err(D::Error::custom)
+    }
+}
+
+/// A nonnegative Unix epoch time with millisecond precision.
+#[garmin_macros::portable(copy, default, ord, hash)]
+pub struct UnixMilliseconds(u64);
+
+impl UnixMilliseconds {
+    #[must_use]
+    pub const fn from_milliseconds_since_epoch(milliseconds: u64) -> Self {
+        Self(milliseconds)
+    }
+
+    #[must_use]
+    pub const fn as_milliseconds_since_epoch(&self) -> u64 {
+        self.0
+    }
+
+    #[must_use]
+    pub fn saturating_from_duration_since_epoch(duration: Duration) -> Self {
+        Self(u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+    }
+}
+
+impl fmt::Display for UnixMilliseconds {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
 
 /// A UTC instant with nanosecond precision.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

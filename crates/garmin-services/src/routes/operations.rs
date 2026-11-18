@@ -313,8 +313,8 @@ impl Upload {
         GpxUpload {
             operation,
             file_name: self.file_name.clone(),
-            total: ByteCount::from_u64(self.total as u64),
-            received: ByteCount::from_u64(received as u64),
+            total: ByteCount::from_bytes(self.total as u64),
+            received: ByteCount::from_bytes(received as u64),
             phase,
         }
     }

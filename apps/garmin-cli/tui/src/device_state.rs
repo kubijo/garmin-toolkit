@@ -110,12 +110,8 @@ fn render_storage_detail(
         return;
     };
 
-    let used = total - free;
-    let percent = if total == 0 {
-        0
-    } else {
-        u16::try_from(u128::from(used) * 100 / u128::from(total)).expect("percentage")
-    };
+    let used = total.saturating_sub(free);
+    let percent = used.ratio_scaled(total, 100);
     frame.render_widget(
         Gauge::default()
             .percent(percent)
@@ -132,9 +128,9 @@ fn render_storage_detail(
             intl,
             default_message: "{used} used / {total} total · {free} free",
             values: {
-                used: super::decimal_bytes(used),
-                total: super::decimal_bytes(total),
-                free: super::decimal_bytes(free),
+                used: used.format_decimal(2),
+                total: total.format_decimal(2),
+                free: free.format_decimal(2),
             },
         ))
         .alignment(Alignment::Center)

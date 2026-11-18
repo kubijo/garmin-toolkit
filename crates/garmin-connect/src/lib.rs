@@ -195,7 +195,7 @@ fn retry_after(headers: &HeaderMap) -> Option<Duration> {
 }
 
 fn limit_bytes(limit: ByteCount) -> Result<usize, Error> {
-    usize::try_from(limit.into_u64()).map_err(|_| Error::TooLarge)
+    usize::try_from(limit.as_bytes()).map_err(|_| Error::TooLarge)
 }
 
 async fn body(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>, Error> {

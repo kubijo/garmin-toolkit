@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use garmin_model::artifact::ArtifactId;
+use garmin_model::artifact::{ArtifactId, ByteCount};
 use tokio::sync::OwnedSemaphorePermit;
 
 use super::{Kind, Result, RouteSession, failure, internal, stale};
@@ -80,8 +80,8 @@ impl RouteDownload {
         self.media_type
     }
     #[must_use]
-    pub fn size(&self) -> u64 {
-        self.bytes.len() as u64
+    pub fn size(&self) -> ByteCount {
+        ByteCount::from_bytes(self.bytes.len() as u64)
     }
 
     /// Starts delivery only if its original epoch is still current.

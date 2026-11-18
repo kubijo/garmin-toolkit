@@ -105,7 +105,10 @@ fn artifact_deduplication_uses_exact_bytes_not_record_ids() -> TestResult {
     assert_ne!(first.id(), second.id());
     assert_eq!(first.digest(), second.digest());
     assert_eq!(first.media_type().to_string(), "application/fit");
-    assert_eq!(first.byte_count().as_u64(), bytes.len().try_into()?);
+    assert_eq!(
+        first.byte_count(),
+        ByteCount::from_bytes(u64::try_from(bytes.len())?)
+    );
     Ok(())
 }
 
@@ -361,9 +364,9 @@ fn artifact_values_and_provenance_round_trip() -> TestResult {
         parsed_digest
     );
 
-    let byte_count = ByteCount::from_u64(8);
+    let byte_count = ByteCount::from_bytes(8);
     assert_eq!(byte_count.to_string(), "8 B");
-    assert_eq!(byte_count.into_u64(), 8);
+    assert_eq!(byte_count.as_bytes(), 8);
 
     let owner_id = UserId::new_v4();
     let source = source(owner_id)?;

@@ -146,22 +146,8 @@ impl Package {
                 )?;
                 previous = Some(row.timestamp_ms);
                 ensure(
-                    match (row.latitude_degrees, row.longitude_degrees) {
-                        (None, None) => true,
-                        (Some(latitude), Some(longitude)) => {
-                            (-90.0..=90.0).contains(&latitude)
-                                && (-180.0..=180.0).contains(&longitude)
-                        }
-                        _ => false,
-                    },
+                    row.latitude_degrees.is_some() == row.longitude_degrees.is_some(),
                     "invalid sample coordinate",
-                )?;
-                ensure(
-                    row.elevation_m.is_none_or(f64::is_finite)
-                        && row
-                            .cadence_rpm
-                            .is_none_or(|value| value.is_finite() && value >= 0.0),
-                    "invalid sample measurement",
                 )?;
             }
             let mut previous = None;
@@ -206,13 +192,6 @@ impl Package {
                     "running" | "cycling" | "swimming" | "walking" | "hiking"
                 ),
                 "invalid activity sport",
-            )?;
-            ensure(
-                [row.average_cadence_rpm, row.maximum_cadence_rpm]
-                    .into_iter()
-                    .flatten()
-                    .all(|value| value.is_finite() && value >= 0.0),
-                "invalid aggregate cadence",
             )?;
         }
         validate_positions(

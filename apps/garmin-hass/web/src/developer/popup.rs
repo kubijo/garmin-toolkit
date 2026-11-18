@@ -126,7 +126,7 @@ fn connect_logs(context: Context, shared: Rc<RefCell<Option<LogServiceClient>>>)
                 garmin_ui::developer::reconnect(&context);
                 context.request_repaint();
                 loop {
-                    super::super::wait_milliseconds(1_000).await;
+                    super::super::wait_for(Duration::from_millis(1_000)).await;
                     super::super::heartbeat(&app)
                         .await
                         .map_err(|error| error.to_string())?;
@@ -152,7 +152,7 @@ fn connect_logs(context: Context, shared: Rc<RefCell<Option<LogServiceClient>>>)
                 state.generation += 1;
             }
             context.request_repaint();
-            super::super::wait_milliseconds(1_000).await;
+            super::super::wait_for(Duration::from_millis(1_000)).await;
         }
     });
 }

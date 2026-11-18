@@ -1,3 +1,4 @@
+use garmin_model::artifact::NonZeroByteRate;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -491,7 +492,8 @@ async fn assisted_recovery_crash_worker() -> Result<()> {
     };
     let server = MockServer::start().await?;
     let mut configuration = settings(&root, &server);
-    configuration.simulation_write_bytes_per_second = std::num::NonZeroU64::new(1_000_000);
+    configuration.simulation_write_bytes_per_second =
+        NonZeroByteRate::try_from_bytes_per_second(1_000_000);
     let session = Operations::default().connect("fixture".to_owned(), configuration);
     settled(&session).await;
     session

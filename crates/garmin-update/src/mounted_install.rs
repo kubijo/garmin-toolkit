@@ -6,6 +6,7 @@ use garmin_device::{
     DeviceInventory, DevicePathState, DevicePathStatus, MountedMtpBackupProgress,
     MountedMtpUploadProgress, PathSafetyError, SafeRelativePath, TransportKind,
 };
+use garmin_model::artifact::ByteCount;
 use garmin_model::map::MapAuthorization;
 use garmin_progress::{CancellationToken, OperationStage, ProgressReporter};
 use md5::{Digest as _, Md5};
@@ -26,7 +27,7 @@ use crate::{
 };
 
 const TRANSACTION_VERSION: u8 = 1;
-const DEVICE_STATE_HEADROOM_BYTES: u64 = 16 * 1024 * 1024;
+const DEVICE_STATE_HEADROOM_BYTES: ByteCount = ByteCount::from_mebibytes(16);
 
 mod assisted;
 pub use assisted::{
@@ -37,7 +38,7 @@ pub use assisted::{
 #[derive(Debug, Clone, Serialize)]
 pub struct MountedMtpPreflight {
     pub files_to_write: usize,
-    pub bytes_to_write: u64,
+    pub bytes_to_write: ByteCount,
     pub files_to_remove: usize,
     pub storage_requirements: Vec<crate::space::StorageSpaceRequirement>,
 }
@@ -68,7 +69,7 @@ struct Payload {
 struct PayloadSource {
     path: SafeRelativePath,
     source: PathBuf,
-    size: u64,
+    size: ByteCount,
     sha256: String,
 }
 
@@ -77,7 +78,7 @@ struct BoundObject {
     storage_id: String,
     storage_label: String,
     path: SafeRelativePath,
-    size: u64,
+    size: ByteCount,
 }
 
 /// Path-and-size identity for an unbacked object.
@@ -146,14 +147,14 @@ struct PreparedMountedUpdate {
 enum RecoveryObjectState {
     Missing,
     Original,
-    Remove { size: u64 },
+    Remove { size: ByteCount },
 }
 
 enum ResumeWriteState {
     Installed,
     Missing,
     SizeMatchedOriginal,
-    Partial { size: u64 },
+    Partial { size: ByteCount },
 }
 
 enum ReadyResumeWriteState {
@@ -283,11 +284,15 @@ where
     D: DeviceWrite + ?Sized,
 {
     let prepared = prepare_update(plan, staged, activation, device, capture, progress).await?;
-    let bytes_to_write = prepared.payloads.iter().try_fold(0_u64, |total, payload| {
-        total
-            .checked_add(payload.target.size)
-            .ok_or(MountedInstallError::ByteCountOverflow)
-    })?;
+    let bytes_to_write =
+        prepared
+            .payloads
+            .iter()
+            .try_fold(ByteCount::default(), |total, payload| {
+                total
+                    .checked_add(payload.target.size)
+                    .ok_or(MountedInstallError::ByteCountOverflow)
+            })?;
     Ok(MountedMtpPreflight {
         files_to_write: prepared.payloads.len(),
         bytes_to_write,
@@ -914,15 +919,15 @@ where
     progress.completed(
         OperationStage::Stage,
         "Device transaction validated",
-        plan.total_bytes,
-        Some(plan.total_bytes),
+        plan.total_bytes.as_bytes(),
+        Some(plan.total_bytes.as_bytes()),
     );
     let (requirements, backup_bytes) = space_requirements(&payloads, &removals, &inventory)?;
     let snapshot = observe_device_state(device, progress).await?;
     crate::space::check_device_space(&snapshot, &requirements)?;
     let retained_backup_bytes = match plan.backup_policy {
         BackupPolicy::Verified => backup_bytes,
-        BackupPolicy::Skip => 0,
+        BackupPolicy::Skip => ByteCount::default(),
     };
     retain_payloads(&mut payloads, retained_backup_bytes, capture).await?;
     Ok(PreparedMountedUpdate {
@@ -945,9 +950,9 @@ async fn prepare_payload_sources(
     progress.started(
         OperationStage::Stage,
         "Validating the device transaction",
-        Some(plan.total_bytes),
+        Some(plan.total_bytes.as_bytes()),
     );
-    let mut verified = 0_u64;
+    let mut verified = ByteCount::default();
     for (spec, staged_file) in plan.downloads.iter().zip(staged) {
         register_destination(&mut destinations, &spec.destination)?;
         let sha256 = verify_local_payload(&staged_file.path, spec.size, Some(&spec.md5)).await?;
@@ -958,8 +963,8 @@ async fn prepare_payload_sources(
             OperationStage::Stage,
             "Validated update payload",
             spec.destination.to_string(),
-            verified,
-            Some(plan.total_bytes),
+            verified.as_bytes(),
+            Some(plan.total_bytes.as_bytes()),
         );
         sources.push(PayloadSource {
             path: spec.destination.clone(),
@@ -980,7 +985,7 @@ async fn prepare_payload_sources(
         sources.push(PayloadSource {
             path,
             source,
-            size,
+            size: ByteCount::from_bytes(size),
             sha256: hex::encode(Sha256::digest(&bytes)),
         });
     }
@@ -1024,9 +1029,9 @@ fn space_requirements(
     payloads: &[Payload],
     removals: &[BoundObject],
     inventory: &DeviceInventory,
-) -> Result<(Vec<crate::space::StorageSpaceRequirement>, u64), MountedInstallError> {
+) -> Result<(Vec<crate::space::StorageSpaceRequirement>, ByteCount), MountedInstallError> {
     let mut changes = Vec::new();
-    let mut backup_bytes = 0_u64;
+    let mut backup_bytes = ByteCount::default();
     for payload in payloads {
         let before = inventory
             .paths
@@ -1036,7 +1041,7 @@ fn space_requirements(
                     && path_key(&item.path) == path_key(&payload.target.path)
             })
             .and_then(|item| item.size)
-            .unwrap_or(0);
+            .unwrap_or_default();
         backup_bytes = backup_bytes
             .checked_add(before)
             .ok_or(MountedInstallError::ByteCountOverflow)?;
@@ -1053,7 +1058,7 @@ fn space_requirements(
         changes.push(crate::space::StorageChange {
             storage_id: &removal.storage_id,
             before_bytes: removal.size,
-            after_bytes: 0,
+            after_bytes: ByteCount::from_bytes(0),
         });
     }
     let mut requirements = crate::space::storage_requirements(changes)?;
@@ -1088,7 +1093,7 @@ async fn retain_authorization(
 
 async fn retain_payloads(
     payloads: &mut [Payload],
-    backup_bytes: u64,
+    backup_bytes: ByteCount,
     capture: &SessionCapture,
 ) -> Result<(), MountedInstallError> {
     let retention_bytes = payloads
@@ -1158,7 +1163,7 @@ fn bind_write_target(
     inventory: &DeviceInventory,
     primary_storage: &str,
     path: SafeRelativePath,
-    size: u64,
+    size: ByteCount,
 ) -> Result<BoundObject, MountedInstallError> {
     let matches = inventory_for_path(inventory, &path)?;
     let present = regular_files(&matches);
@@ -1274,16 +1279,18 @@ where
         }
     }
     targets.extend(prepared.removals.iter().cloned());
-    let total = targets.iter().try_fold(0_u64, |sum, target| {
-        sum.checked_add(target.size)
-            .ok_or(MountedInstallError::ByteCountOverflow)
-    })?;
+    let total = targets
+        .iter()
+        .try_fold(ByteCount::default(), |sum, target| {
+            sum.checked_add(target.size)
+                .ok_or(MountedInstallError::ByteCountOverflow)
+        })?;
     progress.started(
         OperationStage::Backup,
         "Backing up files affected by the update",
-        Some(total),
+        Some(total.as_bytes()),
     );
-    let mut completed = 0_u64;
+    let mut completed = ByteCount::default();
     let mut originals = Vec::with_capacity(targets.len());
     for (index, target) in targets.into_iter().enumerate() {
         let backup_file = format!("mounted-update/backups/{:06}.bin", index + 1);
@@ -1321,8 +1328,8 @@ where
     progress.completed(
         OperationStage::Backup,
         "All affected device files are backed up",
-        completed,
-        Some(total),
+        completed.as_bytes(),
+        Some(total.as_bytes()),
     );
     Ok(originals)
 }
@@ -1339,16 +1346,19 @@ async fn commit_update<D>(
 where
     D: DeviceWrite + ?Sized,
 {
-    let total_bytes = prepared.payloads.iter().try_fold(0_u64, |sum, payload| {
-        sum.checked_add(payload.target.size)
-            .ok_or(MountedInstallError::ByteCountOverflow)
-    })?;
+    let total_bytes = prepared
+        .payloads
+        .iter()
+        .try_fold(ByteCount::default(), |sum, payload| {
+            sum.checked_add(payload.target.size)
+                .ok_or(MountedInstallError::ByteCountOverflow)
+        })?;
     progress.started(
         OperationStage::Commit,
         "Writing verified update files",
-        Some(total_bytes),
+        Some(total_bytes.as_bytes()),
     );
-    let mut completed_bytes = 0_u64;
+    let mut completed_bytes = ByteCount::default();
     let mut operation = 0_usize;
     for (payload, write) in prepared.payloads.iter().zip(&journal.writes) {
         let item_progress = progress.for_item(format!("update-write-{:06}", operation + 1));
@@ -1373,7 +1383,7 @@ where
             &payload.sha256,
             MountedMtpUploadProgress {
                 reporter: item_progress,
-                completed_before: 0,
+                completed_before: ByteCount::from_bytes(0),
                 total: payload.target.size,
             },
             progress,
@@ -1386,8 +1396,8 @@ where
             OperationStage::Commit,
             "Wrote and size-checked update file",
             write.target.path.to_string(),
-            completed_bytes,
-            Some(total_bytes),
+            completed_bytes.as_bytes(),
+            Some(total_bytes.as_bytes()),
         );
         operation += 1;
         write_transaction_event(capture, operation_index, CheckpointKind::Applied, write).await?;
@@ -1421,8 +1431,8 @@ where
     progress.completed(
         OperationStage::Commit,
         "Update files written and size checked",
-        completed_bytes,
-        Some(total_bytes),
+        completed_bytes.as_bytes(),
+        Some(total_bytes.as_bytes()),
     );
     progress.started(
         OperationStage::Cleanup,
@@ -1577,7 +1587,7 @@ where
                 .as_ref()
                 .map(|original| original.size)
         })
-        .unwrap_or(0);
+        .unwrap_or_default();
     let mut requirements = crate::space::storage_requirements([crate::space::StorageChange {
         storage_id: &write.target.storage_id,
         before_bytes,
@@ -1668,17 +1678,20 @@ async fn verify_resume_payloads(
     capture_root: &Path,
     progress: &ProgressReporter,
 ) -> Result<Vec<PathBuf>, MountedInstallError> {
-    let total_bytes = journal.writes.iter().try_fold(0_u64, |sum, write| {
-        sum.checked_add(write.target.size)
-            .ok_or(MountedInstallError::ByteCountOverflow)
-    })?;
+    let total_bytes = journal
+        .writes
+        .iter()
+        .try_fold(ByteCount::default(), |sum, write| {
+            sum.checked_add(write.target.size)
+                .ok_or(MountedInstallError::ByteCountOverflow)
+        })?;
     progress.started(
         OperationStage::Verify,
         "Verifying retained recovery payloads",
-        Some(total_bytes),
+        Some(total_bytes.as_bytes()),
     );
     let mut payloads = Vec::with_capacity(journal.writes.len());
-    let mut payload_bytes = 0_u64;
+    let mut payload_bytes = ByteCount::default();
     for write in &journal.writes {
         require_running(progress)?;
         let payload = recovery_file(
@@ -1696,8 +1709,8 @@ async fn verify_resume_payloads(
                 OperationStage::Verify,
                 "Verifying retained recovery payload",
                 write.target.path.to_string(),
-                completed_before.saturating_add(current),
-                Some(total_bytes),
+                completed_before.saturating_add(current).as_bytes(),
+                Some(total_bytes.as_bytes()),
             );
             Ok(())
         })
@@ -1716,8 +1729,8 @@ async fn verify_resume_payloads(
     progress.completed(
         OperationStage::Verify,
         "Retained recovery payloads verified",
-        payload_bytes,
-        Some(total_bytes),
+        payload_bytes.as_bytes(),
+        Some(total_bytes.as_bytes()),
     );
     Ok(payloads)
 }
@@ -2013,7 +2026,7 @@ async fn remove_incomplete_resume_write<D>(
     write: &JournalWrite,
     device: &D,
     progress: &ProgressReporter,
-    size: u64,
+    size: ByteCount,
 ) -> Result<(), MountedInstallError>
 where
     D: DeviceWrite + ?Sized,
@@ -2024,7 +2037,7 @@ where
         OperationStage::Commit,
         "Removing proven incomplete update file",
         write.target.path.to_string(),
-        Some(size),
+        Some(size.as_bytes()),
     );
     if let Err(error) = device
         .delete_size_checked_with_progress(
@@ -2047,13 +2060,13 @@ where
         OperationStage::Commit,
         format!(
             "Removed incomplete update file; reclaimed {}; free {} → {}",
-            display_bytes(size),
+            size.format_decimal(2),
             storage_free_label(&before, &write.target.storage_id),
             storage_free_label(&after, &write.target.storage_id),
         ),
         write.target.path.to_string(),
-        size,
-        Some(size),
+        size.as_bytes(),
+        Some(size.as_bytes()),
     );
     Ok(())
 }
@@ -2074,7 +2087,7 @@ where
         return Ok(());
     }
     let before_bytes = match state {
-        ReadyResumeWriteState::Installed | ReadyResumeWriteState::Missing => 0,
+        ReadyResumeWriteState::Installed | ReadyResumeWriteState::Missing => ByteCount::default(),
         ReadyResumeWriteState::SizeMatchedOriginal => {
             write
                 .unbacked_original
@@ -2236,7 +2249,7 @@ where
         OperationStage::Commit,
         started_label,
         target.path.to_string(),
-        Some(target.size),
+        Some(target.size.as_bytes()),
     );
     if let Err(error) = device
         .delete_size_checked_with_progress(&target.storage_id, &target.path, target.size, progress)
@@ -2251,13 +2264,13 @@ where
         OperationStage::Commit,
         format!(
             "{completed_label}; reclaimed {}; free {} → {}",
-            display_bytes(target.size),
+            target.size.format_decimal(2),
             storage_free_label(before, &target.storage_id),
             storage_free_label(&after, &target.storage_id),
         ),
         target.path.to_string(),
-        target.size,
-        Some(target.size),
+        target.size.as_bytes(),
+        Some(target.size.as_bytes()),
     );
     Ok(())
 }
@@ -2268,14 +2281,10 @@ fn storage_free_label(state: &garmin_device::DeviceStateSnapshot, storage_id: &s
         .iter()
         .find(|storage| storage.id == storage_id)
         .and_then(|storage| storage.capacity.bytes())
-        .map_or_else(|| "unavailable".to_owned(), |(_, free)| display_bytes(free))
-}
-
-fn display_bytes(bytes: u64) -> String {
-    format!(
-        "{:.2}",
-        byte_unit::Byte::from_u64(bytes).get_appropriate_unit(byte_unit::UnitType::Decimal)
-    )
+        .map_or_else(
+            || "unavailable".to_owned(),
+            |(_, free)| free.format_decimal(2),
+        )
 }
 
 async fn check_device_object_metadata<D>(
@@ -2340,7 +2349,7 @@ where
         &write.sha256,
         MountedMtpUploadProgress {
             reporter: progress.clone(),
-            completed_before: 0,
+            completed_before: ByteCount::from_bytes(0),
             total: write.target.size,
         },
         progress,
@@ -2357,7 +2366,7 @@ async fn upload_with_device_state_monitor<D>(
     storage_id: &str,
     path: &SafeRelativePath,
     source: &Path,
-    size: u64,
+    size: ByteCount,
     sha256: &str,
     upload_progress: MountedMtpUploadProgress,
     state_progress: &ProgressReporter,
@@ -2476,7 +2485,7 @@ async fn inspect_regular_resume_write<D>(
     operation: usize,
     checkpoint: OperationCheckpoint,
     progress: &ProgressReporter,
-    size: u64,
+    size: ByteCount,
 ) -> Result<ResumeWriteInspection, MountedInstallError>
 where
     D: DeviceWrite + ?Sized,
@@ -3107,7 +3116,7 @@ where
                 if let Some(original) = &write.original {
                     changes.push(crate::space::StorageChange {
                         storage_id: &original.target.storage_id,
-                        before_bytes: 0,
+                        before_bytes: ByteCount::from_bytes(0),
                         after_bytes: original.target.size,
                     });
                 }
@@ -3119,7 +3128,7 @@ where
                     after_bytes: write
                         .original
                         .as_ref()
-                        .map_or(0, |original| original.target.size),
+                        .map_or(ByteCount::default(), |original| original.target.size),
                 });
             }
             RecoveryObjectState::Original => {}
@@ -3129,7 +3138,7 @@ where
         match state {
             RecoveryObjectState::Missing => changes.push(crate::space::StorageChange {
                 storage_id: &original.target.storage_id,
-                before_bytes: 0,
+                before_bytes: ByteCount::from_bytes(0),
                 after_bytes: original.target.size,
             }),
             RecoveryObjectState::Remove { size } => {
@@ -3215,8 +3224,8 @@ fn retain_device_state(progress: &ProgressReporter, state: &garmin_device::Devic
                 format!(
                     "Storage snapshot — {}: {} free of {}",
                     storage.label,
-                    display_bytes(free),
-                    display_bytes(total),
+                    free.format_decimal(2),
+                    total.format_decimal(2),
                 )
             },
         );
@@ -3260,7 +3269,7 @@ async fn verify_partial_write<D: DeviceWrite + ?Sized>(
     write: &JournalWrite,
     root: &Path,
     operation: usize,
-    size: u64,
+    size: ByteCount,
     progress: &ProgressReporter,
 ) -> Result<(), MountedInstallError> {
     let blocked = || MountedInstallError::RecoveryEvidence(write.target.path.clone());
@@ -3293,8 +3302,8 @@ async fn verify_partial_write<D: DeviceWrite + ?Sized>(
 async fn verify_partial_object<'a, D>(
     device: &D,
     target: &BoundObject,
-    size: u64,
-    sources: impl IntoIterator<Item = (&'a Path, u64, &'a str)>,
+    size: ByteCount,
+    sources: impl IntoIterator<Item = (&'a Path, ByteCount, &'a str)>,
     root: &Path,
     progress: &ProgressReporter,
 ) -> Result<(), MountedInstallError>
@@ -3304,7 +3313,7 @@ where
     let blocked = || MountedInstallError::RecoveryEvidence(target.path.clone());
     let mut expected = Vec::new();
     for (source, source_size, source_sha256) in sources {
-        if size == 0 || size >= source_size {
+        if size.is_zero() || size >= source_size {
             continue;
         }
         if verify_local_payload_with_progress(source, source_size, None, |_| {
@@ -3315,7 +3324,7 @@ where
         {
             return Err(blocked());
         }
-        let mut source = tokio::fs::File::open(source).await?.take(size);
+        let mut source = tokio::fs::File::open(source).await?.take(size.as_bytes());
         let mut hash = Sha256::new();
         let mut buffer = vec![0; 1024 * 1024];
         loop {
@@ -3343,7 +3352,7 @@ where
             garmin_device::BackupDestination::new(temporary_path, temporary)?,
             MountedMtpBackupProgress {
                 reporter: progress.clone(),
-                completed_before: 0,
+                completed_before: ByteCount::from_bytes(0),
                 total: size,
             },
         )
@@ -3444,7 +3453,7 @@ async fn write_recovery_marker(
 
 async fn verify_local_payload(
     path: &Path,
-    expected_size: u64,
+    expected_size: ByteCount,
     expected_md5: Option<&str>,
 ) -> Result<String, MountedInstallError> {
     verify_local_payload_with_progress(path, expected_size, expected_md5, |_| Ok(())).await
@@ -3452,25 +3461,25 @@ async fn verify_local_payload(
 
 async fn verify_local_payload_with_progress(
     path: &Path,
-    expected_size: u64,
+    expected_size: ByteCount,
     expected_md5: Option<&str>,
-    mut advanced: impl FnMut(u64) -> Result<(), MountedInstallError>,
+    mut advanced: impl FnMut(ByteCount) -> Result<(), MountedInstallError>,
 ) -> Result<String, MountedInstallError> {
     let mut file = tokio::fs::File::open(path).await?;
     let metadata = file.metadata().await?;
     if !metadata.is_file() {
         return Err(MountedInstallError::UnsafeStagedFile(path.to_owned()));
     }
-    if metadata.len() != expected_size {
+    if ByteCount::from_bytes(metadata.len()) != expected_size {
         return Err(MountedInstallError::StagedSize {
             path: path.to_owned(),
             expected: expected_size,
-            actual: metadata.len(),
+            actual: ByteCount::from_bytes(metadata.len()),
         });
     }
     let mut md5 = Md5::new();
     let mut sha256 = Sha256::new();
-    let mut size = 0_u64;
+    let mut size = ByteCount::default();
     let mut buffer = vec![0_u8; 4 * 1024 * 1024];
     loop {
         let count = file.read(&mut buffer).await?;
@@ -3478,7 +3487,9 @@ async fn verify_local_payload_with_progress(
             break;
         }
         size = size
-            .checked_add(u64::try_from(count).map_err(|_| MountedInstallError::ByteCountOverflow)?)
+            .checked_add(ByteCount::from_bytes(
+                u64::try_from(count).map_err(|_| MountedInstallError::ByteCountOverflow)?,
+            ))
             .ok_or(MountedInstallError::ByteCountOverflow)?;
         md5.update(&buffer[..count]);
         sha256.update(&buffer[..count]);
@@ -3587,8 +3598,8 @@ pub enum MountedInstallError {
     #[error("staged file size mismatch for {path}: expected {expected}, received {actual}")]
     StagedSize {
         path: PathBuf,
-        expected: u64,
-        actual: u64,
+        expected: ByteCount,
+        actual: ByteCount,
     },
     #[error("staged file checksum mismatch: expected {expected}, received {actual}")]
     StagedChecksum { expected: String, actual: String },
@@ -3618,7 +3629,7 @@ pub enum MountedInstallError {
     UnexpectedDeviceState {
         path: SafeRelativePath,
         state: DevicePathState,
-        size: Option<u64>,
+        size: Option<ByteCount>,
     },
     #[error("mounted MTP byte count exceeds the supported range")]
     ByteCountOverflow,
@@ -3699,7 +3710,7 @@ mod tests {
             storage_label: format!("Storage {storage_id}"),
             path: path.clone(),
             state,
-            size,
+            size: size.map(ByteCount::from_bytes),
         }
     }
 
@@ -3712,7 +3723,10 @@ mod tests {
                 storages: vec![DeviceStorageState {
                     id: "internal".to_owned(),
                     label: "Internal storage".to_owned(),
-                    capacity: StorageCapacity::new(1_000, 250),
+                    capacity: StorageCapacity::new(
+                        ByteCount::from_bytes(1_000),
+                        ByteCount::from_bytes(250),
+                    ),
                     writable: Some(true),
                 }],
             },
@@ -3741,7 +3755,7 @@ mod tests {
                     storage_id: "internal".to_owned(),
                     storage_label: "Internal storage".to_owned(),
                     path: SafeRelativePath::parse("Garmin/map.img").unwrap(),
-                    size: 1,
+                    size: ByteCount::from_bytes(1),
                 },
                 sha256: "digest".to_owned(),
                 original: None,
@@ -3769,10 +3783,11 @@ mod tests {
             ],
         };
 
-        let target = bind_write_target(&inventory, "internal", path, 42).unwrap();
+        let target =
+            bind_write_target(&inventory, "internal", path, ByteCount::from_bytes(42)).unwrap();
 
         assert_eq!(target.storage_id, "internal");
-        assert_eq!(target.size, 42);
+        assert_eq!(target.size, ByteCount::from_bytes(42));
     }
 
     #[test]
@@ -3786,10 +3801,11 @@ mod tests {
             ],
         };
 
-        let target = bind_write_target(&inventory, "internal", path, 24).unwrap();
+        let target =
+            bind_write_target(&inventory, "internal", path, ByteCount::from_bytes(24)).unwrap();
 
         assert_eq!(target.storage_id, "sd");
-        assert_eq!(target.size, 24);
+        assert_eq!(target.size, ByteCount::from_bytes(24));
     }
 
     #[test]
@@ -3803,7 +3819,8 @@ mod tests {
             ],
         };
 
-        let error = bind_write_target(&inventory, "internal", path, 24).unwrap_err();
+        let error =
+            bind_write_target(&inventory, "internal", path, ByteCount::from_bytes(24)).unwrap_err();
 
         assert!(matches!(error, MountedInstallError::AmbiguousStorage(_)));
     }

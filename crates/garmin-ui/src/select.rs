@@ -238,7 +238,13 @@ fn control(
         );
     }
     if let Some(choice) = choice {
-        paint_choice(ui, rect, choice, visuals.fg_stroke.color);
+        paint_choice(
+            ui,
+            rect,
+            choice,
+            visuals.fg_stroke.color,
+            CARET_SIZE + CONTENT_INSET,
+        );
     }
     let caret_rect = egui::Rect::from_center_size(
         egui::pos2(
@@ -286,7 +292,13 @@ fn control_visuals(
     )
 }
 
-fn paint_choice(ui: &Ui, rect: egui::Rect, choice: Choice<'_>, color: egui::Color32) {
+fn paint_choice(
+    ui: &Ui,
+    rect: egui::Rect,
+    choice: Choice<'_>,
+    color: egui::Color32,
+    trailing: f32,
+) {
     let mut label_x = rect.left() + CONTENT_INSET;
     if let Some(image) = choice.image {
         let image_size = image.size_for_height(IMAGE_HEIGHT);
@@ -306,11 +318,16 @@ fn paint_choice(ui: &Ui, rect: egui::Rect, choice: Choice<'_>, color: egui::Colo
         );
         label_x += IMAGE_SLOT_WIDTH + IMAGE_GAP;
     }
-    ui.painter().text(
-        egui::pos2(label_x, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        choice.label,
-        egui::TextStyle::Button.resolve(ui.style()),
+    let width = (rect.right() - trailing - CONTENT_INSET - label_x).max(0.0);
+    let galley = egui::WidgetText::from(RichText::new(choice.label)).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        width,
+        egui::TextStyle::Button,
+    );
+    ui.painter().galley(
+        egui::pos2(label_x, rect.center().y - galley.size().y / 2.0),
+        galley,
         color,
     );
 }
@@ -357,7 +374,13 @@ fn choice_row(ui: &mut Ui, choice: Choice<'_>, selected: bool, row_height: f32) 
         color32(palette.surfaces().layer(theme::Level::One))
     };
     ui.painter().rect_filled(rect, CHOICE_RADIUS, fill);
-    paint_choice(ui, rect, choice, color32(palette.content().text_primary()));
+    paint_choice(
+        ui,
+        rect,
+        choice,
+        color32(palette.content().text_primary()),
+        0.0,
+    );
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect,

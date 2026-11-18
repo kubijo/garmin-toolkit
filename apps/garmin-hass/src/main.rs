@@ -6,6 +6,7 @@
 )]
 
 use clap::Parser as _;
+use garmin_model::artifact::NonZeroByteRate;
 
 #[derive(clap::Parser)]
 #[command(version, about)]
@@ -39,7 +40,9 @@ async fn main() -> Result<(), garmin_hass::Error> {
         map_render_worker: !args.no_map_render_worker,
         ui_automation: args.ui_automation,
         control_server: args.control_server,
-        simulation_write_bytes_per_second: args.simulation_write_bytes_per_second,
+        simulation_write_bytes_per_second: args
+            .simulation_write_bytes_per_second
+            .map(NonZeroByteRate::from_bytes_per_second),
     })
     .await
 }

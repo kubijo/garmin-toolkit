@@ -113,8 +113,8 @@ fn page_import_updates_the_cached_page_and_list_requests_clear_its_summary()
                     name: format!("Ride {id}"),
                     sport: None,
                     started_at: None,
-                    distance_metres: None,
-                    duration_seconds: None,
+                    distance: None,
+                    duration: None,
                 })
                 .collect(),
         },

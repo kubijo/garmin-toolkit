@@ -1,6 +1,7 @@
 //! Exercise delayed file-window completions through the desktop controller without hardware or a GPU.
 use super::*;
 use eframe::egui;
+use garmin_model::artifact::ByteCount;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -57,12 +58,12 @@ pub(super) fn desktop() -> Result<(tempfile::TempDir, Desktop), Box<dyn std::err
                     DeviceCatalogEntry {
                         path: "Garmin/Activity/synthetic.fit".into(),
                         kind: DeviceCatalogEntryKind::File,
-                        size: Some(1),
+                        size: Some(ByteCount::from_bytes(1)),
                     },
                     DeviceCatalogEntry {
                         path: "Garmin/Activity/other.fit".into(),
                         kind: DeviceCatalogEntryKind::File,
-                        size: Some(1),
+                        size: Some(ByteCount::from_bytes(1)),
                     },
                 ],
             }],

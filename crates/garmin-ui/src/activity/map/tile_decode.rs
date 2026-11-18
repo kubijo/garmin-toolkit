@@ -1,5 +1,6 @@
 //! One bounded MVT decode shared by native, browser worker, and browser fallback.
 
+use garmin_model::artifact::ByteCount;
 use std::collections::HashMap;
 
 use egui::{Color32, Rect, Shape, pos2, vec2};
@@ -176,7 +177,10 @@ fn render(sources: &[Source], style: &Style, zoom: u8, size: u32) -> Result<Deco
                 }
                 Layer::Symbol { layout, paint, .. } => {
                     if let Some(text) = layout.text(&feature.context) {
-                        budget.repeated_text(text.len(), label_count(&feature.geometry))?;
+                        budget.repeated_text(
+                            ByteCount::from_bytes(text.len() as u64),
+                            label_count(&feature.geometry),
+                        )?;
                     }
                     walkers::render_symbol(
                         &feature.geometry,

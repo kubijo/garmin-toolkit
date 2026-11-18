@@ -2488,6 +2488,7 @@ dependencies = [
 name = "garmin-capture"
 version = "0.1.6"
 dependencies = [
+ "garmin-model",
  "har",
  "serde",
  "serde_json",
@@ -2502,7 +2503,6 @@ name = "garmin-cli-tui"
 version = "0.1.6"
 dependencies = [
  "anyhow",
- "byte-unit",
  "crossterm",
  "garmin-device",
  "garmin-i18n",
@@ -2628,6 +2628,7 @@ name = "garmin-model"
 version = "0.1.6"
 dependencies = [
  "blake3",
+ "byte-unit",
  "garmin-color",
  "garmin-macros",
  "geo-types",
@@ -2657,6 +2658,7 @@ dependencies = [
  "garmin-color",
  "garmin-macros",
  "garmin-model",
+ "jiff",
  "remoc",
  "serde",
  "serde_json",
@@ -2669,7 +2671,6 @@ version = "0.1.6"
 dependencies = [
  "arc-swap",
  "buffa",
- "byte-unit",
  "bytemuck",
  "camino",
  "cint",
@@ -2708,7 +2709,6 @@ name = "garmin-update"
 version = "0.1.6"
 dependencies = [
  "base64 0.23.1",
- "byte-unit",
  "fs2",
  "futures-util",
  "garmin-capture",

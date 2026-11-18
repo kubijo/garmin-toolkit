@@ -1,6 +1,7 @@
 //! Browser snapshot adapter: bounded uploads, streamed downloads, reconnect, explicit approval.
 
 use super::{ApplicationServiceClient, JsFuture, Rc, RefCell, State, UserId, spawn_local};
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::files::{Operation, Selection};
 use garmin_service_api::snapshots::{
     MAX_SNAPSHOT_CHUNK, SnapshotReply, SnapshotRequest, SnapshotServiceClient, SnapshotSource,
@@ -8,6 +9,7 @@ use garmin_service_api::snapshots::{
 };
 use garmin_service_api::{ApplicationService as _, snapshots::SnapshotService as _};
 use garmin_ui::backup::{Action, RestoreSummary, SelectedFile, State as ViewState};
+use std::time::Duration;
 use uuid::Uuid;
 use web_time::Instant;
 
@@ -120,7 +122,7 @@ struct Runner {
     operation: Option<Uuid>,
     origin: SnapshotSource,
     recover: bool,
-    restore_facts: Option<(u64, i64)>,
+    restore_facts: Option<(ByteCount, i64)>,
     restore_started: Option<Instant>,
 }
 
@@ -134,7 +136,7 @@ impl Runner {
         loop {
             let app = self.shared.borrow().client.clone();
             let Some(app) = app else {
-                super::wait_milliseconds(250).await;
+                super::wait_for(Duration::from_millis(250)).await;
                 continue;
             };
             match self.connect(&app).await {
@@ -166,7 +168,7 @@ impl Runner {
                     state.backup.command = None;
                 }
             }
-            super::wait_milliseconds(500).await;
+            super::wait_for(Duration::from_millis(500)).await;
         }
     }
 
@@ -213,7 +215,7 @@ impl Runner {
                         session,
                         SnapshotRequest::BeginRestore {
                             operation,
-                            bytes: u64::from(file_size(file)?),
+                            bytes: ByteCount::from_bytes(u64::from(file_size(file)?)),
                         },
                     )
                     .await?,
@@ -272,7 +274,7 @@ impl Runner {
                     ));
                 }
                 _ => {
-                    super::wait_milliseconds(100).await;
+                    super::wait_for(Duration::from_millis(100)).await;
                     current = status(
                         request_status(
                             session,
@@ -317,7 +319,7 @@ impl Runner {
         let file = self.source.as_ref().ok_or_else(|| {
             Failure::Domain("select the backup file again to resume upload".into())
         })?;
-        let total = u64::from(file_size(file)?);
+        let total = ByteCount::from_bytes(u64::from(file_size(file)?));
         if current.total != Some(total) || current.transferred > total {
             return Err(Failure::Domain(
                 "selected file does not match this upload".into(),
@@ -334,12 +336,14 @@ impl Runner {
                 .await?,
             );
         }
-        let offset = u32::try_from(current.transferred)
+        let offset = u32::try_from(current.transferred.as_bytes())
             .map_err(|error| Failure::Domain(error.to_string()))?;
-        let end = u64::from(offset)
-            .saturating_add(u64::from(MAX_SNAPSHOT_CHUNK))
+        let end = current
+            .transferred
+            .saturating_add(MAX_SNAPSHOT_CHUNK)
             .min(total);
-        let end = u32::try_from(end).map_err(|error| Failure::Domain(error.to_string()))?;
+        let end =
+            u32::try_from(end.as_bytes()).map_err(|error| Failure::Domain(error.to_string()))?;
         let blob = file
             .slice_with_f64_and_f64(f64::from(offset), f64::from(end))
             .map_err(|error| js_failure(&error))?;
@@ -352,7 +356,7 @@ impl Runner {
                 session,
                 SnapshotRequest::Upload {
                     operation: current.operation,
-                    offset: u64::from(offset),
+                    offset: current.transferred,
                     bytes,
                 },
             )

@@ -4,6 +4,7 @@ use egui_kittest::{
     kittest::{By, NodeT as _, Queryable as _},
 };
 use garmin_i18n::{Language, Translations};
+use garmin_model::artifact::ByteCount;
 use garmin_service_api::snapshots::{SnapshotPreview, SnapshotState, SnapshotStatus};
 use garmin_ui::backup::{self, Action, State};
 
@@ -22,14 +23,14 @@ fn verified() -> SnapshotStatus {
         operation: id,
         epoch: id,
         state: SnapshotState::AwaitingApproval,
-        transferred: 100,
-        total: Some(100),
+        transferred: ByteCount::from_bytes(100),
+        total: Some(ByteCount::from_bytes(100)),
         error: None,
         preview: Some(SnapshotPreview {
             format_version: 1,
             app_version: "0.1.0".into(),
             created_at: 1_790_640_000,
-            database_bytes: 8_000_000,
+            database_bytes: ByteCount::from_bytes(8_000_000),
             database_sha256: "a".repeat(64),
             approval: id,
         }),
@@ -116,8 +117,8 @@ fn restored_backup_is_acknowledged_in_a_one_action_modal() {
                     intl: &intl,
                     state: &State::Restored(backup::RestoreSummary {
                         elapsed: Some(std::time::Duration::from_secs(18)),
-                        archive_bytes: Some(1_200_000),
-                        database_bytes: Some(8_000_000),
+                        archive_bytes: Some(ByteCount::from_bytes(1_200_000)),
+                        database_bytes: Some(ByteCount::from_bytes(8_000_000)),
                         created_at: Some(1_790_640_000),
                     }),
                     file: Some(&file),

@@ -1,13 +1,14 @@
 use crate::SceneStateKey as _;
+use crate::fixture_coordinate;
 use gallery::prelude::*;
 use garmin_i18n::format_message;
 use garmin_model::{
     activity::{
         ActivityDuration, ActivityMetrics, ActivitySport, ActivitySummary, ActivityTotals, Cadence,
-        Distance, HeartRate, Power, Speed, TimeRange,
+        Distance, HeartRate, Power, Speed, Temperature, TimeRange,
     },
     identity::UnitSystem,
-    route::{Coordinate, Latitude, Longitude},
+    route::{Coordinate, Elevation, Latitude, Longitude},
     value::Timestamp,
 };
 use garmin_service_api::{
@@ -16,6 +17,7 @@ use garmin_service_api::{
     DeviceCatalogEntryKind, DeviceFitPreview, DeviceFitPreviewActivity,
 };
 use garmin_ui::{activity, device_fit_preview, file_import, icons};
+use std::time::Duration;
 
 scene_meta! { title: "Application / Activities" }
 
@@ -137,18 +139,9 @@ const DETAIL: activity::DetailProps<'_> = activity::DetailProps {
     path: Some(garmin_ui::path::Props {
         segments: &[garmin_ui::path::Segment {
             points: &[
-                garmin_ui::path::Point {
-                    latitude: 50.0755,
-                    longitude: 14.4378,
-                },
-                garmin_ui::path::Point {
-                    latitude: 50.0810,
-                    longitude: 14.4510,
-                },
-                garmin_ui::path::Point {
-                    latitude: 50.0940,
-                    longitude: 14.4290,
-                },
+                fixture_coordinate(50.0755, 14.4378),
+                fixture_coordinate(50.0810, 14.4510),
+                fixture_coordinate(50.0940, 14.4290),
             ],
         }],
         empty: "No recorded path",
@@ -378,9 +371,9 @@ fn automation_target(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globa
             phase: "setup".into(),
             kind: "click".into(),
             target: "profile.0".into(),
-            scheduled_seconds: 0.1,
-            actual_seconds: 0.1,
-            lateness_seconds: 0.0,
+            scheduled: Duration::from_millis(100),
+            actual: Duration::from_millis(100),
+            lateness: Duration::from_millis(0),
             target_bounds: [rect.left(), rect.top(), rect.right(), rect.bottom()],
             pointer_position: Some([rect.center().x, rect.center().y]),
         }
@@ -1107,8 +1100,9 @@ fn sample(
     ActivitySampleSnapshot {
         timestamp,
         coordinate,
-        elevation_meters: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(29))
-            .then_some(telemetry.elevation),
+        elevation: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(29)).then(
+            || Elevation::from_meters(telemetry.elevation).expect("fixture elevation is finite"),
+        ),
         distance: Some(Distance::from_millimeters(
             index * 16_800_000 / (sample_count - 1),
         )),
@@ -1129,9 +1123,10 @@ fn sample(
         }),
         power: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(13))
             .then(|| Power::from_watts(rounded_u32(telemetry.power))),
-        temperature_millicelsius: (kind != RecordingKind::MissingMetrics
-            || !index.is_multiple_of(17))
-        .then_some(telemetry.temperature_millicelsius),
+        temperature: (kind != RecordingKind::MissingMetrics || !index.is_multiple_of(17))
+            .then_some(Temperature::from_millicelsius(
+                telemetry.temperature_millicelsius,
+            )),
     }
 }
 

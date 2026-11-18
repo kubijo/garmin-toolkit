@@ -1,5 +1,6 @@
 //! Transaction failures against the production MTP adapter and virtual responder.
 
+use garmin_model::artifact::ByteCount;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -204,7 +205,7 @@ impl DeviceRead for TestDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         destination: BackupDestination,
         progress: MountedMtpBackupProgress,
     ) -> std::result::Result<String, DeviceIoError> {
@@ -226,7 +227,7 @@ impl DeviceRead for TestDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> std::result::Result<(), DeviceIoError> {
         self.verifications.fetch_add(1, Ordering::Relaxed);
@@ -236,7 +237,7 @@ impl DeviceRead for TestDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        limit: u64,
+        limit: ByteCount,
     ) -> std::result::Result<Option<Vec<u8>>, DeviceIoError> {
         self.adapter.read_bounded_file(storage, path, limit).await
     }
@@ -279,7 +280,7 @@ impl DeviceWrite for TestDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> std::result::Result<(), DeviceIoError> {
         if matches!(self.fault, Fault::ChangedBeforeDelete)
@@ -296,7 +297,7 @@ impl DeviceWrite for TestDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
     ) -> std::result::Result<(), DeviceIoError> {
         if matches!(self.fault, Fault::ChangedBeforeDelete)
             && path.to_string().eq_ignore_ascii_case("Garmin/map.img")
@@ -312,7 +313,7 @@ impl DeviceWrite for TestDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         backup: &Path,
         sha256: &str,
     ) -> std::result::Result<(), DeviceIoError> {
@@ -330,12 +331,12 @@ impl DeviceWrite for TestDevice {
                     storage,
                     path,
                     staging.path(),
-                    partial.len() as u64,
+                    ByteCount::from_bytes(partial.len() as u64),
                     &digest(partial),
                     MountedMtpUploadProgress {
                         reporter: ProgressReporter::default(),
-                        completed_before: 0,
-                        total: partial.len() as u64,
+                        completed_before: ByteCount::from_bytes(0),
+                        total: ByteCount::from_bytes(partial.len() as u64),
                     },
                 )
                 .await?;
@@ -350,7 +351,7 @@ impl DeviceWrite for TestDevice {
         storage: &str,
         path: &SafeRelativePath,
         source: &Path,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
         progress: MountedMtpUploadProgress,
     ) -> std::result::Result<(), DeviceIoError> {
@@ -381,7 +382,7 @@ impl DeviceWrite for TestDevice {
                     storage,
                     path,
                     staging.path(),
-                    partial.len() as u64,
+                    ByteCount::from_bytes(partial.len() as u64),
                     &digest(partial),
                     progress,
                 )
@@ -438,7 +439,7 @@ impl Transaction {
             requires_garmin_token: false,
             destination: SafeRelativePath::parse("Garmin/map.img")?,
             cache_name: "payload.bin".to_owned(),
-            size: REPLACEMENT_MAP_BYTES.len() as u64,
+            size: ByteCount::from_bytes(REPLACEMENT_MAP_BYTES.len() as u64),
             md5: hex::encode(Md5::digest(REPLACEMENT_MAP_BYTES)),
         };
         Ok(Self {
@@ -448,16 +449,16 @@ impl Transaction {
                 downloads: vec![spec],
                 files_to_remove: vec![],
                 identifiers: vec![],
-                total_bytes: REPLACEMENT_MAP_BYTES.len() as u64,
+                total_bytes: ByteCount::from_bytes(REPLACEMENT_MAP_BYTES.len() as u64),
                 backup_policy: garmin_update::BackupPolicy::Verified,
                 digest: String::new(),
             }
             .with_backup_policy(garmin_update::BackupPolicy::Verified)?,
             staged: vec![DownloadProgress {
                 path: source,
-                bytes: REPLACEMENT_MAP_BYTES.len() as u64,
+                bytes: ByteCount::from_bytes(REPLACEMENT_MAP_BYTES.len() as u64),
                 elapsed: Duration::ZERO,
-                resumed_at: 0,
+                resumed_at: ByteCount::default(),
                 from_cache: true,
             }],
             capture: SessionCapture::create(&root.join("capture"))?,
@@ -543,18 +544,18 @@ fn multi_file_fixture_with_capacity(
             requires_garmin_token: false,
             destination: SafeRelativePath::parse(destination)?,
             cache_name: format!("payload-{index}.bin"),
-            size: bytes.len() as u64,
+            size: ByteCount::from_bytes(bytes.len() as u64),
             md5: hex::encode(Md5::digest(bytes)),
         });
         staged.push(DownloadProgress {
             path: source,
-            bytes: bytes.len() as u64,
+            bytes: ByteCount::from_bytes(bytes.len() as u64),
             elapsed: Duration::ZERO,
-            resumed_at: 0,
+            resumed_at: ByteCount::default(),
             from_cache: true,
         });
     }
-    let total_bytes = specs.iter().map(|spec| spec.size).sum();
+    let total_bytes = ByteCount::from_bytes(specs.iter().map(|spec| spec.size.as_bytes()).sum());
     let transaction = Transaction {
         plan: UpdatePlan {
             schema_version: garmin_update::UPDATE_PLAN_SCHEMA_VERSION,
@@ -587,7 +588,7 @@ async fn verify_path(device: &TestDevice, path: &str, bytes: &[u8]) -> Result {
         .verify(
             "internal",
             &SafeRelativePath::parse(path)?,
-            bytes.len() as u64,
+            ByteCount::from_bytes(bytes.len() as u64),
             &digest(bytes),
         )
         .await?;
@@ -631,7 +632,7 @@ async fn verify(device: &TestDevice, bytes: &[u8]) -> Result {
         .verify(
             "internal",
             &SafeRelativePath::parse("Garmin/map.img")?,
-            bytes.len() as u64,
+            ByteCount::from_bytes(bytes.len() as u64),
             &digest(bytes),
         )
         .await?;
@@ -639,7 +640,7 @@ async fn verify(device: &TestDevice, bytes: &[u8]) -> Result {
         .verify(
             "internal",
             &SafeRelativePath::parse("Garmin/untouched.img")?,
-            7,
+            ByteCount::from_bytes(7),
             &digest(b"keep me"),
         )
         .await?;
@@ -902,15 +903,17 @@ async fn backup_free_recovery_distinguishes_an_unstarted_same_size_replacement()
     let (device, mut transaction, authorization) = multi_file_fixture(Fault::UploadFailure(1))?;
     let replacement = vec![b'x'; SECOND_ORIGINAL_MAP_BYTES.len()];
     fs::write(&transaction.staged[1].path, &replacement)?;
-    transaction.staged[1].bytes = replacement.len() as u64;
-    transaction.plan.downloads[1].size = replacement.len() as u64;
+    transaction.staged[1].bytes = ByteCount::from_bytes(replacement.len() as u64);
+    transaction.plan.downloads[1].size = ByteCount::from_bytes(replacement.len() as u64);
     transaction.plan.downloads[1].md5 = hex::encode(Md5::digest(&replacement));
-    transaction.plan.total_bytes = transaction
-        .plan
-        .downloads
-        .iter()
-        .map(|item| item.size)
-        .sum();
+    transaction.plan.total_bytes = ByteCount::from_bytes(
+        transaction
+            .plan
+            .downloads
+            .iter()
+            .map(|item| item.size.as_bytes())
+            .sum(),
+    );
     transaction.plan = transaction
         .plan
         .with_backup_policy(garmin_update::BackupPolicy::Skip)?;
@@ -960,7 +963,8 @@ async fn backup_free_recovery_removes_a_partial_then_reclaims_space_before_uploa
         .find(|storage| storage.id == "internal")
         .and_then(|storage| storage.capacity.bytes().map(|(_, free)| free))
         .expect("internal test capacity");
-    let external = vec![b'x'; usize::try_from(free - 20)?];
+    let external =
+        vec![b'x'; usize::try_from(free.saturating_sub(ByteCount::from_bytes(20)).as_bytes())?];
     fs::write(device.root.join("internal/Garmin/external.bin"), &external)?;
 
     let (progress, receiver) = ProgressReporter::channel();
@@ -1342,7 +1346,7 @@ async fn interrupted() -> Result<(Arc<TestDevice>, Arc<Transaction>, PathBuf)> {
             if device
                 .inspect("internal", &partial)
                 .await
-                .is_ok_and(|status| status.size() == Some(9))
+                .is_ok_and(|status| status.size() == Some(ByteCount::from_bytes(9)))
             {
                 break;
             }

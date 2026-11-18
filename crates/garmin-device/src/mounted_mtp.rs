@@ -10,6 +10,7 @@ use crate::{
     TransportKind,
 };
 use crate::{DeviceProbeReport, UploadCompletion};
+use garmin_model::artifact::ByteCount;
 use garmin_progress::{CancellationToken, OperationStage, ProgressReporter};
 use gio::prelude::{CancellableExt, FileEnumeratorExt, FileExt, InputStreamExtManual};
 use gio::{File, FileCopyFlags, FileType};
@@ -135,7 +136,7 @@ fn browse_storage(
             entries.push(crate::DeviceCatalogEntry {
                 path: safe.into_utf8_path_buf(),
                 kind,
-                size,
+                size: size.map(ByteCount::from_bytes),
             });
         }
     }
@@ -246,7 +247,7 @@ pub async fn read_bounded_mounted_mtp_file(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    limit: u64,
+    limit: ByteCount,
 ) -> Result<Option<Vec<u8>>, MountedMtpError> {
     let mount_id = mount_id.to_owned();
     let storage_id = storage_id.to_owned();
@@ -263,7 +264,7 @@ pub async fn read_bounded_mounted_mtp_file(
 fn read_bounded_mounted_file(
     storage: &File,
     path: &SafeRelativePath,
-    limit: u64,
+    limit: ByteCount,
 ) -> Result<Option<Vec<u8>>, MountedMtpError> {
     let (parent, name) = match mounted_parent_with_cancellable(storage, path, None) {
         Ok(parent) => parent,
@@ -292,8 +293,9 @@ fn read_bounded_mounted_file(
             file_type: FileType::Regular,
             size,
         } => {
-            let size =
-                u64::try_from(size).map_err(|_| MountedMtpError::NegativeObjectSize(size))?;
+            let size = u64::try_from(size)
+                .map(ByteCount::from_bytes)
+                .map_err(|_| MountedMtpError::NegativeObjectSize(size))?;
             if size > limit {
                 return Err(MountedMtpError::MetadataTooLarge {
                     path: path.clone(),
@@ -318,11 +320,12 @@ fn read_bounded_mounted_file(
         if count == 0 {
             break;
         }
-        if u64::try_from(bytes.len().saturating_add(count)).unwrap_or(u64::MAX) > limit {
+        let size = ByteCount::from_bytes(bytes.len().saturating_add(count) as u64);
+        if size > limit {
             return Err(MountedMtpError::MetadataTooLarge {
                 path: path.clone(),
                 limit,
-                size: u64::try_from(bytes.len().saturating_add(count)).unwrap_or(u64::MAX),
+                size,
             });
         }
         bytes.extend_from_slice(&buffer[..count]);
@@ -368,7 +371,11 @@ pub async fn list_mounted_mtp_directory(
                 FileType::Directory => (DevicePathState::Directory, None),
                 _ => (DevicePathState::Other, None),
             };
-            entries.push(DeviceDirectoryEntry { name, state, size });
+            entries.push(DeviceDirectoryEntry {
+                name,
+                state,
+                size: size.map(ByteCount::from_bytes),
+            });
         }
         entries.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(entries)
@@ -482,11 +489,7 @@ pub async fn create_verified_mounted_mtp_file(
         temporary.flush()?;
         temporary.as_file().sync_all()?;
         let sha256 = hex::encode(Sha256::digest(&bytes));
-        let size = u64::try_from(bytes.len()).map_err(|_| MountedMtpError::MetadataTooLarge {
-            path: path.clone(),
-            limit: u64::MAX,
-            size: u64::MAX,
-        })?;
+        let size = ByteCount::from_bytes(bytes.len() as u64);
         let root = mounted_root(&mount_id)?;
         let storage = storage_for_id_with_cancellable(&root, &storage_id, None)?;
         upload_to_storage_blocking(
@@ -497,7 +500,7 @@ pub async fn create_verified_mounted_mtp_file(
             &sha256,
             &MountedMtpUploadProgress {
                 reporter: ProgressReporter::default(),
-                completed_before: 0,
+                completed_before: ByteCount::from_bytes(0),
                 total: size,
             },
         )
@@ -576,8 +579,8 @@ fn mounted_device_state_for_root(
                     && info.has_attribute("filesystem::free")
                 {
                     crate::StorageCapacity::new(
-                        info.attribute_uint64("filesystem::size"),
-                        info.attribute_uint64("filesystem::free"),
+                        ByteCount::from_bytes(info.attribute_uint64("filesystem::size")),
+                        ByteCount::from_bytes(info.attribute_uint64("filesystem::free")),
                     )
                 } else {
                     crate::StorageCapacity::unavailable("The mount did not report capacity")
@@ -694,7 +697,7 @@ fn inventory_mounted_mtp_blocking(
 fn inspect_mounted_path(
     storage: &File,
     relative: &SafeRelativePath,
-) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+) -> Result<(DevicePathState, Option<ByteCount>), MountedMtpError> {
     inspect_mounted_path_with_cancellable(storage, relative, None)
 }
 
@@ -702,7 +705,7 @@ fn inspect_mounted_path_with_cancellable(
     storage: &File,
     relative: &SafeRelativePath,
     cancellable: Option<&gio::Cancellable>,
-) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+) -> Result<(DevicePathState, Option<ByteCount>), MountedMtpError> {
     let components = relative
         .as_path()
         .components()
@@ -729,7 +732,10 @@ fn inspect_mounted_path_with_cancellable(
                 FileType::Regular => {
                     let size = u64::try_from(size)
                         .map_err(|_| MountedMtpError::NegativeObjectSize(size))?;
-                    (DevicePathState::RegularFile, Some(size))
+                    (
+                        DevicePathState::RegularFile,
+                        Some(ByteCount::from_bytes(size)),
+                    )
                 }
                 FileType::Directory => (DevicePathState::Directory, None),
                 _ => (DevicePathState::Other, None),
@@ -845,7 +851,7 @@ pub async fn backup_mounted_mtp_object(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     destination: BackupDestination,
     progress: MountedMtpBackupProgress,
 ) -> Result<String, MountedMtpError> {
@@ -875,7 +881,7 @@ pub async fn inspect_mounted_mtp_object(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+) -> Result<(DevicePathState, Option<ByteCount>), MountedMtpError> {
     inspect_mounted_mtp_object_with_progress(
         mount_id,
         storage_id,
@@ -890,7 +896,7 @@ pub async fn inspect_mounted_mtp_object_with_progress(
     storage_id: &str,
     path: &SafeRelativePath,
     progress: &ProgressReporter,
-) -> Result<(DevicePathState, Option<u64>), MountedMtpError> {
+) -> Result<(DevicePathState, Option<ByteCount>), MountedMtpError> {
     let mount_id = mount_id.to_owned();
     let storage_id = storage_id.to_owned();
     let path = path.clone();
@@ -910,7 +916,7 @@ fn backup_mounted_mtp_object_blocking(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     destination: BackupDestination,
     progress: &MountedMtpBackupProgress,
 ) -> Result<String, MountedMtpError> {
@@ -939,7 +945,12 @@ fn backup_mounted_mtp_object_blocking(
         let Ok(copied) = u64::try_from(current) else {
             return;
         };
-        progress.advanced(storage_id, path, copied, expected_size);
+        progress.advanced(
+            storage_id,
+            path,
+            ByteCount::from_bytes(copied),
+            expected_size,
+        );
     };
     if let Err(error) = source.copy(
         &destination,
@@ -973,7 +984,7 @@ pub async fn delete_mounted_mtp_object(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     expected_sha256: &str,
 ) -> Result<(), MountedMtpError> {
     delete_mounted_mtp_object_with_progress(
@@ -991,7 +1002,7 @@ pub async fn delete_mounted_mtp_object_with_progress(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     expected_sha256: &str,
     progress: &ProgressReporter,
 ) -> Result<(), MountedMtpError> {
@@ -1040,7 +1051,7 @@ pub async fn delete_size_checked_mounted_mtp_object(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
 ) -> Result<(), MountedMtpError> {
     delete_size_checked_mounted_mtp_object_with_progress(
         mount_id,
@@ -1056,7 +1067,7 @@ pub async fn delete_size_checked_mounted_mtp_object_with_progress(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     progress: &ProgressReporter,
 ) -> Result<(), MountedMtpError> {
     let mount_id = mount_id.to_owned();
@@ -1090,7 +1101,7 @@ pub async fn verify_mounted_mtp_object(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     expected_sha256: &str,
 ) -> Result<(), MountedMtpError> {
     verify_mounted_mtp_object_with_progress(
@@ -1101,7 +1112,7 @@ pub async fn verify_mounted_mtp_object(
         expected_sha256,
         MountedMtpVerifyProgress {
             reporter: ProgressReporter::default(),
-            completed_before: 0,
+            completed_before: ByteCount::from_bytes(0),
             total: expected_size,
         },
     )
@@ -1115,7 +1126,7 @@ pub async fn verify_mounted_mtp_object_with_progress(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     expected_sha256: &str,
     progress: MountedMtpVerifyProgress,
 ) -> Result<(), MountedMtpError> {
@@ -1161,7 +1172,7 @@ pub async fn restore_mounted_mtp_object(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     backup: &Path,
     expected_sha256: &str,
 ) -> Result<(), MountedMtpError> {
@@ -1181,7 +1192,7 @@ pub async fn restore_mounted_mtp_object_with_progress(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     backup: &Path,
     expected_sha256: &str,
     progress: &ProgressReporter,
@@ -1218,7 +1229,7 @@ pub async fn upload_mounted_mtp_object(
     storage_id: &str,
     path: &SafeRelativePath,
     source: &Path,
-    expected_size: u64,
+    expected_size: ByteCount,
     expected_sha256: &str,
     progress: MountedMtpUploadProgress,
 ) -> Result<(), MountedMtpError> {
@@ -1248,7 +1259,7 @@ fn upload_mounted_mtp_object_blocking(
     storage_id: &str,
     path: &SafeRelativePath,
     source: &Path,
-    expected_size: u64,
+    expected_size: ByteCount,
     expected_sha256: &str,
     progress: &MountedMtpUploadProgress,
 ) -> Result<(), MountedMtpError> {
@@ -1271,7 +1282,7 @@ fn upload_to_storage_blocking(
     storage: &File,
     path: &SafeRelativePath,
     source: &Path,
-    expected_size: u64,
+    expected_size: ByteCount,
     expected_sha256: &str,
     progress: &MountedMtpUploadProgress,
 ) -> Result<(), MountedMtpError> {
@@ -1310,7 +1321,7 @@ fn copy_upload_to_device(
     destination: &File,
     path: &SafeRelativePath,
     source: &Path,
-    expected_size: u64,
+    expected_size: ByteCount,
     progress: &MountedMtpUploadProgress,
 ) -> Result<(), MountedMtpError> {
     let cancellable = gio::Cancellable::new();
@@ -1327,10 +1338,13 @@ fn copy_upload_to_device(
                 OperationStage::Commit,
                 "Writing verified file to device",
                 path.to_string(),
-                progress.completed_before.saturating_add(current),
-                Some(progress.total),
+                progress
+                    .completed_before
+                    .saturating_add(ByteCount::from_bytes(current))
+                    .as_bytes(),
+                Some(progress.total.as_bytes()),
             );
-            if current >= expected_size && !payload_sent {
+            if current >= expected_size.as_bytes() && !payload_sent {
                 payload_sent = true;
                 progress.reporter.started_with_path(
                     OperationStage::DeviceFinalize,
@@ -1386,7 +1400,7 @@ fn copy_upload_to_device(
 fn verify_uploaded_object_metadata(
     destination: &File,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     progress: &MountedMtpUploadProgress,
 ) -> Result<(), MountedMtpError> {
     progress.reporter.started_operations_with_path(
@@ -1406,8 +1420,9 @@ fn verify_uploaded_object_metadata(
     if info.file_type() != FileType::Regular {
         return Err(MountedMtpError::UploadMetadata(path.clone()));
     }
-    let reported_size =
-        u64::try_from(info.size()).map_err(|_| MountedMtpError::NegativeObjectSize(info.size()))?;
+    let reported_size = u64::try_from(info.size())
+        .map(ByteCount::from_bytes)
+        .map_err(|_| MountedMtpError::NegativeObjectSize(info.size()))?;
     if reported_size != expected_size {
         return Err(MountedMtpError::UploadMetadata(path.clone()));
     }
@@ -1444,7 +1459,7 @@ fn restore_mounted_mtp_object_blocking_with_cancellable(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     backup: &Path,
     expected_sha256: &str,
     cancellable: Option<&gio::Cancellable>,
@@ -1525,7 +1540,7 @@ fn mounted_regular_file_with_cancellable(
     mount_id: &str,
     storage_id: &str,
     path: &SafeRelativePath,
-    expected_size: u64,
+    expected_size: ByteCount,
     cancellable: Option<&gio::Cancellable>,
 ) -> Result<File, MountedMtpError> {
     let root = mounted_root(mount_id)?;
@@ -1537,8 +1552,9 @@ fn mounted_regular_file_with_cancellable(
             file_type: FileType::Regular,
             size,
         } => {
-            let actual =
-                u64::try_from(size).map_err(|_| MountedMtpError::NegativeObjectSize(size))?;
+            let actual = u64::try_from(size)
+                .map(ByteCount::from_bytes)
+                .map_err(|_| MountedMtpError::NegativeObjectSize(size))?;
             if actual != expected_size {
                 return Err(MountedMtpError::RemovalObjectSize {
                     path: path.clone(),
@@ -1659,14 +1675,14 @@ fn mounted_directory_with_cancellable(
     Ok(directory)
 }
 
-fn hash_local_file(path: &Path) -> Result<(u64, String), MountedMtpError> {
+fn hash_local_file(path: &Path) -> Result<(ByteCount, String), MountedMtpError> {
     hash_local_file_with_cancellation(path, None)
 }
 
 fn hash_local_file_with_cancellation(
     path: &Path,
     progress: Option<&ProgressReporter>,
-) -> Result<(u64, String), MountedMtpError> {
+) -> Result<(ByteCount, String), MountedMtpError> {
     if !std::fs::symlink_metadata(path)?.file_type().is_file() {
         return Err(MountedMtpError::BackupVerification(path.to_owned()));
     }
@@ -1680,8 +1696,8 @@ fn hash_local_file_with_cancellation(
 fn hash_local_reader(
     file: &mut StdFile,
     progress: Option<&ProgressReporter>,
-) -> Result<(u64, String), MountedMtpError> {
-    let mut size = 0_u64;
+) -> Result<(ByteCount, String), MountedMtpError> {
+    let mut size = ByteCount::default();
     let mut hash = Sha256::new();
     let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
@@ -1693,7 +1709,9 @@ fn hash_local_reader(
             break;
         }
         size = size
-            .checked_add(u64::try_from(count).map_err(|_| MountedMtpError::SizeOverflow)?)
+            .checked_add(ByteCount::from_bytes(
+                u64::try_from(count).map_err(|_| MountedMtpError::SizeOverflow)?,
+            ))
             .ok_or(MountedMtpError::SizeOverflow)?;
         hash.update(&buffer[..count]);
     }
@@ -1706,8 +1724,8 @@ fn hash_local_reader(
 fn hash_mounted_file_with_progress(
     file: &File,
     progress: Option<&ProgressReporter>,
-    mut report: impl FnMut(u64),
-) -> Result<(u64, String), MountedMtpError> {
+    mut report: impl FnMut(ByteCount),
+) -> Result<(ByteCount, String), MountedMtpError> {
     if progress.is_some_and(ProgressReporter::is_cancelled) {
         return Err(MountedMtpError::Cancelled);
     }
@@ -1715,7 +1733,7 @@ fn hash_mounted_file_with_progress(
     let _cancellation = progress
         .map(|progress| CancellableWatcher::new(progress.cancellation_token(), &cancellable));
     let stream = file.read(Some(&cancellable))?;
-    let mut size = 0_u64;
+    let mut size = ByteCount::default();
     let mut hash = Sha256::new();
     let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
@@ -1734,7 +1752,9 @@ fn hash_mounted_file_with_progress(
             break;
         }
         size = size
-            .checked_add(u64::try_from(count).map_err(|_| MountedMtpError::SizeOverflow)?)
+            .checked_add(ByteCount::from_bytes(
+                u64::try_from(count).map_err(|_| MountedMtpError::SizeOverflow)?,
+            ))
             .ok_or(MountedMtpError::SizeOverflow)?;
         hash.update(&buffer[..count]);
         report(size);
@@ -1767,7 +1787,7 @@ fn probe_mounted_mtp_file_blocking(
 ) -> Result<DeviceProbeReport, MountedMtpError> {
     let root = mounted_root(mount_id)?;
     let garmin = exactly_one_garmin_directory(&root)?;
-    let bytes = source.metadata()?.len();
+    let bytes = ByteCount::from_bytes(source.metadata()?.len());
     let (source_size, expected_sha256) = hash_local_file(source)?;
     if source_size != bytes {
         return Err(MountedMtpError::ProbeSize {
@@ -1802,11 +1822,11 @@ fn probe_mounted_mtp_file_blocking(
     Ok(DeviceProbeReport {
         transport: TransportKind::MountedMtp,
         bytes,
-        upload_seconds: upload_elapsed.as_secs_f64(),
-        device_finalize_seconds: finalize_elapsed.as_secs_f64(),
+        upload_elapsed,
+        device_finalize_elapsed: finalize_elapsed,
         upload_completion: UploadCompletion::Acknowledged,
-        read_back_seconds: read_back_elapsed.as_secs_f64(),
-        cleanup_seconds: cleanup_elapsed.as_secs_f64(),
+        read_back_elapsed,
+        cleanup_elapsed,
         content_verified: true,
         temporary_file_removed: true,
     })
@@ -1815,13 +1835,13 @@ fn probe_mounted_mtp_file_blocking(
 fn upload_probe_file(
     source: &Path,
     destination: &File,
-    bytes: u64,
+    bytes: ByteCount,
     progress: &ProgressReporter,
 ) -> Result<(std::time::Duration, std::time::Duration), MountedMtpError> {
     progress.started(
         OperationStage::Upload,
         "Writing through the desktop MTP mount",
-        Some(bytes),
+        Some(bytes.as_bytes()),
     );
     let upload_started = Instant::now();
     let source = File::for_path(source);
@@ -1840,15 +1860,15 @@ fn upload_probe_file(
                 OperationStage::Upload,
                 "Writing through the desktop MTP mount",
                 current,
-                Some(bytes),
+                Some(bytes.as_bytes()),
             );
-            if current >= bytes && payload_elapsed.is_none() {
+            if current >= bytes.as_bytes() && payload_elapsed.is_none() {
                 payload_elapsed = Some(upload_started.elapsed());
                 progress.completed(
                     OperationStage::Upload,
                     "Payload sent through the desktop MTP mount",
-                    bytes,
-                    Some(bytes),
+                    bytes.as_bytes(),
+                    Some(bytes.as_bytes()),
                 );
                 progress.started(
                     OperationStage::DeviceFinalize,
@@ -1899,8 +1919,8 @@ fn upload_probe_file(
         progress.completed(
             OperationStage::Upload,
             "Payload sent through the desktop MTP mount",
-            bytes,
-            Some(bytes),
+            bytes.as_bytes(),
+            Some(bytes.as_bytes()),
         );
         progress.started(
             OperationStage::DeviceFinalize,
@@ -1975,14 +1995,14 @@ fn discard_partial_object(
 fn verify_probe_file(
     destination: &File,
     readback_path: &Path,
-    bytes: u64,
+    bytes: ByteCount,
     expected_sha256: &str,
     progress: &ProgressReporter,
 ) -> Result<std::time::Duration, MountedMtpError> {
     progress.started(
         OperationStage::DeviceVerify,
         "Reading desktop MTP object back",
-        Some(bytes),
+        Some(bytes.as_bytes()),
     );
     let verification_started = Instant::now();
     let readback = File::for_path(readback_path);
@@ -1997,7 +2017,7 @@ fn verify_probe_file(
                 OperationStage::DeviceVerify,
                 "Reading desktop MTP object back",
                 current,
-                Some(bytes),
+                Some(bytes.as_bytes()),
             );
         }
     };
@@ -2056,8 +2076,8 @@ fn verify_probe_file(
     progress.completed(
         OperationStage::DeviceVerify,
         "Read back and SHA-256 verified",
-        actual,
-        Some(bytes),
+        actual.as_bytes(),
+        Some(bytes.as_bytes()),
     );
     Ok(verification_elapsed)
 }
@@ -2280,7 +2300,7 @@ fn read_bounded(source: &File) -> Result<String, MountedMtpError> {
         if count == 0 {
             break;
         }
-        if bytes.len().saturating_add(count) > MAX_MANIFEST_BYTES {
+        if ByteCount::from_bytes(bytes.len().saturating_add(count) as u64) > MAX_MANIFEST_BYTES {
             return Err(MountedMtpError::ManifestTooLarge);
         }
         bytes.extend_from_slice(&buffer[..count]);
@@ -2299,11 +2319,11 @@ pub enum MountedMtpError {
         path: SafeRelativePath,
         state: DevicePathState,
     },
-    #[error("mounted MTP metadata file {path} is {size} bytes; limit is {limit} bytes")]
+    #[error("mounted MTP metadata file {path} is {size}; limit is {limit}")]
     MetadataTooLarge {
         path: SafeRelativePath,
-        limit: u64,
-        size: u64,
+        limit: ByteCount,
+        size: ByteCount,
     },
     #[error("GarminDevice.xml was not found on the mounted MTP device")]
     ManifestMissing,
@@ -2313,7 +2333,7 @@ pub enum MountedMtpError {
     GarminDirectoryMissing,
     #[error("multiple Garmin directories were found on the mounted MTP device")]
     AmbiguousGarminDirectory,
-    #[error("GarminDevice.xml exceeded {MAX_MANIFEST_BYTES} bytes")]
+    #[error("GarminDevice.xml exceeded {MAX_MANIFEST_BYTES}")]
     ManifestTooLarge,
     #[error("GarminDevice.xml was not UTF-8: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
@@ -2345,7 +2365,10 @@ pub enum MountedMtpError {
     #[error("device reported a negative object size: {0}")]
     NegativeObjectSize(i64),
     #[error("device-side size mismatch: expected {expected}, found {actual}")]
-    ProbeSize { expected: u64, actual: u64 },
+    ProbeSize {
+        expected: ByteCount,
+        actual: ByteCount,
+    },
     #[error("desktop MTP read-back checksum did not match the source")]
     ProbeChecksum,
     #[error("disposable device object still exists after deletion")]
@@ -2360,8 +2383,8 @@ pub enum MountedMtpError {
     #[error("mounted MTP object {path} changed size: expected {expected}, found {actual}")]
     RemovalObjectSize {
         path: SafeRelativePath,
-        expected: u64,
-        actual: u64,
+        expected: ByteCount,
+        actual: ByteCount,
     },
     #[error("mounted MTP object {0} changed contents after backup")]
     RemovalObjectChecksum(SafeRelativePath),
@@ -2460,6 +2483,7 @@ mod tests {
         storage_roots, upload_probe_file, upload_to_storage_blocking, verify_probe_file,
     };
     use crate::SafeRelativePath;
+    use garmin_model::artifact::ByteCount;
     use garmin_progress::{OperationStage, ProgressReporter, ProgressState};
     use gio::File;
     use gio::prelude::CancellableExt;
@@ -2492,8 +2516,12 @@ mod tests {
         let fixture = tempfile::tempdir().unwrap();
         let path = SafeRelativePath::parse("GARMIN-TOOLKIT/manifest.toml").unwrap();
 
-        let bytes = read_bounded_mounted_file(&File::for_path(fixture.path()), &path, 1024)
-            .expect("missing metadata is not an unsafe object");
+        let bytes = read_bounded_mounted_file(
+            &File::for_path(fixture.path()),
+            &path,
+            ByteCount::from_kibibytes(1),
+        )
+        .expect("missing metadata is not an unsafe object");
 
         assert_eq!(bytes, None);
     }
@@ -2560,12 +2588,12 @@ mod tests {
             &File::for_path(&storage),
             &path,
             &source,
-            20,
+            ByteCount::from_bytes(20),
             &sha256,
             &MountedMtpUploadProgress {
                 reporter: progress,
-                completed_before: 0,
-                total: 20,
+                completed_before: ByteCount::from_bytes(0),
+                total: ByteCount::from_bytes(20),
             },
         )
         .unwrap();
@@ -2587,7 +2615,7 @@ mod tests {
         assert!(finalize_started < finalize_completed);
         assert!(finalize_completed < verify_completed);
         assert_eq!(
-            events[verify_completed].unit,
+            events[verify_completed].amount.unit(),
             garmin_progress::ProgressUnit::Operations
         );
         assert_eq!(
@@ -2637,7 +2665,13 @@ mod tests {
         std::fs::write(&source, b"verified map payload").unwrap();
         let (progress, receiver) = ProgressReporter::channel();
 
-        upload_probe_file(&source, &File::for_path(&destination), 20, &progress).unwrap();
+        upload_probe_file(
+            &source,
+            &File::for_path(&destination),
+            ByteCount::from_bytes(20),
+            &progress,
+        )
+        .unwrap();
         let events = receiver.try_iter().collect::<Vec<_>>();
         let upload_complete = events
             .iter()
@@ -2667,7 +2701,7 @@ mod tests {
         let result = verify_probe_file(
             &File::for_path(&device_file),
             &readback,
-            10,
+            ByteCount::from_bytes(10),
             &expected,
             &ProgressReporter::default(),
         );

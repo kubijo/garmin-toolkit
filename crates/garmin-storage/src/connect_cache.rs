@@ -1,4 +1,7 @@
+use std::collections::BTreeMap;
+
 use garmin_model::{
+    activity::Distance,
     garmin_connect::{AccountFacts, CacheStatus, CachedActivity},
     identity::{SourceId, UserId},
 };
@@ -16,6 +19,7 @@ pub struct CachedAccount {
 pub struct CacheSnapshot {
     pub activities: Vec<CachedActivity>,
     pub coverage: CacheStatus,
+    pub ascent: BTreeMap<i64, Distance>,
 }
 
 fn invalid(reason: impl std::fmt::Display) -> Error {
@@ -33,6 +37,29 @@ impl Storage {
         &self,
         user: UserId,
         fingerprint: &str,
+    ) -> Result<Option<CacheSnapshot>, Error> {
+        self.read_connect_cache_snapshot(user, fingerprint, false)
+            .await
+    }
+
+    /// Read the published cache and its unambiguous imported FIT elevation measurements.
+    ///
+    /// # Errors
+    /// Returns database or invalid cached-value failures.
+    pub async fn connect_trends_snapshot(
+        &self,
+        user: UserId,
+        fingerprint: &str,
+    ) -> Result<Option<CacheSnapshot>, Error> {
+        self.read_connect_cache_snapshot(user, fingerprint, true)
+            .await
+    }
+
+    async fn read_connect_cache_snapshot(
+        &self,
+        user: UserId,
+        fingerprint: &str,
+        include_ascent: bool,
     ) -> Result<Option<CacheSnapshot>, Error> {
         let user = user.to_string();
         let mut transaction = self.pool.begin().await?;
@@ -63,6 +90,11 @@ impl Storage {
             sqlx::query_file!("queries/connect-cache-status.sql", user, source, generation)
                 .fetch_one(&mut *transaction)
                 .await?;
+        let ascent = if include_ascent {
+            imported_ascent(&mut transaction, &user, &source).await?
+        } else {
+            BTreeMap::new()
+        };
         transaction.commit().await?;
         let mut activities = Vec::with_capacity(summaries.len());
         for summary in summaries {
@@ -72,6 +104,7 @@ impl Storage {
         }
         Ok(Some(CacheSnapshot {
             activities,
+            ascent,
             coverage: CacheStatus {
                 total: usize::try_from(counts.total).map_err(invalid)?,
                 downloaded: usize::try_from(counts.downloaded).map_err(invalid)?,
@@ -311,5 +344,46 @@ impl Storage {
             downloaded: usize::try_from(row.downloaded).map_err(invalid)?,
             unavailable: usize::try_from(row.unavailable).map_err(invalid)?,
         })
+    }
+}
+
+async fn imported_ascent(
+    connection: &mut sqlx::SqliteConnection,
+    user: &str,
+    source: &str,
+) -> Result<BTreeMap<i64, Distance>, Error> {
+    let rows = sqlx::query_file!("queries/connect-imported-ascent.sql", user, source)
+        .fetch_all(connection)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let id = row.source_identity?.parse().ok()?;
+            let millimetres = u64::try_from(row.ascent_mm?).ok()?;
+            Some((id, Distance::from_millimeters(millimetres)))
+        })
+        .collect())
+}
+
+impl Storage {
+    /// Read the elevation measurements that can affect the current Trends history.
+    /// # Errors
+    /// Returns database read failures.
+    pub async fn connect_trends_ascent(
+        &self,
+        user: UserId,
+        fingerprint: &str,
+    ) -> Result<BTreeMap<i64, Distance>, Error> {
+        let user = user.to_string();
+        let mut transaction = self.pool.begin().await?;
+        let account = sqlx::query_file!("queries/connect-cache-account.sql", user, fingerprint)
+            .fetch_optional(&mut *transaction)
+            .await?;
+        let ascent = match account {
+            Some(account) => imported_ascent(&mut transaction, &user, &account.source_id).await?,
+            None => BTreeMap::new(),
+        };
+        transaction.commit().await?;
+        Ok(ascent)
     }
 }

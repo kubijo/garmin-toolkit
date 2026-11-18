@@ -1,6 +1,7 @@
 use crate::SceneStateKey as _;
 use gallery::prelude::*;
 use garmin_color::swatch;
+use garmin_model::artifact::ByteCount;
 use garmin_model::device::{DeviceStorageState, StorageCapacity};
 use garmin_service_api::{
     DeviceCatalogEntry, DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceCatalogStorage,
@@ -166,7 +167,10 @@ fn show_window_scene(
             storages: vec![DeviceStorageState {
                 id: "mock-internal".to_owned(),
                 label: "Internal storage".to_owned(),
-                capacity: StorageCapacity::new(32_000_000_000, 8_600_000_000),
+                capacity: StorageCapacity::new(
+                    ByteCount::from_gigabytes(32),
+                    ByteCount::from_megabytes(8_600),
+                ),
                 writable: Some(true),
             }],
         }];
@@ -524,7 +528,7 @@ fn entries(activity: &str, include_bookmark_examples: bool) -> Vec<DeviceCatalog
         DeviceCatalogEntry {
             path: format!("Garmin/Activity/History/{activity}").into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(48_216),
+            size: Some(ByteCount::from_bytes(48_216)),
         },
         DeviceCatalogEntry {
             path: "Garmin/Courses".into(),
@@ -534,7 +538,7 @@ fn entries(activity: &str, include_bookmark_examples: bool) -> Vec<DeviceCatalog
         DeviceCatalogEntry {
             path: "Garmin/GarminDevice.xml".into(),
             kind: DeviceCatalogEntryKind::File,
-            size: Some(7_412),
+            size: Some(ByteCount::from_bytes(7_412)),
         },
     ];
     if include_bookmark_examples {
@@ -567,7 +571,7 @@ fn entries(activity: &str, include_bookmark_examples: bool) -> Vec<DeviceCatalog
             DeviceCatalogEntry {
                 path: "GARMIN-TOOLKIT/manifest.toml".into(),
                 kind: DeviceCatalogEntryKind::File,
-                size: Some(1_024),
+                size: Some(ByteCount::from_bytes(1_024)),
             },
         ]);
     }

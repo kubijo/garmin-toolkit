@@ -1,5 +1,6 @@
 use super::*;
 use egui::{Event, Pos2, RawInput, Rect, Vec2, ViewportId, ViewportInfo};
+use garmin_model::value::UnixMilliseconds;
 
 struct Child {
     context: Context,
@@ -17,7 +18,7 @@ impl Child {
         state(&context).lock().unwrap().logs = (1..=20)
             .map(|sequence| garmin_model::logging::Record {
                 sequence,
-                timestamp_ms: 0,
+                timestamp_ms: UnixMilliseconds::from_milliseconds_since_epoch(0),
                 level: garmin_model::logging::Level::Info,
                 component: "test".into(),
                 source: "desktop".into(),

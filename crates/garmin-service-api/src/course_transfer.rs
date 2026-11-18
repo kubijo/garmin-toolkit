@@ -19,7 +19,7 @@ pub struct CourseTarget {
     pub storage_id: String,
     pub storage_label: String,
     pub directory: String,
-    pub free_bytes: Option<u64>,
+    pub free_bytes: Option<ByteCount>,
 }
 
 #[garmin_macros::portable(eq)]
@@ -47,8 +47,8 @@ pub enum CourseTransferPhase {
 
 #[garmin_macros::portable(eq)]
 pub struct CourseTransferProgress {
-    pub bytes_sent: u64,
-    pub total_bytes: u64,
+    pub bytes_sent: ByteCount,
+    pub total_bytes: ByteCount,
     pub finishing: bool,
 }
 
@@ -74,7 +74,7 @@ pub struct CourseCleanupReview {
     pub transfer: uuid::Uuid,
     pub target: CourseTarget,
     pub file_name: String,
-    pub byte_count: u64,
+    pub byte_count: ByteCount,
 }
 
 #[rtc::remote]

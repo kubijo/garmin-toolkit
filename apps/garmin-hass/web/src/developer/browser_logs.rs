@@ -1,4 +1,5 @@
 //! Browser callbacks feed the Rust log buffer; workers relay through their parent.
+use garmin_model::value::UnixMilliseconds;
 use std::{cell::RefCell, collections::BTreeMap};
 
 use garmin_model::logging::{Level, Record};
@@ -91,8 +92,8 @@ fn relay(record: Record) {
     clippy::cast_sign_loss,
     reason = "Date.now is a positive epoch millisecond timestamp"
 )]
-fn now() -> u64 {
-    js_sys::Date::now() as u64
+fn now() -> UnixMilliseconds {
+    UnixMilliseconds::from_milliseconds_since_epoch(js_sys::Date::now() as u64)
 }
 
 pub(super) fn pending() -> Batch {

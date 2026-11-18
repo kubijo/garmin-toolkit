@@ -10,8 +10,8 @@ fn review() -> State {
         upload: Some(GpxUpload {
             operation: AcquisitionOperationId::new_v4(),
             file_name: "walk.gpx".into(),
-            received: ByteCount::from_u64(1),
-            total: ByteCount::from_u64(1),
+            received: ByteCount::from_bytes(1),
+            total: ByteCount::from_bytes(1),
             phase: GpxUploadPhase::Review {
                 digest: ArtifactDigest::from_bytes(b"x"),
                 candidates: 1,
@@ -183,8 +183,8 @@ fn replacing_an_upload_clears_the_previous_candidate_before_inspection() {
     let next = GpxUpload {
         operation: AcquisitionOperationId::new_v4(),
         file_name: "replacement.gpx".into(),
-        received: ByteCount::from_u64(0),
-        total: ByteCount::from_u64(1024),
+        received: ByteCount::from_bytes(0),
+        total: ByteCount::from_bytes(1024),
         phase: GpxUploadPhase::Uploading,
     };
 
@@ -205,7 +205,7 @@ fn replacing_an_upload_clears_the_previous_candidate_before_inspection() {
     assert!(!state.points_ready);
 
     let mut progress = next.clone();
-    progress.received = ByteCount::from_u64(512);
+    progress.received = ByteCount::from_bytes(512);
     state.begin_upload(progress.clone());
     assert_eq!(state.upload, Some(progress));
 

@@ -1,5 +1,6 @@
 //! Explicitly invoked physical acceptance; ordinary tests use only disposable directories.
 
+use garmin_model::artifact::ByteCount;
 use std::error::Error;
 
 use garmin_device::{
@@ -62,7 +63,7 @@ async fn verify_reassignment<D: DeviceWrite>(device: &D, storage: &str) -> TestR
         };
         let path = SafeRelativePath::parse(&path)?;
         let bytes = device
-            .read_bounded_file(storage, &path, 16 * 1024)
+            .read_bounded_file(storage, &path, ByteCount::from_kibibytes(16))
             .await?
             .ok_or("pairing history changed before acceptance")?;
         history.push((path, bytes));
@@ -114,7 +115,11 @@ async fn verify_reassignment<D: DeviceWrite>(device: &D, storage: &str) -> TestR
         return Err("original association was not restored".into());
     }
     for (path, bytes) in history {
-        if device.read_bounded_file(storage, &path, 16 * 1024).await? != Some(bytes) {
+        if device
+            .read_bounded_file(storage, &path, ByteCount::from_kibibytes(16))
+            .await?
+            != Some(bytes)
+        {
             return Err("an original pairing document changed".into());
         }
     }

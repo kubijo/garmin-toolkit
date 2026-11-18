@@ -98,7 +98,7 @@ async fn recover_course(
     let payload = fs::read(directory.join("payload.fit"))?;
     let observed = connection
         .device
-        .read_bounded_file(&target.storage_id, &intent.path, review.byte_count.as_u64())
+        .read_bounded_file(&target.storage_id, &intent.path, review.byte_count)
         .await?
         .context("uploaded Course is missing")?;
     ensure!(

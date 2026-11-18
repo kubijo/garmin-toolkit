@@ -1,5 +1,6 @@
 //! Read-only Garmin MTP access.
 
+use garmin_model::artifact::ByteCount;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -24,7 +25,7 @@ use crate::manifest::{
 };
 use crate::mtp::{GARMIN_USB_VENDOR_ID, KNOWN_GARMIN_MTP};
 
-const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
+use crate::manifest::MAX_MANIFEST_BYTES;
 
 /// An attached Garmin MTP candidate.
 #[derive(Clone, Eq, PartialEq)]
@@ -216,7 +217,7 @@ pub struct DeviceFile {
     source_path: PathBuf,
     data_type: DataType,
     direction: TransferDirection,
-    declared_size: u64,
+    declared_size: ByteCount,
     timestamp: Option<DateTime>,
 }
 
@@ -232,7 +233,7 @@ impl DeviceFile {
     }
 
     #[must_use]
-    pub const fn declared_size(&self) -> u64 {
+    pub const fn declared_size(&self) -> ByteCount {
         self.declared_size
     }
 
@@ -248,11 +249,11 @@ impl DeviceFile {
         W: Write + ?Sized,
     {
         let mut download = self.storage.download(self.handle, ByteRange::Full).await?;
-        if download.size() != self.declared_size {
+        if ByteCount::from_bytes(download.size()) != self.declared_size {
             cancel(&mut download, "object size changed before transfer").await?;
             return Err(Error::SizeMismatch {
                 declared: self.declared_size,
-                received: download.size(),
+                received: ByteCount::from_bytes(download.size()),
             });
         }
 
@@ -277,7 +278,7 @@ impl DeviceFile {
             }
         }
 
-        let received = download.bytes_received();
+        let received = ByteCount::from_bytes(download.bytes_received());
         if received != self.declared_size {
             return Err(Error::SizeMismatch {
                 declared: self.declared_size,
@@ -302,12 +303,12 @@ impl fmt::Debug for DeviceFile {
 /// A completed device-to-staging copy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CopyOutcome {
-    bytes: u64,
+    bytes: ByteCount,
 }
 
 impl CopyOutcome {
     #[must_use]
-    pub const fn bytes(&self) -> u64 {
+    pub const fn bytes(&self) -> ByteCount {
         self.bytes
     }
 }
@@ -329,7 +330,7 @@ pub enum Error {
     CandidateChanged,
     #[error("multiple GarminDevice.xml objects occupied the canonical path")]
     AmbiguousManifest,
-    #[error("GarminDevice.xml exceeded {MAX_MANIFEST_BYTES} bytes")]
+    #[error("GarminDevice.xml exceeded {MAX_MANIFEST_BYTES}")]
     ManifestTooLarge,
     #[error("GarminDevice.xml was not UTF-8: {0}")]
     ManifestUtf8(#[from] std::str::Utf8Error),
@@ -346,9 +347,9 @@ pub enum Error {
     #[error("MTP size mismatch: declared {declared}, received {received}")]
     SizeMismatch {
         /// Metadata size.
-        declared: u64,
+        declared: ByteCount,
         /// Transferred size.
-        received: u64,
+        received: ByteCount,
     },
     #[error("staging write failed: {0}")]
     Target(std::io::Error),
@@ -426,7 +427,7 @@ async fn scan_storage(storage: Storage) -> Result<Option<Catalog>, Error> {
                     source_path: path.clone(),
                     data_type: capability.data_type(),
                     direction: capability.direction(),
-                    declared_size: object.size,
+                    declared_size: ByteCount::from_bytes(object.size),
                     timestamp: object.modified.or(object.created),
                 });
             }
@@ -458,15 +459,15 @@ fn connection_error(error: mtp_rs::Error) -> Error {
 }
 
 async fn read_manifest(storage: &Storage, object: &ObjectInfo) -> Result<Vec<u8>, Error> {
-    if object.size > MAX_MANIFEST_BYTES {
+    if ByteCount::from_bytes(object.size) > MAX_MANIFEST_BYTES {
         return Err(Error::ManifestTooLarge);
     }
     let mut download = storage.download(object.handle, ByteRange::Full).await?;
     if download.size() != object.size {
         cancel(&mut download, "manifest size changed before transfer").await?;
         return Err(Error::SizeMismatch {
-            declared: object.size,
-            received: download.size(),
+            declared: ByteCount::from_bytes(object.size),
+            received: ByteCount::from_bytes(download.size()),
         });
     }
 
@@ -485,7 +486,7 @@ async fn read_manifest(storage: &Storage, object: &ObjectInfo) -> Result<Vec<u8>
         let bounded = u64::try_from(bytes.len())
             .ok()
             .and_then(|received| received.checked_add(chunk_size))
-            .is_some_and(|received| received <= MAX_MANIFEST_BYTES);
+            .is_some_and(|received| ByteCount::from_bytes(received) <= MAX_MANIFEST_BYTES);
         if !bounded {
             cancel(&mut download, "manifest exceeded its size bound").await?;
             return Err(Error::ManifestTooLarge);
@@ -493,10 +494,10 @@ async fn read_manifest(storage: &Storage, object: &ObjectInfo) -> Result<Vec<u8>
         bytes.extend_from_slice(&chunk);
     }
 
-    let received = download.bytes_received();
-    if received != object.size {
+    let received = ByteCount::from_bytes(download.bytes_received());
+    if received != ByteCount::from_bytes(object.size) {
         return Err(Error::SizeMismatch {
-            declared: object.size,
+            declared: ByteCount::from_bytes(object.size),
             received,
         });
     }

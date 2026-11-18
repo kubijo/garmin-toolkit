@@ -1,3 +1,4 @@
+use crate::fixture_coordinate;
 use gallery::prelude::*;
 use garmin_color::swatch;
 use garmin_ui::{icons, profile, shell};
@@ -356,22 +357,10 @@ fn accent_examples(ui: &mut Ui) {
         &path::Props {
             segments: &[path::Segment {
                 points: &[
-                    path::Point {
-                        latitude: 0.0,
-                        longitude: 0.0,
-                    },
-                    path::Point {
-                        latitude: 0.8,
-                        longitude: 0.4,
-                    },
-                    path::Point {
-                        latitude: 0.2,
-                        longitude: 1.0,
-                    },
-                    path::Point {
-                        latitude: 0.9,
-                        longitude: 1.4,
-                    },
+                    fixture_coordinate(0.0, 0.0),
+                    fixture_coordinate(0.8, 0.4),
+                    fixture_coordinate(0.2, 1.0),
+                    fixture_coordinate(0.9, 1.4),
                 ],
             }],
             empty: "No route",

@@ -2,6 +2,7 @@
 
 mod support;
 
+use garmin_model::artifact::ByteCount;
 use std::{error::Error, fs, io, time::Duration};
 
 use bytes::Bytes;
@@ -95,7 +96,7 @@ fn uploaded_and_deleted_objects_reach_production_inventory() -> Result<(), Box<d
         assert_eq!(inventory.transport, TransportKind::Mtp);
         assert_eq!(inventory.paths.len(), 1);
         assert_eq!(inventory.paths[0].state, DevicePathState::RegularFile);
-        assert_eq!(inventory.paths[0].size, Some(size));
+        assert_eq!(inventory.paths[0].size, Some(ByteCount::from_bytes(size)));
 
         let (device, storage) = fixture.open().await?;
         let uploaded = storage
@@ -183,7 +184,7 @@ async fn link_probe_reads_back_and_verifies_the_virtual_mtp_object() -> Result<(
     let events = receiver.try_iter().collect::<Vec<_>>();
 
     assert!(report.content_verified);
-    assert!(report.read_back_seconds > 0.0);
+    assert!(!report.read_back_elapsed.is_zero());
     assert_eq!(report.upload_completion, UploadCompletion::Acknowledged);
     assert!(report.temporary_file_removed);
     assert!(recovery.path().read_dir()?.next().is_none());
@@ -203,7 +204,7 @@ async fn link_probe_reads_back_and_verifies_the_virtual_mtp_object() -> Result<(
     assert!(events.iter().any(|event| {
         event.stage == OperationStage::DeviceVerify
             && event.state == ProgressState::Advanced
-            && event.completed == report.bytes
+            && event.amount.completed() == report.bytes.as_bytes()
     }));
     assert!(
         fs::read_dir(fixture.backing.path().join("Garmin"))?

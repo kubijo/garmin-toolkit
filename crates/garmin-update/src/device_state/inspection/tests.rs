@@ -1,5 +1,6 @@
 use super::*;
 use crate::profile_marker::PROFILE_MARKER_PATH;
+use garmin_model::artifact::ByteCount;
 use std::{collections::BTreeMap, sync::Mutex};
 
 /// Deliberately has no `DeviceWrite` implementation.
@@ -60,7 +61,7 @@ impl DeviceRead for Reader {
                 (!child.contains('/')).then(|| garmin_device::storage::DeviceDirectoryEntry {
                     name: child.to_owned(),
                     state: garmin_device::DevicePathState::RegularFile,
-                    size: Some(bytes.len() as u64),
+                    size: Some(ByteCount::from_bytes(bytes.len() as u64)),
                 })
             })
             .collect())
@@ -69,7 +70,7 @@ impl DeviceRead for Reader {
         &self,
         _: &str,
         _: &SafeRelativePath,
-        _: u64,
+        _: ByteCount,
         _: garmin_device::BackupDestination,
         _: garmin_device::MountedMtpBackupProgress,
     ) -> Result<String, DeviceIoError> {
@@ -79,7 +80,7 @@ impl DeviceRead for Reader {
         &self,
         _: &str,
         _: &SafeRelativePath,
-        _: u64,
+        _: ByteCount,
         _: &str,
     ) -> Result<(), DeviceIoError> {
         panic!("unexpected verify")
@@ -88,14 +89,14 @@ impl DeviceRead for Reader {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        limit: u64,
+        limit: ByteCount,
     ) -> Result<Option<Vec<u8>>, DeviceIoError> {
         assert_eq!(storage, "card");
         self.reads.lock().unwrap().push(path.to_string());
         let bytes = self.files.get(&path.to_string()).cloned();
         if bytes
             .as_ref()
-            .is_some_and(|bytes| bytes.len() as u64 > limit)
+            .is_some_and(|bytes| ByteCount::from_bytes(bytes.len() as u64) > limit)
         {
             return Err(DeviceIoError::LimitExceeded(path.to_string()));
         }
@@ -196,7 +197,7 @@ async fn limits_versions_and_identity_mismatch_remain_distinct() {
     let mut reader = reader();
     reader.files.insert(
         MANIFEST.to_owned(),
-        vec![0; usize::try_from(MANIFEST_LIMIT).unwrap() + 1],
+        vec![0; usize::try_from(MANIFEST_LIMIT.as_bytes()).unwrap() + 1],
     );
     let result = inspect(&reader, "card", Some(&"b".repeat(32))).await;
     assert!(matches!(

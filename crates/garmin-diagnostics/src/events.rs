@@ -1,5 +1,9 @@
 use super::response::{Batch, Cursor};
-use garmin_model::diagnostics::{Observation, Update};
+use garmin_model::value::UnixMilliseconds;
+use garmin_model::{
+    artifact::ByteCount,
+    diagnostics::{Observation, Update},
+};
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -8,7 +12,7 @@ use std::{
 };
 
 const RECORDS: usize = 2048;
-const BYTES: usize = 8 * 1024 * 1024;
+const BYTE_LIMIT: ByteCount = ByteCount::from_mebibytes(8);
 
 #[derive(Clone, Default)]
 pub struct Events(Arc<Mutex<Store>>);
@@ -19,7 +23,7 @@ struct Store {
     lost_through: u64,
     error: Option<String>,
     records: VecDeque<Event>,
-    bytes: usize,
+    bytes: ByteCount,
     state: BTreeMap<(String, String, String), Event>,
     revisions: BTreeMap<String, u64>,
 }
@@ -32,7 +36,7 @@ impl Default for Store {
             lost_through: 0,
             error: None,
             records: VecDeque::new(),
-            bytes: 0,
+            bytes: ByteCount::default(),
             state: BTreeMap::new(),
             revisions: BTreeMap::new(),
         }
@@ -42,7 +46,7 @@ impl Default for Store {
 #[derive(Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct Event {
     pub sequence: u64,
-    pub timestamp_ms: u64,
+    pub timestamp_ms: UnixMilliseconds,
     pub source: String,
     #[serde(flatten)]
     pub observation: Observation,
@@ -258,20 +262,20 @@ impl Store {
         self.next += 1;
         let event = Event {
             sequence: self.next,
-            timestamp_ms: u64::try_from(
+            timestamp_ms: UnixMilliseconds::saturating_from_duration_since_epoch(
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis(),
-            )
-            .unwrap_or(u64::MAX),
+                    .unwrap_or_default(),
+            ),
             source: source.into(),
             observation,
         };
-        let size = serde_json::to_vec(&event)
-            .expect("diagnostic records contain strings and integers")
-            .len();
-        if size > 4096 {
+        let size = ByteCount::from_bytes(
+            serde_json::to_vec(&event)
+                .expect("diagnostic records contain strings and integers")
+                .len() as u64,
+        );
+        if size > ByteCount::from_kibibytes(4) {
             self.error = Some("Diagnostic record exceeds 4096 bytes".into());
             return;
         }
@@ -286,16 +290,22 @@ impl Store {
             .is_some_and(|previous| progress_replaces(previous, &event))
             && let Some(previous) = self.records.pop_back()
         {
-            self.bytes -= serde_json::to_vec(&previous)
-                .expect("valid diagnostic record")
-                .len();
+            self.bytes = self.bytes.saturating_sub(ByteCount::from_bytes(
+                serde_json::to_vec(&previous)
+                    .expect("valid diagnostic record")
+                    .len() as u64,
+            ));
         }
-        self.bytes += size;
+        self.bytes = self.bytes.saturating_add(size);
         self.records.push_back(event);
-        while self.records.len() > RECORDS || self.bytes > BYTES {
+        while self.records.len() > RECORDS || self.bytes > BYTE_LIMIT {
             if let Some(old) = self.records.pop_front() {
                 self.lost_through = self.lost_through.max(old.sequence);
-                self.bytes -= serde_json::to_vec(&old).map_or(0, |data| data.len());
+                let size = serde_json::to_vec(&old).map_or_else(
+                    |_| ByteCount::default(),
+                    |data| ByteCount::from_bytes(data.len() as u64),
+                );
+                self.bytes = self.bytes.saturating_sub(size);
             }
         }
     }

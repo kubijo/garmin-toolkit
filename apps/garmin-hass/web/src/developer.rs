@@ -1,6 +1,7 @@
 //! Browser transport adapter for shared tools and centralized diagnostics.
 use eframe::egui::Context;
 use garmin_service_api::logging::{LogService, LogServiceClient};
+use std::time::Duration;
 use wasm_bindgen::prelude::*;
 
 mod browser_logs;
@@ -56,7 +57,7 @@ pub fn update_logs(context: &Context, client: Option<LogServiceClient>) {
 pub fn forward(shared: std::rc::Rc<std::cell::RefCell<super::State>>, context: Context) {
     wasm_bindgen_futures::spawn_local(async move {
         loop {
-            super::wait_milliseconds(500).await;
+            super::wait_for(Duration::from_millis(500)).await;
             let client = shared.borrow().logs.clone();
             if let Some(client) = client {
                 let batch = browser_logs::pending();

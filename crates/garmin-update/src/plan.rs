@@ -1,6 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use garmin_device::{PathSafetyError, SafeRelativePath};
+use garmin_model::artifact::ByteCount;
 use garmin_model::map::{MapCatalog, MapComponent, MapDownload, MapInstallIdentifier};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -28,7 +29,7 @@ pub struct DownloadSpec {
     pub requires_garmin_token: bool,
     pub destination: SafeRelativePath,
     pub cache_name: String,
-    pub size: u64,
+    pub size: ByteCount,
     pub md5: String,
 }
 
@@ -39,7 +40,7 @@ pub struct UpdatePlan {
     pub downloads: Vec<DownloadSpec>,
     pub files_to_remove: Vec<SafeRelativePath>,
     pub identifiers: Vec<MapInstallIdentifier>,
-    pub total_bytes: u64,
+    pub total_bytes: ByteCount,
     pub backup_policy: BackupPolicy,
     pub digest: String,
 }
@@ -50,7 +51,7 @@ struct PlanDigest<'a> {
     downloads: Vec<DownloadDigest<'a>>,
     files_to_remove: &'a [SafeRelativePath],
     identifiers: &'a [MapInstallIdentifier],
-    total_bytes: u64,
+    total_bytes: ByteCount,
     backup_policy: BackupPolicy,
 }
 
@@ -61,7 +62,7 @@ struct DownloadDigest<'a> {
     alternate_sources: Vec<String>,
     requires_garmin_token: bool,
     destination: &'a SafeRelativePath,
-    size: u64,
+    size: ByteCount,
     md5: &'a str,
 }
 
@@ -154,11 +155,13 @@ impl UpdatePlan {
 
         files_to_remove.sort_by(|left, right| left.as_path().cmp(right.as_path()));
         files_to_remove.dedup();
-        let total_bytes = downloads.iter().try_fold(0_u64, |total, item| {
-            total
-                .checked_add(item.size)
-                .ok_or(UpdatePlanError::TotalSizeOverflow)
-        })?;
+        let total_bytes = downloads
+            .iter()
+            .try_fold(ByteCount::default(), |total, item| {
+                total
+                    .checked_add(item.size)
+                    .ok_or(UpdatePlanError::TotalSizeOverflow)
+            })?;
         let mut plan = Self {
             schema_version: UPDATE_PLAN_SCHEMA_VERSION,
             device_digest,
@@ -189,15 +192,18 @@ impl UpdatePlan {
                 ));
             }
         }
-        let total_bytes = self.downloads.iter().try_fold(0_u64, |total, item| {
-            total
-                .checked_add(item.size)
-                .ok_or(UpdatePlanError::TotalSizeOverflow)
-        })?;
+        let total_bytes = self
+            .downloads
+            .iter()
+            .try_fold(ByteCount::default(), |total, item| {
+                total
+                    .checked_add(item.size)
+                    .ok_or(UpdatePlanError::TotalSizeOverflow)
+            })?;
         if total_bytes != self.total_bytes {
             return Err(UpdatePlanError::TotalSizeMismatch {
-                declared: self.total_bytes,
-                calculated: total_bytes,
+                declared: self.total_bytes.as_bytes(),
+                calculated: total_bytes.as_bytes(),
             });
         }
         let calculated = self.calculated_digest()?;
@@ -278,7 +284,7 @@ fn append_map(
                 file: content.file_name.clone(),
             }
         })?;
-        if delivery.size_in_bytes == 0 {
+        if delivery.size_in_bytes.as_bytes() == 0 {
             return Err(UpdatePlanError::EmptyDeliverable {
                 map: map.display_name.clone(),
                 file: content.file_name.clone(),
@@ -474,7 +480,7 @@ mod tests {
                             file_name: "Garmin/map.img".to_owned(),
                             downloads: vec![MapDownload {
                                 md5: "00".repeat(16),
-                                size_in_bytes: 10,
+                                size_in_bytes: ByteCount::from_bytes(10),
                                 delivery_type: Some("Full".to_owned()),
                                 url: "https://download.garmin.com/map.img".to_owned(),
                             }],
@@ -510,13 +516,17 @@ mod tests {
     #[test]
     fn rejects_changed_or_unknown_persisted_plans() {
         let mut plan = plan_fixture();
-        plan.total_bytes += 1;
+        let downloads = serde_json::to_value(plan.download_digests()).unwrap();
+        assert_eq!(downloads[0]["size"], serde_json::json!(10));
+
+        let original_total = plan.total_bytes;
+        plan.total_bytes = ByteCount::from_bytes(original_total.as_bytes() + 1);
         assert!(matches!(
             plan.validate(),
             Err(UpdatePlanError::TotalSizeMismatch { .. })
         ));
 
-        plan.total_bytes -= 1;
+        plan.total_bytes = original_total;
         plan.schema_version = UPDATE_PLAN_SCHEMA_VERSION + 1;
         assert!(matches!(
             plan.validate(),
@@ -546,7 +556,7 @@ mod tests {
                         file_name: "../escape.img".to_owned(),
                         downloads: vec![MapDownload {
                             md5: "00".repeat(16),
-                            size_in_bytes: 10,
+                            size_in_bytes: ByteCount::from_bytes(10),
                             url: "https://download.garmin.com/map.img".to_owned(),
                             ..Default::default()
                         }],
@@ -577,7 +587,7 @@ mod tests {
                         external_file_name: Some(String::new()),
                         downloads: vec![MapDownload {
                             md5: "AAAAAAAAAAAAAAAAAAAAAA==".to_owned(),
-                            size_in_bytes: 10,
+                            size_in_bytes: ByteCount::from_bytes(10),
                             delivery_type: Some("Full".to_owned()),
                             url: "rmu/maps/map.img".to_owned(),
                         }],
@@ -619,7 +629,7 @@ mod tests {
                     file_name: file.to_owned(),
                     downloads: vec![MapDownload {
                         md5: "00".repeat(16),
-                        size_in_bytes: 10,
+                        size_in_bytes: ByteCount::from_bytes(10),
                         url: format!("https://download.garmin.com/{file}"),
                         ..Default::default()
                     }],
@@ -662,7 +672,7 @@ mod tests {
                         file_name: "map.img".to_owned(),
                         downloads: vec![MapDownload {
                             md5: "00".repeat(16),
-                            size_in_bytes: 10,
+                            size_in_bytes: ByteCount::from_bytes(10),
                             url: "https://download.garmin.com/map.img".to_owned(),
                             ..Default::default()
                         }],
@@ -691,7 +701,7 @@ mod tests {
                         file_name: "mock.img".to_owned(),
                         downloads: vec![MapDownload {
                             md5: "00".repeat(16),
-                            size_in_bytes: 10,
+                            size_in_bytes: ByteCount::from_bytes(10),
                             url: url.to_owned(),
                             ..Default::default()
                         }],
@@ -731,7 +741,7 @@ mod tests {
             external_file_name: Some(destination.to_owned()),
             downloads: vec![MapDownload {
                 md5: md5.to_owned(),
-                size_in_bytes: 10,
+                size_in_bytes: ByteCount::from_bytes(10),
                 url: format!("https://download.garmin.com/{file}"),
                 ..Default::default()
             }],
@@ -767,7 +777,7 @@ mod tests {
         let plan =
             UpdatePlan::from_response_selection(&first, "device".to_owned(), [0, 1]).unwrap();
         assert_eq!(plan.downloads.len(), 1);
-        assert_eq!(plan.total_bytes, 10);
+        assert_eq!(plan.total_bytes.as_bytes(), 10);
         assert_eq!(plan.identifiers.len(), 2);
         assert!(matches!(
             UpdatePlan::from_response(
@@ -792,7 +802,7 @@ mod tests {
                         file_name: "map.img".to_owned(),
                         downloads: vec![MapDownload {
                             md5: "00".repeat(16),
-                            size_in_bytes: 10,
+                            size_in_bytes: ByteCount::from_bytes(10),
                             url: url.to_owned(),
                             ..Default::default()
                         }],
@@ -830,7 +840,7 @@ mod tests {
                         file_name: "map.img".to_owned(),
                         downloads: vec![MapDownload {
                             md5: "00".repeat(16),
-                            size_in_bytes: 10,
+                            size_in_bytes: ByteCount::from_bytes(10),
                             url: url.to_owned(),
                             ..Default::default()
                         }],

@@ -11,11 +11,13 @@
 use egui::{Color32, RichText, Ui};
 use garmin_i18n::{Intl, format_message};
 use garmin_model::{
+    activity::Distance,
+    artifact::ArtifactDigest,
     garmin_connect::{
         sync::{Revision, Snapshot},
-        trends::{History, Metric, Period, Range, Sport, cumulative},
+        trends::{BucketValue, History, Metric, Period, Range, Sport, Totals, cumulative},
     },
-    identity::{ProfilePreferences, UnitSystem},
+    identity::{MonthlyDistanceTarget, ProfilePreferences, UnitSystem},
 };
 use jiff::civil::Date;
 
@@ -36,6 +38,8 @@ enum ReadState {
 pub struct State {
     history: Option<History>,
     revision: Option<Revision>,
+    import_revision: Option<ArtifactDigest>,
+    read_token: Option<uuid::Uuid>,
     read: ReadState,
     period: Period,
     anchor: Option<Date>,
@@ -44,9 +48,10 @@ pub struct State {
     cumulative: bool,
     sport: usize,
     comparison_initialized: bool,
+    activity_pair: [Option<i64>; 2],
     metric: Metric,
     selected: Option<Date>,
-    target_draft: Option<[u32; 3]>,
+    target_draft: Option<[MonthlyDistanceTarget; 3]>,
     target_presentation: crate::modal::Presentation,
 }
 
@@ -79,7 +84,7 @@ impl State {
     }
 
     /// Open a draft without modifying the saved profile targets.
-    pub fn edit_targets(&mut self, targets: [u32; 3]) {
+    pub fn edit_targets(&mut self, targets: [MonthlyDistanceTarget; 3]) {
         self.target_draft = Some(targets);
     }
 
@@ -92,6 +97,12 @@ impl State {
     #[must_use]
     pub fn with_period(mut self, period: Period) -> Self {
         self.period = period;
+        self
+    }
+
+    #[must_use]
+    pub fn with_comparison_metric(mut self, metric: Metric) -> Self {
+        self.metric = metric;
         self
     }
 
@@ -118,6 +129,38 @@ impl State {
         }
     }
 
+    pub fn observe_import_revision(&mut self, revision: Option<ArtifactDigest>) {
+        if self.import_revision != revision {
+            self.import_revision = revision;
+            self.read = ReadState::Idle;
+        }
+    }
+
+    pub fn complete_read(
+        &mut self,
+        request: &ReadRequest,
+        result: Result<Option<History>, String>,
+    ) {
+        if self.read_token == Some(request.token)
+            && self.import_revision == request.import_revision
+            && matches!(self.read, ReadState::Loading)
+        {
+            self.complete(&request.sync, result);
+        }
+    }
+
+    fn begin_read(&mut self, sync: Revision) -> ReadRequest {
+        let token = uuid::Uuid::new_v4();
+        self.read_token = Some(token);
+        self.revision = Some(sync.clone());
+        self.read = ReadState::Loading;
+        ReadRequest {
+            sync,
+            import_revision: self.import_revision,
+            token,
+        }
+    }
+
     fn needs_read(&mut self, revision: &Revision) -> bool {
         if self
             .revision
@@ -128,6 +171,7 @@ impl State {
             // Discard the previous report before rendering or accepting another response.
             self.history = None;
             self.selected = None;
+            self.activity_pair = [None; 2];
             self.revision = Some(revision.clone());
             self.read = ReadState::Idle;
         }
@@ -135,6 +179,7 @@ impl State {
     }
 }
 
+mod activity_comparison;
 #[cfg(test)]
 mod tests;
 
@@ -149,11 +194,18 @@ pub struct Props<'a> {
 }
 
 pub enum Action {
-    Read(Revision),
+    Read(ReadRequest),
     Sync,
-    SaveTargets([u32; 3]),
+    SaveTargets([MonthlyDistanceTarget; 3]),
     Cancel(Option<garmin_model::garmin_connect::sync::JobId>),
     OpenActivities,
+}
+
+#[derive(Clone)]
+pub struct ReadRequest {
+    sync: Revision,
+    import_revision: Option<ArtifactDigest>,
+    token: uuid::Uuid,
 }
 
 fn sport_label(intl: &Intl, sport: Sport) -> String {
@@ -256,9 +308,11 @@ fn unit(preferences: ProfilePreferences) -> (&'static str, f64) {
     }
 }
 
-fn duration(seconds: f64) -> String {
-    let minutes = (seconds / 60.0).round() as u64;
-    format!("{}h {:02}m", minutes / 60, minutes % 60)
+fn elevation_unit(preferences: ProfilePreferences) -> (&'static str, f64) {
+    match preferences.unit_system() {
+        UnitSystem::Metric => ("m", 1.0),
+        UnitSystem::Imperial => ("ft", Distance::METRES_PER_FOOT),
+    }
 }
 
 fn values(
@@ -278,16 +332,23 @@ fn values(
         .iter()
         .map(|bucket| bucket.date.to_string())
         .collect();
-    let divisor = match metric {
-        Metric::Distance => unit(preferences).1,
-        Metric::Duration => 3600.0,
-        _ => 1.0,
-    };
+    let units = preferences.unit_system();
     (
         labels,
         buckets
             .into_iter()
-            .map(|bucket| bucket.value.map(|value| value / divisor))
+            .map(|bucket| {
+                bucket.value.map(|value| match value {
+                    BucketValue::Distance(distance) => match (metric, units) {
+                        (Metric::Elevation, UnitSystem::Metric) => distance.as_metres(),
+                        (Metric::Elevation, UnitSystem::Imperial) => distance.as_feet(),
+                        (_, UnitSystem::Metric) => distance.as_kilometres(),
+                        (_, UnitSystem::Imperial) => distance.as_miles(),
+                    },
+                    BucketValue::Duration(duration) => duration.as_hours(),
+                    BucketValue::Count(count) => count as f64,
+                })
+            })
             .collect(),
     )
 }
@@ -360,9 +421,7 @@ pub fn show(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Action>
         output = Some(action);
     }
     if output.is_none() && (needs_read || matches!(state.read, ReadState::Idle)) {
-        state.revision = Some(revision.clone());
-        state.read = ReadState::Loading;
-        output = Some(Action::Read(revision));
+        output = Some(Action::Read(state.begin_read(revision)));
     }
     output
 }
@@ -373,6 +432,7 @@ fn dashboard(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, pr
         top_widgets(ui, state, props, range);
         metrics(ui, state, props, range, previous);
         lower_widgets(ui, state, props, range, previous);
+        activity_comparison::show(ui, state, props, range);
     });
 }
 
@@ -415,7 +475,8 @@ fn targets(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
     card(ui, "targets", |ui| {
         let goals = props.preferences.monthly_distance_targets();
         let monthly_goals = state.is_preset(Period::Month).then_some(goals);
-        let has_goals = monthly_goals.is_some() && goals.iter().any(|goal| *goal > 0);
+        let has_goals =
+            monthly_goals.is_some() && goals.iter().any(|goal| goal.distance().is_some());
         ui.strong(if has_goals {
             format_message!(props.intl, default_message: "Distance targets")
         } else {
@@ -459,13 +520,12 @@ fn target_rows(
     history: &History,
     props: &Props<'_>,
     range: Range,
-    goals: Option<[u32; 3]>,
+    goals: Option<[MonthlyDistanceTarget; 3]>,
 ) {
     for (index, sport) in Sport::ALL.into_iter().enumerate() {
         let totals = history.totals(range, Some(sport));
-        let goal = goals
-            .and_then(|goals| goals.get(index).copied())
-            .filter(|goal| *goal > 0);
+        let goal =
+            goals.and_then(|goals| goals.get(index).and_then(MonthlyDistanceTarget::distance));
         if totals.activities == 0 && goal.is_none() {
             continue;
         }
@@ -480,18 +540,19 @@ fn target_rows(
             } else {
                 String::new()
             };
-            let distance = format!(
-                "{:.1} {} {}",
-                totals.distance_metres / unit(props.preferences).1,
-                unit(props.preferences).0,
-                known
-            );
+            let units = props.preferences.unit_system();
+            let decimal = props.intl.decimal_formatter();
+            let distance = totals.distance.format_major(units, 1, &decimal);
+            let distance = if known.is_empty() {
+                distance
+            } else {
+                format!("{distance} {known}")
+            };
             if let Some(goal) = goal {
                 ui.label(format!(
-                    "{} / {:.1} {}",
+                    "{} / {}",
                     distance,
-                    f64::from(goal) * 1000.0 / unit(props.preferences).1,
-                    unit(props.preferences).0
+                    goal.format_major(units, 1, decimal)
                 ));
             } else {
                 ui.horizontal_wrapped(|ui| {
@@ -505,7 +566,7 @@ fn target_rows(
             }
             let progress = goal
                 .filter(|_| totals.missing_distance == 0)
-                .map(|goal| (totals.distance_metres / (f64::from(goal) * 1000.0)).min(1.0) as f32);
+                .map(|goal| (totals.distance.as_metres() / goal.as_metres()).min(1.0) as f32);
             ui.add_space(4.0);
             target_track(ui, sport, progress);
         });
@@ -525,7 +586,7 @@ fn target_track(ui: &mut Ui, sport: Sport, progress: Option<f32>) {
     }
 }
 
-fn rings(ui: &mut Ui, history: &History, range: Range, goals: [u32; 3]) {
+fn rings(ui: &mut Ui, history: &History, range: Range, goals: [MonthlyDistanceTarget; 3]) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(240.0, 176.0), egui::Sense::hover());
     let center = rect.center();
     let track = crate::theme::color32(crate::theme::palette(ui).borders().subtle());
@@ -533,7 +594,7 @@ fn rings(ui: &mut Ui, history: &History, range: Range, goals: [u32; 3]) {
     for (ring, (index, goal)) in goals
         .into_iter()
         .enumerate()
-        .filter(|(_, goal)| *goal > 0)
+        .filter_map(|(index, goal)| goal.distance().map(|distance| (index, distance)))
         .enumerate()
     {
         let radius = 72.0 - ring as f32 * 16.0;
@@ -543,7 +604,7 @@ fn rings(ui: &mut Ui, history: &History, range: Range, goals: [u32; 3]) {
         if totals.missing_distance > 0 {
             continue;
         }
-        let ratio = totals.distance_metres / (f64::from(goal) * 1000.0);
+        let ratio = totals.distance.as_metres() / goal.as_metres();
         let end = -std::f32::consts::FRAC_PI_2 + ratio.min(1.0) as f32 * std::f32::consts::TAU;
         if ratio > 0.0 {
             ui.painter().add(ring_path(
@@ -630,17 +691,23 @@ fn distances(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
         let goals = props.preferences.monthly_distance_targets();
         for (index, sport) in Sport::ALL.into_iter().enumerate() {
             let total = history.totals(range, Some(sport));
-            let has_goal = goals.get(index).is_some_and(|goal| *goal > 0);
+            let has_goal = goals
+                .get(index)
+                .and_then(MonthlyDistanceTarget::distance)
+                .is_some();
             if total.activities == 0 && !has_goal {
                 continue;
             }
             let label = sport_label(props.intl, sport);
             ui.label(
                 RichText::new(format!(
-                    "{} · {:.1} {}",
+                    "{} · {}",
                     label,
-                    total.distance_metres / unit(props.preferences).1,
-                    unit(props.preferences).0
+                    total.distance.format_major(
+                        props.preferences.unit_system(),
+                        1,
+                        props.intl.decimal_formatter()
+                    )
                 ))
                 .color(label_color(ui, sport)),
             );
@@ -747,8 +814,8 @@ fn metrics(ui: &mut Ui, state: &State, props: &Props<'_>, range: Range, previous
         (
             Metric::Duration,
             format_message!(props.intl, default_message: "Activity time"),
-            duration(total.duration_seconds),
-            prior.duration_seconds,
+            total.duration.format_hours_minutes(),
+            prior.duration.as_seconds(),
         ),
         (
             Metric::ActiveDays,
@@ -766,7 +833,7 @@ fn metrics(ui: &mut Ui, state: &State, props: &Props<'_>, range: Range, previous
             ui.add(egui::Label::new(crate::typography::semibold(value).size(24.0)).extend());
             let current = match metric {
                 Metric::Count => total.activities as f64,
-                Metric::Duration => total.duration_seconds,
+                Metric::Duration => total.duration.as_seconds(),
                 _ => history.active_days(range) as f64,
             };
             if *metric == Metric::Duration && (total.missing_duration > 0 || prior.missing_duration > 0) {
@@ -830,12 +897,12 @@ fn metrics(ui: &mut Ui, state: &State, props: &Props<'_>, range: Range, previous
 }
 
 fn time_mix(ui: &mut Ui, history: &History, props: &Props<'_>, range: Range) {
-    let total = history.totals(range, None).duration_seconds;
+    let total = history.totals(range, None).duration.as_seconds();
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 8.0), egui::Sense::hover());
     let mut left = rect.left();
     for sport in Sport::ALL {
-        let time = history.totals(range, Some(sport)).duration_seconds;
+        let time = history.totals(range, Some(sport)).duration.as_seconds();
         if total > 0.0 {
             let right = left + width * (time / total) as f32;
             ui.painter().rect_filled(
@@ -860,7 +927,7 @@ fn time_mix(ui: &mut Ui, history: &History, props: &Props<'_>, range: Range) {
                 RichText::new(format!(
                     "{} {}",
                     sport_label(props.intl, sport),
-                    duration(totals.duration_seconds)
+                    totals.duration.format_hours_minutes()
                 ))
                 .size(12.0),
             );
@@ -876,13 +943,15 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
             return;
         };
         let sport = Sport::ALL[state.sport];
+        let elevation = state.metric == Metric::Elevation;
+        let monthly = state.is_preset(Period::Year);
         let (labels, current) = values(
             history,
             range,
             Some(sport),
             state.metric,
-            state.is_preset(Period::Year),
-            true,
+            monthly,
+            !elevation,
             props.preferences,
         );
         let (prior_dates, prior) = values(
@@ -890,37 +959,31 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
             previous,
             Some(sport),
             state.metric,
-            state.is_preset(Period::Year),
-            true,
+            monthly,
+            !elevation,
             props.preferences,
         );
         let totals = history.totals(range, Some(sport));
         let missing = match state.metric {
             Metric::Distance => totals.missing_distance,
             Metric::Duration => totals.missing_duration,
+            Metric::Elevation => totals.activities - totals.elevation_activities,
             _ => 0,
         };
-        let value = match state.metric {
-            Metric::Distance => format!(
-                "{:.1} {}",
-                totals.distance_metres / unit(props.preferences).1,
-                unit(props.preferences).0
-            ),
-            Metric::Duration => duration(totals.duration_seconds),
-            _ => totals.activities.to_string(),
-        };
+        let value = comparison_value(state.metric, props, &totals);
         ui.label(RichText::new(value).size(24.0).strong());
-        comparison_delta(
-            ui,
-            props.intl,
-            current.last().copied().flatten(),
-            prior.last().copied().flatten(),
-            match state.metric {
-                Metric::Distance => unit(props.preferences).0,
-                Metric::Duration => "h",
-                _ => "",
-            },
-        );
+        let chart_unit = comparison_unit(state.metric, props.preferences);
+        if elevation {
+            elevation_coverage(ui, props, &totals, &history.totals(previous, Some(sport)));
+        } else {
+            comparison_delta(
+                ui,
+                props.intl,
+                current.last().copied().flatten(),
+                prior.last().copied().flatten(),
+                chart_unit,
+            );
+        }
         if missing > 0 {
             ui.weak(format_message!(props.intl, default_message: "Known values only; missing measurements leave gaps."));
         }
@@ -952,7 +1015,7 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
             trend_chart::Props {
                 labels: &labels,
                 series: &series,
-                kind: if range.from == range.through {
+                kind: if elevation || range.from == range.through {
                     trend_chart::Kind::Bars
                 } else {
                     trend_chart::Kind::Lines
@@ -960,16 +1023,69 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
                 height: 192.0,
                 integral: state.metric == Metric::Count,
                 intl: props.intl,
-                unit: match state.metric {
-                    Metric::Distance => unit(props.preferences).0,
-                    Metric::Duration => "h",
-                    _ => "",
-                },
+                unit: chart_unit,
             },
         );
         trend_chart::legend(ui, frame, &series);
     });
 }
+
+fn comparison_value(metric: Metric, props: &Props<'_>, totals: &Totals) -> String {
+    match metric {
+        Metric::Distance => totals.distance.format_major(
+            props.preferences.unit_system(),
+            1,
+            props.intl.decimal_formatter(),
+        ),
+        Metric::Duration => totals.duration.format_hours_minutes(),
+        Metric::Elevation if totals.elevation_activities > 0 => {
+            totals.elevation_gain.format_elevation(
+                props.preferences.unit_system(),
+                props.intl.decimal_formatter(),
+            )
+        }
+        Metric::Elevation => "—".to_owned(),
+        _ => totals.activities.to_string(),
+    }
+}
+
+fn elevation_coverage(ui: &mut Ui, props: &Props<'_>, current: &Totals, previous: &Totals) {
+    let intl = props.intl;
+    if current.activities > 0 {
+        ui.weak(format_message!(intl, default_message: "Imported FIT elevation for {covered, number} of {total, number} activities", values: {
+            covered: current.elevation_activities as u64, total: current.activities as u64
+        }));
+    }
+    if previous.elevation_activities < previous.activities {
+        ui.weak(format_message!(intl, default_message: "Previous period: {covered, number} of {total, number} activities have imported FIT elevation", values: {
+            covered: previous.elevation_activities as u64, total: previous.activities as u64
+        }));
+    }
+    if current.activities > 0
+        && current.elevation_activities == current.activities
+        && previous.elevation_activities == previous.activities
+    {
+        let (symbol, scale) = elevation_unit(props.preferences);
+        comparison_delta(
+            ui,
+            intl,
+            Some(current.elevation_gain.as_metres() / scale),
+            Some(previous.elevation_gain.as_metres() / scale),
+            symbol,
+        );
+    }
+}
+
+fn comparison_unit(metric: Metric, preferences: ProfilePreferences) -> &'static str {
+    match metric {
+        Metric::Distance => unit(preferences).0,
+        Metric::Duration => "h",
+        Metric::Elevation => elevation_unit(preferences).0,
+        _ => "",
+    }
+}
+
+const COMPARISON_METRIC_WIDTH: f32 = 160.0;
 
 fn comparison_header(ui: &mut Ui, state: &mut State, intl: &Intl) {
     let title = format_message!(intl, default_message: "Period comparison");
@@ -978,14 +1094,14 @@ fn comparison_header(ui: &mut Ui, state: &mut State, intl: &Intl) {
         .enumerate()
         .map(|(index, sport)| (index, sport_label(intl, *sport)))
         .collect::<Vec<_>>();
-    let width = segments::natural_width(ui, &sports) + 16.0 + 128.0;
+    let width = segments::natural_width(ui, &sports) + 16.0 + COMPARISON_METRIC_WIDTH;
     chart_header(ui, &title, width, |ui| {
         comparison_controls(ui, state, intl, &sports);
     });
 }
 
 fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(usize, String)]) {
-    let width = segments::natural_width(ui, sports) + 16.0 + 128.0;
+    let width = segments::natural_width(ui, sports) + 16.0 + COMPARISON_METRIC_WIDTH;
     let layout = if ui.available_width() >= width {
         egui::Layout::left_to_right(egui::Align::Center)
     } else {
@@ -998,10 +1114,12 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
             format_message!(intl, default_message: "Distance"),
             format_message!(intl, default_message: "Activity time"),
             format_message!(intl, default_message: "Activities"),
+            format_message!(intl, default_message: "Elevation gain"),
         ];
         let mut selected = match state.metric {
             Metric::Duration => 1,
             Metric::Count => 2,
+            Metric::Elevation => 3,
             _ => 0,
         };
         let choices = metric_labels
@@ -1010,6 +1128,7 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
                 "trends.metric.distance",
                 "trends.metric.duration",
                 "trends.metric.count",
+                "trends.metric.elevation",
             ])
             .map(|(label, target)| crate::select::Choice::new(label).target(target))
             .collect::<Vec<_>>();
@@ -1019,11 +1138,16 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
             &mut selected,
             &choices,
             crate::select::Props::new("")
-                .width(128.0)
+                .width(COMPARISON_METRIC_WIDTH.min(ui.available_width()))
                 .size(crate::Size::Small),
         );
         crate::semantics::target(ui, &response, "trends.metric");
-        state.metric = [Metric::Distance, Metric::Duration, Metric::Count][selected];
+        state.metric = [
+            Metric::Distance,
+            Metric::Duration,
+            Metric::Count,
+            Metric::Elevation,
+        ][selected];
     });
 }
 
@@ -1173,7 +1297,7 @@ fn calendar(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
                     "{} · {} · {}",
                     props.intl.dates().date(date),
                     totals.activities,
-                    duration(totals.duration_seconds)
+                    totals.duration.format_hours_minutes()
                 ));
             }
         }
@@ -1197,7 +1321,7 @@ fn calendar_fill(
     totals: &garmin_model::garmin_connect::trends::Totals,
     current_month: bool,
 ) -> Color32 {
-    let intensity = (totals.duration_seconds / 7200.0).min(1.0) as f32;
+    let intensity = (totals.duration.as_seconds() / 7200.0).min(1.0) as f32;
     let intensity = if totals.activities > 0 && totals.missing_duration == 0 {
         intensity.max(0.15)
     } else {
@@ -1308,19 +1432,20 @@ fn calendar_readout(ui: &mut Ui, props: &Props<'_>, history: &History, date: Opt
     let distance = totals.as_ref().map_or_else(
         || empty.clone(),
         |totals| {
-            format!(
-                "{:.1} {}",
-                totals.distance_metres / unit(props.preferences).1,
-                unit(props.preferences).0
+            totals.distance.format_major(
+                props.preferences.unit_system(),
+                1,
+                props.intl.decimal_formatter(),
             )
         },
     );
     let activities = totals
         .as_ref()
         .map_or_else(|| empty.clone(), |totals| totals.activities.to_string());
-    let time = totals
-        .as_ref()
-        .map_or_else(|| empty.clone(), |totals| duration(totals.duration_seconds));
+    let time = totals.as_ref().map_or_else(
+        || empty.clone(),
+        |totals| totals.duration.format_hours_minutes(),
+    );
     crate::facts::show(
         ui,
         "calendar-totals",

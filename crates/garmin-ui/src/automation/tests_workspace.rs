@@ -139,7 +139,7 @@ fn selection_steps() -> Vec<Step> {
             phase,
             target: "viewport".into(),
             action: Action::Resize { width, height },
-            after: 0.1,
+            after: Duration::from_millis(100),
         });
         steps.extend(scenarios::responsive_selection_steps(phase));
     }

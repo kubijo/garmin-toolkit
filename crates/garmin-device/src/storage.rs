@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use garmin_model::artifact::ByteCount;
 use thiserror::Error;
 
 use crate::{
@@ -17,7 +18,7 @@ use crate::{
 pub struct DeviceDirectoryEntry {
     pub name: String,
     pub state: crate::DevicePathState,
-    pub size: Option<u64>,
+    pub size: Option<ByteCount>,
 }
 
 mod directory;
@@ -128,7 +129,7 @@ pub trait DeviceRead: Send + Sync {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         destination: BackupDestination,
         progress: MountedMtpBackupProgress,
     ) -> Result<String, DeviceIoError>;
@@ -136,14 +137,14 @@ pub trait DeviceRead: Send + Sync {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError>;
     async fn verify_with_progress(
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
         progress: MountedMtpVerifyProgress,
     ) -> Result<(), DeviceIoError> {
@@ -163,14 +164,14 @@ pub trait DeviceRead: Send + Sync {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        limit: u64,
+        limit: ByteCount,
     ) -> Result<Option<Vec<u8>>, DeviceIoError> {
         let status = self.inspect(storage, path).await?;
         match status {
             DevicePathStatus::Missing => Ok(None),
             DevicePathStatus::RegularFile { size } if size <= limit => {
                 Err(DeviceIoError::Transport(format!(
-                    "bounded reads are unsupported for {storage}:{path} ({size} bytes)"
+                    "bounded reads are unsupported for {storage}:{path} ({size})"
                 )))
             }
             DevicePathStatus::RegularFile { .. } => {
@@ -256,14 +257,14 @@ pub trait DeviceWrite: DeviceRead {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError>;
     async fn delete_with_progress(
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
         progress: &garmin_progress::ProgressReporter,
     ) -> Result<(), DeviceIoError> {
@@ -278,17 +279,17 @@ pub trait DeviceWrite: DeviceRead {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
     ) -> Result<(), DeviceIoError> {
         Err(DeviceIoError::Transport(format!(
-            "size-checked deletion is unsupported for {storage}:{path} ({size} bytes)"
+            "size-checked deletion is unsupported for {storage}:{path} ({size})"
         )))
     }
     async fn delete_size_checked_with_progress(
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         progress: &garmin_progress::ProgressReporter,
     ) -> Result<(), DeviceIoError> {
         require_running(progress)?;
@@ -300,7 +301,7 @@ pub trait DeviceWrite: DeviceRead {
         storage: &str,
         path: &SafeRelativePath,
         source: &Path,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
         progress: MountedMtpUploadProgress,
     ) -> Result<(), DeviceIoError>;
@@ -308,7 +309,7 @@ pub trait DeviceWrite: DeviceRead {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         backup: &Path,
         sha256: &str,
     ) -> Result<(), DeviceIoError>;
@@ -316,7 +317,7 @@ pub trait DeviceWrite: DeviceRead {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         backup: &Path,
         sha256: &str,
         progress: &garmin_progress::ProgressReporter,
@@ -336,7 +337,7 @@ fn require_running(progress: &garmin_progress::ProgressReporter) -> Result<(), D
 }
 
 fn path_status(
-    (state, size): (crate::DevicePathState, Option<u64>),
+    (state, size): (crate::DevicePathState, Option<ByteCount>),
 ) -> Result<DevicePathStatus, DeviceIoError> {
     DevicePathStatus::from_parts(state, size).ok_or_else(|| {
         DeviceIoError::Transport(format!(
@@ -390,7 +391,7 @@ impl DeviceRead for MountedMtpDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         destination: BackupDestination,
         progress: MountedMtpBackupProgress,
     ) -> Result<String, DeviceIoError> {
@@ -402,7 +403,7 @@ impl DeviceRead for MountedMtpDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
         Ok(self.backend_verify(storage, path, size, sha256).await?)
@@ -411,7 +412,7 @@ impl DeviceRead for MountedMtpDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
         progress: MountedMtpVerifyProgress,
     ) -> Result<(), DeviceIoError> {
@@ -424,7 +425,7 @@ impl DeviceRead for MountedMtpDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        limit: u64,
+        limit: ByteCount,
     ) -> Result<Option<Vec<u8>>, DeviceIoError> {
         Ok(self.backend_read_bounded_file(storage, path, limit).await?)
     }
@@ -493,7 +494,7 @@ impl DeviceWrite for MountedMtpDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
         Ok(self.backend_delete(storage, path, size, sha256).await?)
@@ -502,7 +503,7 @@ impl DeviceWrite for MountedMtpDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
         progress: &garmin_progress::ProgressReporter,
     ) -> Result<(), DeviceIoError> {
@@ -514,7 +515,7 @@ impl DeviceWrite for MountedMtpDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
     ) -> Result<(), DeviceIoError> {
         Ok(self
             .backend_delete_size_checked(storage, path, size)
@@ -524,7 +525,7 @@ impl DeviceWrite for MountedMtpDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         progress: &garmin_progress::ProgressReporter,
     ) -> Result<(), DeviceIoError> {
         Ok(self
@@ -536,7 +537,7 @@ impl DeviceWrite for MountedMtpDevice {
         storage: &str,
         path: &SafeRelativePath,
         source: &Path,
-        size: u64,
+        size: ByteCount,
         sha256: &str,
         progress: MountedMtpUploadProgress,
     ) -> Result<(), DeviceIoError> {
@@ -548,7 +549,7 @@ impl DeviceWrite for MountedMtpDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         backup: &Path,
         sha256: &str,
     ) -> Result<(), DeviceIoError> {
@@ -560,7 +561,7 @@ impl DeviceWrite for MountedMtpDevice {
         &self,
         storage: &str,
         path: &SafeRelativePath,
-        size: u64,
+        size: ByteCount,
         backup: &Path,
         sha256: &str,
         progress: &garmin_progress::ProgressReporter,
@@ -666,16 +667,16 @@ mod tests {
         assert!(matches!(
             DeviceIoError::from(MountedMtpError::MetadataTooLarge {
                 path: path.clone(),
-                limit: 64,
-                size: 65,
+                limit: super::ByteCount::from_bytes(64),
+                size: super::ByteCount::from_bytes(65),
             }),
             DeviceIoError::LimitExceeded(_)
         ));
         for error in [
             MountedMtpError::RemovalObjectSize {
                 path: path.clone(),
-                expected: 4,
-                actual: 3,
+                expected: super::ByteCount::from_bytes(4),
+                actual: super::ByteCount::from_bytes(3),
             },
             MountedMtpError::RemovalObjectChecksum(path.clone()),
             MountedMtpError::UploadMetadata(path),

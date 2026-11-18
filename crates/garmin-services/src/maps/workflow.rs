@@ -1,5 +1,7 @@
 //! Map decisions and execution independent of terminal, native, or RPC presentation.
 
+use garmin_model::artifact::ByteCount;
+use garmin_model::artifact::NonZeroByteRate;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -29,7 +31,7 @@ pub struct Settings {
     pub captures: PathBuf,
     pub receipts: PendingRecoveryStore,
     pub concurrency: usize,
-    pub simulation_write_bytes_per_second: Option<std::num::NonZeroU64>,
+    pub simulation_write_bytes_per_second: Option<NonZeroByteRate>,
 }
 
 enum PreparedPlan {
@@ -584,10 +586,10 @@ impl Prepared {
             digest: String::new(),
             removal,
             components,
-            download_bytes: 0,
+            download_bytes: ByteCount::from_bytes(0),
             write_count: 0,
             remove_count: 0,
-            remove_bytes: 0,
+            remove_bytes: ByteCount::from_bytes(0),
             paths: Vec::new(),
             storage_requirements: Vec::new(),
         };

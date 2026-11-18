@@ -1,6 +1,7 @@
 //! Timing and rate observation shared by terminal and graphical presentations.
 
-use crate::{ProgressUnit, model::StageView};
+use crate::{ProgressAmount, ProgressUnit, model::StageView};
+use garmin_model::artifact::ByteRate;
 use std::time::{Duration, SystemTime};
 
 const STALE_BYTE_PROGRESS_AFTER: Duration = Duration::from_secs(10);
@@ -18,7 +19,7 @@ pub fn stage_elapsed(view: &StageView) -> Option<Duration> {
 
 #[must_use]
 pub fn stale_byte_progress(view: &StageView) -> Option<Duration> {
-    if view.unit != ProgressUnit::Bytes || !view.is_active() {
+    if view.amount.unit() != ProgressUnit::Bytes || !view.is_active() {
         return None;
     }
     view.updated_at
@@ -42,7 +43,7 @@ fn byte_sample_elapsed(view: &StageView) -> Option<Duration> {
 pub struct Metrics {
     pub elapsed: Option<Duration>,
     pub idle: Option<Duration>,
-    pub bytes_per_second: Option<u64>,
+    pub bytes_per_second: Option<ByteRate>,
     pub remaining: Option<Duration>,
 }
 
@@ -53,7 +54,10 @@ pub fn metrics(view: &StageView) -> Metrics {
         idle: stale_byte_progress(view),
         ..Metrics::default()
     };
-    if result.idle.is_some() || view.unit != ProgressUnit::Bytes || view.completed == 0 {
+    let ProgressAmount::Bytes { completed, total } = view.amount else {
+        return result;
+    };
+    if result.idle.is_some() || completed.is_zero() {
         return result;
     }
     let Some(sample) =
@@ -65,23 +69,16 @@ pub fn metrics(view: &StageView) -> Metrics {
         clippy::cast_precision_loss,
         reason = "transfer rates and ETA are approximate"
     )]
-    let rate = view.completed as f64 / sample.as_secs_f64();
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "nonnegative display rate saturates at u64::MAX"
-    )]
-    {
-        result.bytes_per_second = Some(rate.max(0.0).round() as u64);
-    }
+    let rate = completed.as_bytes() as f64 / sample.as_secs_f64();
+    result.bytes_per_second = Some(ByteRate::saturating_from_bytes_per_second_f64(rate));
     if view.is_active()
-        && let Some(total) = view.total
-        && total > view.completed
+        && let Some(total) = total
+        && total > completed
         && rate.is_finite()
         && rate > 0.0
     {
         #[expect(clippy::cast_precision_loss, reason = "transfer ETA is approximate")]
-        let seconds = (total - view.completed) as f64 / rate;
+        let seconds = total.saturating_sub(completed).as_bytes() as f64 / rate;
         result.remaining = Duration::try_from_secs_f64(seconds).ok();
     }
     result

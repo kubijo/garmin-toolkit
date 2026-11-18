@@ -1,5 +1,6 @@
 //! Linux desktop mount discovery.
 
+use garmin_model::artifact::ByteCount;
 use std::{
     collections::HashSet,
     fmt,
@@ -25,7 +26,7 @@ use gio::{
 use serde::Serialize;
 use thiserror::Error;
 
-const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
+use crate::manifest::MAX_MANIFEST_BYTES;
 const FILE_ATTRIBUTES: &str = "standard::name,standard::type,standard::size,time::modified";
 
 /// A desktop MTP root, including an available volume that is not mounted yet.
@@ -418,7 +419,7 @@ pub struct DeviceFile {
     relative: PathBuf,
     data_type: DataType,
     direction: TransferDirection,
-    declared_size: u64,
+    declared_size: ByteCount,
     modified: SystemTime,
 }
 
@@ -434,7 +435,7 @@ impl DeviceFile {
     }
 
     #[must_use]
-    pub const fn declared_size(&self) -> u64 {
+    pub const fn declared_size(&self) -> ByteCount {
         self.declared_size
     }
 
@@ -449,17 +450,19 @@ impl DeviceFile {
     {
         let source = self.source.read(gio::Cancellable::NONE)?;
         let mut buffer = vec![0_u8; 64 * 1024];
-        let mut received = 0_u64;
+        let mut received = ByteCount::default();
         loop {
             let count = source.read(&mut buffer, gio::Cancellable::NONE)?;
             if count == 0 {
                 break;
             }
             received = received
-                .checked_add(u64::try_from(count).unwrap_or(u64::MAX))
+                .checked_add(ByteCount::from_bytes(
+                    u64::try_from(count).unwrap_or(u64::MAX),
+                ))
                 .ok_or(Error::SizeMismatch {
                     declared: self.declared_size,
-                    received: u64::MAX,
+                    received: ByteCount::from_bytes(u64::MAX),
                 })?;
             if received > self.declared_size {
                 return Err(Error::SizeMismatch {
@@ -493,12 +496,12 @@ impl fmt::Debug for DeviceFile {
 /// A completed mount-to-staging copy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CopyOutcome {
-    bytes: u64,
+    bytes: ByteCount,
 }
 
 impl CopyOutcome {
     #[must_use]
-    pub const fn bytes(self) -> u64 {
+    pub const fn bytes(self) -> ByteCount {
         self.bytes
     }
 }
@@ -516,7 +519,7 @@ pub enum Error {
     ManifestMissing,
     #[error("multiple GarminDevice.xml files occupied the canonical path")]
     AmbiguousManifest,
-    #[error("GarminDevice.xml exceeded {MAX_MANIFEST_BYTES} bytes")]
+    #[error("GarminDevice.xml exceeded {MAX_MANIFEST_BYTES}")]
     ManifestTooLarge,
     #[error("GarminDevice.xml was not UTF-8: {0}")]
     ManifestUtf8(#[from] std::str::Utf8Error),
@@ -527,16 +530,16 @@ pub enum Error {
     #[error("mounted source size mismatch: declared {declared}, received {received}")]
     SizeMismatch {
         /// Discovery size.
-        declared: u64,
+        declared: ByteCount,
         /// Transferred size.
-        received: u64,
+        received: ByteCount,
     },
 }
 
 struct Entry {
     source: File,
     relative: PathBuf,
-    size: u64,
+    size: ByteCount,
     modified: SystemTime,
 }
 
@@ -559,7 +562,9 @@ fn entries(root: &File) -> Result<Vec<Entry>, Error> {
                 FileType::Regular => entries.push(Entry {
                     source,
                     relative,
-                    size: u64::try_from(info.size()).map_err(|_| Error::NegativeSize)?,
+                    size: u64::try_from(info.size())
+                        .map(ByteCount::from_bytes)
+                        .map_err(|_| Error::NegativeSize)?,
                     modified: info.modification_time(),
                 }),
                 _ => {}
@@ -587,7 +592,9 @@ fn read_manifest(source: &File) -> Result<Vec<u8>, Error> {
             break;
         }
         bytes.extend_from_slice(&buffer[..count]);
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_MANIFEST_BYTES {
+        if ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+            > MAX_MANIFEST_BYTES
+        {
             return Err(Error::ManifestTooLarge);
         }
     }
@@ -649,6 +656,7 @@ fn file_order(left: &DeviceFile, right: &DeviceFile) -> std::cmp::Ordering {
 
 #[cfg(test)]
 mod tests {
+    use garmin_model::artifact::ByteCount;
     use std::{error::Error as StdError, fs, io, io::Write, path::Path, time::Duration};
 
     use gio::{File, prelude::FileExt};
@@ -901,12 +909,12 @@ mod tests {
         };
         assert_eq!(file.data_type(), crate::DataType::Activity);
         assert_eq!(file.direction(), crate::TransferDirection::OutputFromUnit);
-        assert_eq!(file.declared_size(), 4);
+        assert_eq!(file.declared_size(), ByteCount::from_bytes(4));
         assert!(format!("{file:?}").contains("declared_size"));
 
         let mut bytes = Vec::new();
         let outcome = file.copy_to(&mut bytes)?;
-        assert_eq!(outcome.bytes(), 4);
+        assert_eq!(outcome.bytes(), ByteCount::from_bytes(4));
         assert_eq!(bytes, [1, 2, 3, 4]);
         assert!(matches!(
             file.copy_to(&mut RejectingWriter),
@@ -1026,7 +1034,11 @@ mod tests {
 
         let oversized = mount.path().join("oversized.xml");
         let file = fs::File::create(&oversized)?;
-        file.set_len(super::MAX_MANIFEST_BYTES + 1)?;
+        file.set_len(
+            super::MAX_MANIFEST_BYTES
+                .saturating_add(ByteCount::from_bytes(1))
+                .as_bytes(),
+        )?;
         assert!(matches!(
             read_manifest(&File::for_path(oversized)),
             Err(Error::ManifestTooLarge)

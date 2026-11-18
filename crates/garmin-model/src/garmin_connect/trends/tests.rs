@@ -18,8 +18,8 @@ fn summary(
             sport: Some(ActivitySport::Running),
             name: String::new(),
             started_at: Some("2026-11-15T23:30:00Z".into()),
-            distance_metres: distance,
-            duration_seconds: duration,
+            distance: distance.and_then(Distance::try_from_metres),
+            duration: duration.and_then(ActivityDuration::try_from_seconds),
         },
         description: None,
         activity_type: None,
@@ -45,12 +45,58 @@ fn local_dates_missing_fields_and_duplicates_are_not_silent_zeroes() {
     let totals = history.totals(range, None);
     assert_eq!(history.summaries, 4);
     assert_eq!(history.undated, 1);
+    assert_eq!(
+        history
+            .activities
+            .iter()
+            .map(|activity| activity.id)
+            .collect::<Vec<_>>(),
+        [3, 2, 1]
+    );
+    assert_eq!(history.activities[0].distance, None);
+    assert_eq!(history.activities[0].duration, None);
     assert_eq!(totals.activities, 3);
-    assert_eq!(totals.distance_metres, 10_000.0);
-    assert_eq!(totals.duration_seconds, 3660.0);
+    assert_eq!(totals.distance.as_metres(), 10_000.0);
+    assert_eq!(totals.duration.as_seconds(), 3660.0);
     assert_eq!(totals.missing_distance, 2);
     assert_eq!(totals.missing_duration, 1);
     assert_eq!(history.active_days(range), 1);
+}
+
+#[test]
+fn elevation_tracks_coverage_including_reported_zero_and_leaves_incomplete_buckets_unknown() {
+    let summaries = [
+        summary(1, Some("2026-11-01"), None, None),
+        summary(2, Some("2026-11-02"), None, None),
+        summary(3, Some("2026-11-03"), None, None),
+    ];
+    let history = History::from_summaries_with_ascent(
+        &summaries,
+        &BTreeMap::from([
+            (1, Distance::from_millimeters(420_000)),
+            (2, Distance::default()),
+        ]),
+    );
+    let range = Range {
+        from: date("2026-11-01"),
+        through: date("2026-11-03"),
+    };
+    let totals = history.totals(range, None);
+    assert_eq!(totals.elevation_gain, Distance::from_millimeters(420_000));
+    assert_eq!(totals.elevation_activities, 2);
+    assert_eq!(totals.activities, 3);
+    assert_eq!(
+        history
+            .series(range, None, Metric::Elevation, false)
+            .into_iter()
+            .map(|bucket| bucket.value)
+            .collect::<Vec<_>>(),
+        [
+            Some(BucketValue::Distance(Distance::from_millimeters(420_000))),
+            Some(BucketValue::Distance(Distance::default())),
+            None,
+        ],
+    );
 }
 
 #[test]
@@ -111,7 +157,11 @@ fn locale_week_starts_and_unknown_cumulative_samples_stay_consistent() {
     cumulative(&mut series);
     assert_eq!(
         series.iter().map(|bucket| bucket.value).collect::<Vec<_>>(),
-        [Some(1000.0), None, None]
+        [
+            Some(BucketValue::Distance(Distance::from_millimeters(1_000_000))),
+            None,
+            None
+        ]
     );
     assert_eq!(
         history
@@ -119,6 +169,6 @@ fn locale_week_starts_and_unknown_cumulative_samples_stay_consistent() {
             .iter()
             .map(|bucket| bucket.value)
             .collect::<Vec<_>>(),
-        [Some(1.0); 3]
+        [Some(BucketValue::Count(1)); 3]
     );
 }

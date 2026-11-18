@@ -2,7 +2,10 @@ use crate::model::wire;
 use bytes::BytesMut;
 use futures_util::StreamExt;
 use garmin_capture::{CaptureError, HttpHeader, HttpRequestHead, HttpResponseHead, SessionCapture};
-use garmin_model::map::{InstalledMapFile, MapAuthorization, MapCatalog, MapInstallIdentifier};
+use garmin_model::{
+    artifact::ByteCount,
+    map::{InstalledMapFile, MapAuthorization, MapCatalog, MapInstallIdentifier},
+};
 use reqwest::header::{
     ACCEPT, ACCEPT_LANGUAGE, CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderValue,
 };
@@ -15,7 +18,7 @@ use uuid::Uuid;
 
 const OMT_BASE: &str = "https://omt.garmin.com/";
 const OMT_UPDATE_PATH: &str = "api/maps/universal/update";
-const MAX_API_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_API_RESPONSE_BYTES: ByteCount = ByteCount::from_mebibytes(16);
 
 #[must_use]
 /// Return the production map-update endpoint.
@@ -262,7 +265,7 @@ async fn bounded_response_body(
 ) -> Result<BytesMut, OmtError> {
     if response
         .content_length()
-        .is_some_and(|length| length > MAX_API_RESPONSE_BYTES as u64)
+        .is_some_and(|length| ByteCount::from_bytes(length) > MAX_API_RESPONSE_BYTES)
     {
         return Err(OmtError::ResponseTooLarge);
     }
@@ -280,7 +283,9 @@ async fn bounded_response_body(
                 .await
                 .map_err(CaptureError::from)?;
         }
-        if body.len().saturating_add(chunk.len()) > MAX_API_RESPONSE_BYTES {
+        if ByteCount::from_bytes(body.len().saturating_add(chunk.len()) as u64)
+            > MAX_API_RESPONSE_BYTES
+        {
             if let Some(captured) = &mut captured {
                 captured.flush().await.map_err(CaptureError::from)?;
                 captured.sync_all().await.map_err(CaptureError::from)?;
@@ -294,7 +299,9 @@ async fn bounded_response_body(
         captured.sync_all().await.map_err(CaptureError::from)?;
     }
     if let Some(exchange) = exchange {
-        exchange.complete_response_body(body.len()).await?;
+        exchange
+            .complete_response_body(ByteCount::from_bytes(body.len() as u64))
+            .await?;
     }
     Ok(body)
 }

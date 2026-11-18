@@ -10,7 +10,6 @@ publish.workspace = true
 
 [dependencies]
 base64.workspace = true
-byte-unit.workspace = true
 futures-util.workspace = true
 fs2.workspace = true
 garmin-capture.workspace = true

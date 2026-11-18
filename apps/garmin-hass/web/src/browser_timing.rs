@@ -1,9 +1,15 @@
 //! Central browser User Timing bridge for map work visible in Chrome traces.
 
+use std::time::Duration;
+
 use wasm_bindgen::{JsCast, JsValue};
 
 pub(super) fn now() -> f64 {
     performance().map_or(0.0, |performance| performance.now())
+}
+
+pub(super) fn elapsed_since(started: f64) -> Duration {
+    Duration::try_from_secs_f64((now() - started) / 1_000.0).unwrap_or_default()
 }
 
 fn performance() -> Option<web_sys::Performance> {

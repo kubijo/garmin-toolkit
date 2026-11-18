@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 fn prepared(size: u64, chunks: Vec<io::Result<Bytes>>) -> Prepared {
     Prepared::new(
         "test.bin".into(),
-        size,
+        ByteCount::from_bytes(size),
         "application/octet-stream",
         futures_util::stream::iter(chunks).boxed(),
     )
@@ -34,7 +34,12 @@ async fn single_use_response_keeps_file_until_body_finishes() -> anyhow::Result<
     tokio::fs::write(&path, b"content").await?;
     let file = tokio::fs::File::open(&path).await?;
     let ticket = downloads
-        .insert(Prepared::from_file("file.bin".into(), 7, file, owner))
+        .insert(Prepared::from_file(
+            "file.bin".into(),
+            ByteCount::from_bytes(7),
+            file,
+            owner,
+        ))
         .map_err(anyhow::Error::msg)?;
     let response = downloads.take(ticket.token).expect("ticket").response();
     assert!(downloads.take(ticket.token).is_none());
@@ -70,7 +75,12 @@ async fn expiry_and_abandoned_response_release_staged_files() -> anyhow::Result<
         let path = owner.path().to_owned();
         let file = tokio::fs::File::open(&path).await?;
         let ticket = downloads
-            .insert(Prepared::from_file("file.bin".into(), 0, file, owner))
+            .insert(Prepared::from_file(
+                "file.bin".into(),
+                ByteCount::default(),
+                file,
+                owner,
+            ))
             .map_err(anyhow::Error::msg)?;
         if expired {
             downloads
@@ -119,11 +129,11 @@ async fn active_downloads_keep_count_and_byte_budgets_reserved() {
     let ticket = downloads.insert(large).expect("byte budget");
     let active = downloads.take(ticket.token).expect("ticket");
     let mut extra = prepared(0, vec![]);
-    extra.staged_bytes = 1;
+    extra.staged_bytes = ByteCount::from_bytes(1);
     assert!(downloads.insert(extra).is_err());
     drop(active);
     let mut overflow = prepared(0, vec![]);
-    overflow.staged_bytes = u64::MAX;
+    overflow.staged_bytes = ByteCount::from_bytes(u64::MAX);
     assert!(downloads.insert(overflow).is_err());
 }
 
@@ -168,18 +178,19 @@ async fn duplicate_operation_does_not_cancel_original_and_drop_cleans_once() {
 
 #[tokio::test]
 async fn invalid_streams_fail_without_leaking_reservations() {
+    let chunk_len = usize::try_from(CHUNK_BYTES.as_bytes()).unwrap();
     for chunks in [
         vec![],
         vec![Ok(Bytes::new())],
         vec![Ok(Bytes::from_static(b"too long"))],
-        vec![Ok(Bytes::from(vec![0; CHUNK_BYTES + 1]))],
+        vec![Ok(Bytes::from(vec![0; chunk_len + 1]))],
         vec![Err(io::Error::other("source failed"))],
     ] {
         let downloads = Downloads::default();
         let ticket = downloads.insert(prepared(1, chunks)).expect("ticket");
         let response = downloads.take(ticket.token).expect("ticket").response();
         assert!(
-            axum::body::to_bytes(response.into_body(), CHUNK_BYTES * 2)
+            axum::body::to_bytes(response.into_body(), chunk_len * 2)
                 .await
                 .is_err()
         );

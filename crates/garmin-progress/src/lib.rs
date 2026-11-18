@@ -1,5 +1,6 @@
 //! Observation and cancellation contracts shared by long-running operations.
 
+use garmin_model::artifact::ByteCount;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
@@ -92,7 +93,21 @@ impl ProgressEventKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "WireProgressEvent", into = "WireProgressEvent")]
 pub struct ProgressEvent {
+    pub recorded_at: SystemTime,
+    pub scope: ProgressScope,
+    pub stage: OperationStage,
+    pub state: ProgressState,
+    pub kind: ProgressEventKind,
+    pub label: String,
+    pub path: Option<String>,
+    pub amount: ProgressAmount,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename = "ProgressEvent")]
+struct WireProgressEvent {
     #[serde(default = "SystemTime::now")]
     pub recorded_at: SystemTime,
     #[serde(default, skip_serializing_if = "ProgressScope::is_stage")]
@@ -108,6 +123,38 @@ pub struct ProgressEvent {
     pub path: Option<String>,
     pub completed: u64,
     pub total: Option<u64>,
+}
+
+impl From<WireProgressEvent> for ProgressEvent {
+    fn from(wire: WireProgressEvent) -> Self {
+        Self {
+            recorded_at: wire.recorded_at,
+            scope: wire.scope,
+            stage: wire.stage,
+            state: wire.state,
+            kind: wire.kind,
+            label: wire.label,
+            path: wire.path,
+            amount: ProgressAmount::new(wire.unit, wire.completed, wire.total),
+        }
+    }
+}
+
+impl From<ProgressEvent> for WireProgressEvent {
+    fn from(event: ProgressEvent) -> Self {
+        Self {
+            recorded_at: event.recorded_at,
+            scope: event.scope,
+            stage: event.stage,
+            state: event.state,
+            kind: event.kind,
+            label: event.label,
+            path: event.path,
+            unit: event.amount.unit(),
+            completed: event.amount.completed(),
+            total: event.amount.total(),
+        }
+    }
 }
 
 /// Stage totals and individual work have independent lifecycles.
@@ -165,19 +212,57 @@ pub struct ProgressReporter {
     event_kind: ProgressEventKind,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ProgressAmount {
-    unit: ProgressUnit,
-    completed: u64,
-    total: Option<u64>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgressAmount {
+    Bytes {
+        completed: ByteCount,
+        total: Option<ByteCount>,
+    },
+    Operations {
+        completed: u64,
+        total: Option<u64>,
+    },
+}
+
+impl Default for ProgressAmount {
+    fn default() -> Self {
+        Self::new(ProgressUnit::default(), 0, None)
+    }
 }
 
 impl ProgressAmount {
-    const fn new(unit: ProgressUnit, completed: u64, total: Option<u64>) -> Self {
-        Self {
-            unit,
-            completed,
-            total,
+    #[must_use]
+    pub fn new(unit: ProgressUnit, completed: u64, total: Option<u64>) -> Self {
+        match unit {
+            ProgressUnit::Bytes => Self::Bytes {
+                completed: ByteCount::from_bytes(completed),
+                total: total.map(ByteCount::from_bytes),
+            },
+            ProgressUnit::Operations => Self::Operations { completed, total },
+        }
+    }
+
+    #[must_use]
+    pub const fn unit(self) -> ProgressUnit {
+        match self {
+            Self::Bytes { .. } => ProgressUnit::Bytes,
+            Self::Operations { .. } => ProgressUnit::Operations,
+        }
+    }
+
+    #[must_use]
+    pub const fn completed(self) -> u64 {
+        match self {
+            Self::Bytes { completed, .. } => completed.as_bytes(),
+            Self::Operations { completed, .. } => completed,
+        }
+    }
+
+    #[must_use]
+    pub fn total(self) -> Option<u64> {
+        match self {
+            Self::Bytes { total, .. } => total.map(|total| total.as_bytes()),
+            Self::Operations { total, .. } => total,
         }
     }
 }
@@ -512,11 +597,9 @@ impl ProgressReporter {
             stage,
             state: progress_state,
             kind: self.event_kind,
-            unit: amount.unit,
             label: label.into(),
             path,
-            completed: amount.completed,
-            total: amount.total,
+            amount,
         });
     }
 }
@@ -524,6 +607,28 @@ impl ProgressReporter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_transfer_amount_keeps_the_legacy_event_json() {
+        let wire = serde_json::json!({
+            "recorded_at": {"secs_since_epoch": 0, "nanos_since_epoch": 0},
+            "stage": "download",
+            "state": "advanced",
+            "unit": "bytes",
+            "label": "Downloading",
+            "completed": u64::MAX - 1,
+            "total": u64::MAX
+        });
+        let event: ProgressEvent = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(
+            event.amount,
+            ProgressAmount::Bytes {
+                completed: ByteCount::from_bytes(u64::MAX - 1),
+                total: Some(ByteCount::from_bytes(u64::MAX)),
+            }
+        );
+        assert_eq!(serde_json::to_value(event).unwrap(), wire);
+    }
 
     #[test]
     fn item_reporters_share_cancellation_but_not_identity() {

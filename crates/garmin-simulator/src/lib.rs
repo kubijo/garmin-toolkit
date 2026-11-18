@@ -8,6 +8,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use garmin_model::artifact::{ByteCount, NonZeroByteRate};
 use garmin_update::DeviceTiming;
 use md5::{Digest, Md5};
 use quick_xml::Reader;
@@ -17,7 +18,6 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fs;
 use std::net::{IpAddr, SocketAddr};
-use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -31,11 +31,12 @@ use url::Url;
 pub const MOCK_DEVICE_MARKER: &str = ".garmin-cli-mock-device";
 pub const MOCK_DEVICE_MARKER_CONTENT: &[u8] = b"garmin-cli mock fixture\n";
 
-const DOWNLOAD_CHUNK_BYTES: usize = 256 * 1024;
+const DOWNLOAD_CHUNK_BYTES: ByteCount = ByteCount::from_kibibytes(256);
 const DOWNLOAD_CHUNK_DELAY: Duration = Duration::from_millis(200);
 const API_RESPONSE_LATENCY: Duration = Duration::from_millis(500);
 const EXPECTED_USER_AGENT: &str = "RestSharp/112.0.0.0";
-const DEVICE_BYTES_PER_SECOND: NonZeroU64 = NonZeroU64::new(3_000_000).unwrap();
+const DEVICE_BYTES_PER_SECOND: NonZeroByteRate =
+    NonZeroByteRate::try_from_bytes_per_second(3_000_000).unwrap();
 const DEVICE_OPERATION_LATENCY: Duration = Duration::from_millis(300);
 
 /// Requires the exact marker written by the synthetic-device builder.
@@ -345,7 +346,9 @@ async fn download(
                 return None;
             }
             tokio::time::sleep(DOWNLOAD_CHUNK_DELAY).await;
-            let end = offset.saturating_add(DOWNLOAD_CHUNK_BYTES).min(bytes.len());
+            let chunk_len = usize::try_from(DOWNLOAD_CHUNK_BYTES.as_bytes())
+                .expect("download chunk fits usize");
+            let end = offset.saturating_add(chunk_len).min(bytes.len());
             let chunk = bytes.slice(offset..end);
             Some((Ok::<_, Infallible>(chunk), (bytes, end, active)))
         },
@@ -482,7 +485,7 @@ pub async fn seed_download_cache(root: &Path, plan: &garmin_update::UpdatePlan) 
         let bytes = files
             .get(name)
             .with_context(|| format!("mock plan names an unknown payload: {name}"))?;
-        if download.size != bytes.len() as u64 || download.md5 != md5_hex(bytes) {
+        if download.size.as_bytes() != bytes.len() as u64 || download.md5 != md5_hex(bytes) {
             bail!("mock plan metadata differs for {name}");
         }
         tokio::fs::write(root.join(&download.cache_name), bytes).await?;

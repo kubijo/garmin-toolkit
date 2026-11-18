@@ -1,5 +1,6 @@
 //! Read-only access through an existing filesystem mount.
 
+use garmin_model::artifact::ByteCount;
 use std::{
     collections::HashSet,
     fmt, fs,
@@ -16,7 +17,7 @@ use crate::manifest::{
     parse_document,
 };
 
-const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
+use crate::manifest::MAX_MANIFEST_BYTES;
 
 /// A consented, already-mounted device root.
 pub struct Device {
@@ -109,7 +110,7 @@ pub struct DeviceFile {
     relative: PathBuf,
     data_type: DataType,
     direction: TransferDirection,
-    declared_size: u64,
+    declared_size: ByteCount,
     modified: Option<SystemTime>,
 }
 
@@ -125,7 +126,7 @@ impl DeviceFile {
     }
 
     #[must_use]
-    pub const fn declared_size(&self) -> u64 {
+    pub const fn declared_size(&self) -> ByteCount {
         self.declared_size
     }
 
@@ -138,7 +139,7 @@ impl DeviceFile {
         W: Write + ?Sized,
     {
         let mut source = fs::File::open(&self.source).map_err(Error::Source)?;
-        let current_size = source.metadata().map_err(Error::Source)?.len();
+        let current_size = ByteCount::from_bytes(source.metadata().map_err(Error::Source)?.len());
         if current_size != self.declared_size {
             return Err(Error::SizeMismatch {
                 declared: self.declared_size,
@@ -147,17 +148,19 @@ impl DeviceFile {
         }
 
         let mut buffer = vec![0_u8; 64 * 1024];
-        let mut received = 0_u64;
+        let mut received = ByteCount::default();
         loop {
             let count = source.read(&mut buffer).map_err(Error::Source)?;
             if count == 0 {
                 break;
             }
             received = received
-                .checked_add(u64::try_from(count).unwrap_or(u64::MAX))
+                .checked_add(ByteCount::from_bytes(
+                    u64::try_from(count).unwrap_or(u64::MAX),
+                ))
                 .ok_or(Error::SizeMismatch {
                     declared: self.declared_size,
-                    received: u64::MAX,
+                    received: ByteCount::from_bytes(u64::MAX),
                 })?;
             if received > self.declared_size {
                 return Err(Error::SizeMismatch {
@@ -191,12 +194,12 @@ impl fmt::Debug for DeviceFile {
 /// A completed mount-to-staging copy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CopyOutcome {
-    bytes: u64,
+    bytes: ByteCount,
 }
 
 impl CopyOutcome {
     #[must_use]
-    pub const fn bytes(&self) -> u64 {
+    pub const fn bytes(&self) -> ByteCount {
         self.bytes
     }
 }
@@ -210,7 +213,7 @@ pub enum Error {
     ManifestMissing,
     #[error("multiple GarminDevice.xml files occupied the canonical path")]
     AmbiguousManifest,
-    #[error("GarminDevice.xml exceeded {MAX_MANIFEST_BYTES} bytes")]
+    #[error("GarminDevice.xml exceeded {MAX_MANIFEST_BYTES}")]
     ManifestTooLarge,
     #[error("GarminDevice.xml was not UTF-8: {0}")]
     ManifestUtf8(#[from] std::str::Utf8Error),
@@ -223,9 +226,9 @@ pub enum Error {
     #[error("mounted source size mismatch: declared {declared}, received {received}")]
     SizeMismatch {
         /// Discovery size.
-        declared: u64,
+        declared: ByteCount,
         /// Transferred or current size.
-        received: u64,
+        received: ByteCount,
     },
 }
 
@@ -233,7 +236,7 @@ struct Entry {
     absolute: PathBuf,
     relative: PathBuf,
     is_file: bool,
-    size: u64,
+    size: ByteCount,
     modified: Option<SystemTime>,
 }
 
@@ -253,7 +256,7 @@ fn entries(root: &Path) -> Result<Vec<Entry>, Error> {
                 absolute: entry.path().to_path_buf(),
                 relative,
                 is_file: metadata.is_file(),
-                size: metadata.len(),
+                size: ByteCount::from_bytes(metadata.len()),
                 modified: metadata.modified().ok(),
             })
         })
@@ -262,15 +265,19 @@ fn entries(root: &Path) -> Result<Vec<Entry>, Error> {
 
 fn read_manifest(path: &Path) -> Result<Vec<u8>, Error> {
     let file = fs::File::open(path).map_err(Error::Source)?;
-    let size = file.metadata().map_err(Error::Source)?.len();
+    let size = ByteCount::from_bytes(file.metadata().map_err(Error::Source)?.len());
     if size > MAX_MANIFEST_BYTES {
         return Err(Error::ManifestTooLarge);
     }
     let mut bytes = Vec::new();
-    file.take(MAX_MANIFEST_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(Error::Source)?;
-    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_MANIFEST_BYTES {
+    file.take(
+        MAX_MANIFEST_BYTES
+            .saturating_add(ByteCount::from_bytes(1))
+            .as_bytes(),
+    )
+    .read_to_end(&mut bytes)
+    .map_err(Error::Source)?;
+    if ByteCount::from_bytes(u64::try_from(bytes.len()).unwrap_or(u64::MAX)) > MAX_MANIFEST_BYTES {
         return Err(Error::ManifestTooLarge);
     }
     Ok(bytes)
@@ -285,6 +292,7 @@ fn file_order(left: &DeviceFile, right: &DeviceFile) -> std::cmp::Ordering {
 
 #[cfg(test)]
 mod tests {
+    use garmin_model::artifact::ByteCount;
     use std::{error::Error as StdError, fs};
 
     use tempfile::tempdir;
@@ -322,7 +330,7 @@ mod tests {
         assert_eq!(file.data_type(), DataType::Activity);
         let mut bytes = Vec::new();
         let outcome = file.copy_to(&mut bytes)?;
-        assert_eq!(outcome.bytes(), 4);
+        assert_eq!(outcome.bytes(), ByteCount::from_bytes(4));
         assert_eq!(bytes, [1, 2, 3, 4]);
         Ok(())
     }

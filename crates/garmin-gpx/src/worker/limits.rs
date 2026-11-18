@@ -11,8 +11,8 @@ impl ProcessLimits for PlatformLimits {
     fn apply() -> io::Result<()> {
         use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
         for (resource, ceiling) in [
-            (Resource::As, super::MEMORY_BYTES),
-            (Resource::Cpu, super::CPU_SECONDS),
+            (Resource::As, super::MEMORY_BYTES.as_bytes()),
+            (Resource::Cpu, super::CPU_TIME.as_secs()),
             (Resource::Core, 0),
         ] {
             let existing = getrlimit(resource);

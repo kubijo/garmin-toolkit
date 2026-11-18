@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn distance_formats_si_and_imperial_using_locale() {
+    use garmin_i18n::{Language, Translations};
+
+    let intl = Translations::bundled()
+        .expect("catalog")
+        .formatter(Language::Czech)
+        .expect("locale");
+    let decimal = intl.decimal_formatter();
+    assert_eq!(
+        Distance::from_millimeters(900_000).format(UnitSystem::Metric, 2, &decimal),
+        "900\u{a0}m"
+    );
+    assert_eq!(
+        Distance::from_millimeters(1_500_000).format(UnitSystem::Metric, 2, &decimal),
+        "1,50\u{a0}km"
+    );
+    assert_eq!(
+        Distance::from_millimeters(1_609_344).format(UnitSystem::Imperial, 2, decimal),
+        "1,00\u{a0}mi"
+    );
+}
+use garmin_model::activity::ActivityDuration;
+
+#[test]
 fn comparison_starts_on_an_active_sport_and_preserves_later_choices() {
     let date: Date = "2026-11-16".parse().expect("date");
     let range = Range {
@@ -24,6 +48,7 @@ fn comparison_starts_on_an_active_sport_and_preserves_later_choices() {
             },
         }],
         summaries: 1,
+        activities: Vec::new(),
         undated: 0,
     });
     state.initialize_comparison(range);
@@ -120,10 +145,11 @@ fn day_year_and_missing_measurement_views_keep_integer_counts() {
             totals: garmin_model::garmin_connect::trends::Totals {
                 activities: 2,
                 missing_distance: 1,
-                duration_seconds: 3600.0,
+                duration: ActivityDuration::try_from_seconds(3600.0).expect("fixture measurement"),
                 ..Default::default()
             },
         }],
+        activities: Vec::new(),
         undated: 0,
         summaries: 2,
     };
@@ -152,4 +178,20 @@ fn day_year_and_missing_measurement_views_keep_integer_counts() {
     );
     assert_eq!(distance, [None]);
     assert_eq!(counts, [Some(2.0)]);
+}
+#[test]
+fn import_revision_requests_new_history_and_discards_an_in_flight_reply() {
+    let sync = Revision::default();
+    let before = Some(ArtifactDigest::from_bytes(b"before import"));
+    let after = Some(ArtifactDigest::from_bytes(b"after import"));
+    let mut state = State::from_cache(Some(History::default()), sync.clone());
+    state.observe_import_revision(before);
+    let old = state.begin_read(sync.clone());
+    state.observe_import_revision(after);
+    assert!(state.needs_read(&sync));
+    let current = state.begin_read(sync.clone());
+    state.complete_read(&old, Err("stale response".into()));
+    assert!(matches!(state.read, ReadState::Loading));
+    state.complete_read(&current, Ok(Some(History::default())));
+    assert!(!state.needs_read(&sync));
 }
