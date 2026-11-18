@@ -195,6 +195,7 @@ async fn trends_read_all_published_summaries_without_imports_or_refreshes() {
     };
     assert_eq!(report.totals(range, None).activities, 23);
     assert_eq!(report.totals(range, None).elevation_activities, 0);
+    assert_eq!(report.totals(range, None).heart_rate.activities(), 0);
     assert_eq!(app.activities(user).await.expect("imports").len(), 0);
     let sync_revision = app.connect_sync_status(user).await.unwrap().revision();
     let import_revision = app.connect_trends_import_revision(user).await.unwrap();
@@ -216,6 +217,11 @@ async fn trends_read_all_published_summaries_without_imports_or_refreshes() {
     assert_eq!(totals.activities, 23);
     assert_eq!(totals.elevation_activities, 1);
     let imported = app.activities(user).await.expect("FIT projections");
+    assert_eq!(totals.heart_rate.activities(), 1);
+    assert_eq!(
+        totals.heart_rate.value(),
+        imported[0].summary().metrics().average_heart_rate()
+    );
     assert_eq!(
         Some(totals.elevation_gain),
         imported[0].summary().totals().ascent()

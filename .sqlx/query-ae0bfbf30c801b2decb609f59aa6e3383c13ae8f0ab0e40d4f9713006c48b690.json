@@ -1,0 +1,40 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    a.source_identity,\n    MAX(p.ascent_mm) AS ascent_mm,\n    MAX(p.average_heart_rate_bpm) AS average_heart_rate_bpm\nFROM acquisitions AS a\nINNER JOIN normalization_runs AS n ON a.id = n.acquisition_id\nINNER JOIN activity_projections AS p ON n.id = p.normalization_run_id\nWHERE a.owner_id = ? AND a.source_id = ?\nGROUP BY a.source_identity\nHAVING\n    COUNT(*) = 1\n    AND (COUNT(p.ascent_mm) = 1 OR COUNT(p.average_heart_rate_bpm) = 1);\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_identity",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "source_identity"
+          }
+        }
+      },
+      {
+        "name": "ascent_mm",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "average_heart_rate_bpm",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "ae0bfbf30c801b2decb609f59aa6e3383c13ae8f0ab0e40d4f9713006c48b690"
+}

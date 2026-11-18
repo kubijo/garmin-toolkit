@@ -1962,6 +1962,10 @@
     "source": "New profile draft",
     "translation": "Rozepsaný nový profil"
   },
+  "b1tjxMoKIM": {
+    "source": "Previous period: {covered, number} of {total, number} activities have imported FIT heart rate",
+    "translation": "Předchozí období: údaje o tepu z importu FIT má {covered, number} z {total, number} aktivit"
+  },
   "b6zbgE2Wnk": {
     "source": "Toolkit state",
     "translation": "Stav nástroje"
@@ -2622,6 +2626,10 @@
   "oNH4AWD5A+": {
     "source": "Close window",
     "translation": "Zavřít okno"
+  },
+  "oQ8rCxFXEE": {
+    "source": "Average of imported FIT heart rates from {covered, number} of {total, number} activities",
+    "translation": "Průměrný tep z importu FIT u {covered, number} z {total, number} aktivit"
   },
   "oe6bR7M83V": {
     "source": "The selected activity no longer exists",

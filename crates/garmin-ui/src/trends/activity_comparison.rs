@@ -161,6 +161,12 @@ fn measurements(ui: &mut Ui, props: &Props<'_>, activity: &ActivitySummary) {
             format_message!(props.intl, default_message: "Elevation gain"),
             elevation,
         ),
+        (
+            format_message!(props.intl, default_message: "Average heart rate"),
+            activity
+                .average_heart_rate
+                .map(|rate| rate.format(props.intl.decimal_formatter())),
+        ),
     ] {
         ui.weak(label);
         ui.label(value.as_deref().unwrap_or("—"));

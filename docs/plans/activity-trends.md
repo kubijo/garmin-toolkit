@@ -52,9 +52,10 @@ Activity comparison pairs two dated activities of the same supported sport withi
 duration come from cached summaries and use the canonical measurement types. Their formatting methods use profile units
 and locale-aware decimals. Pace or speed is unavailable when either input is missing or zero.
 
-Elevation gain comes from imported FIT projections linked to the same Garmin account and activity ID. Trends reports
-coverage and leaves incomplete chart buckets unknown. A downloaded original contributes after import. Reload cached
-history to pick up newly imported measurements.
+Elevation gain and average heart rate come from imported FIT projections linked to the same Garmin account and activity
+ID. Trends picks up new measurements after import and shows coverage for each period. Elevation leaves incomplete
+buckets unknown. Heart rate gives each measured activity equal weight and leaves buckets with no reported heart rate
+empty.
 
 ## Remaining scope
 

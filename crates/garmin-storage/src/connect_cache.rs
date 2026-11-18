@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use garmin_model::{
-    activity::Distance,
-    garmin_connect::{AccountFacts, CacheStatus, CachedActivity},
+    activity::{Distance, HeartRate},
+    garmin_connect::{AccountFacts, CacheStatus, CachedActivity, trends::ImportedMeasurements},
     identity::{SourceId, UserId},
 };
 
@@ -19,7 +19,7 @@ pub struct CachedAccount {
 pub struct CacheSnapshot {
     pub activities: Vec<CachedActivity>,
     pub coverage: CacheStatus,
-    pub ascent: BTreeMap<i64, Distance>,
+    pub measurements: BTreeMap<i64, ImportedMeasurements>,
 }
 
 fn invalid(reason: impl std::fmt::Display) -> Error {
@@ -59,7 +59,7 @@ impl Storage {
         &self,
         user: UserId,
         fingerprint: &str,
-        include_ascent: bool,
+        include_measurements: bool,
     ) -> Result<Option<CacheSnapshot>, Error> {
         let user = user.to_string();
         let mut transaction = self.pool.begin().await?;
@@ -90,8 +90,8 @@ impl Storage {
             sqlx::query_file!("queries/connect-cache-status.sql", user, source, generation)
                 .fetch_one(&mut *transaction)
                 .await?;
-        let ascent = if include_ascent {
-            imported_ascent(&mut transaction, &user, &source).await?
+        let measurements = if include_measurements {
+            imported_measurements(&mut transaction, &user, &source).await?
         } else {
             BTreeMap::new()
         };
@@ -104,7 +104,7 @@ impl Storage {
         }
         Ok(Some(CacheSnapshot {
             activities,
-            ascent,
+            measurements,
             coverage: CacheStatus {
                 total: usize::try_from(counts.total).map_err(invalid)?,
                 downloaded: usize::try_from(counts.downloaded).map_err(invalid)?,
@@ -347,43 +347,58 @@ impl Storage {
     }
 }
 
-async fn imported_ascent(
+async fn imported_measurements(
     connection: &mut sqlx::SqliteConnection,
     user: &str,
     source: &str,
-) -> Result<BTreeMap<i64, Distance>, Error> {
-    let rows = sqlx::query_file!("queries/connect-imported-ascent.sql", user, source)
+) -> Result<BTreeMap<i64, ImportedMeasurements>, Error> {
+    let rows = sqlx::query_file!("queries/connect-imported-measurements.sql", user, source)
         .fetch_all(connection)
         .await?;
     Ok(rows
         .into_iter()
         .filter_map(|row| {
             let id = row.source_identity?.parse().ok()?;
-            let millimetres = u64::try_from(row.ascent_mm?).ok()?;
-            Some((id, Distance::from_millimeters(millimetres)))
+            let ascent = row
+                .ascent_mm
+                .and_then(|value| u64::try_from(value).ok())
+                .map(Distance::from_millimeters);
+            let average_heart_rate = row
+                .average_heart_rate_bpm
+                .and_then(|value| u16::try_from(value).ok())
+                .map(HeartRate::from_beats_per_minute);
+            Some((
+                id,
+                ImportedMeasurements {
+                    ascent,
+                    average_heart_rate,
+                },
+            ))
         })
         .collect())
 }
 
 impl Storage {
-    /// Read the elevation measurements that can affect the current Trends history.
+    /// Read the imported FIT measurements that can affect the current Trends history.
     /// # Errors
     /// Returns database read failures.
-    pub async fn connect_trends_ascent(
+    pub async fn connect_trends_measurements(
         &self,
         user: UserId,
         fingerprint: &str,
-    ) -> Result<BTreeMap<i64, Distance>, Error> {
+    ) -> Result<BTreeMap<i64, ImportedMeasurements>, Error> {
         let user = user.to_string();
         let mut transaction = self.pool.begin().await?;
         let account = sqlx::query_file!("queries/connect-cache-account.sql", user, fingerprint)
             .fetch_optional(&mut *transaction)
             .await?;
-        let ascent = match account {
-            Some(account) => imported_ascent(&mut transaction, &user, &account.source_id).await?,
+        let measurements = match account {
+            Some(account) => {
+                imported_measurements(&mut transaction, &user, &account.source_id).await?
+            }
             None => BTreeMap::new(),
         };
         transaction.commit().await?;
-        Ok(ascent)
+        Ok(measurements)
     }
 }
