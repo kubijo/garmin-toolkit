@@ -41,6 +41,7 @@ pub struct State {
     anchor: Option<Date>,
     cumulative: bool,
     sport: usize,
+    comparison_initialized: bool,
     metric: Metric,
     selected: Option<Date>,
     target_draft: Option<[u32; 3]>,
@@ -48,6 +49,22 @@ pub struct State {
 }
 
 impl State {
+    fn initialize_comparison(&mut self, range: Range) {
+        if self.comparison_initialized {
+            return;
+        }
+        let Some(history) = &self.history else {
+            return;
+        };
+        if let Some(index) = Sport::ALL
+            .iter()
+            .position(|sport| history.totals(range, Some(*sport)).activities > 0)
+        {
+            self.sport = index;
+        }
+        self.comparison_initialized = true;
+    }
+
     /// Constrain dialogs to their host surface for embedded previews.
     #[must_use]
     pub fn with_presentation(mut self, presentation: crate::modal::Presentation) -> Self {
@@ -193,6 +210,37 @@ fn range_label(intl: &Intl, range: Range) -> String {
     }
 }
 
+fn header_metadata(ui: &mut Ui, state: &State, props: &Props<'_>, range: Range) {
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 0.0;
+        ui.spacing_mut().item_spacing = egui::vec2(16.0, 4.0);
+        ui.horizontal_wrapped(|ui| {
+        metadata_item(ui, range_label(props.intl, range), false);
+        if let Some(last) = props.sync.and_then(|sync| sync.state.last_success) {
+            metadata_item(ui, format_message!(props.intl, default_message: "Last successful sync: {date}", values: { date: props.intl.dates().datetime(last.as_jiff().to_zoned(jiff::tz::TimeZone::system()).datetime()) }), true);
+        }
+        if let Some(first) = state.history.as_ref().and_then(|history| history.days.first()) {
+            metadata_item(ui, format_message!(props.intl, default_message: "Cached activity history starts {date}", values: { date: props.intl.dates().date(first.date) }), true);
+        }
+        });
+    });
+}
+
+fn metadata_item(ui: &mut Ui, text: String, weak: bool) {
+    let text = egui::RichText::new(text);
+    let text = if weak { text.weak() } else { text };
+    let galley = egui::WidgetText::from(text.clone()).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Body,
+    );
+    ui.add_sized(
+        egui::vec2(galley.size().x.min(ui.max_rect().width()), galley.size().y),
+        egui::Label::new(text).wrap(),
+    );
+}
+
 fn unit(preferences: ProfilePreferences) -> (&'static str, f64) {
     match preferences.unit_system() {
         UnitSystem::Metric => ("km", 1000.0),
@@ -258,7 +306,7 @@ pub fn show(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Action>
             ui.add_space(8.0);
             output = controls::toolbar(ui, state, props);
             let Ok((range, previous)) = state.period.ranges_with_week_start(state.anchor.unwrap_or(props.today), props.today, props.intl.dates().week_start()) else { return; };
-            ui.label(range_label(props.intl, range));
+            header_metadata(ui, state, props, range);
             if let Some(action) = controls::sync_feedback(ui, props) { output = Some(action); }
             if let ReadState::Failed(error) = &state.read {
                 crate::notification::show(ui, &crate::notification::Props { kind: crate::notification::Kind::Error, title: &format_message!(props.intl, default_message: "Cached history could not be read"), detail: Some(error) });
@@ -277,9 +325,6 @@ pub fn show(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Action>
                 });
                 return;
             };
-            if let Some(first) = history.days.first() {
-                ui.weak(format_message!(props.intl, default_message: "Cached activity history starts {date}", values: { date: props.intl.dates().date(first.date) }));
-            }
             if history.undated > 0 {
                 ui.weak(format_message!(props.intl, default_message: "{count} summaries have no usable local date and are excluded from period totals.", values: { count: history.undated as u64 }));
             }
@@ -389,6 +434,7 @@ fn targets(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
                 crate::icons::PENCIL,
                 crate::button::Kind::Ghost,
                 props.enabled,
+                "trends.targets.edit",
             )
             .clicked()
             {
@@ -407,7 +453,10 @@ fn target_rows(
 ) {
     for (index, sport) in Sport::ALL.into_iter().enumerate() {
         let totals = history.totals(range, Some(sport));
-        if index >= 3 && totals.activities == 0 {
+        let goal = goals
+            .and_then(|goals| goals.get(index).copied())
+            .filter(|goal| *goal > 0);
+        if totals.activities == 0 && goal.is_none() {
             continue;
         }
         ui.scope(|ui| {
@@ -421,9 +470,6 @@ fn target_rows(
             } else {
                 String::new()
             };
-            let goal = goals
-                .and_then(|goals| goals.get(index).copied())
-                .filter(|goal| *goal > 0);
             let distance = format!(
                 "{:.1} {} {}",
                 totals.distance_metres / unit(props.preferences).1,
@@ -474,12 +520,14 @@ fn rings(ui: &mut Ui, history: &History, range: Range, goals: [u32; 3]) {
     let center = rect.center();
     let track = crate::theme::color32(crate::theme::palette(ui).borders().subtle());
     let mut labels = Vec::new();
-    for (index, goal) in goals.into_iter().enumerate() {
-        let radius = 72.0 - index as f32 * 16.0;
+    for (ring, (index, goal)) in goals
+        .into_iter()
+        .enumerate()
+        .filter(|(_, goal)| *goal > 0)
+        .enumerate()
+    {
+        let radius = 72.0 - ring as f32 * 16.0;
         ui.painter().add(ring_path(center, radius, 1.0, track));
-        if goal == 0 {
-            continue;
-        }
         let sport = Sport::ALL[index];
         let totals = history.totals(range, Some(sport));
         if totals.missing_distance > 0 {
@@ -569,11 +617,11 @@ fn distances(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
         let Some(history) = &state.history else {
             return;
         };
-        for sport in Sport::ALL {
+        let goals = props.preferences.monthly_distance_targets();
+        for (index, sport) in Sport::ALL.into_iter().enumerate() {
             let total = history.totals(range, Some(sport));
-            if !matches!(sport, Sport::Running | Sport::Cycling | Sport::Swimming)
-                && total.activities == 0
-            {
+            let has_goal = goals.get(index).is_some_and(|goal| *goal > 0);
+            if total.activities == 0 && !has_goal {
                 continue;
             }
             let label = sport_label(props.intl, sport);
@@ -811,6 +859,7 @@ fn time_mix(ui: &mut Ui, history: &History, props: &Props<'_>, range: Range) {
 }
 
 fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, previous: Range) {
+    state.initialize_comparison(range);
     card(ui, "comparison", |ui| {
         comparison_header(ui, state, props.intl);
         let Some(history) = &state.history else {
@@ -947,9 +996,14 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
         };
         let choices = metric_labels
             .iter()
-            .map(|label| crate::select::Choice::new(label))
+            .zip([
+                "trends.metric.distance",
+                "trends.metric.duration",
+                "trends.metric.count",
+            ])
+            .map(|(label, target)| crate::select::Choice::new(label).target(target))
             .collect::<Vec<_>>();
-        crate::select::show(
+        let response = crate::select::show(
             ui,
             ui.id().with("metric"),
             &mut selected,
@@ -958,6 +1012,7 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
                 .width(128.0)
                 .size(crate::Size::Small),
         );
+        crate::semantics::target(ui, &response, "trends.metric");
         state.metric = [Metric::Distance, Metric::Duration, Metric::Count][selected];
     });
 }
@@ -1086,6 +1141,7 @@ fn calendar(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
                     props.intl.dates().date(date),
                 )
             });
+            crate::semantics::target(ui, &response, format!("trends.calendar.{date}"));
             if response.clicked() && enabled {
                 state.selected = Some(date);
             }

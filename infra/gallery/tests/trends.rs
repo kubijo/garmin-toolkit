@@ -87,11 +87,14 @@ fn browsing_periods_and_targets_never_starts_a_cloud_sync() {
     let mut view = harness();
     view.run();
     assert_eq!(view.state().reads, 1);
-    view.get_by_label("Day").click();
+    view.get(By::new().predicate(|node| node.author_id() == Some("trends.period.0")))
+        .click();
     view.run();
-    view.get_by_label("Year").click();
+    view.get(By::new().predicate(|node| node.author_id() == Some("trends.period.3")))
+        .click();
     view.run();
-    view.get_by_label("Previous").click();
+    view.get(By::new().predicate(|node| node.author_id() == Some("trends.previous")))
+        .click();
     view.run();
     assert_eq!(view.state().reads, 1);
     assert_eq!(view.state().syncs, 0);
@@ -116,7 +119,8 @@ fn published_empty_history_is_not_a_missing_cache_and_reload_is_explicit() {
 fn target_editor_saves_only_on_confirmation_and_cancel_discards_the_draft() {
     let mut view = harness();
     view.run();
-    view.get_by_label("Edit monthly distance targets").click();
+    view.get(By::new().predicate(|node| node.author_id() == Some("trends.targets.edit")))
+        .click();
     view.run();
     let running = || By::new().predicate(|node| node.author_id() == Some("trends.target.running"));
     view.get(running()).click();
@@ -125,7 +129,8 @@ fn target_editor_saves_only_on_confirmation_and_cancel_discards_the_draft() {
     view.get(running()).type_text("120");
     view.run();
     assert_eq!(view.state().preferences.monthly_distance_targets(), [0; 3]);
-    view.get_by_label("Save targets").click();
+    view.get(By::new().predicate(|node| node.author_id() == Some("modal.primary")))
+        .click();
     view.run();
     assert_eq!(
         view.state().preferences.monthly_distance_targets(),
@@ -138,7 +143,8 @@ fn target_editor_saves_only_on_confirmation_and_cancel_discards_the_draft() {
     view.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
     view.get(running()).type_text("999");
     view.run();
-    view.get_by_label("Cancel").click();
+    view.get(By::new().predicate(|node| node.author_id() == Some("modal.cancel")))
+        .click();
     view.run();
     assert_eq!(
         view.state().preferences.monthly_distance_targets(),
@@ -152,7 +158,8 @@ fn target_editor_saves_only_on_confirmation_and_cancel_discards_the_draft() {
 fn calendar_click_pins_the_date_without_reloading_or_syncing() {
     let mut view = harness();
     view.run();
-    view.get_by_label("November 15, 2026").click();
+    view.get(By::new().predicate(|node| node.author_id() == Some("trends.calendar.2026-11-15")))
+        .click();
     view.run();
     assert!(
         view.query_by_label("Select a day to pin its totals here.")

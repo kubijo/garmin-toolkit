@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn comparison_starts_on_an_active_sport_and_preserves_later_choices() {
+    let date: Date = "2026-11-16".parse().expect("date");
+    let range = Range {
+        from: date,
+        through: date,
+    };
+    let mut state = State::default();
+    state.initialize_comparison(range);
+    assert!(
+        !state.comparison_initialized,
+        "wait for the asynchronous cache read"
+    );
+    state.history = Some(History {
+        days: vec![garmin_model::garmin_connect::trends::Day {
+            date,
+            sport: Sport::Cycling,
+            totals: garmin_model::garmin_connect::trends::Totals {
+                activities: 1,
+                missing_distance: 1,
+                ..Default::default()
+            },
+        }],
+        summaries: 1,
+        undated: 0,
+    });
+    state.initialize_comparison(range);
+    assert_eq!(
+        Sport::ALL[state.sport],
+        Sport::Cycling,
+        "missing distance still counts as activity"
+    );
+    state.sport = 0;
+    state.initialize_comparison(range);
+    assert_eq!(
+        Sport::ALL[state.sport],
+        Sport::Running,
+        "keep an explicit choice even without activity"
+    );
+}
+
+#[test]
 fn generation_changes_clear_old_reports_even_when_the_next_read_fails() {
     for generation in [None, Some("new-account".to_owned())] {
         let old = Revision {
