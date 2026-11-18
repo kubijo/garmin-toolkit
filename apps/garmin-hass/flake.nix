@@ -47,7 +47,9 @@
                 overlays = [ rust-overlay.overlays.default ];
               };
           inherit (pkgs) lib;
-          craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
+          # Fenix already bundles the build-host compiler and target standard libraries.
+          # The factory lets Crane splice that prebuilt toolchain for cross compilation.
+          craneLib = (crane.mkLib pkgs).overrideToolchain (_: toolchain);
           wasmCraneLib = (crane.mkLib buildPkgs).overrideToolchain wasmToolchain;
           auditableCargo = buildPkgs.writeShellScriptBin "cargo" ''
             exec ${lib.getExe' wasmToolchain "cargo"} auditable "$@"
