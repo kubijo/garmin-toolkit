@@ -29,9 +29,13 @@ pub fn show<T: Copy + Eq>(
     target: &str,
 ) {
     ui.push_id(target, |ui| {
+        let targets = (0..choices.len())
+            .map(|index| format!("{target}.{index}"))
+            .collect::<Vec<_>>();
         let choices = choices
             .iter()
-            .map(|(value, label)| button::GroupChoice::text(label, *value))
+            .zip(&targets)
+            .map(|((value, label), target)| button::GroupChoice::text(label, *value).target(target))
             .collect::<Vec<_>>();
         if let Some(value) = button::group(
             ui,

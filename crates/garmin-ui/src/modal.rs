@@ -418,6 +418,12 @@ fn render_footer(
                 }
                 .show_with_states(ui, actions.cancel())
             });
+            if let Some(response) = &primary {
+                crate::semantics::target(ui, response, "modal.primary");
+            }
+            if let Some(response) = &cancel {
+                crate::semantics::target(ui, response, "modal.cancel");
+            }
             let back = options.back.map(|back| {
                 ui.allocate_ui_with_layout(
                     egui::vec2(ui.available_width(), FOOTER_HEIGHT),

@@ -12,32 +12,37 @@ pub(super) fn button(
     icon: icons::Icon,
     kind: button::Kind,
     enabled: bool,
+    target: &str,
 ) -> egui::Response {
-    ui.scope(|ui| {
-        ui.visuals_mut().override_text_color = None;
-        button::Props {
-            label,
-            icon: Some(icon),
-            kind,
-            size: Size::Small,
-            width: button::Width::Fit,
-            enabled,
-        }
-        .show(ui)
-    })
-    .inner
+    let response = ui
+        .scope(|ui| {
+            ui.visuals_mut().override_text_color = None;
+            button::Props {
+                label,
+                icon: Some(icon),
+                kind,
+                size: Size::Small,
+                width: button::Width::Fit,
+                enabled,
+            }
+            .show(ui)
+        })
+        .inner;
+    crate::semantics::target(ui, &response, target);
+    response
 }
 
-fn icon(ui: &mut Ui, label: &str, icon: icons::Icon, enabled: bool) -> bool {
-    button::IconProps {
+fn icon(ui: &mut Ui, label: &str, icon: icons::Icon, enabled: bool, target: &str) -> bool {
+    let response = button::IconProps {
         label,
         icon,
         kind: button::Kind::Ghost,
         size: Size::Small,
         enabled,
     }
-    .show(ui)
-    .clicked()
+    .show(ui);
+    crate::semantics::target(ui, &response, target);
+    response.clicked()
 }
 
 pub(super) fn toolbar(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Action> {
@@ -96,6 +101,7 @@ fn cloud_actions(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Ac
         &format_message!(props.intl, default_message: "Reload cached history"),
         icons::DATABASE,
         !matches!(state.read, ReadState::Loading),
+        "trends.reload",
     ) {
         state.read = ReadState::Idle;
     }
@@ -107,6 +113,7 @@ fn cloud_actions(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Ac
             icons::STOP,
             button::Kind::Tertiary,
             true,
+            "trends.cancel-refresh",
         )
         .clicked()
         .then_some(Action::Cancel(if props.refreshing {
@@ -121,6 +128,7 @@ fn cloud_actions(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Ac
             icons::ARROWS_CLOCKWISE,
             button::Kind::Primary,
             props.enabled,
+            "trends.sync",
         )
         .clicked()
         .then_some(Action::Sync)
@@ -136,6 +144,7 @@ fn period_navigation(ui: &mut Ui, state: &mut State, props: &Props<'_>) {
             &format_message!(props.intl, default_message: "Previous"),
             icons::CARET_LEFT,
             true,
+            "trends.previous",
         ) {
             state.anchor = state.period.shift(anchor, -1).ok();
         }
@@ -144,6 +153,7 @@ fn period_navigation(ui: &mut Ui, state: &mut State, props: &Props<'_>) {
             &format_message!(props.intl, default_message: "Current period"),
             icons::CALENDAR,
             state.anchor.is_some(),
+            "trends.current",
         ) {
             state.anchor = None;
         }
@@ -153,6 +163,7 @@ fn period_navigation(ui: &mut Ui, state: &mut State, props: &Props<'_>) {
             &format_message!(props.intl, default_message: "Next"),
             icons::CARET_RIGHT,
             next.is_some_and(|next| next <= props.today),
+            "trends.next",
         ) {
             state.anchor = next;
         }
@@ -229,12 +240,22 @@ pub(super) fn targets_dialog(ui: &mut Ui, state: &mut State, props: &Props<'_>) 
 }
 
 pub(super) fn sync_feedback(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
-    if let Some(last) = props.sync.and_then(|sync| sync.state.last_success) {
-        ui.weak(format_message!(props.intl, default_message: "Last successful sync: {date}", values: { date: props.intl.dates().datetime(last.as_jiff().to_zoned(jiff::tz::TimeZone::system()).datetime()) }));
+    let progress = props
+        .load_progress
+        .or_else(|| props.sync.and_then(|sync| sync.progress.as_ref()));
+    if progress.is_none()
+        && props.sync.is_none_or(|sync| {
+            matches!(
+                sync.state.outcome,
+                Outcome::Complete { unavailable: 0 } | Outcome::Never | Outcome::Running
+            )
+        })
+    {
+        return None;
     }
     let mut output = None;
     ui.allocate_ui_with_layout(egui::vec2(ui.available_width().min(640.0), 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-        if let Some(progress) = props.load_progress.or_else(|| props.sync.and_then(|sync| sync.progress.as_ref())) {
+        if let Some(progress) = progress {
             let value = match progress {
                 LoadProgress::Downloading { total, downloaded, reused, unavailable, .. } => crate::progress::Value::Determinate { completed: downloaded + reused + unavailable, total: *total },
                 _ => crate::progress::Value::Indeterminate,
@@ -249,7 +270,7 @@ pub(super) fn sync_feedback(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
                     ui.horizontal_wrapped(|ui| {
                         let label = format_message!(props.intl, default_message: "{count, plural, one {# original FIT unavailable} other {# original FITs unavailable}}; Trends use activity summaries.", values: { count: unavailable as u64 });
                         ui.weak(label).on_hover_text(format_message!(props.intl, default_message: "Missing originals do not affect Trends. Sync retries these downloads; some Garmin activities have no downloadable FIT file."));
-                        if button(ui, &format_message!(props.intl, default_message: "View cloud activities"), icons::CLOUD, button::Kind::Ghost, true).clicked() {
+                        if button(ui, &format_message!(props.intl, default_message: "View cloud activities"), icons::CLOUD, button::Kind::Ghost, true, "trends.cloud").clicked() {
                             output = Some(Action::OpenActivities);
                         }
                     });

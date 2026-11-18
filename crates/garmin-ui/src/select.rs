@@ -22,6 +22,7 @@ const CHOICE_RADIUS: egui::CornerRadius = egui::CornerRadius::ZERO;
 #[derive(Clone, Copy, Debug)]
 pub struct Choice<'a> {
     label: &'a str,
+    target: Option<&'a str>,
     image: Option<images::Image>,
     icon: Option<icons::Icon>,
 }
@@ -31,6 +32,7 @@ impl<'a> Choice<'a> {
     pub const fn new(label: &'a str) -> Self {
         Self {
             label,
+            target: None,
             image: None,
             icon: None,
         }
@@ -40,6 +42,12 @@ impl<'a> Choice<'a> {
     pub const fn image(mut self, image: images::Image) -> Self {
         self.image = Some(image);
         self.icon = None;
+        self
+    }
+
+    #[must_use]
+    pub const fn target(mut self, target: &'a str) -> Self {
+        self.target = Some(target);
         self
     }
 
@@ -155,6 +163,9 @@ pub fn show(
                         for (index, choice) in choices.iter().enumerate() {
                             let choice_response =
                                 choice_row(ui, *choice, *selected == index, row_height);
+                            if let Some(target) = choice.target {
+                                crate::semantics::target(ui, &choice_response, target);
+                            }
                             if choice_response.clicked() && *selected != index {
                                 *selected = index;
                                 changed = true;
