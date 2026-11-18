@@ -9,10 +9,29 @@
 
 use egui::{Color32, Shape, Stroke, Ui};
 use egui_plot::{Bar, BarChart, GridMark, Line, LineStyle, Plot, Points};
+use garmin_model::activity::HeartRate;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Sample {
+    Value(f64),
+    HeartRate(HeartRate),
+    Missing,
+    Empty,
+}
+
+impl Sample {
+    pub fn coordinate(self) -> Option<f64> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::HeartRate(rate) => Some(f64::from(rate.as_beats_per_minute())),
+            Self::Missing | Self::Empty => None,
+        }
+    }
+}
 
 pub struct Series<'a> {
     pub name: &'a str,
-    pub values: &'a [Option<f64>],
+    pub values: &'a [Sample],
     pub color: Color32,
     pub dashed: bool,
     pub dates: Option<&'a [String]>,
@@ -63,8 +82,7 @@ pub fn show(ui: &mut Ui, id: impl egui::AsIdSalt, props: Props<'_>) -> egui::Rec
     let maximum = series
         .iter()
         .flat_map(|series| series.values)
-        .flatten()
-        .copied()
+        .filter_map(|sample| sample.coordinate())
         .fold(0.0, f64::max);
     let length = labels.len().max(1);
     let scale_maximum = if matches!(kind, Kind::Lines) && length == 1 {
@@ -121,7 +139,7 @@ pub fn show(ui: &mut Ui, id: impl egui::AsIdSalt, props: Props<'_>) -> egui::Rec
         .show(ui, |plot| paint_series(plot, series, kind));
     paint_grid(ui, background, &plot, length, upper, step, grid);
     paint_axis_labels(ui, &plot, labels);
-    paint_missing(ui, missing_background, &plot, series, labels, intl);
+    paint_missing(ui, missing_background, &plot, series, kind, labels, intl);
     plot.response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Other,
@@ -282,10 +300,11 @@ fn hover_label(
     let label = date
         .parse::<jiff::civil::Date>()
         .map_or_else(|_| date.clone(), |date| intl.dates().date(date));
-    let value = if unit.is_empty() {
-        format!("{:.0}", position.y)
-    } else {
-        format!("{:.2} {}", position.y, unit)
+    let value = match source.values.get(index)? {
+        Sample::HeartRate(rate) => rate.format(intl.decimal_formatter()),
+        Sample::Value(value) if unit.is_empty() => format!("{value:.0}"),
+        Sample::Value(value) => format!("{value:.2} {unit}"),
+        Sample::Missing | Sample::Empty => return None,
     };
     Some(format!("{plot_name}\n{label}\n{value}"))
 }
@@ -295,24 +314,29 @@ fn paint_missing(
     background: egui::layers::ShapeIdx,
     plot: &egui_plot::PlotResponse<()>,
     series: &[Series<'_>],
+    kind: Kind,
     labels: &[String],
     intl: &garmin_i18n::Intl,
 ) {
     let frame = *plot.transform.frame();
     let mut shapes = Vec::new();
     let color = crate::theme::color32(crate::theme::palette(ui).borders().strong());
-    for (series_index, series) in series.iter().enumerate() {
-        for (index, value) in series.values.iter().enumerate() {
-            if value.is_some() {
+    for (series_index, entry) in series.iter().enumerate() {
+        for (index, value) in entry.values.iter().enumerate() {
+            if *value != Sample::Missing {
                 continue;
             }
+            let (center, width) = match kind {
+                Kind::Bars => bar_slot(index, series_index, series.len()),
+                Kind::Lines => (index as f64, 0.64),
+            };
             let left = plot
                 .transform
-                .position_from_point(&egui_plot::PlotPoint::new(index as f64 - 0.32, 0.0))
+                .position_from_point(&egui_plot::PlotPoint::new(center - width / 2.0, 0.0))
                 .x;
             let right = plot
                 .transform
-                .position_from_point(&egui_plot::PlotPoint::new(index as f64 + 0.32, 0.0))
+                .position_from_point(&egui_plot::PlotPoint::new(center + width / 2.0, 0.0))
                 .x;
             let rect = egui::Rect::from_min_max(
                 egui::pos2(left, frame.top()),
@@ -331,7 +355,7 @@ fn paint_missing(
                     ));
                 }
             }
-            let date = series
+            let date = entry
                 .dates
                 .unwrap_or(labels)
                 .get(index)
@@ -350,17 +374,23 @@ fn paint_missing(
                 egui::WidgetInfo::labeled(
                     egui::WidgetType::Other,
                     true,
-                    format!("{}: {}", series.name, label),
+                    format!("{}: {}", entry.name, label),
                 )
             });
-            response.on_hover_text(format!("{}: {}", series.name, label));
+            response.on_hover_text(format!("{}: {}", entry.name, label));
         }
     }
     ui.painter().set(background, Shape::Vec(shapes));
 }
 
+fn bar_slot(index: usize, series_index: usize, series_count: usize) -> (f64, f64) {
+    let width = 0.64 / series_count as f64;
+    let center = index as f64 - 0.32 + (series_index as f64 + 0.5) * width;
+    (center, width)
+}
+
 fn paint_series(plot: &mut egui_plot::PlotUi<'_>, series: &[Series<'_>], kind: Kind) {
-    let count = series.len().max(1) as f64;
+    let count = series.len();
     for (series_index, series) in series.iter().enumerate() {
         match kind {
             Kind::Bars => {
@@ -369,10 +399,9 @@ fn paint_series(plot: &mut egui_plot::PlotUi<'_>, series: &[Series<'_>], kind: K
                     .iter()
                     .enumerate()
                     .filter_map(|(index, value)| {
-                        let width = 0.64 / count;
-                        let offset = ((series_index as f64 + 0.5) / count - 0.5) * 0.64;
-                        value.map(|value| {
-                            Bar::new(index as f64 + offset, value)
+                        let (center, width) = bar_slot(index, series_index, count);
+                        value.coordinate().map(|value| {
+                            Bar::new(center, value)
                                 .width(width)
                                 .fill(series.color)
                                 .stroke(Stroke::NONE)
@@ -387,10 +416,10 @@ fn paint_series(plot: &mut egui_plot::PlotUi<'_>, series: &[Series<'_>], kind: K
                     .values
                     .iter()
                     .enumerate()
-                    .chain(std::iter::once((series.values.len(), &None)))
+                    .chain(std::iter::once((series.values.len(), &Sample::Empty)))
                 {
-                    if let Some(value) = value {
-                        points.push([index as f64, *value]);
+                    if let Some(value) = value.coordinate() {
+                        points.push([index as f64, value]);
                     } else if !points.is_empty() {
                         if points.len() == 1 {
                             plot.points(
@@ -469,10 +498,48 @@ fn paint_grid(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn ticks_have_exact_positions_and_integral_count_steps() {
         assert_eq!(super::scale(3.05, false), (4.0, 2.0));
         assert_eq!(super::scale(4.6, true), (6.0, 3.0));
         assert_eq!(super::scale(0.0, true), (1.0, 1.0));
+    }
+
+    #[test]
+    fn paired_bars_have_disjoint_slots() {
+        let (first, width) = bar_slot(3, 0, 2);
+        let (second, _) = bar_slot(3, 1, 2);
+        assert!(first < 3.0 && second > 3.0);
+        assert!((second - first - width).abs() < 1e-10);
+    }
+
+    #[test]
+    fn heart_rate_hover_formats_the_typed_sample() {
+        let intl = garmin_i18n::Translations::bundled()
+            .unwrap()
+            .formatter(garmin_i18n::Language::Czech)
+            .unwrap();
+        let series = [Series {
+            name: "Period",
+            values: &[Sample::HeartRate(HeartRate::from_beats_per_minute(144))],
+            color: Color32::WHITE,
+            dashed: false,
+            dates: None,
+        }];
+        let hover = egui_plot::HoverPosition::NearDataPoint {
+            plot_name: "Period",
+            position: egui_plot::PlotPoint::new(0.0, 144.0),
+            index: 0,
+        };
+        let label = hover_label(
+            &hover,
+            &series,
+            &["2026-11-18".to_owned()],
+            &intl,
+            HeartRate::SYMBOL,
+        );
+        assert_eq!(label.unwrap().lines().last(), Some("144\u{a0}bpm"));
     }
 }

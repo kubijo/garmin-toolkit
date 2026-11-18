@@ -1,11 +1,11 @@
 use crate::SceneStateKey as _;
 use gallery::prelude::*;
 use garmin_model::{
-    activity::{ActivityDuration, ActivitySport, Distance},
+    activity::{ActivityDuration, ActivitySport, Distance, HeartRate},
     garmin_connect::{
         CachedActivity, RemoteActivity,
         sync::{Revision, Snapshot},
-        trends::{History, Metric, Period},
+        trends::{History, ImportedMeasurements, Metric, Period},
     },
     identity::{MonthlyDistanceTarget, ProfilePreferences},
 };
@@ -13,7 +13,7 @@ use garmin_ui::trends;
 
 scene_meta! { title: "Application / Trends" }
 
-thread_local! { static STATE: crate::SceneState<trends::State, 1024> = const { crate::SceneState::empty() }; }
+thread_local! { static STATE: crate::SceneState<trends::State, 1536> = const { crate::SceneState::empty() }; }
 
 #[scene(default)]
 #[expect(
@@ -32,7 +32,11 @@ fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let imperial = ctx.toggle("imperial", false);
     let cumulative = ctx.toggle("cumulative", false);
     let editor = ctx.toggle("edit targets", false);
-    let elevation = ctx.toggle("elevation comparison", false);
+    let metric = ctx.buttons(
+        "comparison metric",
+        &["distance", "elevation", "heart rate"],
+        0,
+    );
     let unavailable = ctx.toggle("missing original", false);
     let intl = globals.intl();
     let history = if variant == 3 {
@@ -48,17 +52,19 @@ fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                 + 64 * usize::from(previous)
                 + 128 * usize::from(cumulative)
                 + 256 * usize::from(editor)
-                + 512 * usize::from(elevation),
+                + 512 * metric,
             || {
                 let mut state = trends::State::from_cache(history, Revision::default())
                     .with_presentation(garmin_ui::modal::Presentation::Contained)
                     .with_cumulative(cumulative)
                     .with_period([Period::Day, Period::Week, Period::Month, Period::Year][period])
-                    .with_comparison_metric(if elevation {
-                        Metric::Elevation
-                    } else {
-                        Metric::Distance
-                    });
+                    .with_comparison_metric(
+                        [
+                            Metric::Distance,
+                            Metric::Elevation,
+                            Metric::AverageHeartRate,
+                        ][metric],
+                    );
                 if status >= 2 {
                     state.complete(
                         &Revision::default(),
@@ -166,28 +172,35 @@ fn fixture(variant: usize, previous: bool) -> History {
             }
         }
     }
-    let ascent = summaries
+    let imported = summaries
         .iter()
         .enumerate()
-        .filter_map(|(index, summary)| {
+        .map(|(index, summary)| {
             let metres = if summary.activity.sport == Some(ActivitySport::Swimming) {
                 summary
                     .started_local
-                    .as_deref()?
-                    .starts_with("2026-11-16")
-                    .then_some(0)?
+                    .as_deref()
+                    .is_some_and(|date| date.starts_with("2026-11-16"))
+                    .then_some(0)
             } else if index.is_multiple_of(3) {
-                return None;
+                None
             } else {
-                20 + u64::try_from(index % 12).expect("bounded index") * 25
+                Some(20 + u64::try_from(index % 12).expect("bounded index") * 25)
             };
-            Some((
+            (
                 summary.activity.id,
-                Distance::from_millimeters(metres * 1_000),
-            ))
+                ImportedMeasurements {
+                    ascent: metres.map(|value| Distance::from_millimeters(value * 1_000)),
+                    average_heart_rate: (!index.is_multiple_of(4)).then(|| {
+                        HeartRate::from_beats_per_minute(
+                            118 + u16::try_from(index % 40).expect("bounded index"),
+                        )
+                    }),
+                },
+            )
         })
         .collect();
-    History::from_summaries_with_ascent(&summaries, &ascent)
+    History::from_summaries_with_measurements(&summaries, &imported)
 }
 
 fn november() -> Vec<CachedActivity> {

@@ -1,7 +1,9 @@
 //! Read-only account-wide trends from the published summary cache.
 
+use std::collections::BTreeMap;
+
 use garmin_model::artifact::ArtifactDigest;
-use garmin_model::garmin_connect::trends::History;
+use garmin_model::garmin_connect::trends::{History, ImportedMeasurements};
 
 use crate::{Application, Error, UserContext};
 
@@ -17,19 +19,19 @@ impl Application {
         let Some(key) = self.storage.garmin_connect_key(user.user_id()).await? else {
             return Ok(None);
         };
-        let ascent = self
+        let measurements = self
             .storage
-            .connect_trends_ascent(
+            .connect_trends_measurements(
                 user.user_id(),
                 &crate::connect_import::cache::credential_hash(&key),
             )
             .await?;
-        let mut bytes = Vec::new();
-        for (id, distance) in ascent {
-            bytes.extend_from_slice(&id.to_le_bytes());
-            bytes.extend_from_slice(&distance.as_millimeters().to_le_bytes());
-        }
-        Ok(Some(ArtifactDigest::from_bytes(&bytes)))
+        let revision =
+            import_revision(&measurements).map_err(|error| garmin_storage::Error::InvalidData {
+                field: "Trends import revision",
+                reason: error.to_string(),
+            })?;
+        Ok(Some(revision))
     }
     /// Reads the current credential's published history without networking or importing.
     /// # Errors
@@ -47,7 +49,39 @@ impl Application {
             )
             .await?
             .map(|snapshot| {
-                History::from_summaries_with_ascent(&snapshot.activities, &snapshot.ascent)
+                History::from_summaries_with_measurements(
+                    &snapshot.activities,
+                    &snapshot.measurements,
+                )
             }))
+    }
+}
+
+fn import_revision(
+    measurements: &BTreeMap<i64, ImportedMeasurements>,
+) -> Result<ArtifactDigest, serde_json::Error> {
+    serde_json::to_vec(measurements).map(|bytes| ArtifactDigest::from_bytes(&bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use garmin_model::activity::{Distance, HeartRate};
+
+    #[test]
+    fn changing_only_imported_heart_rate_changes_the_revision() {
+        let digest = |average_heart_rate| {
+            import_revision(&BTreeMap::from([(
+                23,
+                ImportedMeasurements {
+                    ascent: Some(Distance::from_millimeters(420_000)),
+                    average_heart_rate,
+                },
+            )]))
+            .unwrap()
+        };
+        let rate = |bpm| Some(HeartRate::from_beats_per_minute(bpm));
+        assert_ne!(digest(None), digest(rate(144)));
+        assert_ne!(digest(rate(144)), digest(rate(145)));
     }
 }

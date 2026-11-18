@@ -7,10 +7,10 @@ use egui_kittest::{
     kittest::{By, Queryable as _},
 };
 use garmin_model::{
-    activity::{ActivityDuration, Distance},
+    activity::{ActivityDuration, Distance, HeartRate},
     garmin_connect::{
         sync::{Outcome, Revision, Snapshot},
-        trends::History,
+        trends::{History, ImportedMeasurements},
     },
     identity::{MonthlyDistanceTarget, ProfilePreferences},
 };
@@ -170,9 +170,15 @@ fn activity_comparison_changes_both_selections_when_the_sport_changes() {
         activity(2, "Long run", Running, 14, Some(3600.0)),
         activity(1, "Easy run", Running, 13, Some(4200.0)),
     ];
-    let history = History::from_summaries_with_ascent(
+    let history = History::from_summaries_with_measurements(
         &summaries,
-        &std::collections::BTreeMap::from([(4, Distance::from_millimeters(420_000))]),
+        &std::collections::BTreeMap::from([(
+            4,
+            ImportedMeasurements {
+                ascent: Some(Distance::from_millimeters(420_000)),
+                average_heart_rate: Some(HeartRate::from_beats_per_minute(144)),
+            },
+        )]),
     );
     let first = || By::new().predicate(|node| node.author_id() == Some("trends.activity.first"));
     let second = || By::new().predicate(|node| node.author_id() == Some("trends.activity.second"));
@@ -193,6 +199,7 @@ fn activity_comparison_changes_both_selections_when_the_sport_changes() {
     );
     assert!(view.query_by_label("20.0\u{a0}km/h").is_some());
     assert!(view.query_by_label("420\u{a0}m").is_some());
+    assert!(view.query_by_label("144\u{a0}bpm").is_some());
     view.get(By::new().predicate(|node| node.author_id() == Some("trends.sport.1")))
         .click();
     view.run();
@@ -204,6 +211,16 @@ fn activity_comparison_changes_both_selections_when_the_sport_changes() {
     view.run();
     assert!(
         view.query_by_label("Imported FIT elevation for 1 of 2 activities")
+            .is_some()
+    );
+    view.get(By::new().predicate(|node| node.author_id() == Some("trends.metric")))
+        .click();
+    view.run();
+    view.get(By::new().predicate(|node| node.author_id() == Some("trends.metric.heart-rate")))
+        .click();
+    view.run();
+    assert!(
+        view.query_by_label("Average of imported FIT heart rates from 1 of 2 activities")
             .is_some()
     );
     view.get(first()).click();

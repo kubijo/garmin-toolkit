@@ -11,7 +11,7 @@
 use egui::{Color32, RichText, Ui};
 use garmin_i18n::{Intl, format_message};
 use garmin_model::{
-    activity::Distance,
+    activity::{Distance, HeartRate},
     artifact::ArtifactDigest,
     garmin_connect::{
         sync::{Revision, Snapshot},
@@ -323,7 +323,8 @@ fn values(
     monthly: bool,
     accumulated: bool,
     preferences: ProfilePreferences,
-) -> (Vec<String>, Vec<Option<f64>>) {
+) -> (Vec<String>, Vec<trend_chart::Sample>) {
+    use trend_chart::Sample;
     let mut buckets = history.series(range, sport, metric, monthly);
     if accumulated {
         cumulative(&mut buckets);
@@ -337,17 +338,20 @@ fn values(
         labels,
         buckets
             .into_iter()
-            .map(|bucket| {
-                bucket.value.map(|value| match value {
-                    BucketValue::Distance(distance) => match (metric, units) {
-                        (Metric::Elevation, UnitSystem::Metric) => distance.as_metres(),
-                        (Metric::Elevation, UnitSystem::Imperial) => distance.as_feet(),
-                        (_, UnitSystem::Metric) => distance.as_kilometres(),
-                        (_, UnitSystem::Imperial) => distance.as_miles(),
-                    },
-                    BucketValue::Duration(duration) => duration.as_hours(),
-                    BucketValue::Count(count) => count as f64,
-                })
+            .map(|bucket| match bucket.value {
+                Some(BucketValue::Distance(distance)) => Sample::Value(match (metric, units) {
+                    (Metric::Elevation, UnitSystem::Metric) => distance.as_metres(),
+                    (Metric::Elevation, UnitSystem::Imperial) => distance.as_feet(),
+                    (_, UnitSystem::Metric) => distance.as_kilometres(),
+                    (_, UnitSystem::Imperial) => distance.as_miles(),
+                }),
+                Some(BucketValue::Duration(duration)) => Sample::Value(duration.as_hours()),
+                Some(BucketValue::Count(count)) => Sample::Value(count as f64),
+                Some(BucketValue::HeartRate(rate)) => Sample::HeartRate(rate),
+                None if metric == Metric::AverageHeartRate && !bucket.has_activities => {
+                    Sample::Empty
+                }
+                None => Sample::Missing,
             })
             .collect(),
     )
@@ -944,6 +948,7 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
         };
         let sport = Sport::ALL[state.sport];
         let elevation = state.metric == Metric::Elevation;
+        let heart_rate = state.metric == Metric::AverageHeartRate;
         let monthly = state.is_preset(Period::Year);
         let (labels, current) = values(
             history,
@@ -951,7 +956,7 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
             Some(sport),
             state.metric,
             monthly,
-            !elevation,
+            !elevation && !heart_rate,
             props.preferences,
         );
         let (prior_dates, prior) = values(
@@ -960,7 +965,7 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
             Some(sport),
             state.metric,
             monthly,
-            !elevation,
+            !elevation && !heart_rate,
             props.preferences,
         );
         let totals = history.totals(range, Some(sport));
@@ -975,12 +980,19 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
         let chart_unit = comparison_unit(state.metric, props.preferences);
         if elevation {
             elevation_coverage(ui, props, &totals, &history.totals(previous, Some(sport)));
+        } else if heart_rate {
+            heart_rate_coverage(
+                ui,
+                props.intl,
+                &totals,
+                &history.totals(previous, Some(sport)),
+            );
         } else {
             comparison_delta(
                 ui,
                 props.intl,
-                current.last().copied().flatten(),
-                prior.last().copied().flatten(),
+                current.last().and_then(|sample| sample.coordinate()),
+                prior.last().and_then(|sample| sample.coordinate()),
                 chart_unit,
             );
         }
@@ -1015,7 +1027,7 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
             trend_chart::Props {
                 labels: &labels,
                 series: &series,
-                kind: if elevation || range.from == range.through {
+                kind: if elevation || heart_rate || range.from == range.through {
                     trend_chart::Kind::Bars
                 } else {
                     trend_chart::Kind::Lines
@@ -1045,6 +1057,10 @@ fn comparison_value(metric: Metric, props: &Props<'_>, totals: &Totals) -> Strin
             )
         }
         Metric::Elevation => "—".to_owned(),
+        Metric::AverageHeartRate => totals.heart_rate.value().map_or_else(
+            || "—".to_owned(),
+            |rate| rate.format(props.intl.decimal_formatter()),
+        ),
         _ => totals.activities.to_string(),
     }
 }
@@ -1076,11 +1092,25 @@ fn elevation_coverage(ui: &mut Ui, props: &Props<'_>, current: &Totals, previous
     }
 }
 
+fn heart_rate_coverage(ui: &mut Ui, intl: &Intl, current: &Totals, previous: &Totals) {
+    if current.activities > 0 {
+        ui.weak(format_message!(intl, default_message: "Average of imported FIT heart rates from {covered, number} of {total, number} activities", values: {
+            covered: current.heart_rate.activities() as u64, total: current.activities as u64
+        }));
+    }
+    if previous.activities > 0 {
+        ui.weak(format_message!(intl, default_message: "Previous period: {covered, number} of {total, number} activities have imported FIT heart rate", values: {
+            covered: previous.heart_rate.activities() as u64, total: previous.activities as u64
+        }));
+    }
+}
+
 fn comparison_unit(metric: Metric, preferences: ProfilePreferences) -> &'static str {
     match metric {
         Metric::Distance => unit(preferences).0,
         Metric::Duration => "h",
         Metric::Elevation => elevation_unit(preferences).0,
+        Metric::AverageHeartRate => HeartRate::SYMBOL,
         _ => "",
     }
 }
@@ -1115,11 +1145,13 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
             format_message!(intl, default_message: "Activity time"),
             format_message!(intl, default_message: "Activities"),
             format_message!(intl, default_message: "Elevation gain"),
+            format_message!(intl, default_message: "Average heart rate"),
         ];
         let mut selected = match state.metric {
             Metric::Duration => 1,
             Metric::Count => 2,
             Metric::Elevation => 3,
+            Metric::AverageHeartRate => 4,
             _ => 0,
         };
         let choices = metric_labels
@@ -1129,6 +1161,7 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
                 "trends.metric.duration",
                 "trends.metric.count",
                 "trends.metric.elevation",
+                "trends.metric.heart-rate",
             ])
             .map(|(label, target)| crate::select::Choice::new(label).target(target))
             .collect::<Vec<_>>();
@@ -1147,6 +1180,7 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
             Metric::Duration,
             Metric::Count,
             Metric::Elevation,
+            Metric::AverageHeartRate,
         ][selected];
     });
 }

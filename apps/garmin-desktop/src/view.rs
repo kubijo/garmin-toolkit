@@ -1590,7 +1590,10 @@ impl Desktop {
         }
     }
 
-    #[expect(clippy::too_many_lines, reason = "Keep worker event dispatch in one match")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep worker event dispatch in one match"
+    )]
     fn process_events(&mut self) {
         let events = self.worker.drain().collect::<Vec<_>>();
         for event in events {

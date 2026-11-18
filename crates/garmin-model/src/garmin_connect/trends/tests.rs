@@ -70,11 +70,23 @@ fn elevation_tracks_coverage_including_reported_zero_and_leaves_incomplete_bucke
         summary(2, Some("2026-11-02"), None, None),
         summary(3, Some("2026-11-03"), None, None),
     ];
-    let history = History::from_summaries_with_ascent(
+    let history = History::from_summaries_with_measurements(
         &summaries,
         &BTreeMap::from([
-            (1, Distance::from_millimeters(420_000)),
-            (2, Distance::default()),
+            (
+                1,
+                ImportedMeasurements {
+                    ascent: Some(Distance::from_millimeters(420_000)),
+                    ..Default::default()
+                },
+            ),
+            (
+                2,
+                ImportedMeasurements {
+                    ascent: Some(Distance::default()),
+                    ..Default::default()
+                },
+            ),
         ]),
     );
     let range = Range {
@@ -96,6 +108,53 @@ fn elevation_tracks_coverage_including_reported_zero_and_leaves_incomplete_bucke
             Some(BucketValue::Distance(Distance::default())),
             None,
         ],
+    );
+}
+
+#[test]
+fn heart_rate_counts_only_reported_activities_and_averages_them_across_days() {
+    let summaries = [
+        summary(1, Some("2026-11-01"), None, None),
+        summary(2, Some("2026-11-01"), None, None),
+        summary(3, Some("2026-11-02"), None, None),
+        summary(4, Some("2026-11-03"), None, None),
+    ];
+    let imported = [(1, 100), (2, 120), (3, 170)]
+        .into_iter()
+        .map(|(id, bpm)| {
+            (
+                id,
+                ImportedMeasurements {
+                    average_heart_rate: Some(HeartRate::from_beats_per_minute(bpm)),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
+    let history = History::from_summaries_with_measurements(&summaries, &imported);
+    let range = Range {
+        from: date("2026-11-01"),
+        through: date("2026-11-03"),
+    };
+    let totals = history.totals(range, None);
+    assert_eq!(totals.activities, 4);
+    assert_eq!(totals.heart_rate.activities(), 3);
+    let bucket = |bpm| {
+        Some(BucketValue::HeartRate(HeartRate::from_beats_per_minute(
+            bpm,
+        )))
+    };
+    assert_eq!(
+        history.series(range, None, Metric::AverageHeartRate, true)[0].value,
+        bucket(130)
+    );
+    assert_eq!(
+        history
+            .series(range, None, Metric::AverageHeartRate, false)
+            .into_iter()
+            .map(|item| item.value)
+            .collect::<Vec<_>>(),
+        [bucket(110), bucket(170), None],
     );
 }
 

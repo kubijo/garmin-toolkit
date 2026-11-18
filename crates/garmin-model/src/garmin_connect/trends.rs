@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use jiff::civil::Date;
 
 use super::CachedActivity;
-use crate::activity::{ActivityDuration, ActivitySport, Distance};
+use crate::activity::{ActivityDuration, ActivitySport, Distance, HeartRate};
 
 #[garmin_macros::portable(copy, eq, ord)]
 pub enum Sport {
@@ -37,6 +37,42 @@ pub struct Totals {
     pub elevation_activities: usize,
     pub missing_distance: usize,
     pub missing_duration: usize,
+    #[serde(default)]
+    pub heart_rate: HeartRateAverage,
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+pub struct ImportedMeasurements {
+    pub ascent: Option<Distance>,
+    pub average_heart_rate: Option<HeartRate>,
+}
+
+/// Each activity with a reported average contributes once.
+#[garmin_macros::portable(default)]
+pub struct HeartRateAverage {
+    sum_bpm: u128,
+    activities: usize,
+}
+
+impl HeartRateAverage {
+    fn record(&mut self, rate: HeartRate) {
+        self.sum_bpm += u128::from(rate.as_beats_per_minute());
+        self.activities += 1;
+    }
+
+    #[must_use]
+    pub const fn activities(&self) -> usize {
+        self.activities
+    }
+
+    #[must_use]
+    pub fn value(&self) -> Option<HeartRate> {
+        let count = self.activities as u128;
+        let bpm = (self.sum_bpm + count / 2).checked_div(count)?;
+        u16::try_from(bpm)
+            .ok()
+            .map(HeartRate::from_beats_per_minute)
+    }
 }
 
 impl Totals {
@@ -48,6 +84,8 @@ impl Totals {
         self.elevation_activities += other.elevation_activities;
         self.missing_distance += other.missing_distance;
         self.missing_duration += other.missing_duration;
+        self.heart_rate.sum_bpm += other.heart_rate.sum_bpm;
+        self.heart_rate.activities += other.heart_rate.activities;
     }
 }
 
@@ -68,6 +106,8 @@ pub struct ActivitySummary {
     pub distance: Option<Distance>,
     pub duration: Option<ActivityDuration>,
     pub elevation_gain: Option<Distance>,
+    #[serde(default)]
+    pub average_heart_rate: Option<HeartRate>,
 }
 
 /// Only published generations are exposed. No incomplete refresh is interpreted as zero activity.
@@ -121,22 +161,29 @@ impl History {
                     Metric::Elevation if totals.elevation_activities == totals.activities => {
                         Some(BucketValue::Distance(totals.elevation_gain))
                     }
+                    Metric::AverageHeartRate => {
+                        totals.heart_rate.value().map(BucketValue::HeartRate)
+                    }
                     _ => None,
                 };
-                Bucket { date, value }
+                Bucket {
+                    date,
+                    value,
+                    has_activities: totals.activities > 0,
+                }
             })
             .collect()
     }
 
     #[must_use]
     pub fn from_summaries(summaries: &[CachedActivity]) -> Self {
-        Self::from_summaries_with_ascent(summaries, &BTreeMap::new())
+        Self::from_summaries_with_measurements(summaries, &BTreeMap::new())
     }
 
     #[must_use]
-    pub fn from_summaries_with_ascent(
+    pub fn from_summaries_with_measurements(
         summaries: &[CachedActivity],
-        ascent: &BTreeMap<i64, Distance>,
+        imported: &BTreeMap<i64, ImportedMeasurements>,
     ) -> Self {
         let mut grouped = BTreeMap::<(Date, Sport), Totals>::new();
         let mut seen = BTreeSet::new();
@@ -167,10 +214,17 @@ impl History {
             totals.activities += 1;
             let distance = summary.activity.distance;
             let duration = summary.activity.duration;
-            let elevation_gain = ascent.get(&summary.activity.id).copied();
+            let measurements = imported
+                .get(&summary.activity.id)
+                .copied()
+                .unwrap_or_default();
+            let elevation_gain = measurements.ascent;
             if let Some(gain) = elevation_gain {
                 totals.elevation_gain = totals.elevation_gain.saturating_add(gain);
                 totals.elevation_activities += 1;
+            }
+            if let Some(rate) = measurements.average_heart_rate {
+                totals.heart_rate.record(rate);
             }
             if let Some(value) = distance {
                 totals.distance = totals.distance.saturating_add(value);
@@ -191,6 +245,7 @@ impl History {
                     distance,
                     duration,
                     elevation_gain,
+                    average_heart_rate: measurements.average_heart_rate,
                 });
             }
         }
@@ -244,12 +299,15 @@ pub enum Metric {
     Count,
     ActiveDays,
     Elevation,
+    AverageHeartRate,
 }
 
 #[garmin_macros::portable]
 pub struct Bucket {
     pub date: Date,
     pub value: Option<BucketValue>,
+    #[serde(default)]
+    pub has_activities: bool,
 }
 
 #[garmin_macros::portable(copy, eq)]
@@ -257,6 +315,7 @@ pub enum BucketValue {
     Distance(Distance),
     Duration(ActivityDuration),
     Count(usize),
+    HeartRate(HeartRate),
 }
 
 impl BucketValue {

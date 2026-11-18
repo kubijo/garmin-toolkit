@@ -311,6 +311,17 @@ impl fmt::Display for Speed {
 pub struct HeartRate(u16);
 
 impl HeartRate {
+    pub const SYMBOL: &'static str = "bpm";
+
+    #[must_use]
+    pub fn format(self, decimal: impl Fn(f64, usize) -> String) -> String {
+        format!(
+            "{}\u{a0}{}",
+            decimal(f64::from(self.as_beats_per_minute()), 0),
+            Self::SYMBOL
+        )
+    }
+
     #[must_use]
     pub const fn from_beats_per_minute(value: u16) -> Self {
         Self(value)
@@ -329,7 +340,7 @@ impl HeartRate {
 
 impl fmt::Display for HeartRate {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{} bpm", self.0)
+        write!(formatter, "{} {}", self.0, Self::SYMBOL)
     }
 }
 

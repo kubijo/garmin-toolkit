@@ -176,8 +176,24 @@ fn day_year_and_missing_measurement_views_keep_integer_counts() {
         true,
         ProfilePreferences::default(),
     );
-    assert_eq!(distance, [None]);
-    assert_eq!(counts, [Some(2.0)]);
+    assert_eq!(distance, [trend_chart::Sample::Missing]);
+    assert_eq!(counts, [trend_chart::Sample::Value(2.0)]);
+    let (_, rates) = values(
+        &history,
+        Range {
+            from: "2026-11-15".parse().expect("date"),
+            through: date,
+        },
+        Some(Sport::Running),
+        Metric::AverageHeartRate,
+        false,
+        false,
+        ProfilePreferences::default(),
+    );
+    assert_eq!(
+        rates,
+        [trend_chart::Sample::Empty, trend_chart::Sample::Missing],
+    );
 }
 #[test]
 fn import_revision_requests_new_history_and_discards_an_in_flight_reply() {
