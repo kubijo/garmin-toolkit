@@ -111,6 +111,9 @@ fn show_scoped(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
 fn status(ui: &mut Ui, props: &Props<'_>, snapshot: &Snapshot, id: egui::Id) -> Option<Action> {
     let mut action = None;
     ui.add_space(16.0);
+    if !props.garmin_connect.activities_busy && feedback(ui, props.intl, snapshot) {
+        ui.add_space(16.0);
+    }
     let never = format_message!(props.intl, default_message: "Never");
     let paused = format_message!(props.intl, default_message: "Not scheduled");
     let timestamp = |value: garmin_model::value::Timestamp| {
@@ -137,9 +140,6 @@ fn status(ui: &mut Ui, props: &Props<'_>, snapshot: &Snapshot, id: egui::Id) -> 
             ),
         ],
     );
-    if let Outcome::Failed { message, .. } = &snapshot.state.outcome {
-        crate::typography::body(ui, message);
-    }
     if snapshot.progress.is_some() {
         ui.add_space(8.0);
         if super::connect_activities::refresh_progress(

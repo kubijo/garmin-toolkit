@@ -59,6 +59,7 @@ pub struct Surfaces {
     chrome: Color,
     background: Color,
     background_hover: Color,
+    notification: Color,
     layers: [Color; 3],
     layer_hovers: [Color; 3],
     fields: [Color; 3],
@@ -66,6 +67,12 @@ pub struct Surfaces {
 }
 
 impl Surfaces {
+    /// Notification surface, independent of the surrounding control layer.
+    #[must_use]
+    pub const fn notification(&self) -> Color {
+        self.notification
+    }
+
     #[must_use]
     pub const fn chrome(&self) -> Color {
         self.chrome
@@ -442,6 +449,7 @@ pub const GRAY_100: Theme = Theme {
         chrome: swatch::BLACK,
         background: swatch::gray::G100,
         background_hover: swatch::gray::G50.with_alpha(0x29),
+        notification: swatch::gray::G80,
         layers: [swatch::gray::G90, swatch::gray::G80, swatch::gray::G70],
         layer_hovers: [
             Color::from_rgb(0x33, 0x33, 0x33),
@@ -695,6 +703,7 @@ pub const GRAY_10: Theme = Theme {
         chrome: swatch::gray::G20,
         background: swatch::gray::G10,
         background_hover: swatch::gray::G50.with_alpha(0x1f),
+        notification: swatch::WHITE,
         layers: [swatch::WHITE, swatch::gray::G10, swatch::WHITE],
         layer_hovers: [
             Color::from_rgb(0xe8, 0xe8, 0xe8),
@@ -944,6 +953,16 @@ pub const GRAY_10: Theme = Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notifications_are_distinct_from_the_page_and_keep_text_readable() {
+        for theme in [&GRAY_100, &GRAY_10] {
+            let surface = theme.surfaces().notification();
+            assert_ne!(surface, theme.surfaces().background());
+            assert!(theme.content().text_primary().contrast_ratio(surface) >= 4.5);
+            assert!(theme.content().text_secondary().contrast_ratio(surface) >= 4.5);
+        }
+    }
 
     #[test]
     fn action_roles_share_one_base_color() {

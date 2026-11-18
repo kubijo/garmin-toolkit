@@ -72,6 +72,12 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<super::Action> {
             ui.add_space(16.0);
             if !props.garmin_connect.activities_busy
                 && let Some(sync) = props.garmin_connect.sync
+                && super::connect_sync::feedback(ui, props.intl, sync)
+            {
+                ui.add_space(16.0);
+            }
+            if !props.garmin_connect.activities_busy
+                && let Some(sync) = props.garmin_connect.sync
                 && sync.progress.is_some()
             {
                 if refresh_progress(
@@ -245,8 +251,28 @@ fn cache_feedback(
     let unavailable = cache.unavailable as u64;
     let status = format_message!(props.intl, default_message: "Cached original FIT files: {downloaded}/{total} · Unavailable: {unavailable}", values: { downloaded: downloaded, total: total, unavailable: unavailable });
     crate::typography::helper(ui, &status);
-    if let Some(warning) = warning {
-        crate::typography::body(ui, warning);
+    if let Some(warning) = warning
+        && !props.garmin_connect.activities_busy
+    {
+        let already_shown = props.garmin_connect.sync.is_some_and(|sync| {
+            sync.progress.is_none()
+                && !props.garmin_connect.activities_busy
+                && !matches!(
+                    &sync.state.outcome,
+                    garmin_model::garmin_connect::sync::Outcome::Never
+                        | garmin_model::garmin_connect::sync::Outcome::Running
+                )
+        });
+        if !already_shown {
+            crate::notification::show(
+                ui,
+                &crate::notification::Props {
+                    kind: crate::notification::Kind::Warning,
+                    title: &format_message!(props.intl, default_message: "Sync did not finish"),
+                    detail: Some(&crate::notification::normalize_error_detail(warning)),
+                },
+            );
+        }
     }
 }
 

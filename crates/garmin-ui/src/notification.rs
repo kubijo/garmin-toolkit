@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use cint::ColorInterop;
 use egui::{Align2, Id, Order, Rect, Response, RichText, Ui};
-use garmin_color::{Color, theme};
+use garmin_color::Color;
 
 use crate::{Size, button, icons, theme as widget_theme};
 
@@ -128,9 +128,7 @@ fn render_inline(ui: &mut Ui, props: &Props<'_>, emphasis: Option<&str>) -> Resp
     let palette = crate::theme::palette(ui);
     let accent = props.kind.color(ui);
     let output = egui::Frame::NONE
-        .fill(widget_theme::color32(
-            palette.surfaces().layer(theme::Level::Two),
-        ))
+        .fill(widget_theme::color32(palette.surfaces().notification()))
         .inner_margin(egui::Margin::symmetric(16, 8))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
@@ -586,9 +584,7 @@ fn render_surface(ui: &mut Ui, props: &ActionableProps<'_>, content_opacity: f32
     let palette = crate::theme::palette(ui);
     let accent = props.kind.color(ui);
     let output = egui::Frame::new()
-        .fill(widget_theme::color32(
-            palette.surfaces().layer(theme::Level::Two),
-        ))
+        .fill(widget_theme::color32(palette.surfaces().notification()))
         .corner_radius(TOAST_RADIUS)
         .stroke(egui::Stroke::new(
             TOAST_STROKE_WIDTH,

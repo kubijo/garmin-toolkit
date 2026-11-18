@@ -14,6 +14,11 @@ enum RequestState {
     Cancelling,
 }
 
+enum Verification {
+    Idle,
+    Checking,
+}
+
 struct Model {
     sync: garmin_model::garmin_connect::sync::Snapshot,
     cloud: bool,
@@ -23,6 +28,7 @@ struct Model {
     disabled: bool,
     key: Option<garmin_model::garmin_connect::PersonalApiKey>,
     facts: Option<garmin_model::garmin_connect::AccountFacts>,
+    verification: Verification,
     checks: u32,
     reject: bool,
     activities: Option<garmin_model::garmin_connect::ActivityResponse>,
@@ -123,7 +129,7 @@ fn harness_for(language: garmin_i18n::Language, size: [f32; 2]) -> Harness<'stat
                             now: "2026-11-10T12:00:00Z".parse().expect("fixture timestamp"),
                             today: jiff::civil::date(2026, 11, 13),
                             configured: state.key.is_some(),
-                            checking: false,
+                            checking: matches!(state.verification, Verification::Checking),
                             facts: state.facts.as_ref(),
                             activities: state.activities.as_ref(),
                             activities_busy: matches!(
@@ -155,6 +161,7 @@ fn harness_for(language: garmin_i18n::Language, size: [f32; 2]) -> Harness<'stat
                 disabled: false,
                 key: None,
                 facts: None,
+                verification: Verification::Idle,
                 checks: 0,
                 reject: false,
                 activities: None,
@@ -869,6 +876,44 @@ fn testing_a_saved_key_shows_service_facts() {
 }
 
 #[test]
+fn connection_verification_keeps_controls_and_known_facts_in_place() {
+    for (language, test_label, sync_label) in [
+        (
+            garmin_i18n::Language::English,
+            "Test connection",
+            "Automatic sync",
+        ),
+        (
+            garmin_i18n::Language::Czech,
+            "Otestovat připojení",
+            "Automatická synchronizace",
+        ),
+    ] {
+        for width in [384.0, 760.0] {
+            let mut view = harness_for(language, [width, 1600.0]);
+            view.state_mut().key = Some(
+                garmin_model::garmin_connect::PersonalApiKey::from_string("fixture-key".into())
+                    .expect("fixture key"),
+            );
+            view.state_mut().facts = Some(test_facts());
+            view.run();
+            let test_top = view.get_by_label(test_label).rect().top();
+            let sync_top = view.get_by_label(sync_label).rect().top();
+            for verification in [Verification::Checking, Verification::Idle] {
+                view.state_mut().verification = verification;
+                view.run_steps(4);
+                assert!((view.get_by_label(test_label).rect().top() - test_top).abs() < 0.01);
+                assert!((view.get_by_label(sync_label).rect().top() - sync_top).abs() < 0.01);
+                assert!(
+                    view.query_by_label("Garmin Rider").is_some(),
+                    "known facts must remain visible while checking"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn uuid_display_names_are_presented_as_profile_identifiers() {
     let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1600.0]);
     view.state_mut().facts = Some(garmin_model::garmin_connect::AccountFacts {
@@ -1279,11 +1324,33 @@ fn capture_connect_settings() -> Result<(), Box<dyn std::error::Error>> {
     let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../.tmp/gallery/connect-settings");
     std::fs::create_dir_all(&out)?;
-    for (name, theme) in [
-        ("dark", egui::ThemePreference::Dark),
-        ("light", egui::ThemePreference::Light),
+    for (name, theme, language, width) in [
+        (
+            "dark",
+            egui::ThemePreference::Dark,
+            garmin_i18n::Language::English,
+            760.0,
+        ),
+        (
+            "light",
+            egui::ThemePreference::Light,
+            garmin_i18n::Language::English,
+            760.0,
+        ),
+        (
+            "dark-cs",
+            egui::ThemePreference::Dark,
+            garmin_i18n::Language::Czech,
+            760.0,
+        ),
+        (
+            "narrow-cs",
+            egui::ThemePreference::Dark,
+            garmin_i18n::Language::Czech,
+            384.0,
+        ),
     ] {
-        let mut view = harness_for(garmin_i18n::Language::English, [760.0, 1200.0]);
+        let mut view = harness_for(language, [width, 1600.0]);
         view.state_mut().key = Some(
             garmin_model::garmin_connect::PersonalApiKey::from_string("preview-key".into())
                 .expect("preview key"),
@@ -1292,6 +1359,10 @@ fn capture_connect_settings() -> Result<(), Box<dyn std::error::Error>> {
         view.ctx.set_theme(theme);
         view.run();
         view.render()?.save(out.join(format!("{name}.png")))?;
+        view.state_mut().verification = Verification::Checking;
+        view.run_steps(4);
+        view.render()?
+            .save(out.join(format!("{name}-checking.png")))?;
     }
     Ok(())
 }
@@ -1321,6 +1392,116 @@ fn auto_sync_is_opt_in_and_can_be_disabled_without_changing_other_preferences() 
     view.get_by_label("Save sync settings").click();
     view.run();
     assert_eq!(view.state().sync.state.interval, None);
+}
+
+fn outcome_view(cloud: bool, width: f32) -> Harness<'static, Model> {
+    let mut view = harness_for(
+        garmin_i18n::Language::English,
+        [width, if cloud { 900.0 } else { 1600.0 }],
+    );
+    view.state_mut().key = Some(
+        garmin_model::garmin_connect::PersonalApiKey::from_string("fixture-key".into())
+            .expect("fixture key"),
+    );
+    view.state_mut().cloud = cloud;
+    view.state_mut().activities = Some(cloud_page(20));
+    view.state_mut().sync.state.interval = garmin_model::garmin_connect::sync::Interval::new(
+        1,
+        garmin_model::garmin_connect::sync::Unit::Hour,
+    );
+    view.state_mut().sync.state.next_attempt = Some(garmin_model::value::Timestamp::from_jiff(
+        "2026-11-10T13:00:00Z".parse().expect("fixture timestamp"),
+    ));
+    view
+}
+
+#[test]
+fn finished_sync_outcomes_remain_visible_in_settings_and_activities() {
+    use garmin_model::garmin_connect::sync::{Failure, Outcome};
+    for cloud in [false, true] {
+        let mut view = outcome_view(cloud, 760.0);
+        for (outcome, title) in [
+            (Outcome::Complete { unavailable: 0 }, "Sync completed"),
+            (
+                Outcome::Complete { unavailable: 2 },
+                "Sync completed with unavailable files",
+            ),
+            (Outcome::Cancelled, "Sync cancelled"),
+            (Outcome::Interrupted, "Sync interrupted"),
+            (
+                Outcome::Failed {
+                    kind: Failure::RateLimit,
+                    message: "HTTP 429".into(),
+                },
+                "Sync paused: Garmin request limit reached",
+            ),
+            (
+                Outcome::Failed {
+                    kind: Failure::Network,
+                    message: "Connection lost".into(),
+                },
+                "Sync did not finish",
+            ),
+        ] {
+            view.state_mut().sync.state.outcome = outcome;
+            view.run();
+            assert!(
+                view.query_by_label(title).is_some(),
+                "missing {title}, cloud={cloud}"
+            );
+            if title != "Sync completed" {
+                assert!(view.query_by_label("Sync completed").is_none());
+            }
+        }
+        view.state_mut().activity_request = RequestState::Loading;
+        view.run_steps(4);
+        assert!(view.query_by_label("Sync did not finish").is_none());
+    }
+}
+
+#[test]
+#[ignore = "renders persistent sync outcomes in both themes"]
+fn capture_sync_feedback() -> Result<(), Box<dyn std::error::Error>> {
+    use garmin_model::garmin_connect::sync::{Failure, Outcome};
+    let out =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/gallery/sync-feedback");
+    std::fs::create_dir_all(&out)?;
+    for (theme_name, theme) in [
+        ("dark", egui::ThemePreference::Dark),
+        ("light", egui::ThemePreference::Light),
+    ] {
+        for (page, cloud, width) in [
+            ("settings", false, 760.0),
+            ("activities", true, 760.0),
+            ("narrow", true, 384.0),
+        ] {
+            let mut view = outcome_view(cloud, width);
+            view.ctx.set_theme(theme);
+            for (name, outcome) in [
+                (
+                    "limited",
+                    Outcome::Failed {
+                        kind: Failure::RateLimit,
+                        message: "Garmin rejected the activity download (HTTP 429)".into(),
+                    },
+                ),
+                ("cancelled", Outcome::Cancelled),
+                ("complete", Outcome::Complete { unavailable: 0 }),
+            ] {
+                view.state_mut().sync.state.last_success =
+                    matches!(outcome, Outcome::Complete { .. }).then(|| {
+                        garmin_model::value::Timestamp::from_jiff(
+                            "2026-11-10T12:00:00Z".parse().expect("fixture timestamp"),
+                        )
+                    });
+                view.state_mut().sync.state.outcome = outcome;
+                view.run();
+                view.render()?
+                    .save(out.join(format!("{page}-{theme_name}-{name}.png")))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[test]
