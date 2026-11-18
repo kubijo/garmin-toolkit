@@ -7,7 +7,8 @@ limit is not automatically scheduled work.
 
 ## Local work
 
-- Qualify [Garmin Connect file fidelity, coverage and connection lifecycle](garmin-connect-import.md).
+- Finish [Garmin Connect qualification](garmin-connect-import.md#qualification): compare downloaded FIT bytes with
+  manual original exports and verify live credential expiry/revocation.
 
 ## Hardware and owner access
 
