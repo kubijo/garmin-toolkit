@@ -566,7 +566,7 @@ impl App {
                         );
                         PageAction::Routes
                     }
-                    Page::Activities => PageAction::Activities(show_activities(
+                    Page::Activities => show_activities(
                         ui,
                         &self.intl,
                         current_profile,
@@ -574,7 +574,7 @@ impl App {
                         self.selected_activity,
                         self.activity_detail.as_deref(),
                         &mut self.activity_workspace,
-                    )),
+                    ),
                     Page::Backup => PageAction::Backup(backup::show(
                         ui,
                         &self.intl,
@@ -753,15 +753,15 @@ impl App {
                 self.load_selected_activity(profiles);
             }
             PageAction::Activities(Some(activity::Action::Export)) => {
-                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index))
-                    && let Some(activity) = profile.activities.get(self.selected_activity)
-                {
-                    spawn_activity_export(
+                self.export_selected_activity(profiles);
+            }
+            PageAction::ImportActivityPackage => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
+                    spawn_activity_package_import(
                         Rc::clone(&self.shared),
                         self.context.clone(),
                         profile.user.id(),
-                        activity.id,
-                        format_message!(&self.intl, default_message: "Could not export activity"),
+                        &self.intl,
                     );
                 }
             }
@@ -1138,6 +1138,20 @@ impl App {
             user_id,
             format_message!(&self.intl, default_message: "Could not open profile picture"),
         );
+    }
+
+    fn export_selected_activity(&self, profiles: &[ProfileSnapshot]) {
+        if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index))
+            && let Some(activity) = profile.activities.get(self.selected_activity)
+        {
+            spawn_activity_export(
+                Rc::clone(&self.shared),
+                self.context.clone(),
+                profile.user.id(),
+                activity.id,
+                format_message!(&self.intl, default_message: "Could not export activity"),
+            );
+        }
     }
 
     fn load_selected_activity(&self, profiles: &[ProfileSnapshot]) {
@@ -1785,6 +1799,7 @@ enum PageAction {
     Maps(Option<(uuid::Uuid, garmin_service_api::maps::Command)>),
     Backup(Option<garmin_ui::backup::Action>),
     Activities(Option<activity::Action>),
+    ImportActivityPackage,
     Settings(Option<profile_settings::Action>),
     Device {
         key: String,
@@ -1842,7 +1857,7 @@ fn show_activities(
     selected: usize,
     detail: Option<&ActivityDetailSnapshot>,
     workspace: &mut activity::Workspace,
-) -> Option<activity::Action> {
+) -> PageAction {
     let items = presentations
         .iter()
         .map(activity::Presentation::item_props)
@@ -1858,6 +1873,7 @@ fn show_activities(
     let no_activities = format_message!(intl, default_message: "No activities yet");
     let select_activity = format_message!(intl, default_message: "Select an activity");
     let mut export = false;
+    let mut import = false;
     let action = workspace.show_with_actions(
         ui,
         intl,
@@ -1873,9 +1889,25 @@ fn show_activities(
             empty_detail: &select_activity,
             no_route: &no_route,
         },
-        |ui| export = !items.is_empty() && activity::export_button(ui, intl),
+        |ui| {
+            export = !items.is_empty() && activity::export_button(ui, intl);
+            import = garmin_ui::button::Props {
+                label: &format_message!(intl, default_message: "Import activity package"),
+                icon: Some(garmin_ui::icons::UPLOAD_SIMPLE),
+                kind: garmin_ui::button::Kind::Tertiary,
+                size: garmin_ui::Size::Small,
+                width: garmin_ui::button::Width::Fit,
+                enabled: true,
+            }
+            .show(ui)
+            .clicked();
+        },
     );
-    action.or(export.then_some(activity::Action::Export))
+    if import {
+        PageAction::ImportActivityPackage
+    } else {
+        PageAction::Activities(action.or(export.then_some(activity::Action::Export)))
+    }
 }
 
 fn show_profile_settings(
@@ -1981,6 +2013,7 @@ struct State {
     profiles_loaded: bool,
     activity_detail: Option<Rc<ActivityDetailSnapshot>>,
     requested_activity: Option<garmin_model::observation::ObservationId>,
+    activity_package_importing: bool,
     preferences_saving: bool,
     garmin_connect_checking: Option<UserId>,
     connect_activities:
@@ -3058,6 +3091,7 @@ fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     state.file_requests.catalog.invalidate();
     state.reconciling_fit_import = None;
     state.connection_generation = state.connection_generation.wrapping_add(1);
+    state.activity_package_importing = false;
     if state.profiles_loaded && state.disconnected_since.is_none() {
         state.disconnected_since = Some(web_time::Instant::now());
     }
@@ -3713,6 +3747,86 @@ fn spawn_update_preferences(
                 }
                 state.notice = Some(Notice::error(failure, error));
             }
+        }
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+fn spawn_activity_package_import(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    user_id: UserId,
+    intl: &garmin_i18n::Intl,
+) {
+    let (client, generation) = {
+        let mut state = shared.borrow_mut();
+        let Some(client) = state
+            .client
+            .clone()
+            .filter(|_| !state.activity_package_importing)
+        else {
+            return;
+        };
+        state.activity_package_importing = true;
+        (client, state.connection_generation)
+    };
+    let failure = format_message!(intl, default_message: "Could not import activity package");
+    let imported = format_message!(intl, default_message: "Activity package imported");
+    let duplicate = format_message!(intl, default_message: "Activity package already imported");
+    spawn_local(async move {
+        let result = async {
+            let Some(file) = rfd::AsyncFileDialog::new()
+                .add_filter("Toolkit ZIP", &["zip"])
+                .pick_file()
+                .await
+            else {
+                return Ok(None);
+            };
+            if shared.borrow().connection_generation != generation {
+                return Ok(None);
+            }
+            let size = browser_file_size(file.inner())
+                .filter(|size| *size <= MAX_DEVICE_BROWSER_TRANSFER_BYTES)
+                .ok_or_else(|| {
+                    "The activity package exceeds the 512 MiB browser limit".to_owned()
+                })?;
+            let (sender, receiver) =
+                remoc::rch::io::sized::<remoc::codec::Default>(size.as_bytes());
+            let rpc = async {
+                client
+                    .import_activity_package(user_id, size, receiver)
+                    .await
+                    .map_err(ConnectError::call)
+                    .and_then(|result| result.map_err(ConnectError::domain))
+                    .map_err(|error| error.to_string())
+            };
+            let (count, ()) = future::try_join(
+                rpc,
+                stream_browser_upload(file.inner().clone(), size, sender),
+            )
+            .await?;
+            Ok::<_, String>(Some(count))
+        }
+        .await;
+        let profiles = if matches!(result, Ok(Some(_)) | Err(_)) {
+            client.profiles().await.ok().and_then(Result::ok)
+        } else {
+            None
+        };
+        let mut state = shared.borrow_mut();
+        if state.connection_generation != generation {
+            return;
+        }
+        state.activity_package_importing = false;
+        if let Some(profiles) = profiles {
+            state.profiles = Rc::new(profiles);
+        }
+        match result {
+            Ok(Some(0)) => state.notice = Some(Notice::information(duplicate)),
+            Ok(Some(_)) => state.notice = Some(Notice::success(imported)),
+            Err(error) => state.notice = Some(Notice::error(failure, error)),
+            Ok(None) => {}
         }
         drop(state);
         context.request_repaint();

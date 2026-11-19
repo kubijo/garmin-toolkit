@@ -17,14 +17,16 @@ use garmin_model::{
         ActivityDuration, ActivityMetrics, ActivitySport, ActivityTotals, Cadence, Distance,
         Energy, HeartRate, Power, Speed, Temperature, TimeRange, TimerState,
     },
-    artifact::ByteCount,
+    artifact::{AcquisitionOperationId, ArtifactDigest, ByteCount, SourceIdentity},
+    identity::{Source, SourceId},
     observation::ObservationId,
     route::{Coordinate, Elevation, Latitude, Longitude},
+    value::Timestamp,
 };
 use garmin_storage::ActivityExport;
 use serde::{Deserialize, Serialize};
 
-use crate::{Application, UserContext};
+use crate::{Application, FitImportRequest, FitImportResult, ImportDisposition, UserContext};
 
 mod provenance;
 mod read;
@@ -56,6 +58,71 @@ pub enum Error {
 }
 
 impl Application {
+    /// Validates a Toolkit ZIP and imports its original FIT files into one profile.
+    ///
+    /// # Errors
+    /// Returns validation or import failures.
+    /// Retrying a partially imported package skips committed originals.
+    pub async fn import_activity_package(
+        &self,
+        user: UserContext,
+        archive: &Path,
+    ) -> Result<usize, Error> {
+        let package = read(std::fs::File::open(archive)?)?;
+        let originals = package
+            .originals
+            .into_values()
+            .map(|bytes| {
+                let digest = ArtifactDigest::from_bytes(&bytes);
+                (digest.to_string(), bytes)
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for bytes in originals.values() {
+            garmin_fit::normalize_activities(bytes)
+                .map_err(|error| Error::Invalid(error.to_string()))?;
+        }
+        let namespace = uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_URL,
+            format!("garmin-toolkit/activity-package/{}", user.user_id()).as_bytes(),
+        );
+        let source = Source::from_parts(
+            SourceId::from_u128(namespace.as_u128()),
+            user.user_id(),
+            "Toolkit activity package".parse().map_err(
+                |error: garmin_model::identity::Error| Error::Invalid(error.to_string()),
+            )?,
+            None,
+        );
+        let mut imported = 0;
+        for (digest, bytes) in originals {
+            let identity = SourceIdentity::from_string(format!("originals/{digest}.fit"))
+                .map_err(|error| Error::Invalid(error.to_string()))?;
+            let operation = uuid::Uuid::new_v5(&namespace, digest.as_bytes());
+            let result = self
+                .import_fit(FitImportRequest::from_parts(
+                    user,
+                    &source,
+                    identity,
+                    AcquisitionOperationId::from_u128(operation.as_u128()),
+                    Timestamp::from_jiff(jiff::Timestamp::now()),
+                    &bytes,
+                ))
+                .await
+                .map_err(|error| Error::Invalid(error.to_string()))?;
+            match result {
+                FitImportResult::Imported {
+                    observations,
+                    disposition: ImportDisposition::Created,
+                } => imported += observations.len(),
+                FitImportResult::Imported { .. } => {}
+                FitImportResult::Rejected { failure, .. } => {
+                    return Err(Error::Invalid(failure.to_string()));
+                }
+            }
+        }
+        Ok(imported)
+    }
+
     /// Exports one owned activity and associated recordings into a new ZIP Data Package.
     ///
     /// Returns `None` for an absent activity or another profile's activity.

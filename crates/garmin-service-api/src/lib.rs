@@ -384,7 +384,7 @@ pub enum InspectionState {
 )]
 mod rpc {
     use super::{
-        ActivityDetailSnapshot, AvatarUpload, DeploymentMode, DeviceBrowserRequest,
+        ActivityDetailSnapshot, AvatarUpload, ByteCount, DeploymentMode, DeviceBrowserRequest,
         DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogSnapshot, DeviceFitImportOutcome,
         DeviceFitImportPlan, DeviceFitImportStatus, DeviceSnapshot, DownloadTicket,
         ProfileAvatarSnapshot, ProfileSnapshot,
@@ -578,6 +578,12 @@ mod rpc {
             user_id: UserId,
             observation_id: ObservationId,
         ) -> Result<Result<DownloadTicket, String>, rtc::CallError>;
+        async fn import_activity_package(
+            &self,
+            user_id: UserId,
+            size: ByteCount,
+            contents: rch::io::Receiver,
+        ) -> Result<Result<usize, String>, rtc::CallError>;
     }
 }
 

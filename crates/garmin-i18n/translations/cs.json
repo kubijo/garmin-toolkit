@@ -279,6 +279,10 @@
     "source": "Light",
     "translation": "Světlý"
   },
+  "3ibkS5qT0V": {
+    "source": "Drop FIT files, Toolkit ZIPs, or folders here",
+    "translation": "Přetáhněte sem soubory FIT, balíčky ZIP z Toolkit nebo složky"
+  },
   "3lYUarFbNp": {
     "source": "Review this partial Course upload before deleting it.",
     "translation": "Před smazáním zkontrolujte tento neúplný přenos trasy."
@@ -1110,6 +1114,10 @@
     "source": "select",
     "translation": "vybrat"
   },
+  "J6Qi3OPlMm": {
+    "source": "Activity package already imported",
+    "translation": "Balíček aktivit už byl importován"
+  },
   "JE2YVbgaBx": {
     "source": "Every",
     "translation": "Opakovat po"
@@ -1225,10 +1233,6 @@
   "KqTQL532Pk": {
     "source": "Send {file} to Garmin:",
     "translation": "Odeslat {file} Garminu:"
-  },
-  "KsSM9j0UnR": {
-    "source": "Import FIT activities",
-    "translation": "Import aktivit FIT"
   },
   "L9pY09lqmU": {
     "source": "Ascent",
@@ -1402,6 +1406,10 @@
     "source": "{used} used · {free} free · {total} total",
     "translation": "Využito {used} · volno {free} · celkem {total}"
   },
+  "OpJfBPEAEe": {
+    "source": "Activity package imported",
+    "translation": "Balíček aktivit byl importován"
+  },
   "OvzONl52rs": {
     "source": "Off",
     "translation": "Vypnuto"
@@ -1518,6 +1526,10 @@
     "source": "This device contains an interrupted transaction. Resolve it before making more changes.",
     "translation": "Toto zařízení obsahuje přerušenou transakci. Před dalšími změnami ji vyřešte."
   },
+  "RHQxKQ/lIo": {
+    "source": "Import activity package",
+    "translation": "Importovat balíček aktivit"
+  },
   "RRSG+MUOZX": {
     "source": "Could not transfer selected items",
     "translation": "Vybrané položky se nepodařilo přenést"
@@ -1610,6 +1622,10 @@
     "source": "Downgrade",
     "translation": "Vrátit na starší verzi"
   },
+  "SgE+xd6QLv": {
+    "source": "Could not import activity package",
+    "translation": "Balíček aktivit se nepodařilo importovat"
+  },
   "Sjo1P44FYy": {
     "source": "Custom",
     "translation": "Vlastní"
@@ -1661,10 +1677,6 @@
   "UDsuGHMCLL": {
     "source": "Personal API key saved",
     "translation": "Klíč Personal API je uložen"
-  },
-  "UHN1MSUDa5": {
-    "source": "Drop FIT files or folders here",
-    "translation": "Přetáhněte sem soubory FIT nebo složky"
   },
   "UIVqKumcgJ": {
     "source": "Recover",
@@ -2517,6 +2529,10 @@
   "m4vqJl0/FT": {
     "source": "Files",
     "translation": "Soubory"
+  },
+  "m6heoimoTE": {
+    "source": "Import activities",
+    "translation": "Importovat aktivity"
   },
   "m9Q7Rf6j4B": {
     "source": "Download complete",

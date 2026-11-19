@@ -57,6 +57,11 @@ extracting archive paths, or fetching URLs. It checks resource integrity, schema
 ranges, and provenance coverage. Reads are limited to 4,096 members, 1 GiB of uncompressed data, and a 4 MiB descriptor.
 This reader supports the Toolkit activity profile rather than arbitrary Data Packages.
 
+Desktop import and the Home Assistant activity library can open a Toolkit ZIP. The importer validates the entire archive
+and checks that every original FIT can be normalized before importing. It rebuilds activity measurements from the FIT
+bytes under the destination profile. Repeated package imports use the original's digest to avoid creating another
+observation for the same file.
+
 The CLI operates on an exclusively locked, stopped deployment:
 
 ```bash

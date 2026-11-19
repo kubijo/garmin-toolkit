@@ -1357,7 +1357,9 @@ impl Desktop {
             return;
         };
         let paths = match action {
-            file_import::Action::Files => dialog.add_filter("FIT activity", &["fit"]).pick_files(),
+            file_import::Action::Files => dialog
+                .add_filter("FIT and Toolkit ZIP", &["fit", "zip"])
+                .pick_files(),
             file_import::Action::Folder => dialog.pick_folder().map(|path| vec![path]),
         };
         if let Some(paths) = paths {
@@ -2618,10 +2620,10 @@ impl ImportCopy {
         let description = if drop_active {
             format_message!(intl, default_message: "Release to import these files")
         } else {
-            format_message!(intl, default_message: "Drop FIT files or folders here")
+            format_message!(intl, default_message: "Drop FIT files, Toolkit ZIPs, or folders here")
         };
         Self {
-            title: format_message!(intl, default_message: "Import FIT activities"),
+            title: format_message!(intl, default_message: "Import activities"),
             description,
             files: format_message!(intl, default_message: "Choose files"),
             folder: format_message!(intl, default_message: "Choose a folder"),

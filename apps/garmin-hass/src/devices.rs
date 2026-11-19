@@ -1,7 +1,7 @@
 use garmin_device::storage::DeviceWrite;
 use garmin_model::artifact::NonZeroByteRate;
 use garmin_model::{
-    artifact::{AcquisitionOperationId, ArtifactDigest, SourceIdentity},
+    artifact::{AcquisitionOperationId, ArtifactDigest, ByteCount, SourceIdentity},
     device::{InspectionSection, ProfileMarkerInspection},
     identity::{DisplayName, Source as ProfileSource, SourceId, UserId},
     observation::ObservationId,
@@ -222,6 +222,7 @@ pub(super) struct Host {
     snapshots: Arc<rch::watch::Sender<Vec<DeviceSnapshot>>>,
     downloads: crate::downloads::Downloads,
     activity_export_gate: Arc<tokio::sync::Mutex<()>>,
+    activity_package_import_gate: Arc<tokio::sync::Mutex<()>>,
     refresh_gate: Arc<tokio::sync::Mutex<()>>,
     deployment: Arc<Deployment>,
     operations: Arc<SnapshotOperations>,
@@ -284,6 +285,7 @@ impl Host {
             snapshots: Arc::new(snapshots),
             downloads: crate::downloads::Downloads::default(),
             activity_export_gate: Arc::default(),
+            activity_package_import_gate: Arc::default(),
             refresh_gate: Arc::new(tokio::sync::Mutex::new(())),
             epoch,
             deployment,
@@ -467,6 +469,38 @@ impl ApplicationService for Host {
                 file,
                 (staging, permit),
             ))
+        }
+        .await;
+        Ok(result)
+    }
+
+    async fn import_activity_package(
+        &self,
+        user_id: UserId,
+        size: ByteCount,
+        contents: rch::io::Receiver,
+    ) -> Result<Result<usize, String>, rtc::CallError> {
+        let Ok(permit) = Arc::clone(&self.activity_package_import_gate).try_lock_owned() else {
+            return Ok(Err(
+                "An activity package import is already in progress".to_owned()
+            ));
+        };
+        let result = async {
+            let path = receive_browser_upload(size, contents).await?;
+            let application = self
+                .deployment
+                .application_owned(self.epoch)
+                .await
+                .map_err(|error| error.to_string())?;
+            let runtime = tokio::runtime::Handle::current();
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                runtime
+                    .block_on(application.import_activity_package(UserContext::new(user_id), &path))
+                    .map_err(|error| error.to_string())
+            })
+            .await
+            .map_err(|error| error.to_string())?
         }
         .await;
         Ok(result)
@@ -807,7 +841,7 @@ impl ApplicationService for Host {
             Ok(guard) => guard,
             Err(error) => return Ok(Err(error.to_owned())),
         };
-        let result = match receive_browser_upload(&request, contents).await {
+        let result = match receive_browser_upload(request.size, contents).await {
             Ok(contents) => source_upload(Arc::clone(&self.source), request, contents, guard).await,
             Err(error) => Err(error),
         };
@@ -1478,14 +1512,14 @@ async fn read_device_browser_file(
 }
 
 async fn receive_browser_upload(
-    request: &DeviceBrowserUpload,
+    size: ByteCount,
     mut contents: rch::io::Receiver,
 ) -> Result<tempfile::TempPath, String> {
-    if request.size > garmin_device::MAX_BROWSER_TRANSFER_BYTES {
-        return Err("the device upload exceeds the 512 MiB browser limit".to_owned());
+    if size > garmin_device::MAX_BROWSER_TRANSFER_BYTES {
+        return Err("the upload exceeds the 512 MiB browser limit".to_owned());
     }
-    if contents.size() != Some(request.size.as_bytes()) {
-        return Err("the device upload stream size does not match its request".to_owned());
+    if contents.size() != Some(size.as_bytes()) {
+        return Err("the upload stream size does not match its request".to_owned());
     }
     let temporary = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
     let mut destination =
@@ -1501,10 +1535,10 @@ async fn receive_browser_upload(
         .sync_all()
         .await
         .map_err(|error| error.to_string())?;
-    if copied != request.size.as_bytes() {
+    if copied != size.as_bytes() {
         return Err(format!(
-            "the device upload ended after {copied} bytes; expected {}",
-            request.size.as_bytes()
+            "the upload ended after {copied} bytes; expected {}",
+            size.as_bytes()
         ));
     }
     Ok(temporary.into_temp_path())
@@ -1831,6 +1865,7 @@ mod tests {
     };
     use garmin_fit::fixture;
     use garmin_model::artifact::ByteCount;
+    use garmin_model::identity::UserId;
     use garmin_progress::ProgressReporter;
     use garmin_service_api::{
         ApplicationService as _, ApplicationServiceClient, ApplicationServiceServerShared,
@@ -2487,18 +2522,34 @@ mod tests {
         let bytes = axum::body::to_bytes(download.response().into_body(), usize::MAX)
             .await
             .unwrap();
-        let package = garmin_services::activity_export::read(std::io::Cursor::new(bytes)).unwrap();
+        let package = garmin_services::activity_export::read(std::io::Cursor::new(&bytes)).unwrap();
         assert_eq!(package.selected, id);
         assert_eq!(
             package.originals.into_values().collect::<Vec<_>>(),
             [original]
         );
+        assert_eq!(upload_activity_package(&host, other.id(), &bytes).await, 1);
+        assert_eq!(upload_activity_package(&host, other.id(), &bytes).await, 0);
         assert!(
             host.prepare_activity_export(user.id(), id)
                 .await
                 .unwrap()
                 .is_ok()
         );
+    }
+
+    async fn upload_activity_package(host: &Host, user: UserId, bytes: &[u8]) -> usize {
+        use tokio::io::AsyncWriteExt as _;
+
+        let size = ByteCount::from_bytes(bytes.len() as u64);
+        let (mut sender, receiver) =
+            remoc::rch::io::sized::<remoc::codec::Default>(size.as_bytes());
+        let send = async {
+            sender.write_all(bytes).await.unwrap();
+            sender.shutdown().await.unwrap();
+        };
+        let (result, ()) = tokio::join!(host.import_activity_package(user, size, receiver), send);
+        result.unwrap().unwrap()
     }
 
     #[tokio::test]

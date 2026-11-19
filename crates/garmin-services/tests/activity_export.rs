@@ -277,6 +277,41 @@ fn corrupt_package(
 }
 
 #[test]
+fn toolkit_package_import_round_trips_between_deployments() -> TestResult {
+    block_on(async {
+        let fixture = export_fixture().await?;
+        let archive = fixture.root.path().join("activity.zip");
+        fixture
+            .application
+            .export_activity(fixture.owner, fixture.observation, &archive)
+            .await?
+            .ok_or("source activity is missing")?;
+        let target =
+            Application::new(Storage::open(fixture.root.path().join("target.sqlite3")).await?);
+        let owner = UserContext::new(target.create_profile("Target owner".parse()?).await?.id());
+        assert_eq!(target.import_activity_package(owner, &archive).await?, 1);
+        assert_eq!(target.import_activity_package(owner, &archive).await?, 0);
+        let imports = target.activities(owner).await?;
+        assert_eq!(imports.len(), 1);
+        assert_eq!(
+            imports[0].summary(),
+            fixture.application.activities(fixture.owner).await?[0].summary()
+        );
+        let output = fixture.root.path().join("target-export.zip");
+        target
+            .export_activity(owner, imports[0].observation_id(), &output)
+            .await?
+            .ok_or("imported activity is missing")?;
+        let package = garmin_services::activity_export::read(std::fs::File::open(output)?)?;
+        assert_eq!(
+            package.originals.into_values().collect::<Vec<_>>(),
+            [fixture.original]
+        );
+        Ok(())
+    })
+}
+
+#[test]
 fn limited_export_discards_an_oversized_archive() -> TestResult {
     block_on(async {
         let fixture = export_fixture().await?;

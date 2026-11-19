@@ -1174,6 +1174,15 @@ fn read_import(
     source: &Source,
     path: &Path,
 ) -> Result<ImportOutcome, String> {
+    if is_activity_package(path) {
+        let count = block_on(application.import_activity_package(user, path))
+            .map_err(|error| error.to_string())?;
+        return Ok(if count == 0 {
+            ImportOutcome::Duplicate
+        } else {
+            ImportOutcome::Imported(count)
+        });
+    }
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
     let path = path
         .to_str()
@@ -1369,12 +1378,12 @@ fn candidates(paths: Vec<PathBuf>, abort: &CancellationToken) -> Option<Vec<Cand
                     reason: "directory contains no FIT files".to_owned(),
                 });
             }
-        } else if is_fit(&path) {
+        } else if is_fit(&path) || is_activity_package(&path) {
             push_file(&mut candidates, &mut seen, path);
         } else {
             candidates.push(Candidate::Failed {
                 path,
-                reason: "not a FIT file or directory".to_owned(),
+                reason: "not a FIT file, activity package, or directory".to_owned(),
             });
         }
     }
@@ -1392,6 +1401,12 @@ fn is_fit(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("fit"))
+}
+
+fn is_activity_package(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
 }
 
 enum Candidate {
