@@ -82,7 +82,7 @@
     };
 
     nix-tools = {
-      url = "github:kubijo/nix-tools/v0.11.0";
+      url = "github:kubijo/nix-tools/v0.12.0";
       inputs = {
         nixpkgs-pinned.follows = "nixpkgs";
         pyproject-nix.follows = "pyproject-nix";
