@@ -6,9 +6,12 @@ use std::time::Instant;
 use objc2::rc::Retained;
 use objc2::{declare_class, msg_send_id, mutability, ClassType, DeclaredClass};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSRunningApplication,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
+    NSApplicationDelegateReply, NSRunningApplication,
 };
-use objc2_foundation::{MainThreadMarker, NSNotification, NSObject, NSObjectProtocol};
+use objc2_foundation::{
+    MainThreadMarker, NSArray, NSNotification, NSObject, NSObjectProtocol, NSString,
+};
 
 use super::event_handler::EventHandler;
 use super::event_loop::{notify_windows_of_exit, stop_app_immediately, ActiveEventLoop, PanicInfo};
@@ -61,6 +64,23 @@ declare_class!(
     unsafe impl NSObjectProtocol for ApplicationDelegate {}
 
     unsafe impl NSApplicationDelegate for ApplicationDelegate {
+        #[method(application:openFile:)]
+        fn open_file(&self, _application: &NSApplication, filename: &NSString) -> bool {
+            crate::platform::macos::dispatch_open_files(vec![filename.to_string().into()])
+        }
+
+        #[method(application:openFiles:)]
+        fn open_files(&self, application: &NSApplication, filenames: &NSArray<NSString>) {
+            let files = filenames.iter().map(|filename| filename.to_string().into()).collect();
+            let reply = if crate::platform::macos::dispatch_open_files(files) {
+                NSApplicationDelegateReply::Success
+            } else {
+                NSApplicationDelegateReply::Failure
+            };
+            // SAFETY: AppKit delivers this delegate callback on the main thread.
+            unsafe { application.replyToOpenOrPrint(reply) };
+        }
+
         #[method(applicationDidFinishLaunching:)]
         fn app_did_finish_launching(&self, notification: &NSNotification) {
             self.did_finish_launching(notification)

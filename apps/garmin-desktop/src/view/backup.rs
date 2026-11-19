@@ -86,6 +86,8 @@ impl Desktop {
         self.selected_activity = 0;
         self.activity_detail = None;
         self.activity_workspace = activity::Workspace::new(&self.map_runtime);
+        self.package_review = PackageReviewState::Idle;
+        self.package_queue.clear();
         self.create_profile = None;
         self.avatar_editor = None;
         self.device_browser = None;

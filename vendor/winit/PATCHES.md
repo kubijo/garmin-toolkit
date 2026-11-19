@@ -38,3 +38,8 @@ preserving outstanding callbacks and ordinary redraw throttling. It wakes the ev
 callers must pace requests. X11 is a no-op. The desktop adapter's lifetime and verification limits are documented in
 `docs/architecture/developer-tools.md` at the repository root. The `redraw_tests` unit test runs separately from workspace
 QA.
+
+## Finder file-open events
+
+The macOS delegate passes Finder file paths to a registered handler and reports whether it accepted them.
+Remove the patch when winit exposes an equivalent file-open handler.

@@ -1682,6 +1682,10 @@
     "source": "↑/↓ or Mouse",
     "translation": "↑/↓ nebo myš"
   },
+  "TWkrXQYM6g": {
+    "source": "Files are ready to import. Create or select a profile to continue.",
+    "translation": "Soubory jsou připravené k importu. Pokračujte vytvořením nebo výběrem profilu."
+  },
   "U78NhEnOlT": {
     "source": "Complete",
     "translation": "Dokončeno"
@@ -2290,10 +2294,6 @@
     "source": "action",
     "translation": "akce"
   },
-  "g9sKRAUa1E": {
-    "source": "View in library",
-    "translation": "Zobrazit v knihovně"
-  },
   "gBPBcLK3+F": {
     "source": "{bytes} in {seconds}s · {rate}",
     "translation": "{bytes} za {seconds} s · {rate}"
@@ -2325,10 +2325,6 @@
   "goGXET1Y4/": {
     "source": "Pairing",
     "translation": "Spárování"
-  },
-  "hDjHqewg1q": {
-    "source": "Will be imported",
-    "translation": "Bude importováno"
   },
   "hRcDjG7HM7": {
     "source": "Back to device",

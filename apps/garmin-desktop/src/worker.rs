@@ -22,6 +22,7 @@ use garmin_model::{
     value::Timestamp,
 };
 use garmin_progress::{CancellationToken, ProgressReporter};
+use garmin_services::activity_export::ActivityImportPreview;
 use garmin_services::deployment::Deployment;
 use garmin_services::{
     Application, AvatarImportRequest, FitImportRequest, FitImportResult, ImportDisposition,
@@ -180,17 +181,14 @@ impl Worker {
         self.send(Command::Import { user, paths });
     }
 
-    pub fn preview_activity_package(&self, user: UserContext, path: PathBuf) {
-        self.send(Command::ActivityPackage(PackageCommand::Preview(
-            user, path,
-        )));
+    pub fn preview_activity_package(&self, path: PathBuf) {
+        self.send(Command::ActivityPackage(PackageCommand::Preview(path)));
     }
 
-    pub fn confirm_activity_package(
-        &self,
-        plan: garmin_services::activity_export::PreparedActivityPackage,
-    ) {
-        self.send(Command::ActivityPackage(PackageCommand::Confirm(plan)));
+    pub fn confirm_activity_package(&self, user: UserContext, preview: ActivityImportPreview) {
+        self.send(Command::ActivityPackage(PackageCommand::Confirm(
+            user, preview,
+        )));
     }
 
     pub fn load_activity(&self, user: UserContext, observation_id: ObservationId) {
@@ -391,10 +389,8 @@ pub enum Event {
     },
     ImportItem(ImportItem),
     ImportFinished(Result<Vec<ProfileData>, String>),
-    ActivityPackagePreview(
-        Result<garmin_services::activity_export::PreparedActivityPackage, String>,
-    ),
-    ActivityPackageImported(Result<Vec<ProfileData>, String>),
+    ActivityPackagePreview(Result<ActivityImportPreview, String>),
+    ActivityPackageImported(Result<(usize, Vec<ProfileData>), String>),
     ActivityLoaded {
         observation_id: ObservationId,
         result: Result<Option<Box<garmin_services::ActivityDetails>>, String>,
@@ -674,25 +670,31 @@ fn update_profile(
 }
 
 enum PackageCommand {
-    Preview(UserContext, PathBuf),
-    Confirm(garmin_services::activity_export::PreparedActivityPackage),
+    Preview(PathBuf),
+    Confirm(UserContext, ActivityImportPreview),
 }
 
 fn activity_package_event(application: &Application, command: PackageCommand) -> Event {
     match command {
-        PackageCommand::Preview(user, path) => Event::ActivityPackagePreview(
+        PackageCommand::Preview(path) => Event::ActivityPackagePreview(
             if is_fit(&path) {
-                block_on(application.preview_activity_fit(user, &path))
+                ActivityImportPreview::from_fit(&path)
             } else {
-                block_on(application.preview_activity_package(user, &path))
+                ActivityImportPreview::from_package(&path)
             }
             .map_err(|error| error.to_string()),
         ),
-        PackageCommand::Confirm(plan) => Event::ActivityPackageImported(
-            block_on(application.confirm_activity_package(plan))
-                .map_err(|error| error.to_string())
-                .and_then(|_| block_on(load_profiles(application))),
-        ),
+        PackageCommand::Confirm(user, preview) => Event::ActivityPackageImported(block_on(async {
+            let plan = application
+                .prepare_activity_import(user, preview)
+                .await
+                .map_err(|error| error.to_string())?;
+            let imported = application
+                .confirm_activity_package(plan)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok((imported, load_profiles(application).await?))
+        })),
     }
 }
 

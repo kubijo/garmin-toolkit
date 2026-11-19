@@ -8,7 +8,7 @@ use garmin_model::{
     activity::{ActivitySport, ActivitySummary, HeartRate},
     identity::UnitSystem,
 };
-use garmin_service_api::ActivitySnapshot;
+use garmin_service_api::{ActivitySnapshot, DeviceFitPreviewActivity};
 
 use crate::{
     icons, path,
@@ -95,14 +95,15 @@ impl Presentation {
             .average_heart_rate()
             .map(HeartRate::into_beats_per_minute);
         let title = sport_title(sport, intl);
-        let subtitle = format_message!(
-            intl,
-            default_message: "{start} · {source}",
-            values: {
-                start: start_label,
-                source: source,
-            },
-        );
+        let subtitle = if source.is_empty() {
+            start_label
+        } else {
+            format_message!(
+                intl,
+                default_message: "{start} · {source}",
+                values: { start: start_label, source: source },
+            )
+        };
         let decimal = intl.decimal_formatter();
         let distance = totals
             .distance()
@@ -280,68 +281,98 @@ pub fn export_button(ui: &mut Ui, intl: &Intl) -> bool {
     response.clicked()
 }
 
-/// Reviews validated package contents before the host starts importing.
-#[must_use]
-pub fn package_review(
-    ui: &mut Ui,
-    intl: &Intl,
-    destination: &str,
-    units: UnitSystem,
-    activities: &[(ActivitySummary, bool)],
-) -> Option<crate::modal::Action> {
-    let title = format_message!(intl, default_message: "Review activity import");
-    let description = format_message!(intl, default_message: "Destination profile: {profile}", values: { profile: destination });
-    let cancel = format_message!(intl, default_message: "Cancel");
-    let count = activities.iter().filter(|(_, existing)| !existing).count();
-    let confirm = if count == 0 {
-        format_message!(intl, default_message: "View in library")
-    } else {
-        format_message!(intl, default_message: "{count, plural, one {Import # activity} other {Import # activities}}", values: { count: count as u64 })
-    };
-    crate::modal::show(
-        ui,
-        ui.id().with("activity-package-review"),
-        &crate::modal::Props {
-            title: &title,
-            description: Some(&description),
-            size: crate::modal::Size::Medium,
-            presentation: crate::modal::Presentation::Modal,
-            cancel_label: Some(&cancel),
-            cancel_disabled: None,
-            backdrop_closes: None,
-            primary: Some(crate::modal::Primary {
-                label: &confirm,
-                icon: Some(icons::UPLOAD_SIMPLE),
-                kind: crate::modal::PrimaryKind::Confirm,
-                enabled: true,
-            }),
-        },
-        |ui| {
-            egui::ScrollArea::vertical()
-                .max_height(320.0)
-                .show(ui, |ui| {
-                    for (summary, existing) in activities {
-                        let status = if *existing {
-                            format_message!(intl, default_message: "Already imported")
-                        } else {
-                            format_message!(intl, default_message: "Will be imported")
-                        };
-                        let presentation =
-                            Presentation::from_summary(*summary, &status, intl, units);
-                        ui.strong(&presentation.title);
-                        ui.label(&presentation.subtitle);
-                        ui.horizontal(|ui| {
-                            if let Some(distance) = &presentation.distance {
-                                ui.label(distance);
-                            }
-                            ui.label(&presentation.duration);
-                        });
-                        ui.add_space(8.0);
-                    }
-                });
-        },
-    )
-    .action
+/// Displays recorded activity details before the host starts importing.
+pub struct PackageReview {
+    workspace: Workspace,
+    selected: usize,
+}
+
+impl PackageReview {
+    #[must_use]
+    pub fn new(runtime: &map_runtime::MapRuntimeHandle) -> Self {
+        Self {
+            workspace: Workspace::new(runtime),
+            selected: 0,
+        }
+    }
+
+    #[must_use]
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        intl: &Intl,
+        destination: Option<&str>,
+        units: UnitSystem,
+        activities: &[&DeviceFitPreviewActivity],
+        today: jiff::civil::Date,
+    ) -> Option<crate::modal::Action> {
+        let title = format_message!(intl, default_message: "Review activity import");
+        let description = destination.map(|name| {
+        format_message!(intl, default_message: "Destination profile: {profile}", values: { profile: name })
+    });
+        let cancel = format_message!(intl, default_message: "Cancel");
+        let confirm = if destination.is_some() {
+            format_message!(intl, default_message: "{count, plural, one {Import # activity} other {Import # activities}}", values: { count: activities.len() as u64 })
+        } else {
+            format_message!(intl, default_message: "Choose a profile")
+        };
+        let presentations = activities
+            .iter()
+            .map(|activity| {
+                Presentation::from_summary(activity.summary, &activity.source, intl, units)
+            })
+            .collect::<Vec<_>>();
+        let items = presentations
+            .iter()
+            .map(Presentation::item_props)
+            .collect::<Vec<_>>();
+        let selected = activities.get(self.selected);
+        let recording_key = selected.map(|_| format!("package-review:{}", self.selected));
+        let empty = format_message!(intl, default_message: "No activities yet");
+        let select = format_message!(intl, default_message: "Select an activity");
+        let no_route = format_message!(intl, default_message: "No recorded route");
+        let output = crate::modal::show_compact(
+            ui,
+            ui.id().with("activity-package-review"),
+            &crate::modal::Props {
+                title: &title,
+                description: description.as_deref(),
+                size: crate::modal::Size::Large,
+                presentation: crate::modal::Presentation::Modal,
+                cancel_label: Some(&cancel),
+                cancel_disabled: None,
+                backdrop_closes: None,
+                primary: Some(crate::modal::Primary {
+                    label: &confirm,
+                    icon: Some(icons::UPLOAD_SIMPLE),
+                    kind: crate::modal::PrimaryKind::Confirm,
+                    enabled: !activities.is_empty(),
+                }),
+            },
+            |ui| {
+                self.workspace.show(
+                    ui,
+                    intl,
+                    &WorkspaceProps {
+                        today,
+                        items: &items,
+                        presentations: &presentations,
+                        selected: selected.map(|_| self.selected),
+                        recording: selected.map(|activity| &activity.recording),
+                        recording_key: recording_key.as_deref(),
+                        units,
+                        empty_list: &empty,
+                        empty_detail: &select,
+                        no_route: &no_route,
+                    },
+                )
+            },
+        );
+        if let Some(Action::Select(index)) = output.inner {
+            self.selected = index;
+        }
+        output.action
+    }
 }
 
 #[must_use]

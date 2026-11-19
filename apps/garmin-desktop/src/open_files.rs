@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
+#[derive(Clone)]
 pub(crate) struct Inbox(PathBuf);
 
 impl Inbox {
@@ -70,6 +71,78 @@ impl Inbox {
         }
         Ok(paths)
     }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn forward_from_bundle(inbox: Inbox) -> io::Result<bool> {
+    use std::time::{Duration, Instant};
+    use winit::{
+        application::ApplicationHandler,
+        event::WindowEvent,
+        event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+        platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS, set_open_files_handler},
+        window::WindowId,
+    };
+
+    struct Forwarding {
+        deadline: Instant,
+        result: Option<io::Result<()>>,
+    }
+
+    impl ApplicationHandler<io::Result<()>> for Forwarding {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(self.deadline));
+        }
+
+        fn user_event(&mut self, event_loop: &ActiveEventLoop, result: io::Result<()>) {
+            self.result = Some(result);
+            event_loop.exit();
+        }
+
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+
+        fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+            if Instant::now() >= self.deadline {
+                event_loop.exit();
+            }
+        }
+    }
+
+    let executable = std::env::current_exe()?;
+    if !executable
+        .ancestors()
+        .nth(3)
+        .is_some_and(|path| path.extension().is_some_and(|extension| extension == "app"))
+    {
+        return Ok(false);
+    }
+
+    // Finder delivers the pending document after AppKit starts, even when this
+    // process cannot acquire the deployment lock.
+    let event_loop = EventLoop::<io::Result<()>>::with_user_event()
+        .with_activation_policy(ActivationPolicy::Accessory)
+        .with_activate_ignoring_other_apps(false)
+        .build()
+        .map_err(io::Error::other)?;
+    let proxy = event_loop.create_proxy();
+    if !set_open_files_handler(move |files| {
+        let result = inbox.enqueue(files);
+        let accepted = result.is_ok();
+        let _ = proxy.send_event(result);
+        accepted
+    }) {
+        return Err(io::Error::other(
+            "Finder file-open handler is already installed",
+        ));
+    }
+    let mut forwarding = Forwarding {
+        deadline: Instant::now() + Duration::from_secs(2),
+        result: None,
+    };
+    event_loop
+        .run_app(&mut forwarding)
+        .map_err(io::Error::other)?;
+    forwarding.result.transpose().map(|result| result.is_some())
 }
 
 #[cfg(test)]

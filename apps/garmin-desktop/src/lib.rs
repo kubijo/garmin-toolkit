@@ -63,6 +63,13 @@ pub fn run_with_options(mut options: Options) -> Result<(), Error> {
         {
             return Ok(());
         }
+        #[cfg(target_os = "macos")]
+        Err(DataError::Io(error)) if error.kind() == std::io::ErrorKind::WouldBlock => {
+            if open_files::forward_from_bundle(opened)? {
+                return Ok(());
+            }
+            return Err(DataError::Io(error).into());
+        }
         Err(error) => return Err(error.into()),
     };
     let logs = garmin_logging::Store::open(data_root.join("logs"), "desktop")?;
@@ -93,6 +100,20 @@ pub fn run_with_options(mut options: Options) -> Result<(), Error> {
 
     let map_metrics = profiling.clone();
     let log_flush = logs.clone();
+    #[cfg(target_os = "macos")]
+    {
+        let inbox = opened.clone();
+        if !winit::platform::macos::set_open_files_handler(move |files| {
+            inbox
+                .enqueue(files)
+                .inspect_err(|error| tracing::warn!(%error, "Could not queue Finder files"))
+                .is_ok()
+        }) {
+            return Err(
+                std::io::Error::other("Finder file-open handler is already installed").into(),
+            );
+        }
+    }
     let window_result = eframe::run_native(
         mode::WINDOW_TITLE,
         eframe::NativeOptions {

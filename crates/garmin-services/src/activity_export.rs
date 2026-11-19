@@ -3,7 +3,7 @@
 use std::io;
 use std::{
     collections::BTreeSet,
-    io::{Seek, SeekFrom, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -14,8 +14,8 @@ use datapackage::{
 
 use garmin_model::{
     activity::{
-        ActivityDuration, ActivityMetrics, ActivitySport, ActivityTotals, Cadence, Distance,
-        Energy, HeartRate, Power, Speed, Temperature, TimeRange, TimerState,
+        ActivityDuration, ActivityMetrics, ActivitySport, ActivitySummary, ActivityTotals, Cadence,
+        Distance, Energy, HeartRate, Power, Speed, Temperature, TimeRange, TimerState,
     },
     artifact::{AcquisitionOperationId, ArtifactDigest, ByteCount, SourceIdentity},
     identity::{Source, SourceId},
@@ -23,15 +23,19 @@ use garmin_model::{
     route::{Coordinate, Elevation, Latitude, Longitude},
     value::Timestamp,
 };
+use garmin_service_api::DeviceFitPreviewActivity;
 use garmin_storage::ActivityExport;
 use serde::{Deserialize, Serialize};
 
+use crate::devices::fit_preview::activity_snapshot;
 use crate::{Application, FitImportRequest, FitImportResult, ImportDisposition, UserContext};
 
 mod provenance;
 mod read;
 pub use provenance::{ActivityExportProvenance, ExportTransformation};
 pub use read::{Package, Provenance as ParsedProvenance, read};
+
+const MAX_OPEN_FIT_BYTES: ByteCount = ByteCount::from_mebibytes(64);
 
 /// Counts of preserved observations and original FIT artifacts.
 #[derive(Debug, Eq, PartialEq)]
@@ -80,14 +84,8 @@ impl Application {
         user: UserContext,
         archive: &Path,
     ) -> Result<PreparedActivityPackage, Error> {
-        let package = read(std::fs::File::open(archive)?)?;
-        self.prepare_activity_originals(
-            user,
-            package.originals.into_values(),
-            "activity-package",
-            "Toolkit activity package",
-        )
-        .await
+        self.prepare_activity_import(user, ActivityImportPreview::from_package(archive)?)
+            .await
     }
 
     /// Previews a FIT recording handed off by a desktop launcher.
@@ -98,34 +96,29 @@ impl Application {
         user: UserContext,
         path: &Path,
     ) -> Result<PreparedActivityPackage, Error> {
-        self.prepare_activity_originals(
-            user,
-            [std::fs::read(path)?],
-            "open-fit",
-            "Opened FIT recording",
-        )
-        .await
+        self.prepare_activity_import(user, ActivityImportPreview::from_fit(path)?)
+            .await
     }
 
-    async fn prepare_activity_originals(
+    /// Checks the destination and binds the inspected originals to that profile.
+    ///
+    /// # Errors
+    /// Returns an error if the destination is missing or its import history cannot be read.
+    pub async fn prepare_activity_import(
         &self,
         user: UserContext,
-        files: impl IntoIterator<Item = Vec<u8>>,
-        namespace_name: &str,
-        label: &str,
+        preview: ActivityImportPreview,
     ) -> Result<PreparedActivityPackage, Error> {
         if self.storage.user(user.user_id()).await?.is_none() {
             return Err(Error::Invalid(
                 "The destination profile no longer exists".to_owned(),
             ));
         }
-        let originals = files
-            .into_iter()
-            .map(|bytes| {
-                let digest = ArtifactDigest::from_bytes(&bytes);
-                (digest.to_string(), bytes)
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
+        let ActivityImportPreview {
+            originals,
+            namespace_name,
+            label,
+        } = preview;
         let namespace = uuid::Uuid::new_v5(
             &uuid::Uuid::NAMESPACE_URL,
             format!("garmin-toolkit/{namespace_name}/{}", user.user_id()).as_bytes(),
@@ -141,26 +134,28 @@ impl Application {
             None,
         );
         let mut entries = Vec::with_capacity(originals.len());
-        for (digest, bytes) in originals {
+        for InspectedOriginal {
+            digest,
+            bytes,
+            activities,
+        } in originals
+        {
             let identity = SourceIdentity::from_string(format!("originals/{digest}.fit"))
                 .map_err(|error| Error::Invalid(error.to_string()))?;
             let operation = uuid::Uuid::new_v5(&namespace, digest.as_bytes());
             let operation = AcquisitionOperationId::from_u128(operation.as_u128());
-            let recorded = garmin_fit::normalize_activities(&bytes)
-                .map_err(|error| Error::Invalid(error.to_string()))?;
             let already_imported = self
                 .fit_import_completed(user, operation)
                 .await
                 .map_err(|error| Error::Invalid(error.to_string()))?;
-            let activities = recorded
-                .activities()
-                .map(garmin_model::activity::Activity::summary)
-                .collect();
             entries.push(PackageOriginal {
                 identity,
                 operation,
                 bytes,
-                activities,
+                activities: activities
+                    .into_iter()
+                    .map(|activity| activity.summary)
+                    .collect(),
                 already_imported,
             });
         }
@@ -268,6 +263,97 @@ impl Application {
             .persist_noclobber(destination)
             .map_err(|error| error.error)?;
         Ok(Some(report))
+    }
+}
+
+/// Inspected activity contents and the exact originals available for import.
+pub struct ActivityImportPreview {
+    originals: Vec<InspectedOriginal>,
+    namespace_name: &'static str,
+    label: &'static str,
+}
+
+struct InspectedOriginal {
+    digest: String,
+    bytes: Vec<u8>,
+    activities: Vec<DeviceFitPreviewActivity>,
+}
+
+impl ActivityImportPreview {
+    /// Reads and validates the originals from a Toolkit activity package.
+    ///
+    /// # Errors
+    /// Returns an error for an unreadable or invalid package.
+    pub fn from_package(path: &Path) -> Result<Self, Error> {
+        let package = read(std::fs::File::open(path)?)?;
+        Self::from_originals(
+            package.originals.into_values(),
+            "activity-package",
+            "Toolkit activity package",
+        )
+    }
+
+    /// Reads and validates a FIT recording.
+    ///
+    /// # Errors
+    /// Returns an error for an unreadable or invalid recording.
+    pub fn from_fit(path: &Path) -> Result<Self, Error> {
+        let metadata = std::fs::metadata(path)?;
+        if !metadata.is_file() {
+            return Err(Error::Invalid("Expected a regular FIT file".to_owned()));
+        }
+        let too_large = || Error::Invalid("FIT file exceeds the 64 MiB preview limit".to_owned());
+        if metadata.len() > MAX_OPEN_FIT_BYTES.as_bytes() {
+            return Err(too_large());
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)?
+            .take(MAX_OPEN_FIT_BYTES.as_bytes() + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > MAX_OPEN_FIT_BYTES.as_bytes() {
+            return Err(too_large());
+        }
+        Self::from_originals([bytes], "open-fit", "Opened FIT recording")
+    }
+
+    fn from_originals(
+        files: impl IntoIterator<Item = Vec<u8>>,
+        namespace_name: &'static str,
+        label: &'static str,
+    ) -> Result<Self, Error> {
+        let unique = files
+            .into_iter()
+            .map(|bytes| (ArtifactDigest::from_bytes(&bytes).to_string(), bytes))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut originals = Vec::with_capacity(unique.len());
+        for (digest, bytes) in unique {
+            let recorded = garmin_fit::normalize_activities(&bytes)
+                .map_err(|error| Error::Invalid(error.to_string()))?;
+            let activities = recorded
+                .normalized_activities()
+                .map(activity_snapshot)
+                .collect();
+            originals.push(InspectedOriginal {
+                digest,
+                bytes,
+                activities,
+            });
+        }
+        Ok(Self {
+            originals,
+            namespace_name,
+            label,
+        })
+    }
+
+    pub fn activities(&self) -> impl Iterator<Item = ActivitySummary> + '_ {
+        self.recordings().map(|activity| activity.summary)
+    }
+
+    pub fn recordings(&self) -> impl Iterator<Item = &DeviceFitPreviewActivity> + '_ {
+        self.originals
+            .iter()
+            .flat_map(|original| &original.activities)
     }
 }
 

@@ -83,6 +83,8 @@
 //! ```
 
 use std::os::raw::c_void;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -90,6 +92,24 @@ use serde::{Deserialize, Serialize};
 use crate::event_loop::{ActiveEventLoop, EventLoopBuilder};
 use crate::monitor::MonitorHandle;
 use crate::window::{Window, WindowAttributes};
+
+type OpenFilesHandler = dyn Fn(Vec<PathBuf>) -> bool + Send + Sync;
+static OPEN_FILES_HANDLER: OnceLock<Box<OpenFilesHandler>> = OnceLock::new();
+
+/// Registers a Finder file-open handler. Call before running the event loop.
+///
+/// Returns `false` if a handler is already registered. The handler returns `true` to accept the files.
+pub fn set_open_files_handler(
+    handler: impl Fn(Vec<PathBuf>) -> bool + Send + Sync + 'static,
+) -> bool {
+    OPEN_FILES_HANDLER.set(Box::new(handler)).is_ok()
+}
+
+pub(crate) fn dispatch_open_files(files: Vec<PathBuf>) -> bool {
+    OPEN_FILES_HANDLER
+        .get()
+        .is_some_and(|handler| handler(files))
+}
 
 /// Additional methods on [`Window`] that are specific to MacOS.
 pub trait WindowExtMacOS {

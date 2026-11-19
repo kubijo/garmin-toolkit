@@ -1,0 +1,7 @@
+version = 1
+
+[paths]
+"Applications/Garmin Toolkit.app/Contents/Info.plist" = { type = "file", min_size = 1 }
+"Applications/Garmin Toolkit.app/Contents/Resources/GarminToolkit.icns" = { type = "file", min_size = 1 }
+"Applications/Garmin Toolkit.app/Contents/MacOS/garmin-desktop" = { type = "file", mode_required = 0o100, min_size = 1 }
+"Applications/Garmin Toolkit.app/Contents/MacOS/garmin-gpx-worker" = { type = "file", mode_required = 0o100, min_size = 1 }

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>CFBundleDisplayName</key>
+    <string>Garmin Toolkit</string>
+    <key>CFBundleName</key>
+    <string>Garmin Toolkit</string>
+    <key>CFBundleIdentifier</key>
+    <string>io.kubijo.GarminToolkit</string>
+    <key>CFBundleExecutable</key>
+    <string>garmin-desktop</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>GarminToolkit.icns</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@version@</string>
+    <key>CFBundleVersion</key>
+    <string>@version@</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+      <dict>
+        <key>CFBundleTypeName</key>
+        <string>Garmin FIT recording</string>
+        <key>CFBundleTypeRole</key>
+        <string>Viewer</string>
+        <key>LSHandlerRank</key>
+        <string>Alternate</string>
+        <key>LSItemContentTypes</key>
+        <array>
+          <string>io.kubijo.garmin-toolkit.fit</string>
+        </array>
+      </dict>
+      <dict>
+        <key>CFBundleTypeName</key>
+        <string>Garmin Toolkit activity package</string>
+        <key>CFBundleTypeRole</key>
+        <string>Viewer</string>
+        <key>LSHandlerRank</key>
+        <string>Owner</string>
+        <key>LSItemContentTypes</key>
+        <array>
+          <string>io.kubijo.garmin-toolkit.activity</string>
+        </array>
+      </dict>
+    </array>
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+      <dict>
+        <key>UTTypeIdentifier</key>
+        <string>io.kubijo.garmin-toolkit.fit</string>
+        <key>UTTypeDescription</key>
+        <string>Garmin FIT recording</string>
+        <key>UTTypeConformsTo</key>
+        <array>
+          <string>public.data</string>
+        </array>
+        <key>UTTypeTagSpecification</key>
+        <dict>
+          <key>public.filename-extension</key>
+          <array>
+            <string>fit</string>
+          </array>
+          <key>public.mime-type</key>
+          <string>application/vnd.ant.fit</string>
+        </dict>
+      </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+      <dict>
+        <key>UTTypeIdentifier</key>
+        <string>io.kubijo.garmin-toolkit.activity</string>
+        <key>UTTypeDescription</key>
+        <string>Garmin Toolkit activity package</string>
+        <key>UTTypeConformsTo</key>
+        <array>
+          <string>public.zip-archive</string>
+        </array>
+        <key>UTTypeTagSpecification</key>
+        <dict>
+          <key>public.filename-extension</key>
+          <array>
+            <string>garmin-activity</string>
+          </array>
+          <key>public.mime-type</key>
+          <string>application/vnd.garmin-toolkit.activity+zip</string>
+        </dict>
+      </dict>
+    </array>
+  </dict>
+</plist>

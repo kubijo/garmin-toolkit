@@ -1,8 +1,21 @@
 //! Read-only FIT inspection shared by native and Home Assistant file browsers.
 
+use garmin_fit::NormalizedActivity;
 use garmin_service_api::{
-    DeviceFitPreview, DeviceFitPreviewActivity, DeviceFitPreviewContent, DeviceFitPreviewCourse,
+    ActivityRecordingSnapshot, DeviceFitPreview, DeviceFitPreviewActivity, DeviceFitPreviewContent,
+    DeviceFitPreviewCourse,
 };
+
+pub(crate) fn activity_snapshot(activity: &NormalizedActivity) -> DeviceFitPreviewActivity {
+    DeviceFitPreviewActivity {
+        source: activity
+            .creator()
+            .product_name()
+            .map_or_else(|| "FIT".to_owned(), ToString::to_string),
+        summary: activity.activity().summary(),
+        recording: ActivityRecordingSnapshot::from(activity.activity()),
+    }
+}
 
 /// Inspect the FIT file type and construct a preview without importing or persisting it.
 /// # Errors
@@ -12,16 +25,7 @@ pub fn inspect(file_name: String, bytes: &[u8]) -> Result<DeviceFitPreview, Stri
         Ok(import) => {
             let activities = import
                 .normalized_activities()
-                .map(|activity| DeviceFitPreviewActivity {
-                    source: activity
-                        .creator()
-                        .product_name()
-                        .map_or_else(|| "FIT".to_owned(), ToString::to_string),
-                    summary: activity.activity().summary(),
-                    recording: garmin_service_api::ActivityRecordingSnapshot::from(
-                        activity.activity(),
-                    ),
-                })
+                .map(activity_snapshot)
                 .collect::<Vec<_>>();
             if activities.is_empty() {
                 return Err("the FIT file does not contain an activity".to_owned());

@@ -19,7 +19,9 @@ use garmin_service_api::{
     DeviceCatalogSnapshot, DeviceCatalogStorage, DeviceDataType, DeviceSnapshot, InspectionState,
     TransferDirection,
 };
-use garmin_services::{ActivityPreview, UserContext, deployment::Deployment};
+use garmin_services::{
+    ActivityPreview, UserContext, activity_export::ActivityImportPreview, deployment::Deployment,
+};
 use garmin_ui::{
     activity, device, device_browser, device_fit_preview, file_import, icons, image_crop, modal,
     notification, profile, profile_settings, progress, shell,
@@ -68,7 +70,8 @@ pub struct Desktop {
     selected_activity: usize,
     activity_detail: Option<ActivityDetailSnapshot>,
     package_review: PackageReviewState,
-    package_queue: std::collections::VecDeque<(UserContext, PathBuf)>,
+    package_review_view: activity::PackageReview,
+    package_queue: std::collections::VecDeque<PathBuf>,
     opened_files: Option<crate::open_files::Inbox>,
     next_open_files_poll: Instant,
     activity_workspace: activity::Workspace,
@@ -179,6 +182,7 @@ impl Desktop {
             selected_activity: 0,
             activity_detail: None,
             package_review: PackageReviewState::Idle,
+            package_review_view: activity::PackageReview::new(&map_runtime),
             package_queue: std::collections::VecDeque::new(),
             opened_files: None,
             next_open_files_poll: Instant::now(),
@@ -262,6 +266,29 @@ impl Desktop {
         if let LoadState::Unavailable(reason) = &self.load {
             ui.label(reason);
             return;
+        }
+        if matches!(self.package_review, PackageReviewState::ChoosingProfile(_)) {
+            let notice = Notice::information(format_message!(
+                &self.intl,
+                default_message: "Files are ready to import. Create or select a profile to continue.",
+            ));
+            notification::show(ui, &notice.props());
+            let cancel = format_message!(&self.intl, default_message: "Cancel");
+            if (garmin_ui::button::Props {
+                label: &cancel,
+                icon: None,
+                kind: garmin_ui::button::Kind::Ghost,
+                size: garmin_ui::Size::Small,
+                width: garmin_ui::button::Width::Fit,
+                enabled: true,
+            })
+            .show(ui)
+            .clicked()
+            {
+                self.package_review = PackageReviewState::Idle;
+                self.next_package();
+            }
+            ui.add_space(8.0);
         }
         let profiles = self.profile_props();
         match profile::chooser(
@@ -1385,32 +1412,31 @@ impl Desktop {
         if paths.is_empty() || self.import.busy() {
             return;
         }
-        let Some(index) = self.selected_profile else {
-            self.notice = Some(Notice::information(format_message!(
-                &self.intl,
-                default_message: "Choose a profile before importing files",
-            )));
-            return;
-        };
-        let user = UserContext::new(self.profiles[index].user.id());
         let (packages, files): (Vec<_>, Vec<_>) = paths.into_iter().partition(|path| {
             !path.is_dir() && (worker::is_activity_package(path) || worker::is_fit(path))
         });
         if !files.is_empty() {
-            self.import.start();
-            self.worker.import(user, files);
+            if let Some(index) = self.selected_profile {
+                let user = UserContext::new(self.profiles[index].user.id());
+                self.import.start();
+                self.worker.import(user, files);
+            } else {
+                self.notice = Some(Notice::information(format_message!(
+                    &self.intl,
+                    default_message: "Choose a profile before importing files",
+                )));
+            }
         }
-        self.package_queue
-            .extend(packages.into_iter().map(|path| (user, path)));
+        self.package_queue.extend(packages);
         self.next_package();
     }
 
     fn next_package(&mut self) {
         if matches!(self.package_review, PackageReviewState::Idle)
-            && let Some((user, path)) = self.package_queue.pop_front()
+            && let Some(path) = self.package_queue.pop_front()
         {
             self.package_review = PackageReviewState::Busy;
-            self.worker.preview_activity_package(user, path);
+            self.worker.preview_activity_package(path);
         }
     }
 
@@ -1424,7 +1450,6 @@ impl Desktop {
         };
         if Instant::now() < self.next_open_files_poll
             || !matches!(self.load, LoadState::Ready)
-            || self.selected_profile.is_none()
             || self.import.busy()
             || self.backup.state.switching()
         {
@@ -1445,36 +1470,42 @@ impl Desktop {
     }
 
     fn show_package_review(&mut self, ui: &mut Ui) {
+        if self.backup.state.switching() {
+            return;
+        }
+        if self.selected_profile.is_some()
+            && matches!(self.package_review, PackageReviewState::ChoosingProfile(_))
+            && let PackageReviewState::ChoosingProfile(preview) =
+                std::mem::replace(&mut self.package_review, PackageReviewState::Idle)
+        {
+            self.package_review = PackageReviewState::Ready(preview);
+        }
         let PackageReviewState::Ready(package) = &self.package_review else {
             return;
         };
-        let Some(profile) = self
-            .profiles
-            .iter()
-            .find(|profile| profile.user.id() == package.user().user_id())
-        else {
-            self.package_review = PackageReviewState::Idle;
-            self.next_package();
-            return;
-        };
-        let action = activity::package_review(
+        let profile = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index));
+        let units = self.selected_unit_system();
+        let action = self.package_review_view.show(
             ui,
             &self.intl,
-            profile.user.profile().display_name().as_str(),
-            profile.user.profile().preferences().unit_system(),
-            &package.activities().collect::<Vec<_>>(),
+            profile.map(|profile| profile.user.profile().display_name().as_str()),
+            units,
+            &package.recordings().collect::<Vec<_>>(),
+            jiff::Zoned::now().date(),
         );
         match action {
             Some(modal::Action::Primary) => {
                 if let PackageReviewState::Ready(package) =
                     std::mem::replace(&mut self.package_review, PackageReviewState::Idle)
                 {
-                    if package.activities().all(|(_, existing)| existing) {
-                        self.page = Page::Activities;
-                        self.next_package();
-                    } else {
+                    if let Some(profile) = profile {
                         self.package_review = PackageReviewState::Busy;
-                        self.worker.confirm_activity_package(package);
+                        self.worker
+                            .confirm_activity_package(UserContext::new(profile.user.id()), package);
+                    } else {
+                        self.package_review = PackageReviewState::ChoosingProfile(package);
                     }
                 }
             }
@@ -1793,7 +1824,11 @@ impl Desktop {
                 worker::Event::ActivityPackagePreview(result) => {
                     self.package_review = PackageReviewState::Idle;
                     match result {
-                        Ok(package) => self.package_review = PackageReviewState::Ready(package),
+                        Ok(package) => {
+                            self.package_review_view =
+                                activity::PackageReview::new(&self.map_runtime);
+                            self.package_review = PackageReviewState::Ready(package);
+                        }
                         Err(error) => self.notice = Some(Notice::error(error)),
                     }
                     self.next_package();
@@ -1801,11 +1836,15 @@ impl Desktop {
                 worker::Event::ActivityPackageImported(result) => {
                     self.package_review = PackageReviewState::Idle;
                     match result {
-                        Ok(profiles) => {
+                        Ok((imported, profiles)) => {
                             self.replace_profiles(profiles, None);
-                            self.notice = Some(Notice::information(
-                                format_message!(&self.intl, default_message: "Activity package imported"),
-                            ));
+                            self.page = Page::Activities;
+                            let message = if imported == 0 {
+                                format_message!(&self.intl, default_message: "Already imported")
+                            } else {
+                                format_message!(&self.intl, default_message: "Activity package imported")
+                            };
+                            self.notice = Some(Notice::information(message));
                         }
                         Err(error) => self.notice = Some(Notice::error(error)),
                     }
@@ -2338,7 +2377,8 @@ enum FileWindowAction {
 enum PackageReviewState {
     Idle,
     Busy,
-    Ready(garmin_services::activity_export::PreparedActivityPackage),
+    Ready(ActivityImportPreview),
+    ChoosingProfile(ActivityImportPreview),
 }
 
 enum LoadState {

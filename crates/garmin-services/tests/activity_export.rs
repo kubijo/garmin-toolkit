@@ -6,10 +6,26 @@ use garmin_model::{
     observation::ObservationId,
     value::Timestamp,
 };
+use garmin_services::activity_export::ActivityImportPreview;
 use garmin_services::{Application, FitImportRequest, FitImportResult, UserContext};
 use garmin_storage::Storage;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+#[test]
+fn standalone_fit_preview_rejects_oversized_files() -> TestResult {
+    use garmin_model::artifact::ByteCount;
+
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("oversized.fit");
+    std::fs::File::create(&path)?.set_len(ByteCount::from_mebibytes(65).as_bytes())?;
+    assert!(matches!(
+        ActivityImportPreview::from_fit(&path),
+        Err(garmin_services::activity_export::Error::Invalid(message))
+            if message == "FIT file exceeds the 64 MiB preview limit"
+    ));
+    Ok(())
+}
 
 #[test]
 fn provenance_profile_preserves_ordered_transformation_fields() -> TestResult {
@@ -286,10 +302,38 @@ fn toolkit_package_import_round_trips_between_deployments() -> TestResult {
             .export_activity(fixture.owner, fixture.observation, &archive)
             .await?
             .ok_or("source activity is missing")?;
+        let inspected = ActivityImportPreview::from_package(&archive)?;
+        let fit_path = fixture.root.path().join("original.fit");
+        std::fs::write(&fit_path, &fixture.original)?;
+        let fit = ActivityImportPreview::from_fit(&fit_path)?;
+        assert_eq!(
+            fit.activities().collect::<Vec<_>>(),
+            inspected.activities().collect::<Vec<_>>()
+        );
+        let fit_recording = &fit
+            .recordings()
+            .next()
+            .ok_or("missing FIT recording")?
+            .recording;
+        let package_recording = &inspected
+            .recordings()
+            .next()
+            .ok_or("missing package recording")?
+            .recording;
+        assert!(
+            fit_recording
+                .samples
+                .iter()
+                .any(|sample| sample.coordinate.is_some())
+        );
+        assert_eq!(fit_recording.samples.len(), package_recording.samples.len());
+        assert_eq!(fit_recording.laps.len(), package_recording.laps.len());
+        let renamed = fixture.root.path().join("moved.zip");
+        std::fs::rename(&archive, &renamed)?;
         let target =
             Application::new(Storage::open(fixture.root.path().join("target.sqlite3")).await?);
         let owner = UserContext::new(target.create_profile("Target owner".parse()?).await?.id());
-        let preview = target.preview_activity_package(owner, &archive).await?;
+        let preview = target.prepare_activity_import(owner, inspected).await?;
         assert_eq!(
             preview
                 .activities()
@@ -301,8 +345,6 @@ fn toolkit_package_import_round_trips_between_deployments() -> TestResult {
             target.activities(owner).await?,
             [] as [garmin_services::ActivityPreview; 0]
         );
-        let renamed = fixture.root.path().join("moved.zip");
-        std::fs::rename(&archive, &renamed)?;
         assert_eq!(target.confirm_activity_package(preview).await?, 1);
         let retry = target.preview_activity_package(owner, &renamed).await?;
         assert!(retry.activities().all(|(_, existing)| existing));

@@ -4,6 +4,7 @@ import gzip
 import json
 import os
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from haos_platform import inspect_archive, unpack_archive
 SCRATCH = Path(__file__).resolve().parents[2] / '.tmp'
 
 
+@unittest.skipUnless(sys.platform == 'linux', 'OCI images are built on Linux')
 class NativeOciTests(unittest.TestCase):
     def setUp(self) -> None:
         SCRATCH.mkdir(exist_ok=True)

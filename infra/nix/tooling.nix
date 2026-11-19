@@ -198,20 +198,22 @@ let
         '';
         python-tests.command = pkgs.writeShellScript "python-tests" ''
           export PATH=${
-            lib.makeBinPath [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.git
-              pkgs.gh
-              pkgs.just
-              pkgs.syft
-              pkgs.skopeo
-              pkgs.distribution
-              pkgs.zsync
-              pkgs.squashfsTools
-              nixOci
-              dirspec
-            ]
+            lib.makeBinPath (
+              [
+                pkgs.bash
+                pkgs.coreutils
+                pkgs.git
+                pkgs.gh
+                pkgs.just
+                pkgs.syft
+                pkgs.skopeo
+                pkgs.distribution
+                pkgs.zsync
+                pkgs.squashfsTools
+                dirspec
+              ]
+              ++ lib.optional pkgs.stdenv.hostPlatform.isLinux nixOci
+            )
           }:$PATH
           exec ${pythonToolsEnv}/bin/python -m unittest discover -q \
             --start-directory infra/python \

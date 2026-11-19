@@ -33,6 +33,8 @@
             inherit system;
           };
           inherit (pkgs) lib;
+          inherit (builtins) fromTOML readFile;
+          appVersion = (fromTOML (readFile (workspaceSrc + "/Cargo.toml"))).workspace.package.version;
           craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
           productionIdentity = {
             id = "io.kubijo.GarminToolkit";
@@ -181,6 +183,7 @@
                   + "/apps/garmin-desktop/${if demo then "package-demo-linux" else "package-linux"}.dirspec.toml"
                 else
                   workspaceSrc + "/apps/garmin-desktop/package-darwin.dirspec.toml";
+              makeBundle = pkgs.stdenv.hostPlatform.isDarwin && !demo;
             in
             craneLib.buildPackage (
               commonArgs
@@ -192,7 +195,13 @@
                   license = lib.licenses.agpl3Plus;
                 };
                 inherit cargoArtifacts;
-                nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ dirspec ];
+                nativeBuildInputs =
+                  commonArgs.nativeBuildInputs
+                  ++ [ dirspec ]
+                  ++ lib.optionals makeBundle [
+                    pkgs.libicns
+                    pkgs.libplist
+                  ];
                 # Keep dynamically loaded libraries and GIO modules in the
                 # application's runtime closure, including outside the dev shell.
                 preFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
@@ -204,9 +213,21 @@
                 postInstall =
                   installDocumentation ''"$out"''
                   + lib.optionalString pkgs.stdenv.hostPlatform.isLinux (installLauncher launcher ''"$out"'');
-                postFixup = ''
-                  dirspec "$out" --spec ${packageSpec}
-                '';
+                postFixup =
+                  lib.optionalString makeBundle ''
+                    bundle="$out/Applications/Garmin Toolkit.app/Contents"
+                    install -Dm755 "$out/bin/garmin-desktop" "$bundle/MacOS/garmin-desktop"
+                    install -Dm755 "$out/bin/garmin-gpx-worker" "$bundle/MacOS/garmin-gpx-worker"
+                    mkdir -p "$bundle/Resources"
+                    png2icns "$bundle/Resources/GarminToolkit.icns" \
+                      ${brandAssets}/icon-{128,256,512}.png
+                    substitute ${./Info.plist.xml} "$bundle/Info.plist" --replace-fail '@version@' ${lib.escapeShellArg appVersion}
+                    plistutil -i "$bundle/Info.plist" -o /dev/null
+                    dirspec "$out" --spec ${./package-darwin-bundle.dirspec.toml}
+                  ''
+                  + ''
+                    dirspec "$out" --spec ${packageSpec}
+                  '';
               }
             );
           package = mkPackage {
