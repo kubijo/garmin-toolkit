@@ -52,6 +52,7 @@ pub struct Presentation {
     distance: Option<String>,
     duration: String,
     metrics: Vec<Metric>,
+    original: Option<garmin_service_api::ActivityOriginal>,
 }
 
 impl Presentation {
@@ -67,7 +68,20 @@ impl Presentation {
 
     #[must_use]
     pub fn from_snapshot(snapshot: &ActivitySnapshot, intl: &Intl, units: UnitSystem) -> Self {
-        Self::from_summary(snapshot.summary, &snapshot.source, intl, units)
+        let mut presentation = Self::from_summary(snapshot.summary, &snapshot.source, intl, units);
+        presentation.original.clone_from(&snapshot.original);
+        presentation
+    }
+
+    #[must_use]
+    pub fn with_original(mut self, original: garmin_service_api::ActivityOriginal) -> Self {
+        self.original = Some(original);
+        self
+    }
+
+    fn recording_identity(&self) -> Option<(&str, &[u8; 32])> {
+        let original = self.original.as_ref()?;
+        Some((&original.fingerprint_schema, &original.fingerprint_digest))
     }
 
     fn new(summary: ActivitySummary, source: &str, intl: &Intl, units: UnitSystem) -> Self {
@@ -127,6 +141,7 @@ impl Presentation {
             distance,
             duration,
             metrics,
+            original: None,
         }
     }
 

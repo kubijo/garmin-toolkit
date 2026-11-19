@@ -3,11 +3,12 @@
 use garmin_fit::{CreatorDiagnostics, NormalizedActivity, SequencePosition};
 use garmin_model::{
     activity::ActivitySummary,
-    artifact::NormalizationRunId,
-    identity::UserId,
+    artifact::{NormalizationRunId, SourceIdentity},
+    identity::{SourceLabel, UserId},
     observation::{
         Observation, ObservationId, ObservationKind, SemanticFingerprint, SemanticFingerprintError,
     },
+    value::Timestamp,
 };
 use sqlx::{Sqlite, Transaction};
 use thiserror::Error;
@@ -84,9 +85,26 @@ pub struct StoredActivitySummary {
     creator: CreatorDiagnostics,
     summary: ActivitySummary,
     fingerprint: SemanticFingerprint,
+    acquisition_source: SourceLabel,
+    source_identity: SourceIdentity,
+    acquired_at: Timestamp,
 }
 
 impl StoredActivitySummary {
+    #[must_use]
+    pub const fn acquisition_source(&self) -> &SourceLabel {
+        &self.acquisition_source
+    }
+
+    #[must_use]
+    pub const fn source_identity(&self) -> &SourceIdentity {
+        &self.source_identity
+    }
+
+    #[must_use]
+    pub const fn acquired_at(&self) -> Timestamp {
+        self.acquired_at
+    }
     #[must_use]
     pub const fn fingerprint(&self) -> &SemanticFingerprint {
         &self.fingerprint

@@ -46,13 +46,14 @@ impl Navigation {
             }
             action = self.controls(ui, intl, props);
         });
-        let Some(presentation) = props
-            .selected
-            .and_then(|index| props.presentations.get(index))
-        else {
+        let Some(selected) = props.selected else {
+            return action;
+        };
+        let Some(presentation) = props.presentations.get(selected) else {
             return action;
         };
         ui.label(RichText::new(&presentation.subtitle).small());
+        action = original_picker(ui, intl, props.presentations, selected).or(action);
         ui.add_space(4.0);
         metrics(ui, presentation);
         let day = calendar::on_day(props.presentations, presentation.local_start.date());
@@ -67,6 +68,8 @@ impl Navigation {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for index in day {
                         let item = &props.presentations[index];
+                        let selected_recording =
+                            same_recording(props.presentations, selected, index);
                         let label = format!(
                             "{} · {} · {}",
                             calendar::time_label(intl, item.local_start),
@@ -74,12 +77,12 @@ impl Navigation {
                             item.distance.as_deref().unwrap_or(&item.duration)
                         );
                         let response = ui.add(
-                            egui::Button::selectable(props.selected == Some(index), ())
+                            egui::Button::selectable(selected_recording, ())
                                 .left_text(label)
                                 .gap(0.0)
                                 .min_size(egui::vec2(ui.available_width(), 24.0)),
                         );
-                        if props.selected == Some(index) {
+                        if selected_recording {
                             let background = ui.visuals().selection.bg_fill;
                             let surface = garmin_color::Color::from_u32(u32::from_be_bytes(
                                 background.to_srgba_unmultiplied(),
@@ -98,7 +101,11 @@ impl Navigation {
                         }
                         crate::semantics::target(ui, &response, format!("activity.day.{index}"));
                         if response.clicked() {
-                            action = Some(Action::Select(index));
+                            action = Some(Action::Select(if selected_recording {
+                                selected
+                            } else {
+                                index
+                            }));
                         }
                     }
                 });
@@ -108,9 +115,11 @@ impl Navigation {
 
     fn controls(&mut self, ui: &mut Ui, intl: &Intl, props: &WorkspaceProps<'_>) -> Option<Action> {
         let order = calendar::chronological(props.presentations);
-        let position = props
-            .selected
-            .and_then(|selected| order.iter().position(|&index| index == selected));
+        let position = props.selected.and_then(|selected| {
+            order
+                .iter()
+                .position(|&index| same_recording(props.presentations, selected, index))
+        });
         let previous = position
             .and_then(|p| p.checked_sub(1))
             .and_then(|p| order.get(p))
@@ -196,6 +205,12 @@ impl Navigation {
                     ui.heading(format_message!(intl, default_message: "All activities"));
                     self.archive_filters(ui, intl);
                     let query = self.query.to_lowercase();
+                    let matched_recordings = props
+                        .presentations
+                        .iter()
+                        .filter(|item| matches_query(item, self.sport, &query))
+                        .filter_map(Presentation::recording_identity)
+                        .collect::<std::collections::HashSet<_>>();
                     egui::ScrollArea::vertical()
                         .max_height((bounds.height() - 180.0).max(80.0))
                         .show(ui, |ui| {
@@ -205,12 +220,19 @@ impl Navigation {
                                 .rev()
                             {
                                 let item = &props.presentations[index];
-                                if !matches_query(item, self.sport, &query) {
+                                if !item
+                                    .recording_identity()
+                                    .is_some_and(|identity| matched_recordings.contains(&identity))
+                                    && !matches_query(item, self.sport, &query)
+                                {
                                     continue;
                                 }
                                 any = true;
-                                if archive_row(ui, item, index, props.selected == Some(index)) {
-                                    action = Some(Action::Select(index));
+                                let selected = props.selected.filter(|&selected| {
+                                    same_recording(props.presentations, selected, index)
+                                });
+                                if archive_row(ui, item, index, selected.is_some()) {
+                                    action = Some(Action::Select(selected.unwrap_or(index)));
                                 }
                             }
                             if !any {
@@ -297,10 +319,77 @@ impl Navigation {
     }
 }
 
+fn same_recording(activities: &[Presentation], first: usize, second: usize) -> bool {
+    first == second
+        || activities
+            .get(first)
+            .and_then(Presentation::recording_identity)
+            .is_some_and(|identity| activities[second].recording_identity() == Some(identity))
+}
+
+fn original_picker(
+    ui: &mut Ui,
+    intl: &Intl,
+    activities: &[Presentation],
+    selected: usize,
+) -> Option<Action> {
+    let identity = activities[selected].recording_identity()?;
+    let originals = activities
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item.recording_identity() == Some(identity))
+        .filter_map(|(index, item)| Some((index, item.original.as_ref()?)))
+        .collect::<Vec<_>>();
+    if originals.len() < 2 {
+        return None;
+    }
+    let labels = originals
+        .iter()
+        .map(|(_, original)| {
+            let imported = original
+                .acquired_at
+                .as_jiff()
+                .to_zoned(jiff::tz::TimeZone::system());
+            format!(
+                "{} · {} · {}",
+                original.source,
+                original.source_identity,
+                intl.dates().datetime(imported.datetime())
+            )
+        })
+        .collect::<Vec<_>>();
+    let targets = originals
+        .iter()
+        .map(|(index, _)| format!("activity.original.{index}"))
+        .collect::<Vec<_>>();
+    let choices = labels
+        .iter()
+        .zip(&targets)
+        .map(|(label, target)| select::Choice::new(label).target(target))
+        .collect::<Vec<_>>();
+    let mut current = originals.iter().position(|(index, _)| *index == selected)?;
+    let response = select::show(
+        ui,
+        ui.id().with("activity-original"),
+        &mut current,
+        &choices,
+        select::Props::new(&format_message!(intl, default_message: "Original recording"))
+            .size(Size::Small)
+            .width(ui.available_width().min(480.0)),
+    );
+    crate::semantics::target(ui, &response, "activity.original");
+    let index = originals[current].0;
+    (index != selected).then_some(Action::Select(index))
+}
+
 fn matches_query(item: &Presentation, sport: Option<ActivitySport>, query: &str) -> bool {
     sport.is_none_or(|sport| item.sport == sport)
         && (item.title.to_lowercase().contains(query)
             || item.subtitle.to_lowercase().contains(query)
+            || item.original.as_ref().is_some_and(|original| {
+                original.source.to_lowercase().contains(query)
+                    || original.source_identity.to_lowercase().contains(query)
+            })
             || item.local_start.date().to_string().contains(query))
 }
 

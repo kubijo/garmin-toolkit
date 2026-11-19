@@ -263,6 +263,18 @@ pub struct ActivitySnapshot {
     pub id: ObservationId,
     pub source: String,
     pub summary: ActivitySummary,
+    #[serde(default)]
+    pub original: Option<ActivityOriginal>,
+}
+
+/// Identity and provenance of one stored activity observation.
+#[garmin_macros::portable]
+pub struct ActivityOriginal {
+    pub fingerprint_schema: String,
+    pub fingerprint_digest: [u8; 32],
+    pub source: String,
+    pub source_identity: String,
+    pub acquired_at: Timestamp,
 }
 
 #[garmin_macros::portable]

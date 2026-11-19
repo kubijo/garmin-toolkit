@@ -201,6 +201,12 @@ fn day_button(
 pub(super) fn chronological(activities: &[Presentation]) -> Vec<usize> {
     let mut indices = (0..activities.len()).collect::<Vec<_>>();
     indices.sort_by_key(|&index| (activities[index].started_at, index));
+    let mut seen = std::collections::HashSet::new();
+    indices.retain(|&index| {
+        activities[index]
+            .recording_identity()
+            .is_none_or(|identity| seen.insert(identity))
+    });
     indices
 }
 

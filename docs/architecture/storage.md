@@ -43,6 +43,9 @@ Stored activity summaries expose the versioned semantic fingerprint as the ident
 observation ID identifies an individual import, and a Garmin activity ID is scoped to its Connect account source.
 Reports can group identical recordings while exports and activity detail retain each observation and its provenance.
 
+The activity library displays one row per recording fingerprint. When several observations share that fingerprint, the
+activity detail lets users switch originals by acquisition source, source identity, and import time.
+
 The descriptor names resources, their SHA-256 hashes and byte counts, field types, units, nullability, primary keys, and
 foreign keys. CSV preserves canonical integer units and source ordering; missing measurements remain empty cells. GPX
 uses WGS84 degrees and meters and starts a new segment at missing coordinates or timer pauses. Samples captured while

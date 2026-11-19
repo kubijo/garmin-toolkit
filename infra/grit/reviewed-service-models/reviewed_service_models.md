@@ -132,6 +132,7 @@ or {
     `ProfileAvatarSnapshot`,
     `AvatarUpload`,
     `AvatarCrop`,
+    `ActivityOriginal`,
     `ActivitySnapshot`,
     `ActivityDetailSnapshot`,
     `ActivityRecordingSnapshot`,

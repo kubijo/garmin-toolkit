@@ -1,6 +1,9 @@
 SELECT
     activity_projections.observation_id,
     observations.owner_id,
+    sources.label AS acquisition_source,
+    acquisitions.source_identity,
+    acquisitions.acquired_at,
     observations.fingerprint_schema_name,
     observations.fingerprint_schema_version,
     observations.fingerprint_digest,
@@ -31,6 +34,12 @@ SELECT
 FROM activity_projections
 INNER JOIN observations
     ON activity_projections.observation_id = observations.id
+INNER JOIN normalization_runs
+    ON observations.normalization_run_id = normalization_runs.id
+INNER JOIN acquisitions
+    ON normalization_runs.acquisition_id = acquisitions.id
+INNER JOIN sources
+    ON acquisitions.source_id = sources.id
 LEFT OUTER JOIN fit_creator_diagnostics
     ON
         activity_projections.observation_id

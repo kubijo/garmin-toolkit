@@ -111,9 +111,14 @@ pub struct ActivityPreview {
     observation_id: ObservationId,
     source: String,
     summary: ActivitySummary,
+    original: garmin_service_api::ActivityOriginal,
 }
 
 impl ActivityPreview {
+    #[must_use]
+    pub const fn original(&self) -> &garmin_service_api::ActivityOriginal {
+        &self.original
+    }
     #[must_use]
     pub const fn observation_id(&self) -> ObservationId {
         self.observation_id
@@ -136,6 +141,13 @@ impl From<StoredActivitySummary> for ActivityPreview {
         let summary = stored.summary();
         Self {
             observation_id,
+            original: garmin_service_api::ActivityOriginal {
+                fingerprint_schema: stored.fingerprint().schema().to_string(),
+                fingerprint_digest: *stored.fingerprint().digest().as_bytes(),
+                source: stored.acquisition_source().to_string(),
+                source_identity: stored.source_identity().to_string(),
+                acquired_at: stored.acquired_at(),
+            },
             source: stored
                 .creator()
                 .product_name()

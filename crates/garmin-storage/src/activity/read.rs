@@ -126,6 +126,9 @@ impl Storage {
 struct ActivityHeaderRow {
     observation_id: String,
     owner_id: String,
+    acquisition_source: String,
+    source_identity: String,
+    acquired_at: String,
     fingerprint_schema_name: String,
     fingerprint_schema_version: String,
     fingerprint_digest: Vec<u8>,
@@ -243,6 +246,9 @@ impl TryFrom<ActivityHeaderRow> for StoredActivitySummary {
     type Error = crate::Error;
 
     fn try_from(row: ActivityHeaderRow) -> Result<Self, Self::Error> {
+        let acquisition_source = parse(&row.acquisition_source, "activity source label")?;
+        let source_identity = parse(&row.source_identity, "activity source identity")?;
+        let acquired_at = parse(&row.acquired_at, "activity acquisition time")?;
         let header = DecodedHeader::try_from(row)?;
         Ok(Self {
             observation_id: header.observation_id,
@@ -252,6 +258,9 @@ impl TryFrom<ActivityHeaderRow> for StoredActivitySummary {
             creator: header.creator,
             summary: header.summary,
             fingerprint: header.fingerprint,
+            acquisition_source,
+            source_identity,
+            acquired_at,
         })
     }
 }

@@ -296,10 +296,13 @@ impl App {
         if Rc::ptr_eq(&self.profiles, &profiles) {
             return;
         }
-        let selected = self
+        let previous = self
             .selected_profile
-            .and_then(|index| self.profiles.get(index))
-            .map(|profile| profile.user.id());
+            .and_then(|index| self.profiles.get(index));
+        let selected = previous.map(|profile| profile.user.id());
+        let previous_activity = previous
+            .and_then(|profile| profile.activities.get(self.selected_activity))
+            .map(|activity| activity.id);
         self.profile_presentations = profiles
             .iter()
             .map(profile::Presentation::from_snapshot)
@@ -310,6 +313,23 @@ impl App {
                 .iter()
                 .position(|profile| profile.user.id() == user_id)
         });
+        if let Some(profile) = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+        {
+            if let Some(index) = profile
+                .activities
+                .iter()
+                .position(|activity| Some(activity.id) == previous_activity)
+            {
+                self.selected_activity = index;
+            } else {
+                self.selected_activity = self
+                    .selected_activity
+                    .min(profile.activities.len().saturating_sub(1));
+                self.load_selected_activity(&self.profiles);
+            }
+        }
         self.sync_selected_preferences();
         self.rebuild_activities();
     }
@@ -1613,11 +1633,6 @@ impl App {
             self.device_fit_plan = None;
             self.device_fit_job = None;
             self.page = Page::Activities;
-        }
-        if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index)) {
-            self.selected_activity = self
-                .selected_activity
-                .min(profile.activities.len().saturating_sub(1));
         }
         self.apply_profile_creation(&profiles);
         self.sync_selected_preferences();

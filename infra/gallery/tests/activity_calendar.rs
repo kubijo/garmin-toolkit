@@ -27,24 +27,54 @@ impl activity::map_runtime::Backend for NoTiles {
 }
 
 fn harness() -> Harness<'static, usize> {
+    library_harness(false)
+}
+
+fn library_harness(duplicates: bool) -> Harness<'static, usize> {
     let intl = Translations::bundled()
         .expect("bundled translations")
         .formatter(Language::English)
         .expect("English formatter");
-    let presentations = [0, 60_000, 259_200_000].map(|milliseconds| {
-        // Mid-month keeps all three fixtures in one month in every local zone.
-        let time = Timestamp::from_unix_milliseconds(1_252_800_000 + milliseconds)
-            .expect("fixture timestamp");
-        let duration = ActivityDuration::from_milliseconds(0);
-        let summary = ActivitySummary::from_parts(
-            ActivitySport::Cycling,
-            TimeRange::from_parts(time, time).expect("fixture time range"),
-            ActivityTotals::from_parts(duration, duration, None, None, None, None)
-                .expect("fixture totals"),
-            ActivityMetrics::default(),
-        );
-        activity::Presentation::from_summary(summary, "Calendar fixture", &intl, UnitSystem::Metric)
-    });
+    let presentations = [0, 60_000, 259_200_000, 0]
+        .into_iter()
+        .take(if duplicates { 4 } else { 3 })
+        .enumerate()
+        .map(|(index, milliseconds)| {
+            // Mid-month keeps all three fixtures in one month in every local zone.
+            let time = Timestamp::from_unix_milliseconds(1_252_800_000 + milliseconds)
+                .expect("fixture timestamp");
+            let duration = ActivityDuration::from_milliseconds(0);
+            let summary = ActivitySummary::from_parts(
+                ActivitySport::Cycling,
+                TimeRange::from_parts(time, time).expect("fixture time range"),
+                ActivityTotals::from_parts(duration, duration, None, None, None, None)
+                    .expect("fixture totals"),
+                ActivityMetrics::default(),
+            );
+            let presentation = activity::Presentation::from_summary(
+                summary,
+                "Calendar fixture",
+                &intl,
+                UnitSystem::Metric,
+            );
+            if duplicates && (index == 0 || index == 3) {
+                presentation.with_original(garmin_service_api::ActivityOriginal {
+                    fingerprint_schema: "activity/1".to_owned(),
+                    fingerprint_digest: [42; 32],
+                    source: if index == 0 {
+                        "Local FIT"
+                    } else {
+                        "Garmin Connect"
+                    }
+                    .to_owned(),
+                    source_identity: if index == 0 { "ride.fit" } else { "23" }.to_owned(),
+                    acquired_at: time,
+                })
+            } else {
+                presentation
+            }
+        })
+        .collect::<Vec<_>>();
     let runtime = activity::map_runtime::MapRuntimeHandle::new(
         NoTiles,
         activity::map_runtime::Renderer::software(),
@@ -84,6 +114,28 @@ fn harness() -> Harness<'static, usize> {
         },
         1,
     )
+}
+
+#[test]
+fn archive_groups_recordings_and_picker_opens_each_original() {
+    let mut harness = library_harness(true);
+    let target = |id: &'static str| By::new().predicate(move |node| node.author_id() == Some(id));
+    harness.run();
+    harness.get_by_label("All activities").click();
+    harness.run();
+    assert!(harness.query(target("activity.0")).is_some());
+    assert!(harness.query(target("activity.3")).is_none());
+    harness.get(target("activity.0")).click();
+    harness.run();
+    assert_eq!(*harness.state(), 0);
+    harness.get(target("activity.original")).click();
+    harness.run();
+    harness.get(target("activity.original.3")).click();
+    harness.run();
+    assert_eq!(*harness.state(), 3);
+    harness.get_by_label("Next activity").click();
+    harness.run();
+    assert_eq!(*harness.state(), 1);
 }
 
 #[test]

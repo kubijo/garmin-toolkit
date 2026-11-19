@@ -1296,6 +1296,7 @@ fn activity_snapshot(activity: &garmin_services::ActivityPreview) -> ActivitySna
         id: activity.observation_id(),
         source: activity.source().to_owned(),
         summary,
+        original: Some(activity.original().clone()),
     }
 }
 

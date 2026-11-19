@@ -1844,6 +1844,11 @@ impl Desktop {
     }
 
     fn replace_profiles(&mut self, profiles: Vec<worker::ProfileData>, select: Option<UserId>) {
+        let previous_activity = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+            .and_then(|profile| profile.previews.get(self.selected_activity))
+            .map(ActivityPreview::observation_id);
         let selected = select.or_else(|| {
             self.selected_profile
                 .and_then(|index| self.profiles.get(index))
@@ -1858,11 +1863,19 @@ impl Desktop {
                 .iter()
                 .position(|profile| profile.user.id() == user_id)
         });
-        let count = self
+        self.selected_activity = self
             .selected_profile
             .and_then(|index| self.profiles.get(index))
-            .map_or(0, |profile| profile.activities.len());
-        self.selected_activity = self.selected_activity.min(count.saturating_sub(1));
+            .map_or(0, |profile| {
+                profile
+                    .previews
+                    .iter()
+                    .position(|preview| Some(preview.observation_id()) == previous_activity)
+                    .unwrap_or_else(|| {
+                        self.selected_activity
+                            .min(profile.previews.len().saturating_sub(1))
+                    })
+            });
         self.apply_selected_preferences();
         self.load_selected_activity();
     }
@@ -2922,6 +2935,7 @@ fn activity_presentation(
     units: UnitSystem,
 ) -> activity::Presentation {
     activity::Presentation::from_summary(preview.summary(), preview.source(), intl, units)
+        .with_original(preview.original().clone())
 }
 
 #[cfg(test)]

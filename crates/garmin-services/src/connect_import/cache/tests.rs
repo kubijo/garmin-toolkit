@@ -553,7 +553,20 @@ async fn trends_merges_a_local_fit_after_connect_proves_its_identity() {
     let merged = after.activities.iter().find(|item| item.id == 23).unwrap();
     assert!(merged.average_heart_rate.is_some());
     assert!(merged.elevation_gain.is_some());
-    assert_eq!(app.activities(user).await.unwrap().len(), 2);
+    let originals = app.activities(user).await.unwrap();
+    assert_eq!(originals.len(), 2);
+    assert_eq!(
+        originals[0].original().fingerprint_digest,
+        originals[1].original().fingerprint_digest
+    );
+    let sources = originals
+        .iter()
+        .map(|activity| activity.original().source.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        sources,
+        std::collections::BTreeSet::from(["Garmin Connect", "Local FIT"])
+    );
 
     let account = cached_account(&app, user, &credential_hash(&key)).await;
     let connect = Source::from_parts(
