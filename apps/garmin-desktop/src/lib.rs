@@ -23,6 +23,7 @@ mod device_backend;
 mod map_worker;
 mod mode;
 mod native;
+mod open_files;
 mod profiling;
 #[cfg(feature = "render-probe")]
 pub mod render_probe;
@@ -45,11 +46,25 @@ pub fn run() -> Result<(), Error> {
 /// Open the native application with explicitly selected development controls.
 /// # Errors
 /// Returns startup, logging, or window initialization failures.
-pub fn run_with_options(options: Options) -> Result<(), Error> {
+pub fn run_with_options(mut options: Options) -> Result<(), Error> {
     options.validate()?;
     let profiling = profiling::RuntimeMetricsRecorder::from_environment()?;
     let data_root = eframe::storage_dir(mode::APP_ID).ok_or(Error::DataRootUnavailable)?;
     fs::create_dir_all(&data_root)?;
+    let opened = open_files::Inbox::new(&data_root);
+    let forwarded = !options.files.is_empty();
+    if forwarded {
+        opened.enqueue(std::mem::take(&mut options.files))?;
+    }
+    let deployment = match block_on(mode::open(&data_root)) {
+        Ok(deployment) => deployment,
+        Err(DataError::Io(error))
+            if forwarded && error.kind() == std::io::ErrorKind::WouldBlock =>
+        {
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    };
     let logs = garmin_logging::Store::open(data_root.join("logs"), "desktop")?;
     logs.install_global();
     let _ = tracing_subscriber::registry()
@@ -65,7 +80,6 @@ pub fn run_with_options(options: Options) -> Result<(), Error> {
         ))
         .try_init();
     tracing::info!("Desktop starting");
-    let deployment = block_on(mode::open(&data_root))?;
     let device_platform = device_backend::open(&data_root)?;
     let translations = Translations::bundled()?;
     let viewport = eframe::egui::ViewportBuilder::default()
@@ -89,7 +103,7 @@ pub fn run_with_options(options: Options) -> Result<(), Error> {
         Box::new(move |creation| {
             garmin_ui::install(&creation.egui_ctx);
             window::install(&creation.egui_ctx);
-            developer::install(&creation.egui_ctx, options, logs, creation.winit_window())?;
+            developer::install(&creation.egui_ctx, &options, logs, creation.winit_window())?;
             garmin_ui::developer::state(&creation.egui_ctx)
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -117,7 +131,7 @@ pub fn run_with_options(options: Options) -> Result<(), Error> {
                     .expect("writing to a String cannot fail");
                     garmin_ui::activity::install_wgpu_map(render_state, u32::from(MULTISAMPLING))
                 })?;
-            Ok(Box::new(view::Desktop::new(
+            let mut desktop = view::Desktop::new(
                 deployment,
                 translations,
                 creation.egui_ctx.clone(),
@@ -125,7 +139,9 @@ pub fn run_with_options(options: Options) -> Result<(), Error> {
                 &data_root,
                 map_renderer,
                 map_metrics,
-            )?))
+            )?;
+            desktop.set_open_files(opened);
+            Ok(Box::new(desktop))
         }),
     );
     log_flush.flush();

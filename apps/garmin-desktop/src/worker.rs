@@ -180,6 +180,19 @@ impl Worker {
         self.send(Command::Import { user, paths });
     }
 
+    pub fn preview_activity_package(&self, user: UserContext, path: PathBuf) {
+        self.send(Command::ActivityPackage(PackageCommand::Preview(
+            user, path,
+        )));
+    }
+
+    pub fn confirm_activity_package(
+        &self,
+        plan: garmin_services::activity_export::PreparedActivityPackage,
+    ) {
+        self.send(Command::ActivityPackage(PackageCommand::Confirm(plan)));
+    }
+
     pub fn load_activity(&self, user: UserContext, observation_id: ObservationId) {
         self.send(Command::LoadActivity {
             user,
@@ -292,6 +305,7 @@ enum Command {
         user: UserContext,
         paths: Vec<PathBuf>,
     },
+    ActivityPackage(PackageCommand),
     LoadActivity {
         user: UserContext,
         observation_id: ObservationId,
@@ -377,6 +391,10 @@ pub enum Event {
     },
     ImportItem(ImportItem),
     ImportFinished(Result<Vec<ProfileData>, String>),
+    ActivityPackagePreview(
+        Result<garmin_services::activity_export::PreparedActivityPackage, String>,
+    ),
+    ActivityPackageImported(Result<Vec<ProfileData>, String>),
     ActivityLoaded {
         observation_id: ObservationId,
         result: Result<Option<Box<garmin_services::ActivityDetails>>, String>,
@@ -655,6 +673,33 @@ fn update_profile(
     emit(events, context, Event::ProfileUpdated(result))
 }
 
+enum PackageCommand {
+    Preview(UserContext, PathBuf),
+    Confirm(garmin_services::activity_export::PreparedActivityPackage),
+}
+
+fn activity_package_event(application: &Application, command: PackageCommand) -> Event {
+    match command {
+        PackageCommand::Preview(user, path) => Event::ActivityPackagePreview(
+            if is_fit(&path) {
+                block_on(application.preview_activity_fit(user, &path))
+            } else {
+                block_on(application.preview_activity_package(user, &path))
+            }
+            .map_err(|error| error.to_string()),
+        ),
+        PackageCommand::Confirm(plan) => Event::ActivityPackageImported(
+            block_on(application.confirm_activity_package(plan))
+                .map_err(|error| error.to_string())
+                .and_then(|_| block_on(load_profiles(application))),
+        ),
+    }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "The worker dispatches commands against one deployment lease"
+)]
 fn execute_command(
     runtime: &tokio::runtime::Runtime,
     application: &Application,
@@ -665,6 +710,13 @@ fn execute_command(
     mutations: &garmin_services::maps::MutationLocks,
 ) -> bool {
     match command {
+        Command::ActivityPackage(command) => {
+            return emit(
+                events,
+                context,
+                activity_package_event(application, command),
+            );
+        }
         Command::ReadTrends { user, revision } => {
             return read_trends_command(application, user, revision, events, context);
         }
@@ -1397,16 +1449,19 @@ fn push_file(candidates: &mut Vec<Candidate>, seen: &mut HashSet<PathBuf>, path:
     }
 }
 
-fn is_fit(path: &Path) -> bool {
+pub(crate) fn is_fit(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("fit"))
 }
 
-fn is_activity_package(path: &Path) -> bool {
+pub(crate) fn is_activity_package(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("zip")
+                || extension.eq_ignore_ascii_case("garmin-activity")
+        })
 }
 
 enum Candidate {

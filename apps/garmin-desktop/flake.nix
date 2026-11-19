@@ -91,15 +91,24 @@
           mkLauncher =
             identity:
             let
-              desktopEntry = pkgs.makeDesktopItem {
-                name = identity.id;
-                desktopName = identity.name;
-                comment = "Local-first Garmin companion";
-                exec = "garmin-desktop";
-                icon = identity.id;
-                categories = [ "Utility" ];
-                startupWMClass = identity.id;
-              };
+              associatesFiles = identity.id == productionIdentity.id;
+              desktopEntry = pkgs.makeDesktopItem (
+                {
+                  name = identity.id;
+                  desktopName = identity.name;
+                  comment = "Local-first Garmin companion";
+                  exec = "garmin-desktop" + lib.optionalString associatesFiles " %F";
+                  icon = identity.id;
+                  categories = [ "Utility" ];
+                  startupWMClass = identity.id;
+                }
+                // lib.optionalAttrs associatesFiles {
+                  mimeTypes = [
+                    "application/vnd.ant.fit"
+                    "application/vnd.garmin-toolkit.activity+zip"
+                  ];
+                }
+              );
               metainfo = xmlFormat.generate "${identity.id}.metainfo.xml" {
                 component = {
                   inherit (identity) id name;
@@ -127,6 +136,9 @@
             pkgs.runCommandLocal "${identity.slug}-desktop-launcher" { } ''
               mkdir -p "$out/share"
               cp -r ${desktopEntry}/share/applications "$out/share/"
+              ${lib.optionalString associatesFiles ''
+                install -Dm444 ${./garmin-toolkit-mime.xml} "$out/share/mime/packages/garmin-toolkit.xml"
+              ''}
               install -Dm444 ${metainfo} "$out/share/metainfo/${identity.id}.metainfo.xml"
               install -Dm444 ${brandAssets}/icon-128.png \
                 "$out/share/icons/hicolor/128x128/apps/${identity.id}.png"
@@ -260,27 +272,36 @@
                 appstreamcli validate --no-net ${demoLauncher}/share/metainfo/${demoIdentity.id}.metainfo.xml
                 touch "$out"
               '';
-          launcherInstallCheck = pkgs.runCommandLocal "check-desktop-launcher-install" { } ''
-            mkdir -p "$TMPDIR/production" "$TMPDIR/demo"
-            ${installLauncher launcher ''"$TMPDIR/production"''}
-            ${installLauncher demoLauncher ''"$TMPDIR/demo"''}
-            diff --recursive --brief ${launcher}/share "$TMPDIR/production/share"
-            diff --recursive --brief ${demoLauncher}/share "$TMPDIR/demo/share"
-            ${installDocumentation ''"$TMPDIR/production"''}
-            ${installDocumentation ''"$TMPDIR/demo"''}
-            diff --recursive --brief ${documentation}/share/doc "$TMPDIR/production/share/doc"
-            diff --recursive --brief ${documentation}/share/doc "$TMPDIR/demo/share/doc"
-            test -w "$TMPDIR/production/share/applications/${productionIdentity.id}.desktop"
-            test -w "$TMPDIR/demo/share/applications/${demoIdentity.id}.desktop"
-            documentation=${documentation}/share/doc/garmin-toolkit
-            cmp ${workspaceSrc}/assets/licenses/bundle-desktop.json "$documentation/assets/licenses/bundle-desktop.json"
-            for name in LICENSE-AGPL LICENSE-MIT LICENSE-APACHE COPYRIGHT.md THIRD_PARTY_NOTICES.md; do
-              cmp "${workspaceSrc}/$name" "$documentation/$name"
-            done
-            diff --recursive --brief ${workspaceSrc}/infra/fixtures/fit/development-activities \
-              "$documentation/infra/fixtures/fit/development-activities"
-            touch "$out"
-          '';
+          launcherInstallCheck =
+            pkgs.runCommandLocal "check-desktop-launcher-install"
+              {
+                nativeBuildInputs = [ pkgs.shared-mime-info ];
+              }
+              ''
+                mkdir -p "$TMPDIR/production" "$TMPDIR/demo"
+                ${installLauncher launcher ''"$TMPDIR/production"''}
+                ${installLauncher demoLauncher ''"$TMPDIR/demo"''}
+                diff --recursive --brief ${launcher}/share "$TMPDIR/production/share"
+                diff --recursive --brief ${demoLauncher}/share "$TMPDIR/demo/share"
+                ${installDocumentation ''"$TMPDIR/production"''}
+                ${installDocumentation ''"$TMPDIR/demo"''}
+                diff --recursive --brief ${documentation}/share/doc "$TMPDIR/production/share/doc"
+                diff --recursive --brief ${documentation}/share/doc "$TMPDIR/demo/share/doc"
+                test -w "$TMPDIR/production/share/applications/${productionIdentity.id}.desktop"
+                test -w "$TMPDIR/demo/share/applications/${demoIdentity.id}.desktop"
+                grep -Fx 'Exec=garmin-desktop %F' "$TMPDIR/production/share/applications/${productionIdentity.id}.desktop"
+                update-mime-database "$TMPDIR/production/share/mime"
+                grep -F 'application/vnd.ant.fit:*.fit' "$TMPDIR/production/share/mime/globs2"
+                grep -F 'application/vnd.garmin-toolkit.activity+zip:*.garmin-activity' "$TMPDIR/production/share/mime/globs2"
+                documentation=${documentation}/share/doc/garmin-toolkit
+                cmp ${workspaceSrc}/assets/licenses/bundle-desktop.json "$documentation/assets/licenses/bundle-desktop.json"
+                for name in LICENSE-AGPL LICENSE-MIT LICENSE-APACHE COPYRIGHT.md THIRD_PARTY_NOTICES.md; do
+                  cmp "${workspaceSrc}/$name" "$documentation/$name"
+                done
+                diff --recursive --brief ${workspaceSrc}/infra/fixtures/fit/development-activities \
+                  "$documentation/infra/fixtures/fit/development-activities"
+                touch "$out"
+              '';
         in
         {
           inherit

@@ -22,7 +22,7 @@ pub(crate) fn request_root_wake(context: &egui::Context) -> Option<RootWakeReque
         .map(|tools| tools.lock().wake.request())
 }
 
-#[derive(Clone, Copy, Debug, Default, clap::Parser)]
+#[derive(Clone, Debug, Default, clap::Parser)]
 pub struct Options {
     /// Enable semantic automation (demo builds only).
     #[arg(long)]
@@ -30,13 +30,16 @@ pub struct Options {
     /// Start the loopback control server on an OS-assigned port (demo builds only).
     #[arg(long)]
     pub control_server: bool,
+    /// FIT recordings or Toolkit activity packages to review.
+    #[arg(value_name = "FILE")]
+    pub files: Vec<std::path::PathBuf>,
 }
 
 impl Options {
     /// Validate startup controls before opening application storage.
     /// # Errors
     /// Production builds reject automation and the control server.
-    pub fn validate(self) -> std::io::Result<()> {
+    pub fn validate(&self) -> std::io::Result<()> {
         if (self.ui_automation || self.control_server) && !cfg!(feature = "demo") {
             return Err(std::io::Error::other(
                 "automation and control server require a demo build",
@@ -121,7 +124,7 @@ pub fn shutdown(context: &egui::Context) {
 
 pub fn install(
     context: &egui::Context,
-    options: Options,
+    options: &Options,
     store: garmin_logging::Store,
     window: Option<&std::sync::Arc<winit::window::Window>>,
 ) -> std::io::Result<()> {
@@ -555,6 +558,7 @@ mod tests {
         let options = Options {
             ui_automation: true,
             control_server: false,
+            ..Options::default()
         };
         assert_eq!(options.validate().is_ok(), cfg!(feature = "demo"));
         assert!(Options::default().validate().is_ok());
@@ -566,7 +570,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let store = garmin_logging::Store::open(directory.path(), "test").unwrap();
         let context = egui::Context::default();
-        install(&context, Options::default(), store, None).unwrap();
+        install(&context, &Options::default(), store, None).unwrap();
         assert!(state(&context).lock().unwrap().server.is_none());
         state(&context)
             .lock()

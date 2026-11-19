@@ -133,6 +133,7 @@ or {
     `AvatarUpload`,
     `AvatarCrop`,
     `ActivityOriginal`,
+    `ActivityPackagePreview`,
     `ActivitySnapshot`,
     `ActivityDetailSnapshot`,
     `ActivityRecordingSnapshot`,

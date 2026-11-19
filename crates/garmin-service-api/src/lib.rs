@@ -267,6 +267,12 @@ pub struct ActivitySnapshot {
     pub original: Option<ActivityOriginal>,
 }
 
+#[garmin_macros::portable]
+pub struct ActivityPackagePreview {
+    pub token: uuid::Uuid,
+    pub activities: Vec<(ActivitySummary, bool)>,
+}
+
 /// Identity and provenance of one stored activity observation.
 #[garmin_macros::portable]
 pub struct ActivityOriginal {
@@ -384,10 +390,10 @@ pub enum InspectionState {
 )]
 mod rpc {
     use super::{
-        ActivityDetailSnapshot, AvatarUpload, ByteCount, DeploymentMode, DeviceBrowserRequest,
-        DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogSnapshot, DeviceFitImportOutcome,
-        DeviceFitImportPlan, DeviceFitImportStatus, DeviceSnapshot, DownloadTicket,
-        ProfileAvatarSnapshot, ProfileSnapshot,
+        ActivityDetailSnapshot, ActivityPackagePreview, AvatarUpload, ByteCount, DeploymentMode,
+        DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogSnapshot,
+        DeviceFitImportOutcome, DeviceFitImportPlan, DeviceFitImportStatus, DeviceSnapshot,
+        DownloadTicket, ProfileAvatarSnapshot, ProfileSnapshot,
     };
     use garmin_model::{
         identity::{ProfilePreferences, User, UserId},
@@ -583,6 +589,18 @@ mod rpc {
             user_id: UserId,
             size: ByteCount,
             contents: rch::io::Receiver,
+        ) -> Result<Result<usize, String>, rtc::CallError>;
+        async fn preview_activity_package(
+            &self,
+            user_id: UserId,
+            size: ByteCount,
+            contents: rch::io::Receiver,
+        ) -> Result<Result<ActivityPackagePreview, String>, rtc::CallError>;
+        async fn finish_activity_package(
+            &self,
+            user_id: UserId,
+            preview: uuid::Uuid,
+            confirm: bool,
         ) -> Result<Result<usize, String>, rtc::CallError>;
     }
 }

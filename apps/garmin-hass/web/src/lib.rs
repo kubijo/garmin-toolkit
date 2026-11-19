@@ -1770,6 +1770,7 @@ impl eframe::App for App {
             self.show_avatar_editor(ui);
             self.show_device_fit_preview(ui);
             self.show_cloud_fit_preview(ui);
+            self.show_activity_package_review(ui);
             self.show_pairing_confirmation(ui);
         }
         if let Some(since) = disconnected_since.filter(|_| loaded) {
@@ -2014,6 +2015,7 @@ struct State {
     activity_detail: Option<Rc<ActivityDetailSnapshot>>,
     requested_activity: Option<garmin_model::observation::ObservationId>,
     activity_package_importing: bool,
+    activity_package_review: Option<ActivityPackageReview>,
     preferences_saving: bool,
     garmin_connect_checking: Option<UserId>,
     connect_activities:
@@ -3092,6 +3094,7 @@ fn set_connection_error(shared: &RefCell<State>, error: impl fmt::Display) {
     state.reconciling_fit_import = None;
     state.connection_generation = state.connection_generation.wrapping_add(1);
     state.activity_package_importing = false;
+    state.activity_package_review = None;
     if state.profiles_loaded && state.disconnected_since.is_none() {
         state.disconnected_since = Some(web_time::Instant::now());
     }
@@ -3753,6 +3756,92 @@ fn spawn_update_preferences(
     });
 }
 
+struct ActivityPackageReview {
+    user: UserId,
+    token: uuid::Uuid,
+    rows: Vec<(garmin_model::activity::ActivitySummary, bool)>,
+}
+
+impl App {
+    fn show_activity_package_review(&mut self, ui: &mut Ui) {
+        let action = {
+            let state = self.shared.borrow();
+            let Some(review) = &state.activity_package_review else {
+                return;
+            };
+            let Some(profile) = self
+                .profiles
+                .iter()
+                .find(|profile| profile.user.id() == review.user)
+            else {
+                return;
+            };
+            activity::package_review(
+                ui,
+                &self.intl,
+                profile.user.profile().display_name().as_str(),
+                profile.user.profile().preferences().unit_system(),
+                &review.rows,
+            )
+        };
+        let Some(action) = action else {
+            return;
+        };
+        let (review, client, generation) = {
+            let mut state = self.shared.borrow_mut();
+            let Some(review) = state.activity_package_review.take() else {
+                return;
+            };
+            let Some(client) = state.client.clone() else {
+                return;
+            };
+            state.activity_package_importing = true;
+            (review, client, state.connection_generation)
+        };
+        let primary = action == garmin_ui::modal::Action::Primary;
+        let confirm = primary && review.rows.iter().any(|(_, existing)| !existing);
+        if primary && !confirm {
+            self.page = Page::Activities;
+        }
+        let failure =
+            format_message!(&self.intl, default_message: "Could not import activity package");
+        let imported = format_message!(&self.intl, default_message: "Activity package imported");
+        let duplicate =
+            format_message!(&self.intl, default_message: "Activity package already imported");
+        let shared = Rc::clone(&self.shared);
+        let context = self.context.clone();
+        spawn_local(async move {
+            let result = client
+                .finish_activity_package(review.user, review.token, confirm)
+                .await
+                .map_err(ConnectError::call)
+                .and_then(|result| result.map_err(ConnectError::domain));
+            let profiles = if confirm {
+                client.profiles().await.ok().and_then(Result::ok)
+            } else {
+                None
+            };
+            let mut state = shared.borrow_mut();
+            if state.connection_generation != generation {
+                return;
+            }
+            state.activity_package_importing = false;
+            if let Some(profiles) = profiles {
+                state.profiles = Rc::new(profiles);
+            }
+            if confirm {
+                state.notice = Some(match result {
+                    Ok(0) => Notice::information(duplicate),
+                    Ok(_) => Notice::success(imported),
+                    Err(error) => Notice::error(failure, error),
+                });
+            }
+            drop(state);
+            context.request_repaint();
+        });
+    }
+}
+
 fn spawn_activity_package_import(
     shared: Rc<RefCell<State>>,
     context: eframe::egui::Context,
@@ -3761,23 +3850,19 @@ fn spawn_activity_package_import(
 ) {
     let (client, generation) = {
         let mut state = shared.borrow_mut();
-        let Some(client) = state
-            .client
-            .clone()
-            .filter(|_| !state.activity_package_importing)
-        else {
+        let Some(client) = state.client.clone().filter(|_| {
+            !state.activity_package_importing && state.activity_package_review.is_none()
+        }) else {
             return;
         };
         state.activity_package_importing = true;
         (client, state.connection_generation)
     };
     let failure = format_message!(intl, default_message: "Could not import activity package");
-    let imported = format_message!(intl, default_message: "Activity package imported");
-    let duplicate = format_message!(intl, default_message: "Activity package already imported");
     spawn_local(async move {
         let result = async {
             let Some(file) = rfd::AsyncFileDialog::new()
-                .add_filter("Toolkit ZIP", &["zip"])
+                .add_filter("Toolkit activity package", &["garmin-activity", "zip"])
                 .pick_file()
                 .await
             else {
@@ -3795,36 +3880,31 @@ fn spawn_activity_package_import(
                 remoc::rch::io::sized::<remoc::codec::Default>(size.as_bytes());
             let rpc = async {
                 client
-                    .import_activity_package(user_id, size, receiver)
+                    .preview_activity_package(user_id, size, receiver)
                     .await
                     .map_err(ConnectError::call)
                     .and_then(|result| result.map_err(ConnectError::domain))
                     .map_err(|error| error.to_string())
             };
-            let (count, ()) = future::try_join(
+            let (preview, ()) = future::try_join(
                 rpc,
                 stream_browser_upload(file.inner().clone(), size, sender),
             )
             .await?;
-            Ok::<_, String>(Some(count))
+            Ok::<_, String>(Some(ActivityPackageReview {
+                user: user_id,
+                token: preview.token,
+                rows: preview.activities,
+            }))
         }
         .await;
-        let profiles = if matches!(result, Ok(Some(_)) | Err(_)) {
-            client.profiles().await.ok().and_then(Result::ok)
-        } else {
-            None
-        };
         let mut state = shared.borrow_mut();
         if state.connection_generation != generation {
             return;
         }
         state.activity_package_importing = false;
-        if let Some(profiles) = profiles {
-            state.profiles = Rc::new(profiles);
-        }
         match result {
-            Ok(Some(0)) => state.notice = Some(Notice::information(duplicate)),
-            Ok(Some(_)) => state.notice = Some(Notice::success(imported)),
+            Ok(Some(review)) => state.activity_package_review = Some(review),
             Err(error) => state.notice = Some(Notice::error(failure, error)),
             Ok(None) => {}
         }

@@ -271,6 +271,10 @@
     "source": "No activities in this FIT file",
     "translation": "Tento soubor FIT neobsahuje žádné aktivity"
   },
+  "3a88LSsSIZ": {
+    "source": "Destination profile: {profile}",
+    "translation": "Cílový profil: {profile}"
+  },
   "3aot4WURaf": {
     "source": "Save a copy of the current application data.",
     "translation": "Uložte kopii aktuálních dat aplikace."
@@ -757,6 +761,10 @@
     "source": "Profile settings",
     "translation": "Nastavení profilu"
   },
+  "CjIOcy79u7": {
+    "source": "Review activity import",
+    "translation": "Zkontrolovat import aktivit"
+  },
   "Cpy7ynymcy": {
     "source": "Folder not found. Check the path and try again.",
     "translation": "Složka nenalezena. Zkontrolujte cestu a zkuste to znovu."
@@ -1233,6 +1241,10 @@
   "KqTQL532Pk": {
     "source": "Send {file} to Garmin:",
     "translation": "Odeslat {file} Garminu:"
+  },
+  "KyldYLduAH": {
+    "source": "{count, plural, one {Import # activity} other {Import # activities}}",
+    "translation": "{count, plural, one {Importovat # aktivitu} few {Importovat # aktivity} other {Importovat # aktivit}}"
   },
   "L9pY09lqmU": {
     "source": "Ascent",
@@ -2278,6 +2290,10 @@
     "source": "action",
     "translation": "akce"
   },
+  "g9sKRAUa1E": {
+    "source": "View in library",
+    "translation": "Zobrazit v knihovně"
+  },
   "gBPBcLK3+F": {
     "source": "{bytes} in {seconds}s · {rate}",
     "translation": "{bytes} za {seconds} s · {rate}"
@@ -2309,6 +2325,10 @@
   "goGXET1Y4/": {
     "source": "Pairing",
     "translation": "Spárování"
+  },
+  "hDjHqewg1q": {
+    "source": "Will be imported",
+    "translation": "Bude importováno"
   },
   "hRcDjG7HM7": {
     "source": "Back to device",

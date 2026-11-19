@@ -73,9 +73,10 @@ pub fn run() -> Result<()> {
     let logs = garmin_logging::Store::open(data.path().join("logs"), "render-probe")?;
     crate::developer::install(
         &context,
-        crate::Options {
+        &crate::Options {
             ui_automation: true,
             control_server: true,
+            ..crate::Options::default()
         },
         logs.clone(),
         None,

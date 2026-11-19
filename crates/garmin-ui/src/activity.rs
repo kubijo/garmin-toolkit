@@ -280,6 +280,70 @@ pub fn export_button(ui: &mut Ui, intl: &Intl) -> bool {
     response.clicked()
 }
 
+/// Reviews validated package contents before the host starts importing.
+#[must_use]
+pub fn package_review(
+    ui: &mut Ui,
+    intl: &Intl,
+    destination: &str,
+    units: UnitSystem,
+    activities: &[(ActivitySummary, bool)],
+) -> Option<crate::modal::Action> {
+    let title = format_message!(intl, default_message: "Review activity import");
+    let description = format_message!(intl, default_message: "Destination profile: {profile}", values: { profile: destination });
+    let cancel = format_message!(intl, default_message: "Cancel");
+    let count = activities.iter().filter(|(_, existing)| !existing).count();
+    let confirm = if count == 0 {
+        format_message!(intl, default_message: "View in library")
+    } else {
+        format_message!(intl, default_message: "{count, plural, one {Import # activity} other {Import # activities}}", values: { count: count as u64 })
+    };
+    crate::modal::show(
+        ui,
+        ui.id().with("activity-package-review"),
+        &crate::modal::Props {
+            title: &title,
+            description: Some(&description),
+            size: crate::modal::Size::Medium,
+            presentation: crate::modal::Presentation::Modal,
+            cancel_label: Some(&cancel),
+            cancel_disabled: None,
+            backdrop_closes: None,
+            primary: Some(crate::modal::Primary {
+                label: &confirm,
+                icon: Some(icons::UPLOAD_SIMPLE),
+                kind: crate::modal::PrimaryKind::Confirm,
+                enabled: true,
+            }),
+        },
+        |ui| {
+            egui::ScrollArea::vertical()
+                .max_height(320.0)
+                .show(ui, |ui| {
+                    for (summary, existing) in activities {
+                        let status = if *existing {
+                            format_message!(intl, default_message: "Already imported")
+                        } else {
+                            format_message!(intl, default_message: "Will be imported")
+                        };
+                        let presentation =
+                            Presentation::from_summary(*summary, &status, intl, units);
+                        ui.strong(&presentation.title);
+                        ui.label(&presentation.subtitle);
+                        ui.horizontal(|ui| {
+                            if let Some(distance) = &presentation.distance {
+                                ui.label(distance);
+                            }
+                            ui.label(&presentation.duration);
+                        });
+                        ui.add_space(8.0);
+                    }
+                });
+        },
+    )
+    .action
+}
+
 #[must_use]
 pub fn list(ui: &mut Ui, props: &ListProps<'_>) -> Option<Action> {
     let height = props

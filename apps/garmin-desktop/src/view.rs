@@ -67,6 +67,10 @@ pub struct Desktop {
     page_import: Option<(UserId, profile_settings::connect_activities::Batch)>,
     selected_activity: usize,
     activity_detail: Option<ActivityDetailSnapshot>,
+    package_review: PackageReviewState,
+    package_queue: std::collections::VecDeque<(UserContext, PathBuf)>,
+    opened_files: Option<crate::open_files::Inbox>,
+    next_open_files_poll: Instant,
     activity_workspace: activity::Workspace,
     navigation: shell::Navigation,
     load: LoadState,
@@ -174,6 +178,10 @@ impl Desktop {
             page_import: None,
             selected_activity: 0,
             activity_detail: None,
+            package_review: PackageReviewState::Idle,
+            package_queue: std::collections::VecDeque::new(),
+            opened_files: None,
+            next_open_files_poll: Instant::now(),
             activity_workspace,
             routes,
             navigation: shell::Navigation::Expanded,
@@ -1336,8 +1344,8 @@ impl Desktop {
         let id = activity.observation_id();
         if let Some(destination) = crate::native::file_dialog(&self.context).and_then(|dialog| {
             dialog
-                .set_file_name(format!("activity-{id}.zip"))
-                .add_filter("ZIP", &["zip"])
+                .set_file_name(format!("activity-{id}.garmin-activity"))
+                .add_filter("Toolkit activity package", &["garmin-activity", "zip"])
                 .save_file()
         }) {
             self.worker
@@ -1358,7 +1366,10 @@ impl Desktop {
         };
         let paths = match action {
             file_import::Action::Files => dialog
-                .add_filter("FIT and Toolkit ZIP", &["fit", "zip"])
+                .add_filter(
+                    "FIT and Toolkit activity package",
+                    &["fit", "garmin-activity", "zip"],
+                )
                 .pick_files(),
             file_import::Action::Folder => dialog.pick_folder().map(|path| vec![path]),
         };
@@ -1382,8 +1393,97 @@ impl Desktop {
             return;
         };
         let user = UserContext::new(self.profiles[index].user.id());
-        self.import.start();
-        self.worker.import(user, paths);
+        let (packages, files): (Vec<_>, Vec<_>) = paths.into_iter().partition(|path| {
+            !path.is_dir() && (worker::is_activity_package(path) || worker::is_fit(path))
+        });
+        if !files.is_empty() {
+            self.import.start();
+            self.worker.import(user, files);
+        }
+        self.package_queue
+            .extend(packages.into_iter().map(|path| (user, path)));
+        self.next_package();
+    }
+
+    fn next_package(&mut self) {
+        if matches!(self.package_review, PackageReviewState::Idle)
+            && let Some((user, path)) = self.package_queue.pop_front()
+        {
+            self.package_review = PackageReviewState::Busy;
+            self.worker.preview_activity_package(user, path);
+        }
+    }
+
+    pub(crate) fn set_open_files(&mut self, inbox: crate::open_files::Inbox) {
+        self.opened_files = Some(inbox);
+    }
+
+    fn poll_open_files(&mut self, ui: &Ui) {
+        let Some(inbox) = &self.opened_files else {
+            return;
+        };
+        if Instant::now() < self.next_open_files_poll
+            || !matches!(self.load, LoadState::Ready)
+            || self.selected_profile.is_none()
+            || self.import.busy()
+            || self.backup.state.switching()
+        {
+            return;
+        }
+        self.next_open_files_poll = Instant::now() + Duration::from_millis(250);
+        ui.ctx().request_repaint_after(Duration::from_millis(250));
+        match inbox.take() {
+            Ok(paths) if !paths.is_empty() => {
+                self.page = Page::Activities;
+                ui.ctx()
+                    .send_viewport_cmd(eframe::egui::ViewportCommand::Focus);
+                self.start_import(paths);
+            }
+            Ok(_) => {}
+            Err(error) => self.notice = Some(Notice::error(error.to_string())),
+        }
+    }
+
+    fn show_package_review(&mut self, ui: &mut Ui) {
+        let PackageReviewState::Ready(package) = &self.package_review else {
+            return;
+        };
+        let Some(profile) = self
+            .profiles
+            .iter()
+            .find(|profile| profile.user.id() == package.user().user_id())
+        else {
+            self.package_review = PackageReviewState::Idle;
+            self.next_package();
+            return;
+        };
+        let action = activity::package_review(
+            ui,
+            &self.intl,
+            profile.user.profile().display_name().as_str(),
+            profile.user.profile().preferences().unit_system(),
+            &package.activities().collect::<Vec<_>>(),
+        );
+        match action {
+            Some(modal::Action::Primary) => {
+                if let PackageReviewState::Ready(package) =
+                    std::mem::replace(&mut self.package_review, PackageReviewState::Idle)
+                {
+                    if package.activities().all(|(_, existing)| existing) {
+                        self.page = Page::Activities;
+                        self.next_package();
+                    } else {
+                        self.package_review = PackageReviewState::Busy;
+                        self.worker.confirm_activity_package(package);
+                    }
+                }
+            }
+            Some(modal::Action::Cancel) => {
+                self.package_review = PackageReviewState::Idle;
+                self.next_package();
+            }
+            None => {}
+        }
     }
 
     fn process_devices(&mut self, context: &Context) {
@@ -1690,6 +1790,27 @@ impl Desktop {
                 worker::Event::ImportStarted { total } => self.import.begin(total),
                 worker::Event::ImportItem(item) => self.import.record(item),
                 worker::Event::ImportFinished(result) => self.import_finished(result),
+                worker::Event::ActivityPackagePreview(result) => {
+                    self.package_review = PackageReviewState::Idle;
+                    match result {
+                        Ok(package) => self.package_review = PackageReviewState::Ready(package),
+                        Err(error) => self.notice = Some(Notice::error(error)),
+                    }
+                    self.next_package();
+                }
+                worker::Event::ActivityPackageImported(result) => {
+                    self.package_review = PackageReviewState::Idle;
+                    match result {
+                        Ok(profiles) => {
+                            self.replace_profiles(profiles, None);
+                            self.notice = Some(Notice::information(
+                                format_message!(&self.intl, default_message: "Activity package imported"),
+                            ));
+                        }
+                        Err(error) => self.notice = Some(Notice::error(error)),
+                    }
+                    self.next_package();
+                }
                 worker::Event::ActivityExported(result) => {
                     self.notice = Some(match result {
                         Ok(true) => Notice::information(
@@ -2162,6 +2283,7 @@ impl eframe::App for Desktop {
         self.process_backup();
         self.routes.poll();
         self.process_events();
+        self.poll_open_files(ui);
         self.process_devices(ui.ctx());
         self.handle_quit_input(ui.ctx());
         let (drop_active, dropped) = ui.ctx().input(|input| {
@@ -2185,6 +2307,7 @@ impl eframe::App for Desktop {
         self.show_create_profile(ui);
         self.show_avatar_editor(ui);
         self.show_connect_preview(ui);
+        self.show_package_review(ui);
         if self.show_file_window() {
             self.file_window_close_pending = false;
             if self.file_window_wake.is_none() {
@@ -2210,6 +2333,12 @@ impl eframe::App for Desktop {
 enum FileWindowAction {
     Browser(device_browser::Action),
     Preview(device_fit_preview::Action),
+}
+
+enum PackageReviewState {
+    Idle,
+    Busy,
+    Ready(garmin_services::activity_export::PreparedActivityPackage),
 }
 
 enum LoadState {

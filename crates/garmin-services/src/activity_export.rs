@@ -68,44 +68,131 @@ impl Application {
         user: UserContext,
         archive: &Path,
     ) -> Result<usize, Error> {
+        let preview = self.preview_activity_package(user, archive).await?;
+        self.confirm_activity_package(preview).await
+    }
+
+    /// Validates all originals and prepares an import without writing to the profile.
+    /// # Errors
+    /// Returns an error for an unknown profile or invalid package.
+    pub async fn preview_activity_package(
+        &self,
+        user: UserContext,
+        archive: &Path,
+    ) -> Result<PreparedActivityPackage, Error> {
         let package = read(std::fs::File::open(archive)?)?;
-        let originals = package
-            .originals
-            .into_values()
+        self.prepare_activity_originals(
+            user,
+            package.originals.into_values(),
+            "activity-package",
+            "Toolkit activity package",
+        )
+        .await
+    }
+
+    /// Previews a FIT recording handed off by a desktop launcher.
+    /// # Errors
+    /// Returns an error for an unreadable or invalid recording or an unknown profile.
+    pub async fn preview_activity_fit(
+        &self,
+        user: UserContext,
+        path: &Path,
+    ) -> Result<PreparedActivityPackage, Error> {
+        self.prepare_activity_originals(
+            user,
+            [std::fs::read(path)?],
+            "open-fit",
+            "Opened FIT recording",
+        )
+        .await
+    }
+
+    async fn prepare_activity_originals(
+        &self,
+        user: UserContext,
+        files: impl IntoIterator<Item = Vec<u8>>,
+        namespace_name: &str,
+        label: &str,
+    ) -> Result<PreparedActivityPackage, Error> {
+        if self.storage.user(user.user_id()).await?.is_none() {
+            return Err(Error::Invalid(
+                "The destination profile no longer exists".to_owned(),
+            ));
+        }
+        let originals = files
+            .into_iter()
             .map(|bytes| {
                 let digest = ArtifactDigest::from_bytes(&bytes);
                 (digest.to_string(), bytes)
             })
             .collect::<std::collections::BTreeMap<_, _>>();
-        for bytes in originals.values() {
-            garmin_fit::normalize_activities(bytes)
-                .map_err(|error| Error::Invalid(error.to_string()))?;
-        }
         let namespace = uuid::Uuid::new_v5(
             &uuid::Uuid::NAMESPACE_URL,
-            format!("garmin-toolkit/activity-package/{}", user.user_id()).as_bytes(),
+            format!("garmin-toolkit/{namespace_name}/{}", user.user_id()).as_bytes(),
         );
         let source = Source::from_parts(
             SourceId::from_u128(namespace.as_u128()),
             user.user_id(),
-            "Toolkit activity package".parse().map_err(
-                |error: garmin_model::identity::Error| Error::Invalid(error.to_string()),
-            )?,
+            label
+                .parse()
+                .map_err(|error: garmin_model::identity::Error| {
+                    Error::Invalid(error.to_string())
+                })?,
             None,
         );
-        let mut imported = 0;
+        let mut entries = Vec::with_capacity(originals.len());
         for (digest, bytes) in originals {
             let identity = SourceIdentity::from_string(format!("originals/{digest}.fit"))
                 .map_err(|error| Error::Invalid(error.to_string()))?;
             let operation = uuid::Uuid::new_v5(&namespace, digest.as_bytes());
+            let operation = AcquisitionOperationId::from_u128(operation.as_u128());
+            let recorded = garmin_fit::normalize_activities(&bytes)
+                .map_err(|error| Error::Invalid(error.to_string()))?;
+            let already_imported = self
+                .fit_import_completed(user, operation)
+                .await
+                .map_err(|error| Error::Invalid(error.to_string()))?;
+            let activities = recorded
+                .activities()
+                .map(garmin_model::activity::Activity::summary)
+                .collect();
+            entries.push(PackageOriginal {
+                identity,
+                operation,
+                bytes,
+                activities,
+                already_imported,
+            });
+        }
+        Ok(PreparedActivityPackage {
+            user,
+            source,
+            entries,
+        })
+    }
+
+    /// Imports the exact originals validated for this destination profile.
+    /// # Errors
+    /// Returns an import error. Retrying skips commits from an interrupted import.
+    pub async fn confirm_activity_package(
+        &self,
+        package: PreparedActivityPackage,
+    ) -> Result<usize, Error> {
+        let PreparedActivityPackage {
+            user,
+            source,
+            entries,
+        } = package;
+        let mut imported = 0;
+        for entry in entries {
             let result = self
                 .import_fit(FitImportRequest::from_parts(
                     user,
                     &source,
-                    identity,
-                    AcquisitionOperationId::from_u128(operation.as_u128()),
+                    entry.identity,
+                    entry.operation,
                     Timestamp::from_jiff(jiff::Timestamp::now()),
-                    &bytes,
+                    &entry.bytes,
                 ))
                 .await
                 .map_err(|error| Error::Invalid(error.to_string()))?;
@@ -181,6 +268,41 @@ impl Application {
             .persist_noclobber(destination)
             .map_err(|error| error.error)?;
         Ok(Some(report))
+    }
+}
+
+/// An import bound to the profile and exact bytes reviewed by the user.
+pub struct PreparedActivityPackage {
+    user: UserContext,
+    source: Source,
+    entries: Vec<PackageOriginal>,
+}
+
+struct PackageOriginal {
+    identity: SourceIdentity,
+    operation: AcquisitionOperationId,
+    bytes: Vec<u8>,
+    activities: Vec<garmin_model::activity::ActivitySummary>,
+    already_imported: bool,
+}
+
+impl PreparedActivityPackage {
+    #[must_use]
+    pub const fn user(&self) -> UserContext {
+        self.user
+    }
+
+    /// Activity rows and whether each original has already been imported.
+    pub fn activities(
+        &self,
+    ) -> impl Iterator<Item = (garmin_model::activity::ActivitySummary, bool)> + '_ {
+        self.entries.iter().flat_map(|entry| {
+            entry
+                .activities
+                .iter()
+                .copied()
+                .map(|activity| (activity, entry.already_imported))
+        })
     }
 }
 

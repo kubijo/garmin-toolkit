@@ -289,7 +289,24 @@ fn toolkit_package_import_round_trips_between_deployments() -> TestResult {
         let target =
             Application::new(Storage::open(fixture.root.path().join("target.sqlite3")).await?);
         let owner = UserContext::new(target.create_profile("Target owner".parse()?).await?.id());
-        assert_eq!(target.import_activity_package(owner, &archive).await?, 1);
+        let preview = target.preview_activity_package(owner, &archive).await?;
+        assert_eq!(
+            preview
+                .activities()
+                .map(|(_, existing)| existing)
+                .collect::<Vec<_>>(),
+            [false]
+        );
+        assert_eq!(
+            target.activities(owner).await?,
+            [] as [garmin_services::ActivityPreview; 0]
+        );
+        let renamed = fixture.root.path().join("moved.zip");
+        std::fs::rename(&archive, &renamed)?;
+        assert_eq!(target.confirm_activity_package(preview).await?, 1);
+        let retry = target.preview_activity_package(owner, &renamed).await?;
+        assert!(retry.activities().all(|(_, existing)| existing));
+        std::fs::rename(renamed, &archive)?;
         assert_eq!(target.import_activity_package(owner, &archive).await?, 0);
         let imports = target.activities(owner).await?;
         assert_eq!(imports.len(), 1);

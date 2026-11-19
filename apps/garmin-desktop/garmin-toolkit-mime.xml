@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/vnd.ant.fit">
+    <comment>Garmin FIT recording</comment>
+    <glob pattern="*.fit" weight="40"/>
+    <magic priority="80">
+      <match type="string" value=".FIT" offset="8"/>
+    </magic>
+  </mime-type>
+  <mime-type type="application/vnd.garmin-toolkit.activity+zip">
+    <comment>Garmin Toolkit activity package</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.garmin-activity"/>
+  </mime-type>
+</mime-info>

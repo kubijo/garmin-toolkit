@@ -9,11 +9,11 @@ use garmin_model::{
 };
 use garmin_progress::{CancellationToken, ProgressReporter};
 use garmin_service_api::{
-    ActivityDetailSnapshot, ActivitySnapshot, ApplicationService, AvatarUpload,
-    DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogEntry,
-    DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceCatalogStorage, DeviceFitImportOutcome,
-    DeviceFitImportPlan, DeviceFitImportStatus, DeviceFitPreview, DeviceSnapshot, DownloadTicket,
-    ProfileAvatarSnapshot, ProfileSnapshot,
+    ActivityDetailSnapshot, ActivityPackagePreview, ActivitySnapshot, ApplicationService,
+    AvatarUpload, DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload,
+    DeviceCatalogEntry, DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceCatalogStorage,
+    DeviceFitImportOutcome, DeviceFitImportPlan, DeviceFitImportStatus, DeviceFitPreview,
+    DeviceSnapshot, DownloadTicket, ProfileAvatarSnapshot, ProfileSnapshot,
 };
 use garmin_services::{
     Application, AvatarImportRequest, FitImportRequest, FitImportResult, ImportDisposition,
@@ -216,6 +216,14 @@ pub(super) trait SourceProvider {
     ) -> Result<Box<dyn Source>, SourceOpenError>;
 }
 
+struct PendingActivityPackage {
+    token: Uuid,
+    user: UserId,
+    epoch: Uuid,
+    path: tempfile::TempPath,
+    expires: std::time::Instant,
+}
+
 #[derive(Clone)]
 pub(super) struct Host {
     source: Arc<Mutex<Box<dyn Source>>>,
@@ -223,6 +231,7 @@ pub(super) struct Host {
     downloads: crate::downloads::Downloads,
     activity_export_gate: Arc<tokio::sync::Mutex<()>>,
     activity_package_import_gate: Arc<tokio::sync::Mutex<()>>,
+    activity_package_preview: Arc<Mutex<Option<PendingActivityPackage>>>,
     refresh_gate: Arc<tokio::sync::Mutex<()>>,
     deployment: Arc<Deployment>,
     operations: Arc<SnapshotOperations>,
@@ -286,6 +295,7 @@ impl Host {
             downloads: crate::downloads::Downloads::default(),
             activity_export_gate: Arc::default(),
             activity_package_import_gate: Arc::default(),
+            activity_package_preview: Arc::default(),
             refresh_gate: Arc::new(tokio::sync::Mutex::new(())),
             epoch,
             deployment,
@@ -436,7 +446,7 @@ impl ApplicationService for Host {
             return Ok(Err("An activity export is already in progress".to_owned()));
         };
         let result = async {
-            let file_name = format!("activity-{observation_id}.zip");
+            let file_name = format!("activity-{observation_id}.garmin-activity");
             let zip_name = file_name.clone();
             let runtime = tokio::runtime::Handle::current();
             let (staging, path, permit, _application) = tokio::task::spawn_blocking(move || {
@@ -504,6 +514,109 @@ impl ApplicationService for Host {
         }
         .await;
         Ok(result)
+    }
+
+    async fn preview_activity_package(
+        &self,
+        user_id: UserId,
+        size: ByteCount,
+        contents: rch::io::Receiver,
+    ) -> Result<Result<ActivityPackagePreview, String>, rtc::CallError> {
+        let Ok(permit) = Arc::clone(&self.activity_package_import_gate).try_lock_owned() else {
+            return Ok(Err(
+                "An activity package import is already in progress".to_owned()
+            ));
+        };
+        let result = async {
+            let path = receive_browser_upload(size, contents).await?;
+            let application = self
+                .deployment
+                .application_owned(self.epoch)
+                .await
+                .map_err(|error| error.to_string())?;
+            let runtime = tokio::runtime::Handle::current();
+            let (path, rows, _permit) = tokio::task::spawn_blocking(move || {
+                let preview = runtime
+                    .block_on(
+                        application.preview_activity_package(UserContext::new(user_id), &path),
+                    )
+                    .map_err(|error| error.to_string())?;
+                Ok::<_, String>((path, preview.activities().collect::<Vec<_>>(), permit))
+            })
+            .await
+            .map_err(|error| error.to_string())??;
+            let token = Uuid::new_v4();
+            *self
+                .activity_package_preview
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(PendingActivityPackage {
+                token,
+                user: user_id,
+                epoch: self.epoch,
+                path,
+                expires: std::time::Instant::now() + Duration::from_secs(300),
+            });
+            Ok(ActivityPackagePreview {
+                token,
+                activities: rows,
+            })
+        }
+        .await;
+        Ok(result)
+    }
+
+    async fn finish_activity_package(
+        &self,
+        user_id: UserId,
+        preview: Uuid,
+        confirm: bool,
+    ) -> Result<Result<usize, String>, rtc::CallError> {
+        let Ok(permit) = Arc::clone(&self.activity_package_import_gate).try_lock_owned() else {
+            return Ok(Err(
+                "An activity package import is already in progress".to_owned()
+            ));
+        };
+        let pending = {
+            let mut pending = self
+                .activity_package_preview
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if pending
+                .as_ref()
+                .is_some_and(|item| item.expires <= std::time::Instant::now())
+            {
+                pending.take();
+            }
+            if pending.as_ref().is_some_and(|item| {
+                item.token == preview && item.user == user_id && item.epoch == self.epoch
+            }) {
+                pending.take()
+            } else {
+                None
+            }
+        };
+        let Some(pending) = pending else {
+            return Ok(Err("The activity package preview expired".to_owned()));
+        };
+        if !confirm {
+            return Ok(Ok(0));
+        }
+        let application = self
+            .deployment
+            .application_owned(self.epoch)
+            .await
+            .map_err(|_| rtc::CallError::NotServed)?;
+        let runtime = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            runtime
+                .block_on(
+                    application.import_activity_package(UserContext::new(user_id), &pending.path),
+                )
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|_| rtc::CallError::NotServed)
     }
 
     async fn route_download(
@@ -2528,8 +2641,28 @@ mod tests {
             package.originals.into_values().collect::<Vec<_>>(),
             [original]
         );
-        assert_eq!(upload_activity_package(&host, other.id(), &bytes).await, 1);
-        assert_eq!(upload_activity_package(&host, other.id(), &bytes).await, 0);
+        let preview = preview_uploaded_activity_package(&host, other.id(), &bytes).await;
+        assert!(
+            host.finish_activity_package(user.id(), preview, true)
+                .await
+                .unwrap()
+                .is_err()
+        );
+        assert_eq!(
+            host.finish_activity_package(other.id(), preview, false)
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+        let preview = preview_uploaded_activity_package(&host, other.id(), &bytes).await;
+        assert_eq!(
+            host.finish_activity_package(other.id(), preview, true)
+                .await
+                .unwrap()
+                .unwrap(),
+            1
+        );
         assert!(
             host.prepare_activity_export(user.id(), id)
                 .await
@@ -2538,7 +2671,7 @@ mod tests {
         );
     }
 
-    async fn upload_activity_package(host: &Host, user: UserId, bytes: &[u8]) -> usize {
+    async fn preview_uploaded_activity_package(host: &Host, user: UserId, bytes: &[u8]) -> Uuid {
         use tokio::io::AsyncWriteExt as _;
 
         let size = ByteCount::from_bytes(bytes.len() as u64);
@@ -2548,8 +2681,11 @@ mod tests {
             sender.write_all(bytes).await.unwrap();
             sender.shutdown().await.unwrap();
         };
-        let (result, ()) = tokio::join!(host.import_activity_package(user, size, receiver), send);
-        result.unwrap().unwrap()
+        let (result, ()) = tokio::join!(host.preview_activity_package(user, size, receiver), send);
+        let preview = result.unwrap().unwrap();
+        assert_eq!(preview.activities.len(), 1);
+        assert!(!preview.activities[0].1);
+        preview.token
     }
 
     #[tokio::test]
