@@ -277,6 +277,26 @@ fn corrupt_package(
 }
 
 #[test]
+fn limited_export_discards_an_oversized_archive() -> TestResult {
+    block_on(async {
+        let fixture = export_fixture().await?;
+        let output = fixture.root.path().join("limited.zip");
+        let before = std::fs::read_dir(fixture.root.path())?.count();
+        let limit = garmin_model::artifact::ByteCount::from_bytes(64);
+        assert!(
+            fixture
+                .application
+                .export_activity_with_limit(fixture.owner, fixture.observation, &output, limit,)
+                .await
+                .is_err()
+        );
+        assert!(!output.exists());
+        assert_eq!(std::fs::read_dir(fixture.root.path())?.count(), before);
+        Ok(())
+    })
+}
+
+#[test]
 fn activity_package_is_owned_and_never_replaces_an_existing_file() -> TestResult {
     block_on(async {
         let ExportFixture {

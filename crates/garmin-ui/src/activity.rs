@@ -262,6 +262,22 @@ pub struct BrowserProps<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     Select(usize),
+    Export,
+}
+
+#[must_use]
+pub fn export_button(ui: &mut Ui, intl: &Intl) -> bool {
+    let response = crate::button::Props {
+        label: &format_message!(intl, default_message: "Export activity"),
+        icon: Some(icons::DOWNLOAD_SIMPLE),
+        kind: crate::button::Kind::Tertiary,
+        size: crate::Size::Small,
+        width: crate::button::Width::Fit,
+        enabled: true,
+    }
+    .show(ui);
+    crate::semantics::target(ui, &response, "activity.export");
+    response.clicked()
 }
 
 #[must_use]

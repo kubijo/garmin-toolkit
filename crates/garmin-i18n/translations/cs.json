@@ -830,6 +830,10 @@
     "translation": "Připojeno: {device}",
     "description": "Notification title for a newly attached device"
   },
+  "E9UnlE+KXS": {
+    "source": "Export activity",
+    "translation": "Exportovat aktivitu"
+  },
   "EAG99Y+EPN": {
     "source": "This action is unavailable in the current map state.",
     "translation": "Tato akce není v aktuálním stavu map dostupná."
@@ -1966,6 +1970,10 @@
     "source": "No Personal API key saved",
     "translation": "Klíč Personal API není uložen"
   },
+  "az+C3qBafI": {
+    "source": "Activity exported",
+    "translation": "Aktivita byla exportována"
+  },
   "b0bewtUePz": {
     "source": "New profile draft",
     "translation": "Rozepsaný nový profil"
@@ -2810,6 +2818,10 @@
   "rQUSqe6JcA": {
     "source": "Creating…",
     "translation": "Vytváření…"
+  },
+  "rQlRMk67EV": {
+    "source": "Could not export activity",
+    "translation": "Aktivitu se nepodařilo exportovat"
   },
   "rUdUVLpKb7": {
     "source": "Replace existing backup?",

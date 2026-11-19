@@ -494,8 +494,10 @@ impl Desktop {
             }
             PageOutput::Backup(action) => self.handle_backup_action(action),
             PageOutput::Activities((import, selected)) => {
-                if let Some(activity::Action::Select(index)) = selected {
-                    self.select_activity(index);
+                match selected {
+                    Some(activity::Action::Select(index)) => self.select_activity(index),
+                    Some(activity::Action::Export) => self.export_selected_activity(),
+                    None => {}
                 }
                 if let Some(action) = import {
                     self.open_import_dialog(action);
@@ -1321,6 +1323,28 @@ impl Desktop {
         self.worker.load_activity(user, observation_id);
     }
 
+    fn export_selected_activity(&self) {
+        let Some(profile) = self
+            .selected_profile
+            .and_then(|index| self.profiles.get(index))
+        else {
+            return;
+        };
+        let Some(activity) = profile.previews.get(self.selected_activity) else {
+            return;
+        };
+        let id = activity.observation_id();
+        if let Some(destination) = crate::native::file_dialog(&self.context).and_then(|dialog| {
+            dialog
+                .set_file_name(format!("activity-{id}.zip"))
+                .add_filter("ZIP", &["zip"])
+                .save_file()
+        }) {
+            self.worker
+                .export_activity(UserContext::new(profile.user.id()), id, destination);
+        }
+    }
+
     fn profile_props(&self) -> Vec<profile::ProfileProps<'_>> {
         self.profiles
             .iter()
@@ -1664,6 +1688,20 @@ impl Desktop {
                 worker::Event::ImportStarted { total } => self.import.begin(total),
                 worker::Event::ImportItem(item) => self.import.record(item),
                 worker::Event::ImportFinished(result) => self.import_finished(result),
+                worker::Event::ActivityExported(result) => {
+                    self.notice = Some(match result {
+                        Ok(true) => Notice::information(
+                            format_message!(&self.intl, default_message: "Activity exported"),
+                        ),
+                        Ok(false) => Notice::error(
+                            format_message!(&self.intl, default_message: "The selected activity no longer exists"),
+                        ),
+                        Err(error) => {
+                            let title = format_message!(&self.intl, default_message: "Could not export activity");
+                            Notice::error(format!("{title} · {error}"))
+                        }
+                    });
+                }
                 worker::Event::ActivityLoaded {
                     observation_id,
                     result,
@@ -2525,6 +2563,7 @@ impl<'a> ActivitiesPage<'a> {
         let select_activity = format_message!(self.intl, default_message: "Select an activity");
         let import_copy = ImportCopy::new(self.intl, self.drop_active);
         let mut import = None;
+        let mut export = false;
         let selected = workspace.show_with_actions(
             ui,
             self.intl,
@@ -2541,6 +2580,7 @@ impl<'a> ActivitiesPage<'a> {
                 no_route: &no_route,
             },
             |ui| {
+                export = !items.is_empty() && activity::export_button(ui, self.intl);
                 ui.add_space(12.0);
                 import = file_import::actions(
                     ui,
@@ -2559,7 +2599,10 @@ impl<'a> ActivitiesPage<'a> {
         if self.drop_active {
             file_import::drop_overlay(ui, drop_rect, &import_copy.description);
         }
-        (import, selected)
+        (
+            import,
+            selected.or(export.then_some(activity::Action::Export)),
+        )
     }
 }
 

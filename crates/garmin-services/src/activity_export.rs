@@ -1,6 +1,11 @@
 //! Portable recorded activities: typed CSV, GPX, provenance, and authoritative FIT.
 
-use std::{collections::BTreeSet, path::Path};
+use std::io;
+use std::{
+    collections::BTreeSet,
+    io::{Seek, SeekFrom, Write},
+    path::Path,
+};
 
 use datapackage::{
     Constraints, Descriptor, Field, FieldNames, ForeignKey, Metadata, Reference,
@@ -12,6 +17,7 @@ use garmin_model::{
         ActivityDuration, ActivityMetrics, ActivitySport, ActivityTotals, Cadence, Distance,
         Energy, HeartRate, Power, Speed, Temperature, TimeRange, TimerState,
     },
+    artifact::ByteCount,
     observation::ObservationId,
     route::{Coordinate, Elevation, Latitude, Longitude},
 };
@@ -63,6 +69,25 @@ impl Application {
         selected: ObservationId,
         destination: &Path,
     ) -> Result<Option<Report>, Error> {
+        self.export_activity_with_limit(
+            actor,
+            selected,
+            destination,
+            ByteCount::from_bytes(u64::MAX),
+        )
+        .await
+    }
+
+    /// Exports an activity while bounding the size of the temporary ZIP.
+    /// # Errors
+    /// Returns export errors or an I/O error if the ZIP would exceed the limit.
+    pub async fn export_activity_with_limit(
+        &self,
+        actor: UserContext,
+        selected: ObservationId,
+        destination: &Path,
+        limit: ByteCount,
+    ) -> Result<Option<Report>, Error> {
         let recordings = self
             .storage
             .activity_export(actor.user_id(), selected)
@@ -75,12 +100,58 @@ impl Application {
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
         let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-        let report = write_package(&mut temporary, selected, &recordings)?;
+        let report = write_package(
+            LimitedWriter {
+                file: temporary.as_file_mut(),
+                position: ByteCount::default(),
+                limit,
+            },
+            selected,
+            &recordings,
+        )?;
         temporary.as_file().sync_all()?;
         temporary
             .persist_noclobber(destination)
             .map_err(|error| error.error)?;
         Ok(Some(report))
+    }
+}
+
+struct LimitedWriter<'a> {
+    file: &'a mut std::fs::File,
+    position: ByteCount,
+    limit: ByteCount,
+}
+
+impl Write for LimitedWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self
+            .position
+            .checked_add(ByteCount::from_bytes(bytes.len() as u64))
+            .is_none_or(|end| end > self.limit)
+        {
+            return Err(io::Error::other(
+                "Activity export exceeds the download size limit",
+            ));
+        }
+        let written = self.file.write(bytes)?;
+        self.position = self
+            .position
+            .checked_add(ByteCount::from_bytes(written as u64))
+            .expect("a successful write stays within the checked byte limit");
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl Seek for LimitedWriter<'_> {
+    fn seek(&mut self, target: SeekFrom) -> io::Result<u64> {
+        let position = self.file.seek(target)?;
+        self.position = ByteCount::from_bytes(position);
+        Ok(position)
     }
 }
 
@@ -298,11 +369,11 @@ impl Rows {
 }
 
 fn write_package(
-    file: &mut tempfile::NamedTempFile,
+    file: LimitedWriter<'_>,
     selected: ObservationId,
     recordings: &[ActivityExport],
 ) -> Result<Report, Error> {
-    let mut writer = datapackage::Writer::new(file.as_file_mut());
+    let mut writer = datapackage::Writer::new(file);
     let mut rows = Rows::default();
     let mut originals = BTreeSet::new();
     for recording in recordings {
@@ -396,7 +467,7 @@ fn write_package(
 }
 
 fn add_table<T: Table>(
-    writer: &mut datapackage::Writer<&mut std::fs::File>,
+    writer: &mut datapackage::Writer<LimitedWriter<'_>>,
     name: &'static str,
     rows: &[T],
     primary_key: Vec<&'static str>,
@@ -433,7 +504,7 @@ fn add_table<T: Table>(
 }
 
 fn add_resource(
-    writer: &mut datapackage::Writer<&mut std::fs::File>,
+    writer: &mut datapackage::Writer<LimitedWriter<'_>>,
     name: String,
     path: String,
     format: &'static str,

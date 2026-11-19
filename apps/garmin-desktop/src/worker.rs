@@ -187,6 +187,19 @@ impl Worker {
         });
     }
 
+    pub fn export_activity(
+        &self,
+        user: UserContext,
+        observation_id: ObservationId,
+        destination: PathBuf,
+    ) {
+        self.send(Command::ExportActivity {
+            user,
+            observation_id,
+            destination,
+        });
+    }
+
     pub fn import_avatar(
         &self,
         user: UserContext,
@@ -283,6 +296,11 @@ enum Command {
         user: UserContext,
         observation_id: ObservationId,
     },
+    ExportActivity {
+        user: UserContext,
+        observation_id: ObservationId,
+        destination: PathBuf,
+    },
     ImportAvatar {
         user: UserContext,
         path: PathBuf,
@@ -363,6 +381,7 @@ pub enum Event {
         observation_id: ObservationId,
         result: Result<Option<Box<garmin_services::ActivityDetails>>, String>,
     },
+    ActivityExported(Result<bool, String>),
 }
 
 pub struct ProfileData {
@@ -692,17 +711,21 @@ fn execute_command(
             user,
             observation_id,
         } => {
-            let result = block_on(application.activity(user, observation_id))
-                .map(|details| details.map(Box::new))
-                .map_err(|error| error.to_string());
             return emit(
                 events,
                 context,
-                Event::ActivityLoaded {
-                    observation_id,
-                    result,
-                },
+                load_activity(application, user, observation_id),
             );
+        }
+        Command::ExportActivity {
+            user,
+            observation_id,
+            destination,
+        } => {
+            let result = block_on(application.export_activity(user, observation_id, &destination))
+                .map(|report| report.is_some())
+                .map_err(|error| error.to_string());
+            return emit(events, context, Event::ActivityExported(result));
         }
         Command::ImportAvatar {
             user,
@@ -741,6 +764,20 @@ fn execute_command(
         Command::Shutdown => return false,
     }
     true
+}
+
+fn load_activity(
+    application: &Application,
+    user: UserContext,
+    observation_id: ObservationId,
+) -> Event {
+    let result = block_on(application.activity(user, observation_id))
+        .map(|details| details.map(Box::new))
+        .map_err(|error| error.to_string());
+    Event::ActivityLoaded {
+        observation_id,
+        result,
+    }
 }
 
 #[expect(

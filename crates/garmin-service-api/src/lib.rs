@@ -573,6 +573,11 @@ mod rpc {
             &self,
             user_id: UserId,
         ) -> Result<Result<Option<garmin_model::artifact::ArtifactDigest>, String>, rtc::CallError>;
+        async fn prepare_activity_export(
+            &self,
+            user_id: UserId,
+            observation_id: ObservationId,
+        ) -> Result<Result<DownloadTicket, String>, rtc::CallError>;
     }
 }
 

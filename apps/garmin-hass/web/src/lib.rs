@@ -752,6 +752,19 @@ impl App {
                 self.selected_activity = index;
                 self.load_selected_activity(profiles);
             }
+            PageAction::Activities(Some(activity::Action::Export)) => {
+                if let Some(profile) = self.selected_profile.and_then(|index| profiles.get(index))
+                    && let Some(activity) = profile.activities.get(self.selected_activity)
+                {
+                    spawn_activity_export(
+                        Rc::clone(&self.shared),
+                        self.context.clone(),
+                        profile.user.id(),
+                        activity.id,
+                        format_message!(&self.intl, default_message: "Could not export activity"),
+                    );
+                }
+            }
             PageAction::Settings(Some(action)) => {
                 self.handle_profile_settings_action(action, profiles);
             }
@@ -1844,7 +1857,8 @@ fn show_activities(
     let no_route = format_message!(intl, default_message: "No recorded route");
     let no_activities = format_message!(intl, default_message: "No activities yet");
     let select_activity = format_message!(intl, default_message: "Select an activity");
-    workspace.show(
+    let mut export = false;
+    let action = workspace.show_with_actions(
         ui,
         intl,
         &activity::WorkspaceProps {
@@ -1859,7 +1873,9 @@ fn show_activities(
             empty_detail: &select_activity,
             no_route: &no_route,
         },
-    )
+        |ui| export = !items.is_empty() && activity::export_button(ui, intl),
+    );
+    action.or(export.then_some(activity::Action::Export))
 }
 
 fn show_profile_settings(
@@ -3697,6 +3713,37 @@ fn spawn_update_preferences(
                 }
                 state.notice = Some(Notice::error(failure, error));
             }
+        }
+        drop(state);
+        context.request_repaint();
+    });
+}
+
+fn spawn_activity_export(
+    shared: Rc<RefCell<State>>,
+    context: eframe::egui::Context,
+    user_id: UserId,
+    observation_id: garmin_model::observation::ObservationId,
+    failure: String,
+) {
+    let Some(client) = shared.borrow().client.clone() else {
+        return;
+    };
+    let generation = shared.borrow().connection_generation;
+    spawn_local(async move {
+        let result = client
+            .prepare_activity_export(user_id, observation_id)
+            .await
+            .map_err(ConnectError::call)
+            .and_then(|result| result.map_err(ConnectError::domain));
+        let mut state = shared.borrow_mut();
+        if state.connection_generation != generation {
+            return;
+        }
+        if let Err(error) =
+            result.and_then(|ticket| trigger_download(&ticket).map_err(ConnectError::domain))
+        {
+            state.notice = Some(Notice::error(failure, error));
         }
         drop(state);
         context.request_repaint();

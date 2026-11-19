@@ -221,6 +221,7 @@ pub(super) struct Host {
     source: Arc<Mutex<Box<dyn Source>>>,
     snapshots: Arc<rch::watch::Sender<Vec<DeviceSnapshot>>>,
     downloads: crate::downloads::Downloads,
+    activity_export_gate: Arc<tokio::sync::Mutex<()>>,
     refresh_gate: Arc<tokio::sync::Mutex<()>>,
     deployment: Arc<Deployment>,
     operations: Arc<SnapshotOperations>,
@@ -282,6 +283,7 @@ impl Host {
             source: Arc::new(Mutex::new(source)),
             snapshots: Arc::new(snapshots),
             downloads: crate::downloads::Downloads::default(),
+            activity_export_gate: Arc::default(),
             refresh_gate: Arc::new(tokio::sync::Mutex::new(())),
             epoch,
             deployment,
@@ -415,6 +417,59 @@ impl ApplicationService for Host {
         >::new(Arc::new(session));
         tokio::spawn(server.serve());
         Ok(Ok(client))
+    }
+
+    async fn prepare_activity_export(
+        &self,
+        user_id: garmin_model::identity::UserId,
+        observation_id: ObservationId,
+    ) -> Result<Result<DownloadTicket, String>, rtc::CallError> {
+        let application = self
+            .deployment
+            .application_owned(self.epoch)
+            .await
+            .map_err(|_| rtc::CallError::NotServed)?;
+        self.downloads.expire();
+        let Ok(permit) = Arc::clone(&self.activity_export_gate).try_lock_owned() else {
+            return Ok(Err("An activity export is already in progress".to_owned()));
+        };
+        let result = async {
+            let file_name = format!("activity-{observation_id}.zip");
+            let zip_name = file_name.clone();
+            let runtime = tokio::runtime::Handle::current();
+            let (staging, path, permit, _application) = tokio::task::spawn_blocking(move || {
+                let staging = tempfile::tempdir().map_err(|error| error.to_string())?;
+                let path = staging.path().join(zip_name);
+                runtime
+                    .block_on(application.export_activity_with_limit(
+                        UserContext::new(user_id),
+                        observation_id,
+                        &path,
+                        garmin_device::MAX_BROWSER_TRANSFER_BYTES,
+                    ))
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| "The selected activity no longer exists".to_owned())?;
+                Ok::<_, String>((staging, path, permit, application))
+            })
+            .await
+            .map_err(|error| error.to_string())??;
+            let file = tokio::fs::File::open(path)
+                .await
+                .map_err(|error| error.to_string())?;
+            let bytes = file
+                .metadata()
+                .await
+                .map_err(|error| error.to_string())?
+                .len();
+            self.downloads.insert(crate::downloads::Prepared::from_file(
+                file_name,
+                garmin_model::artifact::ByteCount::from_bytes(bytes),
+                file,
+                (staging, permit),
+            ))
+        }
+        .await;
+        Ok(result)
     }
 
     async fn route_download(
@@ -2369,6 +2424,80 @@ mod tests {
                 .unwrap()
                 .unwrap(),
             DeviceFitImportStatus::Stopped
+        );
+    }
+
+    #[tokio::test]
+    async fn activity_export_download_preserves_the_original_and_checks_ownership() {
+        let directory = tempfile::tempdir().unwrap();
+        let deployment = crate::prepare_deployment(directory.path()).await.unwrap();
+        let original = fixture::activity(fixture::Sport::Cycling).unwrap();
+        let host = Host::new(
+            Box::new(FitSource {
+                bytes: Arc::new(Mutex::new(original.clone())),
+            }),
+            deployment,
+        );
+        let user = host
+            .create_profile("Rider".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let other = host
+            .create_profile("Other rider".to_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let target = fit_target();
+        let plan = host
+            .device_fit_preview(user.id(), "device".to_owned(), target.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        host.import_device_fit(user.id(), "device".to_owned(), target, plan.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let profiles = host.profiles().await.unwrap().unwrap();
+        let id = profiles
+            .iter()
+            .find(|profile| profile.user.id() == user.id())
+            .unwrap()
+            .activities[0]
+            .id;
+        assert!(
+            host.prepare_activity_export(other.id(), id)
+                .await
+                .unwrap()
+                .is_err()
+        );
+        let ticket = host
+            .prepare_activity_export(user.id(), id)
+            .await
+            .unwrap()
+            .unwrap();
+        let download = host.take_download(ticket.token).unwrap();
+        assert!(host.take_download(ticket.token).is_none());
+        assert!(
+            host.prepare_activity_export(user.id(), id)
+                .await
+                .unwrap()
+                .is_err()
+        );
+        let bytes = axum::body::to_bytes(download.response().into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let package = garmin_services::activity_export::read(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(package.selected, id);
+        assert_eq!(
+            package.originals.into_values().collect::<Vec<_>>(),
+            [original]
+        );
+        assert!(
+            host.prepare_activity_export(user.id(), id)
+                .await
+                .unwrap()
+                .is_ok()
         );
     }
 

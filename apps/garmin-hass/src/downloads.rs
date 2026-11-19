@@ -221,7 +221,7 @@ impl Downloads {
         Ok(ticket)
     }
 
-    fn expire(&self) {
+    pub(super) fn expire(&self) {
         self.pending
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
