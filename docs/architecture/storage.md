@@ -39,6 +39,10 @@ schema-typed CSV relations for summaries, laps, samples, and timer events, GPX 1
 provenance, and every associated original FIT artifact. Equal semantic fingerprints and explicit association groups
 select related recordings within the same profile. FIT bytes remain authoritative; a chained FIT is preserved whole.
 
+Stored activity summaries expose the versioned semantic fingerprint as the identity of the normalized recording. The
+observation ID identifies an individual import, and a Garmin activity ID is scoped to its Connect account source.
+Reports can group identical recordings while exports and activity detail retain each observation and its provenance.
+
 The descriptor names resources, their SHA-256 hashes and byte counts, field types, units, nullability, primary keys, and
 foreign keys. CSV preserves canonical integer units and source ordering; missing measurements remain empty cells. GPX
 uses WGS84 degrees and meters and starts a new segment at missing coordinates or timer pauses. Samples captured while

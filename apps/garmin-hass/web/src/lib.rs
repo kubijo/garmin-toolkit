@@ -528,6 +528,7 @@ impl App {
                                 today: jiff::Zoned::now().date(),
                                 preferences: current_profile.user.profile().preferences(),
                                 sync: Some(&current_profile.connect_sync),
+                                connect_configured: current_profile.garmin_connect_configured,
                                 enabled,
                                 refreshing,
                                 load_progress: progress.as_ref(),
@@ -3129,7 +3130,6 @@ async fn poll_connect_sync(
             state
                 .profiles
                 .iter()
-                .filter(|profile| profile.garmin_connect_configured)
                 .map(|profile| profile.user.id())
                 .collect::<Vec<_>>(),
         )

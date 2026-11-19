@@ -1,14 +1,15 @@
 //! Read-only account-wide trends from the published summary cache.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use garmin_model::artifact::ArtifactDigest;
-use garmin_model::garmin_connect::trends::{History, ImportedMeasurements};
+use garmin_model::garmin_connect::trends::{ActivitySummary, History, ImportedMeasurements, Sport};
+use garmin_storage::{CacheSnapshot, StoredActivitySummary};
 
 use crate::{Application, Error, UserContext};
 
 impl Application {
-    /// Fingerprint the imported measurements available to the current Trends account.
+    /// Fingerprint the immutable recordings available to Trends for this profile.
     /// # Errors
     /// Returns profile authorization or cache persistence errors.
     pub async fn connect_trends_import_revision(
@@ -16,72 +17,132 @@ impl Application {
         user: UserContext,
     ) -> Result<Option<ArtifactDigest>, Error> {
         self.garmin_connect_configured(user).await?;
-        let Some(key) = self.storage.garmin_connect_key(user.user_id()).await? else {
-            return Ok(None);
-        };
-        let measurements = self
-            .storage
-            .connect_trends_measurements(
-                user.user_id(),
-                &crate::connect_import::cache::credential_hash(&key),
-            )
-            .await?;
-        let revision =
-            import_revision(&measurements).map_err(|error| garmin_storage::Error::InvalidData {
+        let ids = self.storage.trends_observation_ids(user.user_id()).await?;
+        let bytes =
+            serde_json::to_vec(&ids).map_err(|error| garmin_storage::Error::InvalidData {
                 field: "Trends import revision",
                 reason: error.to_string(),
             })?;
-        Ok(Some(revision))
+        Ok(Some(ArtifactDigest::from_bytes(&bytes)))
     }
-    /// Reads the current credential's published history without networking or importing.
+    /// Reads local recordings and the current account's published history.
     /// # Errors
     /// Returns profile authorization or cache persistence errors.
     pub async fn connect_trends(&self, user: UserContext) -> Result<Option<History>, Error> {
         self.garmin_connect_configured(user).await?;
-        let Some(key) = self.storage.garmin_connect_key(user.user_id()).await? else {
-            return Ok(None);
-        };
-        Ok(self
-            .storage
-            .connect_trends_snapshot(
-                user.user_id(),
-                &crate::connect_import::cache::credential_hash(&key),
-            )
-            .await?
-            .map(|snapshot| {
-                History::from_summaries_with_measurements(
-                    &snapshot.activities,
-                    &snapshot.measurements,
+        if let Some(key) = self.storage.garmin_connect_key(user.user_id()).await?
+            && let Some(snapshot) = self
+                .storage
+                .connect_trends_snapshot(
+                    user.user_id(),
+                    &crate::connect_import::cache::credential_hash(&key),
                 )
-            }))
+                .await?
+        {
+            return Ok(Some(merge_recordings(snapshot)));
+        }
+        let recordings = self.storage.activities(user.user_id()).await?;
+        let locals = local_recordings(&recordings, &jiff::tz::TimeZone::UTC, HashSet::new());
+        Ok((!locals.is_empty()).then(|| History::from_recordings(&[], &BTreeMap::new(), locals)))
     }
 }
 
-fn import_revision(
-    measurements: &BTreeMap<i64, ImportedMeasurements>,
-) -> Result<ArtifactDigest, serde_json::Error> {
-    serde_json::to_vec(measurements).map(|bytes| ArtifactDigest::from_bytes(&bytes))
+fn merge_recordings(mut snapshot: CacheSnapshot) -> History {
+    let zone = snapshot
+        .time_zone
+        .as_deref()
+        .and_then(|name| jiff::tz::TimeZone::get(name).ok())
+        .unwrap_or(jiff::tz::TimeZone::UTC);
+    let by_id = snapshot
+        .local
+        .iter()
+        .map(|recording| (recording.observation_id(), recording))
+        .collect::<BTreeMap<_, _>>();
+    let mut claimed = HashSet::new();
+    let mut measurements = BTreeMap::new();
+    for cached in &mut snapshot.activities {
+        let Some(recording) = snapshot
+            .recordings
+            .get(&cached.activity.id)
+            .and_then(|ids| {
+                unambiguous_recording(ids.iter().filter_map(|id| by_id.get(id).copied()))
+            })
+        else {
+            continue;
+        };
+        let summary = recording.summary();
+        claimed.insert(recording.fingerprint());
+        let date = cached
+            .started_local
+            .as_deref()
+            .and_then(|text| text.get(..10));
+        if date
+            .and_then(|date| date.parse::<jiff::civil::Date>().ok())
+            .is_none()
+        {
+            cached.started_local = Some(
+                summary
+                    .time()
+                    .start()
+                    .as_jiff()
+                    .to_zoned(zone.clone())
+                    .date()
+                    .to_string(),
+            );
+        }
+        cached.activity.sport = cached.activity.sport.or(Some(summary.sport()));
+        cached.activity.distance = cached.activity.distance.or(summary.totals().distance());
+        cached.activity.duration = cached.activity.duration.or(Some(summary.totals().timer()));
+        measurements.insert(cached.activity.id, fit_measurements(recording));
+    }
+    let locals = local_recordings(&snapshot.local, &zone, claimed);
+    History::from_recordings(&snapshot.activities, &measurements, locals)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use garmin_model::activity::{Distance, HeartRate};
+fn local_recordings<'a>(
+    recordings: &'a [StoredActivitySummary],
+    zone: &jiff::tz::TimeZone,
+    mut claimed: HashSet<&'a garmin_model::observation::SemanticFingerprint>,
+) -> Vec<ActivitySummary> {
+    recordings
+        .iter()
+        .filter(|recording| claimed.insert(recording.fingerprint()))
+        .map(|recording| {
+            let summary = recording.summary();
+            let measurements = fit_measurements(recording);
+            ActivitySummary {
+                id: 0,
+                date: summary
+                    .time()
+                    .start()
+                    .as_jiff()
+                    .to_zoned(zone.clone())
+                    .date(),
+                sport: Sport::from(summary.sport()),
+                name: String::new(),
+                distance: summary.totals().distance(),
+                duration: Some(summary.totals().timer()),
+                elevation_gain: measurements.ascent,
+                average_heart_rate: measurements.average_heart_rate,
+                local_observation: Some(recording.observation_id()),
+            }
+        })
+        .collect()
+}
 
-    #[test]
-    fn changing_only_imported_heart_rate_changes_the_revision() {
-        let digest = |average_heart_rate| {
-            import_revision(&BTreeMap::from([(
-                23,
-                ImportedMeasurements {
-                    ascent: Some(Distance::from_millimeters(420_000)),
-                    average_heart_rate,
-                },
-            )]))
-            .unwrap()
-        };
-        let rate = |bpm| Some(HeartRate::from_beats_per_minute(bpm));
-        assert_ne!(digest(None), digest(rate(144)));
-        assert_ne!(digest(rate(144)), digest(rate(145)));
+fn unambiguous_recording<'a>(
+    mut recordings: impl Iterator<Item = &'a StoredActivitySummary>,
+) -> Option<&'a StoredActivitySummary> {
+    let first = recordings.next()?;
+    recordings
+        .all(|recording| recording.fingerprint() == first.fingerprint())
+        .then_some(first)
+}
+
+fn fit_measurements(recording: &StoredActivitySummary) -> ImportedMeasurements {
+    let summary = recording.summary();
+    ImportedMeasurements {
+        ascent: summary.totals().ascent(),
+        average_heart_rate: summary.metrics().average_heart_rate(),
     }
 }

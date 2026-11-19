@@ -22,6 +22,7 @@ struct Model {
     reads: usize,
     syncs: usize,
     sync: Option<Snapshot>,
+    connect_configured: bool,
     cloud_opens: usize,
 }
 
@@ -50,6 +51,7 @@ fn harness() -> Harness<'static, Model> {
                         today: "2026-11-17".parse().expect("date"),
                         preferences: model.preferences,
                         sync: model.sync.as_ref(),
+                        connect_configured: model.connect_configured,
                         enabled: true,
                         refreshing: false,
                         load_progress: None,
@@ -78,9 +80,20 @@ fn harness() -> Harness<'static, Model> {
                 reads: 0,
                 syncs: 0,
                 sync: None,
+                connect_configured: true,
                 cloud_opens: 0,
             },
         )
+}
+
+#[test]
+fn trends_loads_history_without_a_connect_account() {
+    let mut view = harness();
+    view.state_mut().connect_configured = false;
+    view.run();
+    assert_eq!(view.state().reads, 1);
+    assert!(view.query_by_label("Period comparison").is_some());
+    assert!(view.query_by_label("Sync activities").is_none());
 }
 
 #[test]

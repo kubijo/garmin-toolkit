@@ -135,6 +135,10 @@
     "source": "Space",
     "translation": "Mezerník"
   },
+  "0hNVuNVZel": {
+    "source": "Activity history starts {date}",
+    "translation": "Historie aktivit začíná {date}"
+  },
   "1+ROfpt6kh": {
     "source": "Transaction",
     "translation": "Transakce"
@@ -158,6 +162,10 @@
   "1LFAVvlkvM": {
     "source": "Route preview",
     "translation": "Náhled trasy"
+  },
+  "1LFie24BpJ": {
+    "source": "Import a FIT activity to see trends.",
+    "translation": "Pro zobrazení trendů importujte aktivitu ve formátu FIT."
   },
   "1MaxxL4pb0": {
     "source": "Route type",
@@ -1350,10 +1358,6 @@
     "source": "Generate FIT",
     "translation": "Vygenerovat FIT"
   },
-  "O3U8zpwAyH": {
-    "source": "Sync your Garmin account to see trends. Activities remain unimported.",
-    "translation": "Pro zobrazení trendů synchronizujte účet Garmin. Aktivity se tím neimportují."
-  },
   "O9GTIcAimZ": {
     "source": "Profile picture",
     "translation": "Profilový obrázek"
@@ -1557,6 +1561,10 @@
   "RvgqAOEeQv": {
     "source": "Execution mode",
     "translation": "Režim provedení"
+  },
+  "S0Bg0TTID4": {
+    "source": "Import a FIT activity or sync your Garmin account to see trends.",
+    "translation": "Pro zobrazení trendů importujte aktivitu ve formátu FIT nebo synchronizujte účet Garmin."
   },
   "S40xOi/j1/": {
     "source": "Create it inside {directory}.",
@@ -2970,10 +2978,6 @@
   "ubmFc8rrea": {
     "source": "Install",
     "translation": "Nainstalovat"
-  },
-  "uctN1pmj4S": {
-    "source": "Cached activity history starts {date}",
-    "translation": "Historie aktivit v mezipaměti začíná {date}"
   },
   "ug01MkZy2v": {
     "source": "Time",

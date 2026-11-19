@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
 use garmin_model::{
-    activity::{Distance, HeartRate},
-    garmin_connect::{AccountFacts, CacheStatus, CachedActivity, trends::ImportedMeasurements},
+    garmin_connect::{AccountFacts, CacheStatus, CachedActivity},
     identity::{SourceId, UserId},
+    observation::ObservationId,
 };
 
-use crate::{Error, Storage};
+use crate::{Error, Storage, activity::StoredActivitySummary};
 
 /// Active account snapshot bound to the profile's current credential.
 pub struct CachedAccount {
@@ -19,7 +19,9 @@ pub struct CachedAccount {
 pub struct CacheSnapshot {
     pub activities: Vec<CachedActivity>,
     pub coverage: CacheStatus,
-    pub measurements: BTreeMap<i64, ImportedMeasurements>,
+    pub recordings: BTreeMap<i64, Vec<ObservationId>>,
+    pub local: Vec<StoredActivitySummary>,
+    pub time_zone: Option<String>,
 }
 
 fn invalid(reason: impl std::fmt::Display) -> Error {
@@ -42,7 +44,7 @@ impl Storage {
             .await
     }
 
-    /// Read the published cache and its unambiguous imported FIT elevation measurements.
+    /// Read published summaries and stored recordings within the same database snapshot.
     ///
     /// # Errors
     /// Returns database or invalid cached-value failures.
@@ -90,10 +92,15 @@ impl Storage {
             sqlx::query_file!("queries/connect-cache-status.sql", user, source, generation)
                 .fetch_one(&mut *transaction)
                 .await?;
-        let measurements = if include_measurements {
-            imported_measurements(&mut transaction, &user, &source).await?
+        let (recordings, local, time_zone) = if include_measurements {
+            let facts: AccountFacts = serde_json::from_str(&account.facts).map_err(invalid)?;
+            (
+                imported_recordings(&mut transaction, &user, &source).await?,
+                crate::activity::read::activity_summaries(&mut transaction, &user).await?,
+                facts.time_zone,
+            )
         } else {
-            BTreeMap::new()
+            (BTreeMap::new(), Vec::new(), None)
         };
         transaction.commit().await?;
         let mut activities = Vec::with_capacity(summaries.len());
@@ -104,7 +111,9 @@ impl Storage {
         }
         Ok(Some(CacheSnapshot {
             activities,
-            measurements,
+            recordings,
+            local,
+            time_zone,
             coverage: CacheStatus {
                 total: usize::try_from(counts.total).map_err(invalid)?,
                 downloaded: usize::try_from(counts.downloaded).map_err(invalid)?,
@@ -347,58 +356,37 @@ impl Storage {
     }
 }
 
-async fn imported_measurements(
+async fn imported_recordings(
     connection: &mut sqlx::SqliteConnection,
     user: &str,
     source: &str,
-) -> Result<BTreeMap<i64, ImportedMeasurements>, Error> {
-    let rows = sqlx::query_file!("queries/connect-imported-measurements.sql", user, source)
+) -> Result<BTreeMap<i64, Vec<ObservationId>>, Error> {
+    let rows = sqlx::query_file!("queries/connect-imported-recordings.sql", user, source)
         .fetch_all(connection)
         .await?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|row| {
-            let id = row.source_identity?.parse().ok()?;
-            let ascent = row
-                .ascent_mm
-                .and_then(|value| u64::try_from(value).ok())
-                .map(Distance::from_millimeters);
-            let average_heart_rate = row
-                .average_heart_rate_bpm
-                .and_then(|value| u16::try_from(value).ok())
-                .map(HeartRate::from_beats_per_minute);
-            Some((
-                id,
-                ImportedMeasurements {
-                    ascent,
-                    average_heart_rate,
-                },
-            ))
-        })
-        .collect())
+    let mut recordings = BTreeMap::<_, Vec<_>>::new();
+    for row in rows {
+        if let Ok(id) = row.source_identity.parse() {
+            recordings
+                .entry(id)
+                .or_default()
+                .push(row.observation_id.parse().map_err(invalid)?);
+        }
+    }
+    Ok(recordings)
 }
 
 impl Storage {
-    /// Read the imported FIT measurements that can affect the current Trends history.
+    /// Read the immutable recording IDs that can affect the current Trends history.
     /// # Errors
     /// Returns database read failures.
-    pub async fn connect_trends_measurements(
-        &self,
-        user: UserId,
-        fingerprint: &str,
-    ) -> Result<BTreeMap<i64, ImportedMeasurements>, Error> {
+    pub async fn trends_observation_ids(&self, user: UserId) -> Result<Vec<ObservationId>, Error> {
         let user = user.to_string();
-        let mut transaction = self.pool.begin().await?;
-        let account = sqlx::query_file!("queries/connect-cache-account.sql", user, fingerprint)
-            .fetch_optional(&mut *transaction)
-            .await?;
-        let measurements = match account {
-            Some(account) => {
-                imported_measurements(&mut transaction, &user, &account.source_id).await?
-            }
-            None => BTreeMap::new(),
-        };
-        transaction.commit().await?;
-        Ok(measurements)
+        sqlx::query_file_scalar!("queries/activity-observation-ids.sql", user)
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .map(|id| id.parse().map_err(invalid))
+            .collect()
     }
 }

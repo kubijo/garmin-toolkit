@@ -122,6 +122,7 @@ fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                         today: "2026-11-16".parse().expect("fixture date"),
                         preferences,
                         sync: Some(&sync),
+                        connect_configured: true,
                         enabled: status != 3,
                         refreshing: status == 1,
                         load_progress: None,

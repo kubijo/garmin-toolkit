@@ -237,12 +237,13 @@ async fn trends_read_all_published_summaries_without_imports_or_refreshes() {
         .set_garmin_connect_key(user.user_id(), Some(&replacement))
         .await
         .expect("replace");
-    assert!(
-        app.connect_trends(user)
-            .await
-            .expect("scoped cache")
-            .is_none()
-    );
+    let local = app
+        .connect_trends(user)
+        .await
+        .expect("scoped history")
+        .unwrap();
+    assert_eq!(local.summaries, 1);
+    assert!(local.activities[0].local_observation.is_some());
 }
 
 #[tokio::test]
@@ -469,7 +470,6 @@ async fn import_cached_preview(app: &Application, user: UserContext) {
         preview.details.description.as_deref(),
         Some("Coastal recovery ride")
     );
-    assert_eq!(app.activities(user).await.unwrap().len(), 0);
     app.garmin_connect_activity(
         user,
         ActivityRequest::Import {
@@ -479,7 +479,124 @@ async fn import_cached_preview(app: &Application, user: UserContext) {
     )
     .await
     .unwrap();
-    assert_eq!(app.activities(user).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn trends_merges_a_local_fit_after_connect_proves_its_identity() {
+    use garmin_model::identity::{Source, SourceId};
+
+    let root = tempfile::tempdir().unwrap();
+    let (app, user, key) = application(&root.path().join("identity.sqlite3")).await;
+    app.storage
+        .set_garmin_connect_key(user.user_id(), None)
+        .await
+        .unwrap();
+    assert!(app.connect_trends(user).await.unwrap().is_none());
+
+    let source = Source::from_parts(
+        SourceId::new_v4(),
+        user.user_id(),
+        "Local FIT".parse().unwrap(),
+        None,
+    );
+    let revision = app.connect_trends_import_revision(user).await.unwrap();
+    import_trends_recording(&app, user, &source, garmin_fit::fixture::Sport::Cycling).await;
+
+    let local = app.connect_trends(user).await.unwrap().unwrap();
+    assert_eq!(local.summaries, 1);
+    assert!(local.activities[0].local_observation.is_some());
+    assert!(local.activities[0].average_heart_rate.is_some());
+    assert!(local.activities[0].elevation_gain.is_some());
+    app.storage
+        .set_garmin_connect_key(user.user_id(), Some(&key))
+        .await
+        .unwrap();
+    assert_eq!(
+        app.connect_trends(user).await.unwrap().unwrap().summaries,
+        1
+    );
+    let remote = MockRemote::new();
+    app.load_connect_cache(
+        user,
+        &credential_hash(&key),
+        &remote,
+        Refresh::Full,
+        &uninterrupted(),
+    )
+    .await
+    .unwrap();
+
+    let before = app.connect_trends(user).await.unwrap().unwrap();
+    assert_eq!(before.summaries, 24);
+    assert_eq!(
+        before
+            .activities
+            .iter()
+            .filter(|item| item.local_observation.is_some())
+            .count(),
+        1
+    );
+    assert_ne!(
+        app.connect_trends_import_revision(user).await.unwrap(),
+        revision
+    );
+
+    import_cached_preview(&app, user).await;
+    let after = app.connect_trends(user).await.unwrap().unwrap();
+    assert_eq!(after.summaries, 23);
+    assert!(
+        after
+            .activities
+            .iter()
+            .all(|item| item.local_observation.is_none())
+    );
+    let merged = after.activities.iter().find(|item| item.id == 23).unwrap();
+    assert!(merged.average_heart_rate.is_some());
+    assert!(merged.elevation_gain.is_some());
+    assert_eq!(app.activities(user).await.unwrap().len(), 2);
+
+    let account = cached_account(&app, user, &credential_hash(&key)).await;
+    let connect = Source::from_parts(
+        account.source,
+        user.user_id(),
+        "Garmin Connect".parse().unwrap(),
+        None,
+    );
+    import_trends_recording(&app, user, &connect, garmin_fit::fixture::Sport::Running).await;
+    let ambiguous = app.connect_trends(user).await.unwrap().unwrap();
+    assert_eq!(ambiguous.summaries, 25);
+    let cloud = ambiguous
+        .activities
+        .iter()
+        .find(|item| item.local_observation.is_none() && item.id == 23)
+        .unwrap();
+    assert_eq!(cloud.average_heart_rate, None);
+    assert_eq!(cloud.elevation_gain, None);
+}
+
+async fn import_trends_recording(
+    app: &Application,
+    user: UserContext,
+    source: &garmin_model::identity::Source,
+    sport: garmin_fit::fixture::Sport,
+) {
+    use crate::FitImportRequest;
+    use garmin_model::{
+        artifact::{AcquisitionOperationId, SourceIdentity},
+        value::Timestamp,
+    };
+
+    let bytes = garmin_fit::fixture::activity(sport).unwrap();
+    app.import_fit(FitImportRequest::from_parts(
+        user,
+        source,
+        SourceIdentity::from_string("23".to_owned()).unwrap(),
+        AcquisitionOperationId::new_v4(),
+        Timestamp::from_jiff(jiff::Timestamp::now()),
+        &bytes,
+    ))
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

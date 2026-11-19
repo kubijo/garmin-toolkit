@@ -6,6 +6,7 @@ use jiff::civil::Date;
 
 use super::CachedActivity;
 use crate::activity::{ActivityDuration, ActivitySport, Distance, HeartRate};
+use crate::observation::ObservationId;
 
 #[garmin_macros::portable(copy, eq, ord)]
 pub enum Sport {
@@ -26,6 +27,18 @@ impl Sport {
         Self::Hiking,
         Self::Other,
     ];
+}
+
+impl From<ActivitySport> for Sport {
+    fn from(sport: ActivitySport) -> Self {
+        match sport {
+            ActivitySport::Running => Self::Running,
+            ActivitySport::Cycling => Self::Cycling,
+            ActivitySport::Swimming => Self::Swimming,
+            ActivitySport::Walking => Self::Walking,
+            ActivitySport::Hiking => Self::Hiking,
+        }
+    }
 }
 
 #[garmin_macros::portable(default)]
@@ -76,6 +89,27 @@ impl HeartRateAverage {
 }
 
 impl Totals {
+    fn record(&mut self, activity: &ActivitySummary) {
+        self.activities += 1;
+        if let Some(value) = activity.distance {
+            self.distance = self.distance.saturating_add(value);
+        } else {
+            self.missing_distance += 1;
+        }
+        if let Some(value) = activity.duration {
+            self.duration = self.duration.saturating_add(value);
+        } else {
+            self.missing_duration += 1;
+        }
+        if let Some(gain) = activity.elevation_gain {
+            self.elevation_gain = self.elevation_gain.saturating_add(gain);
+            self.elevation_activities += 1;
+        }
+        if let Some(rate) = activity.average_heart_rate {
+            self.heart_rate.record(rate);
+        }
+    }
+
     pub fn add(&mut self, other: &Self) {
         self.activities += other.activities;
         self.distance = self.distance.saturating_add(other.distance);
@@ -99,6 +133,7 @@ pub struct Day {
 /// Measurements available for a dated activity in a supported sport.
 #[garmin_macros::portable]
 pub struct ActivitySummary {
+    /// Garmin activity ID. Local recordings use `local_observation` for identity.
     pub id: i64,
     pub date: Date,
     pub sport: Sport,
@@ -108,6 +143,22 @@ pub struct ActivitySummary {
     pub elevation_gain: Option<Distance>,
     #[serde(default)]
     pub average_heart_rate: Option<HeartRate>,
+    #[serde(default)]
+    pub local_observation: Option<ObservationId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ActivityIdentity {
+    Connect(i64),
+    Local(ObservationId),
+}
+
+impl ActivitySummary {
+    #[must_use]
+    pub fn identity(&self) -> ActivityIdentity {
+        self.local_observation
+            .map_or(ActivityIdentity::Connect(self.id), ActivityIdentity::Local)
+    }
 }
 
 /// Only published generations are exposed. No incomplete refresh is interpreted as zero activity.
@@ -185,10 +236,17 @@ impl History {
         summaries: &[CachedActivity],
         imported: &BTreeMap<i64, ImportedMeasurements>,
     ) -> Self {
-        let mut grouped = BTreeMap::<(Date, Sport), Totals>::new();
+        Self::from_recordings(summaries, imported, Vec::new())
+    }
+
+    #[must_use]
+    pub fn from_recordings(
+        summaries: &[CachedActivity],
+        imported: &BTreeMap<i64, ImportedMeasurements>,
+        mut activities: Vec<ActivitySummary>,
+    ) -> Self {
         let mut seen = BTreeSet::new();
         let mut undated = 0;
-        let mut activities = Vec::new();
         for summary in summaries {
             if !seen.insert(summary.activity.id) {
                 continue;
@@ -202,54 +260,34 @@ impl History {
                 undated += 1;
                 continue;
             };
-            let sport = match summary.activity.sport {
-                Some(ActivitySport::Running) => Sport::Running,
-                Some(ActivitySport::Cycling) => Sport::Cycling,
-                Some(ActivitySport::Swimming) => Sport::Swimming,
-                Some(ActivitySport::Walking) => Sport::Walking,
-                Some(ActivitySport::Hiking) => Sport::Hiking,
-                _ => Sport::Other,
-            };
-            let totals = grouped.entry((date, sport)).or_default();
-            totals.activities += 1;
-            let distance = summary.activity.distance;
-            let duration = summary.activity.duration;
             let measurements = imported
                 .get(&summary.activity.id)
                 .copied()
                 .unwrap_or_default();
-            let elevation_gain = measurements.ascent;
-            if let Some(gain) = elevation_gain {
-                totals.elevation_gain = totals.elevation_gain.saturating_add(gain);
-                totals.elevation_activities += 1;
-            }
-            if let Some(rate) = measurements.average_heart_rate {
-                totals.heart_rate.record(rate);
-            }
-            if let Some(value) = distance {
-                totals.distance = totals.distance.saturating_add(value);
-            } else {
-                totals.missing_distance += 1;
-            }
-            if let Some(value) = duration {
-                totals.duration = totals.duration.saturating_add(value);
-            } else {
-                totals.missing_duration += 1;
-            }
-            if sport != Sport::Other {
-                activities.push(ActivitySummary {
-                    id: summary.activity.id,
-                    date,
-                    sport,
-                    name: summary.activity.name.clone(),
-                    distance,
-                    duration,
-                    elevation_gain,
-                    average_heart_rate: measurements.average_heart_rate,
-                });
-            }
+            activities.push(ActivitySummary {
+                id: summary.activity.id,
+                date,
+                sport: summary.activity.sport.map_or(Sport::Other, Sport::from),
+                name: summary.activity.name.clone(),
+                distance: summary.activity.distance,
+                duration: summary.activity.duration,
+                elevation_gain: measurements.ascent,
+                average_heart_rate: measurements.average_heart_rate,
+                local_observation: None,
+            });
         }
-        activities.sort_unstable_by_key(|activity| std::cmp::Reverse((activity.date, activity.id)));
+        let summaries = activities.len() + undated;
+        let mut grouped = BTreeMap::<(Date, Sport), Totals>::new();
+        for activity in &activities {
+            grouped
+                .entry((activity.date, activity.sport))
+                .or_default()
+                .record(activity);
+        }
+        activities.retain(|activity| activity.sport != Sport::Other);
+        activities.sort_unstable_by_key(|activity| {
+            std::cmp::Reverse((activity.date, activity.identity()))
+        });
         Self {
             days: grouped
                 .into_iter()
@@ -261,7 +299,7 @@ impl History {
                 .collect(),
             activities,
             undated,
-            summaries: seen.len(),
+            summaries,
         }
     }
 

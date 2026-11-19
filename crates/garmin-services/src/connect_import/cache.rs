@@ -231,7 +231,9 @@ impl Application {
             garmin_storage::CacheSnapshot {
                 activities: summaries,
                 coverage,
-                measurements: BTreeMap::new(),
+                recordings: BTreeMap::new(),
+                local: Vec::new(),
+                time_zone: None,
             },
             start,
             filters,

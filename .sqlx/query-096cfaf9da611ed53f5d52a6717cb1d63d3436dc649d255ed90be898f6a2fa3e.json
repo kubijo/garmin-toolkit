@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    a.source_identity,\n    p.observation_id\nFROM acquisitions AS a\nINNER JOIN normalization_runs AS n ON a.id = n.acquisition_id\nINNER JOIN activity_projections AS p ON n.id = p.normalization_run_id\nWHERE a.owner_id = ? AND a.source_id = ?\nORDER BY a.source_identity, p.observation_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_identity",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "acquisitions",
+            "name": "source_identity"
+          }
+        }
+      },
+      {
+        "name": "observation_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "activity_projections",
+            "name": "observation_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "096cfaf9da611ed53f5d52a6717cb1d63d3436dc649d255ed90be898f6a2fa3e"
+}

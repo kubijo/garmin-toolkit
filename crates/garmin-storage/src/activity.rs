@@ -5,13 +5,15 @@ use garmin_model::{
     activity::ActivitySummary,
     artifact::NormalizationRunId,
     identity::UserId,
-    observation::{Observation, ObservationId, ObservationKind, SemanticFingerprintError},
+    observation::{
+        Observation, ObservationId, ObservationKind, SemanticFingerprint, SemanticFingerprintError,
+    },
 };
 use sqlx::{Sqlite, Transaction};
 use thiserror::Error;
 
 mod export;
-mod read;
+pub(crate) mod read;
 mod write;
 
 pub use export::ActivityExport;
@@ -81,9 +83,14 @@ pub struct StoredActivitySummary {
     sequence_position: SequencePosition,
     creator: CreatorDiagnostics,
     summary: ActivitySummary,
+    fingerprint: SemanticFingerprint,
 }
 
 impl StoredActivitySummary {
+    #[must_use]
+    pub const fn fingerprint(&self) -> &SemanticFingerprint {
+        &self.fingerprint
+    }
     #[must_use]
     pub const fn observation_id(&self) -> ObservationId {
         self.observation_id

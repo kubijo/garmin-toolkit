@@ -49,14 +49,25 @@ Custom ranges include both endpoints, cover up to 366 days, and compare against 
 equal length. Monthly goals apply to the Month preset.
 
 Activity comparison pairs two dated activities of the same supported sport within the selected period. Distance and
-duration come from cached summaries and use the canonical measurement types. Their formatting methods use profile units
-and locale-aware decimals. Pace or speed is unavailable when either input is missing or zero.
+duration use the canonical measurement types and format with profile units and locale-aware decimals. Pace or speed is
+unavailable when either input is missing or zero.
 
-Elevation gain and average heart rate come from imported FIT projections linked to the same Garmin account and activity
-ID. Trends picks up new measurements after import and shows coverage for each period. Elevation leaves incomplete
-buckets unknown. Heart rate gives each measured activity equal weight and leaves buckets with no reported heart rate
-empty.
+Elevation gain and average heart rate come from imported FIT projections. Trends picks up new measurements after import
+and shows coverage for each period. Elevation leaves incomplete buckets unknown. Heart rate gives each measured activity
+equal weight and leaves buckets with no reported heart rate empty.
+
+## Activity identity
+
+Trends joins a published Garmin summary to FIT observations through the active account's source and Garmin activity ID.
+Observations with the same versioned semantic fingerprint represent one recording for reporting. The Garmin row supplies
+its name and any available summary measurements. The matched FIT supplies elevation, heart rate, and missing summary
+measurements. When a Garmin ID links to multiple distinct fingerprints, the Garmin row and the recordings remain
+separate. A cloud summary without a linked FIT lacks the evidence for matching a local import.
+
+FIT recordings appear in Trends after import. Unmatched recordings appear alongside published Connect history when
+available. Dates use the Connect cache's account time zone when available and UTC otherwise. Original observations and
+acquisition provenance remain available to the activity library and exports.
 
 ## Remaining scope
 
-Local-only history, cross-source deduplication, and other FIT-derived performance metrics remain separate work.
+Other FIT-derived performance metrics remain separate work.

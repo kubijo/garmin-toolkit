@@ -404,6 +404,7 @@ impl Desktop {
                         today: jiff::Zoned::now().date(),
                         preferences: settings_props.preferences,
                         sync: settings_props.garmin_connect.sync,
+                        connect_configured: settings_props.garmin_connect.configured,
                         enabled: !self.preferences_saving,
                         refreshing: settings_props.garmin_connect.activities_busy,
                         load_progress: settings_props.garmin_connect.load_progress,

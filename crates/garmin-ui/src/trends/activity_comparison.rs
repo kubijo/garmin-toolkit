@@ -4,7 +4,7 @@ use egui::Ui;
 use garmin_i18n::format_message;
 use garmin_model::{
     activity::{ActivityDuration, Distance, Speed},
-    garmin_connect::trends::ActivitySummary,
+    garmin_connect::trends::{ActivityIdentity, ActivitySummary},
     identity::UnitSystem,
 };
 
@@ -45,7 +45,9 @@ pub(super) fn show(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Ran
             );
             let second_choices = activities
                 .into_iter()
-                .filter(|activity| activity.sport == first.sport && activity.id != first.id)
+                .filter(|activity| {
+                    activity.sport == first.sport && activity.identity() != first.identity()
+                })
                 .collect::<Vec<_>>();
             let second = picker(
                 &mut right[0],
@@ -64,7 +66,7 @@ fn picker<'a>(
     ui: &mut Ui,
     props: &Props<'_>,
     activities: &[&'a ActivitySummary],
-    selected: &mut Option<i64>,
+    selected: &mut Option<ActivityIdentity>,
     first: bool,
 ) -> &'a ActivitySummary {
     let (target, title) = if first {
@@ -83,7 +85,17 @@ fn picker<'a>(
         .map(|activity| {
             let date = props.intl.dates().date(activity.date);
             if activity.name.trim().is_empty() {
-                format!("{date} · #{}", activity.id)
+                match activity.identity() {
+                    ActivityIdentity::Connect(id) => format!("{date} · #{id}"),
+                    ActivityIdentity::Local(id) => {
+                        let id = id.to_string();
+                        format!(
+                            "{} · {date} · {}",
+                            sport_label(props.intl, activity.sport),
+                            &id[..8]
+                        )
+                    }
+                }
             } else {
                 format!("{} · {date}", activity.name)
             }
@@ -95,7 +107,7 @@ fn picker<'a>(
         .collect::<Vec<_>>();
     let mut index = activities
         .iter()
-        .position(|activity| Some(activity.id) == *selected)
+        .position(|activity| Some(activity.identity()) == *selected)
         .unwrap_or(0);
     let response = crate::select::show(
         ui,
@@ -107,7 +119,7 @@ fn picker<'a>(
     .on_hover_text(&labels[index]);
     crate::semantics::target(ui, &response, target);
     let activity = activities[index];
-    *selected = Some(activity.id);
+    *selected = Some(activity.identity());
     activity
 }
 

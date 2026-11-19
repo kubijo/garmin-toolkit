@@ -21,6 +21,22 @@ use semver::Version;
 use super::{StoredActivity, StoredActivitySummary};
 use crate::Storage;
 
+pub(crate) async fn activity_summaries(
+    connection: &mut sqlx::SqliteConnection,
+    owner_id: &str,
+) -> Result<Vec<StoredActivitySummary>, crate::Error> {
+    sqlx::query_file_as!(
+        ActivityHeaderRow,
+        "queries/activity-summaries.sql",
+        owner_id,
+    )
+    .fetch_all(connection)
+    .await?
+    .into_iter()
+    .map(StoredActivitySummary::try_from)
+    .collect()
+}
+
 impl Storage {
     /// Lists one user's activity summaries, newest first.
     /// # Errors
@@ -29,17 +45,8 @@ impl Storage {
         &self,
         owner_id: UserId,
     ) -> Result<Vec<StoredActivitySummary>, crate::Error> {
-        let owner_id = owner_id.to_string();
-        sqlx::query_file_as!(
-            ActivityHeaderRow,
-            "queries/activity-summaries.sql",
-            owner_id,
-        )
-        .fetch_all(&self.pool)
-        .await?
-        .into_iter()
-        .map(StoredActivitySummary::try_from)
-        .collect()
+        let mut connection = self.pool.acquire().await?;
+        activity_summaries(&mut connection, &owner_id.to_string()).await
     }
 
     /// Loads one complete activity within its owner's scope.
@@ -244,6 +251,7 @@ impl TryFrom<ActivityHeaderRow> for StoredActivitySummary {
             sequence_position: header.sequence_position,
             creator: header.creator,
             summary: header.summary,
+            fingerprint: header.fingerprint,
         })
     }
 }

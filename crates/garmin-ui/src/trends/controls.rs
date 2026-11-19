@@ -245,6 +245,9 @@ fn cloud_actions(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Ac
     ) {
         state.read = ReadState::Idle;
     }
+    if !props.connect_configured {
+        return None;
+    }
     let busy = props.refreshing || props.sync.is_some_and(|sync| sync.job.is_some());
     if busy {
         button(
@@ -397,6 +400,9 @@ pub(super) fn targets_dialog(ui: &mut Ui, state: &mut State, props: &Props<'_>) 
 }
 
 pub(super) fn sync_feedback(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
+    if !props.connect_configured {
+        return None;
+    }
     let progress = props
         .load_progress
         .or_else(|| props.sync.and_then(|sync| sync.progress.as_ref()));

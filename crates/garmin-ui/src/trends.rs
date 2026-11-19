@@ -15,7 +15,10 @@ use garmin_model::{
     artifact::ArtifactDigest,
     garmin_connect::{
         sync::{Revision, Snapshot},
-        trends::{BucketValue, History, Metric, Period, Range, Sport, Totals, cumulative},
+        trends::{
+            ActivityIdentity, BucketValue, History, Metric, Period, Range, Sport, Totals,
+            cumulative,
+        },
     },
     identity::{MonthlyDistanceTarget, ProfilePreferences, UnitSystem},
 };
@@ -48,7 +51,7 @@ pub struct State {
     cumulative: bool,
     sport: usize,
     comparison_initialized: bool,
-    activity_pair: [Option<i64>; 2],
+    activity_pair: [Option<ActivityIdentity>; 2],
     metric: Metric,
     selected: Option<Date>,
     target_draft: Option<[MonthlyDistanceTarget; 3]>,
@@ -188,6 +191,7 @@ pub struct Props<'a> {
     pub today: Date,
     pub preferences: ProfilePreferences,
     pub sync: Option<&'a Snapshot>,
+    pub connect_configured: bool,
     pub enabled: bool,
     pub refreshing: bool,
     pub load_progress: Option<&'a garmin_model::garmin_connect::LoadProgress>,
@@ -280,7 +284,7 @@ fn header_metadata(ui: &mut Ui, state: &State, props: &Props<'_>, range: Range) 
             metadata_item(ui, format_message!(props.intl, default_message: "Last successful sync: {date}", values: { date: props.intl.dates().datetime(last.as_jiff().to_zoned(jiff::tz::TimeZone::system()).datetime()) }), true);
         }
         if let Some(first) = state.history.as_ref().and_then(|history| history.days.first()) {
-            metadata_item(ui, format_message!(props.intl, default_message: "Cached activity history starts {date}", values: { date: props.intl.dates().date(first.date) }), true);
+            metadata_item(ui, format_message!(props.intl, default_message: "Activity history starts {date}", values: { date: props.intl.dates().date(first.date) }), true);
         }
         });
     });
@@ -394,8 +398,10 @@ pub fn show(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Action>
                         ui.spinner();
                     } else if props.refreshing || props.sync.is_some_and(|sync| sync.job.is_some()) {
                         ui.label(format_message!(props.intl, default_message: "Sync is running. Trends use the last published summary cache."));
+                    } else if props.connect_configured {
+                        ui.label(format_message!(props.intl, default_message: "Import a FIT activity or sync your Garmin account to see trends."));
                     } else {
-                        ui.label(format_message!(props.intl, default_message: "Sync your Garmin account to see trends. Activities remain unimported."));
+                        ui.label(format_message!(props.intl, default_message: "Import a FIT activity to see trends."));
                     }
                 });
                 return;
