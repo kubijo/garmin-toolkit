@@ -1,5 +1,8 @@
 # Garmin Toolkit
 
+[![AI: co-written](https://img.shields.io/badge/AI-co--written-blue)](#ai-usage)
+[![AI tool: Codex](https://img.shields.io/badge/AI_tool-Codex-blueviolet)](#ai-usage)
+
 Experimental, unofficial Linux tools for Garmin devices and data:
 
 - `garmin-cli`: device inspection and guarded map maintenance;
@@ -73,6 +76,12 @@ observed service and download-authorization behavior behind a replaceable adapte
 
 See the [documentation index](docs/README.md), [development workflow](docs/development.md), and
 [remaining work](docs/plans/README.md). Just lists the available commands.
+
+### AI usage
+
+Garmin Toolkit is human-led and co-written with AI. Codex contributes substantial code and documentation and helps
+review changes and run tests. The maintainer directs the work, reviews changes, and tests behavior on real hardware.
+Review and test coverage vary by change.
 
 ## Acknowledgements
 
