@@ -3,7 +3,9 @@ use garmin_i18n::{Intl, format_message};
 use garmin_service_api::course_transfer::CourseTransferPhase;
 use garmin_service_api::routes::{CourseVersion, RouteRequest};
 
-use super::{Action, State, Workspace, action_button, action_row, error, sport_label, widgets};
+use super::{Action, State, Workspace, action_button, error, sport_label, widgets};
+use crate::action_row;
+use crate::action_row::Placement;
 use crate::{button, icons, modal, typography};
 
 impl Workspace {
@@ -31,8 +33,10 @@ impl Workspace {
             .filter(|version| current.is_none_or(|current| current.id != version.id));
         if history.clone().next().is_some() || state.next_versions.is_some() {
             ui.add_space(16.0);
-            let response = ui.collapsing(
-                format_message!(intl, default_message: "Previous FIT files"),
+            crate::accordion::inline(
+                ui,
+                "routes.history",
+                &format_message!(intl, default_message: "Previous FIT files"),
                 |ui| {
                     for version in history {
                         ui.push_id(version.id, |ui| {
@@ -43,7 +47,6 @@ impl Workspace {
                     action = more_versions(ui, intl, state, enabled).or(action.take());
                 },
             );
-            crate::semantics::target(ui, &response.header_response, "routes.history");
         }
         if state.transfer.is_some() {
             action = transfer_dialog(ui, intl, state).or(action);
@@ -127,8 +130,9 @@ fn header(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
         .map_or(0.0, |_| source_button.natural_width(ui));
     let actions = |ui: &mut Ui| {
         if let Some(source) = &state.source {
-            action_row(
+            action_row::show(
                 ui,
+                Placement::Leading,
                 [(
                     "routes.source",
                     Action::Download(source.artifact),

@@ -11,8 +11,36 @@ pub struct Props<'a> {
     pub inline_padding: i8,
 }
 
+/// A compact disclosure within another item, identified independently of its translated label.
+pub fn inline(ui: &mut Ui, id: &str, label: &str, content: impl FnOnce(&mut Ui)) -> egui::Response {
+    let header = egui::CollapsingHeader::new(label)
+        .id_salt(id)
+        .show(ui, content)
+        .header_response;
+    let header = crate::button::interaction_cursor(header);
+    let expanded = CollapsingState::load_with_default_open(ui.ctx(), header.id, false).is_open();
+    ui.ctx()
+        .accesskit_node_builder(header.id, |node| node.set_expanded(expanded));
+    crate::semantics::target(ui, &header, id);
+    header
+}
+
 /// Show a keyboard-accessible disclosure with padded, unindented content.
 pub fn show(ui: &mut Ui, props: &Props<'_>, content: impl FnOnce(&mut Ui)) {
+    show_with_body_margin(
+        ui,
+        props,
+        egui::Margin::symmetric(props.inline_padding, 16),
+        content,
+    );
+}
+
+pub(crate) fn show_with_body_margin(
+    ui: &mut Ui,
+    props: &Props<'_>,
+    margin: egui::Margin,
+    content: impl FnOnce(&mut Ui),
+) {
     let mut state = CollapsingState::load_with_default_open(
         ui.ctx(),
         ui.make_persistent_id(props.id),
@@ -71,9 +99,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>, content: impl FnOnce(&mut Ui)) {
         stroke,
     );
     state.show_body_unindented(ui, |ui| {
-        egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(props.inline_padding, 16))
-            .show(ui, content);
+        egui::Frame::NONE.inner_margin(margin).show(ui, content);
     });
     let bottom = ui.cursor().top() - ui.spacing().item_spacing.y;
     ui.painter().line_segment(

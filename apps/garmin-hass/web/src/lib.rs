@@ -8,6 +8,7 @@ mod connect_state;
 mod control;
 mod developer;
 mod files;
+mod firmware;
 mod map_composition;
 mod map_worker;
 mod maps;
@@ -30,6 +31,7 @@ use garmin_service_api::{
     DeviceCatalogSnapshot, DeviceFitImportOutcome, DeviceFitImportPlan, DeviceFitImportStatus,
     DeviceSnapshot, DownloadTicket, ProfileSnapshot,
 };
+use garmin_ui::firmware::Notices as FirmwareNotices;
 use garmin_ui::{
     activity, device, device_browser, device_fit_preview, icons, image_crop, modal, notification,
     offline, profile, profile_settings, progress, shell,
@@ -598,6 +600,9 @@ impl App {
                         self.profile_presentations[profile_index].props(),
                         true,
                     )),
+                    Page::Firmware(key) => {
+                        PageAction::Firmware(firmware::show(ui, &self.intl, &self.shared, key))
+                    }
                     Page::Maps(key) => {
                         PageAction::Maps(maps::show(ui, &self.intl, &self.shared, key))
                     }
@@ -768,6 +773,19 @@ impl App {
             PageAction::Settings(Some(action)) => {
                 self.handle_profile_settings_action(action, profiles);
             }
+            PageAction::Firmware(Some((revision, action))) => firmware::submit(
+                Rc::clone(&self.shared),
+                self.context.clone(),
+                revision,
+                action,
+            ),
+            PageAction::Device {
+                key,
+                action: Some(device::Action::ManageFirmware),
+            } => {
+                firmware::open(Rc::clone(&self.shared), self.context.clone(), key.clone());
+                self.page = Page::Firmware(key);
+            }
             PageAction::Maps(Some((revision, command))) => maps::submit(
                 Rc::clone(&self.shared),
                 self.context.clone(),
@@ -792,32 +810,34 @@ impl App {
             PageAction::Device {
                 key,
                 action: Some(device::Action::Refresh),
-            } => {
-                let shared = Rc::clone(&self.shared);
-                let context = self.context.clone();
-                let failure =
-                    format_message!(&self.intl, default_message: "Could not refresh device");
-                let client = shared.borrow().client.clone();
-                if let Some(client) = client {
-                    spawn_local(async move {
-                        let result = client
-                            .refresh_device(key)
-                            .await
-                            .map_err(ConnectError::call)
-                            .and_then(|result| result.map_err(ConnectError::domain));
-                        if let Err(error) = result {
-                            shared.borrow_mut().notice = Some(Notice::error(failure, error));
-                        }
-                        context.request_repaint();
-                    });
-                }
-            }
+            } => self.refresh_device(key),
             PageAction::Routes
             | PageAction::Maps(None)
+            | PageAction::Firmware(None)
             | PageAction::Backup(None)
             | PageAction::Activities(None)
             | PageAction::Settings(None)
             | PageAction::Device { action: None, .. } => {}
+        }
+    }
+
+    fn refresh_device(&self, key: String) {
+        let shared = Rc::clone(&self.shared);
+        let context = self.context.clone();
+        let failure = format_message!(&self.intl, default_message: "Could not refresh device");
+        let client = shared.borrow().client.clone();
+        if let Some(client) = client {
+            spawn_local(async move {
+                let result = client
+                    .refresh_device(key)
+                    .await
+                    .map_err(ConnectError::call)
+                    .and_then(|result| result.map_err(ConnectError::domain));
+                if let Err(error) = result {
+                    shared.borrow_mut().notice = Some(Notice::error(failure, error));
+                }
+                context.request_repaint();
+            });
         }
     }
 
@@ -1653,7 +1673,7 @@ impl App {
         self.apply_device_fit_results();
         self.sync_activity_detail(activity_detail);
         let profiles = Rc::clone(&self.profiles);
-        if matches!(&self.page, Page::Device(key) if !devices.iter().any(|device| &device.key == key))
+        if matches!(&self.page, Page::Device(key) | Page::Firmware(key) if !devices.iter().any(|device| &device.key == key))
         {
             self.device_browser = None;
             self.device_fit_preview = None;
@@ -1667,6 +1687,28 @@ impl App {
 }
 
 impl App {
+    fn show_notifications(&mut self, ui: &Ui, connected: bool, devices: &[DeviceSnapshot]) {
+        let open = {
+            let mut state = self.shared.borrow_mut();
+            let State {
+                toasts,
+                firmware_notices,
+                ..
+            } = &mut *state;
+            if connected {
+                firmware_notices.sync(&self.intl, devices, toasts, self.selected_profile.is_some());
+            }
+            toasts
+                .show(ui.ctx(), Id::new("hass-notifications"))
+                .into_iter()
+                .find_map(|event| firmware_notices.handle(event))
+        };
+        if connected && let Some(key) = open {
+            firmware::open(Rc::clone(&self.shared), self.context.clone(), key.clone());
+            self.page = Page::Firmware(key);
+        }
+    }
+
     fn apply_connect_notices(&self, state: &mut State) {
         if let Some(user) = state.connect_refresh_cancelled.take()
             && self
@@ -1776,11 +1818,7 @@ impl eframe::App for App {
         if let Some(since) = disconnected_since.filter(|_| loaded) {
             self.show_offline(ui, since);
         }
-        let _ = self
-            .shared
-            .borrow_mut()
-            .toasts
-            .show(ui.ctx(), Id::new("hass-notifications"));
+        self.show_notifications(ui, connected, &devices);
         automation::dispatch_menu(ui.ctx());
         if connected {
             self.developer.update(&self.intl);
@@ -1795,6 +1833,7 @@ impl eframe::App for App {
 }
 
 enum PageAction {
+    Firmware(Option<(uuid::Uuid, garmin_service_api::firmware::Action)>),
     Trends(Option<garmin_ui::trends::Action>),
     Routes,
     Maps(Option<(uuid::Uuid, garmin_service_api::maps::Command)>),
@@ -2006,6 +2045,7 @@ struct State {
     epoch: Option<String>,
     backup: backup::Controller,
     maps: maps::Controller,
+    firmware: firmware::Controller,
     client: Option<ApplicationServiceClient>,
     logs: Option<garmin_service_api::logging::LogServiceClient>,
     deployment_mode: DeploymentMode,
@@ -2054,6 +2094,7 @@ struct State {
     created_profile: Option<UserId>,
     notice: Option<Notice>,
     toasts: notification::Toasts,
+    firmware_notices: FirmwareNotices,
     file_toasts: notification::Toasts,
     file_progress_toast: Option<notification::ToastId>,
     error: Option<String>,
@@ -2988,11 +3029,13 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                             if state.epoch.as_ref() != Some(&epoch) {
                                 let backup = std::mem::take(&mut state.backup);
                                 let maps = std::mem::take(&mut state.maps);
+                                let firmware = state.firmware.take_route();
                                 let pending_fit_import = state.pending_fit_import.clone();
                                 let generation = state.connection_generation.wrapping_add(1);
                                 *state = State {
                                     backup,
                                     maps,
+                                    firmware,
                                     pending_fit_import,
                                     connection_generation: generation,
                                     ..State::default()
@@ -3017,6 +3060,7 @@ fn spawn_connection(shared: Rc<RefCell<State>>, context: eframe::egui::Context) 
                     }
                     context.request_repaint();
                     maps::reconnect(Rc::clone(&shared), context.clone());
+                    firmware::reconnect(Rc::clone(&shared), context.clone());
                     let _control = control::register(&client, &context).await;
                     let reason = loop {
                         match next_connection_event(&mut snapshots).await {

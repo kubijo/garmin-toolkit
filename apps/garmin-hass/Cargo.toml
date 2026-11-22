@@ -26,7 +26,7 @@ futures-lite.workspace = true
 futures-util.workspace = true
 garmin-device.workspace = true
 garmin-fit.workspace = true
-garmin-fixtures = { workspace = true, optional = true }
+garmin-fixtures = { workspace = true, optional = true, features = ["demo"] }
 garmin-importer.workspace = true
 garmin-map-tiles.workspace = true
 garmin-model.workspace = true
@@ -53,7 +53,7 @@ indoc.workspace = true
 sqlx.workspace = true
 zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
 garmin-fit = { workspace = true, features = ["test-fixtures"] }
-garmin-fixtures.workspace = true
+garmin-fixtures = { workspace = true, features = ["demo"] }
 image.workspace = true
 reqwest.workspace = true
 tokio-tungstenite.workspace = true

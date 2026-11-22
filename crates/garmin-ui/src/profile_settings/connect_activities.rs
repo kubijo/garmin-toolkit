@@ -6,7 +6,7 @@ use garmin_model::{
 };
 
 use super::Props;
-use crate::{Size, activity, button, icons, select};
+use crate::{Size, activity, button, icons, modal, notification, select};
 
 mod batch;
 mod filters;
@@ -75,6 +75,10 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) -> Option<super::Action> {
             ui.add_space(16.0);
             if !props.garmin_connect.activities_busy
                 && let Some(sync) = props.garmin_connect.sync
+                && !matches!(
+                    sync.state.outcome,
+                    garmin_model::garmin_connect::sync::Outcome::Complete { .. }
+                )
                 && super::connect_sync::feedback(ui, props.intl, sync)
             {
                 ui.add_space(16.0);
@@ -184,6 +188,7 @@ fn rows(
     enabled: bool,
 ) -> Option<ActivityRequest> {
     let mut request = None;
+    let detail_id = props.id.with("unavailable-original");
     let footer = if ui.available_width() < 320.0 {
         96.0
     } else {
@@ -216,18 +221,16 @@ fn rows(
                     for (index, remote) in activities.iter().enumerate() {
                         ui.push_id(remote.id, |ui| {
                             ui.allocate_ui(egui::vec2(width, 56.0), |ui| {
-                                let row = Row::new(remote, props);
-                                let accent = remote
-                                    .imported
-                                    .then_some(crate::theme::palette(ui).support().success());
-                                let response = ui.add_enabled_ui(enabled, |ui| {
-                                    activity::selectable_row(ui, &row.props(&remote.name), accent)
-                                });
-                                if remote.imported {
-                                    imported_badge(ui, response.inner.rect);
-                                }
-                                if response.inner.clicked() {
-                                    request = Some(ActivityRequest::Preview { id: remote.id });
+                                if ui
+                                    .add_enabled_ui(enabled, |ui| activity_row(ui, props, remote))
+                                    .inner
+                                    .clicked()
+                                {
+                                    if remote.original_unavailable {
+                                        ui.data_mut(|data| data.insert_temp(detail_id, remote.id));
+                                    } else {
+                                        request = Some(ActivityRequest::Preview { id: remote.id });
+                                    }
                                 }
                             });
                         });
@@ -240,7 +243,69 @@ fn rows(
                     }
                 });
         });
+    if let Some(id) = ui.data(|data| data.get_temp::<i64>(detail_id)) {
+        let activity = activities
+            .iter()
+            .find(|remote| remote.id == id && remote.original_unavailable);
+        if activity.is_none_or(|remote| unavailable_detail(ui, props, detail_id, remote)) {
+            ui.data_mut(|data| data.remove::<i64>(detail_id));
+        }
+    }
     request
+}
+
+fn unavailable_detail(
+    ui: &mut Ui,
+    props: &Props<'_>,
+    id: egui::Id,
+    remote: &RemoteActivity,
+) -> bool {
+    let row = Row::new(remote, props);
+    let close = format_message!(props.intl, default_message: "Close");
+    let output = modal::show(
+        ui,
+        id,
+        &modal::Props {
+            title: &remote.name,
+            description: (!row.subtitle.is_empty()).then_some(row.subtitle.as_str()),
+            size: modal::Size::Small,
+            presentation: modal::Presentation::Modal,
+            cancel_label: Some(&close),
+            cancel_disabled: None,
+            backdrop_closes: Some(true),
+            primary: None,
+        },
+        |ui| {
+            let mut facts = Vec::new();
+            if let Some(distance) = &row.distance {
+                facts.push((
+                    format_message!(props.intl, default_message: "Distance"),
+                    distance.as_str(),
+                ));
+            }
+            if !row.duration.is_empty() {
+                facts.push((
+                    format_message!(props.intl, default_message: "Activity time"),
+                    row.duration.as_str(),
+                ));
+            }
+            if !facts.is_empty() {
+                crate::facts::show(ui, id.with("summary"), &facts);
+                ui.add_space(16.0);
+            }
+            notification::show(
+                ui,
+                &notification::Props {
+                    kind: notification::Kind::Warning,
+                    title: &format_message!(props.intl, default_message: "Original FIT file unavailable"),
+                    detail: Some(
+                        &format_message!(props.intl, default_message: "Preview and import require the original file. Refresh to retry the download."),
+                    ),
+                },
+            );
+        },
+    );
+    output.action.is_some()
 }
 
 fn cache_feedback(
@@ -264,6 +329,7 @@ fn cache_feedback(
                     &sync.state.outcome,
                     garmin_model::garmin_connect::sync::Outcome::Never
                         | garmin_model::garmin_connect::sync::Outcome::Running
+                        | garmin_model::garmin_connect::sync::Outcome::Complete { .. }
                 )
         });
         if !already_shown {
@@ -297,7 +363,10 @@ fn toolbar(
             ui,
             &import,
             Some(icons::DOWNLOAD_SIMPLE),
-            enabled && activities.iter().any(|activity| !activity.imported),
+            enabled
+                && activities
+                    .iter()
+                    .any(RemoteActivity::eligible_for_page_import),
         ) {
             result = Some(super::Action::StartGarminConnectPageImport);
         }
@@ -331,28 +400,58 @@ fn refresh_actions(
         enabled,
     };
     let width = button.natural_width(ui) + 40.0 - 1.0;
+    let full = format_message!(props.intl, default_message: "Full refresh");
+    let full_refresh = button::Props {
+        label: &full,
+        icon: Some(icons::ARROWS_CLOCKWISE),
+        kind: button::Kind::Ghost,
+        ..button
+    };
+    let helper = format_message!(props.intl, default_message: "Check the entire history for older edits and deletions, and retry missing files.");
+    let options_label = format_message!(props.intl, default_message: "Refresh options");
     let mut request = None;
-    ui.allocate_ui_with_layout(egui::vec2(width, 40.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.spacing_mut().item_spacing.x = -1.0;
-        if button.show(ui).clicked() {
-            request = Some(ActivityRequest::Load { start, filters: filters.clone() });
-        }
-        let options = button::IconProps {
-            label: &format_message!(props.intl, default_message: "Refresh options"),
-            icon: icons::CARET_DOWN,
-            kind: button::Kind::Tertiary,
-            size: Size::Medium,
-            enabled,
-        }.show(ui);
-        let _ = egui::Popup::menu(&options).show(|ui| {
-            let full = format_message!(props.intl, default_message: "Full refresh");
-            let helper = format_message!(props.intl, default_message: "Check the entire history for older edits and deletions, and retry missing files.");
-            if (button::Props { label: &full, icon: Some(icons::ARROWS_CLOCKWISE), kind: button::Kind::Ghost, size: Size::Medium, width: button::Width::Fill, enabled }).show(ui).on_hover_text(helper).clicked() {
-                request = Some(ActivityRequest::RefreshAll { start, filters: filters.clone() });
-                ui.close();
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, 40.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = -1.0;
+            let primary = button.show(ui);
+            if primary.clicked() {
+                request = Some(ActivityRequest::Load {
+                    start,
+                    filters: filters.clone(),
+                });
             }
-        });
-    });
+            let options = button::IconProps {
+                label: &options_label,
+                icon: icons::CARET_DOWN,
+                kind: button::Kind::Tertiary,
+                size: Size::Medium,
+                enabled,
+            }
+            .show(ui);
+            let frame = egui::Frame::popup(ui.style()).inner_margin(2);
+            let split = primary.union(options.clone());
+            let menu_width = split
+                .rect
+                .width()
+                .max(full_refresh.natural_width(ui) + frame.total_margin().sum().x);
+            egui::Popup::menu(&options)
+                .anchor(&split)
+                .frame(frame)
+                .gap(2.0)
+                .width(menu_width)
+                .show(|ui| {
+                    if full_refresh.show(ui).on_hover_text(helper).clicked() {
+                        request = Some(ActivityRequest::RefreshAll {
+                            start,
+                            filters: filters.clone(),
+                        });
+                        ui.close();
+                    }
+                });
+        },
+    );
     request
 }
 
@@ -478,15 +577,33 @@ fn arrow(ui: &mut Ui, label: &str, icon: icons::Icon, enabled: bool) -> bool {
     .clicked()
 }
 
-fn imported_badge(ui: &Ui, rect: egui::Rect) {
-    let palette = crate::theme::palette(ui);
-    let center = egui::pos2(rect.left() + 40.0, rect.center().y + 12.0);
-    icons::Props {
-        icon: icons::CHECK,
-        size: 16.0,
-        color: palette.support().success(),
+fn activity_row(ui: &mut Ui, props: &Props<'_>, remote: &RemoteActivity) -> egui::Response {
+    let mut row = Row::new(remote, props);
+    let support = crate::theme::palette(ui).support();
+    let badge = if remote.original_unavailable {
+        let warning = format_message!(props.intl, default_message: "Original FIT file unavailable");
+        if row.subtitle.is_empty() {
+            row.subtitle = warning;
+        } else {
+            row.subtitle = format!("{warning} · {}", row.subtitle);
+        }
+        Some((icons::WARNING, support.warning()))
+    } else {
+        remote.imported.then_some((icons::CHECK, support.success()))
+    };
+    let response =
+        activity::selectable_row(ui, &row.props(&remote.name), badge.map(|(_, color)| color));
+    if let Some((icon, color)) = badge {
+        let rect = response.rect;
+        let center = egui::pos2(rect.left() + 40.0, rect.center().y + 12.0);
+        icons::Props {
+            icon,
+            size: 16.0,
+            color,
+        }
+        .paint_at(ui, center);
     }
-    .paint_at(ui, center);
+    response
 }
 
 struct Row {

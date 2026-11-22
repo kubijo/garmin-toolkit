@@ -20,6 +20,24 @@ pub(super) fn resize_at(ui: &Ui, bounds: Rect) {
         return;
     }
     paint_south_east_grip(ui, bounds);
+    // The title bar's close button extends to the corner.
+    // Claim this part of its hit region so releasing a resize press cannot also close the window.
+    let north_east = ui.interact(
+        Rect::from_min_size(
+            bounds.right_top() - egui::vec2(CORNER_WIDTH, 0.0),
+            egui::Vec2::splat(CORNER_WIDTH),
+        ),
+        ui.make_persistent_id("window-north-east-resize"),
+        egui::Sense::CLICK | egui::Sense::DRAG,
+    );
+    if north_east.hovered() || north_east.is_pointer_button_down_on() {
+        context.set_cursor_icon(CursorIcon::ResizeNorthEast);
+        if north_east.is_pointer_button_down_on() && context.input(|i| i.pointer.primary_pressed())
+        {
+            context.send_viewport_cmd(ViewportCommand::BeginResize(ResizeDirection::NorthEast));
+        }
+        return;
+    }
     let Some(pointer) = context.pointer_hover_pos() else {
         return;
     };
@@ -131,6 +149,76 @@ mod tests {
         assert_eq!(resize_target(BOUNDS, BOUNDS.center()), None);
         assert_eq!(resize_target(BOUNDS, Pos2::new(8.0, 8.0)), None);
         assert_eq!(resize_target(BOUNDS, Pos2::new(-1.0, 40.0)), None);
+    }
+
+    #[test]
+    fn upper_right_resize_and_close_button_have_separate_hit_targets() {
+        use crate::shell::{WindowAction, WindowControls, window_header};
+        use egui::{Event, Modifiers, PointerButton, RawInput};
+
+        let context = egui::Context::default();
+        crate::install(&context);
+        let bounds = Rect::from_min_size(Pos2::ZERO, egui::vec2(320.0, 160.0));
+        let controls = WindowControls {
+            maximized: false,
+            minimize_label: "Minimize",
+            maximize_label: "Maximize",
+            restore_label: "Restore",
+            close_label: "Close",
+        };
+        for (pos, corner) in [
+            (Pos2::new(311.0, 9.0), true),
+            (Pos2::new(300.0, 20.0), false),
+        ] {
+            let button = |pressed| Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            };
+            for (step, events) in [
+                vec![Event::PointerMoved(pos)],
+                vec![],
+                vec![button(true)],
+                vec![button(false)],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut action = None;
+                let output = context.run_ui(
+                    RawInput {
+                        screen_rect: Some(bounds),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        action = window_header(ui, "Device updates", &controls);
+                        resize_at(ui, bounds);
+                    },
+                );
+                if step == 1 && corner {
+                    assert_eq!(
+                        output.platform_output.cursor_icon,
+                        CursorIcon::ResizeNorthEast
+                    );
+                }
+                let resize = output.viewport_output.values().any(|viewport| {
+                    viewport.commands.iter().any(|command| {
+                        matches!(
+                            command,
+                            ViewportCommand::BeginResize(ResizeDirection::NorthEast)
+                        )
+                    })
+                });
+                assert_eq!(resize, corner && step == 2);
+                assert_eq!(
+                    action,
+                    (!corner && step == 3).then_some(WindowAction::Close)
+                );
+                output.drop_without_applying_deltas();
+            }
+        }
     }
 
     #[test]

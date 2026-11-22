@@ -244,7 +244,19 @@ pub(crate) fn row<T>(
     .inner
 }
 
-impl Props<'_> {
+impl<'a> Props<'a> {
+    #[must_use]
+    pub const fn new(label: &'a str, kind: Kind) -> Self {
+        Self {
+            label,
+            icon: None,
+            kind,
+            size: Size::Medium,
+            width: Width::Fit,
+            enabled: true,
+        }
+    }
+
     pub(crate) fn natural_width(self, ui: &Ui) -> f32 {
         let metrics = metrics(self.size);
         let text = egui::WidgetText::from(RichText::new(self.label).size(metrics.font_size))
@@ -463,9 +475,122 @@ impl IconProps<'_> {
             })
             .inner;
         response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, self.enabled, self.label)
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), self.label)
         });
         interaction_cursor(response).on_hover_text(self.label)
+    }
+}
+
+/// Compact action on a map or canvas, with an accessible name in icon-only mode.
+pub struct OverlayProps<'a> {
+    pub label: &'a str,
+    pub icon: Icon,
+    pub show_label: bool,
+    pub width: f32,
+    /// Present for actions that maintain a pressed state, such as playback.
+    pub selected: Option<bool>,
+    pub enabled: bool,
+}
+
+impl OverlayProps<'_> {
+    pub fn show(self, ui: &mut Ui) -> Response {
+        use crate::theme::color32;
+        let Self {
+            label,
+            icon,
+            show_label,
+            width,
+            selected,
+            enabled,
+        } = self;
+        let palette = crate::theme::palette(ui);
+        let surface = color32(palette.surfaces().layer(theme::Level::One));
+        let foreground = color32(palette.content().icon_primary());
+        let disabled = color32(palette.content().icon_disabled());
+        let primary = palette.buttons().primary();
+        let pressed = selected == Some(true);
+        let rest = if pressed {
+            overlay_visuals(
+                color32(primary.rest().background()),
+                color32(primary.rest().background()),
+                color32(primary.rest().foreground()),
+            )
+        } else {
+            overlay_visuals(surface, egui::Color32::TRANSPARENT, foreground)
+        };
+        let hovered = if pressed {
+            overlay_visuals(
+                color32(primary.hover().background()),
+                color32(primary.hover().background()),
+                color32(primary.hover().foreground()),
+            )
+        } else {
+            overlay_visuals(
+                color32(palette.surfaces().layer_hover(theme::Level::One)),
+                color32(palette.surfaces().background_hover()),
+                foreground,
+            )
+        };
+        let active = if pressed {
+            overlay_visuals(
+                color32(primary.active().background()),
+                color32(primary.active().background()),
+                color32(primary.active().foreground()),
+            )
+        } else {
+            let fill = color32(palette.surfaces().layer(theme::Level::Two));
+            overlay_visuals(fill, fill, foreground)
+        };
+        let disabled = overlay_visuals(surface, egui::Color32::TRANSPARENT, disabled);
+
+        let response = ui
+            .scope(|ui| {
+                ui.spacing_mut().interact_size.y = 32.0;
+                ui.spacing_mut().button_padding = egui::vec2(8.0, 0.0);
+                let widgets = &mut ui.visuals_mut().widgets;
+                widgets.inactive = rest;
+                widgets.hovered = hovered;
+                widgets.active = active;
+                widgets.open = active;
+                widgets.noninteractive = disabled;
+                ui.visuals_mut().interact_cursor = Some(egui::CursorIcon::PointingHand);
+                let image = icon.mask().fit_to_exact_size(egui::Vec2::splat(16.0));
+                let text = show_label.then(|| RichText::new(label).size(12.0).into());
+                ui.add_enabled(
+                    enabled,
+                    egui::Button::opt_image_and_text(Some(image), text)
+                        .image_tint_follows_text_color(true)
+                        .gap(4.0)
+                        .min_size(egui::vec2(width, 32.0))
+                        .corner_radius(CONTROL_RADIUS),
+                )
+            })
+            .inner;
+        response.widget_info(|| match selected {
+            Some(selected) => egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                response.enabled(),
+                selected,
+                label,
+            ),
+            None => egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label),
+        });
+        interaction_cursor(response).on_hover_text(label)
+    }
+}
+
+fn overlay_visuals(
+    background: egui::Color32,
+    weak_background: egui::Color32,
+    foreground: egui::Color32,
+) -> egui::style::WidgetVisuals {
+    egui::style::WidgetVisuals {
+        bg_fill: background,
+        weak_bg_fill: weak_background,
+        bg_stroke: egui::Stroke::NONE,
+        corner_radius: CONTROL_RADIUS,
+        fg_stroke: egui::Stroke::new(1.0, foreground),
+        expansion: 0.0,
     }
 }
 
@@ -499,7 +624,7 @@ const fn metrics(size: Size) -> Metrics {
             horizontal_padding: 12.0,
             font_size: 12.0,
             icon_size: 16.0,
-            gap: 6.0,
+            gap: 4.0,
         },
         Size::Medium => Metrics {
             height: 40.0,

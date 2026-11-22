@@ -3,11 +3,12 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use garmin_capture::SessionCapture;
 use garmin_device::storage::{DeviceIoError, DeviceWrite};
 use garmin_device::{
-    DeviceInventory, DevicePathState, DevicePathStatus, MountedMtpBackupProgress,
-    MountedMtpUploadProgress, PathSafetyError, SafeRelativePath, TransportKind,
+    DeviceInventory, DevicePathInspection, DevicePathState, DevicePathStatus,
+    MountedMtpBackupProgress, MountedMtpUploadProgress, PathSafetyError, SafeRelativePath,
+    TransportKind,
 };
 use garmin_model::artifact::ByteCount;
-use garmin_model::map::MapAuthorization;
+use garmin_model::map::{MapAuthorization, MapUnlock};
 use garmin_progress::{CancellationToken, OperationStage, ProgressReporter};
 use md5::{Digest as _, Md5};
 use serde::{Deserialize, Serialize};
@@ -21,19 +22,40 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use crate::device_state::{
     DeviceContentIdentity, DeviceOperationTarget, DeviceOriginalState, DeviceTransactionEventPhase,
 };
+use crate::firmware::{FirmwareTarget, InstalledFirmware, UpdateMetadata};
 use crate::{
     ApplyReport, BackupPolicy, DeviceTransactionKind, DeviceTransactionStore, DownloadProgress,
     PortableTransaction, RecoveryOutcome, UpdatePlan,
 };
 
+#[derive(Clone, Copy)]
+pub(crate) enum InstallFiles<'a> {
+    Maps(&'a MapAuthorization),
+    Firmware(&'a [FirmwareTarget]),
+}
+
+impl<'a> InstallFiles<'a> {
+    fn unlocks(self) -> Result<&'a [MapUnlock], MountedInstallError> {
+        match self {
+            Self::Maps(activation) => {
+                validate_authorization(activation)?;
+                Ok(&activation.unlocks)
+            }
+            Self::Firmware(_) => Ok(&[]),
+        }
+    }
+}
+
 const TRANSACTION_VERSION: u8 = 1;
 const DEVICE_STATE_HEADROOM_BYTES: ByteCount = ByteCount::from_mebibytes(16);
 
 mod assisted;
+mod identity;
 pub use assisted::{
     AssistedRecoveryPlan, AssistedRecoveryReport, EmptyUpload, approve_assisted_recovery,
     review_assisted_recovery,
 };
+pub use identity::{UpdateTransactionMatch, match_update_transaction, same_recovery_history};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MountedMtpPreflight {
@@ -124,6 +146,8 @@ enum JournalState {
 #[serde(deny_unknown_fields)]
 struct MountedTransactionJournal {
     version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transaction_id: Option<uuid::Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     execution_target: Option<String>,
     device_digest: String,
@@ -283,7 +307,15 @@ pub async fn preflight_mounted_mtp_update<D>(
 where
     D: DeviceWrite + ?Sized,
 {
-    let prepared = prepare_update(plan, staged, activation, device, capture, progress).await?;
+    let prepared = prepare_update(
+        plan,
+        staged,
+        InstallFiles::Maps(activation),
+        device,
+        capture,
+        progress,
+    )
+    .await?;
     let bytes_to_write =
         prepared
             .payloads
@@ -316,8 +348,29 @@ pub async fn apply_mounted_mtp_with_progress<D>(
 where
     D: DeviceWrite + ?Sized,
 {
+    apply_files(
+        plan,
+        staged,
+        InstallFiles::Maps(activation),
+        device,
+        capture,
+        progress,
+    )
+    .await
+}
+
+const PREPARED_JOURNAL: &str = "mounted-update/transaction/000000-prepared.json";
+
+pub(crate) async fn apply_files<D: DeviceWrite + ?Sized>(
+    plan: &UpdatePlan,
+    staged: &[DownloadProgress],
+    files: InstallFiles<'_>,
+    device: &D,
+    capture: &SessionCapture,
+    progress: ProgressReporter,
+) -> Result<ApplyReport, MountedInstallError> {
     let started = Instant::now();
-    let prepared = prepare_update(plan, staged, activation, device, capture, &progress).await?;
+    let prepared = prepare_update(plan, staged, files, device, capture, &progress).await?;
     let originals = match plan.backup_policy {
         BackupPolicy::Verified => backup_originals(&prepared, device, capture, &progress).await?,
         BackupPolicy::Skip => {
@@ -340,16 +393,18 @@ where
         device.execution_target(),
         capture.root(),
     )?;
+    let portable = build_portable_transaction(plan, &prepared, &journal, files)?;
+    journal.transaction_id = Some(portable.transaction_id());
     validate_journal(&journal, &plan.device_digest, JournalState::Prepared)?;
     capture
-        .write_json_atomic(
-            Path::new("mounted-update/transaction/000000-prepared.json"),
-            &journal,
-        )
+        .write_json_atomic(Path::new(PREPARED_JOURNAL), &journal)
         .await?;
 
-    let portable = build_portable_transaction(plan, &prepared, &journal)?;
-    let device_state = DeviceTransactionStore::open(device).await?;
+    let rollback_progress = progress.clone().for_required_cleanup();
+    let device_state = DeviceTransactionStore::open(device)
+        .await?
+        .with_progress(&rollback_progress);
+    require_running(&progress)?;
     device_state.prepare(&portable).await?;
 
     let mutation = commit_update(
@@ -366,7 +421,6 @@ where
         if plan.backup_policy == BackupPolicy::Skip {
             return Err(unprotected_failure(&journal, capture.root(), operation).await);
         }
-        let rollback_progress = progress.clone().for_required_cleanup();
         return Err(rollback_failure(
             operation,
             &journal,
@@ -392,7 +446,6 @@ where
         if plan.backup_policy == BackupPolicy::Skip {
             return Err(unprotected_failure(&journal, capture.root(), operation).await);
         }
-        let rollback_progress = progress.clone().for_required_cleanup();
         return Err(rollback_failure(
             operation,
             &journal,
@@ -411,20 +464,25 @@ where
         BackupPolicy::Skip => "Update evidence retained; no recovery backup was created",
     };
     progress.completed(OperationStage::Cleanup, cleanup, 1, Some(1));
-    Ok(completed_apply_report(plan, &prepared, activation, started))
+    Ok(completed_apply_report(
+        plan,
+        &prepared,
+        files.unlocks()?.len(),
+        started,
+    ))
 }
 
 fn completed_apply_report(
     plan: &UpdatePlan,
     prepared: &PreparedMountedUpdate,
-    activation: &MapAuthorization,
+    unlocks_written: usize,
     started: Instant,
 ) -> ApplyReport {
     ApplyReport {
         files_written: prepared.payloads.len(),
         bytes_written: plan.total_bytes,
         files_removed: prepared.removals.len(),
-        unlocks_written: activation.unlocks.len(),
+        unlocks_written,
         backup_policy: plan.backup_policy,
         recovery: RecoveryOutcome::NoTransaction,
         elapsed: started.elapsed(),
@@ -461,58 +519,77 @@ fn build_portable_transaction(
     plan: &UpdatePlan,
     prepared: &PreparedMountedUpdate,
     journal: &MountedTransactionJournal,
+    files: InstallFiles<'_>,
 ) -> Result<PortableTransaction, MountedInstallError> {
-    let mut transaction = PortableTransaction::new(
-        DeviceTransactionKind::Update,
-        plan.device_digest.clone(),
-        plan.digest.clone(),
-        plan.backup_policy,
-    );
-    for (download, payload) in plan.downloads.iter().zip(&prepared.payloads) {
-        transaction.add_download(download, payload.sha256.clone());
-    }
-    transaction.set_identifiers(plan.identifiers.clone());
-    for write in &journal.writes {
-        let target = DeviceOperationTarget::new(
-            write.target.storage_id.clone(),
-            write.target.storage_label.clone(),
-            write.target.path.clone(),
-        );
-        let expected = DeviceContentIdentity::new(write.target.size, write.sha256.clone());
-        let original = match (&write.original, &write.unbacked_original) {
-            (Some(original), None) => DeviceOriginalState::Verified(DeviceContentIdentity::new(
-                original.target.size,
-                original.sha256.clone(),
-            )),
-            (None, Some(original)) => DeviceOriginalState::Unverified {
-                size: original.size,
-            },
-            (None, None) => DeviceOriginalState::Missing,
-            (Some(_), Some(_)) => return Err(MountedInstallError::InvalidJournal),
-        };
-        transaction.add_write(target, expected, original)?;
-    }
-    for original in &journal.removals {
-        transaction.add_verified_removal(
-            DeviceOperationTarget::new(
-                original.target.storage_id.clone(),
-                original.target.storage_label.clone(),
-                original.target.path.clone(),
-            ),
-            DeviceContentIdentity::new(original.target.size, original.sha256.clone()),
-        )?;
-    }
-    for original in &journal.unbacked_removals {
-        transaction.add_unverified_removal(
-            DeviceOperationTarget::new(
-                original.storage_id.clone(),
-                original.storage_label.clone(),
-                original.path.clone(),
-            ),
-            original.size,
-        )?;
+    let mut transaction = journal.portable_operations()?;
+    if matches!(files, InstallFiles::Maps(_)) {
+        for (download, payload) in plan.downloads.iter().zip(&prepared.payloads) {
+            transaction.add_download(download, payload.sha256.clone());
+        }
+        transaction.set_identifiers(plan.identifiers.clone());
     }
     Ok(transaction)
+}
+
+impl MountedTransactionJournal {
+    fn portable_operations(&self) -> Result<PortableTransaction, MountedInstallError> {
+        let mut transaction = PortableTransaction::new(
+            DeviceTransactionKind::Update,
+            self.device_digest.clone(),
+            self.plan_digest.clone(),
+            self.backup_policy,
+        );
+        for write in &self.writes {
+            let target = DeviceOperationTarget::new(
+                write.target.storage_id.clone(),
+                write.target.storage_label.clone(),
+                write.target.path.clone(),
+            );
+            let expected = DeviceContentIdentity::new(write.target.size, write.sha256.clone());
+            let original = match (&write.original, &write.unbacked_original) {
+                (Some(original), None) => DeviceOriginalState::Verified(
+                    DeviceContentIdentity::new(original.target.size, original.sha256.clone()),
+                ),
+                (None, Some(original)) => DeviceOriginalState::Unverified {
+                    size: original.size,
+                },
+                (None, None) => DeviceOriginalState::Missing,
+                (Some(_), Some(_)) => return Err(MountedInstallError::InvalidJournal),
+            };
+            transaction.add_write(target, expected, original)?;
+        }
+        for original in &self.removals {
+            transaction.add_verified_removal(
+                DeviceOperationTarget::new(
+                    original.target.storage_id.clone(),
+                    original.target.storage_label.clone(),
+                    original.target.path.clone(),
+                ),
+                DeviceContentIdentity::new(original.target.size, original.sha256.clone()),
+            )?;
+        }
+        for original in &self.unbacked_removals {
+            transaction.add_unverified_removal(
+                DeviceOperationTarget::new(
+                    original.storage_id.clone(),
+                    original.storage_label.clone(),
+                    original.path.clone(),
+                ),
+                original.size,
+            )?;
+        }
+        Ok(transaction)
+    }
+
+    fn matches_transaction(
+        &self,
+        active: &PortableTransaction,
+    ) -> Result<bool, MountedInstallError> {
+        Ok(self
+            .transaction_id
+            .is_none_or(|id| id == active.transaction_id())
+            && self.portable_operations()?.has_same_operations(active))
+    }
 }
 
 fn build_journal(
@@ -580,6 +657,7 @@ fn build_journal(
     };
     Ok(MountedTransactionJournal {
         version: TRANSACTION_VERSION,
+        transaction_id: None,
         execution_target: execution_target.map(str::to_owned),
         device_digest: plan.device_digest.clone(),
         plan_digest: plan.digest.clone(),
@@ -605,21 +683,31 @@ pub async fn recover_mounted_mtp_update<D>(
 where
     D: DeviceWrite + ?Sized,
 {
-    let prepared_path = recovery_file(
-        capture_root,
-        "mounted-update/transaction/000000-prepared.json",
-    )
-    .await?;
+    recover_update(capture_root, device_digest, device, progress, None).await
+}
+
+pub(crate) async fn recover_update<D: DeviceWrite + ?Sized>(
+    capture_root: &Path,
+    device_digest: &str,
+    device: &D,
+    progress: &ProgressReporter,
+    firmware: Option<(&str, Option<&InstalledFirmware<'_>>)>,
+) -> Result<MountedUpdateRecoveryReport, MountedInstallError> {
+    let prepared_path = recovery_file(capture_root, PREPARED_JOURNAL).await?;
     let prepared = read_journal(&prepared_path).await?;
     validate_journal(&prepared, device_digest, JournalState::Prepared)?;
+    if firmware.is_some_and(|(plan, _)| plan != prepared.plan_digest) {
+        return Err(MountedInstallError::RecoveryPlanMismatch);
+    }
     if prepared.execution_target.as_deref() != device.execution_target() {
         return Err(MountedInstallError::RecoveryDeviceMismatch);
     }
-    let device_state = DeviceTransactionStore::open(device).await?;
-    let portable = device_state.active(device_digest).await?;
-    if portable
-        .as_ref()
-        .is_some_and(|transaction| transaction.plan_digest() != prepared.plan_digest)
+    let device_state = DeviceTransactionStore::open(device)
+        .await?
+        .with_progress(progress);
+    let portable = device_state.active_prepared(device_digest).await?;
+    if let Some(transaction) = &portable
+        && !prepared.matches_transaction(transaction)?
     {
         return Err(MountedInstallError::RecoveryPlanMismatch);
     }
@@ -628,7 +716,14 @@ where
     if tokio::fs::try_exists(&committed_path).await? {
         let committed = read_journal(&committed_path).await?;
         validate_matching_journal(&prepared, &committed, JournalState::Committed)?;
-        verify_committed(&committed, device, progress).await?;
+        verify_committed(
+            &committed,
+            device,
+            progress,
+            capture_root,
+            firmware.and_then(|(_, installed)| installed),
+        )
+        .await?;
         resolve_portable_transaction(&device_state, portable.as_ref()).await?;
         publish_device_state(device, progress).await;
         return Ok(MountedUpdateRecoveryReport {
@@ -778,6 +873,39 @@ fn validate_original(original: &OriginalObject) -> Result<(), MountedInstallErro
     Ok(())
 }
 
+/// Validate the prepared journal and check whether the host recorded a matching commit.
+/// # Errors
+/// Either journal is unreadable, belongs to another plan or target, or its contents disagree.
+pub async fn update_is_committed(
+    capture: &Path,
+    device_digest: &str,
+    plan_digest: &str,
+    execution_target: Option<&str>,
+) -> Result<bool, MountedInstallError> {
+    let prepared = read_journal(&recovery_file(capture, PREPARED_JOURNAL).await?).await?;
+    validate_journal(&prepared, device_digest, JournalState::Prepared)?;
+    if prepared.plan_digest != plan_digest {
+        return Err(MountedInstallError::RecoveryPlanMismatch);
+    }
+    if prepared.execution_target.as_deref() != execution_target {
+        return Err(MountedInstallError::RecoveryDeviceMismatch);
+    }
+    let commit = "mounted-update/transaction/committed.json";
+    match tokio::fs::symlink_metadata(capture.join(commit)).await {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        result => {
+            result?;
+        }
+    }
+    let committed = recovery_file(capture, commit).await?;
+    validate_matching_journal(
+        &prepared,
+        &read_journal(&committed).await?,
+        JournalState::Committed,
+    )?;
+    Ok(true)
+}
+
 fn validate_matching_journal(
     prepared: &MountedTransactionJournal,
     candidate: &MountedTransactionJournal,
@@ -796,12 +924,24 @@ async fn verify_committed<D>(
     journal: &MountedTransactionJournal,
     device: &D,
     progress: &ProgressReporter,
+    capture_root: &Path,
+    firmware: Option<&InstalledFirmware<'_>>,
 ) -> Result<(), MountedInstallError>
 where
     D: DeviceWrite + ?Sized,
 {
     for write in &journal.writes {
-        check_device_object_metadata(device, &write.target, progress).await?;
+        let present =
+            check_device_object_metadata(device, &write.target, progress, firmware.is_some())
+                .await?;
+        if !present {
+            let installed = firmware.ok_or(MountedInstallError::InvalidJournal)?;
+            if !confirmed_missing_write(capture_root, write, installed).await? {
+                return Err(MountedInstallError::RecoveryEvidence(
+                    write.target.path.clone(),
+                ));
+            }
+        }
     }
     for removal in &journal.removals {
         let (state, size) = device
@@ -832,6 +972,37 @@ where
     Ok(())
 }
 
+async fn confirmed_missing_write(
+    root: &Path,
+    write: &JournalWrite,
+    installed: &InstalledFirmware<'_>,
+) -> Result<bool, MountedInstallError> {
+    if let Some(confirmed) = installed.payload(&write.target.path) {
+        return Ok(confirmed);
+    }
+    // Companion bytes retained by the journal record their own parent and version transition.
+    if write.target.size > UpdateMetadata::MAX_BYTES {
+        return Ok(false);
+    }
+    let file = write
+        .payload_file
+        .as_deref()
+        .ok_or(MountedInstallError::InvalidJournal)?;
+    let path = recovery_file(root, file).await?;
+    let mut bytes = Vec::new();
+    tokio::fs::File::open(path)
+        .await?
+        .take(write.target.size.as_bytes() + 1)
+        .read_to_end(&mut bytes)
+        .await?;
+    if ByteCount::from_bytes(bytes.len() as u64) != write.target.size
+        || hex::encode(Sha256::digest(&bytes)) != write.sha256
+    {
+        return Ok(false);
+    }
+    Ok(serde_json::from_slice(&bytes).is_ok_and(|record| installed.companion(&record)))
+}
+
 async fn verify_rolled_back<D>(
     journal: &MountedTransactionJournal,
     device: &D,
@@ -842,7 +1013,7 @@ where
 {
     for write in &journal.writes {
         if let Some(original) = &write.original {
-            check_device_object_metadata(device, &original.target, progress).await?;
+            check_device_object_metadata(device, &original.target, progress, false).await?;
         } else {
             let (state, size) = device
                 .inspect_with_progress(&write.target.storage_id, &write.target.path, progress)
@@ -858,7 +1029,7 @@ where
         }
     }
     for removal in &journal.removals {
-        check_device_object_metadata(device, &removal.target, progress).await?;
+        check_device_object_metadata(device, &removal.target, progress, false).await?;
     }
     Ok(())
 }
@@ -866,7 +1037,7 @@ where
 async fn prepare_update<D>(
     plan: &UpdatePlan,
     staged: &[DownloadProgress],
-    activation: &MapAuthorization,
+    files: InstallFiles<'_>,
     device: &D,
     capture: &SessionCapture,
     progress: &ProgressReporter,
@@ -874,14 +1045,14 @@ async fn prepare_update<D>(
 where
     D: DeviceWrite + ?Sized,
 {
-    validate_authorization(activation)?;
     if plan.downloads.len() != staged.len() {
         return Err(MountedInstallError::IncompleteStage {
             expected: plan.downloads.len(),
             actual: staged.len(),
         });
     }
-    let sources = prepare_payload_sources(plan, staged, activation, capture, progress).await?;
+    let sources =
+        prepare_payload_sources(plan, staged, files.unlocks()?, capture, progress).await?;
 
     let write_keys = sources
         .iter()
@@ -901,9 +1072,18 @@ where
     let primary_storage = device.primary_storage_id().await?;
     let mut payloads = sources
         .into_iter()
-        .map(|source| {
+        .enumerate()
+        .map(|(index, source)| {
+            let target = match files {
+                InstallFiles::Maps(_) => {
+                    bind_write_target(&inventory, &primary_storage, source.path, source.size)?
+                }
+                InstallFiles::Firmware(targets) => {
+                    bind_firmware_target(&inventory, &source, targets.get(index))?
+                }
+            };
             Ok(Payload {
-                target: bind_write_target(&inventory, &primary_storage, source.path, source.size)?,
+                target,
                 source: source.source,
                 sha256: source.sha256,
             })
@@ -941,11 +1121,11 @@ where
 async fn prepare_payload_sources(
     plan: &UpdatePlan,
     staged: &[DownloadProgress],
-    activation: &MapAuthorization,
+    unlocks: &[MapUnlock],
     capture: &SessionCapture,
     progress: &ProgressReporter,
 ) -> Result<Vec<PayloadSource>, MountedInstallError> {
-    let mut sources = Vec::with_capacity(plan.downloads.len() + activation.unlocks.len());
+    let mut sources = Vec::with_capacity(plan.downloads.len() + unlocks.len());
     let mut destinations = BTreeSet::new();
     progress.started(
         OperationStage::Stage,
@@ -973,7 +1153,7 @@ async fn prepare_payload_sources(
             sha256,
         });
     }
-    for (index, unlock) in activation.unlocks.iter().enumerate() {
+    for (index, unlock) in unlocks.iter().enumerate() {
         let path = SafeRelativePath::parse(&unlock.file_name)?;
         register_destination(&mut destinations, &path)?;
         let bytes = BASE64.decode(&unlock.gma)?;
@@ -1159,34 +1339,81 @@ fn register_destination(
     }
 }
 
+fn bind_firmware_target(
+    inventory: &DeviceInventory,
+    source: &PayloadSource,
+    approved: Option<&FirmwareTarget>,
+) -> Result<BoundObject, MountedInstallError> {
+    let changed = || MountedInstallError::FirmwareDestinationChanged(source.path.clone());
+    let approved = approved
+        .filter(|t| t.path == source.path && t.offered_bytes == source.size)
+        .ok_or_else(changed)?;
+    let matches = inventory_for_path(inventory, &source.path)?;
+    let mut storage = matches
+        .into_iter()
+        .filter(|item| item.storage_id == approved.storage_id);
+    let item = storage.next().ok_or_else(changed)?;
+    if storage.next().is_some() {
+        return Err(MountedInstallError::AmbiguousStorage(source.path.clone()));
+    }
+    let expected = approved
+        .existing_bytes
+        .map_or(DevicePathStatus::Missing, |size| {
+            DevicePathStatus::RegularFile { size }
+        });
+    if DevicePathStatus::from_parts(item.state, item.size) != Some(expected) {
+        return Err(changed());
+    }
+    Ok(BoundObject {
+        storage_id: item.storage_id.clone(),
+        storage_label: item.storage_label.clone(),
+        path: source.path.clone(),
+        size: source.size,
+    })
+}
+
 fn bind_write_target(
     inventory: &DeviceInventory,
     primary_storage: &str,
     path: SafeRelativePath,
     size: ByteCount,
 ) -> Result<BoundObject, MountedInstallError> {
-    let matches = inventory_for_path(inventory, &path)?;
+    let item = write_location(inventory, primary_storage, &path, &[])?;
+    Ok(BoundObject {
+        storage_id: item.storage_id.clone(),
+        storage_label: item.storage_label.clone(),
+        path,
+        size,
+    })
+}
+
+pub(crate) fn write_location<'a>(
+    inventory: &'a DeviceInventory,
+    primary_storage: &str,
+    path: &SafeRelativePath,
+    allowed_storages: &[String],
+) -> Result<&'a DevicePathInspection, MountedInstallError> {
+    let mut matches = inventory_for_path(inventory, path)?;
+    if !allowed_storages.is_empty() {
+        matches.retain(|item| {
+            allowed_storages.iter().any(|name| {
+                name.eq_ignore_ascii_case(&item.storage_label)
+                    || name.eq_ignore_ascii_case(&item.storage_id)
+            })
+        });
+        if matches.is_empty() {
+            return Err(MountedInstallError::DeclaredStorageMissing(path.clone()));
+        }
+    }
     let present = regular_files(&matches);
     match present.as_slice() {
-        [item] => Ok(BoundObject {
-            storage_id: item.storage_id.clone(),
-            storage_label: item.storage_label.clone(),
-            path,
-            size,
-        }),
-        [] => {
-            let storage = matches
-                .iter()
-                .find(|item| item.storage_id == primary_storage)
-                .ok_or_else(|| MountedInstallError::PrimaryStorageMissing(path.clone()))?;
-            Ok(BoundObject {
-                storage_id: storage.storage_id.clone(),
-                storage_label: storage.storage_label.clone(),
-                path,
-                size,
-            })
-        }
-        _ => Err(MountedInstallError::AmbiguousStorage(path)),
+        [item] => Ok(*item),
+        [] if !allowed_storages.is_empty() && matches.len() == 1 => Ok(matches[0]),
+        [] => matches
+            .into_iter()
+            .find(|item| item.storage_id == primary_storage)
+            .ok_or_else(|| MountedInstallError::PrimaryStorageMissing(path.clone())),
+        _ => Err(MountedInstallError::AmbiguousStorage(path.clone())),
     }
 }
 
@@ -2291,7 +2518,8 @@ async fn check_device_object_metadata<D>(
     device: &D,
     target: &BoundObject,
     progress: &ProgressReporter,
-) -> Result<(), MountedInstallError>
+    allow_missing: bool,
+) -> Result<bool, MountedInstallError>
 where
     D: DeviceWrite + ?Sized,
 {
@@ -2308,7 +2536,10 @@ where
     let status = device
         .inspect_with_progress(&target.storage_id, &target.path, &item)
         .await?;
-    if status != (DevicePathStatus::RegularFile { size: target.size }) {
+    let missing = status == DevicePathStatus::Missing;
+    if !(allow_missing && missing)
+        && status != (DevicePathStatus::RegularFile { size: target.size })
+    {
         let (state, size) = status.into_parts();
         item.failed_with_path(
             OperationStage::DeviceVerify,
@@ -2328,7 +2559,7 @@ where
         1,
         Some(1),
     );
-    Ok(())
+    Ok(!missing)
 }
 
 async fn upload_recovery_payload<D>(
@@ -3625,6 +3856,10 @@ pub enum MountedInstallError {
     AmbiguousStorage(SafeRelativePath),
     #[error("the canonical device storage did not inventory new object {0}")]
     PrimaryStorageMissing(SafeRelativePath),
+    #[error("the storage declared for {0} is unavailable")]
+    DeclaredStorageMissing(SafeRelativePath),
+    #[error("the reviewed firmware destination changed: {0}")]
+    FirmwareDestinationChanged(SafeRelativePath),
     #[error("unexpected device state for {path}: {state:?}, size {size:?}")]
     UnexpectedDeviceState {
         path: SafeRelativePath,
@@ -3659,6 +3894,8 @@ pub enum MountedInstallError {
     RecoveryDeviceMismatch,
     #[error("the host recovery journal does not match the device's active transaction")]
     RecoveryPlanMismatch,
+    #[error("the firmware selection does not match its registered plan")]
+    FirmwareSelectionMismatch,
     #[error("mounted MTP device operation failed: {0}")]
     Device(DeviceIoError),
     #[error("local update payload I/O failed: {0}")]
@@ -3745,6 +3982,7 @@ mod tests {
         let capture = tempfile::tempdir().unwrap();
         let journal = MountedTransactionJournal {
             version: TRANSACTION_VERSION,
+            transaction_id: None,
             execution_target: None,
             device_digest: "device".to_owned(),
             plan_digest: "plan".to_owned(),
@@ -3806,6 +4044,25 @@ mod tests {
 
         assert_eq!(target.storage_id, "sd");
         assert_eq!(target.size, ByteCount::from_bytes(24));
+    }
+
+    #[test]
+    fn firmware_storage_rules_bind_new_files_and_reject_absent_volumes() {
+        let path = SafeRelativePath::parse("Garmin/RemoteSW/component.bin").unwrap();
+        let inventory = DeviceInventory {
+            transport: TransportKind::Mtp,
+            paths: vec![
+                inspection("internal", &path, DevicePathState::RegularFile, Some(12)),
+                inspection("sd", &path, DevicePathState::Missing, None),
+            ],
+        };
+        let target = write_location(&inventory, "internal", &path, &["SD".to_owned()]).unwrap();
+        assert_eq!(target.storage_id, "sd");
+        assert_eq!(target.state, DevicePathState::Missing);
+        assert!(matches!(
+            write_location(&inventory, "internal", &path, &["absent".to_owned()]),
+            Err(MountedInstallError::DeclaredStorageMissing(_))
+        ));
     }
 
     #[test]

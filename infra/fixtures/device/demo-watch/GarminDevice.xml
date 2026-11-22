@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Device xmlns="http://www.garmin.com/xmlschemas/GarminDevice/v2">
   <Model>
+    <PartNumber>006-FAKE-01</PartNumber>
     <SoftwareVersion>1870</SoftwareVersion>
     <Description>Mock Watch-o-Matic 9000</Description>
   </Model>
@@ -45,5 +46,32 @@
         <TransferDirection>InputOutput</TransferDirection>
       </File>
     </DataType>
+    <UpdateFile>
+      <PartNumber>006-V4532-00</PartNumber>
+      <Version>
+        <Major>22</Major>
+        <Minor>44</Minor>
+      </Version>
+      <Path>Garmin</Path>
+      <FileName>GUPDATE.GSP</FileName>
+    </UpdateFile>
+    <UpdateFile>
+      <PartNumber>006-DB775-00</PartNumber>
+      <Version>
+        <Major>0</Major>
+        <Minor>1</Minor>
+      </Version>
+      <Path>Garmin/RemoteSW</Path>
+      <FileName>006-DB775-00.zvp</FileName>
+    </UpdateFile>
+    <UpdateFile>
+      <PartNumber>006-D9971-49</PartNumber>
+      <Version>
+        <Major>0</Major>
+        <Minor>1</Minor>
+      </Version>
+      <Path>Garmin/ExtData</Path>
+      <FileName>006-D9971-49.bin</FileName>
+    </UpdateFile>
   </MassStorageMode>
 </Device>

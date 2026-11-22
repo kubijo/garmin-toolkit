@@ -10,6 +10,8 @@ use crossterm::terminal::{
 };
 use garmin_device::{DeviceSummary, TransportKind};
 use garmin_i18n::{Intl, Language, Translations, format_message};
+use garmin_model::artifact::ByteCount;
+use garmin_model::firmware::{Component as FirmwareComponent, StagingIssue};
 use garmin_model::map::MapOperation;
 use garmin_progress::metrics::{stage_elapsed, stale_byte_progress};
 use garmin_progress::{
@@ -284,7 +286,50 @@ impl Drop for Session {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DeviceOperation {
+    Maps,
+    Firmware,
+    FirmwareStatus,
+    FirmwareRecovery,
+}
+
 impl Session {
+    /// Select the task for the connected device.
+    /// # Errors
+    /// Rendering or input failed.
+    pub fn select_device_operation(&mut self) -> Result<DeviceOperation> {
+        let intl = selected_formatter();
+        let operations = [
+            (
+                DeviceOperation::Maps,
+                format_message!(&intl, default_message: "Manage maps"),
+            ),
+            (
+                DeviceOperation::Firmware,
+                format_message!(&intl, default_message: "Check and stage device updates"),
+            ),
+            (
+                DeviceOperation::FirmwareStatus,
+                format_message!(&intl, default_message: "Inspect last transfer"),
+            ),
+            (
+                DeviceOperation::FirmwareRecovery,
+                format_message!(&intl, default_message: "Recover interrupted transfer"),
+            ),
+        ];
+        let rows = operations
+            .iter()
+            .map(|(_, label)| label.clone())
+            .collect::<Vec<_>>();
+        let title = format_message!(&intl, default_message: "Select a device operation");
+        match device_selection_loop(self.terminal(), &rows, &title, true, 0, None)? {
+            DeviceSelection::Selected(i) => Ok(operations[i].0),
+            DeviceSelection::Cancelled => Err(Cancelled::new("device operation").into()),
+            DeviceSelection::Rescan(_) => unreachable!("static operation menu"),
+        }
+    }
+
     /// Asks the user to choose one of the discovered devices.
     /// # Errors
     /// Rendering or input failure.
@@ -526,6 +571,45 @@ impl ConfirmationBody {
             note: None,
         }
     }
+
+    pub fn firmware_write<'a>(
+        components: impl IntoIterator<Item = &'a FirmwareComponent>,
+        download_bytes: ByteCount,
+        device_model: &str,
+    ) -> Self {
+        let bold = Style::default().add_modifier(Modifier::BOLD);
+        let mut introduction = Text::from(
+            components
+                .into_iter()
+                .map(firmware_component_summary)
+                .collect::<Vec<_>>(),
+        );
+        introduction.push_line(Line::from(vec![
+            Span::styled(download_bytes.format_binary(), bold),
+            Span::raw(" to stage on "),
+            Span::styled(device_model.to_owned(), bold),
+        ]));
+        Self {
+            introduction,
+            fields: Vec::new(),
+            note: None,
+        }
+    }
+}
+
+#[must_use]
+pub fn firmware_component_summary(item: &FirmwareComponent) -> Line<'static> {
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    Line::from(vec![
+        Span::styled(item.part_number.clone(), bold),
+        Span::raw(format!("  {}  ", item.name)),
+        item.installed.as_ref().map_or_else(
+            || Span::raw("unknown"),
+            |version| Span::styled(version.clone(), bold),
+        ),
+        Span::raw(" → "),
+        Span::styled(item.available.clone(), bold),
+    ])
 }
 
 #[must_use]
@@ -896,6 +980,50 @@ pub struct MapChoice {
     pub operation: MapOperation,
     pub can_remove: bool,
     pub cache: Option<MapCacheAvailability>,
+    pub unavailable_reason: Option<String>,
+}
+
+impl MapChoice {
+    #[must_use]
+    pub fn firmware(item: &FirmwareComponent, intl: &Intl) -> Self {
+        let available = item.available.as_str();
+        let installed = item.installed.as_deref();
+        let unavailable_reason = match &item.staging_issue {
+            Some(StagingIssue::InstallationInstructions) => Some(
+                format_message!(intl, default_message: "Additional installation instructions are unsupported."),
+            ),
+            Some(StagingIssue::DeliveryRestriction(channel)) => Some(
+                format_message!(intl, default_message: "Unsupported delivery restriction: {channel}", values: {channel: channel.as_str()}),
+            ),
+            None if item.download_bytes.is_none() => {
+                Some(format_message!(intl, default_message: "Download unavailable"))
+            }
+            None => None,
+        };
+        Self {
+            name: item.name.clone(),
+            version_transition: format!("{} → {available}", installed.unwrap_or("—")),
+            version_tone: if installed == Some(available) {
+                MapVersionTone::UpToDate
+            } else if installed.is_some() {
+                MapVersionTone::Outdated
+            } else {
+                MapVersionTone::Unknown
+            },
+            description: item.download_bytes.map_or_else(
+                || item.part_number.clone(),
+                |bytes| format!("{} · {}", item.part_number, bytes.format_binary()),
+            ),
+            operation: if installed.is_some() {
+                MapOperation::Update
+            } else {
+                MapOperation::Install
+            },
+            can_remove: false,
+            cache: None,
+            unavailable_reason,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -918,6 +1046,7 @@ const MAP_TABLE_COLUMN_SPACING: u16 = 1;
 pub(crate) enum MapActionMode {
     ChangeOnly,
     Combined,
+    Firmware,
 }
 
 impl MapActionMode {
@@ -976,6 +1105,56 @@ pub fn select_maps(choices: &[MapChoice]) -> Result<Option<Vec<usize>>> {
         MapSelection::Cancelled => Ok(None),
         MapSelection::Refresh => unreachable!("refresh is disabled"),
     }
+}
+
+/// Select the firmware components to stage.
+/// # Errors
+/// Terminal setup, rendering or input failed.
+pub fn select_firmware(
+    components: &[FirmwareComponent],
+    profile: RunProfile,
+) -> Result<Option<Vec<usize>>> {
+    Session::open_with_profile(profile)?.select_firmware(components)
+}
+
+impl Session {
+    /// Select firmware components in the active session.
+    /// # Errors
+    /// Terminal rendering or input failed.
+    pub fn select_firmware(
+        &mut self,
+        components: &[FirmwareComponent],
+    ) -> Result<Option<Vec<usize>>> {
+        let intl = selected_formatter();
+        let choices: Vec<_> = components
+            .iter()
+            .map(|item| MapChoice::firmware(item, &intl))
+            .collect();
+        if choices.is_empty() {
+            let title = format_message!(&intl, default_message: "Device updates");
+            let message =
+                format_message!(&intl, default_message: "No updates were offered for this device.");
+            self.notice(&title, &message)?;
+            return Ok(Some(Vec::new()));
+        }
+        let mut selector = MapSelector::new(choices.len());
+        match map_selection_loop(
+            self.terminal(),
+            &choices,
+            &mut selector,
+            None,
+            false,
+            MapActionMode::Firmware,
+        )? {
+            MapSelection::Selected(selected) => Ok(Some(selected.changes)),
+            MapSelection::Cancelled => Ok(None),
+            MapSelection::Refresh => unreachable!("refresh is disabled"),
+        }
+    }
+}
+
+fn firmware_read_only(choices: &[MapChoice], mode: MapActionMode) -> bool {
+    mode == MapActionMode::Firmware && choices.iter().all(|c| c.unavailable_reason.is_some())
 }
 
 impl Session {
@@ -1097,6 +1276,7 @@ fn map_selection_loop(
     can_refresh: bool,
     mode: MapActionMode,
 ) -> Result<MapSelection> {
+    let read_only = firmware_read_only(choices, mode);
     loop {
         let area = terminal.content_area()?;
         let mut table_area = area;
@@ -1120,6 +1300,15 @@ fn map_selection_loop(
         })?;
 
         match event::read()? {
+            Event::Key(key)
+                if read_only
+                    && (is_cancel_key(&key)
+                        || (key.kind == KeyEventKind::Press && key.code == KeyCode::Enter)) =>
+            {
+                return Ok(MapSelection::Selected(selected_map_choices(
+                    &selector.actions,
+                )));
+            }
             Event::Key(key) if is_cancel_key(&key) => return Ok(MapSelection::Cancelled),
             Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                 KeyCode::Up => select_table_previous(&mut selector.table),
@@ -1143,7 +1332,11 @@ fn map_selection_loop(
                     );
                 }
                 KeyCode::Char('a' | 'A') => {
-                    selector.actions.fill(MapChoiceAction::Change);
+                    for (action, choice) in selector.actions.iter_mut().zip(choices) {
+                        if choice.unavailable_reason.is_none() {
+                            *action = MapChoiceAction::Change;
+                        }
+                    }
                 }
                 KeyCode::Char('k' | 'K') => selector.actions.fill(MapChoiceAction::Keep),
                 KeyCode::Char('r' | 'R') if can_refresh => return Ok(MapSelection::Refresh),
@@ -1193,8 +1386,17 @@ fn draw_map_selection(
 ) {
     let (table_area, help_area) = areas;
     let intl = selected_formatter();
-    let map_component = format_message!(&intl, default_message: "Map component");
-    let map_components = format_message!(&intl, default_message: "Garmin map components");
+    let (map_component, map_components) = if mode == MapActionMode::Firmware {
+        (
+            format_message!(&intl, default_message: "Component"),
+            format_message!(&intl, default_message: "Device updates"),
+        )
+    } else {
+        (
+            format_message!(&intl, default_message: "Map component"),
+            format_message!(&intl, default_message: "Garmin map components"),
+        )
+    };
     let keep = format_message!(&intl, default_message: "Keep");
     let change = format_message!(&intl, default_message: "Change");
     let remove = format_message!(&intl, default_message: "Remove");
@@ -1249,7 +1451,20 @@ fn draw_map_selection(
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(table, table_area, state);
 
-    render_map_selection_help(frame, help_area, actions, can_refresh, mode);
+    if firmware_read_only(choices, mode) {
+        let row = format_message!(&intl, default_message: "row");
+        let close = format_message!(&intl, default_message: "close");
+        render_hint_footer(
+            frame,
+            help_area,
+            &[
+                FooterHint::new("↑/↓", &row),
+                FooterHint::new("Enter/Esc", &close),
+            ],
+        );
+    } else {
+        render_map_selection_help(frame, help_area, actions, can_refresh, mode);
+    }
 }
 
 fn render_map_selection_help(
@@ -1311,13 +1526,10 @@ const fn map_selection_footer_height(can_refresh: bool) -> u16 {
     if can_refresh { 4 } else { 3 }
 }
 
-fn map_choice_row<'a>(
-    intl: &Intl,
-    choice: &'a MapChoice,
-    action: MapChoiceAction,
-    highlighted: bool,
-    mode: MapActionMode,
-) -> Row<'a> {
+fn choice_metadata(choice: &MapChoice, highlighted: bool) -> Line<'_> {
+    if let Some(reason) = &choice.unavailable_reason {
+        return Line::from(reason.as_str());
+    }
     let metadata_style = Style::default().fg(if highlighted {
         Color::Black
     } else {
@@ -1358,21 +1570,35 @@ fn map_choice_row<'a>(
         metadata.push(Span::styled(" · ", metadata_style));
         metadata.push(Span::styled(choice.description.as_str(), metadata_style));
     }
+    Line::from(metadata)
+}
+
+fn map_choice_row<'a>(
+    intl: &Intl,
+    choice: &'a MapChoice,
+    action: MapChoiceAction,
+    highlighted: bool,
+    mode: MapActionMode,
+) -> Row<'a> {
     let details = Text::from(vec![
         Line::from(Span::styled(
             choice.name.as_str(),
             Style::default().add_modifier(Modifier::BOLD),
         )),
-        Line::from(metadata),
+        choice_metadata(choice, highlighted),
     ]);
     let keep = choice_marker(
         action == MapChoiceAction::Keep,
         &format_message!(intl, default_message: "Keep"),
     );
-    let change = choice_marker(
-        action == MapChoiceAction::Change,
-        &map_operation_label(intl, choice.operation),
-    );
+    let change = if choice.unavailable_reason.is_some() {
+        String::new()
+    } else {
+        choice_marker(
+            action == MapChoiceAction::Change,
+            &map_operation_label(intl, choice.operation),
+        )
+    };
     let remove = choice.can_remove.then(|| {
         choice_marker(
             action == MapChoiceAction::Remove,
@@ -1449,6 +1675,9 @@ const fn next_map_action(
     mode: MapActionMode,
     direction: CycleDirection,
 ) -> MapChoiceAction {
+    if choice.unavailable_reason.is_some() {
+        return MapChoiceAction::Keep;
+    }
     let removal_available = mode.allows_removal() && choice.can_remove;
     match direction {
         CycleDirection::Next => match current {
@@ -1524,6 +1753,9 @@ fn select_map_cell(
         return;
     }
     state.select(Some(selected));
+    if choices[selected].unavailable_reason.is_some() {
+        return;
+    }
 
     let right = area.right();
     let action_column_span = MAP_ACTION_COLUMN_WIDTH.saturating_add(MAP_TABLE_COLUMN_SPACING);
@@ -2341,6 +2573,38 @@ impl Session {
         .await
     }
 
+    /// Show the cancellable firmware lookup while the device inventory and catalog are read.
+    /// # Errors
+    /// Lookup, rendering or cancellation failure.
+    pub async fn load_firmware_components<T, F>(&mut self, task: F) -> Result<T>
+    where
+        F: Future<Output = Result<T>>,
+    {
+        loading_loop(self.terminal(), task, None, LoadingActivity::Firmware).await
+    }
+
+    /// Transfer firmware and keep the final eject instruction visible.
+    /// # Errors
+    /// A task, rendering, or input error.
+    pub async fn run_firmware_progress<T, F>(
+        &mut self,
+        receiver: ProgressReceiver,
+        task: F,
+        cancellation: CancellationToken,
+    ) -> Result<T>
+    where
+        F: Future<Output = Result<T>>,
+    {
+        let intl = selected_formatter();
+        self.run_operation_progress(receiver, task, cancellation, ProgressConfig {
+            title: format_message!(&intl, default_message: "Staging updates"),
+            initial: format_message!(&intl, default_message: "Preparing update…"),
+            stages: UPDATE_STAGES,
+            completion: Some(format_message!(&intl, default_message: "Eject and disconnect the device so it can apply the updates.")),
+            initial_completion: None,
+        }).await
+    }
+
     /// Runs the shared update pipeline using the session's runtime profile.
     /// # Errors
     /// A task, rendering, or input error.
@@ -2601,6 +2865,7 @@ enum LoadingActivity {
     DeviceRecovery,
     DeviceStorage,
     MapComponents,
+    Firmware,
 }
 
 impl LoadingActivity {
@@ -2611,6 +2876,7 @@ impl LoadingActivity {
             Self::DeviceRecovery => format_message!(intl, default_message: "Device recovery"),
             Self::DeviceStorage => format_message!(intl, default_message: "Device storage"),
             Self::MapComponents => format_message!(intl, default_message: "Map components"),
+            Self::Firmware => format_message!(intl, default_message: "Device updates"),
         }
     }
 
@@ -2631,6 +2897,7 @@ impl LoadingActivity {
             Self::MapComponents => {
                 format_message!(intl, default_message: "Loading map components…")
             }
+            Self::Firmware => format_message!(intl, default_message: "Checking device updates…"),
         }
     }
 
@@ -2664,6 +2931,9 @@ impl LoadingActivity {
                 intl,
                 default_message: "Contacting the map-update service."
             )),
+            Self::Firmware => Line::raw(
+                format_message!(intl, default_message: "Checking available updates for the installed software."),
+            ),
         }
     }
 
@@ -2674,6 +2944,7 @@ impl LoadingActivity {
             Self::DeviceRecovery => "device-link recovery",
             Self::DeviceStorage => "device storage inspection",
             Self::MapComponents => "map component loading",
+            Self::Firmware => "firmware lookup",
         }
     }
 }
@@ -4096,6 +4367,77 @@ mod tests {
     use crate::progress_state::{ProgressModel, StageView};
 
     #[test]
+    fn empty_and_unavailable_firmware_catalogs_finish_without_a_write() {
+        use super::{
+            CycleDirection, FirmwareComponent, StagingIssue, firmware_read_only, next_map_action,
+        };
+        use garmin_model::artifact::ByteCount;
+
+        let intl = super::selected_formatter();
+        assert!(firmware_read_only(&[], MapActionMode::Firmware));
+        let mut component = FirmwareComponent {
+            name: "Watch font".into(),
+            part_number: "font".into(),
+            semantic_version: "2.0.0".into(),
+            description: None,
+            installed: None,
+            available: "2.00".into(),
+            system_bundle: false,
+            needs_restart: false,
+            has_metadata: false,
+            release_notes: Vec::new(),
+            download_bytes: None,
+            staging_issue: Some(StagingIssue::DeliveryRestriction("USB".into())),
+        };
+        let blocked = MapChoice::firmware(&component, &intl);
+        let mut choices = vec![blocked];
+        component.staging_issue = None;
+        component.name = "Watch audio".into();
+        choices.push(MapChoice::firmware(&component, &intl));
+        assert!(firmware_read_only(&choices, MapActionMode::Firmware));
+        assert_eq!(
+            choices[0].unavailable_reason.as_deref(),
+            Some("Unsupported delivery restriction: USB")
+        );
+        assert_eq!(
+            choices[1].unavailable_reason.as_deref(),
+            Some("Download unavailable")
+        );
+        component.download_bytes = Some(ByteCount::from_bytes(64));
+        choices.push(MapChoice::firmware(&component, &intl));
+        assert!(!firmware_read_only(&choices, MapActionMode::Firmware));
+        assert_eq!(
+            next_map_action(
+                MapChoiceAction::Keep,
+                &choices[0],
+                MapActionMode::Firmware,
+                CycleDirection::Next
+            ),
+            MapChoiceAction::Keep
+        );
+        assert_eq!(
+            next_map_action(
+                MapChoiceAction::Keep,
+                &choices[2],
+                MapActionMode::Firmware,
+                CycleDirection::Next
+            ),
+            MapChoiceAction::Change
+        );
+        let mut actions = [MapChoiceAction::Keep; 3];
+        select_map_cell(
+            Rect::new(0, 0, 100, 12),
+            90,
+            3,
+            &mut TableState::default(),
+            &mut actions,
+            &choices,
+            MapActionMode::Firmware,
+        );
+        assert_eq!(actions[0], MapChoiceAction::Keep);
+    }
+
+    #[test]
     fn pending_recovery_actions_remain_distinct() {
         use ratatui_interact::traits::{ContainerAction, EventResult};
 
@@ -4144,6 +4486,7 @@ mod tests {
             version_tone: MapVersionTone::Outdated,
             description: String::new(),
             operation: MapOperation::Update,
+            unavailable_reason: None,
             can_remove: true,
             cache: None,
         }];
@@ -4191,6 +4534,7 @@ mod tests {
             version_tone: MapVersionTone::UpToDate,
             description: String::new(),
             operation: MapOperation::Reinstall,
+            unavailable_reason: None,
             can_remove: false,
             cache: None,
         }];

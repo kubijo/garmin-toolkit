@@ -12,9 +12,9 @@ caches original FIT archives in the profile database, independently of activity 
 and **Refresh** read recent pages until a page overlaps the cached index, update summaries from those pages, preserve
 older cached history and retry missing originals throughout the account. **Full refresh** enumerates the complete
 history to reconcile older edits and deletions. Backdated additions beyond the overlap require a full refresh. One
-authenticated session serves either refresh; already downloaded originals are reused. Individual unavailable files
-remain searchable. Connection or rate-limit failures stop downloading, retain completed files and show a warning; cached
-metadata remains browsable.
+authenticated session serves either refresh; already downloaded originals are reused. An unavailable FIT file is marked
+on its activity. Opening the activity shows its cached summary and how to retry the download. Connection or rate-limit
+failures stop downloading and show a page warning. Cached activities remain browsable.
 
 Live progress reports connection, indexed pages and discovered summaries while the total remains unknown, then original
 file completion with new downloads, reused cache entries, unavailable files and remaining work. Desktop events and a
@@ -42,11 +42,11 @@ Opening an activity previews cached metadata and its original FIT. **Import FIT*
 through the existing importer. Confirmation binds the profile, activity ID, account and exact cached FIT bytes; an exact
 previously imported file has import disabled. Importing does not download the original again.
 
-**Import all on this page** snapshots up to 20 visible activities, skips imported rows and processes the rest
-sequentially through the same FIT checks. Cancellation stops between files and retains completed imports. The summary
-reports imported, skipped and failed counts; access, connection and rate-limit failures stop the batch. There is no
-automatic import. Optional auto-sync refreshes the account cache and downloads original FIT files on a per-profile
-schedule. Loading the cloud browser also populates that cache.
+**Import all on this page** snapshots up to 20 visible activities and processes them in order. It skips previously
+imported activities and those marked **Original FIT file unavailable**. Cancellation stops between files and retains
+completed imports. The summary reports imported, skipped and failed counts. Access, connection and rate-limit failures
+stop the batch. Imports are manual. Optional auto-sync refreshes the account cache and downloads original FIT files on a
+per-profile schedule. Loading the cloud browser also populates that cache.
 
 Batch preparation returns only the activity ID, exact-byte digest and imported status. Interactive preview responses are
 capped at 8 MiB of encoded data before entering the browser RPC transport; larger recordings can still be imported

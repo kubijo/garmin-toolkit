@@ -1,0 +1,214 @@
+{
+  "$id": "1",
+  "updates": [
+    {
+      "$id": "2",
+      "partNumber": "006-D1074-00",
+      "productName": "Time Zone Map",
+      "version": "43.00",
+      "isPrimaryFirmware": false,
+      "dataType": "Firmware",
+      "description": "Time Zone Map",
+      "locale": null,
+      "severity": "Recommended",
+      "releaseNotes": [
+        {
+          "$id": "3",
+          "version": "43.00",
+          "changeLog": [
+            "Updated Morocco to observe Greenwich Mean Time.",
+            "Updated the time zone information for various countries and regions.",
+            "Updated some country names to reflect the ISO country names."
+          ],
+          "semanticVersion": "43.0.0",
+          "isCriticalFixVersion": false
+        },
+        {
+          "$id": "4",
+          "version": "41.00",
+          "changeLog": [
+            "Updating database."
+          ],
+          "semanticVersion": "41.0.0",
+          "isCriticalFixVersion": false
+        }
+      ],
+      "eulaUrl": "https://example.invalid/garmin/resource-1",
+      "deliverable": {
+        "$id": "5",
+        "downloadUrl": "https://example.invalid/garmin/resource-2",
+        "md5": "d8b8236cadea7917e060f012fedfa819",
+        "sizeInBytes": 582656,
+        "secureDownloadUrl": "https://example.invalid/garmin/resource-2"
+      },
+      "installation": {
+        "$id": "6",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/Maps",
+        "fileName": "gmaptz.img",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [],
+      "releaseState": "live",
+      "releaseDate": "2026-10-30T18:01:09Z",
+      "secureEulaUrl": "https://example.invalid/garmin/resource-1",
+      "semanticVersion": "43.0.0",
+      "displayVersion": "43.00",
+      "containsCriticalFixVersion": false
+    },
+    {
+      "$id": "7",
+      "partNumber": "006-V4440-00",
+      "productName": "Edge 1050 Software Bundle",
+      "version": "33.22",
+      "isPrimaryFirmware": false,
+      "dataType": "Firmware",
+      "description": "Edge 1050 GSPs for bundled updates",
+      "locale": "es_US",
+      "severity": "Recommended",
+      "releaseNotes": [
+        {
+          "$id": "8",
+          "version": "33.22",
+          "changeLog": [
+            "Added Garmin Messenger, GroupRide, Alternate Datafields, and Garmin Cycling Coach features from Edge 1060.",
+            "Improved the Garmin Pay experience by reducing interruptions.",
+            "Fixed battery drain while the device was not in use.",
+            "Fixed LiveTrack sessions ending after 24 hours.",
+            "Fixed GPS and Bike Lights being disabled while in Connect IQ apps.",
+            "Fixed large cadence spikes when pedaling backward while connected to a Bosch Smart System.",
+            "Fixed Varia Vue On Radar Activity recording mode.",
+            "Fixed gear tracking mileage.",
+            "Fixed missing icons on the home screen.",
+            "Prevented \"Find My Edge\" feature from being muted.",
+            "Fixed Garmin Coach only offering rest days and not showing on the home screen.",
+            "Fixed setting routing mode.",
+            "Fixed bottle size not displaying value.",
+            "Fixed some devices failing to fully start up.",
+            "Improved device stability and fixed various minor bugs.",
+            "Made general security improvements."
+          ],
+          "semanticVersion": "33.22.0",
+          "isCriticalFixVersion": false
+        }
+      ],
+      "eulaUrl": "https://example.invalid/garmin/resource-3",
+      "deliverable": {
+        "$id": "9",
+        "downloadUrl": "https://example.invalid/garmin/resource-4",
+        "md5": "a3436f5e3249a54de685534ed8f94102",
+        "sizeInBytes": 97688531,
+        "secureDownloadUrl": "https://example.invalid/garmin/resource-4"
+      },
+      "installation": {
+        "$id": "10",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin",
+        "fileName": "GUPDATE.GSP",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [],
+      "releaseState": "live",
+      "releaseDate": "2026-11-19T21:10:43Z",
+      "secureEulaUrl": "https://example.invalid/garmin/resource-3",
+      "semanticVersion": "33.22.0",
+      "displayVersion": "33.22",
+      "containsCriticalFixVersion": false
+    },
+    {
+      "$id": "11",
+      "partNumber": "006-DB477-00",
+      "productName": "Audio Prompt Bundle Schema 3",
+      "version": "2.08",
+      "isPrimaryFirmware": false,
+      "dataType": "Firmware",
+      "description": "New audio prompt bundle with schema to support TTS type queries",
+      "locale": null,
+      "severity": "Recommended",
+      "releaseNotes": [
+        {
+          "$id": "12",
+          "version": "2.08",
+          "changeLog": [
+            "Added High Threat Vehicle alert"
+          ],
+          "semanticVersion": "2.8.0",
+          "isCriticalFixVersion": false
+        }
+      ],
+      "eulaUrl": "https://example.invalid/garmin/resource-3",
+      "deliverable": {
+        "$id": "13",
+        "downloadUrl": "https://example.invalid/garmin/resource-5",
+        "md5": "c975507edc9841534dda135793d38f76",
+        "sizeInBytes": 86691117,
+        "secureDownloadUrl": "https://example.invalid/garmin/resource-5"
+      },
+      "installation": {
+        "$id": "14",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/Prompts",
+        "fileName": "prompt_bundle.hvm",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [],
+      "releaseState": "live",
+      "releaseDate": "2026-02-10T20:53:24Z",
+      "secureEulaUrl": "https://example.invalid/garmin/resource-3",
+      "semanticVersion": "2.8.0",
+      "displayVersion": "2.08",
+      "containsCriticalFixVersion": false
+    },
+    {
+      "$id": "15",
+      "partNumber": "006-DA674-00",
+      "productName": "Etyp",
+      "version": "2.70",
+      "isPrimaryFirmware": false,
+      "dataType": "Etyp",
+      "description": null,
+      "locale": null,
+      "severity": "Recommended",
+      "releaseNotes": [],
+      "eulaUrl": null,
+      "deliverable": {
+        "$id": "16",
+        "downloadUrl": "https://example.invalid/garmin/resource-6",
+        "md5": "06264e133f82af350f39959378b2413e",
+        "sizeInBytes": 65065,
+        "secureDownloadUrl": "https://example.invalid/garmin/resource-6"
+      },
+      "installation": {
+        "$id": "17",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/SID",
+        "fileName": "DA67400.sid",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [],
+      "releaseState": "Live",
+      "releaseDate": "2026-11-18T13:38:54.618565",
+      "secureEulaUrl": null,
+      "semanticVersion": "2.70.9999",
+      "displayVersion": "2.70",
+      "containsCriticalFixVersion": false
+    }
+  ],
+  "accessLevel": "live"
+}

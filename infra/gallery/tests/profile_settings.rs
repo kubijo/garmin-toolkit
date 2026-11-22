@@ -296,6 +296,7 @@ fn browsing_cloud_activities_only_requests_a_preview_until_explicit_import() {
         activities: vec![RemoteActivity {
             id: 42,
             imported: false,
+            original_unavailable: false,
             sport: Some(garmin_model::activity::ActivitySport::Cycling),
             name: "Road ride".into(),
             started_at: Some("2026-11-10 10:00:00".into()),
@@ -347,6 +348,7 @@ fn cloud_page(start: u32) -> garmin_model::garmin_connect::ActivityResponse {
             .map(|index| RemoteActivity {
                 id: i64::from(index + 1),
                 imported: index == 2,
+                original_unavailable: false,
                 sport: Some(if index % 2 == 0 {
                     ActivitySport::Cycling
                 } else {
@@ -456,7 +458,14 @@ fn cloud_filters_validate_dates_reset_paging_and_preserve_applied_queries() {
     );
     view.get_by_label("Refresh options").click();
     view.run();
-    view.get_by_label("Full refresh").click();
+    let primary = view.get_by_label("Refresh").rect();
+    let full_refresh = view.get_by_label("Full refresh");
+    let item = full_refresh.rect();
+    assert!((item.left() - primary.left()).abs() <= 4.0);
+    assert!((item.top() - primary.bottom()).abs() <= 8.0);
+    let caret = view.get_by_label("Refresh options").rect();
+    assert!((item.right() - caret.right()).abs() <= 16.0);
+    full_refresh.click();
     view.run();
     assert_eq!(
         view.state().requests.last(),
@@ -634,6 +643,44 @@ fn fuzzy_search_is_a_single_account_query_and_imports_refill_the_cached_page() {
         view.state().requests.last(),
         Some(&ActivityRequest::List { start: 20, filters })
     );
+}
+
+#[test]
+fn page_import_skips_unavailable_originals_and_enables_after_recovery() {
+    use garmin_model::garmin_connect::{ActivityRequest, ActivityResponse};
+
+    let mut view = outcome_view(true, 760.0);
+    let import = "Import all on this page";
+    for recovered in [false, true] {
+        let Some(ActivityResponse::Page {
+            activities, cache, ..
+        }) = &mut view.state_mut().activities
+        else {
+            panic!("expected fixture page");
+        };
+        for row in activities.iter_mut() {
+            row.original_unavailable = !(recovered && row.id == 2);
+        }
+        cache.unavailable = activities
+            .iter()
+            .filter(|row| row.original_unavailable)
+            .count();
+        cache.downloaded = cache.total - cache.unavailable;
+        view.run();
+        assert_eq!(
+            view.get_by_label(import).accesskit_node().is_disabled(),
+            !recovered
+        );
+        view.get_by_label(import).click();
+        view.run_steps(3);
+        if !recovered {
+            assert!(view.state().batch.is_none());
+            assert_eq!(view.state().requests.len(), 0);
+        }
+    }
+    assert_eq!(view.state().requests, [ActivityRequest::Prepare { id: 2 }]);
+    let counts = view.state().batch.as_ref().expect("started batch").counts;
+    assert_eq!((counts.total, counts.skipped, counts.failed), (20, 19, 0));
 }
 
 #[test]
@@ -1419,16 +1466,13 @@ fn outcome_view(cloud: bool, width: f32) -> Harness<'static, Model> {
 }
 
 #[test]
-fn finished_sync_outcomes_remain_visible_in_settings_and_activities() {
+fn activities_show_sync_interruptions_and_settings_record_completion() {
     use garmin_model::garmin_connect::sync::{Failure, Outcome};
     for cloud in [false, true] {
         let mut view = outcome_view(cloud, 760.0);
         for (outcome, title) in [
             (Outcome::Complete { unavailable: 0 }, "Sync completed"),
-            (
-                Outcome::Complete { unavailable: 2 },
-                "Sync completed with unavailable files",
-            ),
+            (Outcome::Complete { unavailable: 2 }, "Sync completed"),
             (Outcome::Cancelled, "Sync cancelled"),
             (Outcome::Interrupted, "Sync interrupted"),
             (
@@ -1448,9 +1492,10 @@ fn finished_sync_outcomes_remain_visible_in_settings_and_activities() {
         ] {
             view.state_mut().sync.state.outcome = outcome;
             view.run();
-            assert!(
+            assert_eq!(
                 view.query_by_label(title).is_some(),
-                "missing {title}, cloud={cloud}"
+                !(cloud && title == "Sync completed"),
+                "{title}, cloud={cloud}"
             );
             if title != "Sync completed" {
                 assert!(view.query_by_label("Sync completed").is_none());
@@ -1462,6 +1507,60 @@ fn finished_sync_outcomes_remain_visible_in_settings_and_activities() {
     }
 }
 
+fn missing_original_view(width: f32) -> Harness<'static, Model> {
+    let mut view = outcome_view(true, width);
+    let state = view.state_mut();
+    let Some(garmin_model::garmin_connect::ActivityResponse::Page {
+        activities, cache, ..
+    }) = &mut state.activities
+    else {
+        panic!("expected an activity page");
+    };
+    activities[1].original_unavailable = true;
+    cache.downloaded -= 1;
+    cache.unavailable = 1;
+    state.sync.state.outcome =
+        garmin_model::garmin_connect::sync::Outcome::Complete { unavailable: 1 };
+    view.run();
+    view
+}
+
+#[test]
+fn missing_original_warning_belongs_to_the_activity() {
+    let mut view = missing_original_view(760.0);
+    let title = "Original FIT file unavailable";
+    let missing = view.get_by_label("Evening run 2");
+    assert!(
+        missing
+            .accesskit_node()
+            .description()
+            .is_some_and(|text| text.contains(title))
+    );
+    assert!(
+        view.get_by_label("Hamina Road Cycling 1")
+            .accesskit_node()
+            .description()
+            .is_some_and(|text| !text.contains(title))
+    );
+    assert!(
+        view.query_by_label("Sync completed with unavailable files")
+            .is_none()
+    );
+    missing.click();
+    view.run();
+    assert!(view.query_by_label(title).is_some());
+    assert_eq!(view.state().requests.len(), 0);
+    view.get_by_label("Close").click();
+    view.run();
+    assert!(view.query_by_label(title).is_none());
+    view.get_by_label("Hamina Road Cycling 1").click();
+    view.run();
+    assert_eq!(
+        view.state().requests,
+        [garmin_model::garmin_connect::ActivityRequest::Preview { id: 1 }]
+    );
+}
+
 #[test]
 #[ignore = "renders persistent sync outcomes in both themes"]
 fn capture_sync_feedback() -> Result<(), Box<dyn std::error::Error>> {
@@ -1469,6 +1568,15 @@ fn capture_sync_feedback() -> Result<(), Box<dyn std::error::Error>> {
     let out =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/gallery/sync-feedback");
     std::fs::create_dir_all(&out)?;
+    let mut missing = missing_original_view(760.0);
+    missing
+        .render()?
+        .save(out.join("missing-original-row.png"))?;
+    missing.get_by_label("Evening run 2").click();
+    missing.run();
+    missing
+        .render()?
+        .save(out.join("missing-original-detail.png"))?;
     for (theme_name, theme) in [
         ("dark", egui::ThemePreference::Dark),
         ("light", egui::ThemePreference::Light),
@@ -1580,6 +1688,12 @@ fn capture_cloud_browser() -> Result<(), Box<dyn std::error::Error>> {
         view.ctx.set_theme(theme);
         view.run();
         view.render()?.save(out.join(format!("{name}.png")))?;
+        view.get_by_label("Refresh options").click();
+        view.run();
+        view.render()?
+            .save(out.join(format!("{name}-refresh-options.png")))?;
+        view.key_press(egui::Key::Escape);
+        view.run();
         view.state_mut().activity_request = RequestState::Loading;
         view.state_mut().load_progress =
             Some(garmin_model::garmin_connect::LoadProgress::Downloading {

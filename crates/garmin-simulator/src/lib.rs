@@ -1,3 +1,4 @@
+mod firmware;
 pub mod shadow;
 pub mod virtual_device;
 
@@ -251,7 +252,12 @@ pub async fn serve(listen: SocketAddr, ready_file: Option<&Path>) -> Result<()> 
 fn app_state(base: &Url, authorization: MockAuthorization) -> AppState {
     AppState {
         base: base.clone(),
-        files: Arc::new(mock_files()),
+        files: Arc::new(
+            mock_map_files()
+                .into_iter()
+                .chain(firmware::files())
+                .collect(),
+        ),
         authorization,
         active_downloads: Arc::new(AtomicUsize::new(0)),
         max_parallel_downloads: Arc::new(AtomicUsize::new(0)),
@@ -261,6 +267,7 @@ fn app_state(base: &Url, authorization: MockAuthorization) -> AppState {
 fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/maps/universal/update", post(update))
+        .route("/api/device-software/v1/updates", post(firmware::updates))
         .route("/api/maps/universal/activate", post(activate))
         .route("/downloads/{name}", get(download))
         .route("/__mock/stats", get(stats))
@@ -412,7 +419,7 @@ fn update_response_fixture(state: &AppState) -> String {
         .replace("{{TRAILS_MD5}}", &file_hash("trails.img"))
 }
 
-fn mock_files() -> HashMap<String, Bytes> {
+fn mock_map_files() -> HashMap<String, Bytes> {
     [
         ("europe.img", mock_bytes(0x31, 12_000_000)),
         ("europe-routing.img", mock_bytes(0x52, 10_000_000)),
@@ -475,7 +482,7 @@ pub async fn create_fixture(root: &Path) -> Result<()> {
 /// An error for an unknown plan source, mismatched metadata, or file I/O.
 pub async fn seed_download_cache(root: &Path, plan: &garmin_update::UpdatePlan) -> Result<()> {
     tokio::fs::create_dir_all(root).await?;
-    let files = mock_files();
+    let files = mock_map_files();
     for download in &plan.downloads {
         let name = download
             .source
@@ -513,7 +520,7 @@ pub async fn verify_fixture(root: &Path) -> Result<FixtureVerification> {
 /// Missing, stale, or changed payloads and transaction debris.
 pub async fn verify_fixture_payloads(root: &Path) -> Result<FixtureVerification> {
     let mock = root.join("Garmin/Mock");
-    for (name, expected) in mock_files() {
+    for (name, expected) in mock_map_files() {
         let path = mock.join(&name);
         let actual = tokio::fs::read(&path)
             .await
@@ -564,7 +571,7 @@ mod tests {
 
     #[test]
     fn deterministic_payloads_have_distinct_integrity_values() {
-        let files = mock_files();
+        let files = mock_map_files();
         assert_eq!(files.len(), 3);
         let hashes = files
             .values()

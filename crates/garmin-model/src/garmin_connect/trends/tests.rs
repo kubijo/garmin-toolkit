@@ -15,6 +15,7 @@ fn summary(
         activity: RemoteActivity {
             id,
             imported: false,
+            original_unavailable: false,
             sport: Some(ActivitySport::Running),
             name: String::new(),
             started_at: Some("2026-11-15T23:30:00Z".into()),

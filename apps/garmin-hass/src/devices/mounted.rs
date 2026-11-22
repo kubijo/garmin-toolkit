@@ -1,4 +1,8 @@
-use std::{marker::PhantomData, sync::mpsc, time::Duration};
+use std::{
+    marker::PhantomData,
+    sync::{Weak, mpsc},
+    time::Duration,
+};
 
 use garmin_device::{attachments, attachments::Candidate as _};
 use garmin_progress::ProgressReporter;
@@ -6,6 +10,7 @@ use garmin_service_api::{
     DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload, DeviceCatalogSnapshot,
     DeviceSnapshot,
 };
+use garmin_services::maps::Operations;
 
 use super::{
     Source, SourceOpenError, SourceProvider, browser_device_key, device_catalog,
@@ -119,6 +124,12 @@ impl<A: Adapter> DeviceSource<A> {
 }
 
 impl<A: Adapter> Source for DeviceSource<A> {
+    fn observe_firmware_attachments(&mut self, operations: Weak<Operations>) {
+        if let Some(requests) = &self.requests {
+            let _ = requests.send(MountedRequest::ObserveFirmware(operations));
+        }
+    }
+
     fn device_connector(
         &mut self,
         key: &str,
@@ -272,6 +283,7 @@ fn receive_with_cancellation<T>(
 }
 
 enum MountedRequest {
+    ObserveFirmware(Weak<Operations>),
     Maps(String, mpsc::Sender<Result<String, String>>),
     Snapshot(mpsc::Sender<Vec<DeviceSnapshot>>),
     Refresh(String, mpsc::Sender<Result<(), String>>),
@@ -309,11 +321,13 @@ fn device_worker<A: Adapter>(requests: &mpsc::Receiver<MountedRequest>) {
     let mut manager = attachments::Manager::with_inspector(A::backend(), move |candidate| {
         A::inspect(&handle, candidate)
     });
+    let mut firmware = Weak::new();
     loop {
-        log_device_events(manager.poll());
+        handle_device_events(manager.poll(), &firmware);
         match requests.recv_timeout(Duration::from_millis(250)) {
+            Ok(MountedRequest::ObserveFirmware(operations)) => firmware = operations,
             Ok(MountedRequest::Snapshot(reply)) => {
-                log_device_events(manager.poll());
+                handle_device_events(manager.poll(), &firmware);
                 let value = manager
                     .presentations()
                     .into_iter()
@@ -323,16 +337,16 @@ fn device_worker<A: Adapter>(requests: &mpsc::Receiver<MountedRequest>) {
             }
             Ok(MountedRequest::Refresh(key, reply)) => {
                 let result = manager.refresh(&key);
-                log_device_events(manager.poll());
+                handle_device_events(manager.poll(), &firmware);
                 let _ignored = reply.send(result);
             }
             Ok(MountedRequest::Invalidate(key, reply)) => {
                 manager.invalidate(&key);
-                log_device_events(manager.poll());
+                handle_device_events(manager.poll(), &firmware);
                 let _ignored = reply.send(());
             }
             Ok(MountedRequest::Maps(key, reply)) => {
-                log_device_events(manager.poll());
+                handle_device_events(manager.poll(), &firmware);
                 let result = manager
                     .candidate(&key)
                     .map(|candidate| A::location(&candidate))
@@ -340,7 +354,7 @@ fn device_worker<A: Adapter>(requests: &mpsc::Receiver<MountedRequest>) {
                 let _ignored = reply.send(result);
             }
             Ok(MountedRequest::Catalog(key, progress, reply)) => {
-                log_device_events(manager.poll());
+                handle_device_events(manager.poll(), &firmware);
                 let result = manager
                     .candidate(&key)
                     .ok_or_else(|| "the selected device is no longer connected".to_owned())
@@ -349,7 +363,7 @@ fn device_worker<A: Adapter>(requests: &mpsc::Receiver<MountedRequest>) {
                 let _ignored = reply.send(result);
             }
             Ok(MountedRequest::Browser(request, progress, reply)) => {
-                log_device_events(manager.poll());
+                handle_device_events(manager.poll(), &firmware);
                 let key = browser_device_key(&request).to_owned();
                 let result = manager
                     .candidate(&key)
@@ -359,7 +373,7 @@ fn device_worker<A: Adapter>(requests: &mpsc::Receiver<MountedRequest>) {
                 let _ignored = reply.send(result);
             }
             Ok(MountedRequest::Download(key, target, progress, reply)) => {
-                log_device_events(manager.poll());
+                handle_device_events(manager.poll(), &firmware);
                 let result = manager
                     .candidate(&key)
                     .ok_or_else(|| "the selected device is no longer connected".to_owned())
@@ -367,7 +381,7 @@ fn device_worker<A: Adapter>(requests: &mpsc::Receiver<MountedRequest>) {
                 let _ignored = reply.send(result);
             }
             Ok(MountedRequest::Upload(request, contents, progress, reply)) => {
-                log_device_events(manager.poll());
+                handle_device_events(manager.poll(), &firmware);
                 let key = request.device_key.clone();
                 let result = manager
                     .candidate(&key)
@@ -384,13 +398,16 @@ fn device_worker<A: Adapter>(requests: &mpsc::Receiver<MountedRequest>) {
     }
 }
 
-fn log_device_events(events: Vec<attachments::Event>) {
+fn handle_device_events(events: Vec<attachments::Event>, firmware: &Weak<Operations>) {
     for event in events {
         match event {
             attachments::Event::Attached { key, name } => {
                 tracing::info!(device_key = %key, device_name = %name, "device attached");
             }
             attachments::Event::Detached { key } => {
+                if let Some(firmware) = firmware.upgrade() {
+                    firmware.forget_firmware(&key);
+                }
                 tracing::info!(device_key = %key, "device detached");
             }
             attachments::Event::Inspected { key, name } => {
@@ -406,6 +423,65 @@ fn log_device_events(events: Vec<attachments::Event>) {
             }
         }
     }
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn reconnect_between_snapshots_revokes_the_review_and_checks_the_new_device() {
+    use garmin_fixtures::firmware::FENIX_GSP_22_44;
+    use garmin_service_api::firmware::Phase;
+    use garmin_services::maps::device::{Connector, DirectoryConnector};
+    use std::sync::Arc;
+
+    let devices = tempfile::tempdir().unwrap();
+    let manifest = devices.path().join("GarminDevice.xml");
+    std::fs::write(&manifest, FENIX_GSP_22_44.inventory).unwrap();
+    let connector: Arc<dyn Connector> = Arc::new(DirectoryConnector {
+        root: devices.path().into(),
+        storage_id: "internal".into(),
+        storage_label: "Internal".into(),
+    });
+    let operations = Arc::new(Operations::default());
+    let key = "port";
+    let old = operations
+        .open_firmware(key.into(), connector.clone(), true)
+        .await
+        .unwrap();
+    let (revision, _) = old.check_components().await.unwrap();
+    let review = old.review_selection(revision, vec![0]).unwrap();
+    let previous = old.available_update().unwrap().attachment;
+
+    handle_device_events(
+        vec![
+            attachments::Event::Detached { key: key.into() },
+            attachments::Event::Attached {
+                key: key.into(),
+                name: "Reattached device".into(),
+            },
+        ],
+        &Arc::downgrade(&operations),
+    );
+    assert!(operations.firmware_session(key).is_none());
+    assert_eq!(old.snapshot().phase, Phase::Disconnected);
+    assert!(
+        old.claim_for_staging(review.revision, review.review.unwrap().approval)
+            .await
+            .is_err()
+    );
+
+    let new = operations
+        .open_firmware(key.into(), connector, true)
+        .await
+        .unwrap();
+    new.check_on_attachment();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while new.available_update().is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_ne!(new.available_update().unwrap().attachment, previous);
 }
 
 fn browser<A: Adapter>(

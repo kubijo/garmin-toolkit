@@ -302,7 +302,13 @@ fn show_header(ui: &mut Ui, title: &str, labels: &crate::shell::WindowLabels) ->
             ),
             (controls.close_label, WindowAction::Close),
         ] {
-            if ui.button(label).clicked() {
+            if (crate::button::Props {
+                size: crate::Size::Small,
+                ..crate::button::Props::new(label, crate::button::Kind::Ghost)
+            })
+            .show(ui)
+            .clicked()
+            {
                 action = Some(requested);
                 ui.close();
             }

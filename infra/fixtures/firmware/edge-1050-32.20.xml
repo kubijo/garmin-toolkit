@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Device xmlns="http://www.garmin.com/xmlschemas/GarminDevice/v2">
+  <Model>
+    <PartNumber>006-B4440-00</PartNumber>
+    <SoftwareVersion>3220</SoftwareVersion>
+    <Description>Edge 1050 fixture</Description>
+  </Model>
+  <Id>1</Id>
+  <MassStorageMode>
+    <UpdateFile>
+      <PartNumber>006-V4440-00</PartNumber>
+      <Version>
+        <Major>32</Major>
+        <Minor>20</Minor>
+      </Version>
+      <Path>GARMIN</Path>
+      <FileName>gupdate.gsp</FileName>
+    </UpdateFile>
+  </MassStorageMode>
+</Device>

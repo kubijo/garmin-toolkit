@@ -22,6 +22,7 @@ use garmin_service_api::{
 use garmin_services::{
     ActivityPreview, UserContext, activity_export::ActivityImportPreview, deployment::Deployment,
 };
+use garmin_ui::firmware::Notices as FirmwareNotices;
 use garmin_ui::{
     activity, device, device_browser, device_fit_preview, file_import, icons, image_crop, modal,
     notification, profile, profile_settings, progress, shell,
@@ -96,6 +97,7 @@ pub struct Desktop {
     file_progress_toast: Option<notification::ToastId>,
     devices: devices::Manager<device_backend::Platform>,
     device_toasts: HashMap<notification::ToastId, String>,
+    firmware_notices: FirmwareNotices,
     notify_on_inspection: HashSet<String>,
     worker: Worker,
     map_runtime: activity::map_runtime::MapRuntimeHandle,
@@ -209,6 +211,7 @@ impl Desktop {
             file_progress_toast: None,
             devices: devices::Manager::with_inspector(device_platform, device_backend::inspect),
             device_toasts: HashMap::new(),
+            firmware_notices: FirmwareNotices::default(),
             notify_on_inspection: HashSet::new(),
             worker,
             map_runtime,
@@ -328,13 +331,13 @@ impl Desktop {
         frame: &eframe::Frame,
         profile_index: usize,
         drop_active: bool,
+        device_snapshots: &[DeviceSnapshot],
     ) {
         let profile_props = self
             .profiles
             .iter()
             .map(ProfileView::profile_props)
             .collect::<Vec<_>>();
-        let device_snapshots = self.device_snapshots();
         if matches!(self.page, Page::GarminConnect)
             && !self.profiles[profile_index].garmin_connect_configured
         {
@@ -392,13 +395,13 @@ impl Desktop {
             profile_menu_expanded: self.profile_menu_expanded,
             page: &self.page,
             navigation: self.navigation,
-            devices: &device_snapshots,
+            devices: device_snapshots,
             window_controls: Some(&window_controls),
             backup_enabled: self.profiles[profile_index].user.role()
                 == garmin_model::identity::Role::Owner,
             garmin_connect_configured: self.profiles[profile_index].garmin_connect_configured,
         };
-        let route_devices = route_device_connectors(&self.devices, &device_snapshots);
+        let route_devices = route_device_connectors(&self.devices, device_snapshots);
         let output = workspace::show(ui, &props, |ui| {
             if let Some(notice) = notice {
                 notification::show(ui, &notice.props());
@@ -445,6 +448,10 @@ impl Desktop {
                         load_progress: settings_props.garmin_connect.load_progress,
                     },
                 )),
+                Page::Firmware(key) => PageOutput::Firmware {
+                    key: key.clone(),
+                    command: self.maps.show_firmware(ui, intl, key),
+                },
                 Page::Maps(key) => PageOutput::Maps {
                     key: key.clone(),
                     command: self.maps.show(ui, intl, key),
@@ -470,7 +477,7 @@ impl Desktop {
             }
         });
         self.handle_page_output(profile_index, output.inner);
-        self.handle_shell_action(ui.ctx(), frame, output.action, &device_snapshots);
+        self.handle_shell_action(ui.ctx(), frame, output.action, device_snapshots);
     }
 
     fn handle_page_output(&mut self, profile_index: usize, output: PageOutput) {
@@ -514,19 +521,28 @@ impl Desktop {
                     None => {}
                 }
             }
+            PageOutput::Firmware {
+                key,
+                command: Some((revision, action)),
+            } => self.maps.submit_firmware(&key, revision, action),
+            PageOutput::Device {
+                key,
+                action: Some(action @ (device::Action::ManageMaps | device::Action::ManageFirmware)),
+            } => {
+                if let Some(candidate) = self.devices.candidate(&key) {
+                    if matches!(action, device::Action::ManageFirmware) {
+                        self.maps.open_firmware(&candidate);
+                        self.page = Page::Firmware(key);
+                    } else {
+                        self.maps.open(&candidate);
+                        self.page = Page::Maps(key);
+                    }
+                }
+            }
             PageOutput::Maps {
                 key,
                 command: Some((revision, command)),
             } => self.maps.submit(&key, revision, command),
-            PageOutput::Device {
-                key,
-                action: Some(device::Action::ManageMaps),
-            } => {
-                if let Some(candidate) = self.devices.candidate(&key) {
-                    self.maps.open(&candidate);
-                    self.page = Page::Maps(key);
-                }
-            }
             PageOutput::Backup(action) => self.handle_backup_action(action),
             PageOutput::Activities((import, selected)) => {
                 match selected {
@@ -557,6 +573,7 @@ impl Desktop {
             }
             PageOutput::Routes
             | PageOutput::Maps { command: None, .. }
+            | PageOutput::Firmware { command: None, .. }
             | PageOutput::Settings(None)
             | PageOutput::Device { action: None, .. } => {}
             PageOutput::Device {
@@ -874,7 +891,13 @@ impl Desktop {
         self.devices
             .presentations()
             .into_iter()
-            .map(device_snapshot)
+            .map(|presentation| {
+                let update = self.maps.firmware_update(&presentation.key);
+                DeviceSnapshot {
+                    firmware_update: update,
+                    ..device_snapshot(presentation)
+                }
+            })
             .collect()
     }
 
@@ -1520,6 +1543,12 @@ impl Desktop {
     fn process_devices(&mut self, context: &Context) {
         context.request_repaint_after(Duration::from_secs(1));
         for event in self.devices.poll() {
+            if let devices::Event::Inspected { key, .. }
+            | devices::Event::InspectionFailed { key, .. } = &event
+                && let Some(candidate) = self.devices.candidate(key)
+            {
+                self.maps.check_attached_firmware(&candidate);
+            }
             match event {
                 devices::Event::Attached { key, name } => {
                     let title = format_message!(
@@ -1542,6 +1571,7 @@ impl Desktop {
                     self.device_toasts.insert(id, key);
                 }
                 devices::Event::Detached { key } => {
+                    self.maps.operations.forget_firmware(&key);
                     self.notify_on_inspection.remove(&key);
                     if self.file_window_device.as_deref() == Some(key.as_str()) {
                         self.file_window.close(&self.context);
@@ -1562,7 +1592,8 @@ impl Desktop {
                         self.device_fit_preview = None;
                         self.device_browser_status = DeviceBrowserStatus::Idle;
                     }
-                    if matches!(&self.page, Page::Device(active) if active == &key) {
+                    if matches!(&self.page, Page::Device(active) | Page::Firmware(active) if active == &key)
+                    {
                         self.page = Page::Activities;
                     }
                 }
@@ -1618,6 +1649,13 @@ impl Desktop {
             notification::StackMode::Automatic,
         );
         for event in events {
+            if let Some(key) = self.firmware_notices.handle(event)
+                && let Some(candidate) = self.devices.candidate(&key)
+            {
+                self.maps.open_firmware(&candidate);
+                self.page = Page::Firmware(key);
+                continue;
+            }
             match event {
                 notification::ToastEvent::Invoked(id) => {
                     let Some(key) = self.device_toasts.remove(&id) else {
@@ -2324,6 +2362,13 @@ impl eframe::App for Desktop {
         self.process_events();
         self.poll_open_files(ui);
         self.process_devices(ui.ctx());
+        let devices = self.device_snapshots();
+        self.firmware_notices.sync(
+            &self.intl,
+            &devices,
+            &mut self.toasts,
+            self.selected_profile.is_some(),
+        );
         self.handle_quit_input(ui.ctx());
         let (drop_active, dropped) = ui.ctx().input(|input| {
             (
@@ -2340,7 +2385,7 @@ impl eframe::App for Desktop {
             self.start_import(dropped);
         }
         match self.selected_profile {
-            Some(index) => self.show_application(ui, frame, index, drop_active),
+            Some(index) => self.show_application(ui, frame, index, drop_active, &devices),
             None => self.show_chooser(ui, frame),
         }
         self.show_create_profile(ui);
@@ -2521,6 +2566,7 @@ fn device_snapshot(presentation: devices::Presentation) -> DeviceSnapshot {
         identifier: presentation
             .identifier
             .map(garmin_device::DeviceId::into_u32),
+        firmware_update: None,
         software_version: presentation
             .software_version
             .map(garmin_device::SoftwareVersion::into_hundredths),
@@ -2595,6 +2641,10 @@ fn device_catalog_snapshot(
 }
 
 enum PageOutput {
+    Firmware {
+        key: String,
+        command: Option<(Uuid, garmin_service_api::firmware::Action)>,
+    },
     Trends(Option<garmin_ui::trends::Action>),
     Routes,
     Maps {

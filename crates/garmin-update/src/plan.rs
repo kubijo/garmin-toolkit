@@ -155,6 +155,15 @@ impl UpdatePlan {
 
         files_to_remove.sort_by(|left, right| left.as_path().cmp(right.as_path()));
         files_to_remove.dedup();
+        Self::from_files(device_digest, downloads, files_to_remove, identifiers)
+    }
+
+    pub(crate) fn from_files(
+        device_digest: String,
+        downloads: Vec<DownloadSpec>,
+        files_to_remove: Vec<SafeRelativePath>,
+        identifiers: Vec<MapInstallIdentifier>,
+    ) -> Result<Self, UpdatePlanError> {
         let total_bytes = downloads
             .iter()
             .try_fold(ByteCount::default(), |total, item| {
@@ -380,7 +389,7 @@ fn validated_sources(
     Ok(sources)
 }
 
-fn normalized_md5(value: &str) -> Option<String> {
+pub(crate) fn normalized_md5(value: &str) -> Option<String> {
     if value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Some(value.to_ascii_lowercase());
     }
@@ -395,7 +404,7 @@ fn stable_source(source: &Url) -> String {
     source.into()
 }
 
-fn is_http_loopback_url(url: &Url) -> bool {
+pub(crate) fn is_http_loopback_url(url: &Url) -> bool {
     if url.scheme() != "http" {
         return false;
     }

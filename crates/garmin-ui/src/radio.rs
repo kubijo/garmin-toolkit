@@ -4,10 +4,13 @@ use egui::{Atoms, RadioButton, Ui};
 
 use crate::{button, images, semantics};
 
+const ICON_SIZE: f32 = 16.0;
+const LABEL_GAP: f32 = 8.0;
+
 /// One labelled option with a stable interaction target.
 pub struct Choice<'a, T> {
     label: &'a str,
-    value: T,
+    pub(super) value: T,
     target: &'a str,
     image: Option<images::Image>,
     enabled: bool,
@@ -35,86 +38,48 @@ impl<'a, T> Choice<'a, T> {
         self.enabled = enabled;
         self
     }
-}
 
-/// Group label, helper text, and interaction state.
-#[derive(Clone, Copy, Debug)]
-pub struct Props<'a> {
-    pub label: &'a str,
-    pub helper: Option<&'a str>,
-    pub enabled: bool,
-}
-
-/// Renders one row when all options fit, otherwise one compact vertical group.
-pub fn show<T: Copy + PartialEq>(
-    ui: &mut Ui,
-    selected: T,
-    choices: &[Choice<'_, T>],
-    props: Props<'_>,
-) -> Option<T> {
-    ui.label(props.label);
-    let mut changed = None;
-    ui.add_enabled_ui(props.enabled, |ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(16.0, 4.0);
-        ui.spacing_mut().interact_size.y = 24.0;
-        ui.spacing_mut().icon_spacing = 8.0;
-        let width = choices
-            .iter()
-            .fold(-ui.spacing().item_spacing.x, |width, choice| {
-                width + choice_width(ui, choice) + ui.spacing().item_spacing.x
-            });
-        let layout = if width <= ui.available_width() {
-            egui::Layout::left_to_right(egui::Align::Center)
-        } else {
-            egui::Layout::top_down(egui::Align::Min)
-        };
-        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 24.0), layout, |ui| {
-            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-            for choice in choices {
-                let mut atoms = Atoms::new(choice.label);
-                if let Some(image) = choice.image {
-                    atoms.push_left(
-                        image
-                            .widget()
-                            .fit_to_exact_size(image.size_for_height(16.0)),
-                    );
-                }
-                let response = ui
-                    .push_id(choice.target, |ui| {
-                        crate::theme::selected_control(ui, selected == choice.value, |ui| {
-                            button::interaction_cursor(ui.add_enabled(
-                                choice.enabled,
-                                RadioButton::new(selected == choice.value, atoms),
-                            ))
-                        })
-                    })
-                    .inner;
-                semantics::target(ui, &response, choice.target);
-                if response.clicked() && selected != choice.value {
-                    changed = Some(choice.value);
-                }
-            }
-        });
-    });
-    if let Some(helper) = props.helper {
-        ui.add(egui::Label::new(egui::RichText::new(helper).weak().size(12.0)).wrap());
+    /// Render an individual radio target. Its caller owns the selection.
+    pub fn show(&self, ui: &mut Ui, selected: bool) -> egui::Response {
+        let mut atoms = Atoms::new(self.label);
+        if let Some(image) = self.image {
+            atoms.push_left(
+                image
+                    .widget()
+                    .fit_to_exact_size(image.size_for_height(ICON_SIZE)),
+            );
+        }
+        let response = ui
+            .push_id(self.target, |ui| {
+                ui.spacing_mut().interact_size.y = 24.0;
+                ui.spacing_mut().icon_width = ICON_SIZE;
+                ui.spacing_mut().icon_spacing = LABEL_GAP;
+                crate::theme::selected_control(ui, selected && self.enabled, |ui| {
+                    button::interaction_cursor(
+                        ui.add_enabled(self.enabled, RadioButton::new(selected, atoms)),
+                    )
+                })
+            })
+            .inner;
+        semantics::target(ui, &response, self.target);
+        response
     }
-    changed
+    pub(super) fn width(&self, ui: &Ui) -> f32 {
+        egui::WidgetText::from(self.label)
+            .into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Body,
+            )
+            .size()
+            .x
+            + ICON_SIZE
+            + LABEL_GAP
+            + self
+                .image
+                .map_or(0.0, |image| image.size_for_height(ICON_SIZE).x + LABEL_GAP)
+    }
 }
 
-fn choice_width<T>(ui: &Ui, choice: &Choice<'_, T>) -> f32 {
-    egui::WidgetText::from(choice.label)
-        .into_galley(
-            ui,
-            Some(egui::TextWrapMode::Extend),
-            f32::INFINITY,
-            egui::TextStyle::Body,
-        )
-        .size()
-        .x
-        + ui.spacing().icon_width
-        + ui.spacing().icon_spacing
-        + choice.image.map_or(0.0, |image| {
-            image.size_for_height(16.0).x + ui.spacing().icon_spacing
-        })
-}
+pub use crate::radio_group::{Props, show};

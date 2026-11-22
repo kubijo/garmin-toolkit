@@ -1,0 +1,23 @@
+out = "../../../.tmp/gallery/progress-indicator"
+size = "1200x960"
+sheet = "sheet.png"
+report = "capture.json"
+settle = false
+
+[[shot]]
+name = "overview"
+scene = "progress_indicator::Overview"
+frames = 23
+
+[[shot]]
+name = "light"
+scene = "progress_indicator::Overview"
+frames = 23
+globals = { Theme = "Light" }
+
+[[shot]]
+name = "narrow"
+scene = "progress_indicator::Overview"
+frames = 23
+size = "720x1440"
+knobs = { width = 320 }

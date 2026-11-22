@@ -1,7 +1,8 @@
 use crate::model::wire;
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use futures_util::StreamExt;
 use garmin_capture::{CaptureError, HttpHeader, HttpRequestHead, HttpResponseHead, SessionCapture};
+use garmin_device::{DeviceManifest, ManifestError};
 use garmin_model::{
     artifact::ByteCount,
     map::{InstalledMapFile, MapAuthorization, MapCatalog, MapInstallIdentifier},
@@ -18,6 +19,7 @@ use uuid::Uuid;
 
 const OMT_BASE: &str = "https://omt.garmin.com/";
 const OMT_UPDATE_PATH: &str = "api/maps/universal/update";
+pub const FIRMWARE_UPDATE_ENDPOINT: &str = "https://omt.garmin.com/api/device-software/v1/updates";
 const MAX_API_RESPONSE_BYTES: ByteCount = ByteCount::from_mebibytes(16);
 
 #[must_use]
@@ -59,6 +61,7 @@ pub struct OmtClient {
     http: Client,
     base: Url,
     capture: Option<SessionCapture>,
+    identity: ClientIdentity,
 }
 
 impl OmtClient {
@@ -113,13 +116,16 @@ impl OmtClient {
             .read_timeout(Duration::from_secs(60))
             .redirect(reqwest::redirect::Policy::none());
         if loopback_http {
-            builder = builder.tls_certs_only(std::iter::empty::<reqwest::Certificate>());
+            builder = builder
+                .no_proxy()
+                .tls_certs_only(std::iter::empty::<reqwest::Certificate>());
         }
         let http = builder.build()?;
         Ok(Self {
             http,
             base,
             capture: None,
+            identity: identity.clone(),
         })
     }
 
@@ -129,7 +135,41 @@ impl OmtClient {
         self
     }
 
+    /// Query Garmin's device software catalog.
+    /// The host retains the private response until projected for display.
+    ///
+    /// # Errors
+    /// Returns an error for invalid inventory, transport failures,
+    /// non-success status or an oversized response.
+    pub async fn device_software(&self, manifest: &DeviceManifest) -> Result<Bytes, OmtError> {
+        let endpoint = Url::parse(FIRMWARE_UPDATE_ENDPOINT)?;
+        let request = wire::DeviceSoftwareRequest {
+            garmin_device_xml: manifest.firmware_inventory_xml()?,
+            is_user_interactive: false,
+            client_info: wire::SoftwareClientInfo {
+                client_type: self.identity.name.to_ascii_lowercase(),
+                locale_code: &self.identity.locale,
+                operating_system_type: match self.identity.platform.as_str() {
+                    "WINDOWS" => "Windows",
+                    platform => platform,
+                },
+                operating_system_version: &self.identity.platform_version,
+            },
+        };
+        let response = self
+            .http
+            .post(self.base.join(endpoint.path())?)
+            .json(&request)
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(OmtError::SoftwareStatus(response.status()));
+        }
+        Ok(bounded_response_body(response, None).await?.freeze())
+    }
+
     /// Request available universal-map updates using the complete device XML.
+    ///
     /// # Errors
     /// [`OmtError`] for transport, status, or response-schema failures.
     pub async fn check_maps(
@@ -322,6 +362,10 @@ fn sanitize_server_error(bytes: &[u8]) -> String {
 
 #[derive(Debug, Error)]
 pub enum OmtError {
+    #[error("cannot prepare firmware inventory: {0}")]
+    FirmwareInventory(#[from] ManifestError),
+    #[error("Garmin software service returned {0}")]
+    SoftwareStatus(StatusCode),
     #[error("invalid service URL: {0}")]
     Url(#[from] url::ParseError),
     #[error("mock service URL must use HTTP on loopback: {0}")]

@@ -1,4 +1,4 @@
-//! Deployment backups live in the owner menu without occupying primary navigation.
+//! Profile settings and owner backups are accessed through the profile selector.
 
 use egui_kittest::{
     Harness,
@@ -10,7 +10,7 @@ use garmin_service_api::{DeviceSnapshot, InspectionState};
 use garmin_ui::{profile, shell, workspace};
 
 #[test]
-fn backup_is_an_owner_only_secondary_action() {
+fn profile_settings_and_owner_backups_open_from_the_selector() {
     for owner in [false, true] {
         let intl = Translations::bundled()
             .expect("catalog")
@@ -25,6 +25,7 @@ fn backup_is_an_owner_only_secondary_action() {
             key: "mock-cycle".to_owned(),
             name: "Mock Cycle".to_owned(),
             identifier: None,
+            firmware_update: None,
             software_version: None,
             inspection: InspectionState::Ready,
             inspection_error: None,
@@ -83,6 +84,17 @@ fn backup_is_an_owner_only_secondary_action() {
                         .is_some_and(|label| label.contains("Backup"))
             }))
             .is_none()
+        );
+        let settings = view.get_by_label("Profile settings");
+        assert_eq!(
+            settings.accesskit_node().author_id(),
+            Some("profile.settings")
+        );
+        settings.click();
+        view.run_steps(3);
+        assert_eq!(
+            *view.state(),
+            Some(shell::Action::Profile(profile::Action::Settings))
         );
         let backup =
             view.query(By::new().predicate(|node| node.author_id() == Some("profile.backup")));

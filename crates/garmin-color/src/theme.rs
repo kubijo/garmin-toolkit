@@ -4,6 +4,18 @@ use thiserror::Error;
 
 use crate::{Color, swatch};
 
+/// Neutral foreground with the higher contrast against an opaque fill.
+#[must_use]
+pub fn on_fill(fill: Color) -> Color {
+    let light = swatch::gray::G10;
+    let dark = swatch::gray::G100;
+    if light.contrast_ratio(fill) > dark.contrast_ratio(fill) {
+        light
+    } else {
+        dark
+    }
+}
+
 /// Surface nesting level.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Level {
@@ -59,6 +71,7 @@ pub struct Surfaces {
     chrome: Color,
     background: Color,
     background_hover: Color,
+    progress_fill: Color,
     notification: Color,
     layers: [Color; 3],
     layer_hovers: [Color; 3],
@@ -67,6 +80,12 @@ pub struct Surfaces {
 }
 
 impl Surfaces {
+    /// Background behind progress text, tinted with the current profile accent.
+    #[must_use]
+    pub fn progress_fill(&self, accent: Color) -> Color {
+        self.progress_fill.tinted_by(accent)
+    }
+
     /// Notification surface, independent of the surrounding control layer.
     #[must_use]
     pub const fn notification(&self) -> Color {
@@ -449,6 +468,7 @@ pub const GRAY_100: Theme = Theme {
         chrome: swatch::BLACK,
         background: swatch::gray::G100,
         background_hover: swatch::gray::G50.with_alpha(0x29),
+        progress_fill: Color::from_rgb(0x1e, 0x47, 0x66),
         notification: swatch::gray::G80,
         layers: [swatch::gray::G90, swatch::gray::G80, swatch::gray::G70],
         layer_hovers: [
@@ -703,6 +723,7 @@ pub const GRAY_10: Theme = Theme {
         chrome: swatch::gray::G20,
         background: swatch::gray::G10,
         background_hover: swatch::gray::G50.with_alpha(0x1f),
+        progress_fill: Color::from_rgb(0xa5, 0xd1, 0xf7),
         notification: swatch::WHITE,
         layers: [swatch::WHITE, swatch::gray::G10, swatch::WHITE],
         layer_hovers: [
@@ -953,6 +974,32 @@ pub const GRAY_10: Theme = Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn progress_fills_keep_text_readable_across_profile_accents() {
+        for theme in [&GRAY_100, &GRAY_10] {
+            for accent in [
+                swatch::ACTION,
+                swatch::WHITE,
+                swatch::BLACK,
+                swatch::red::G50,
+                swatch::yellow::G30,
+                swatch::green::G50,
+                swatch::purple::G60,
+            ] {
+                let fill = theme.surfaces().progress_fill(accent);
+                for text in [
+                    theme.content().text_primary(),
+                    theme.content().text_secondary(),
+                ] {
+                    assert!(
+                        text.contrast_ratio(fill) >= 4.5,
+                        "{text} on {fill} for {accent}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn notifications_are_distinct_from_the_page_and_keep_text_readable() {

@@ -105,3 +105,33 @@ fn disclosure_preserves_pointer_and_keyboard_access_to_its_content() {
     harness.run();
     assert!(harness.query_by_label("Retained plan evidence").is_some());
 }
+
+#[test]
+fn inline_disclosure_keeps_its_state_when_the_label_changes() {
+    let mut view = Harness::builder().build_ui_state(
+        |ui, label: &mut &str| {
+            garmin_ui::accordion::inline(ui, "history", label, |ui| {
+                ui.label("Previous file");
+            });
+        },
+        "History",
+    );
+    view.run();
+    view.get_by_label("History").focus();
+    view.run();
+    view.key_press(egui::Key::Space);
+    view.run();
+    *view.state_mut() = "Historie";
+    view.run();
+    assert!(view.query_by_label("Previous file").is_some());
+    assert_eq!(
+        view.get_by_label("Historie")
+            .accesskit_node()
+            .data()
+            .is_expanded(),
+        Some(true)
+    );
+    view.key_press(egui::Key::Enter);
+    view.run();
+    assert!(view.query_by_label("Previous file").is_none());
+}

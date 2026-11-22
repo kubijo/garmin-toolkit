@@ -22,6 +22,72 @@ struct SceneProps {
 }
 
 #[scene(default)]
+fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    use Kind::{Danger, Ghost, Primary, Secondary, Tertiary, TertiaryDanger};
+    #[derive(Clone, Copy)]
+    enum Example {
+        Action(Kind),
+        Disabled,
+        Icon,
+        Overlay { labeled: bool },
+    }
+    use Example::{Action, Disabled, Icon, Overlay};
+    let examples = [
+        ("Primary", Action(Primary)),
+        ("Secondary", Action(Secondary)),
+        ("Tertiary", Action(Tertiary)),
+        ("Tertiary danger", Action(TertiaryDanger)),
+        ("Ghost", Action(Ghost)),
+        ("Danger", Action(Danger)),
+        ("Disabled", Disabled),
+        ("Icon only", Icon),
+        ("Overlay", Overlay { labeled: true }),
+        ("Selected overlay", Overlay { labeled: false }),
+    ];
+    ctx.matrix_with(ui, &[egui::vec2(192.0, 0.0); 10], |ctx, ui, i| {
+        let (stage, example) = examples[i];
+        globals.example(ctx, ui, stage, 192.0, |ui| match example {
+            Action(kind) => {
+                let label = if matches!(kind, Danger | TertiaryDanger) {
+                    "Delete"
+                } else {
+                    "Import activities"
+                };
+                Props::new(label, kind).show(ui);
+            }
+            Disabled => {
+                Props {
+                    enabled: false,
+                    ..Props::new("Import activities", Primary)
+                }
+                .show(ui);
+            }
+            Icon => {
+                IconProps {
+                    label: "Import activities",
+                    icon: icons::UPLOAD_SIMPLE,
+                    kind: Ghost,
+                    size: Size::Medium,
+                    enabled: true,
+                }
+                .show(ui);
+            }
+            Overlay { labeled } => {
+                button::OverlayProps {
+                    label: if labeled { "Full activity" } else { "Play" },
+                    icon: if labeled { icons::TARGET } else { icons::PLAY },
+                    show_label: labeled,
+                    width: if labeled { 112.0 } else { 32.0 },
+                    selected: if labeled { None } else { Some(true) },
+                    enabled: true,
+                }
+                .show(ui);
+            }
+        });
+    });
+}
+
+#[scene]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     let props = SceneProps {
         kind: kind(ctx.buttons("kind", KINDS, 0)),

@@ -84,7 +84,9 @@ impl Browser {
                 target = Some(path.clone());
             }
         }
-        let response = ui.allocate_response(ui.available_size(), egui::Sense::click());
+        let response = button::interaction_cursor(
+            ui.allocate_response(ui.available_size(), egui::Sense::click()),
+        );
         crate::semantics::target(ui, &response, "files.path.edit");
         let response =
             response.on_hover_text(format_message!(intl, default_message: "Enter a folder path"));

@@ -48,6 +48,7 @@ impl MockRemote {
                     activity: RemoteActivity {
                         id,
                         imported: false,
+                        original_unavailable: false,
                         sport: Some(ActivitySport::Cycling),
                         name: if id == 23 {
                             "Hamina Cycling".into()
@@ -617,7 +618,7 @@ async fn full_account_cache_survives_restart_and_searches_beyond_page_one_withou
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("cache.sqlite3");
     let (app, user, key) = application(&path).await;
-    let remote = MockRemote::new();
+    let mut remote = MockRemote::new();
     let fingerprint = credential_hash(&key);
     app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
         .await
@@ -632,20 +633,7 @@ async fn full_account_cache_survives_restart_and_searches_beyond_page_one_withou
     drop(app);
     let app = Application::new(garmin_storage::Storage::open(&path).await.unwrap());
     let account = cached_account(&app, user, &fingerprint).await;
-    assert!(
-        app.storage
-            .connect_cache_account(UserId::from_u128(2), &fingerprint)
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        app.storage
-            .connect_cache_account(user.user_id(), "another-key")
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert_reopened_cache_scope_and_availability(&app, user, &fingerprint).await;
     let result = app
         .query_connect_cache(
             user,
@@ -679,6 +667,7 @@ async fn full_account_cache_survives_restart_and_searches_beyond_page_one_withou
         (23, 22, 1)
     );
     import_cached_preview(&app, user).await;
+    remote.fail = None;
     app.load_connect_cache(user, &fingerprint, &remote, Refresh::Full, &uninterrupted())
         .await
         .unwrap();
@@ -688,6 +677,14 @@ async fn full_account_cache_survives_restart_and_searches_beyond_page_one_withou
         "refresh retries only the unavailable original"
     );
     let account = cached_account(&app, user, &fingerprint).await;
+    assert!(
+        app.storage
+            .connect_cache_summaries(user.user_id(), &account)
+            .await
+            .unwrap()
+            .iter()
+            .all(|row| !row.activity.original_unavailable)
+    );
     let result = app
         .query_connect_cache(
             user,
@@ -706,6 +703,42 @@ async fn full_account_cache_survives_restart_and_searches_beyond_page_one_withou
         result,
         ConnectActivityResult::State(ActivityResponse::Page { total: 0, .. })
     ));
+}
+
+async fn assert_reopened_cache_scope_and_availability(
+    app: &Application,
+    user: UserContext,
+    fingerprint: &str,
+) {
+    let cached = app
+        .storage
+        .connect_cache_snapshot(user.user_id(), fingerprint)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        cached
+            .activities
+            .iter()
+            .filter(|row| row.activity.original_unavailable)
+            .map(|row| row.activity.id)
+            .collect::<Vec<_>>(),
+        [1]
+    );
+    assert!(
+        app.storage
+            .connect_cache_account(UserId::from_u128(2), fingerprint)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        app.storage
+            .connect_cache_account(user.user_id(), "another-key")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]

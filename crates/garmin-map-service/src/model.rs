@@ -8,6 +8,23 @@ use garmin_model::map::{
 pub(crate) mod wire {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DeviceSoftwareRequest<'a> {
+        pub(crate) garmin_device_xml: String,
+        pub(crate) is_user_interactive: bool,
+        pub(crate) client_info: SoftwareClientInfo<'a>,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct SoftwareClientInfo<'a> {
+        pub(crate) client_type: String,
+        pub(crate) locale_code: &'a str,
+        pub(crate) operating_system_type: &'a str,
+        pub(crate) operating_system_version: &'a str,
+    }
+
     #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "PascalCase")]
     pub(crate) struct UpdateOptions {

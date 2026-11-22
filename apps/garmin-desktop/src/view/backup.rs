@@ -102,6 +102,7 @@ impl Desktop {
         self.import = ImportStatus::default();
         self.notice = None;
         self.toasts = notification::Toasts::default();
+        self.firmware_notices = FirmwareNotices::default();
         self.device_toasts.clear();
         self.notify_on_inspection.clear();
         self.load = LoadState::Loading;

@@ -11,6 +11,7 @@ use crate::{
 };
 use garmin_i18n::format_message;
 use garmin_progress::OperationStage;
+pub use screens::firmware_components;
 pub use state::PreviewState;
 
 /// Stable visual states exposed to the development gallery.
@@ -27,6 +28,9 @@ pub enum PreviewScreen {
     StorageStress,
     StorageRefreshFailed,
     MapSelection,
+    FirmwareEdge,
+    FirmwareWatchComponents,
+    FirmwareWatchSystem,
     UpdateConfirmation(bool),
     RemovalConfirmation,
     PipelineProbeConfirmation,
@@ -96,6 +100,11 @@ pub fn render_preview(
             screens::render_storage_refresh_failure_preview(frame, area);
         }
         PreviewScreen::MapSelection => screens::render_storage_preview(frame, area, false, false),
+        PreviewScreen::FirmwareEdge
+        | PreviewScreen::FirmwareWatchComponents
+        | PreviewScreen::FirmwareWatchSystem => {
+            screens::render_firmware_preview(frame, area, screen);
+        }
         PreviewScreen::UpdateConfirmation(backup_enabled) => {
             screens::render_confirmation_preview(frame, backup_enabled);
         }

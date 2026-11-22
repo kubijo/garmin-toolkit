@@ -98,8 +98,6 @@ const PANE_INLINE_PADDING: f32 = 16.0;
 const PANE_CLOSE_BUTTON_SIZE: f32 = 32.0;
 const PANE_CONTENT_MARGIN: egui::Margin = egui::Margin::symmetric(16, 0);
 const TABLE_BORDER_ALPHA: u8 = 0x40;
-const TABLE_STRIPE_CONTRAST_DIVISOR: u8 = 5;
-const TABLE_STRIPE_CONTRAST_MULTIPLIER: u8 = 2;
 const UPLOAD_ACTION_AREA_HEIGHT: f32 = 56.0;
 const PANE_ACTION_HEIGHT: f32 = 32.0;
 const PANE_ACTION_BOTTOM_INSET: f32 = 16.0;
@@ -2104,7 +2102,7 @@ impl Browser {
                 egui::CornerRadius::ZERO,
                 egui::Color32::from_black_alpha(40),
             );
-            response.clicked()
+            button::interaction_cursor(response).clicked()
         })
         .inner;
         egui::Window::new("device-explorer-compact-pane")
@@ -3474,10 +3472,7 @@ fn show_entry_table_content(
     ui.set_clip_rect(table_clip);
     let table_painter = ui.painter().with_clip_rect(table_clip);
     let palette = crate::theme::palette(ui);
-    let stripe = palette.surfaces().background_hover();
-    let stripe_alpha =
-        stripe.as_rgba()[3] / TABLE_STRIPE_CONTRAST_DIVISOR * TABLE_STRIPE_CONTRAST_MULTIPLIER;
-    ui.visuals_mut().faint_bg_color = color32(stripe.with_alpha(stripe_alpha));
+    ui.visuals_mut().faint_bg_color = crate::theme::table_stripe(ui);
     if !palette.is_dark() {
         ui.visuals_mut().selection.bg_fill =
             color32(palette.surfaces().layer_hover(color_theme::Level::Two));
@@ -3618,7 +3613,7 @@ fn render_entry_table(
                     });
                 });
                 row.col(|ui| show_table_size(ui, entry.size));
-                responses.push((index, row.response()));
+                responses.push((index, button::interaction_cursor(row.response())));
             });
         });
     responses

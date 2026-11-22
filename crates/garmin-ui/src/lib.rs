@@ -6,6 +6,7 @@
 )]
 
 pub mod accordion;
+pub mod action_row;
 pub mod activity;
 #[cfg(any(test, feature = "automation"))]
 pub mod automation;
@@ -16,6 +17,7 @@ mod calendar;
 pub mod capacity;
 #[cfg(any(test, feature = "automation"))]
 pub mod capture;
+pub mod checkbox;
 pub mod date_input;
 pub mod developer;
 pub mod device;
@@ -24,6 +26,7 @@ pub mod device_fit_preview;
 pub mod diagnostics;
 pub mod facts;
 pub mod file_import;
+pub mod firmware;
 mod header_selector;
 pub mod icons;
 pub mod image_crop;
@@ -37,15 +40,21 @@ pub mod path;
 pub mod profile;
 pub mod profile_settings;
 pub mod progress;
+pub mod progress_indicator;
 pub mod radio;
+pub mod radio_group;
 pub mod routes;
 pub mod segments;
 pub mod select;
 pub mod semantics;
 pub mod shell;
 mod size;
+pub mod skeleton;
+pub mod slider;
+pub mod summary_table;
 mod text;
 pub mod theme;
+pub mod toggle;
 mod trend_chart;
 pub mod trends;
 pub mod typography;

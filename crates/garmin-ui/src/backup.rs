@@ -3,6 +3,8 @@
 use garmin_model::artifact::ByteCount;
 use std::time::Duration;
 
+use crate::action_row;
+use crate::action_row::Placement;
 use crate::{Size, button, icons, modal, progress};
 use cint::ColorInterop;
 use egui::{Id, RichText, Ui};
@@ -153,7 +155,7 @@ fn show_picker(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
             },
         ),
     ];
-    action_row(ui, &buttons)
+    action_row::show(ui, Placement::Leading, buttons)
 }
 
 fn show_locations(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
@@ -242,7 +244,7 @@ fn location_card(
     description: &str,
     pictogram: icons::Icon,
     inline_padding: i8,
-    buttons: &[(&str, Action, button::Props<'_>)],
+    buttons: &[(&str, Action, button::Props<'_>); 2],
 ) -> Option<Action> {
     let palette = crate::theme::palette(ui);
     egui::Frame::NONE
@@ -255,14 +257,7 @@ fn location_card(
             ui.scope(|ui| {
                 ui.set_max_width(ui.available_width().min(640.0));
                 ui.spacing_mut().item_spacing = egui::vec2(16.0, 8.0);
-                let compact = buttons
-                    .iter()
-                    .map(|(_, _, button)| button.natural_width(ui))
-                    .sum::<f32>()
-                    + 8.0
-                    + 64.0
-                    + 16.0
-                    > ui.available_width();
+                let compact = action_row::width(ui, buttons) + 64.0 + 16.0 > ui.available_width();
                 let mut action = None;
                 ui.horizontal(|ui| {
                     icons::Props {
@@ -278,48 +273,19 @@ fn location_card(
                         crate::typography::body(ui, description);
                         if !compact {
                             ui.add_space(8.0);
-                            action = action_row(ui, buttons);
+                            action = action_row::show(ui, Placement::Leading, *buttons);
                         }
                     });
                 });
                 if compact {
                     ui.add_space(8.0);
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    action = action_row(ui, buttons);
+                    action = action_row::show(ui, Placement::Leading, *buttons);
                 }
                 action
             })
             .inner
         })
         .inner
-}
-
-fn action_row(ui: &mut Ui, buttons: &[(&str, Action, button::Props<'_>)]) -> Option<Action> {
-    let stacked = buttons
-        .iter()
-        .map(|(_, _, button)| button.natural_width(ui))
-        .sum::<f32>()
-        + ui.spacing().item_spacing.x
-        > ui.available_width();
-    let mut action = None;
-    let actions = |ui: &mut Ui| {
-        for &(id, selected, mut button) in buttons {
-            if stacked {
-                button.width = button::Width::Fill;
-            }
-            let response = button.show(ui);
-            crate::semantics::target(ui, &response, id);
-            if response.clicked() {
-                action = Some(selected);
-            }
-        }
-    };
-    if stacked {
-        ui.vertical(actions);
-    } else {
-        ui.horizontal(actions);
-    }
-    action
 }
 
 /// Operation status shared with the profile chooser after a database switch.
@@ -618,9 +584,10 @@ fn show_status(ui: &mut Ui, intl: &Intl, status: &SnapshotStatus) -> Option<Acti
             width: button::Width::Fit,
             enabled: true,
         };
-        return action_row(
+        return action_row::show(
             ui,
-            &[
+            Placement::Leading,
+            [
                 ("backup.approve", Action::Approve, confirm_button),
                 (
                     "backup.cancel",

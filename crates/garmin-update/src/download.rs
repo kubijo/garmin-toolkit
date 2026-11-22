@@ -9,7 +9,7 @@ use garmin_progress::{
 };
 use md5::{Digest, Md5};
 use reqwest::header::{ACCEPT, CONTENT_RANGE, RANGE};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -46,7 +46,6 @@ pub struct Downloader {
     concurrency: usize,
     capture: Option<SessionCapture>,
     authorizer: Arc<dyn DownloadUrlAuthorizer>,
-    cache_locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 /// Size-checked availability for one set of content-addressed artifacts.
@@ -110,10 +109,29 @@ impl Downloader {
     /// # Errors
     /// [`DownloadError`] if the HTTP client cannot be constructed.
     pub fn new(concurrency: usize, user_agent: &str) -> Result<Self, DownloadError> {
+        Self::with_http(concurrency, user_agent, reqwest::Client::builder())
+    }
+
+    /// Download from the local simulator without consulting system proxies.
+    /// # Errors
+    /// Invalid concurrency or client configuration.
+    pub fn local_mock(concurrency: usize, user_agent: &str) -> Result<Self, DownloadError> {
+        Self::with_http(
+            concurrency,
+            user_agent,
+            reqwest::Client::builder().no_proxy(),
+        )
+    }
+
+    fn with_http(
+        concurrency: usize,
+        user_agent: &str,
+        builder: reqwest::ClientBuilder,
+    ) -> Result<Self, DownloadError> {
         if !(1..=32).contains(&concurrency) {
             return Err(DownloadError::InvalidConcurrency(concurrency));
         }
-        let http = reqwest::Client::builder()
+        let http = builder
             .connect_timeout(Duration::from_secs(15))
             .read_timeout(Duration::from_secs(60))
             .redirect(reqwest::redirect::Policy::none())
@@ -124,7 +142,6 @@ impl Downloader {
             concurrency: concurrency.max(1),
             capture: None,
             authorizer: Arc::new(RejectProtectedDownloads),
-            cache_locks: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -138,18 +155,6 @@ impl Downloader {
     pub fn with_url_authorizer(mut self, authorizer: Arc<dyn DownloadUrlAuthorizer>) -> Self {
         self.authorizer = authorizer;
         self
-    }
-
-    fn cache_lock(&self, cache_name: &str) -> Arc<tokio::sync::Mutex<()>> {
-        let mut locks = self
-            .cache_locks
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        Arc::clone(
-            locks
-                .entry(cache_name.to_owned())
-                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
-        )
     }
 
     /// Download and verify every content item with bounded concurrency.
@@ -191,7 +196,7 @@ impl Downloader {
         crate::space::check_host_space(cache, needed).await?;
         progress.started(
             OperationStage::Download,
-            format!("Downloading {} map files", specs.len()),
+            format!("Downloading {} files", specs.len()),
             Some(total.as_bytes()),
         );
         progress.started(
@@ -234,7 +239,7 @@ impl Downloader {
                 Ok(Err(error)) => {
                     tasks.abort_all();
                     while tasks.join_next().await.is_some() {}
-                    progress.failed(OperationStage::Download, "A map download failed");
+                    progress.failed(OperationStage::Download, "A download failed");
                     return Err(error);
                 }
                 Err(error) => {
@@ -300,14 +305,13 @@ impl Downloader {
             &display_path,
             Some(spec.size.as_bytes()),
         );
-        let cache_lock = self.cache_lock(&spec.cache_name);
-        let _cache_guard = cache_lock.lock().await;
         if progress.is_cancelled() {
             return Err(DownloadError::Cancelled);
         }
         tokio::fs::create_dir_all(cache).await?;
         require_cache_directory(cache).await?;
         let final_path = cache_path(cache, spec)?;
+        let _cache_guard = lock_cache_entry(&final_path, progress).await?;
         reject_unsafe_cache_entry(&final_path).await?;
         if let Some(cached) = cached_download(&final_path, spec, progress).await? {
             return Ok(cached);
@@ -439,7 +443,7 @@ fn forward_file_progress(
             };
             parent.advanced(
                 event.stage,
-                format!("{action} {} map files", values.len()),
+                format!("{action} {} files", values.len()),
                 completed.as_bytes(),
                 Some(total.as_bytes()),
             );
@@ -550,14 +554,14 @@ mod progress_tests {
 
     #[test]
     fn completion_labels_preserve_cache_reuse() {
-        assert_eq!(completed_download_label(3, 3), "Reused 3 cached map files");
+        assert_eq!(completed_download_label(3, 3), "Reused 3 cached files");
         assert_eq!(
             completed_download_label(3, 2),
-            "Downloaded 1 map file; reused 2 cached map files"
+            "Downloaded 1 file; reused 2 cached files"
         );
         assert_eq!(
             completed_verification_label(3, 2),
-            "Verified 3 map files (2 cached)"
+            "Verified 3 files (2 cached)"
         );
     }
 }
@@ -648,6 +652,7 @@ async fn request_download(
         let response = match http.execute(request).await {
             Ok(response) => response,
             Err(error) => {
+                let error = error.without_url();
                 if let Some(exchange) = &exchange {
                     exchange.error(&error.to_string()).await?;
                 }
@@ -1045,21 +1050,21 @@ async fn cached_download(
 
 fn completed_download_label(total: usize, cached: usize) -> String {
     match (total.saturating_sub(cached), cached) {
-        (0, cached) => format!("Reused {}", map_file_count(cached, true)),
-        (downloaded, 0) => format!("Downloaded {}", map_file_count(downloaded, false)),
+        (0, cached) => format!("Reused {}", file_count(cached, true)),
+        (downloaded, 0) => format!("Downloaded {}", file_count(downloaded, false)),
         (downloaded, cached) => {
             format!(
                 "Downloaded {}; reused {}",
-                map_file_count(downloaded, false),
-                map_file_count(cached, true)
+                file_count(downloaded, false),
+                file_count(cached, true)
             )
         }
     }
 }
 
-fn map_file_count(count: usize, cached: bool) -> String {
+fn file_count(count: usize, cached: bool) -> String {
     format!(
-        "{count} {}map file{}",
+        "{count} {}file{}",
         if cached { "cached " } else { "" },
         if count == 1 { "" } else { "s" }
     )
@@ -1067,9 +1072,38 @@ fn map_file_count(count: usize, cached: bool) -> String {
 
 fn completed_verification_label(total: usize, cached: usize) -> String {
     if cached == 0 {
-        format!("Verified {total} map files")
+        format!("Verified {total} files")
     } else {
-        format!("Verified {total} map files ({cached} cached)")
+        format!("Verified {total} files ({cached} cached)")
+    }
+}
+
+async fn lock_cache_entry(
+    path: &Path,
+    progress: &ProgressReporter,
+) -> Result<std::fs::File, DownloadError> {
+    let path = path.with_extension("lock");
+    reject_unsafe_cache_entry(&path).await?;
+    let lock = tokio::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .await?
+        .into_std()
+        .await;
+    loop {
+        if progress.is_cancelled() {
+            return Err(DownloadError::Cancelled);
+        }
+        match lock.try_lock() {
+            Ok(()) => return Ok(lock),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
+        }
     }
 }
 
@@ -1128,7 +1162,7 @@ impl DownloadProgress {
 pub enum DownloadError {
     #[error(transparent)]
     Space(#[from] crate::space::SpaceError),
-    #[error("map download cancelled")]
+    #[error("download cancelled")]
     Cancelled,
     #[error("combined download size exceeds the supported range")]
     TotalSizeOverflow,

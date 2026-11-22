@@ -21,6 +21,7 @@ fn snapshot() -> DeviceSnapshot {
         key: "fixture".to_owned(),
         name: "Mock Watch-o-Matic 9000".to_owned(),
         identifier: Some(42),
+        firmware_update: None,
         software_version: Some(1870),
         inspection: InspectionState::Failed,
         inspection_error: None,

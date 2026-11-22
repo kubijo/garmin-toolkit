@@ -1,6 +1,7 @@
 mod activity_export;
 mod diagnostic;
 mod diagnostics;
+mod firmware;
 mod pending_recovery;
 mod pipeline;
 
@@ -85,7 +86,7 @@ struct Cli {
         default_value = "auto"
     )]
     language: LanguageChoice,
-    /// Use a loopback map service.
+    /// Use a loopback update service.
     #[arg(long, global = true, value_name = "URL")]
     mock_server: Option<url::Url>,
     /// Use a synthetic device in the interactive flow.
@@ -112,6 +113,11 @@ struct Cli {
 enum Command {
     /// Export or inspect portable activity packages.
     Activity(activity_export::Options),
+    /// Check device firmware and component updates.
+    Firmware {
+        #[command(subcommand)]
+        command: firmware::Command,
+    },
     /// Read logs and events from a running local desktop or HASS demo.
     Diagnostics(diagnostics::Args),
     /// Discover and inspect devices.
@@ -610,6 +616,9 @@ async fn run_cli(cli: Cli, capture: Option<SessionCapture>) -> Result<()> {
     }
     match cli.command {
         Some(Command::Activity(options)) => options.run(cli.json).await,
+        Some(Command::Firmware { command }) => {
+            Box::pin(command.run(cli.json, cli.mock_server.as_ref(), capture)).await
+        }
         Some(Command::Diagnostics(args)) => args.run(cli.json).await,
         None => match (cli.mock_device, cli.mock_server.as_ref()) {
             (Some(path), Some(mock_server)) => {
@@ -893,7 +902,23 @@ struct GuidedUpdate<'a> {
 async fn interactive_guided_update(config: GuidedUpdate<'_>) -> Result<()> {
     let profile = config.service.profile(config.device.device_changes());
     let mut session = tui::Session::open_with_profile(profile)?;
-    let result = interactive_guided_update_flow(&config, &mut session).await;
+    let manifest = select_guided_device(&config.source, &mut session).await?;
+    if config.device.device_changes() == tui::DeviceChanges::Enabled {
+        let operation = session.select_device_operation()?;
+        if operation != tui::DeviceOperation::Maps {
+            let target = target_for_device(&manifest.summary)?;
+            return firmware::guided(
+                operation,
+                target,
+                config.service,
+                config.capture,
+                config.cache,
+                session,
+            )
+            .await;
+        }
+    }
+    let result = interactive_guided_update_flow(&config, &mut session, manifest).await;
     match result {
         Ok(()) => Ok(()),
         Err(error) if cancellation_step(&error).is_some() => Err(error),
@@ -911,8 +936,8 @@ async fn interactive_guided_update(config: GuidedUpdate<'_>) -> Result<()> {
 async fn interactive_guided_update_flow(
     config: &GuidedUpdate<'_>,
     session: &mut tui::Session,
+    manifest: DeviceManifest,
 ) -> Result<()> {
-    let manifest = select_guided_device(&config.source, session).await?;
     let device = config.device.resolve(&manifest)?;
     if config.device.supports_pending_recovery(&manifest) {
         let writable = device
@@ -3406,6 +3431,22 @@ fn authorize_garmin_contact(
     may_download: bool,
     session: Option<&mut tui::Session>,
 ) -> Result<()> {
+    authorize_garmin_contact_at(
+        consent,
+        json,
+        may_download,
+        session,
+        garmin_map_service::omt_update_endpoint().as_str(),
+    )
+}
+
+fn authorize_garmin_contact_at(
+    consent: &GarminContactConsent,
+    json: bool,
+    may_download: bool,
+    session: Option<&mut tui::Session>,
+    endpoint: &str,
+) -> Result<()> {
     let interactive = interactive_confirmation_available(json);
     if !should_prompt(
         consent.confirm_contact_garmin.as_ref(),
@@ -3414,7 +3455,6 @@ fn authorize_garmin_contact(
     )? {
         return Ok(());
     }
-    let endpoint = garmin_map_service::omt_update_endpoint().to_string();
     let confirmed = match session {
         Some(session) => session.confirm_garmin_contact(endpoint, may_download),
         None => tui::confirm_garmin_contact(endpoint, may_download),
@@ -4163,6 +4203,7 @@ fn map_choices(response: &MapCatalog) -> Vec<tui::MapChoice> {
                     details.join(" · ")
                 },
                 operation: map.operation(),
+                unavailable_reason: None,
                 can_remove: map_removal_available(map),
                 cache: None,
             }

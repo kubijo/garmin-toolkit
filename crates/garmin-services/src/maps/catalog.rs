@@ -18,6 +18,13 @@ pub enum CatalogSource {
 }
 
 impl CatalogSource {
+    pub(crate) fn simulator_origin(&self) -> Option<&Url> {
+        match self {
+            Self::Garmin => None,
+            Self::Loopback(base) => Some(base),
+        }
+    }
+
     /// Describe available choices using the same validated
     /// plans and artifact cache as execution.
     ///
@@ -68,10 +75,13 @@ impl CatalogSource {
     /// # Errors
     /// Invalid service configuration.
     pub fn client(&self) -> Result<OmtClient> {
-        let identity = ClientIdentity::default();
+        self.client_with_identity(&ClientIdentity::default())
+    }
+
+    pub(crate) fn client_with_identity(&self, identity: &ClientIdentity) -> Result<OmtClient> {
         Ok(match self {
-            Self::Garmin => OmtClient::anonymous(&identity)?,
-            Self::Loopback(base) => OmtClient::local_mock(&identity, base.clone())?,
+            Self::Garmin => OmtClient::anonymous(identity)?,
+            Self::Loopback(base) => OmtClient::local_mock(identity, base.clone())?,
         })
     }
 

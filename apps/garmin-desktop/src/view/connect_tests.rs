@@ -110,6 +110,7 @@ fn page_import_updates_the_cached_page_and_list_requests_clear_its_summary()
                 .map(|id| RemoteActivity {
                     id,
                     imported: false,
+                    original_unavailable: false,
                     name: format!("Ride {id}"),
                     sport: None,
                     started_at: None,

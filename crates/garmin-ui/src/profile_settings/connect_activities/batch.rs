@@ -57,7 +57,7 @@ pub struct Step {
 }
 
 impl Batch {
-    /// Snapshots at most one page; imported rows are counted without requesting them.
+    /// Snapshots one page and counts already imported or unavailable originals as skipped.
     #[must_use]
     pub fn new(activities: &[RemoteActivity]) -> Option<Self> {
         if activities.len() > 20 {
@@ -83,10 +83,10 @@ impl Batch {
             stopped: false,
         };
         for activity in activities {
-            if activity.imported {
-                batch.counts.skipped += 1;
-            } else {
+            if activity.eligible_for_page_import() {
                 batch.queue.push_back(activity.clone());
+            } else {
+                batch.counts.skipped += 1;
             }
         }
         batch.finished = batch.queue.is_empty();
@@ -224,6 +224,7 @@ mod tests {
         RemoteActivity {
             id,
             imported,
+            original_unavailable: false,
             name: format!("Ride {id}"),
             sport: None,
             started_at: None,
@@ -250,7 +251,8 @@ mod tests {
 
     #[test]
     fn skips_existing_and_imports_only_the_snapshotted_page_through_review_digests() {
-        let mut rows = [row(1, true), row(2, false), row(3, false)];
+        let mut rows = [row(1, true), row(2, false), row(3, false), row(4, false)];
+        rows[3].original_unavailable = true;
         let mut batch = Batch::new(&rows).unwrap();
         rows[1].id = 99;
         assert_eq!(
@@ -290,7 +292,7 @@ mod tests {
                 batch.counts.skipped,
                 batch.counts.failed
             ),
-            (1, 2, 0)
+            (1, 3, 0)
         );
         assert!(!batch.running());
     }

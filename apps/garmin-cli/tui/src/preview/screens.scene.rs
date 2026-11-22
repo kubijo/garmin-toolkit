@@ -102,6 +102,31 @@ fn map_selection(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     show_terminal(ctx, ui, RunProfile::PRODUCTION, PreviewScreen::MapSelection);
 }
 
+#[scene(order = 31)]
+fn edge_firmware(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+    show_terminal(ctx, ui, RunProfile::PRODUCTION, PreviewScreen::FirmwareEdge);
+}
+
+#[scene(order = 32)]
+fn watch_components(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+    show_terminal(
+        ctx,
+        ui,
+        RunProfile::PRODUCTION,
+        PreviewScreen::FirmwareWatchComponents,
+    );
+}
+
+#[scene(order = 33)]
+fn watch_firmware(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
+    show_terminal(
+        ctx,
+        ui,
+        RunProfile::PRODUCTION,
+        PreviewScreen::FirmwareWatchSystem,
+    );
+}
+
 #[scene(order = 40)]
 fn storage_capacity(ctx: &mut SceneCtx<'_>, ui: &mut Ui) {
     show_terminal(

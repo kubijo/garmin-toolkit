@@ -8,7 +8,7 @@ use garmin_service_api::maps::{
 };
 use std::time::Duration;
 
-use crate::{Size, button, icons, radio, text::format_bytes, typography};
+use crate::{Size, button, icons, radio_group, text::format_bytes, typography};
 
 /// Retain the service failure until rendering so language changes also update visible errors.
 pub enum ClientError {
@@ -240,14 +240,14 @@ fn preferences(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Command> {
     let verified = format_message!(intl, default_message: "Verified backup");
     let skip = format_message!(intl, default_message: "Skip backup");
     let choices = [
-        radio::Choice::new(&verified, true, "maps.backup.verified"),
-        radio::Choice::new(&skip, false, "maps.backup.skip"),
+        radio_group::Choice::new(&verified, true, "maps.backup.verified"),
+        radio_group::Choice::new(&skip, false, "maps.backup.skip"),
     ];
-    if let Some(value) = radio::show(
+    if let Some(value) = radio_group::show(
         ui,
         !updates || state.verified_backup,
         &choices,
-        radio::Props {
+        radio_group::Props {
             label: &format_message!(intl, default_message: "Recovery backup"),
             helper: None,
             enabled: updates,
@@ -272,14 +272,14 @@ fn preferences(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Command> {
         format_message!(intl, default_message: "Apply the reviewed changes to the connected device after you confirm the plan.")
     };
     let choices = [
-        radio::Choice::new(&apply, false, "maps.mode.apply"),
-        radio::Choice::new(&dry_run, true, "maps.mode.simulate"),
+        radio_group::Choice::new(&apply, false, "maps.mode.apply"),
+        radio_group::Choice::new(&dry_run, true, "maps.mode.simulate"),
     ];
-    if let Some(value) = radio::show(
+    if let Some(value) = radio_group::show(
         ui,
         state.dry_run,
         &choices,
-        radio::Props {
+        radio_group::Props {
             label: &format_message!(intl, default_message: "Execution mode"),
             helper: Some(&mode_help),
             enabled: !state

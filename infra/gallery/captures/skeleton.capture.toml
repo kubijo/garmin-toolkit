@@ -1,0 +1,16 @@
+out = "../../../.tmp/gallery/skeleton"
+size = "720x520"
+sheet = "sheet.png"
+report = "capture.json"
+settle = false
+
+[[shot]]
+name = "overview"
+scene = "skeleton::Overview"
+frames = 23
+
+[[shot]]
+name = "light"
+scene = "skeleton::Overview"
+frames = 23
+globals = { Theme = "Light" }

@@ -169,6 +169,7 @@ fn activity_comparison_changes_both_selections_when_the_sport_changes() {
             name: name.to_owned(),
             sport: Some(sport),
             imported: false,
+            original_unavailable: false,
             started_at: None,
             distance: Distance::try_from_metres(10_000.0),
             duration: seconds.and_then(ActivityDuration::try_from_seconds),

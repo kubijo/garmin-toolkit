@@ -3,6 +3,15 @@ use garmin_i18n::format_message;
 
 scene_meta! { title: "Components / Navigation / Accordion" }
 
+#[scene]
+fn inline(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    globals.example(ctx, ui, "Inline disclosure", 320.0, |ui| {
+        garmin_ui::accordion::inline(ui, "release-notes", "Release notes", |ui| {
+            ui.label("Improved route guidance.");
+        });
+    });
+}
+
 #[scene(default)]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let open = ctx.toggle("open", false);

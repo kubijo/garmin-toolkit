@@ -56,8 +56,8 @@ let
           # Match the ambient Just entrypoints. Target-scoped flags never reach WASM or Darwin.
           linuxLinkFlags = "-C link-arg=-fuse-ld=mold";
           hostSccacheHook = ''
-            if [[ -z ''${RUSTC_WRAPPER+x} ]] && host_sccache=$(command -v sccache); then
-              export RUSTC_WRAPPER="$host_sccache"
+            if wrapper=$(bash ${../just/build-cache.sh} rustc-wrapper); then
+              export RUSTC_WRAPPER="$wrapper"
             fi
           '';
           nativeCompilerEnv = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

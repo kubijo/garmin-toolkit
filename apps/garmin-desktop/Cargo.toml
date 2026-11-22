@@ -35,7 +35,7 @@ futures-lite.workspace = true
 garmin-color.workspace = true
 garmin-device.workspace = true
 garmin-fit.workspace = true
-garmin-fixtures = { workspace = true, optional = true }
+garmin-fixtures = { workspace = true, optional = true, features = ["demo"] }
 garmin-i18n.workspace = true
 garmin-importer.workspace = true
 garmin-map-tiles.workspace = true

@@ -47,11 +47,7 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
                 } else {
                     f32::from_f64(completed.to_f64() / total.to_f64())
                 };
-                ui.add(
-                    widget_theme::progress_bar(fraction, progress_accent(ui))
-                        .desired_height(height)
-                        .corner_radius(egui::CornerRadius::ZERO),
-                );
+                track(ui, fraction, height);
             }
         }
         if let Some(detail) = props.detail {
@@ -70,6 +66,15 @@ pub fn show(ui: &mut Ui, props: &Props<'_>) {
 fn progress_accent(ui: &Ui) -> garmin_color::Color {
     let [r, g, b, _] = ui.visuals().extreme_bg_color.to_srgba_unmultiplied();
     widget_theme::selection_accent_on(ui, garmin_color::Color::from_rgb(r, g, b))
+}
+
+fn track(ui: &mut Ui, fraction: f32, height: f32) {
+    ui.add(
+        widget_theme::progress_bar(fraction, progress_accent(ui))
+            .desired_width(ui.available_width())
+            .desired_height(height)
+            .corner_radius(egui::CornerRadius::ZERO),
+    );
 }
 
 pub(crate) fn indeterminate(ui: &mut Ui, height: f32) {

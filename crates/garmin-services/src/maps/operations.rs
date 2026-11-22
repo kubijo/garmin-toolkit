@@ -11,6 +11,7 @@ use super::{MutationLocks, Session, Settings};
 #[derive(Default)]
 pub struct Operations {
     sessions: Mutex<HashMap<(uuid::Uuid, String), Session>>,
+    firmware_sessions: Mutex<HashMap<(uuid::Uuid, String), crate::firmware::Session>>,
     mutations: Arc<MutationLocks>,
     deployment: Option<Arc<crate::deployment::Deployment>>,
     simulator: tokio::sync::OnceCell<garmin_simulator::MockServer>,
@@ -51,15 +52,7 @@ impl Operations {
             .deployment
             .as_ref()
             .context("map host has no deployment")?;
-        let source = if simulated {
-            let server = self
-                .simulator
-                .get_or_try_init(garmin_simulator::MockServer::start)
-                .await?;
-            super::CatalogSource::Loopback(server.base_url().clone())
-        } else {
-            super::CatalogSource::Garmin
-        };
+        let source = self.catalog_source(simulated).await?;
         let root = deployment.root().join("maps");
         let mut receipts =
             super::pending_recovery::PendingRecoveryStore::new(root.join("pending-recoveries"));
@@ -79,6 +72,99 @@ impl Operations {
                 simulation_write_bytes_per_second: self.simulation_write_bytes_per_second,
             },
         ))
+    }
+
+    async fn catalog_source(&self, simulated: bool) -> anyhow::Result<super::CatalogSource> {
+        if simulated {
+            let server = self
+                .simulator
+                .get_or_try_init(garmin_simulator::MockServer::start)
+                .await?;
+            Ok(super::CatalogSource::Loopback(server.base_url().clone()))
+        } else {
+            Ok(super::CatalogSource::Garmin)
+        }
+    }
+
+    /// Join the device's firmware session without querying Garmin.
+    ///
+    /// # Errors
+    /// The loopback simulator could not start.
+    pub async fn open_firmware(
+        &self,
+        device: String,
+        connector: Arc<dyn super::device::Connector>,
+        simulated: bool,
+    ) -> anyhow::Result<crate::firmware::Session> {
+        if !simulated && let Some(host) = &self.deployment {
+            use super::pending_recovery::PendingRecoveryStore;
+            PendingRecoveryStore::physical_firmware()?.adopt_firmware_receipts(
+                &PendingRecoveryStore::new(host.root().join("firmware/receipts")),
+            )?;
+        }
+        let source = self.catalog_source(simulated).await?;
+        Ok(self.connect_firmware(device, connector, source))
+    }
+
+    /// Join the host session for a CLI-selected catalog and device.
+    pub fn connect_firmware(
+        &self,
+        device: String,
+        connector: Arc<dyn super::device::Connector>,
+        source: super::CatalogSource,
+    ) -> crate::firmware::Session {
+        let deployment = self
+            .deployment
+            .as_ref()
+            .map(|host| (Arc::clone(host), host.epoch()));
+        let epoch = deployment
+            .as_ref()
+            .map_or(uuid::Uuid::nil(), |(_, epoch)| *epoch);
+        let mut sessions = self
+            .firmware_sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        sessions.retain(|(existing, _), _| *existing == epoch);
+        sessions
+            .entry((epoch, device.clone()))
+            .or_insert_with(|| {
+                crate::firmware::Session::new(
+                    device,
+                    connector,
+                    source,
+                    self.mutations(),
+                    deployment,
+                )
+            })
+            .clone()
+    }
+
+    /// Drop the old attachment's catalog and connector before the same key can reconnect.
+    pub fn forget_firmware(&self, device: &str) {
+        self.firmware_sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(_, key), session| {
+                if key == device {
+                    session.disconnect();
+                    false
+                } else {
+                    true
+                }
+            });
+    }
+
+    #[must_use]
+    pub fn firmware_session(&self, device: &str) -> Option<crate::firmware::Session> {
+        let epoch = self
+            .deployment
+            .as_ref()
+            .map_or(uuid::Uuid::nil(), |host| host.epoch());
+        self.firmware_sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&(epoch, device.to_owned()))
+            .cloned()
     }
 
     /// Join the device's existing workflow, or create its first host session.

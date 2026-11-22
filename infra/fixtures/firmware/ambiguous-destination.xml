@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Device xmlns="http://www.garmin.com/xmlschemas/GarminDevice/v2">
+  <Model>
+    <SoftwareVersion>2420</SoftwareVersion>
+    <Description>Storage routing fixture</Description>
+  </Model>
+  <Id>3</Id>
+  <MassStorageMode>
+    <UpdateFile>
+      <PartNumber>006-V4532-00</PartNumber>
+      <Version>
+        <Major>1</Major>
+        <Minor>5</Minor>
+      </Version>
+      <Path>Garmin</Path>
+      <FileName>GUPDATE.GSP</FileName>
+    </UpdateFile>
+    <UpdateFile>
+      <PartNumber>006-V4532-00</PartNumber>
+      <Version>
+        <Major>22</Major>
+        <Minor>44</Minor>
+      </Version>
+      <Path>Garmin</Path>
+      <FileName>GUPDATE.GSP</FileName>
+    </UpdateFile>
+    <Extensions>
+      <UpdatesToInstallLocations>
+        <Update>
+          <StorageDesc>Internal</StorageDesc>
+          <PartNumbers>
+            <PartNumber>006-V4532-00</PartNumber>
+          </PartNumbers>
+        </Update>
+      </UpdatesToInstallLocations>
+    </Extensions>
+  </MassStorageMode>
+</Device>

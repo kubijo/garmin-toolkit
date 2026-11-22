@@ -50,6 +50,36 @@ joins them to Garmin's catalog before clients receive installed-to-available com
 An update approval retains selected catalog entries beside its executable plan. The confirmation shows aggregate file
 and byte counts only after naming every component with its `Update` or `Install` action.
 
+## Device updates
+
+Desktop and Home Assistant check for firmware after inspecting a newly connected device. The host removes unlock
+elements before submitting the inventory to Garmin. A system firmware upgrade marks the device in the sidebar and shows
+a notification that opens **Device updates**. Component-only offers appear on that page. Browsers share the host's
+catalog, review and transfer progress. Reconnecting the physical device starts a fresh check. The catalog includes
+installed and offered versions, companion metadata, release notes and download sizes. A retained receipt for the
+connected device takes precedence over a new selection. Receipt discovery uses the local registry and works even when
+the catalog lookup fails.
+
+A firmware review binds its component selection to a device and catalog revision. Editing the selection revokes that
+approval. Claiming it takes the shared map and browser write lock, consumes the approval and rereads the installed
+versions and destinations. A changed device or selected inventory entry requires a new review. The host resolves
+declared storage and checks space separately on each volume. It verifies the size and MD5 of each cached file and checks
+each metadata record against the selected part and version transition. Firmware staging uses the maps backup and
+transfer journal. A separate selection receipt records the installed and offered versions so a fresh inventory can
+confirm individual components after ejection. The [loopback fixtures](../../infra/fixtures/firmware/README.md) exercise
+this path.
+
+The TUI offers **Check and stage device updates** in the device menu. The CLI uses the same transport options as maps.
+
+- `firmware check` lists available parts. `firmware stage --part PART` stages a selection. Repeat `--part` for each
+  additional component.
+- `firmware status` compares the reconnected device's inventory with the transfer receipt.
+  `firmware status --receipt ID --acknowledge` dismisses the receipt and keeps the capture.
+- `firmware recover` matches the active device plan to its journal. If no active marker remains, use `--receipt ID` to
+  choose a retained transfer. Recovery verifies staged files for older receipts that lack version details.
+
+## Device access and pairing
+
 A selected activity directory is separate read-only ingress into the same artifact and parsing pipeline. Selection
 grants access only to that directory; type, size, and parser limits still apply.
 

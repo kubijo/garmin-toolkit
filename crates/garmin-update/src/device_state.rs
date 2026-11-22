@@ -5,6 +5,7 @@ use garmin_device::storage::{DeviceIoError, DeviceWrite};
 use garmin_device::{DevicePathState, DevicePathStatus, SafeRelativePath};
 use garmin_model::artifact::ByteCount;
 use garmin_model::map::MapInstallIdentifier;
+use garmin_progress::ProgressReporter;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
@@ -329,8 +330,16 @@ impl PortableTransaction {
         &self.0.plan_digest
     }
 
-    fn transaction_id(&self) -> Uuid {
+    pub(crate) fn transaction_id(&self) -> Uuid {
         self.0.transaction_id
+    }
+
+    pub(crate) fn has_same_operations(&self, other: &Self) -> bool {
+        self.0.kind == other.0.kind
+            && self.0.device_digest == other.0.device_digest
+            && self.0.plan_digest == other.0.plan_digest
+            && self.0.backup_policy == other.0.backup_policy
+            && self.0.operations == other.0.operations
     }
 
     fn operations(&self) -> &[DeviceTransactionOperation] {
@@ -745,6 +754,7 @@ impl DeviceIdentityState {
 pub struct DeviceTransactionStore<'a, D: DeviceWrite + ?Sized> {
     device: &'a D,
     storage: String,
+    progress: ProgressReporter,
 }
 
 impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
@@ -756,7 +766,76 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
         Ok(Self {
             device,
             storage: device.primary_storage_id().await?,
+            progress: ProgressReporter::default(),
         })
+    }
+
+    pub(crate) fn with_progress(mut self, progress: &ProgressReporter) -> Self {
+        self.progress = progress.clone();
+        self
+    }
+
+    /// Inspect the active marker without finalizing or removing device state.
+    /// # Errors
+    /// The marker is unreadable, malformed or belongs to another device.
+    pub async fn active_plan_digest(
+        &self,
+        device_digest: &str,
+    ) -> Result<Option<String>, DeviceStateError> {
+        let Some(bytes) = self
+            .read(SafeRelativePath::parse(ACTIVE)?, ACTIVE_LIMIT)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let marker: ActiveTransaction = serde_json::from_slice(&bytes)?;
+        marker.validate(device_digest)?;
+        Ok(Some(marker.plan_digest))
+    }
+
+    /// Read the active transaction and its original file identities without cleaning up device state.
+    /// # Errors
+    /// The active marker or its referenced journal is unreadable or inconsistent.
+    pub async fn active_prepared(
+        &self,
+        device_digest: &str,
+    ) -> Result<Option<PortableTransaction>, DeviceStateError> {
+        let Some(bytes) = self
+            .read(SafeRelativePath::parse(ACTIVE)?, ACTIVE_LIMIT)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let active: ActiveTransaction = serde_json::from_slice(&bytes)?;
+        active.validate(device_digest)?;
+        let manifest = self
+            .read(SafeRelativePath::parse(MANIFEST)?, MANIFEST_LIMIT)
+            .await?
+            .ok_or_else(|| DeviceStateError::MissingDocument(MANIFEST.to_owned()))?;
+        NamespaceManifest::parse(&manifest)?;
+        let prepared = self.read_prepared(&active).await?;
+        self.validate_namespace_size(&prepared).await?;
+        Ok(Some(prepared))
+    }
+
+    async fn read_prepared(
+        &self,
+        active: &ActiveTransaction,
+    ) -> Result<PortableTransaction, DeviceStateError> {
+        let bytes = self
+            .read(prepared_path(active.transaction_id)?, PREPARED_LIMIT)
+            .await?
+            .ok_or(DeviceStateError::MissingPrepared)?;
+        let transaction = PortableTransaction::decode(&bytes)?;
+        if transaction.transaction_id() != active.transaction_id
+            || transaction.device_digest() != active.device_digest
+            || transaction.plan_digest() != active.plan_digest
+        {
+            return Err(DeviceStateError::InvalidTransaction(
+                "active marker does not match prepared transaction".to_owned(),
+            ));
+        }
+        Ok(transaction)
     }
 
     /// Read the active transaction.
@@ -782,20 +861,7 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
         };
         let active: ActiveTransaction = serde_json::from_slice(&active_bytes)?;
         active.validate(device_digest)?;
-        let prepared_path = prepared_path(active.transaction_id)?;
-        let prepared_bytes = self
-            .read(prepared_path, PREPARED_LIMIT)
-            .await?
-            .ok_or(DeviceStateError::MissingPrepared)?;
-        let transaction = PortableTransaction::decode(&prepared_bytes)?;
-        if transaction.transaction_id() != active.transaction_id
-            || transaction.device_digest() != active.device_digest
-            || transaction.plan_digest() != active.plan_digest
-        {
-            return Err(DeviceStateError::InvalidTransaction(
-                "active marker does not match prepared transaction".to_owned(),
-            ));
-        }
+        let transaction = self.read_prepared(&active).await?;
         if let Some(completed) = self
             .read(
                 completed_path(transaction.transaction_id())?,
@@ -827,18 +893,24 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
             return Err(DeviceStateError::PendingTransaction);
         }
         self.device
-            .ensure_directory(&self.storage, &SafeRelativePath::parse(TRANSACTIONS)?)
-            .await?;
-        self.device
-            .ensure_directory(
+            .ensure_directory_with_progress(
                 &self.storage,
-                &transaction_directory(transaction.transaction_id())?,
+                &SafeRelativePath::parse(TRANSACTIONS)?,
+                &self.progress,
             )
             .await?;
         self.device
-            .ensure_directory(
+            .ensure_directory_with_progress(
+                &self.storage,
+                &transaction_directory(transaction.transaction_id())?,
+                &self.progress,
+            )
+            .await?;
+        self.device
+            .ensure_directory_with_progress(
                 &self.storage,
                 &events_directory(transaction.transaction_id())?,
+                &self.progress,
             )
             .await?;
         let prepared_path = prepared_path(transaction.transaction_id())?;
@@ -896,6 +968,11 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
         .await?;
         let active_path = SafeRelativePath::parse(ACTIVE)?;
         if let Some(active) = self.read(active_path.clone(), ACTIVE_LIMIT).await? {
+            if serde_json::from_slice::<ActiveTransaction>(&active)?
+                != ActiveTransaction::from_transaction(transaction)
+            {
+                return Err(DeviceStateError::ConflictingDocument(ACTIVE.to_owned()));
+            }
             self.remove_file(&active_path, &active).await?;
         }
         self.cleanup(transaction).await
@@ -975,7 +1052,11 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
 
     async fn ensure_namespace(&self, device_digest: &str) -> Result<(), DeviceStateError> {
         self.device
-            .ensure_directory(&self.storage, &SafeRelativePath::parse(NAMESPACE)?)
+            .ensure_directory_with_progress(
+                &self.storage,
+                &SafeRelativePath::parse(NAMESPACE)?,
+                &self.progress,
+            )
             .await?;
         let path = SafeRelativePath::parse(MANIFEST)?;
         if let Some(bytes) = self.read(path.clone(), MANIFEST_LIMIT).await? {
@@ -1021,9 +1102,10 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
             self.remove_file(&path, &bytes).await?;
         }
         self.device
-            .remove_empty_directory(
+            .remove_empty_directory_with_progress(
                 &self.storage,
                 &events_directory(transaction.transaction_id())?,
+                &self.progress,
             )
             .await?;
         for (path, limit) in [
@@ -1038,9 +1120,10 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
             }
         }
         self.device
-            .remove_empty_directory(
+            .remove_empty_directory_with_progress(
                 &self.storage,
                 &transaction_directory(transaction.transaction_id())?,
+                &self.progress,
             )
             .await?;
         Ok(())
@@ -1114,6 +1197,9 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
             Some(observed) if observed == bytes => Ok(()),
             Some(_) => Err(DeviceStateError::ConflictingDocument(path.to_string())),
             None => {
+                if self.progress.is_cancelled() {
+                    return Err(DeviceIoError::Cancelled.into());
+                }
                 self.device
                     .create_verified_file(&self.storage, path, bytes)
                     .await?;
@@ -1154,7 +1240,13 @@ impl<'a, D: DeviceWrite + ?Sized> DeviceTransactionStore<'a, D> {
             .map_err(|_| DeviceStateError::DocumentTooLarge(path.to_string()))?;
         let sha256 = hex::encode(Sha256::digest(bytes));
         self.device
-            .delete(&self.storage, path, ByteCount::from_bytes(size), &sha256)
+            .delete_with_progress(
+                &self.storage,
+                path,
+                ByteCount::from_bytes(size),
+                &sha256,
+                &self.progress,
+            )
             .await?;
         Ok(())
     }

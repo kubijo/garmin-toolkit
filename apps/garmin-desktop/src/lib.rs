@@ -6,7 +6,7 @@
     reason = "eframe and device/rendering adapters require incompatible transitive releases"
 )]
 
-use std::{fmt::Write as _, fs};
+use std::fs;
 
 use futures_lite::future::block_on;
 use garmin_i18n::Translations;
@@ -125,33 +125,7 @@ pub fn run_with_options(mut options: Options) -> Result<(), Error> {
             garmin_ui::install(&creation.egui_ctx);
             window::install(&creation.egui_ctx);
             developer::install(&creation.egui_ctx, &options, logs, creation.winit_window())?;
-            garmin_ui::developer::state(&creation.egui_ctx)
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .debug = format!(
-                "Version: {}\nPlatform: {}\nMode: {}\nRenderer: WGPU (4x MSAA)",
-                env!("CARGO_PKG_VERSION"),
-                std::env::consts::OS,
-                mode::WINDOW_TITLE
-            );
-            let map_renderer = creation
-                .wgpu_render_state
-                .as_ref()
-                .ok_or(Error::MapRendererUnavailable)
-                .map(|render_state| {
-                    let info = render_state.adapter.get_info();
-                    write!(
-                        garmin_ui::developer::state(&creation.egui_ctx)
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .debug,
-                        "\nAdapter: {}\nBackend: {:?}",
-                        info.name,
-                        info.backend
-                    )
-                    .expect("writing to a String cannot fail");
-                    garmin_ui::activity::install_wgpu_map(render_state, u32::from(MULTISAMPLING))
-                })?;
+            let map_renderer = install_map_renderer(creation)?;
             let mut desktop = view::Desktop::new(
                 deployment,
                 translations,
@@ -170,6 +144,32 @@ pub fn run_with_options(mut options: Options) -> Result<(), Error> {
     window_result?;
     profiling_result?;
     Ok(())
+}
+
+fn install_map_renderer(
+    creation: &eframe::CreationContext<'_>,
+) -> Result<garmin_ui::activity::WgpuMapHandle, Error> {
+    let render_state = creation
+        .wgpu_render_state
+        .as_ref()
+        .ok_or(Error::MapRendererUnavailable)?;
+    let info = render_state.adapter.get_info();
+    let debug = format!(
+        "Version: {}\nPlatform: {}\nMode: {}\nRenderer: WGPU ({MULTISAMPLING}x MSAA)\nAdapter: {}\nBackend: {:?}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        mode::WINDOW_TITLE,
+        info.name,
+        info.backend,
+    );
+    garmin_ui::developer::state(&creation.egui_ctx)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .debug = debug;
+    Ok(garmin_ui::activity::install_wgpu_map(
+        render_state,
+        u32::from(MULTISAMPLING),
+    ))
 }
 
 /// Desktop startup failure.

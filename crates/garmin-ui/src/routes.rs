@@ -20,7 +20,7 @@ use crate::{
     },
     button, icons, typography,
 };
-use widgets::{Row, action_button, action_row};
+use widgets::{Row, action_button};
 
 pub struct Workspace {
     map: ActivityMap,

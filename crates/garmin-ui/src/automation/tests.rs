@@ -102,7 +102,7 @@ fn scenario_buttons_show_a_pointer_only_when_enabled() {
         );
         assert_eq!(
             render(true, vec![Event::PointerMoved(point)]),
-            egui::CursorIcon::Default
+            egui::CursorIcon::NotAllowed
         );
         render(false, vec![]);
     }

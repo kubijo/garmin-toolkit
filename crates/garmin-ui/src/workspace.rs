@@ -15,6 +15,7 @@ pub enum Page {
     Backup,
     Device(String),
     Maps(String),
+    Firmware(String),
 }
 
 impl Page {
@@ -27,7 +28,7 @@ impl Page {
             Self::GarminConnect => Some(3 + devices.len()),
             Self::Trends => Some(4 + devices.len()),
             Self::Backup => None,
-            Self::Device(key) | Self::Maps(key) => devices
+            Self::Device(key) | Self::Maps(key) | Self::Firmware(key) => devices
                 .iter()
                 .position(|device| &device.key == key)
                 .map(|index| index + 3),
@@ -71,22 +72,27 @@ pub struct Output<R> {
 #[must_use]
 pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) -> Output<R> {
     let activities = format_message!(props.intl, default_message: "Activities");
-    let settings = format_message!(props.intl, default_message: "Profile settings");
     let routes = format_message!(props.intl, default_message: "Routes");
     let primary_destinations = [
-        shell::Destination {
-            label: &activities,
-            icon: icons::ACTIVITY,
-        },
-        shell::Destination {
-            label: &routes,
-            icon: icons::MAP_TRIFOLD,
-        },
+        shell::Destination::new(&activities, icons::ACTIVITY),
+        shell::Destination::new(&routes, icons::MAP_TRIFOLD),
     ];
+    let update_labels = props
+        .devices
+        .iter()
+        .map(|device| {
+            device
+                .firmware_update
+                .as_ref()
+                .map(|update| crate::firmware::update_title(props.intl, &device.name, update))
+        })
+        .collect::<Vec<_>>();
     let device_destinations = props
         .devices
         .iter()
-        .map(|snapshot| shell::Destination {
+        .zip(&update_labels)
+        .map(|(snapshot, update)| shell::Destination {
+            badge: update.as_deref(),
             label: &snapshot.name,
             icon: device::snapshot_icon(snapshot),
         })
@@ -95,25 +101,14 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
     let connect_label = format_message!(props.intl, default_message: "Garmin activities");
     let trends_label = format_message!(props.intl, default_message: "Trends");
     let connect_destinations = [
-        shell::Destination {
-            label: &connect_label,
-            icon: icons::CLOUD,
-        },
-        shell::Destination {
-            label: &trends_label,
-            icon: icons::ACTIVITY,
-        },
+        shell::Destination::new(&connect_label, icons::CLOUD),
+        shell::Destination::new(&trends_label, icons::ACTIVITY),
     ];
     let navigation_groups = [
         shell::NavigationGroup {
             label: None,
             separated: false,
             destinations: &primary_destinations,
-        },
-        shell::NavigationGroup {
-            label: (!device_destinations.is_empty()).then_some(devices_label.as_str()),
-            separated: false,
-            destinations: &device_destinations,
         },
         shell::NavigationGroup {
             label: None,
@@ -125,12 +120,9 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
             },
         },
         shell::NavigationGroup {
-            label: None,
+            label: (!device_destinations.is_empty()).then_some(devices_label.as_str()),
             separated: true,
-            destinations: &[shell::Destination {
-                label: &settings,
-                icon: icons::GEAR,
-            }],
+            destinations: &device_destinations,
         },
     ];
     let navigation_indices =
@@ -173,12 +165,11 @@ pub fn show<R>(ui: &mut Ui, props: &Props<'_>, page: impl FnOnce(&mut Ui) -> R) 
 
 fn navigation_indices(devices: usize, connect_configured: bool) -> Vec<usize> {
     let mut indices = vec![0, 1];
-    indices.extend(3..3 + devices);
     if connect_configured {
         indices.push(3 + devices);
         indices.push(4 + devices);
     }
-    indices.push(2);
+    indices.extend(3..3 + devices);
     indices
 }
 
@@ -198,11 +189,11 @@ mod tests {
     use garmin_service_api::{DeviceSnapshot, InspectionState};
 
     #[test]
-    fn settings_follow_cloud_and_devices_with_or_without_a_connect_key() {
-        assert_eq!(super::navigation_indices(0, true), [0, 1, 3, 4, 2]);
-        assert_eq!(super::navigation_indices(0, false), [0, 1, 2]);
-        assert_eq!(super::navigation_indices(2, true), [0, 1, 3, 4, 5, 6, 2]);
-        assert_eq!(super::navigation_indices(2, false), [0, 1, 3, 4, 2]);
+    fn attached_devices_follow_activities_and_optional_connect_pages() {
+        assert_eq!(super::navigation_indices(0, true), [0, 1, 3, 4]);
+        assert_eq!(super::navigation_indices(0, false), [0, 1]);
+        assert_eq!(super::navigation_indices(2, true), [0, 1, 5, 6, 3, 4]);
+        assert_eq!(super::navigation_indices(2, false), [0, 1, 3, 4]);
     }
 
     fn device(key: &str) -> DeviceSnapshot {
@@ -210,6 +201,7 @@ mod tests {
             key: key.to_owned(),
             name: key.to_owned(),
             identifier: None,
+            firmware_update: None,
             software_version: None,
             inspection: InspectionState::Ready,
             inspection_error: None,

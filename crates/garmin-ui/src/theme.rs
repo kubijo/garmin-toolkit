@@ -61,6 +61,17 @@ pub fn palette(ui: &Ui) -> &'static theme::Theme {
     }
 }
 
+/// Alternating table rows use two fifths of the theme's hover overlay opacity.
+pub(crate) fn table_stripe(ui: &Ui) -> Color32 {
+    let overlay = palette(ui).surfaces().background_hover();
+    color32(overlay.with_alpha(overlay.as_rgba()[3] / 5 * 2))
+}
+
+/// Keep the same readable foreground as the fill passes behind a cell's text.
+pub(crate) fn table_progress_fill(ui: &Ui) -> Color32 {
+    color32(palette(ui).surfaces().progress_fill(profile_accent(ui)))
+}
+
 /// Accent shared by selected-row and active-navigation markers.
 #[must_use]
 pub fn selection_accent(ui: &Ui) -> Color {
@@ -95,7 +106,7 @@ pub(crate) fn profile_accent(ui: &Ui) -> Color {
         .unwrap_or_else(|| palette(ui).interaction().interactive())
 }
 
-/// Color radio dots and checkbox marks while retaining neutral labels and disabled states.
+/// Color the selection mark while retaining neutral labels and disabled states.
 pub fn selected_control<R>(ui: &mut Ui, selected: bool, show: impl FnOnce(&mut Ui) -> R) -> R {
     ui.scope(|ui| {
         if selected && ui.is_enabled() {

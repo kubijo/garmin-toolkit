@@ -44,6 +44,37 @@ pub fn semibold(text: impl Into<String>) -> RichText {
     RichText::new(text).family(Weight::SemiBold.family())
 }
 
+pub(crate) fn with_emphasis(
+    detail: &str,
+    emphasis: Option<&str>,
+    size: f32,
+    color: egui::Color32,
+) -> egui::text::LayoutJob {
+    let normal = egui::TextFormat {
+        font_id: font(size, Weight::Regular),
+        color,
+        ..Default::default()
+    };
+    let mut job = egui::text::LayoutJob::default();
+    if let Some(emphasis) = emphasis.filter(|value| !value.is_empty())
+        && let Some((before, after)) = detail.split_once(emphasis)
+    {
+        job.append(before, 0.0, normal.clone());
+        job.append(
+            emphasis,
+            0.0,
+            egui::TextFormat {
+                font_id: font(size, Weight::SemiBold),
+                ..normal.clone()
+            },
+        );
+        job.append(after, 0.0, normal);
+    } else {
+        job.append(detail, 0.0, normal);
+    }
+    job
+}
+
 /// Regular body typography for composition inside another widget (14 px / 20 px).
 /// Inherits the widget's text color; use [`body`] for a complete explanatory paragraph.
 #[must_use]

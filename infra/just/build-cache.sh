@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ ${1:-} == rustc-wrapper ]]; then
+    if [[ -n ${RUSTC_WRAPPER+x} ]]; then
+        wrapper=$RUSTC_WRAPPER
+    else
+        wrapper=$(command -v sccache) || exit 1
+    fi
+    case $wrapper in
+    sccache | */sccache)
+        if ! "$wrapper" "${RUSTC:-rustc}" -vV >/dev/null 2>&1; then
+            # Leave Cargo's own configuration alone unless replacing an inherited wrapper.
+            [[ -n ${RUSTC_WRAPPER+x} ]] || exit 1
+            wrapper=''
+        fi
+        ;;
+    esac
+    printf '%s\n' "$wrapper"
+    exit 0
+fi
+
 repository_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 temporary_root="$repository_root/.tmp"
 shared="$temporary_root/cargo-target"
@@ -83,7 +102,7 @@ clean)
     done
     ;;
 *)
-    printf 'usage: build-cache.sh {report|clean}\n' >&2
+    printf 'usage: build-cache.sh {report|clean|rustc-wrapper}\n' >&2
     exit 64
     ;;
 esac

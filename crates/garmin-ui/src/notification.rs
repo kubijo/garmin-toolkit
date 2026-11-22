@@ -99,29 +99,7 @@ fn inline_detail(
     emphasis: Option<&str>,
     color: egui::Color32,
 ) -> egui::text::LayoutJob {
-    let normal = egui::TextFormat {
-        font_id: crate::typography::font(12.0, crate::typography::Weight::Regular),
-        color,
-        ..Default::default()
-    };
-    let mut job = egui::text::LayoutJob::default();
-    if let Some(emphasis) = emphasis.filter(|value| !value.is_empty())
-        && let Some((before, after)) = detail.split_once(emphasis)
-    {
-        job.append(before, 0.0, normal.clone());
-        job.append(
-            emphasis,
-            0.0,
-            egui::TextFormat {
-                font_id: crate::typography::font(12.0, crate::typography::Weight::SemiBold),
-                ..normal.clone()
-            },
-        );
-        job.append(after, 0.0, normal);
-    } else {
-        job.append(detail, 0.0, normal);
-    }
-    job
+    crate::typography::with_emphasis(detail, emphasis, 12.0, color)
 }
 
 fn render_inline(ui: &mut Ui, props: &Props<'_>, emphasis: Option<&str>) -> Response {

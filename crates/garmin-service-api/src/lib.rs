@@ -3,6 +3,7 @@
 pub mod control;
 pub mod course_transfer;
 pub mod files;
+pub mod firmware;
 pub mod logging;
 pub mod maps;
 pub mod routes;
@@ -33,6 +34,8 @@ pub struct DeviceSnapshot {
     pub report: Option<garmin_model::device::DeviceInspection>,
     pub capabilities: Vec<DeviceCapability>,
     pub storages: Vec<DeviceStorageState>,
+    #[serde(default)]
+    pub firmware_update: Option<firmware::AvailableUpdate>,
 }
 
 #[garmin_macros::portable(eq)]
@@ -602,6 +605,10 @@ mod rpc {
             preview: uuid::Uuid,
             confirm: bool,
         ) -> Result<Result<usize, String>, rtc::CallError>;
+        async fn firmware(
+            &self,
+            device_key: String,
+        ) -> Result<Result<crate::firmware::FirmwareServiceClient, String>, rtc::CallError>;
     }
 }
 

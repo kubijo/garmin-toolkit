@@ -1,0 +1,136 @@
+out = "../../../.tmp/gallery/firmware"
+size = "960x800"
+sheet = "sheet.png"
+report = "capture.json"
+settle = true
+
+[[shot]]
+name = "device-sidebar"
+scene = "workspace::Desktop"
+[shot.knobs]
+"Garmin Connect configured" = true
+"firmware update" = true
+
+[[shot]]
+name = "device-rail"
+scene = "workspace::Web$"
+[shot.knobs]
+"firmware update" = true
+collapsed = true
+
+[[shot]]
+name = "edge-catalog"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Edge"
+state = "catalog"
+
+[[shot]]
+name = "watch-components"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Watch components"
+state = "catalog"
+
+[[shot]]
+name = "watch-system"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Watch system"
+state = "catalog"
+
+[[shot]]
+name = "edge-review"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Edge"
+state = "review"
+width = 936
+
+[[shot]]
+name = "edge-review-narrow"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Edge"
+state = "review"
+width = 320
+[shot.globals]
+Language = "Čeština"
+Theme = "Light"
+
+[[shot]]
+name = "watch-review"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Watch system"
+state = "review"
+
+[[shot]]
+name = "staging"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Watch system"
+state = "staging"
+
+[[shot]]
+name = "write-failed"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Edge"
+state = "write failed"
+
+[[shot]]
+name = "ready"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Watch system"
+state = "ready"
+
+[[shot]]
+name = "transfer-receipts"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Edge"
+state = "transfer receipts"
+
+[[shot]]
+name = "partial-confirmation"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Watch system"
+state = "reconnected"
+
+[[shot]]
+name = "edge-version-mismatch"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Edge"
+state = "reported version differs"
+
+[[shot]]
+name = "recovery"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Edge"
+state = "recovery"
+
+[[shot]]
+name = "review-recovery"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Watch system"
+state = "review recovery"
+
+[[shot]]
+name = "empty"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Edge"
+state = "empty"
+
+[[shot]]
+name = "consent"
+scene = "firmware::Playground"
+[shot.knobs]
+device = "Edge"
+state = "consent"

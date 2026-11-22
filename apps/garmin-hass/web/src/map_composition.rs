@@ -2,6 +2,7 @@
 
 use eframe::{egui, wgpu};
 use garmin_ui::activity::map_composition::{CompositionPlugin, Host, Placement};
+use garmin_ui::{button, slider, toggle};
 use wasm_bindgen::prelude::*;
 
 #[path = "map_composition/renderer.rs"]
@@ -224,25 +225,22 @@ impl eframe::App for Fixture {
         ui.heading("Map composition proof — not the activity renderer");
         ui.label(status_text());
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.show_map, "Show surface");
-            ui.checkbox(&mut self.show_window, "Overlap window");
+            toggle::show(ui, &mut self.show_map, "Show surface");
+            toggle::show(ui, &mut self.show_window, "Overlap window");
             let mut dark = ui.visuals().dark_mode;
-            if ui.checkbox(&mut dark, "Dark theme").changed() {
+            if toggle::show(ui, &mut dark, "Dark theme").changed() {
                 ui.ctx().set_visuals(if dark {
                     egui::Visuals::dark()
                 } else {
                     egui::Visuals::light()
                 });
             }
-            ui.checkbox(&mut self.show_modal, "Modal");
+            toggle::show(ui, &mut self.show_modal, "Modal");
         });
-        ui.add(egui::Slider::new(&mut self.width, 160.0..=1600.0).text("Width"));
-        ui.add(egui::Slider::new(&mut self.height, 120.0..=1200.0).text("Height"));
+        slider::editable(ui, "Width", &mut self.width, 160.0..=1600.0);
+        slider::editable(ui, "Height", &mut self.height, 120.0..=1200.0);
         let mut zoom = ui.ctx().zoom_factor();
-        if ui
-            .add(egui::Slider::new(&mut zoom, 0.5..=2.0).text("UI zoom"))
-            .changed()
-        {
+        if slider::editable(ui, "UI zoom", &mut zoom, 0.5..=2.0).changed() {
             ui.ctx().set_zoom_factor(zoom);
         }
         egui::ScrollArea::both().show(ui, |ui| {
@@ -256,8 +254,8 @@ impl eframe::App for Fixture {
                 let opening = ui.ctx().plugin::<CompositionPlugin>().lock().opening(rect);
                 ui.painter().add(opening);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(16.0)), |ui| {
-                    if ui
-                        .button("Overlay control")
+                    if button::Props::new("Overlay control", button::Kind::Secondary)
+                        .show(ui)
                         .on_hover_text("Tooltip above the worker canvas")
                         .clicked()
                     {
@@ -279,7 +277,9 @@ impl eframe::App for Fixture {
                     ui.label(
                         "The modal backdrop must dim the worker surface and block its controls.",
                     );
-                    ui.button("Close modal").clicked()
+                    button::Props::new("Close modal", button::Kind::Secondary)
+                        .show(ui)
+                        .clicked()
                 });
             if modal.inner || modal.should_close() {
                 self.show_modal = false;

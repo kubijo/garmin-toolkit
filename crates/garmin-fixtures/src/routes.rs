@@ -12,7 +12,7 @@ use garmin_model::{
 use garmin_storage::Storage;
 use gpx_format::{Gpx, GpxVersion, Track, TrackSegment, Waypoint};
 
-use super::{SeedError, SeededCorpus, invalid, parse};
+use crate::seed::{SeedError, SeededCorpus, invalid, parse};
 
 #[cfg(test)]
 mod tests;

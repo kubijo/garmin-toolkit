@@ -1,6 +1,7 @@
 //! Browser implementation of the shared secondary-window contract.
 use crate::window_channel::Channel;
 use eframe::egui::{self, Context, Ui};
+use garmin_ui::button::{Kind, Props};
 use garmin_ui::window::{
     Event, Spec, WindowHost,
     protocol::{KIND_PARAMETER, Message, SESSION_PARAMETER, valid_session},
@@ -111,10 +112,13 @@ impl<C: Serialize + DeserializeOwned + 'static, S: Serialize + DeserializeOwned 
             .open(&mut open)
             .show(context, |ui| {
                 ui.label(error);
-                if ui.button("Retry popup").clicked() {
+                if Props::new("Retry popup", Kind::Primary).show(ui).clicked() {
                     self.error = self.launch(false).err();
                 }
-                if ui.button("Open in a tab").clicked() {
+                if Props::new("Open in a tab", Kind::Secondary)
+                    .show(ui)
+                    .clicked()
+                {
                     self.error = self.launch(true).err();
                 }
             });

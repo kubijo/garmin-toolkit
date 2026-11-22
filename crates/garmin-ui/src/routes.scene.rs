@@ -276,6 +276,7 @@ fn show_transfer_dialog(state: &mut routes::State) {
         key: "edge-1050".into(),
         name: "Edge 1050".into(),
         identifier: Some(36_264_719),
+        firmware_update: None,
         software_version: Some(1870),
         inspection: InspectionState::Ready,
         inspection_error: None,

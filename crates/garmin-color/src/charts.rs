@@ -11,16 +11,7 @@ pub const fn foreground(dark: bool) -> Color {
     }
 }
 
-#[must_use]
-pub fn on_fill(fill: Color) -> Color {
-    let light = crate::swatch::gray::G10;
-    let dark = crate::swatch::gray::G100;
-    if light.contrast_ratio(fill) > dark.contrast_ratio(fill) {
-        light
-    } else {
-        dark
-    }
-}
+pub use crate::theme::on_fill;
 
 #[must_use]
 pub fn text(dark: bool, index: usize) -> Color {

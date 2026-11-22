@@ -16,7 +16,7 @@ use garmin_service_api::{
     ActivityTimerEventSnapshot, ActivityTimerStateSnapshot, DeviceBrowserTarget,
     DeviceCatalogEntryKind, DeviceFitPreview, DeviceFitPreviewActivity,
 };
-use garmin_ui::{activity, device_fit_preview, file_import, icons};
+use garmin_ui::{activity, button, device_fit_preview, file_import, icons};
 use std::time::Duration;
 
 scene_meta! { title: "Application / Activities" }
@@ -304,7 +304,10 @@ fn automation_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals
         ui.add_space(220.0);
         if let Some(name) = selected {
             ui.label(format!("Selected: {name}"));
-            if ui.button("Reopen menu").clicked() {
+            if button::Props::new("Reopen menu", button::Kind::Secondary)
+                .show(ui)
+                .clicked()
+            {
                 ui.data_mut(|data| data.remove::<String>(selected_id));
             }
         }
@@ -346,7 +349,10 @@ fn automation_status(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globa
             });
             ui.add_space(8.0);
         }
-        if ui.button("Restart preview").clicked() {
+        if button::Props::new("Restart preview", button::Kind::Secondary)
+            .show(ui)
+            .clicked()
+        {
             ui.data_mut(|data| data.insert_temp(cancelled_id, false));
         }
     });

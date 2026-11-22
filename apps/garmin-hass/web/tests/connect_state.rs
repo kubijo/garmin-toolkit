@@ -12,6 +12,7 @@ fn row(id: i64) -> RemoteActivity {
     RemoteActivity {
         id,
         imported: false,
+        original_unavailable: false,
         name: format!("Ride {id}"),
         sport: None,
         started_at: None,

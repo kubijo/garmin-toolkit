@@ -49,8 +49,20 @@ impl Navigation {
 /// One primary destination.
 #[derive(Clone, Copy, Debug)]
 pub struct Destination<'a> {
+    pub badge: Option<&'a str>,
     pub label: &'a str,
     pub icon: icons::Icon,
+}
+
+impl<'a> Destination<'a> {
+    #[must_use]
+    pub const fn new(label: &'a str, icon: icons::Icon) -> Self {
+        Self {
+            label,
+            icon,
+            badge: None,
+        }
+    }
 }
 
 /// Related primary destinations.
@@ -377,11 +389,11 @@ fn navigation_overlay(ui: &Ui, root: Rect, navigation: Rect, props: &Props<'_>) 
                 egui::pos2(navigation.right(), overlay.top()),
                 overlay.right_bottom(),
             );
-            let dismiss = area_ui.interact(
+            let dismiss = crate::button::interaction_cursor(area_ui.interact(
                 outside,
                 area_ui.make_persistent_id("shell-navigation-dismiss"),
                 Sense::click_and_drag(),
-            );
+            ));
             background.rect_filled(outside, 0.0, egui::Color32::from_black_alpha(120));
             background.rect_filled(
                 navigation,
@@ -787,7 +799,7 @@ fn navigation_contents(ui: &Ui, rect: Rect, props: &Props<'_>) -> Option<Action>
                 ui,
                 item_rect,
                 ui.make_persistent_id(("shell-destination", destination_index)),
-                destination.label,
+                destination.badge.unwrap_or(destination.label),
             );
             paint_destination(
                 ui,
@@ -800,7 +812,9 @@ fn navigation_contents(ui: &Ui, rect: Rect, props: &Props<'_>) -> Option<Action>
             let clicked = response.clicked();
             crate::semantics::target(ui, &response, format!("navigation.{destination_index}"));
             crate::semantics::value(&response, if active { "on" } else { "off" });
-            if props.navigation == Navigation::Rail {
+            if let Some(badge) = destination.badge {
+                response.on_hover_text(badge);
+            } else if props.navigation == Navigation::Rail {
                 response.on_hover_text(destination.label);
             }
             if clicked {
@@ -857,6 +871,21 @@ fn paint_destination(
         },
     }
     .paint_at(ui, icon_center);
+    if destination.badge.is_some() {
+        let center = icon_center + egui::vec2(8.0, -10.0);
+        let background = if response.highlighted() || active {
+            color32(surface)
+        } else {
+            color32(theme.surfaces().chrome())
+        };
+        ui.painter().circle_filled(center, 8.0, background);
+        icons::Props {
+            icon: icons::CARET_DOUBLE_UP,
+            size: 16.0,
+            color: theme.support().success(),
+        }
+        .paint_at(ui, center);
+    }
     if navigation == Navigation::Expanded {
         ui.painter().text(
             egui::pos2(icon_center.x + ICON_SIZE / 2.0 + 12.0, rect.center().y),
@@ -991,6 +1020,7 @@ mod tests {
             separated: false,
             destinations: &[Destination {
                 label: "Destination",
+                badge: None,
                 icon: icons::HOUSE,
             }],
         }];

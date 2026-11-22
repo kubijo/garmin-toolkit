@@ -28,6 +28,7 @@ use super::map::ActivityMap;
 use super::{Action, ItemProps, Presentation};
 use crate::{
     Size, button, icons,
+    skeleton::Skeleton,
     theme::{CONTROL_RADIUS, PANEL_RADIUS, color32},
 };
 
@@ -907,7 +908,7 @@ impl Viewer {
             egui::Vec2::splat(FRAME),
         );
         let fit = floating_control(ui, fit_bounds, Layout::left_to_right(Align::Center), |ui| {
-            floating_icon_button(ui, &fit_route, icons::TARGET, false, true)
+            floating_icon_button(ui, &fit_route, icons::TARGET, None, true)
         });
         crate::semantics::target(ui, &fit.inner, "map.fit");
         if fit.inner.clicked() {
@@ -923,9 +924,9 @@ impl Viewer {
         let zoom = floating_control(ui, zoom_bounds, Layout::top_down(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.y = GAP;
             let zoom_in = format_message!(intl, default_message: "Zoom in");
-            let zoom_in = floating_icon_button(ui, &zoom_in, icons::PLUS, false, true);
+            let zoom_in = floating_icon_button(ui, &zoom_in, icons::PLUS, None, true);
             let zoom_out = format_message!(intl, default_message: "Zoom out");
-            let zoom_out = floating_icon_button(ui, &zoom_out, icons::MINUS, false, true);
+            let zoom_out = floating_icon_button(ui, &zoom_out, icons::MINUS, None, true);
             paint_horizontal_control_separator(ui, zoom_in.rect, GAP);
             (zoom_in, zoom_out)
         });
@@ -964,7 +965,7 @@ impl Viewer {
             Layout::left_to_right(Align::Center),
             |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                let play = floating_icon_button(ui, &play_label, icon, playing, can_play);
+                let play = floating_icon_button(ui, &play_label, icon, Some(playing), can_play);
                 ui.add_space(16.0);
                 let speed = playback_speed_slider(
                     ui,
@@ -1030,7 +1031,15 @@ impl Viewer {
             bounds = bounds.translate(egui::vec2(0.0, -frame_size - inset));
         }
         let control = floating_control(ui, bounds, Layout::left_to_right(Align::Center), |ui| {
-            floating_labeled_button(ui, &full_activity, icons::TARGET, 112.0, false, true)
+            button::OverlayProps {
+                label: &full_activity,
+                icon: icons::TARGET,
+                show_label: true,
+                width: 112.0,
+                selected: None,
+                enabled: true,
+            }
+            .show(ui)
         });
         crate::semantics::target(ui, &control.inner, "map.full-activity");
         if control.inner.clicked() {
@@ -1296,7 +1305,7 @@ fn disabled_playback_controls(ui: &mut Ui, intl: &Intl, bounds: egui::Rect) {
     controls.spacing_mut().item_spacing.x = 0.0;
     controls.add_enabled_ui(false, |ui| {
         let play_label = format_message!(intl, default_message: "Play");
-        let play = floating_icon_button(ui, &play_label, icons::PLAY, false, false);
+        let play = floating_icon_button(ui, &play_label, icons::PLAY, Some(false), false);
         crate::semantics::target(ui, &play, "playback.toggle");
         crate::semantics::value(&play, "stopped");
         ui.add_space(16.0);
@@ -1369,10 +1378,18 @@ fn floating_icon_button(
     ui: &mut Ui,
     label: &str,
     icon: icons::Icon,
-    selected: bool,
+    selected: Option<bool>,
     enabled: bool,
 ) -> egui::Response {
-    floating_button(ui, Some(icon), None, 32.0, selected, enabled).on_hover_text(label)
+    button::OverlayProps {
+        label,
+        icon,
+        show_label: false,
+        width: 32.0,
+        selected,
+        enabled,
+    }
+    .show(ui)
 }
 
 fn playback_speed_slider(
@@ -1382,202 +1399,19 @@ fn playback_speed_slider(
     enabled: bool,
 ) -> egui::Response {
     ui.add_enabled_ui(enabled, |ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let palette = crate::theme::palette(ui);
-        let rail = color32(palette.content().icon_secondary());
-        let foreground = color32(palette.content().icon_primary());
         ui.spacing_mut().slider_width = 96.0;
-        ui.spacing_mut().interact_size.y = 18.0;
-        let mut step = *speed as usize;
-        // Retain egui's input handling, but paint rail, stops, and knob in that order.
-        let opacity = ui.opacity();
-        ui.set_opacity(0.0);
-        let mut response = ui.add(
-            egui::Slider::new(&mut step, 0..=PlaybackSpeed::ALL.len() - 1)
-                .step_by(1.0)
-                .handle_shape(egui::style::HandleShape::Circle)
-                .trailing_fill(false)
-                .show_value(false),
+        let mut index = *speed as usize;
+        let response = crate::slider::stops(
+            ui,
+            "playback.speed",
+            label,
+            &mut index,
+            PlaybackSpeed::ALL.map(PlaybackSpeed::label),
         );
-        ui.set_opacity(opacity);
-        // egui's circular slider handle reserves this radius at each end of the rail.
-        let knob_radius = response.rect.height() / 2.5;
-        let positions = response.rect.x_range().shrink(knob_radius);
-        ui.painter().rect_filled(
-            egui::Rect::from_center_size(
-                response.rect.center(),
-                egui::vec2(response.rect.width(), 1.5),
-            ),
-            egui::CornerRadius::ZERO,
-            rail,
-        );
-        let mut stop_hovered = false;
-        for (index, candidate) in PlaybackSpeed::ALL.iter().enumerate() {
-            let center = egui::pos2(
-                egui::lerp(
-                    positions,
-                    index as f32 / (PlaybackSpeed::ALL.len() - 1) as f32,
-                ),
-                response.rect.center().y,
-            );
-            let target = ui.interact(
-                egui::Rect::from_center_size(center, egui::vec2(20.0, 32.0)),
-                response.id.with(("playback-speed-stop", index)),
-                Sense::click(),
-            );
-            let stop_label = format!("{label}: {}", candidate.label());
-            stop_hovered |= target.hovered();
-            target.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &stop_label)
-            });
-            crate::semantics::target(ui, &target, format!("playback.speed.{index}"));
-            if target.clicked() {
-                if step != index {
-                    step = index;
-                    response.mark_changed();
-                }
-                response.request_focus();
-            }
-            ui.painter().rect_filled(
-                egui::Rect::from_center_size(center, egui::vec2(1.75, 7.0)),
-                egui::CornerRadius::ZERO,
-                rail,
-            );
-            target
-                .on_hover_text(stop_label)
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
-        }
-        let knob_color = if response.hovered() || response.dragged() || response.has_focus() {
-            foreground
-        } else {
-            rail
-        };
-        ui.painter().circle(
-            egui::pos2(
-                egui::lerp(
-                    positions,
-                    step as f32 / (PlaybackSpeed::ALL.len() - 1) as f32,
-                ),
-                response.rect.center().y,
-            ),
-            knob_radius,
-            knob_color,
-            egui::Stroke::new(1.5, knob_color),
-        );
-        *speed = PlaybackSpeed::ALL[step];
-        crate::semantics::target(ui, &response, "playback.speed");
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_label(label);
-            node.set_value(speed.label());
-        });
-        ui.add_sized(
-            [36.0, 32.0],
-            egui::Label::new(RichText::new(speed.label()).size(11.0)),
-        );
-        if stop_hovered {
-            response
-        } else {
-            response.on_hover_text(format!("{label}: {}", speed.label()))
-        }
+        *speed = PlaybackSpeed::ALL[index];
+        response
     })
     .inner
-}
-
-fn floating_labeled_button(
-    ui: &mut Ui,
-    label: &str,
-    icon: icons::Icon,
-    width: f32,
-    selected: bool,
-    enabled: bool,
-) -> egui::Response {
-    floating_button(ui, Some(icon), Some(label), width, selected, enabled)
-}
-
-fn floating_button(
-    ui: &mut Ui,
-    icon: Option<icons::Icon>,
-    text: Option<&str>,
-    width: f32,
-    selected: bool,
-    enabled: bool,
-) -> egui::Response {
-    let palette = crate::theme::palette(ui);
-    let surface = color32(palette.surfaces().layer(theme::Level::One));
-    let foreground = color32(palette.content().icon_primary());
-    let disabled = color32(palette.content().icon_disabled());
-    let primary = palette.buttons().primary();
-    let rest = if selected {
-        map_control_visuals(
-            color32(primary.rest().background()),
-            color32(primary.rest().background()),
-            color32(primary.rest().foreground()),
-        )
-    } else {
-        map_control_visuals(surface, egui::Color32::TRANSPARENT, foreground)
-    };
-    let hovered = if selected {
-        map_control_visuals(
-            color32(primary.hover().background()),
-            color32(primary.hover().background()),
-            color32(primary.hover().foreground()),
-        )
-    } else {
-        map_control_visuals(
-            color32(palette.surfaces().layer_hover(theme::Level::One)),
-            color32(palette.surfaces().background_hover()),
-            foreground,
-        )
-    };
-    let active = if selected {
-        map_control_visuals(
-            color32(primary.active().background()),
-            color32(primary.active().background()),
-            color32(primary.active().foreground()),
-        )
-    } else {
-        let fill = color32(palette.surfaces().layer(theme::Level::Two));
-        map_control_visuals(fill, fill, foreground)
-    };
-    let disabled = map_control_visuals(surface, egui::Color32::TRANSPARENT, disabled);
-
-    ui.scope(|ui| {
-        ui.spacing_mut().interact_size.y = 32.0;
-        ui.spacing_mut().button_padding = egui::vec2(8.0, 0.0);
-        let widgets = &mut ui.visuals_mut().widgets;
-        widgets.inactive = rest;
-        widgets.hovered = hovered;
-        widgets.active = active;
-        widgets.open = active;
-        widgets.noninteractive = disabled;
-        ui.visuals_mut().interact_cursor = Some(egui::CursorIcon::PointingHand);
-        let image = icon.map(|icon| icon.mask().fit_to_exact_size(egui::Vec2::splat(15.0)));
-        let text = text.map(|text| RichText::new(text).size(11.0).into());
-        ui.add_enabled(
-            enabled,
-            egui::Button::opt_image_and_text(image, text)
-                .image_tint_follows_text_color(true)
-                .gap(5.0)
-                .min_size(egui::vec2(width, 32.0))
-                .corner_radius(CONTROL_RADIUS),
-        )
-    })
-    .inner
-}
-
-fn map_control_visuals(
-    background: egui::Color32,
-    weak_background: egui::Color32,
-    foreground: egui::Color32,
-) -> egui::style::WidgetVisuals {
-    egui::style::WidgetVisuals {
-        bg_fill: background,
-        weak_bg_fill: weak_background,
-        bg_stroke: egui::Stroke::NONE,
-        corner_radius: CONTROL_RADIUS,
-        fg_stroke: egui::Stroke::new(1.0, foreground),
-        expansion: 0.0,
-    }
 }
 
 fn lap_table_header(ui: &mut Ui, intl: &Intl) {
@@ -1816,8 +1650,7 @@ fn loading_surface(ui: &mut Ui, height: f32, label: &str) {
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::hover());
     let palette = crate::theme::palette(ui);
-    ui.painter()
-        .rect_filled(rect, PANEL_RADIUS, color32(palette.surfaces().chrome()));
+    Skeleton::new(rect.size()).paint_at(ui, rect.min);
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -1828,43 +1661,31 @@ fn loading_surface(ui: &mut Ui, height: f32, label: &str) {
 }
 
 fn loading_chart(ui: &mut Ui) {
-    let palette = crate::theme::palette(ui);
-    let field = color32(palette.surfaces().background_hover());
-    let placeholder = color32(palette.borders().subtle()).gamma_multiply(0.7);
     chart_panel(
         ui,
         |ui, beside| {
-            skeleton_block(ui, egui::vec2(96.0, 14.0), placeholder);
+            Skeleton::new(egui::vec2(96.0, 14.0)).show(ui);
             if beside {
                 for _ in 0..3 {
                     ui.horizontal(|ui| {
-                        skeleton_block(ui, egui::vec2(64.0, 12.0), placeholder);
-                        skeleton_block(ui, egui::vec2(72.0, 12.0), placeholder);
+                        Skeleton::new(egui::vec2(64.0, 12.0)).show(ui);
+                        Skeleton::new(egui::vec2(72.0, 12.0)).show(ui);
                     });
                 }
             } else {
                 ui.columns(3, |columns| {
                     for column in columns {
                         let width = column.available_width();
-                        skeleton_block(column, egui::vec2(width.min(64.0), 8.0), placeholder);
-                        skeleton_block(column, egui::vec2(width.min(92.0), 14.0), placeholder);
+                        Skeleton::new(egui::vec2(width.min(64.0), 8.0)).show(column);
+                        Skeleton::new(egui::vec2(width.min(92.0), 14.0)).show(column);
                     }
                 });
             }
         },
         |ui| {
-            let (rect, _) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), CHART_HEIGHT),
-                Sense::hover(),
-            );
-            ui.painter().rect_filled(rect, CONTROL_RADIUS, field);
+            Skeleton::new(egui::vec2(ui.available_width(), CHART_HEIGHT)).show(ui);
         },
     );
-}
-
-fn skeleton_block(ui: &mut Ui, size: egui::Vec2, fill: egui::Color32) {
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    ui.painter().rect_filled(rect, CONTROL_RADIUS, fill);
 }
 
 #[derive(Clone, Copy)]
@@ -3770,13 +3591,11 @@ mod tests {
                 speed_slider_frame(&context, &mut speed, Vec::new(), true);
             }
             let tooltip_ids = std::iter::once(slider.id)
-                .chain((0..3_usize).map(|index| slider.id.with(("playback-speed-stop", index))));
+                .chain((0..3_usize).map(|index| slider.id.with(("slider-stop", index))));
             let open = tooltip_ids
                 .filter(|id| egui::Tooltip::was_tooltip_open_last_frame(&context, *id))
                 .collect::<Vec<_>>();
-            let expected = stop.map_or(slider.id, |index| {
-                slider.id.with(("playback-speed-stop", index))
-            });
+            let expected = stop.map_or(slider.id, |index| slider.id.with(("slider-stop", index)));
             assert_eq!(
                 open,
                 vec![expected],
@@ -3846,7 +3665,7 @@ mod tests {
                             ui,
                             "Play",
                             crate::icons::PLAY,
-                            false,
+                            Some(false),
                             enabled,
                         );
                         ui.add_space(16.0);

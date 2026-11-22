@@ -91,7 +91,7 @@ garmin-connect = { path = "crates/garmin-connect" }
 garmin-device = { path = "crates/garmin-device" }
 garmin-diagnostics = { path = "crates/garmin-diagnostics" }
 garmin-fit = { path = "crates/garmin-fit" }
-garmin-fixtures = { path = "crates/garmin-fixtures" }
+garmin-fixtures = { path = "crates/garmin-fixtures", default-features = false }
 garmin-gpx = { path = "crates/garmin-gpx" }
 garmin-i18n = { path = "crates/garmin-i18n" }
 garmin-importer = { path = "crates/garmin-importer" }

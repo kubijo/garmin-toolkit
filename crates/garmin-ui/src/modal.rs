@@ -194,18 +194,17 @@ fn show_with_layout<R>(
                 ctx.request_repaint();
             }
             let mut output = response.inner;
+            let can_cancel =
+                props.cancel_label.is_some() && !props.cancel_disabled.unwrap_or(false);
             let close_requested = response.response.should_close()
-                || (props.backdrop_closes.unwrap_or_default()
-                    && response.backdrop_response.clicked());
+                || (can_cancel
+                    && props.backdrop_closes.unwrap_or_default()
+                    && button::interaction_cursor(response.backdrop_response).clicked());
             let escaped = response.is_top_modal
                 && !response.any_popup_open
                 && ctx
                     .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-            if output.action.is_none()
-                && props.cancel_label.is_some()
-                && !props.cancel_disabled.unwrap_or(false)
-                && (close_requested || escaped)
-            {
+            if output.action.is_none() && can_cancel && (close_requested || escaped) {
                 output.action = Some(Action::Cancel);
             }
             output
@@ -226,7 +225,7 @@ fn show_with_layout<R>(
                 .inner;
             if output.action.is_none()
                 && props.backdrop_closes.unwrap_or_default()
-                && backdrop.clicked()
+                && button::interaction_cursor(backdrop).clicked()
             {
                 output.action = Some(Action::Cancel);
             }

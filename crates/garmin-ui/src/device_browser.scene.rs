@@ -159,6 +159,7 @@ fn show_window_scene(
             key: "mock:watch-o-matic-9000".to_owned(),
             name: "Mock Watch-o-Matic 9000".to_owned(),
             identifier: Some(36_264_719),
+            firmware_update: None,
             software_version: Some(3_220),
             inspection: InspectionState::Ready,
             inspection_error: None,

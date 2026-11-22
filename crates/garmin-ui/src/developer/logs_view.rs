@@ -157,15 +157,9 @@ fn filters(ui: &mut Ui, filter: &mut Filter) {
 fn time_filter(ui: &mut Ui, label: &str, value: &mut Option<UnixMilliseconds>) {
     ui.push_id(label, |ui| {
         let mut enabled = value.is_some();
-        ui.scope(|ui| {
-            ui.spacing_mut().interact_size.y = 24.0;
-            if crate::theme::selected_control(ui, enabled, |ui| ui.checkbox(&mut enabled, label))
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .changed()
-            {
-                *value = enabled.then_some(UnixMilliseconds::default());
-            }
-        });
+        if crate::toggle::show(ui, &mut enabled, label).changed() {
+            *value = enabled.then_some(UnixMilliseconds::default());
+        }
         if let Some(value) = value {
             let mut milliseconds = value.as_milliseconds_since_epoch();
             input::show_number(

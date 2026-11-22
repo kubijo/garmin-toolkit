@@ -31,9 +31,12 @@ mod menu {
         ui.label("Use Stop or Esc to cancel.");
         let mut selected = None;
         for name in SCENARIOS {
-            let response = ui
-                .add_enabled(!running, egui::Button::new(*name))
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let response = crate::button::Props {
+                enabled: !running,
+                size: crate::Size::Small,
+                ..crate::button::Props::new(name, crate::button::Kind::Ghost)
+            }
+            .show(ui);
             crate::semantics::target(ui, &response, format!("automation.scenario.{name}"));
             if response.clicked() {
                 selected = Some(*name);
@@ -224,7 +227,7 @@ pub fn status_view(
         return false;
     }
     ui.label("Input locked · Esc to stop");
-    let stop = ui.button("Stop (Esc)");
+    let stop = crate::button::Props::new("Stop (Esc)", crate::button::Kind::Secondary).show(ui);
     crate::semantics::target(ui, &stop, "automation.stop");
     stop.clicked()
 }

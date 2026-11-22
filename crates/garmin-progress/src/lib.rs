@@ -208,11 +208,12 @@ where
 pub struct ProgressReporter {
     sink: Option<Arc<dyn ProgressSink>>,
     cancellation: CancellationToken,
+    cleanup_cancellation: Option<CancellationToken>,
     device_state: DeviceStateTracker,
     event_kind: ProgressEventKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProgressAmount {
     Bytes {
         completed: ByteCount,
@@ -292,6 +293,9 @@ impl ProgressReporter {
             parent.event(event);
         })
         .with_cancellation(self.cancellation_token());
+        child
+            .cleanup_cancellation
+            .clone_from(&self.cleanup_cancellation);
         child.device_state = self.device_state.clone();
         child.event_kind = self.event_kind;
         child
@@ -305,6 +309,7 @@ impl ProgressReporter {
             Self {
                 sink: Some(Arc::new(ChannelProgressSink(sender))),
                 cancellation: CancellationToken::default(),
+                cleanup_cancellation: None,
                 device_state: device_state.clone(),
                 event_kind: ProgressEventKind::Generic,
             },
@@ -317,6 +322,7 @@ impl ProgressReporter {
         Self {
             sink: Some(Arc::new(HandlerProgressSink(handler))),
             cancellation: CancellationToken::default(),
+            cleanup_cancellation: None,
             device_state: DeviceStateTracker::default(),
             event_kind: ProgressEventKind::Generic,
         }
@@ -331,6 +337,9 @@ impl ProgressReporter {
             downstream.event(event);
         });
         reporter.cancellation = self.cancellation.clone();
+        reporter
+            .cleanup_cancellation
+            .clone_from(&self.cleanup_cancellation);
         reporter.device_state = self.device_state.clone();
         reporter.event_kind = self.event_kind;
         reporter
@@ -358,10 +367,17 @@ impl ProgressReporter {
         self
     }
 
-    /// Create an independently cancellable cleanup reporter.
+    /// Invalidate required cleanup when its physical device disconnects.
+    #[must_use]
+    pub fn with_cleanup_cancellation(mut self, cancellation: CancellationToken) -> Self {
+        self.cleanup_cancellation = Some(cancellation);
+        self
+    }
+
+    /// Cleanup survives user cancellation for as long as its device remains attached.
     #[must_use]
     pub fn for_required_cleanup(mut self) -> Self {
-        self.cancellation = CancellationToken::default();
+        self.cancellation = self.cleanup_cancellation.clone().unwrap_or_default();
         self
     }
 

@@ -5,7 +5,7 @@ use garmin_color::theme;
 use garmin_i18n::{Intl, format_message};
 use garmin_model::identity::{LanguagePreference, ProfilePreferences, ThemePreference, UnitSystem};
 
-use crate::{Size, button, icons, images, profile, radio};
+use crate::{Size, button, icons, images, profile, radio_group};
 mod accent;
 pub mod connect_activities;
 pub(crate) mod connect_sync;
@@ -143,14 +143,14 @@ fn show_preferences(ui: &mut Ui, props: &Props<'_>) -> Option<ProfilePreferences
     let metric = format_message!(props.intl, default_message: "Metric");
     let imperial = format_message!(props.intl, default_message: "Imperial");
     let units = [
-        radio::Choice::new(&metric, UnitSystem::Metric, "profile.units.metric"),
-        radio::Choice::new(&imperial, UnitSystem::Imperial, "profile.units.imperial"),
+        radio_group::Choice::new(&metric, UnitSystem::Metric, "profile.units.metric"),
+        radio_group::Choice::new(&imperial, UnitSystem::Imperial, "profile.units.imperial"),
     ];
-    if let Some(unit_system) = radio::show(
+    if let Some(unit_system) = radio_group::show(
         ui,
         preferences.unit_system(),
         &units,
-        radio::Props {
+        radio_group::Props {
             label: &unit_label,
             helper: Some(&unit_helper),
             enabled: !props.disabled,
@@ -166,24 +166,24 @@ fn show_preferences(ui: &mut Ui, props: &Props<'_>) -> Option<ProfilePreferences
 
     let language_label = format_message!(props.intl, default_message: "Language");
     let languages = [
-        radio::Choice::new(
+        radio_group::Choice::new(
             language_autonym(LanguagePreference::English),
             LanguagePreference::English,
             "profile.language.english",
         )
         .image(images::UNITED_KINGDOM),
-        radio::Choice::new(
+        radio_group::Choice::new(
             language_autonym(LanguagePreference::Czech),
             LanguagePreference::Czech,
             "profile.language.czech",
         )
         .image(images::CZECHIA),
     ];
-    if let Some(language) = radio::show(
+    if let Some(language) = radio_group::show(
         ui,
         preferences.language(),
         &languages,
-        radio::Props {
+        radio_group::Props {
             label: &language_label,
             helper: None,
             enabled: !props.disabled,
@@ -241,14 +241,14 @@ fn show_file_windows(ui: &mut Ui, props: &Props<'_>, selected: bool) -> Option<b
     let inline = format_message!(props.intl, default_message: "Inside the app");
     let helper = format_message!(props.intl, default_message: "Choose where file browsers and choosers open.");
     let choices = [
-        radio::Choice::new(&separate, false, "profile.file-windows.separate"),
-        radio::Choice::new(&inline, true, "profile.file-windows.inline"),
+        radio_group::Choice::new(&separate, false, "profile.file-windows.separate"),
+        radio_group::Choice::new(&inline, true, "profile.file-windows.inline"),
     ];
-    radio::show(
+    radio_group::show(
         ui,
         selected,
         &choices,
-        radio::Props {
+        radio_group::Props {
             label: &label,
             helper: Some(&helper),
             enabled: !props.disabled,

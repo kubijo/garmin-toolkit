@@ -45,4 +45,4 @@ uuid.workspace = true
 workspace = true
 
 [dev-dependencies]
-garmin-fixtures.workspace = true
+garmin-fixtures = { workspace = true, features = ["demo"] }

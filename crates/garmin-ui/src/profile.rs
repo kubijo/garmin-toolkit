@@ -556,15 +556,15 @@ pub fn menu(ui: &mut Ui, props: &MenuProps<'_>) -> Option<Action> {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         header_selector::menu(ui, |ui| {
-            if action_row(
+            let settings = action_row(
                 ui,
                 &settings,
                 icons::GEAR,
                 header_selector::RowKind::Default,
                 false,
-            )
-            .clicked()
-            {
+            );
+            crate::semantics::target(ui, &settings, "profile.settings");
+            if settings.clicked() {
                 action = Some(Action::Settings);
             }
             if props.backup_enabled {

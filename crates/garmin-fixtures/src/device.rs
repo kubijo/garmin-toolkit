@@ -22,7 +22,7 @@ pub const KEY: &str = "demo:watch-o-matic-9000";
 pub const NAME: &str = "Mock Watch-o-Matic 9000";
 pub const STORAGE_ID: &str = "internal";
 pub const STORAGE_LABEL: &str = "Mock internal storage";
-const MANIFEST_XML: &str =
+pub const MANIFEST_XML: &str =
     include_str!("../../../infra/fixtures/device/demo-watch/GarminDevice.xml");
 
 #[must_use]

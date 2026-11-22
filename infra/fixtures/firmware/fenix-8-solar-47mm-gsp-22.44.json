@@ -1,0 +1,293 @@
+{
+  "$id": "1",
+  "updates": [
+    {
+      "$id": "2",
+      "partNumber": "006-V4532-00",
+      "productName": "fenix 8 - 47mm, Solar - System Software Bundle",
+      "version": "24.20",
+      "isPrimaryFirmware": false,
+      "dataType": "Firmware",
+      "description": "fenix 8 - 47mm, Solar bundled update",
+      "locale": null,
+      "severity": "Recommended",
+      "releaseNotes": [
+        {
+          "$id": "3",
+          "version": "23.39",
+          "changeLog": [
+            "Adds a suggested quick workout for running.",
+            "Adds dive computer settings sharing in the Garmin Share app.",
+            "Adds the XC Ski Indoor activity.",
+            "Adds context to volume control.",
+            "Enables the voice command feature with the \"OK Garmin\" wake word.",
+            "Fixes an issue that could result in pace/speed dropouts, especially during interval training.",
+            "Fixes an issue that could cause the device to reset during a strength activity free workout.",
+            "Fixes the onscreen lap shortcut no longer showing in HIIT workouts.",
+            "Fixes an issue with not being able to start a suggested multisport workout.",
+            "Fixes an issue with selecting rest days for daily suggested or Garmin Coach plan workouts.",
+            "Fixes an issue where the training days shown on the watch might not match the days shown in the Garmin Coach plan.",
+            "Fixes volume level not returning to correct setting after water ejection.",
+            "Fixes an issue that could cause music volume to increase after an alarm sounds.",
+            "Fixes an issue that could cause the device to reset when installing audio prompt software and host",
+            "Fixes potential shutdown when switching playlists in Spotify.",
+            "Fixes potential issue with Spotify music playback after skipping songs via paired Bluetooth headphones.",
+            "Fixes potential shutdown when using the HIIT activity. simultaneously.",
+            "Fixes other minor issues.",
+            "Improves the flashlight shortcut to cycle through the on, off, and strobe modes during an activity.",
+            "Reduces false unlocks when using the touch lock feature.",
+            "Supports Xero range and sensor data in the Applied Ballistics app.",
+            "Updates translations."
+          ],
+          "semanticVersion": "23.39.0",
+          "isCriticalFixVersion": false
+        }
+      ],
+      "eulaUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-1",
+      "deliverable": {
+        "$id": "4",
+        "downloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-2",
+        "md5": "b11cf2a6790df3c6500ae9b9f820ee36",
+        "sizeInBytes": 61810888,
+        "secureDownloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-2"
+      },
+      "installation": {
+        "$id": "5",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin",
+        "fileName": "GUPDATE.GSP",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [],
+      "releaseState": "phased_rollout",
+      "releaseDate": "2026-09-28T20:47:34Z",
+      "secureEulaUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-1",
+      "semanticVersion": "24.20.0",
+      "displayVersion": "24.20",
+      "containsCriticalFixVersion": false
+    },
+    {
+      "$id": "6",
+      "partNumber": "006-DB775-00",
+      "productName": "Mobility and Move Alert Videos",
+      "version": "1.00",
+      "isPrimaryFirmware": false,
+      "dataType": "Firmware",
+      "description": "260x260, White BG",
+      "locale": null,
+      "severity": "Recommended",
+      "releaseNotes": [
+        {
+          "$id": "7",
+          "version": "1.00",
+          "changeLog": [
+            "Initial release."
+          ],
+          "semanticVersion": "1.0.0",
+          "isCriticalFixVersion": false
+        }
+      ],
+      "eulaUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-1",
+      "deliverable": {
+        "$id": "8",
+        "downloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-3",
+        "md5": "bdfce0b60eec65f73ee713a81f60036a",
+        "sizeInBytes": 13982715,
+        "secureDownloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-3"
+      },
+      "installation": {
+        "$id": "9",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/RemoteSW",
+        "fileName": "006-DB775-00.zvp",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [
+        "BTC",
+        "LTE",
+        "BLE"
+      ],
+      "releaseState": "live",
+      "releaseDate": "2025-07-24T21:26:57Z",
+      "secureEulaUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-1",
+      "semanticVersion": "1.0.0",
+      "displayVersion": "1.00",
+      "containsCriticalFixVersion": false
+    },
+    {
+      "$id": "10",
+      "partNumber": "006-D9971-49",
+      "productName": "TTF Binary Data, NotoSansMath Regular",
+      "version": "2.00",
+      "isPrimaryFirmware": false,
+      "dataType": "Firmware",
+      "description": "",
+      "locale": null,
+      "severity": "Recommended",
+      "releaseNotes": [
+        {
+          "$id": "11",
+          "version": "2.00",
+          "changeLog": [
+            "NA"
+          ],
+          "semanticVersion": "2.0.0",
+          "isCriticalFixVersion": false
+        }
+      ],
+      "eulaUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-1",
+      "deliverable": {
+        "$id": "12",
+        "downloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-4",
+        "md5": "85daf4fb63a7e73fd9f662fdd9fd361b",
+        "sizeInBytes": 1004136,
+        "secureDownloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-4"
+      },
+      "installation": {
+        "$id": "13",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/ExtData",
+        "fileName": "006-D9971-49.bin",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [],
+      "releaseState": "live",
+      "releaseDate": "2026-11-10T16:02:11Z",
+      "secureEulaUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-1",
+      "semanticVersion": "2.0.0",
+      "displayVersion": "2.00",
+      "containsCriticalFixVersion": false
+    },
+    {
+      "$id": "14",
+      "partNumber": "006-V4532-00-META",
+      "productName": "fenix 8 - 47mm, Solar - System Software Bundle",
+      "version": "24.20",
+      "isPrimaryFirmware": false,
+      "dataType": "UpdateMetadata",
+      "description": "fenix 8 - 47mm, Solar bundled update",
+      "locale": null,
+      "severity": "Critical",
+      "releaseNotes": [],
+      "eulaUrl": "",
+      "deliverable": {
+        "$id": "15",
+        "downloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-5",
+        "md5": "6b6b2ef85a0cb16af240ef1aaa1c21b6",
+        "sizeInBytes": 117,
+        "secureDownloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-5"
+      },
+      "installation": {
+        "$id": "16",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/UpdateMetadata",
+        "fileName": "006v453200.json",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [],
+      "releaseState": "phased_rollout",
+      "releaseDate": "2026-09-28T20:47:34Z",
+      "secureEulaUrl": "",
+      "semanticVersion": "24.20.0",
+      "displayVersion": "24.20",
+      "containsCriticalFixVersion": false
+    },
+    {
+      "$id": "17",
+      "partNumber": "006-DB775-00-META",
+      "productName": "Mobility and Move Alert Videos",
+      "version": "1.00",
+      "isPrimaryFirmware": false,
+      "dataType": "UpdateMetadata",
+      "description": "260x260, White BG",
+      "locale": null,
+      "severity": "Critical",
+      "releaseNotes": [],
+      "eulaUrl": "",
+      "deliverable": {
+        "$id": "18",
+        "downloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-6",
+        "md5": "c97b78412aa9a5ce4df82c6c80949cf5",
+        "sizeInBytes": 115,
+        "secureDownloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-6"
+      },
+      "installation": {
+        "$id": "19",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/UpdateMetadata",
+        "fileName": "006db77500.json",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [
+        "BTC",
+        "LTE",
+        "BLE"
+      ],
+      "releaseState": "live",
+      "releaseDate": "2025-07-24T21:26:57Z",
+      "secureEulaUrl": "",
+      "semanticVersion": "1.0.0",
+      "displayVersion": "1.00",
+      "containsCriticalFixVersion": false
+    },
+    {
+      "$id": "20",
+      "partNumber": "006-D9971-49-META",
+      "productName": "TTF Binary Data, NotoSansMath Regular",
+      "version": "2.00",
+      "isPrimaryFirmware": false,
+      "dataType": "UpdateMetadata",
+      "description": "",
+      "locale": null,
+      "severity": "Critical",
+      "releaseNotes": [],
+      "eulaUrl": "",
+      "deliverable": {
+        "$id": "21",
+        "downloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-7",
+        "md5": "2b7e3fa27f820cd38c99e8bd445b4c65",
+        "sizeInBytes": 115,
+        "secureDownloadUrl": "https://example.invalid/garmin/fenix-8-gsp-resource-7"
+      },
+      "installation": {
+        "$id": "22",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/UpdateMetadata",
+        "fileName": "006d997149.json",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [],
+      "releaseState": "live",
+      "releaseDate": "2026-11-10T16:02:11Z",
+      "secureEulaUrl": "",
+      "semanticVersion": "2.0.0",
+      "displayVersion": "2.00",
+      "containsCriticalFixVersion": false
+    }
+  ],
+  "accessLevel": "live"
+}

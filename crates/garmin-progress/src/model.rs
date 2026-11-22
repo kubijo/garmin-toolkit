@@ -1,5 +1,6 @@
 //! Shared aggregation of operation progress; renderers consume this observation model.
 
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -78,7 +79,7 @@ impl StageView {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationView {
     pub stage: Option<OperationStage>,
     pub state: Option<ProgressState>,
@@ -161,7 +162,50 @@ pub struct ProgressModel {
     items: Vec<ItemView>,
 }
 
+/// Portable view of the dashboard, including events completed between client redraws.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Transcript {
+    pub stages: Vec<StageLine>,
+    pub history: Vec<OperationView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageLine {
+    pub stage: OperationStage,
+    pub state: Option<ProgressState>,
+    pub amount: ProgressAmount,
+    pub label: String,
+    pub path: Option<String>,
+}
+
 impl ProgressModel {
+    #[must_use]
+    pub fn transcript(&self) -> Transcript {
+        let stages = self
+            .stages
+            .iter()
+            .map(|(stage, aggregate)| {
+                // File byte counters advance between aggregate checkpoints.
+                let view = self
+                    .active()
+                    .filter(|item| item.stage == *stage)
+                    .max_by_key(|item| item.view.updated_at)
+                    .map_or(aggregate, |item| &item.view);
+                StageLine {
+                    stage: *stage,
+                    state: view.state,
+                    amount: view.amount,
+                    label: view.label.clone(),
+                    path: view.path.clone(),
+                }
+            })
+            .collect();
+        Transcript {
+            stages,
+            history: self.history.iter().cloned().collect(),
+        }
+    }
+
     #[must_use]
     pub fn new(stages: &[OperationStage], initial: &str) -> Self {
         Self {

@@ -165,6 +165,26 @@ impl Color {
             alpha,
         ))
     }
+
+    /// Apply an accent's hue at this surface's lightness, capped at the chroma of both colors.
+    #[must_use]
+    pub fn tinted_by(self, accent: Self) -> Self {
+        let surface: Oklch = Srgba::from(self.0)
+            .into_format::<f32, f32>()
+            .color
+            .into_color();
+        let tint: Oklch = Srgba::from(accent.0)
+            .into_format::<f32, f32>()
+            .color
+            .into_color();
+        let color = Oklch::new(surface.l, surface.chroma.min(tint.chroma), tint.hue);
+        Self(
+            gamut_mapped_srgb(color.into_color())
+                .with_alpha(f32::from(self.as_rgba()[3]) / 255.0)
+                .into_format::<u8, u8>()
+                .into(),
+        )
+    }
 }
 
 impl From<Color> for Alpha<EncodedSrgb<u8>> {

@@ -3,6 +3,7 @@
 mod backup;
 mod device_state;
 mod download;
+pub mod firmware;
 mod host;
 mod install;
 mod mounted_install;
@@ -28,8 +29,10 @@ pub use install::{
 pub use mounted_install::{
     AssistedRecoveryPlan, AssistedRecoveryReport, EmptyUpload, MountedInstallError,
     MountedMtpPreflight, MountedUpdateRecoveryOutcome, MountedUpdateRecoveryReport,
-    UnprotectedMutationEvidence, apply_mounted_mtp_with_progress, approve_assisted_recovery,
-    preflight_mounted_mtp_update, recover_mounted_mtp_update, review_assisted_recovery,
+    UnprotectedMutationEvidence, UpdateTransactionMatch, apply_mounted_mtp_with_progress,
+    approve_assisted_recovery, match_update_transaction, preflight_mounted_mtp_update,
+    recover_mounted_mtp_update, review_assisted_recovery, same_recovery_history,
+    update_is_committed,
 };
 pub use plan::{
     BackupPolicy, DownloadSpec, UPDATE_PLAN_SCHEMA_VERSION, UpdatePlan, UpdatePlanError,

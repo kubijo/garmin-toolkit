@@ -11,8 +11,8 @@ Open Garmin Toolkit once so Finder discovers it. Use **Open With → Garmin Tool
 2. While the app is running. The preview should open in the existing window.
 3. While `result/bin/garmin-desktop` is running from a terminal. The preview should open in that instance.
 
-Dismiss each preview between attempts. On a fresh installation, verify that the preview opens before any profile
-exists. Click **Choose a profile**, create one, and confirm the import once the preview shows the destination.
+Dismiss each preview between attempts. On a fresh installation, verify that the preview opens before any profile exists.
+Click **Choose a profile**, create one, and confirm the import once the preview shows the destination.
 
 Regenerate the fixtures from the repository root with a fresh output directory:
 

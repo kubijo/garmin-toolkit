@@ -13,6 +13,8 @@ pub(super) struct Device {
     pub(super) id: u32,
     #[serde(rename = "MassStorageMode")]
     pub(super) mass_storage_mode: MassStorageMode,
+    #[serde(default, rename = "Extensions")]
+    pub(super) extensions: Extensions,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,8 +37,35 @@ pub(super) struct MassStorageMode {
 pub(super) enum MassStorageEntry {
     DataType(DataType),
     UpdateFile(UpdateFile),
+    Extensions(Extensions),
     #[serde(other)]
     Unsupported,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct Extensions {
+    #[serde(default, rename = "UpdatesToInstallLocations")]
+    pub(super) locations: InstallLocations,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct InstallLocations {
+    #[serde(default, rename = "Update")]
+    pub(super) updates: Vec<StorageRule>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct StorageRule {
+    #[serde(rename = "StorageDesc")]
+    pub(super) storage: Option<String>,
+    #[serde(default, rename = "PartNumbers")]
+    pub(super) parts: PartNumbers,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct PartNumbers {
+    #[serde(default, rename = "PartNumber")]
+    pub(super) values: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +74,10 @@ pub(super) struct UpdateFile {
     pub(super) part_number: String,
     #[serde(rename = "Version")]
     pub(super) version: MapVersion,
+    #[serde(rename = "Path")]
+    pub(super) path: Option<String>,
+    #[serde(rename = "FileName")]
+    pub(super) file_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

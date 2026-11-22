@@ -6,6 +6,9 @@ width after formatting.
 
 Use an 8 px spacing scale: multiples of 8 px, with 4 px or 2 px for compact gaps.
 
+Use shared `garmin-ui` controls in both graphical hosts. Put hit areas, cursor and keyboard behavior, accessibility
+semantics, and internal spacing in the component. Add each reusable control to rs-gallery with separate variant stages.
+
 Use typed quantities throughout code we control, including calculations, snapshots, digest inputs and formatters.
 Convert to raw numbers at external interfaces that require them. Prefer serialization on the type when it can preserve
 the required wire format. Use `std::time::Duration` as the design reference for quantity types: unit-named constructors
@@ -16,6 +19,9 @@ Keep gallery `.scene.rs` files beside the implementation they demonstrate, using
 `infra/gallery` owns the host, discovery configuration, and capture recipes, not component scenes.
 
 Use the edit tool for file changes. Do not create or rewrite content through shell/Python heredocs.
+
+Keep fixed XML and JSON test documents in fixture files. Build variable documents with a serializer or a format-aware
+builder. This applies to test helpers as well as production code.
 
 In Nix, inherit used `builtins` attributes at the top of the scope instead of calling `builtins.name`.
 

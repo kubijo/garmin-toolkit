@@ -12,6 +12,7 @@ publish.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
 garmin-capture.workspace = true
+garmin-device.workspace = true
 garmin-model.workspace = true
 hex.workspace = true
 md-5.workspace = true
@@ -25,7 +26,6 @@ uuid.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
-garmin-device.workspace = true
 indoc.workspace = true
 quick-xml.workspace = true
 

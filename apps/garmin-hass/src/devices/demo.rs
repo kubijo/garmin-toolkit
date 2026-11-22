@@ -66,6 +66,10 @@ impl DemoSource {
 }
 
 impl Source for DemoSource {
+    fn simulated(&self) -> bool {
+        true
+    }
+
     fn device_connector(
         &mut self,
         key: &str,

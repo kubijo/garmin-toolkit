@@ -11,14 +11,26 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["demo"]
+demo = [
+    "dep:garmin-device",
+    "dep:garmin-fit",
+    "dep:garmin-importer",
+    "dep:garmin-model",
+    "dep:garmin-storage",
+    "dep:gpx-format",
+    "dep:thiserror",
+]
+
 [dependencies]
-garmin-device.workspace = true
-garmin-fit = { workspace = true, features = ["test-fixtures"] }
-garmin-importer.workspace = true
-garmin-model.workspace = true
-garmin-storage.workspace = true
-gpx-format.workspace = true
-thiserror.workspace = true
+garmin-device = { workspace = true, optional = true }
+garmin-fit = { workspace = true, optional = true, features = ["test-fixtures"] }
+garmin-importer = { workspace = true, optional = true }
+garmin-model = { workspace = true, optional = true }
+garmin-storage = { workspace = true, optional = true }
+gpx-format = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
 
 [dev-dependencies]
 futures-lite.workspace = true

@@ -80,6 +80,7 @@ impl Session {
                     activity: RemoteActivity {
                         id,
                         imported: false,
+                        original_unavailable: false,
                         sport: activity_type.as_deref().and_then(sport),
                         name: fact(summary.activity_name).unwrap_or_else(|| id.to_string()),
                         started_at: fact(summary.start_time_gmt),

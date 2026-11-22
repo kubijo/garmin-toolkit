@@ -8,20 +8,24 @@ scene_meta! { title: "Application / Shell" }
 const PRIMARY_DESTINATIONS: &[shell::Destination<'_>] = &[
     shell::Destination {
         label: "Overview",
+        badge: None,
         icon: icons::HOUSE,
     },
     shell::Destination {
         label: "Activities",
+        badge: None,
         icon: icons::ACTIVITY,
     },
     shell::Destination {
         label: "Courses",
+        badge: None,
         icon: icons::ROUTE,
     },
 ];
 
 const DEVICE_DESTINATIONS: &[shell::Destination<'_>] = &[shell::Destination {
     label: "Mock Cycle-o-Matic 9000",
+    badge: None,
     icon: icons::BICYCLE,
 }];
 
@@ -223,7 +227,7 @@ fn show_shell(
         },
         shell::NavigationGroup {
             label: Some("Attached devices"),
-            separated: false,
+            separated: true,
             destinations: DEVICE_DESTINATIONS,
         },
     ];
@@ -280,19 +284,19 @@ fn show_shell(
 }
 
 fn accent_examples(ui: &mut Ui) {
-    use garmin_ui::{Size, button, path, progress, radio};
+    use garmin_ui::{Size, button, checkbox, path, progress, radio_group};
     let id = ui.id().with("accent-examples");
     let (mut metric, mut checked, mut first) = ui
         .data(|data| data.get_temp::<(bool, bool, bool)>(id))
         .unwrap_or((true, true, true));
-    if let Some(value) = radio::show(
+    if let Some(value) = radio_group::show(
         ui,
         metric,
         &[
-            radio::Choice::new("Metric", true, "accent.metric"),
-            radio::Choice::new("Imperial", false, "accent.imperial"),
+            radio_group::Choice::new("Metric", true, "accent.metric"),
+            radio_group::Choice::new("Imperial", false, "accent.imperial"),
         ],
-        radio::Props {
+        radio_group::Props {
             label: "Units",
             helper: None,
             enabled: true,
@@ -300,10 +304,7 @@ fn accent_examples(ui: &mut Ui) {
     ) {
         metric = value;
     }
-    garmin_ui::theme::selected_control(ui, checked, |ui| {
-        ui.checkbox(&mut checked, "Selected checkbox")
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
-    });
+    checkbox::show(ui, &mut checked, "Selected checkbox");
     ui.add_space(8.0);
     if let Some(value) = button::group(
         ui,

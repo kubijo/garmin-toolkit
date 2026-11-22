@@ -1,5 +1,5 @@
 use super::{Action, Props};
-use crate::{Size, button, input, notification, radio, select};
+use crate::{Size, button, input, notification, radio_group, select};
 use egui::Ui;
 use garmin_i18n::format_message;
 use garmin_model::garmin_connect::sync::{Failure, Interval, Outcome, Snapshot, Unit};
@@ -46,14 +46,14 @@ fn show_scoped(ui: &mut Ui, props: &Props<'_>) -> Option<Action> {
     ui.add_space(16.0);
     let off = format_message!(props.intl, default_message: "Off");
     let every = format_message!(props.intl, default_message: "Every");
-    if let Some(enabled) = radio::show(
+    if let Some(enabled) = radio_group::show(
         ui,
         draft.enabled,
         &[
-            radio::Choice::new(&off, false, "connect.sync.off"),
-            radio::Choice::new(&every, true, "connect.sync.every"),
+            radio_group::Choice::new(&off, false, "connect.sync.off"),
+            radio_group::Choice::new(&every, true, "connect.sync.every"),
         ],
-        radio::Props {
+        radio_group::Props {
             label: "",
             helper: None,
             enabled: !props.disabled,
@@ -166,15 +166,10 @@ pub(crate) fn feedback(ui: &mut Ui, intl: &garmin_i18n::Intl, snapshot: &Snapsho
     }
     let (kind, title, mut detail) = match &snapshot.state.outcome {
         Outcome::Never | Outcome::Running => return false,
-        Outcome::Complete { unavailable: 0 } => (
+        Outcome::Complete { .. } => (
             Kind::Success,
             format_message!(intl, default_message: "Sync completed"),
-            format_message!(intl, default_message: "Activities and FIT files are cached. Imports remain manual."),
-        ),
-        Outcome::Complete { unavailable } => (
-            Kind::Warning,
-            format_message!(intl, default_message: "Sync completed with unavailable files"),
-            format_message!(intl, default_message: "{count, plural, one {# FIT file is unavailable.} other {# FIT files are unavailable.}} Imports remain manual.", values: { count: *unavailable as u64 }),
+            format_message!(intl, default_message: "Activity summaries are up to date."),
         ),
         Outcome::Cancelled => (
             Kind::Information,

@@ -7,6 +7,7 @@ pub mod connect_sync;
 pub mod course_transfer;
 pub mod deployment;
 pub mod devices;
+pub mod firmware;
 pub mod jobs;
 pub mod maps;
 pub mod paths;

@@ -35,6 +35,10 @@ bytes; choosing a device does not pair or reassign that device. Cleanup has a se
 bytes and the exact retained path. `CourseTransferProgress` exposes only bounded byte counts and a finalizing flag for
 the active transfer; raw device events and paths remain on the host.
 
+Firmware snapshots expose component versions, transfer progress and receipt observations. Review and recovery actions
+carry host-issued approval IDs. Transfer sizes use byte counts and selections use fixed-width component indices. The
+host owns device writes, recovery journals and download URLs.
+
 ```grit
 language rust
 
@@ -70,6 +74,14 @@ or {
     `Choice`,
     `CatalogService`,
     `Component`,
+    `AvailableUpdate`,
+    `Review`,
+    `RetainedTransfer`,
+    `ReceiptStatus`,
+    `TransferProgress`,
+    `Observation`,
+    `InstalledStatus`,
+    `Inspection`,
     `Plan`,
     `StorageRequirement`,
     `Recovery`,

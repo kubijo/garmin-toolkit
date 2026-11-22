@@ -10,11 +10,11 @@ Toolkit primitives and roles.
   parents. Components use `garmin-color` semantic roles, never swatch grades.
 - Primary buttons use action blue; links, focus, progress, and active destinations use accent roles. Selection and open
   controls use neutral layers. Permanent panes use layers/dividers; shadows belong to menus, popovers, dialogs, toasts.
-- The selected profile supplies selection markers, radio/checkbox marks, selected segmented options, routes, and
-  operation progress. Markers are opaque and adjusted to at least 3:1 contrast against their surface. Segmented options
-  use neutral fills and text with an accent underline. Profile styling is scoped to the shell's UI tree. Primary
-  actions, links, focus, status colors, chart metrics, and route metric gradients retain their semantic colors. Login
-  profile cards keep each profile's own accent.
+- The selected profile supplies selection markers, radio dots, checked and mixed checkbox fills, selected segmented
+  options, routes, and operation progress. Markers are opaque and adjusted to at least 3:1 contrast against their
+  surface. Segmented options use neutral fills and text with an accent underline. Profile styling is scoped to the
+  shell's UI tree. Primary actions, links, focus, status colors, chart metrics, and route metric gradients retain their
+  semantic colors. Login profile cards keep each profile's own accent.
 - Spacing uses multiples of 8 logical pixels, with 4 or 2 for compact gaps. Rows: 32; controls: 40; prominent controls:
   48\. Default desktop page inset: 24; dense workspaces: 16. Narrow layouts reduce insets deliberately.
 - Controls, rows, cards, panes, menus, dialogs, and toasts are square. Radius tokens stay centralized; avatars/status
@@ -37,8 +37,22 @@ destination order and semantics. The navigation trailing edge is the shell divid
 
 ### Pages, cards, and forms
 
-Two-value selections use visible radio groups; do not hide either choice in a dropdown. Use `radio::show` for shared
-labels, helper text, optional leading images, wrapping, and enabled/disabled interaction cues.
+Use the `garmin-ui` controls in desktop and browser views. The rs-gallery **Components** catalog exercises their states.
+
+- Use `button::Props` for actions, `IconProps` for named icon buttons, and `OverlayProps` for compact map controls.
+- Use `checkbox::show` for independent selections and `show_mixed` for a partial selection. Align supporting rows with
+  `checkbox::LABEL_INSET`.
+- Use `toggle::show` for on/off settings that take effect immediately.
+- Use `radio_group::show` for mutually exclusive named options. The group renders `radio::Choice`, wraps on narrow
+  surfaces, and supports arrow keys. Use `button::group` for segmented navigation.
+- Use `accordion::inline` for expandable details within an item and `accordion::show` for a full-width section.
+- Use `slider::editable` for numeric input, `slider::track` for a labeled track, and `slider::stops` for named choices.
+- Use `action_row::show` for independent buttons with an 8 px gap. The first action sits at the requested edge and moves
+  to the top when the buttons stack.
+
+Controls own their hit area, cursor, focus treatment, and internal spacing. Keep the label inside the interactive
+target. Disable the whole control when its action is unavailable. The
+[control captures](../../infra/gallery/captures/controls.capture.toml) cover dark and light themes.
 
 One page title, aligned content, optional contextual actions. Cards group objects or forms; avoid nested cards and
 low-information full-width slabs. Form labels sit above filled/outlined controls, helper/error text below. Destructive
@@ -74,6 +88,13 @@ region, calendar, week-start, numbering, and hour-cycle preferences independentl
 Inline feedback stays beside content; toasts report events; dialogs request decisions. Severity uses icons/words as well
 as color. Animations are short, interruptible, and optional for comprehension. Toast surfaces/rails are square and clip
 below native window controls, including shadows and animation. Maintained set: `notifications.capture.toml`.
+
+Use `progress_indicator` for workflow steps and `progress` for the amount of work done within a step. The indicator
+stacks steps on narrow surfaces. Interactive callers decide whether to navigate when a step is selected. The
+[gallery capture set](../../infra/gallery/captures/progress-indicator.capture.toml) covers both layouts.
+
+Use `skeleton::Skeleton` for loading placeholders. Each caller supplies the rectangle size or circle diameter. The
+component owns the animated sweep and renders a static shape when egui animations are disabled.
 
 ## Verification
 

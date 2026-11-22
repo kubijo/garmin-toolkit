@@ -53,6 +53,7 @@ pub enum CollectionState<'a> {
 pub enum Action {
     BrowseFiles,
     ManageMaps,
+    ManageFirmware,
     Pair,
     Refresh,
 }
@@ -397,6 +398,19 @@ fn controls(
             crate::semantics::target(ui, &response, "device.maps");
             if response.clicked() {
                 action = Some(Action::ManageMaps);
+            }
+            let response = button::Props {
+                label: &format_message!(intl, default_message: "Device updates"),
+                icon: Some(icons::DOWNLOAD_SIMPLE),
+                kind: button::Kind::Secondary,
+                size: Size::Medium,
+                width: button::Width::Fit,
+                enabled: snapshot.inspection == InspectionState::Ready,
+            }
+            .show(ui);
+            crate::semantics::target(ui, &response, "device.firmware");
+            if response.clicked() {
+                action = Some(Action::ManageFirmware);
             }
         }
         action

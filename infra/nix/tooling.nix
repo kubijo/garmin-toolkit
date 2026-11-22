@@ -25,6 +25,9 @@ let
       "crates/garmin-ui/src/activity/map_composition.wgsl"
       "infra/javascript/fixtures/*.pbf.hex"
       "infra/javascript/fixtures/*.pbf"
+      # File-association tests open these binary recordings and activity packages as shipped.
+      "infra/fixtures/file-associations/*.fit"
+      "infra/fixtures/file-associations/*.garmin-activity"
       # Biome's HTML parser rewrites Askama block delimiters;
       # Askama compiles these templates.
       "crates/garmin-diagnostics/templates/*.html"

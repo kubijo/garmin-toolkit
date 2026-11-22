@@ -1,0 +1,186 @@
+{
+  "$id": "1",
+  "updates": [
+    {
+      "$id": "2",
+      "partNumber": "006-DB775-00",
+      "productName": "Mobility and Move Alert Videos",
+      "version": "1.00",
+      "isPrimaryFirmware": false,
+      "dataType": "Firmware",
+      "description": "260x260, White BG",
+      "locale": null,
+      "severity": "Recommended",
+      "releaseNotes": [
+        {
+          "$id": "3",
+          "version": "1.00",
+          "changeLog": [
+            "Initial release."
+          ],
+          "semanticVersion": "1.0.0",
+          "isCriticalFixVersion": false
+        }
+      ],
+      "eulaUrl": "https://example.invalid/garmin/fenix-8-resource-1",
+      "deliverable": {
+        "$id": "4",
+        "downloadUrl": "https://example.invalid/garmin/fenix-8-resource-2",
+        "md5": "bdfce0b60eec65f73ee713a81f60036a",
+        "sizeInBytes": 13982715,
+        "secureDownloadUrl": "https://example.invalid/garmin/fenix-8-resource-2"
+      },
+      "installation": {
+        "$id": "5",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/RemoteSW",
+        "fileName": "006-DB775-00.zvp",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [
+        "LTE",
+        "BTC",
+        "BLE"
+      ],
+      "releaseState": "live",
+      "releaseDate": "2025-07-24T21:26:57Z",
+      "secureEulaUrl": "https://example.invalid/garmin/fenix-8-resource-1",
+      "semanticVersion": "1.0.0",
+      "displayVersion": "1.00",
+      "containsCriticalFixVersion": false
+    },
+    {
+      "$id": "6",
+      "partNumber": "006-D9971-49",
+      "productName": "TTF Binary Data, NotoSansMath Regular",
+      "version": "2.00",
+      "isPrimaryFirmware": false,
+      "dataType": "Firmware",
+      "description": "",
+      "locale": null,
+      "severity": "Recommended",
+      "releaseNotes": [
+        {
+          "$id": "7",
+          "version": "2.00",
+          "changeLog": [
+            "NA"
+          ],
+          "semanticVersion": "2.0.0",
+          "isCriticalFixVersion": false
+        }
+      ],
+      "eulaUrl": "https://example.invalid/garmin/fenix-8-resource-1",
+      "deliverable": {
+        "$id": "8",
+        "downloadUrl": "https://example.invalid/garmin/fenix-8-resource-3",
+        "md5": "85daf4fb63a7e73fd9f662fdd9fd361b",
+        "sizeInBytes": 1004136,
+        "secureDownloadUrl": "https://example.invalid/garmin/fenix-8-resource-3"
+      },
+      "installation": {
+        "$id": "9",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/ExtData",
+        "fileName": "006-D9971-49.bin",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [],
+      "releaseState": "live",
+      "releaseDate": "2026-11-10T16:02:11Z",
+      "secureEulaUrl": "https://example.invalid/garmin/fenix-8-resource-1",
+      "semanticVersion": "2.0.0",
+      "displayVersion": "2.00",
+      "containsCriticalFixVersion": false
+    },
+    {
+      "$id": "10",
+      "partNumber": "006-DB775-00-META",
+      "productName": "Mobility and Move Alert Videos",
+      "version": "1.00",
+      "isPrimaryFirmware": false,
+      "dataType": "UpdateMetadata",
+      "description": "260x260, White BG",
+      "locale": null,
+      "severity": "Critical",
+      "releaseNotes": [],
+      "eulaUrl": "",
+      "deliverable": {
+        "$id": "11",
+        "downloadUrl": "https://example.invalid/garmin/fenix-8-resource-4",
+        "md5": "c97b78412aa9a5ce4df82c6c80949cf5",
+        "sizeInBytes": 115,
+        "secureDownloadUrl": "https://example.invalid/garmin/fenix-8-resource-4"
+      },
+      "installation": {
+        "$id": "12",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/UpdateMetadata",
+        "fileName": "006db77500.json",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [
+        "LTE",
+        "BTC",
+        "BLE"
+      ],
+      "releaseState": "live",
+      "releaseDate": "2025-07-24T21:26:57Z",
+      "secureEulaUrl": "",
+      "semanticVersion": "1.0.0",
+      "displayVersion": "1.00",
+      "containsCriticalFixVersion": false
+    },
+    {
+      "$id": "13",
+      "partNumber": "006-D9971-49-META",
+      "productName": "TTF Binary Data, NotoSansMath Regular",
+      "version": "2.00",
+      "isPrimaryFirmware": false,
+      "dataType": "UpdateMetadata",
+      "description": "",
+      "locale": null,
+      "severity": "Critical",
+      "releaseNotes": [],
+      "eulaUrl": "",
+      "deliverable": {
+        "$id": "14",
+        "downloadUrl": "https://example.invalid/garmin/fenix-8-resource-5",
+        "md5": "2b7e3fa27f820cd38c99e8bd445b4c65",
+        "sizeInBytes": 115,
+        "secureDownloadUrl": "https://example.invalid/garmin/fenix-8-resource-5"
+      },
+      "installation": {
+        "$id": "15",
+        "isProductInstalled": true,
+        "isReinstall": false,
+        "path": "Garmin/UpdateMetadata",
+        "fileName": "006d997149.json",
+        "order": 100,
+        "instructions": [],
+        "isRestartRequired": false,
+        "isDelta": false
+      },
+      "deliveryRestrictions": [],
+      "releaseState": "live",
+      "releaseDate": "2026-11-10T16:02:11Z",
+      "secureEulaUrl": "",
+      "semanticVersion": "2.0.0",
+      "displayVersion": "2.00",
+      "containsCriticalFixVersion": false
+    }
+  ],
+  "accessLevel": "live"
+}

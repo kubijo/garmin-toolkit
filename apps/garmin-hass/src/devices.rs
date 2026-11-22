@@ -13,7 +13,7 @@ use garmin_service_api::{
     AvatarUpload, DeviceBrowserRequest, DeviceBrowserTarget, DeviceBrowserUpload,
     DeviceCatalogEntry, DeviceCatalogEntryKind, DeviceCatalogSnapshot, DeviceCatalogStorage,
     DeviceFitImportOutcome, DeviceFitImportPlan, DeviceFitImportStatus, DeviceFitPreview,
-    DeviceSnapshot, DownloadTicket, ProfileAvatarSnapshot, ProfileSnapshot,
+    DeviceSnapshot, DownloadTicket, InspectionState, ProfileAvatarSnapshot, ProfileSnapshot,
 };
 use garmin_services::{
     Application, AvatarImportRequest, FitImportRequest, FitImportResult, ImportDisposition,
@@ -173,6 +173,17 @@ impl Drop for FitImportLease {
 }
 
 pub(super) trait Source: Send {
+    fn simulated(&self) -> bool {
+        false
+    }
+
+    /// Invalidate an attachment's firmware session as soon as the discovery worker observes its removal.
+    fn observe_firmware_attachments(
+        &mut self,
+        _operations: std::sync::Weak<garmin_services::maps::Operations>,
+    ) {
+    }
+
     fn device_connector(
         &mut self,
         _device_key: &str,
@@ -227,6 +238,7 @@ struct PendingActivityPackage {
 #[derive(Clone)]
 pub(super) struct Host {
     source: Arc<Mutex<Box<dyn Source>>>,
+    simulated: bool,
     snapshots: Arc<rch::watch::Sender<Vec<DeviceSnapshot>>>,
     downloads: crate::downloads::Downloads,
     activity_export_gate: Arc<tokio::sync::Mutex<()>>,
@@ -262,7 +274,6 @@ impl Host {
         deployment: Arc<Deployment>,
         bytes_per_second: Option<NonZeroByteRate>,
     ) -> Arc<Self> {
-        let (snapshots, _receiver) = rch::watch::channel(source.snapshot());
         let operations = SnapshotOperations::new(
             Arc::clone(&deployment),
             garmin_storage::snapshot::Limits::default(),
@@ -273,6 +284,8 @@ impl Host {
             garmin_services::maps::Operations::new(Arc::clone(&deployment))
                 .with_simulation_write_rate(bytes_per_second),
         );
+        source.observe_firmware_attachments(Arc::downgrade(&maps));
+        let (snapshots, _receiver) = rch::watch::channel(source.snapshot());
         Arc::new(Self {
             routes: garmin_services::routes::operations::RouteOperations::beside_host(Arc::clone(
                 &deployment,
@@ -290,6 +303,7 @@ impl Host {
             connect_refresh_cancel: Arc::default(),
             #[cfg(feature = "demo")]
             integration_gate: Arc::new(Mutex::new(None)),
+            simulated: source.simulated(),
             source: Arc::new(Mutex::new(source)),
             snapshots: Arc::new(snapshots),
             downloads: crate::downloads::Downloads::default(),
@@ -355,9 +369,60 @@ impl Host {
     async fn refresh(&self) {
         let _guard = self.refresh_gate.lock().await;
         match source_snapshot(Arc::clone(&self.source)).await {
-            Ok(next) => publish_snapshot(&self.snapshots, next),
+            Ok(mut next) => {
+                self.update_firmware_snapshots(&mut next).await;
+                publish_snapshot(&self.snapshots, next);
+            }
             Err(error) => tracing::warn!(%error, "device snapshot worker failed"),
         }
+    }
+
+    async fn update_firmware_snapshots(&self, devices: &mut [DeviceSnapshot]) {
+        for previous in self.snapshots.borrow().iter() {
+            if !devices.iter().any(|device| device.key == previous.key) {
+                self.maps.forget_firmware(&previous.key);
+            }
+        }
+        for device in devices {
+            let inspected = device.inspection != InspectionState::Running;
+            let session = match self.maps.firmware_session(&device.key) {
+                Some(session) => session,
+                None if inspected => {
+                    let Ok(Ok(connector)) = self.connector(device.key.clone()).await else {
+                        continue;
+                    };
+                    let Ok(session) = self
+                        .maps
+                        .open_firmware(device.key.clone(), connector, self.simulated)
+                        .await
+                    else {
+                        continue;
+                    };
+                    session
+                }
+                None => continue,
+            };
+            if inspected {
+                session.check_on_attachment();
+            }
+            device.firmware_update = session.available_update();
+        }
+    }
+
+    async fn connector(
+        &self,
+        key: String,
+    ) -> Result<Result<Arc<dyn garmin_services::maps::device::Connector>, String>, rtc::CallError>
+    {
+        let source = Arc::clone(&self.source);
+        tokio::task::spawn_blocking(move || {
+            source
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .device_connector(&key)
+        })
+        .await
+        .map_err(|_| rtc::CallError::NotServed)
     }
 
     pub(super) fn take_download(&self, token: Uuid) -> Option<crate::downloads::Download> {
@@ -660,17 +725,7 @@ impl ApplicationService for Host {
         device_key: String,
     ) -> Result<Result<garmin_service_api::maps::MapServiceClient, String>, rtc::CallError> {
         let _lease = self.application().await?;
-        let source = Arc::clone(&self.source);
-        let key = device_key.clone();
-        let connector = tokio::task::spawn_blocking(move || {
-            source
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .device_connector(&key)
-        })
-        .await
-        .map_err(|_| rtc::CallError::NotServed)?;
-        let connector = match connector {
+        let connector = match self.connector(device_key.clone()).await? {
             Ok(connector) => connector,
             Err(error) => return Ok(Err(error)),
         };
@@ -686,6 +741,32 @@ impl ApplicationService for Host {
             _,
             remoc::codec::Default,
         >::new(Arc::new(session));
+        tokio::spawn(server.serve());
+        Ok(Ok(client))
+    }
+
+    async fn firmware(
+        &self,
+        device_key: String,
+    ) -> Result<Result<garmin_service_api::firmware::FirmwareServiceClient, String>, rtc::CallError>
+    {
+        use garmin_service_api::firmware::FirmwareServiceServerShared;
+        let _lease = self.application().await?;
+        let _attachment = self.refresh_gate.lock().await;
+        let connector = match self.connector(device_key.clone()).await? {
+            Ok(connector) => connector,
+            Err(error) => return Ok(Err(error)),
+        };
+        let session = match self
+            .maps
+            .open_firmware(device_key, connector, self.simulated)
+            .await
+        {
+            Ok(session) => session,
+            Err(error) => return Ok(Err(error.to_string())),
+        };
+        let (server, client) =
+            FirmwareServiceServerShared::<_, remoc::codec::Default>::new(Arc::new(session));
         tokio::spawn(server.serve());
         Ok(Ok(client))
     }
@@ -1905,15 +1986,14 @@ fn publish_snapshot(
 
 fn device_snapshot(presentation: garmin_device::attachments::Presentation) -> DeviceSnapshot {
     use garmin_device::attachments;
-    use garmin_service_api::{
-        DeviceCapability, DeviceDataType, InspectionState, TransferDirection,
-    };
+    use garmin_service_api::{DeviceCapability, DeviceDataType, TransferDirection};
     DeviceSnapshot {
         key: presentation.key,
         name: presentation.name,
         identifier: presentation
             .identifier
             .map(garmin_device::DeviceId::into_u32),
+        firmware_update: None,
         software_version: presentation
             .software_version
             .map(garmin_device::SoftwareVersion::into_hundredths),
@@ -2414,6 +2494,109 @@ mod tests {
 
     #[cfg(feature = "demo")]
     mod maps;
+
+    #[cfg(feature = "demo")]
+    #[tokio::test]
+    async fn firmware_lookup_shares_the_review_across_host_connections() {
+        use garmin_fixtures::firmware::{FENIX_24_20, FENIX_GSP_22_44};
+        use garmin_service_api::firmware::{Action, FirmwareService as _, InstalledStatus, Phase};
+        let directory = tempfile::tempdir().unwrap();
+        let storage = crate::prepare_deployment(directory.path()).await.unwrap();
+        let host = Host::new(demo_source(&directory), storage);
+        std::fs::write(
+            directory.path().join("device/Garmin/GarminDevice.xml"),
+            FENIX_GSP_22_44.inventory,
+        )
+        .unwrap();
+        let devices = host.watch_devices().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                host.refresh().await;
+                if let Some(update) = &devices.borrow().unwrap()[0].firmware_update {
+                    assert_eq!(update.version, "24.20");
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let client = host
+            .firmware(DEMO_DEVICE_KEY.into())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut watch = client.watch().await.unwrap();
+        let available = watch.borrow_and_update().unwrap().clone();
+        let Phase::Available(components) = &available.phase else {
+            panic!("expected a catalog");
+        };
+        let bundle = components
+            .iter()
+            .position(|component| component.system_bundle)
+            .unwrap();
+        let reviewed = client
+            .review(available.revision, vec![u32::try_from(bundle).unwrap()])
+            .await
+            .unwrap()
+            .unwrap();
+        drop(client);
+        host.refresh().await;
+        let reconnected = host
+            .with_control(None)
+            .firmware(DEMO_DEVICE_KEY.into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            *reconnected.watch().await.unwrap().borrow().unwrap(),
+            reviewed
+        );
+        let approval = reviewed.review.unwrap().approval;
+        reconnected
+            .act(reviewed.revision, Action::Stage(approval))
+            .await
+            .unwrap()
+            .unwrap();
+        let ready = tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let state = watch.borrow_and_update().unwrap().clone();
+                match state.phase {
+                    Phase::ReadyToEject { .. } => break state,
+                    Phase::Failed(reason) => panic!("{reason}"),
+                    _ => watch.changed().await.unwrap(),
+                }
+            }
+        })
+        .await
+        .unwrap();
+        std::fs::write(
+            directory.path().join("device/Garmin/GarminDevice.xml"),
+            FENIX_24_20.inventory,
+        )
+        .unwrap();
+        reconnected
+            .act(ready.revision, Action::Inspect)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let state = watch.borrow_and_update().unwrap().clone();
+                match state.phase {
+                    Phase::Reconnected(observations) => {
+                        assert_eq!(observations.len(), 1);
+                        assert_eq!(observations[0].status, InstalledStatus::Confirmed);
+                        break;
+                    }
+                    Phase::Failed(reason) => panic!("{reason}"),
+                    _ => watch.changed().await.unwrap(),
+                }
+            }
+        })
+        .await
+        .unwrap();
+    }
 
     #[tokio::test]
     async fn browser_avatar_upload_uses_the_application_importer() {

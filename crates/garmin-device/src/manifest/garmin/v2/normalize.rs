@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
-use garmin_model::map::{InstalledMapFile, MapVersion};
+use garmin_model::map::MapVersion;
 
 use crate::manifest::{
-    DataType, DeviceId, DeviceModel, FileCapability, ManifestError, ManifestFormat, ManifestQuirk,
-    OperationHandle, ParsedManifest, SoftwareVersion, TransferDirection,
+    DataType, DeviceId, DeviceModel, FileCapability, InstalledUpdateFile, ManifestError,
+    ManifestFormat, ManifestQuirk, OperationHandle, ParsedManifest, SoftwareVersion,
+    TransferDirection,
 };
 
-use super::wire::{Device, File, MassStorageEntry};
+use super::wire::{Device, File, MassStorageEntry, StorageRule, UpdateFile};
+use crate::manifest::model::UpdateInventory;
 
 pub(super) fn normalize(raw: Device, xml: &str) -> Result<ParsedManifest, ManifestError> {
     let Device {
@@ -15,7 +17,9 @@ pub(super) fn normalize(raw: Device, xml: &str) -> Result<ParsedManifest, Manife
         model,
         id,
         mass_storage_mode,
+        extensions,
     } = raw;
+    let mut storage_rules = extensions.locations.updates;
     let mut data_types = Vec::new();
     let mut update_files = Vec::new();
     let mut saw_update_file = false;
@@ -30,22 +34,15 @@ pub(super) fn normalize(raw: Device, xml: &str) -> Result<ParsedManifest, Manife
                 saw_update_file = true;
                 update_files.push(update_file);
             }
+            MassStorageEntry::Extensions(extensions) => {
+                storage_rules.extend(extensions.locations.updates);
+            }
             MassStorageEntry::Unsupported => {}
         }
     }
     let quirks = interleaved
         .then_some(ManifestQuirk::InterleavedMassStorageEntries)
         .into_iter()
-        .collect();
-    let installed_map_files = update_files
-        .into_iter()
-        .filter_map(|file| {
-            let part_number = file.part_number.trim();
-            (!part_number.is_empty()).then(|| InstalledMapFile {
-                part_number: part_number.to_owned(),
-                version: MapVersion::new(file.version.major, file.version.minor),
-            })
-        })
         .collect();
     let mut capabilities: Vec<FileCapability> = Vec::new();
     let mut indexes: HashMap<(DataType, TransferDirection), usize> = HashMap::new();
@@ -86,8 +83,48 @@ pub(super) fn normalize(raw: Device, xml: &str) -> Result<ParsedManifest, Manife
             SoftwareVersion::from_hundredths(model.software_version),
         ),
         capabilities,
-        installed_map_files,
+        update_inventory(update_files, storage_rules),
     ))
+}
+
+fn update_inventory(
+    update_files: Vec<UpdateFile>,
+    storage_rules: Vec<StorageRule>,
+) -> UpdateInventory {
+    let mut inventory = UpdateInventory::default();
+    for rule in storage_rules {
+        if let Some(storage) = rule
+            .storage
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            for part in rule.parts.values {
+                inventory
+                    .storages_by_part
+                    .entry(part.trim().to_owned())
+                    .or_default()
+                    .push(storage.to_owned());
+            }
+        }
+    }
+    for names in inventory.storages_by_part.values_mut() {
+        names.sort();
+        names.dedup();
+    }
+    inventory.files = update_files
+        .into_iter()
+        .filter_map(|file| {
+            let part_number = file.part_number.trim();
+            (!part_number.is_empty()).then(|| InstalledUpdateFile {
+                part_number: part_number.to_owned(),
+                version: MapVersion::new(file.version.major, file.version.minor),
+                path: file.path,
+                file_name: file.file_name,
+            })
+        })
+        .collect();
+    inventory
 }
 
 fn supported_data_type(name: &str) -> Option<DataType> {
@@ -232,6 +269,7 @@ mod tests {
             },
             id: 123_456,
             mass_storage_mode: wire::MassStorageMode { entries },
+            extensions: wire::Extensions::default(),
         }
     }
 
@@ -264,6 +302,8 @@ mod tests {
         wire::MassStorageEntry::UpdateFile(wire::UpdateFile {
             part_number: "006-D0000-00".to_owned(),
             version: wire::MapVersion { major: 1, minor: 2 },
+            path: None,
+            file_name: None,
         })
     }
 }

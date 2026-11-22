@@ -18,7 +18,7 @@ use super::{
     require_running, validate_journal, verify_local_payload,
 };
 use crate::host::{HostFilesystem as _, SystemFilesystem};
-use crate::{BackupPolicy, DeviceTransactionKind, DeviceTransactionStore, PortableTransaction};
+use crate::{BackupPolicy, DeviceTransactionStore, PortableTransaction};
 
 /// An empty object that ordinary recovery cannot match to a payload prefix.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -67,7 +67,7 @@ pub async fn review_assisted_recovery<D: DeviceWrite + ?Sized>(
     device: &D,
     progress: &ProgressReporter,
 ) -> Result<Option<AssistedRecoveryPlan>, MountedInstallError> {
-    let (journal, transaction) = review_journal(root, identity, device).await?;
+    let (journal, transaction) = review_journal(root, identity, device, progress).await?;
     let canonical_root = tokio::fs::canonicalize(root).await?;
     let checkpoints = load_rollback_checkpoints(&journal, root).await?;
     verify_backups(&journal, root).await?;
@@ -129,6 +129,7 @@ async fn review_journal<D: DeviceWrite + ?Sized>(
     root: &Path,
     identity: &str,
     device: &D,
+    progress: &ProgressReporter,
 ) -> Result<(MountedTransactionJournal, PortableTransaction), MountedInstallError> {
     let path = recovery_file(root, "mounted-update/transaction/000000-prepared.json").await?;
     let journal = read_journal(&path).await?;
@@ -144,14 +145,14 @@ async fn review_journal<D: DeviceWrite + ?Sized>(
             return Err(MountedInstallError::InvalidJournal);
         }
     }
-    let store = DeviceTransactionStore::open(device).await?;
+    let store = DeviceTransactionStore::open(device)
+        .await?
+        .with_progress(progress);
     let transaction = store
-        .active(identity)
+        .active_prepared(identity)
         .await?
         .ok_or(MountedInstallError::InvalidJournal)?;
-    if transaction.kind() != DeviceTransactionKind::Update
-        || transaction.plan_digest() != journal.plan_digest
-    {
+    if !journal.matches_transaction(&transaction)? {
         return Err(MountedInstallError::RecoveryPlanMismatch);
     }
     Ok((journal, transaction))

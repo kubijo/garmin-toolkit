@@ -21,6 +21,7 @@ fn details(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         key: "mock-watch".to_owned(),
         name: "Mock Watch-o-Matic 9000".to_owned(),
         identifier: (state == 0).then_some(42_530_200),
+        firmware_update: None,
         software_version: (state == 0).then_some(1870),
         inspection: match state {
             1 => InspectionState::Running,
@@ -155,6 +156,7 @@ fn partial_inspection(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Glob
         key: "mock-watch".to_owned(),
         name: "Mock Watch-o-Matic 9000".to_owned(),
         identifier: Some(42),
+        firmware_update: None,
         software_version: Some(1870),
         inspection: InspectionState::Failed,
         inspection_error: None,

@@ -267,3 +267,17 @@ portable transaction blocked further changes and offered recovery. Verified-back
 update back, reconciled device state, and restored 39.82 GB free. After another safe eject, restart, and remount, the
 TUI presented no recovery prompt and offered Antarctica only as an install. This completes the current fēnix and Edge
 black-box update, restart, and interrupted-recovery matrix. Private captures are not publication artifacts.
+
+## Device update evidence
+
+On 2026-11-21 the production desktop app staged the Edge 1050 Software Bundle 33.22 (part `006-V4440-00`, 93.2 MiB) over
+desktop MTP at `Garmin/GUPDATE.GSP`. After disconnect and installation, **System > About** showed 33.22, up from 32.20.
+On reconnect, the desktop transfer receipt showed **Update confirmed** for the same part and version.
+
+In a separate TUI run, the only committed write was Time Zone Map 40.00 → 43.00 (part `006-D1074-00`) at
+`Garmin/Maps/gmaptz.img`. Its SHA-256 matched the staged file and the reconnected device reported 43.00. The Edge also
+offered system software 32.22 after ejection. The operator declined it, and inspection found a separate
+`Garmin/GUPDATE.gsp` that predated the map transfer.
+
+The [fēnix 8 fixtures](../../infra/fixtures/firmware/README.md) cover component and system offers. Installation on the
+watch remains [unverified](../plans/README.md#hardware-and-owner-access).

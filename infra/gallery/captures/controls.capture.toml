@@ -1,0 +1,110 @@
+out = "../../../.tmp/gallery/controls"
+size = "1000x720"
+sheet = "sheet.png"
+report = "capture.json"
+settle = false
+
+[[shot]]
+name = "summary-table-dark"
+scene = "summary_table::Playground"
+globals = { Theme = "Dark" }
+
+[[shot]]
+name = "summary-table-light"
+scene = "summary_table::Playground"
+knobs = { width = 240 }
+globals = { Theme = "Light" }
+
+[[shot]]
+name = "button-dark"
+scene = "button::Overview"
+frames = 3
+globals = { Theme = "Dark" }
+
+[[shot]]
+name = "button-light"
+scene = "button::Overview"
+frames = 3
+globals = { Theme = "Light" }
+
+[[shot]]
+name = "radio-dark"
+scene = "radio::Overview"
+frames = 3
+globals = { Theme = "Dark" }
+
+[[shot]]
+name = "radio-light"
+scene = "radio::Overview"
+frames = 3
+globals = { Theme = "Light" }
+
+[[shot]]
+name = "radio-group-dark"
+scene = "radio_group::Overview"
+frames = 3
+globals = { Theme = "Dark" }
+
+[[shot]]
+name = "radio-group-light"
+scene = "radio_group::Overview"
+frames = 3
+globals = { Theme = "Light" }
+
+[[shot]]
+name = "checkbox-dark"
+scene = "checkbox::Overview"
+frames = 3
+globals = { Theme = "Dark" }
+
+[[shot]]
+name = "checkbox-light"
+scene = "checkbox::Overview"
+frames = 3
+globals = { Theme = "Light" }
+
+[[shot]]
+name = "toggle-dark"
+scene = "toggle::Overview"
+frames = 3
+globals = { Theme = "Dark" }
+
+[[shot]]
+name = "toggle-light"
+scene = "toggle::Overview"
+frames = 3
+globals = { Theme = "Light" }
+
+[[shot]]
+name = "disclosure-dark"
+scene = "accordion::Inline"
+frames = 3
+globals = { Theme = "Dark" }
+
+[[shot]]
+name = "disclosure-light"
+scene = "accordion::Inline"
+frames = 3
+globals = { Theme = "Light" }
+
+[[shot]]
+name = "slider-dark"
+scene = "slider::Overview"
+frames = 3
+
+[[shot]]
+name = "slider-light"
+scene = "slider::Overview"
+frames = 3
+globals = { Theme = "Light" }
+
+[[shot]]
+name = "action-row-dark"
+scene = "action_row::Overview"
+frames = 3
+
+[[shot]]
+name = "action-row-light"
+scene = "action_row::Overview"
+frames = 3
+globals = { Theme = "Light" }

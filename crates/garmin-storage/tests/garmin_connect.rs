@@ -40,6 +40,7 @@ fn discarding_staging_preserves_published_and_other_profile_summaries() -> TestR
             activity: RemoteActivity {
                 id: 1,
                 imported: false,
+                original_unavailable: false,
                 sport: None,
                 name: "Ride".into(),
                 started_at: None,

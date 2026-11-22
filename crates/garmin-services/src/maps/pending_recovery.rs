@@ -39,6 +39,23 @@ pub struct PendingRecovery {
 }
 
 impl PendingRecovery {
+    /// The unique host registration, even when the same selection is staged again.
+    /// # Errors
+    /// The registry filename does not contain a receipt UUID.
+    pub fn id(&self) -> Result<uuid::Uuid> {
+        let id = self
+            .receipt
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .context("missing receipt ID")?;
+        Ok(uuid::Uuid::parse_str(id)?)
+    }
+
+    #[must_use]
+    pub const fn registered_at(&self) -> Timestamp {
+        self.registered_at
+    }
+
     /// Whether this receipt belongs to a retained virtual target instead of its source device.
     /// # Errors
     /// Unsafe, oversized, unsupported, or mismatched execution metadata.
@@ -134,6 +151,68 @@ pub struct PendingRecoveryStore {
 }
 
 impl PendingRecoveryStore {
+    /// Registry shared by CLI and graphical hosts for physical firmware transfers.
+    /// # Errors
+    /// The host state directory is unavailable.
+    pub fn physical_firmware() -> Result<Self> {
+        Ok(Self::new(
+            crate::paths::host_state_directory()?.join("garmin-cli/firmware/devices"),
+        ))
+    }
+
+    /// Import existing firmware receipts when a graphical deployment opens.
+    /// # Errors
+    /// A registry is busy or its receipts cannot be read or durably stored.
+    pub fn adopt_firmware_receipts(&self, previous: &Self) -> Result<()> {
+        if self.root == previous.root {
+            return Ok(());
+        }
+        for pending in Self::list_root(&previous.root)? {
+            let _new = self.lock_device(&pending.device_digest)?;
+            let _old = previous.lock_device(&pending.device_digest)?;
+            if !pending.receipt.try_exists()? {
+                continue;
+            }
+            let copied = self.for_device(&pending.device_digest)?.iter().any(|p| {
+                p.transaction == pending.transaction
+                    && p.plan_digest == pending.plan_digest
+                    && p.kind == pending.kind
+            });
+            if !copied {
+                // The capture may be on an unmounted volume.
+                self.write_receipt(&RecoveryReceipt {
+                    version: REGISTRY_VERSION,
+                    kind: pending.kind,
+                    transaction: pending.transaction.clone(),
+                    device_digest: pending.device_digest.clone(),
+                    plan_digest: pending.plan_digest.clone(),
+                    registered_at: pending.registered_at,
+                })?;
+            }
+            previous.clear(&pending)?;
+        }
+        Ok(())
+    }
+
+    /// Hold a device's registry slot across preparation, recovery or acknowledgement in another process.
+    /// # Errors
+    /// Invalid identity, inaccessible registry, or an operation already holds the slot.
+    pub fn lock_device(&self, digest: &str) -> Result<File> {
+        if digest.len() != 32 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+            bail!("invalid device identity");
+        }
+        self.create_root()?;
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.root.join(format!("{digest}.lock")))?;
+        fs2::FileExt::try_lock_exclusive(&file)
+            .context("another firmware operation owns this device")?;
+        Ok(file)
+    }
+
     /// Clears a completed operation's notice without hiding its successful outcome.
     pub fn clear_completed(&self, recovery: &PendingRecovery) {
         if let Err(error) = self.clear(recovery) {

@@ -12,6 +12,35 @@ WRAPPER = Path(__file__).resolve().parents[1] / 'just' / 'memory-capped.sh'
 
 
 class BuildLimitsTests(unittest.TestCase):
+    def test_cache_selection_probes_host_and_inherited_sccache(self) -> None:
+        root = WRAPPER.parents[2]
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / 'sccache'
+            cache.write_text('#!/bin/sh\n[ "$#" = 2 ] && [ "$1" = "$RUSTC" ] && [ "$2" = -vV ] && exit "$PROBE_EXIT"\n')
+            cache.chmod(0o755)
+            env = {**os.environ, 'PATH': f'{directory}:{os.environ["PATH"]}', 'RUSTC': 'test rustc'}
+            env.pop('RUSTC_WRAPPER', None)
+            command = ['just', '--tempdir', directory, '--justfile', str(root / 'justfile'), 'with-host-sccache']
+            for configured, probe_exit, expected in (
+                (None, 0, str(cache)),
+                (None, 1, 'unset'),
+                (str(cache), 1, ''),
+                ('custom-wrapper', 1, 'custom-wrapper'),
+                ('', 0, ''),
+            ):
+                with self.subTest(configured=configured, probe_exit=probe_exit):
+                    environment = {**env, 'PROBE_EXIT': str(probe_exit)}
+                    if configured is not None:
+                        environment['RUSTC_WRAPPER'] = configured
+                    result = subprocess.run(
+                        [*command, 'bash', '-c', 'printf "%s" "${RUSTC_WRAPPER-unset}"'],
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    self.assertEqual(result.stdout, expected)
+
     def test_manual_commands_preserve_resources_and_arguments_with_and_without_nix(self) -> None:
         just, bash = shutil.which('just'), shutil.which('bash')
         assert just is not None and bash is not None

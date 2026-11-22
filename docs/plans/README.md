@@ -7,6 +7,8 @@ limit is not automatically scheduled work.
 
 ## Hardware and owner access
 
+- Stage an offered system update on the fēnix 8 Solar (47 mm). Record the transport, part, versions and destination.
+  After ejection, verify installation on the watch and confirm the receipt on reconnect.
 - Confirm Garmin's response to an [expired or revoked Personal API key](garmin-connect-import.md#qualification).
 - Complete Venu 3S explorer acceptance and establish Edge 850 support for manifest-declared operations. Record the
   device, firmware, host, and adapter; retain host/GVFS defect evidence.

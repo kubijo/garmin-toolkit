@@ -146,15 +146,9 @@ pub fn show(ui: &mut Ui, state: &mut State, props: Props<'_>) -> Output {
 
     ui.add_space(16.0);
     let slider_width = (available - 96.0).clamp(80.0, 220.0);
-    ui.scope(|ui| {
+    ui.add_enabled_ui(!props.disabled, |ui| {
         ui.spacing_mut().slider_width = slider_width;
-        ui.horizontal(|ui| {
-            ui.label(props.zoom_label);
-            ui.add_enabled(
-                !props.disabled,
-                egui::Slider::new(&mut state.zoom, 1.0..=MAX_ZOOM).show_value(false),
-            );
-        });
+        crate::slider::track(ui, props.zoom_label, &mut state.zoom, 1.0..=MAX_ZOOM);
     });
     constrain(state, source_size, rect.width());
 

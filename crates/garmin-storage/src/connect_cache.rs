@@ -74,14 +74,7 @@ impl Storage {
         };
         let source = account.source_id;
         let generation = account.generation;
-        let summaries = sqlx::query_file_scalar!(
-            "queries/connect-cache-summaries.sql",
-            user,
-            source,
-            generation
-        )
-        .fetch_all(&mut *transaction)
-        .await?;
+        let mut activities = read_summaries(&mut transaction, &user, &source, &generation).await?;
         let imported =
             sqlx::query_file_scalar!("queries/imported-source-identities.sql", user, source)
                 .fetch_all(&mut *transaction)
@@ -103,11 +96,8 @@ impl Storage {
             (BTreeMap::new(), Vec::new(), None)
         };
         transaction.commit().await?;
-        let mut activities = Vec::with_capacity(summaries.len());
-        for summary in summaries {
-            let mut summary: CachedActivity = serde_json::from_str(&summary).map_err(invalid)?;
+        for summary in &mut activities {
             summary.activity.imported = imported.contains(&summary.activity.id.to_string());
-            activities.push(summary);
         }
         Ok(Some(CacheSnapshot {
             activities,
@@ -271,18 +261,8 @@ impl Storage {
     ) -> Result<Vec<CachedActivity>, Error> {
         let user = user.to_string();
         let source = account.source.to_string();
-        let generation = &account.generation;
-        sqlx::query_file_scalar!(
-            "queries/connect-cache-summaries.sql",
-            user,
-            source,
-            generation
-        )
-        .fetch_all(&self.pool)
-        .await?
-        .into_iter()
-        .map(|text| serde_json::from_str(&text).map_err(invalid))
-        .collect()
+        let mut connection = self.pool.acquire().await?;
+        read_summaries(&mut connection, &user, &source, &account.generation).await
     }
 
     /// Reads an original or its last download failure, scoped to one profile and account.
@@ -354,6 +334,29 @@ impl Storage {
             unavailable: usize::try_from(row.unavailable).map_err(invalid)?,
         })
     }
+}
+
+async fn read_summaries(
+    connection: &mut sqlx::SqliteConnection,
+    user: &str,
+    source: &str,
+    generation: &str,
+) -> Result<Vec<CachedActivity>, Error> {
+    sqlx::query_file!(
+        "queries/connect-cache-summaries.sql",
+        user,
+        source,
+        generation
+    )
+    .fetch_all(connection)
+    .await?
+    .into_iter()
+    .map(|row| {
+        let mut summary: CachedActivity = serde_json::from_str(&row.summary).map_err(invalid)?;
+        summary.activity.original_unavailable = row.original_unavailable != 0;
+        Ok(summary)
+    })
+    .collect()
 }
 
 async fn imported_recordings(

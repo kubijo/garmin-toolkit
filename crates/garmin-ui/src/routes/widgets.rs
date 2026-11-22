@@ -4,7 +4,8 @@ use garmin_service_api::routes::OutlinePoint;
 
 use super::State;
 use crate::{
-    Size, activity::map::paint_route_endpoints, button, icons, semantics, theme, typography,
+    Size, activity::map::paint_route_endpoints, button, icons, semantics, skeleton::Skeleton,
+    theme, typography,
 };
 
 pub(super) struct Row<'a> {
@@ -301,37 +302,6 @@ pub(super) fn icon_button(
     response.clicked()
 }
 
-pub(super) fn action_row<A, const N: usize>(
-    ui: &mut Ui,
-    buttons: [(&str, A, button::Props<'_>); N],
-) -> Option<A> {
-    let width = buttons
-        .iter()
-        .map(|(_, _, button)| button.natural_width(ui))
-        .sum::<f32>()
-        + 8.0 * f32::from(u16::try_from(N.saturating_sub(1)).unwrap_or(u16::MAX));
-    let stacked = width > ui.available_width();
-    let mut action = None;
-    let show = |ui: &mut Ui| {
-        for (id, requested, mut button) in buttons {
-            if stacked {
-                button.width = button::Width::Fill;
-            }
-            let response = button.show(ui);
-            semantics::target(ui, &response, id);
-            if response.clicked() {
-                action = Some(requested);
-            }
-        }
-    };
-    if stacked {
-        ui.vertical(show);
-    } else {
-        ui.horizontal(show);
-    }
-    action
-}
-
 pub(super) fn busy(ui: &mut Ui, state: &State) {
     ui.allocate_ui(egui::vec2(24.0, 24.0), |ui| {
         if state.busy || state.pending.is_some() {
@@ -352,7 +322,6 @@ pub(super) fn route_placeholders(ui: &mut Ui) {
 fn route_placeholder(ui: &mut Ui) {
     let palette = theme::palette(ui);
     let row_fill = theme::color32(palette.surfaces().layer(Level::One));
-    let placeholder_fill = theme::color32(palette.surfaces().layer(Level::Two));
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 72.0), egui::Sense::hover());
     let text_width = (rect.width() - 96.0).max(0.0);
@@ -363,9 +332,7 @@ fn route_placeholder(ui: &mut Ui) {
     ];
     ui.painter().rect_filled(rect, 0, row_fill);
     for (x, y, width, height) in blocks {
-        let block =
-            egui::Rect::from_min_size(rect.min + egui::vec2(x, y), egui::vec2(width, height));
-        ui.painter().rect_filled(block, 0, placeholder_fill);
+        Skeleton::new(egui::vec2(width, height)).paint_at(ui, rect.min + egui::vec2(x, y));
     }
 }
 

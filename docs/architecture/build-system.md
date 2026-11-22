@@ -35,8 +35,8 @@ gallery watches its scene library and loads replacements without checking compil
 changing toolchains or dependency configuration. Different toolchains, target triples, profiles, and Cargo features may
 still produce distinct artifacts inside the shared directory. Nix package builds keep their isolated sandbox outputs.
 
-Local Just entrypoints, Nix QA apps, and development shells preserve an explicit `RUSTC_WRAPPER`. When it is unset and
-the host provides `sccache`, they select that executable; hosts without it continue without a wrapper.
+Local Just entrypoints, Nix QA apps and development shells use host `sccache` when it can run the compiler's version
+probe. If the probe fails, they continue without that cache. Explicit custom wrappers and `RUSTC_WRAPPER=` are honored.
 
 Coverage builds and tests `cargo-llvm-cov` with the selected Rust toolchain and uses that toolchain's `llvm-cov` and
 `llvm-profdata` for local and CI reports. Package tests remain enabled.

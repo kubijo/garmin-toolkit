@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+garmin-fixtures.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true
 garmin-capture.workspace = true

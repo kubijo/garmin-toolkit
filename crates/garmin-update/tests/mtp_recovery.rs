@@ -605,6 +605,77 @@ async fn require_absent(device: &TestDevice, path: &str) -> Result {
     Ok(())
 }
 
+#[tokio::test]
+async fn firmware_metadata_upload_failure_rolls_back_the_bundle_and_partial_metadata() -> Result {
+    use garmin_fixtures::firmware::{FENIX_GSP_22_44, GSP_METADATA};
+    use garmin_update::firmware::{FirmwareCatalog, FirmwarePlan, FirmwareTarget, UpdateMetadata};
+
+    let device = TestDevice::new(Fault::UploadFailure(2), TEST_CAPACITY, false)?;
+    let root = tempdir()?;
+    let capture = SessionCapture::create(&root.path().join("capture"))?;
+    let catalog = FirmwareCatalog::from_json(FENIX_GSP_22_44.catalog.as_bytes())?;
+    let record: UpdateMetadata = serde_json::from_slice(GSP_METADATA.as_bytes())?;
+    let previous = b"previous device software";
+    fs::write(device.root.join("internal/Garmin/GUPDATE.GSP"), previous)?;
+    let mut downloads = Vec::new();
+    let mut targets = Vec::new();
+    let mut verified = Vec::new();
+    for (part, bytes, existing_bytes) in [
+        (
+            "006-V4532-00",
+            b"fixture system bundle".to_vec(),
+            Some(ByteCount::from_bytes(previous.len() as u64)),
+        ),
+        ("006-V4532-00-META", serde_json::to_vec(&record)?, None),
+    ] {
+        let offer = catalog
+            .updates
+            .iter()
+            .find(|item| item.part_number == part)
+            .ok_or("missing fixture offer")?;
+        let mut spec = offer.download_spec(None).ok_or("invalid fixture offer")?;
+        spec.size = ByteCount::from_bytes(bytes.len() as u64);
+        spec.md5 = hex::encode(Md5::digest(&bytes));
+        spec.cache_name.clone_from(&spec.md5);
+        let path = root.path().join(part);
+        fs::write(&path, bytes)?;
+        targets.push(FirmwareTarget {
+            path: spec.destination.clone(),
+            storage_id: "internal".into(),
+            existing_bytes,
+            offered_bytes: spec.size,
+        });
+        verified.push(DownloadProgress {
+            path,
+            bytes: spec.size,
+            elapsed: Duration::ZERO,
+            resumed_at: ByteCount::default(),
+            from_cache: true,
+        });
+        downloads.push(spec);
+    }
+    let plan = FirmwarePlan::new(TEST_DEVICE_DIGEST.into(), downloads)?;
+    assert!(
+        plan.stage(
+            &verified,
+            &targets,
+            &device,
+            &capture,
+            ProgressReporter::default()
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(device.uploads.load(Ordering::Relaxed), 2);
+    verify_path(&device, "Garmin/GUPDATE.GSP", previous).await?;
+    require_absent(&device, "Garmin/UpdateMetadata/006v453200.json").await?;
+    assert_eq!(
+        recover(capture.root(), &device).await?,
+        MountedUpdateRecoveryOutcome::AlreadyRolledBack
+    );
+    Ok(())
+}
+
 async fn occupy_marker(transaction: &Transaction, relative: &str) -> Result {
     transaction
         .capture

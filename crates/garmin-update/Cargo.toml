@@ -17,8 +17,10 @@ garmin-device.workspace = true
 garmin-model.workspace = true
 garmin-progress.workspace = true
 hex.workspace = true
+jiff = { workspace = true, features = ["serde"] }
 md-5.workspace = true
 reqwest.workspace = true
+semver = { workspace = true, features = ["serde"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -37,5 +39,6 @@ ignored = ["md-5"]
 workspace = true
 
 [dev-dependencies]
+garmin-fixtures.workspace = true
 async-trait.workspace = true
 mtp-rs = { workspace = true, features = ["virtual-device"] }

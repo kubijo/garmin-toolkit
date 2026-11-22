@@ -60,6 +60,6 @@ apalis-sqlite.workspace = true
 sqlx.workspace = true
 postcard.workspace = true
 image.workspace = true
-garmin-fixtures.workspace = true
+garmin-fixtures = { workspace = true, features = ["demo"] }
 garmin-fit = { workspace = true, features = ["test-fixtures"] }
 futures-lite.workspace = true

@@ -318,6 +318,7 @@ fn samples(year: i32, month: u8, entries: impl IntoIterator<Item = Sample>) -> V
                         + i64::try_from(index).expect("fixture index")
                         + 1,
                     imported: index.is_multiple_of(4),
+                    original_unavailable: false,
                     sport: Some(sport),
                     name: match sport {
                         ActivitySport::Running => "Training run",

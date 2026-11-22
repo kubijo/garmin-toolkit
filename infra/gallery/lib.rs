@@ -16,7 +16,9 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
-use gallery::{CatalogGlobals, Checkerboard, GlobalControls, Icon, StageSpec};
+use gallery::{
+    CatalogGlobals, Checkerboard, GlobalControls, Icon, SceneCtx, Stage, StageSpec, egui,
+};
 use garmin_i18n::{Intl, Language as IntlLanguage, Translations};
 use garmin_model::route::Coordinate;
 use serde::{Deserialize, Serialize};
@@ -107,6 +109,29 @@ impl Globals {
             GalleryTheme::Light => Checkerboard::Light,
             GalleryTheme::Dark => Checkerboard::Dark,
         })
+    }
+
+    /// A labeled, independently collapsible stage for one example in a component overview.
+    pub(crate) fn example(
+        &self,
+        ctx: &mut SceneCtx<'_>,
+        ui: &mut egui::Ui,
+        label: &str,
+        width: f32,
+        draw: impl FnOnce(&mut egui::Ui),
+    ) {
+        ui.vertical(|ui| {
+            ui.label(label);
+            ctx.stage(ui, self.stage(Stage::Fit), |ui| {
+                egui::Frame::new()
+                    .fill(ui.visuals().panel_fill)
+                    .inner_margin(16)
+                    .show(ui, |ui| {
+                        ui.set_width(width - 32.0);
+                        draw(ui);
+                    });
+            });
+        });
     }
 
     pub(crate) fn intl(&self) -> Intl {

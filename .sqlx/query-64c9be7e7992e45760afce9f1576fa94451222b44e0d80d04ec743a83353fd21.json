@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n    s.summary,\n    o.failure IS NOT NULL AS original_unavailable\nFROM connect_cache_summaries AS s LEFT JOIN connect_cache_originals AS o\n    ON\n        s.user_id = o.user_id\n        AND s.source_id = o.source_id\n        AND s.activity_id = o.activity_id\nWHERE s.user_id = ? AND s.source_id = ? AND s.generation = ?\nORDER BY s.activity_id DESC;\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "summary",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "connect_cache_summaries",
+            "name": "summary"
+          }
+        }
+      },
+      {
+        "name": "original_unavailable",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "64c9be7e7992e45760afce9f1576fa94451222b44e0d80d04ec743a83353fd21"
+}

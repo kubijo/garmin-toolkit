@@ -25,6 +25,18 @@ name = "map-selection"
 scene = "screens::Map selection"
 
 [[shot]]
+name = "edge-firmware"
+scene = "screens::Edge firmware"
+
+[[shot]]
+name = "watch-components"
+scene = "screens::Watch components"
+
+[[shot]]
+name = "watch-firmware"
+scene = "screens::Watch firmware"
+
+[[shot]]
 name = "dry-run-confirmation"
 scene = "modes::Dry run confirmation"
 

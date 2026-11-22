@@ -3,11 +3,11 @@
 [![AI: co-written](https://img.shields.io/badge/AI-co--written-blue)](#ai-usage)
 [![AI tool: Codex](https://img.shields.io/badge/AI_tool-Codex-blueviolet)](#ai-usage)
 
-Experimental, unofficial Linux tools for Garmin devices and data:
+Experimental, unofficial Linux tools for Garmin devices and data.
 
-- `garmin-cli`: device inspection and guarded map maintenance;
-- `garmin-desktop`: local activity and route management;
-- `garmin-hass`: experimental Home Assistant app.
+- `garmin-cli` inspects devices and stages map, firmware and component updates from the terminal.
+- `garmin-desktop` manages activities, routes and attached devices.
+- `garmin-hass` brings the shared graphical workspace to Home Assistant.
 
 ## Desktop
 
@@ -51,11 +51,24 @@ recipes keep it at `.tmp/app-cache`. The link benchmark uses the normal device p
 disposable file, and separately reports payload transfer, device finalization, SHA-256 read-back, and cleanup. Raw-MTP
 probes keep recovery receipts below the configured cache until the exact disposable object is verified and removed.
 
+## Device updates
+
+Select your device under **Attached devices** at the bottom of the sidebar and open **Device updates**. When system
+software is available, a double chevron marks the device and a notification opens its update list. Select the components
+you want, review their versions and total size, then choose **Write selected updates**.
+
+Eject and disconnect the device so it can apply the update. Follow any installation prompt on the device, then reconnect
+and open **Device updates**. The page shows the installation result for each component and any recovery action. Dismiss
+the receipt to return to available updates. The Edge 1050 upgrade from 32.20 to 33.22 was confirmed on hardware. See the
+[hardware record](docs/research/usb-sync.md#device-update-evidence) and
+[terminal commands](docs/architecture/connectivity.md#device-updates).
+
 ## Safety
 
-Garmin contact and device writes require separate confirmation. Downloads require HTTPS, reject redirects, and verify
-size and MD5. Device paths reject traversal and symlink escapes. Writes use verified backups and a durable journal;
-cancellation waits for a safe checkpoint.
+Desktop and Home Assistant check Garmin for updates when a device connects. The CLI asks before contacting Garmin.
+Staging a selection requires write confirmation. Downloads require HTTPS, reject redirects, and verify size and MD5.
+Device paths reject traversal and symlink escapes. Writes use verified backups and a durable journal; cancellation waits
+for a safe checkpoint.
 
 Production writes require a new capture directory. Captures may contain device identity, authorization, licensed maps,
 logs, and backups. Keep them private.

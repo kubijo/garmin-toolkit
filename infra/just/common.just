@@ -30,8 +30,8 @@ in-shell +cmd:
 
     cd {{ quote(repository_root) }}
 
-    if [[ -z ${RUSTC_WRAPPER+x} ]] && host_sccache=$(command -v sccache); then
-        export RUSTC_WRAPPER="$host_sccache"
+    if wrapper=$(bash infra/just/build-cache.sh rustc-wrapper); then
+        export RUSTC_WRAPPER="$wrapper"
     fi
 
     if command -v python3 >/dev/null 2>&1; then
@@ -49,7 +49,7 @@ in-shell +cmd:
 [private]
 [script("bash")]
 with-host-sccache +cmd:
-    if [[ -z ${RUSTC_WRAPPER+x} ]] && host_sccache=$(command -v sccache); then
-        export RUSTC_WRAPPER="$host_sccache"
+    if wrapper=$(bash {{ quote(repository_root / "infra/just/build-cache.sh") }} rustc-wrapper); then
+        export RUSTC_WRAPPER="$wrapper"
     fi
     exec "$@"

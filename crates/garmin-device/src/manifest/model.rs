@@ -1,10 +1,10 @@
-use std::{fmt, path::Path};
+use std::{collections::BTreeMap, fmt, path::Path};
 
 use camino::Utf8PathBuf;
 
 use crate::SafeRelativePath;
 
-use garmin_model::map::InstalledMapFile;
+use garmin_model::map::{InstalledMapFile, MapVersion};
 
 /// The detected device-metadata document format.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -137,6 +137,21 @@ impl fmt::Display for SoftwareVersion {
     }
 }
 
+/// One installed component, including any destination declared by the device.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InstalledUpdateFile {
+    pub part_number: String,
+    pub version: MapVersion,
+    pub path: Option<String>,
+    pub file_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct UpdateInventory {
+    pub files: Vec<InstalledUpdateFile>,
+    pub storages_by_part: BTreeMap<String, Vec<String>>,
+}
+
 /// Format-neutral metadata produced by a registered manifest parser.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParsedManifest {
@@ -146,6 +161,7 @@ pub struct ParsedManifest {
     id: DeviceId,
     model: DeviceModel,
     capabilities: Vec<FileCapability>,
+    update_inventory: UpdateInventory,
     installed_map_files: Vec<InstalledMapFile>,
 }
 
@@ -157,8 +173,16 @@ impl ParsedManifest {
         id: DeviceId,
         model: DeviceModel,
         capabilities: Vec<FileCapability>,
-        installed_map_files: Vec<InstalledMapFile>,
+        update_inventory: UpdateInventory,
     ) -> Self {
+        let installed_map_files = update_inventory
+            .files
+            .iter()
+            .map(|file| InstalledMapFile {
+                part_number: file.part_number.clone(),
+                version: file.version,
+            })
+            .collect();
         Self {
             raw_document,
             format,
@@ -166,6 +190,7 @@ impl ParsedManifest {
             id,
             model,
             capabilities,
+            update_inventory,
             installed_map_files,
         }
     }
@@ -203,6 +228,30 @@ impl ParsedManifest {
     #[must_use]
     pub fn installed_map_files(&self) -> &[InstalledMapFile] {
         &self.installed_map_files
+    }
+
+    #[must_use]
+    pub fn installed_update_files(&self) -> &[InstalledUpdateFile] {
+        &self.update_inventory.files
+    }
+
+    /// Match a mounted volume name against the device's update storage declarations.
+    #[must_use]
+    pub fn declares_update_storage(&self, label: &str) -> bool {
+        self.update_inventory
+            .storages_by_part
+            .values()
+            .flatten()
+            .any(|name| name.eq_ignore_ascii_case(label))
+    }
+
+    /// Storage declarations also apply to offered parts with no installed file.
+    #[must_use]
+    pub fn update_storages(&self, part_number: &str) -> &[String] {
+        self.update_inventory
+            .storages_by_part
+            .get(part_number)
+            .map_or(&[], Vec::as_slice)
     }
 }
 

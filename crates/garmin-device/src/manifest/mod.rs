@@ -4,6 +4,7 @@ mod error;
 mod garmin;
 mod model;
 
+use quick_xml::{Reader, Writer};
 use std::path::Path;
 
 use garmin_model::artifact::ByteCount;
@@ -13,11 +14,49 @@ use crate::{DeviceManifest, DeviceSummary, TransportKind};
 
 pub use error::ManifestError;
 pub use model::{
-    DataType, DeviceId, DeviceModel, FileCapability, ManifestFormat, ManifestQuirk,
-    OperationHandle, ParsedManifest, SoftwareVersion, TransferDirection,
+    DataType, DeviceId, DeviceModel, FileCapability, InstalledUpdateFile, ManifestFormat,
+    ManifestQuirk, OperationHandle, ParsedManifest, SoftwareVersion, TransferDirection,
 };
 
 pub(crate) const MAX_MANIFEST_BYTES: ByteCount = ByteCount::from_mebibytes(4);
+
+impl DeviceManifest {
+    /// Prepare the device inventory for a software lookup.
+    /// Map unlock codes belong only to map operations.
+    ///
+    /// # Errors
+    /// Returns an error if the inventory cannot be represented
+    /// as a standalone UTF-8 document.
+    pub fn firmware_inventory_xml(&self) -> Result<String, ManifestError> {
+        let mut reader = Reader::from_str(self.raw_xml());
+        let mut writer = Writer::new(Vec::new());
+        loop {
+            let event = reader
+                .read_event()
+                .map_err(|e| ManifestError::MalformedDocument(e.to_string()))?;
+            match event {
+                Event::Start(tag) if tag.local_name().as_ref() == "Unlock" => {
+                    reader
+                        .read_to_end(tag.name())
+                        .map_err(|e| ManifestError::MalformedDocument(e.to_string()))?;
+                }
+                Event::Empty(tag) if tag.local_name().as_ref() == "Unlock" => {}
+                Event::Comment(_) | Event::PI(_) | Event::Decl(_) => {}
+                Event::DocType(_) => {
+                    return Err(ManifestError::MalformedDocument(
+                        "unexpected DTD in firmware inventory".into(),
+                    ));
+                }
+                Event::Eof => break,
+                event => writer
+                    .write_event(event)
+                    .map_err(|e| ManifestError::MalformedDocument(e.to_string()))?,
+            }
+        }
+        String::from_utf8(writer.into_inner())
+            .map_err(|e| ManifestError::MalformedDocument(e.to_string()))
+    }
+}
 
 /// Parse a metadata document into transport-neutral device metadata.
 pub(crate) fn parse_document(raw_document: &str) -> Result<ParsedManifest, ManifestError> {
@@ -89,6 +128,24 @@ fn detect_format(raw_document: &str) -> Result<ManifestFormat, ManifestError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn firmware_request_preserves_inventory_and_extensions_and_removes_unlocks() {
+        let xml = include_str!("../../tests/fixtures/software-lookup.xml");
+        let original = parse_manifest(xml, TransportKind::MassStorage, "fixture".into()).unwrap();
+        let request = original.firmware_inventory_xml().unwrap();
+        assert!(!request.contains("Unlock"));
+        assert!(!request.contains("fictional-"));
+        assert!(request.contains("Preserved &amp; escaped"));
+        let sent = parse_manifest(&request, TransportKind::MassStorage, "fixture".into()).unwrap();
+        assert_eq!(sent.identity_digest(), original.identity_digest());
+        assert_eq!(sent.summary, original.summary);
+        assert_eq!(
+            sent.capabilities().installed_update_files(),
+            original.capabilities().installed_update_files()
+        );
+        assert_eq!(original.raw_xml(), xml);
+    }
 
     #[test]
     fn detects_the_registered_garmin_v2_format() {

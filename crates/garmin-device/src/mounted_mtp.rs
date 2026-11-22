@@ -424,8 +424,18 @@ fn ensure_mounted_mtp_directory_blocking(
     cancellable: Option<&gio::Cancellable>,
 ) -> Result<(), MountedMtpError> {
     let root = mounted_root(mount_id)?;
-    let mut parent = storage_for_id_with_cancellable(&root, storage_id, cancellable)?;
-    for component in path.as_path().components() {
+    let storage = storage_for_id_with_cancellable(&root, storage_id, cancellable)?;
+    ensure_mounted_directories(storage, path.as_path().components(), path, cancellable)?;
+    Ok(())
+}
+
+fn ensure_mounted_directories(
+    mut parent: File,
+    directories: std::path::Components<'_>,
+    path: &SafeRelativePath,
+    cancellable: Option<&gio::Cancellable>,
+) -> Result<File, MountedMtpError> {
+    for component in directories {
         let name = component.as_os_str().to_string_lossy().into_owned();
         parent = match child_metadata_with_cancellable(&parent, &name, cancellable)? {
             ChildMetadata::Unique {
@@ -470,7 +480,7 @@ fn ensure_mounted_mtp_directory_blocking(
             }
         };
     }
-    Ok(())
+    Ok(parent)
 }
 
 pub async fn create_verified_mounted_mtp_file(
@@ -1294,11 +1304,20 @@ fn upload_to_storage_blocking(
     let cancellable = gio::Cancellable::new();
     let _cancellation =
         CancellableWatcher::new(progress.reporter.cancellation_token(), &cancellable);
-    let (parent, name) = mounted_parent_with_cancellable(storage, path, Some(&cancellable))?;
-    let destination = parent.child(name);
-    if destination.query_exists(Some(&cancellable)) {
+    let mut directories = path.as_path().components();
+    let name = directories
+        .next_back()
+        .expect("validated nonempty device path");
+    let parent =
+        ensure_mounted_directories(storage.clone(), directories, path, Some(&cancellable))?;
+    let name = name.as_os_str().to_string_lossy();
+    if !matches!(
+        child_metadata_with_cancellable(&parent, &name, Some(&cancellable))?,
+        ChildMetadata::Missing
+    ) {
         return Err(MountedMtpError::UploadDestinationExists(path.clone()));
     }
+    let destination = parent.child(name.as_ref());
 
     copy_upload_to_device(&destination, path, source, expected_size, progress)?;
     if let Err(error) = verify_uploaded_object_metadata(&destination, path, expected_size, progress)
@@ -2574,13 +2593,13 @@ mod tests {
     }
 
     #[test]
-    fn uploads_a_locally_verified_object_and_checks_device_metadata() {
+    fn uploads_a_verified_object_into_missing_device_directories_and_checks_metadata() {
         let fixture = tempfile::tempdir().unwrap();
         let storage = fixture.path().join("storage");
         let source = fixture.path().join("source.img");
         std::fs::create_dir_all(storage.join("Garmin")).unwrap();
         std::fs::write(&source, b"verified map payload").unwrap();
-        let path = SafeRelativePath::parse("Garmin/map.img").unwrap();
+        let path = SafeRelativePath::parse("GARMIN/KBD/Updates/Emojis.db").unwrap();
         let sha256 = hex::encode(Sha256::digest(b"verified map payload"));
         let (progress, receiver) = ProgressReporter::channel();
 
@@ -2599,7 +2618,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            std::fs::read(storage.join("Garmin/map.img")).unwrap(),
+            std::fs::read(storage.join("Garmin/KBD/Updates/Emojis.db")).unwrap(),
             b"verified map payload"
         );
         let events = receiver.try_iter().collect::<Vec<_>>();
@@ -2622,6 +2641,45 @@ mod tests {
             events[verify_completed].label,
             "Uploaded file path and size checked"
         );
+    }
+
+    #[test]
+    fn uploads_refuse_conflicting_directory_and_file_names() {
+        let fixture = tempfile::tempdir().unwrap();
+        let storage = File::for_path(fixture.path());
+        let source = fixture.path().join("source");
+        std::fs::write(&source, b"update").unwrap();
+        let size = ByteCount::from_bytes(6);
+        let hash = hex::encode(Sha256::digest(b"update"));
+        let progress = MountedMtpUploadProgress {
+            reporter: ProgressReporter::default(),
+            completed_before: ByteCount::default(),
+            total: size,
+        };
+        let upload = |name| {
+            let path = SafeRelativePath::parse(name).unwrap();
+            upload_to_storage_blocking(&storage, &path, &source, size, &hash, &progress)
+        };
+        std::fs::create_dir(fixture.path().join("Garmin")).unwrap();
+        std::fs::create_dir(fixture.path().join("GARMIN")).unwrap();
+        assert!(matches!(
+            upload("Garmin/Updates/Emojis.db"),
+            Err(MountedMtpError::MetadataPathState {
+                state: crate::DevicePathState::Ambiguous,
+                ..
+            })
+        ));
+        assert!(matches!(
+            upload("Source/Emojis.db"),
+            Err(MountedMtpError::MetadataPathState {
+                state: crate::DevicePathState::Other,
+                ..
+            })
+        ));
+        assert!(matches!(
+            upload("SOURCE"),
+            Err(MountedMtpError::UploadDestinationExists(_))
+        ));
     }
 
     #[test]

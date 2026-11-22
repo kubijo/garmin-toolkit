@@ -22,6 +22,69 @@ use crate::{
 
 const PREVIEW_MAP_SERVICE_URL: &str = "https://omt.garmin.com/api/maps/universal/update";
 
+/// Decode a firmware gallery fixture using the host catalog model.
+/// # Panics
+/// The screen must select a firmware fixture with valid inventory and deliverables.
+#[must_use]
+pub fn firmware_components(screen: super::PreviewScreen) -> Vec<garmin_model::firmware::Component> {
+    use super::PreviewScreen;
+    use garmin_device::parse_manifest;
+    use garmin_fixtures::firmware::{EDGE_32_20, FENIX_24_20, FENIX_GSP_22_44};
+    use garmin_update::firmware::FirmwareCatalog;
+    let capture = match screen {
+        PreviewScreen::FirmwareEdge => EDGE_32_20,
+        PreviewScreen::FirmwareWatchComponents => FENIX_24_20,
+        PreviewScreen::FirmwareWatchSystem => FENIX_GSP_22_44,
+        _ => unreachable!("firmware catalog preview"),
+    };
+    let device = parse_manifest(
+        capture.inventory,
+        TransportKind::MassStorage,
+        "fixture".into(),
+    )
+    .expect("fixture inventory");
+    let catalog = FirmwareCatalog::from_json(capture.catalog.as_bytes()).expect("fixture catalog");
+    catalog
+        .components(device.capabilities())
+        .expect("fixture components")
+        .iter()
+        .map(|item| item.snapshot(None).expect("fixture size"))
+        .collect()
+}
+
+pub(super) fn render_firmware_preview(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    screen: super::PreviewScreen,
+) {
+    let mut choices = Vec::new();
+    let mut actions = Vec::new();
+    let intl = selected_formatter();
+    for item in firmware_components(screen) {
+        choices.push(MapChoice::firmware(&item, &intl));
+        actions.push(if item.system_bundle {
+            MapChoiceAction::Change
+        } else {
+            MapChoiceAction::Keep
+        });
+    }
+    let selected = actions
+        .iter()
+        .position(|a| *a == MapChoiceAction::Change)
+        .unwrap_or(0);
+    let mut state = TableState::default().with_selected(Some(selected));
+    let areas = Layout::vertical([Constraint::Min(5), Constraint::Length(4)]).split(area);
+    draw_map_selection(
+        frame,
+        (areas[0], areas[1]),
+        &choices,
+        &actions,
+        &mut state,
+        false,
+        MapActionMode::Firmware,
+    );
+}
+
 pub(super) fn render_contact_garmin_preview(frame: &mut ratatui::Frame<'_>) {
     let config = confirmation_dialog_config("Contact Garmin?", "Contact Garmin");
     let mut state = DialogState::new(garmin_contact_confirmation_body(
@@ -104,6 +167,7 @@ pub(super) fn render_map_preview(frame: &mut ratatui::Frame<'_>, area: Rect) {
             version_tone: MapVersionTone::UpToDate,
             description: "Base maps · 2 files · 53.95 MB".to_owned(),
             operation: MapOperation::Reinstall,
+            unavailable_reason: None,
             can_remove: false,
             cache: None,
         },
@@ -113,6 +177,7 @@ pub(super) fn render_map_preview(frame: &mut ratatui::Frame<'_>, area: Rect) {
             version_tone: MapVersionTone::Outdated,
             description: "Europe · TopoActive · 5 files · 5.30 GB".to_owned(),
             operation: MapOperation::Update,
+            unavailable_reason: None,
             can_remove: true,
             cache: Some(MapCacheAvailability {
                 cached_files: 5,
@@ -125,6 +190,7 @@ pub(super) fn render_map_preview(frame: &mut ratatui::Frame<'_>, area: Rect) {
             version_tone: MapVersionTone::Unknown,
             description: "Points of Interest · 2 files · 42.76 MB".to_owned(),
             operation: MapOperation::Install,
+            unavailable_reason: None,
             can_remove: false,
             cache: Some(MapCacheAvailability {
                 cached_files: 1,
@@ -300,4 +366,54 @@ pub(super) fn render_abort_preview(frame: &mut ratatui::Frame<'_>) {
         dialog.render(frame);
     }
     render_abort_footer(frame);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::preview::PreviewScreen;
+    use ratatui::{Terminal, backend::TestBackend, style::Modifier};
+
+    #[test]
+    fn firmware_write_emphasizes_identifiers_versions_and_total_size() {
+        let mut item = firmware_components(PreviewScreen::FirmwareEdge)
+            .into_iter()
+            .find(|item| item.part_number == "006-D1074-00")
+            .unwrap();
+        item.installed = Some("40.00".into());
+        let mut body =
+            ConfirmationBody::firmware_write([&item], item.download_bytes.unwrap(), "Edge 1050");
+        let mut terminal = Terminal::new(TestBackend::new(80, 10)).unwrap();
+        terminal
+            .draw(|frame| draw_confirmation_body(frame, frame.area(), &mut body))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        for (row, runs) in [
+            vec![
+                ("006-D1074-00", true),
+                ("  Time Zone Map  ", false),
+                ("40.00", true),
+                (" → ", false),
+                ("43.00", true),
+            ],
+            vec![
+                ("569.0 KiB", true),
+                (" to stage on ", false),
+                ("Edge 1050", true),
+            ],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut x = 2;
+            for (text, bold) in runs {
+                for ch in text.chars() {
+                    let cell = &buffer[(x, 1 + u16::try_from(row).unwrap())];
+                    assert_eq!(cell.symbol(), ch.to_string());
+                    assert_eq!(cell.modifier.contains(Modifier::BOLD), bold, "{text}");
+                    x += 1;
+                }
+            }
+        }
+    }
 }

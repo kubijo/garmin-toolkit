@@ -5,6 +5,8 @@ use egui::{Response, RichText, Ui, emath::Numeric};
 
 use crate::{Size, button, icons, theme::PANEL_RADIUS};
 
+pub use crate::checkbox::show as checkbox;
+
 /// Supporting or validation text below an input.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Message<'a> {

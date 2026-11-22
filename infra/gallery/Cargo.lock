@@ -2505,6 +2505,7 @@ dependencies = [
  "anyhow",
  "crossterm",
  "garmin-device",
+ "garmin-fixtures",
  "garmin-i18n",
  "garmin-model",
  "garmin-progress",
@@ -2555,6 +2556,10 @@ dependencies = [
  "walkdir",
  "zip",
 ]
+
+[[package]]
+name = "garmin-fixtures"
+version = "0.1.6"
 
 [[package]]
 name = "garmin-gallery"
@@ -2658,6 +2663,7 @@ dependencies = [
  "garmin-color",
  "garmin-macros",
  "garmin-model",
+ "garmin-progress",
  "jiff",
  "remoc",
  "serde",
@@ -2716,8 +2722,10 @@ dependencies = [
  "garmin-model",
  "garmin-progress",
  "hex",
+ "jiff",
  "md-5",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",

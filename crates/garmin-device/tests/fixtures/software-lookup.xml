@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Device xmlns="http://www.garmin.com/xmlschemas/GarminDevice/v2" xmlns:ext="urn:fixture">
+  <Model>
+    <SoftwareVersion>2420</SoftwareVersion>
+    <Description>Fixture &amp; inventory</Description>
+  </Model>
+  <Id>42</Id>
+  <Unlock>
+    <Code>fictional-first</Code>
+  </Unlock>
+  <Unlock/>
+  <ext:Unlock>
+    <ext:Code>fictional-second</ext:Code>
+  </ext:Unlock>
+  <MassStorageMode>
+    <UpdateFile>
+      <PartNumber>006-V4532-00</PartNumber>
+      <Version>
+        <Major>22</Major>
+        <Minor>44</Minor>
+      </Version>
+      <Path>Garmin</Path>
+      <FileName>GUPDATE.GSP</FileName>
+    </UpdateFile>
+  </MassStorageMode>
+  <Extensions>
+    <ext:Feature>Preserved &amp; escaped</ext:Feature>
+  </Extensions>
+</Device>

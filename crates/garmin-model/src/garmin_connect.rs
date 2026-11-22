@@ -35,6 +35,9 @@ pub struct ActivityDetails {
 pub struct RemoteActivity {
     pub id: i64,
     pub imported: bool,
+    /// The last attempt to cache this activity's original FIT file failed.
+    #[serde(default)]
+    pub original_unavailable: bool,
     pub sport: Option<crate::activity::ActivitySport>,
     pub name: String,
     pub started_at: Option<String>,
@@ -42,6 +45,14 @@ pub struct RemoteActivity {
     pub distance: Option<Distance>,
     #[serde(rename = "duration_seconds", default, with = "duration_wire")]
     pub duration: Option<ActivityDuration>,
+}
+
+impl RemoteActivity {
+    /// Whether the page import should request this activity's original.
+    #[must_use]
+    pub const fn eligible_for_page_import(&self) -> bool {
+        !self.imported && !self.original_unavailable
+    }
 }
 
 // Published cache rows and the RPC transport retain their existing numeric representation.
@@ -298,6 +309,7 @@ mod tests {
                 .map(|id| RemoteActivity {
                     id,
                     imported: false,
+                    original_unavailable: false,
                     sport: None,
                     name: id.to_string(),
                     started_at: None,
@@ -355,6 +367,7 @@ mod tests {
             activities: vec![RemoteActivity {
                 id: 42,
                 imported: false,
+                original_unavailable: false,
                 sport: None,
                 name: "Ride".into(),
                 started_at: None,

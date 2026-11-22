@@ -31,6 +31,7 @@ fn disconnected(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
         key: "mock-cycle-o-matic-9000".to_owned(),
         name: "Mock Cycle-o-Matic 9000".to_owned(),
         identifier: Some(36_264_719),
+        firmware_update: None,
         software_version: Some(3_220),
         inspection: InspectionState::Ready,
         inspection_error: None,
