@@ -31,9 +31,6 @@ All four devices are available and support Bluetooth and Wi-Fi. fēnix/Venu are 
 Venu tests watch portability; Edge 850 extends the established Edge 1050 bike support. Record firmware, host, and
 adapter for every run.
 
-Simultaneous Edge 1050 and Venu 3S attachment was observed, but it does not establish complete explorer or write
-acceptance for either device.
-
 On 2026-11-03, the owner verified Edge 1050 discovery, directory browsing, activity and Course FIT previews, and
 explicit activity import through the development HASS app on Raspberry Pi with a direct USB connection. Firmware was not
 recorded for this run. After redeployment of the refresh fix, the owner confirmed that refreshing retains the navigated
@@ -71,13 +68,23 @@ These rows describe recorded acceptance, not every operation exposed by the adap
 | Edge 1050 / HASS Pi   | Discovery, browse, activity/Course preview, activity import, path refresh  |
 | Edge 1050 / Linux x64 | AppImage discovery/reconnect, browse, FIT activity preview                 |
 | Edge 1050 / ARM64 VM  | Automatic mounting, discovery, browse, FIT activity preview with map       |
-| Venu 3S               | Simultaneous attachment with Edge 1050 only                                |
+| Venu 3S / desktop     | USB/MTP Explorer acceptance and two golf database updates confirmed on 17.05 |
 | Edge 850              | No recorded physical acceptance run                                        |
 
 Evidence: [desktop reconnect](usb-sync.md#physical-desktop-reconnect),
 [physical pairing revisions/reassignment](usb-sync.md#physical-pairing-marker-acceptance),
 [map maintenance](usb-sync.md#map-maintenance-evidence), [device updates](usb-sync.md#device-update-evidence), and
 [Course recovery/firmware discovery](usb-sync.md#course-transfer-evidence).
+
+On the Venu 3S running software 17.05, desktop detected the watch over USB/MTP and reported its internal storage.
+Device Explorer browsed `GARMIN/Activity` and previewed a walking FIT. Refresh preserved the folder and selection,
+and browsing worked again after reconnect.
+
+Device Explorer listed workout FIT files under `GARMIN/Workouts`. Open routed the workout to activity preview,
+which rejected the file type.
+
+Desktop staged the EMEA Golf Courses DB (`006-DA094-02`) and Pacific Taiwan Golf Courses DB (`006-DA094-03`) together
+over USB/MTP. The receipt confirmed both updates from 1.02 to 1.10 after reconnect.
 
 Raw-MTP limitations are recorded with [the adapter evidence](usb-sync.md#existing-adapters). Packaged desktop/ARM64
 guest details are in [desktop packaging](desktop-packaging.md); a Linux VM on macOS does not qualify a native macOS
