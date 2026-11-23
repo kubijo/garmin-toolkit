@@ -58,30 +58,30 @@ and [Index S2 specifications](https://www.garmin.com/en-GB/p/679362/pn/010-02294
 
 These rows describe recorded acceptance, not every operation exposed by the adapter or manifest.
 
-| Device / path         | Verified operations                                                        |
-| --------------------- | -------------------------------------------------------------------------- |
-| fēnix / Linux GVFS    | Manifest, FIT reads/decode, probe create/read/delete, map maintenance      |
-| fēnix / desktop       | MTP video bundle staging and reconnect confirmation at 1.00                |
-| fēnix / raw MTP       | Manifest and complete FIT reads/decode                                     |
-| Edge 1050 / GVFS      | Map update/removal, restart acceptance, interrupted-update rollback        |
-| Edge 1050 / desktop   | MTP staging and reconnect confirmation of Time Zone Map 43.00 and FW 33.22 |
-| Edge 1050 / HASS Pi   | Discovery, browse, activity/Course preview, activity import, path refresh  |
-| Edge 1050 / Linux x64 | AppImage discovery/reconnect, browse, FIT activity preview                 |
-| Edge 1050 / ARM64 VM  | Automatic mounting, discovery, browse, FIT activity preview with map       |
+| Device / path         | Verified operations                                                          |
+| --------------------- | ---------------------------------------------------------------------------- |
+| fēnix / Linux GVFS    | Manifest, FIT reads/decode, probe create/read/delete, map maintenance        |
+| fēnix / desktop       | MTP video bundle staging and reconnect confirmation at 1.00                  |
+| fēnix / raw MTP       | Manifest and complete FIT reads/decode                                       |
+| Edge 1050 / GVFS      | Map update/removal, restart acceptance, interrupted-update rollback          |
+| Edge 1050 / desktop   | MTP staging and reconnect confirmation of Time Zone Map 43.00 and FW 33.22   |
+| Edge 1050 / HASS Pi   | Discovery, browse, activity/Course preview, activity import, path refresh    |
+| Edge 1050 / Linux x64 | AppImage discovery/reconnect, browse, FIT activity preview                   |
+| Edge 1050 / ARM64 VM  | Automatic mounting, discovery, browse, FIT activity preview with map         |
 | Venu 3S / desktop     | USB/MTP Explorer acceptance and two golf database updates confirmed on 17.05 |
-| Edge 850              | No recorded physical acceptance run                                        |
+| Edge 850              | No recorded physical acceptance run                                          |
 
 Evidence: [desktop reconnect](usb-sync.md#physical-desktop-reconnect),
 [physical pairing revisions/reassignment](usb-sync.md#physical-pairing-marker-acceptance),
 [map maintenance](usb-sync.md#map-maintenance-evidence), [device updates](usb-sync.md#device-update-evidence), and
 [Course recovery/firmware discovery](usb-sync.md#course-transfer-evidence).
 
-On the Venu 3S running software 17.05, desktop detected the watch over USB/MTP and reported its internal storage.
-Device Explorer browsed `GARMIN/Activity` and previewed a walking FIT. Refresh preserved the folder and selection,
-and browsing worked again after reconnect.
+On the Venu 3S running software 17.05, desktop detected the watch over USB/MTP and reported its internal storage. Device
+Explorer browsed `GARMIN/Activity` and previewed a walking FIT. Refresh preserved the folder and selection, and browsing
+worked again after reconnect.
 
-Device Explorer listed workout FIT files under `GARMIN/Workouts`. Open routed the workout to activity preview,
-which rejected the file type.
+Device Explorer listed workout FIT files under `GARMIN/Workouts`. Open routed the workout to activity preview, which
+rejected the file type.
 
 Desktop staged the EMEA Golf Courses DB (`006-DA094-02`) and Pacific Taiwan Golf Courses DB (`006-DA094-03`) together
 over USB/MTP. The receipt confirmed both updates from 1.02 to 1.10 after reconnect.

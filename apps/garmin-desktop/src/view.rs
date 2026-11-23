@@ -629,9 +629,10 @@ impl Desktop {
                     preview.show(ui, intl, busy, units, jiff::Zoned::now().date())
                 });
                 let action = if let Some(browser) = browser {
-                    ui.add_enabled_ui(!busy && !preview_open, |ui| browser.show(ui, intl)).inner
+                    ui.add_enabled_ui(!busy && !preview_open, |ui| browser.show(ui, intl))
+                        .inner
                 } else {
-                    ui.label(if loading { "Waiting for the device catalogue…" } else { "Device catalogue unavailable. Close this window and choose Browse files to retry." });
+                    device_browser::show_catalog_pending(ui, intl, loading);
                     None
                 };
                 let toast_bounds = if inline {

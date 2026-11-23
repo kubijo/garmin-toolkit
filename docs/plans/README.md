@@ -10,8 +10,6 @@ limit is not automatically scheduled work.
 - Stage an offered system update on the fēnix 8 Solar (47 mm). Record the transport, part, versions and destination.
   After ejection, verify installation on the watch and confirm the receipt on reconnect.
 - Confirm Garmin's response to an [expired or revoked Personal API key](garmin-connect-import.md#qualification).
-- Establish Edge 850 support for manifest-declared operations. Record the device, firmware, host, and adapter. Retain
-  host/GVFS defect evidence.
 - Confirm the fēnix raw-MTP upload correction after a usable fresh session. The known `OpenSession` failure and
   successful GVFS map maintenance are separate evidence; see
   [USB limitations](../research/usb-sync.md#existing-adapters).

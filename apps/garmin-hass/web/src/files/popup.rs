@@ -285,7 +285,8 @@ impl eframe::App for Files {
             )
             .inner
         } else {
-            ui.label(if self.snapshot.as_ref().is_none_or(|snapshot| snapshot.busy) { "Waiting for the device catalogue…" } else { "Device catalogue unavailable. Close this window and choose Browse files to retry." });
+            let loading = self.snapshot.as_ref().is_none_or(|snapshot| snapshot.busy);
+            device_browser::show_catalog_pending(ui, &self.intl, loading);
             None
         };
         let _ = self.shared.borrow_mut().file_toasts.show_in(

@@ -1350,6 +1350,10 @@
     "source": "Recorded user ID",
     "translation": "Zaznamenané ID uživatele"
   },
+  "LFoZqHFixP": {
+    "source": "Device catalogue unavailable. Close this window and choose Browse files to retry.",
+    "translation": "Katalog zařízení není dostupný. Zavřete toto okno a zkuste znovu otevřít Procházet soubory."
+  },
   "LUxyccUGuQ": {
     "source": "Choose where file browsers and choosers open.",
     "translation": "Zvolte, kde se otevírají prohlížeče a výběry souborů."
@@ -3314,6 +3318,10 @@
   "uh6+FY6l+b": {
     "source": "Choose an existing backup. Review it before replacing any data.",
     "translation": "Vyberte existující zálohu. Před nahrazením dat ji zkontrolujte."
+  },
+  "uo/YlLaSjD": {
+    "source": "Loading device files…",
+    "translation": "Načítání souborů zařízení…"
   },
   "uqBy7yud/k": {
     "source": "Enter a name",

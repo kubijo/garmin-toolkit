@@ -20,6 +20,57 @@ use garmin_service_api::{
 
 use crate::{Size, button, header_selector, icons, input, modal, theme::color32};
 
+/// Placeholder for the first catalogue request, shared by both file window hosts.
+pub fn show_catalog_pending(ui: &mut Ui, intl: &Intl, loading: bool) {
+    if loading && !uses_compact_layout(ui.available_width()) {
+        for (panel, width, heading) in [
+            (
+                egui::Panel::left(Id::new("device-explorer-loading-storage")),
+                TREE_WIDTH,
+                format_message!(intl, default_message: "Storage"),
+            ),
+            (
+                egui::Panel::right(Id::new("device-explorer-loading-details")),
+                DETAILS_WIDTH,
+                format_message!(intl, default_message: "Details"),
+            ),
+        ] {
+            panel
+                .exact_size(width)
+                .show_separator_line(false)
+                .frame(pane_frame(ui, PaneSurface::Sidebar))
+                .show(ui, |ui| {
+                    pane_header(ui, "catalogue-loading", None, |ui, _| {
+                        ui.label(heading);
+                    });
+                    egui::Frame::NONE.inner_margin(16).show(ui, |ui| {
+                        catalogue_skeleton(ui, [0.72, 0.54, 0.64]);
+                    });
+                });
+        }
+    }
+    egui::CentralPanel::default()
+        .frame(pane_frame(ui, PaneSurface::Workspace))
+        .show(ui, |ui| {
+            ui.add_space(8.0);
+            if loading {
+                ui.strong(format_message!(intl, default_message: "Loading device files…"));
+                ui.add_space(16.0);
+                catalogue_skeleton(ui, [0.80, 0.60, 0.72, 0.56, 0.68, 0.76]);
+            } else {
+                ui.label(format_message!(intl, default_message: "Device catalogue unavailable. Close this window and choose Browse files to retry."));
+            }
+        });
+}
+
+fn catalogue_skeleton(ui: &mut Ui, fractions: impl IntoIterator<Item = f32>) {
+    let width = ui.available_width();
+    ui.spacing_mut().item_spacing.y = 16.0;
+    for fraction in fractions {
+        crate::skeleton::Skeleton::new(egui::vec2(width * fraction, 16.0)).show(ui);
+    }
+}
+
 pub mod chooser;
 mod path;
 mod view_state;

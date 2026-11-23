@@ -11,6 +11,20 @@ use garmin_ui::{device, device_browser, profile, shell, workspace};
 
 scene_meta! { title: "Components / File browser" }
 
+#[scene]
+fn loading_wide(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage((960, 640)), |ui| {
+        device_browser::show_catalog_pending(ui, &globals.intl(), true);
+    });
+}
+
+#[scene]
+fn loading_compact(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage((480, 640)), |ui| {
+        device_browser::show_catalog_pending(ui, &globals.intl(), true);
+    });
+}
+
 thread_local! {
     static BROWSERS: crate::SceneState<device_browser::Browser, 8> = const { crate::SceneState::empty() };
     static SELECTED_BROWSERS: crate::SceneState<(device_browser::Browser, u8), 3> = const { crate::SceneState::empty() };
