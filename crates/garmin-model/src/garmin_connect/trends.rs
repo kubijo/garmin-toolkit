@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use jiff::civil::Date;
 
 use super::CachedActivity;
-use crate::activity::{ActivityDuration, ActivitySport, Distance, HeartRate, Power};
+use crate::activity::{ActivityDuration, ActivitySport, Cadence, Distance, HeartRate, Power};
 use crate::observation::ObservationId;
 
 #[garmin_macros::portable(copy, eq, ord)]
@@ -56,6 +56,8 @@ pub struct Totals {
     pub peak_power: Option<Power>,
     #[serde(default)]
     pub power_activities: usize,
+    #[serde(default)]
+    pub cadence: CadenceAverage,
 }
 
 #[derive(Clone, Copy, Debug, Default, serde::Serialize)]
@@ -64,6 +66,42 @@ pub struct ImportedMeasurements {
     pub average_heart_rate: Option<HeartRate>,
     pub peak_power: Option<Power>,
     pub average_power: Option<Power>,
+    pub average_cadence: Option<Cadence>,
+}
+
+/// Each ride with reported cadence contributes once.
+#[garmin_macros::portable(default)]
+pub struct CadenceAverage {
+    value: Option<Cadence>,
+    activities: usize,
+}
+
+impl CadenceAverage {
+    #[must_use]
+    pub const fn value(&self) -> Option<Cadence> {
+        self.value
+    }
+
+    #[must_use]
+    pub const fn activities(&self) -> usize {
+        self.activities
+    }
+
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Activity counts provide a fractional mean weight"
+    )]
+    fn merge(&mut self, value: Cadence, activities: usize) {
+        if activities == 0 {
+            return;
+        }
+        self.activities += activities;
+        let weight = activities as f64 / self.activities as f64;
+        self.value = Some(
+            self.value
+                .map_or(value, |current| current.interpolate(value, weight)),
+        );
+    }
 }
 
 /// Each activity with a reported average contributes once.
@@ -118,6 +156,11 @@ impl Totals {
             self.peak_power = self.peak_power.max(activity.peak_power);
             self.power_activities += 1;
         }
+        if activity.sport == Sport::Cycling
+            && let Some(cadence) = activity.average_cadence
+        {
+            self.cadence.merge(cadence, 1);
+        }
     }
 
     pub fn add(&mut self, other: &Self) {
@@ -132,6 +175,9 @@ impl Totals {
         self.heart_rate.activities += other.heart_rate.activities;
         self.peak_power = self.peak_power.max(other.peak_power);
         self.power_activities += other.power_activities;
+        if let Some(cadence) = other.cadence.value() {
+            self.cadence.merge(cadence, other.cadence.activities());
+        }
     }
 }
 
@@ -161,6 +207,8 @@ pub struct ActivitySummary {
     pub peak_power: Option<Power>,
     #[serde(default)]
     pub average_power: Option<Power>,
+    #[serde(default)]
+    pub average_cadence: Option<Cadence>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -232,6 +280,7 @@ impl History {
                         totals.heart_rate.value().map(BucketValue::HeartRate)
                     }
                     Metric::PeakPower => totals.peak_power.map(BucketValue::Power),
+                    Metric::AverageCadence => totals.cadence.value().map(BucketValue::Cadence),
                     _ => None,
                 };
                 Bucket {
@@ -292,6 +341,7 @@ impl History {
                 average_heart_rate: measurements.average_heart_rate,
                 peak_power: measurements.peak_power,
                 average_power: measurements.average_power,
+                average_cadence: measurements.average_cadence,
                 local_observation: None,
             });
         }
@@ -358,6 +408,7 @@ pub enum Metric {
     Elevation,
     AverageHeartRate,
     PeakPower,
+    AverageCadence,
 }
 
 #[garmin_macros::portable]
@@ -368,13 +419,14 @@ pub struct Bucket {
     pub has_activities: bool,
 }
 
-#[garmin_macros::portable(copy, eq)]
+#[garmin_macros::portable(copy)]
 pub enum BucketValue {
     Distance(Distance),
     Duration(ActivityDuration),
     Count(usize),
     HeartRate(HeartRate),
     Power(Power),
+    Cadence(Cadence),
 }
 
 impl BucketValue {

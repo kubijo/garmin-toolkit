@@ -1,6 +1,6 @@
 use gallery::prelude::*;
 use garmin_model::{
-    activity::{ActivityDuration, ActivitySport, Distance, HeartRate, Power},
+    activity::{ActivityDuration, ActivitySport, Cadence, Distance, HeartRate, Power},
     garmin_connect::{
         CachedActivity, RemoteActivity,
         sync::{Revision, Snapshot},
@@ -51,7 +51,13 @@ fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let editor = ctx.toggle("edit targets", false);
     let metric = ctx.buttons(
         "comparison metric",
-        &["distance", "elevation", "heart rate", "peak power"],
+        &[
+            "distance",
+            "elevation",
+            "heart rate",
+            "peak power",
+            "average cadence",
+        ],
         0,
     );
     let unavailable = ctx.toggle("missing original", false);
@@ -82,6 +88,7 @@ fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
                                 Metric::Elevation,
                                 Metric::AverageHeartRate,
                                 Metric::PeakPower,
+                                Metric::AverageCadence,
                             ][metric],
                         );
                     if status >= 2 {
@@ -219,6 +226,14 @@ fn fixture(variant: usize, previous: bool) -> History {
                         .map(|n| Power::from_watts(if n == 1 { 0 } else { 240 + n * 10 })),
                     average_power: power_sample
                         .map(|n| Power::from_watts(if n == 1 { 0 } else { 160 + n * 5 })),
+                    average_cadence: power_sample.and_then(|n| {
+                        Cadence::from_revolutions_per_minute(if n == 1 {
+                            0.0
+                        } else {
+                            72.5 + f64::from(n)
+                        })
+                        .ok()
+                    }),
                     average_heart_rate: (!index.is_multiple_of(4)).then(|| {
                         HeartRate::from_beats_per_minute(
                             118 + u16::try_from(index % 40).expect("bounded index"),

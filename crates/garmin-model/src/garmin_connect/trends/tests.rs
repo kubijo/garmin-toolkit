@@ -206,6 +206,49 @@ fn peak_power_keeps_the_highest_measured_ride_and_counts_zero_watts() {
 }
 
 #[test]
+fn cadence_averages_measured_rides_across_days_and_keeps_zero() {
+    let mut summaries = [
+        summary(1, Some("2026-11-01"), None, None),
+        summary(2, Some("2026-11-01"), None, None),
+        summary(3, Some("2026-11-02"), None, None),
+        summary(4, Some("2026-11-03"), None, None),
+    ];
+    for ride in &mut summaries {
+        ride.activity.sport = Some(ActivitySport::Cycling);
+    }
+    let measurements = [(1, 80.0), (2, 100.5), (3, 0.0)]
+        .into_iter()
+        .map(|(id, rpm)| {
+            (
+                id,
+                ImportedMeasurements {
+                    average_cadence: Cadence::from_revolutions_per_minute(rpm).ok(),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
+    let history = History::from_summaries_with_measurements(&summaries, &measurements);
+    let range = Range {
+        from: date("2026-11-01"),
+        through: date("2026-11-03"),
+    };
+    let sport = Some(Sport::Cycling);
+    assert_eq!(history.totals(range, sport).cadence.activities(), 3);
+    let reading = |bucket: &Bucket| match bucket.value {
+        Some(BucketValue::Cadence(cadence)) => Some(cadence.as_revolutions_per_minute()),
+        _ => None,
+    };
+    let daily = history.series(range, sport, Metric::AverageCadence, false);
+    assert_eq!(
+        daily.iter().map(reading).collect::<Vec<_>>(),
+        [Some(90.25), Some(0.0), None]
+    );
+    let monthly = history.series(range, sport, Metric::AverageCadence, true);
+    assert!((reading(&monthly[0]).expect("monthly cadence") - 180.5 / 3.0).abs() < 1e-10);
+}
+
+#[test]
 fn comparisons_match_calendar_dates_and_clamp_short_months() {
     let today = date("2026-11-16");
     let (current, previous) = Period::Month.ranges(today, today).expect("month range");

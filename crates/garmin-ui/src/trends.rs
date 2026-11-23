@@ -11,7 +11,7 @@
 use egui::{Color32, RichText, Ui};
 use garmin_i18n::{Intl, format_message};
 use garmin_model::{
-    activity::{Distance, HeartRate, Power},
+    activity::{Cadence, Distance, HeartRate, Power},
     artifact::ArtifactDigest,
     garmin_connect::{
         sync::{Revision, Snapshot},
@@ -105,7 +105,7 @@ impl State {
 
     #[must_use]
     pub fn with_comparison_metric(mut self, metric: Metric) -> Self {
-        if metric == Metric::PeakPower {
+        if matches!(metric, Metric::PeakPower | Metric::AverageCadence) {
             self.sport = Sport::Cycling as usize;
             self.comparison_initialized = true;
         }
@@ -357,7 +357,10 @@ fn values(
                 Some(BucketValue::Count(count)) => Sample::Value(count as f64),
                 Some(BucketValue::HeartRate(rate)) => Sample::HeartRate(rate),
                 Some(BucketValue::Power(power)) => Sample::Power(power),
-                None if metric == Metric::PeakPower => Sample::Empty,
+                Some(BucketValue::Cadence(cadence)) => Sample::Cadence(cadence),
+                None if matches!(metric, Metric::PeakPower | Metric::AverageCadence) => {
+                    Sample::Empty
+                }
                 None if metric == Metric::AverageHeartRate && !bucket.has_activities => {
                     Sample::Empty
                 }
@@ -445,10 +448,13 @@ pub fn show(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Action>
 fn dashboard(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, previous: Range) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(16.0, 16.0);
-        top_widgets(ui, state, props, range);
+        let calendar_in_first_row = ui.available_width() >= 880.0;
+        top_widgets(ui, state, props, range, calendar_in_first_row);
         metrics(ui, state, props, range, previous);
         lower_widgets(ui, state, props, range, previous);
-        activity_comparison::show(ui, state, props, range);
+        if !calendar_in_first_row {
+            calendar(ui, state, props, range);
+        }
     });
 }
 
@@ -482,26 +488,27 @@ impl RowPlots {
     }
 }
 
-/// Divide the height left by the neighboring card among the visible plots.
+/// Divide the height left by the tallest neighboring card among the visible plots.
 /// Measuring the whole chart card accounts for wrapped labels, axes and legends.
-fn chart_row(
+fn chart_row<const N: usize>(
     ui: &mut Ui,
     id: &str,
-    draw: impl FnOnce(&mut Ui, &mut RowPlots) -> (egui::Rect, egui::Rect),
+    draw: impl FnOnce(&mut Ui, &mut RowPlots) -> [egui::Rect; N],
 ) {
     let key = ui.id().with(id);
     let mut plots = RowPlots {
         extra_per_plot: ui.data(|data| data.get_temp(key)).unwrap_or_default(),
         count: 0,
     };
-    let slots = [
-        ui.painter().add(egui::Shape::Noop),
-        ui.painter().add(egui::Shape::Noop),
-    ];
-    let (chart, neighbor) = draw(ui, &mut plots);
-    fill_row(ui, slots, [chart, neighbor]);
+    let slots = std::array::from_fn(|_| ui.painter().add(egui::Shape::Noop));
+    let rects = draw(ui, &mut plots);
+    fill_row(ui, slots, rects);
     if plots.count > 0 {
-        let remaining = neighbor.height() - chart.height();
+        let tallest_neighbor = rects[1..]
+            .iter()
+            .map(egui::Rect::height)
+            .fold(0.0, f32::max);
+        let remaining = tallest_neighbor - rects[0].height();
         let extra = (plots.extra_per_plot + remaining / plots.count as f32).max(0.0);
         if (extra - plots.extra_per_plot).abs() > 0.5 {
             ui.data_mut(|data| data.insert_temp(key, extra));
@@ -510,18 +517,43 @@ fn chart_row(
     }
 }
 
-fn top_widgets(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
-    if ui.available_width() < 880.0 {
+fn top_widgets(
+    ui: &mut Ui,
+    state: &mut State,
+    props: &Props<'_>,
+    range: Range,
+    calendar_in_first_row: bool,
+) {
+    if !calendar_in_first_row {
         targets(ui, state, props, range);
         distances(ui, state, props, range, &mut RowPlots::default());
         return;
     }
     chart_row(ui, "distance-row", |ui, plots| {
-        ui.columns(2, |columns| {
-            targets(&mut columns[0], state, props, range);
-            distances(&mut columns[1], state, props, range, plots);
-            (columns[1].min_rect(), columns[0].min_rect())
+        let calendar_width = 288.0;
+        let gap = ui.spacing().item_spacing.x;
+        let distance_width = (ui.available_width() - calendar_width - 2.0 * gap) / 2.0;
+        let layout = egui::Layout::top_down(egui::Align::Min);
+        ui.horizontal_top(|ui| {
+            let targets =
+                ui.allocate_ui_with_layout(egui::vec2(distance_width, 0.0), layout, |ui| {
+                    targets(ui, state, props, range);
+                });
+            let distances =
+                ui.allocate_ui_with_layout(egui::vec2(distance_width, 0.0), layout, |ui| {
+                    distances(ui, state, props, range, plots);
+                });
+            let calendar =
+                ui.allocate_ui_with_layout(egui::vec2(calendar_width, 0.0), layout, |ui| {
+                    calendar(ui, state, props, range);
+                });
+            [
+                distances.response.rect,
+                targets.response.rect,
+                calendar.response.rect,
+            ]
         })
+        .inner
     });
 }
 
@@ -1010,10 +1042,11 @@ fn comparison(
             return;
         };
         let sport = Sport::ALL[state.sport];
-        let elevation = state.metric == Metric::Elevation;
-        let heart_rate = state.metric == Metric::AverageHeartRate;
-        let power = state.metric == Metric::PeakPower;
-        let accumulated = !(elevation || heart_rate || power);
+        let metric = state.metric;
+        let accumulated = matches!(
+            metric,
+            Metric::Distance | Metric::Duration | Metric::Count | Metric::ActiveDays
+        );
         let monthly = state.is_preset(Period::Year);
         let series_for = |period| {
             values(
@@ -1039,27 +1072,28 @@ fn comparison(
         let value = comparison_value(state.metric, props, &totals);
         ui.label(RichText::new(value).size(24.0).strong());
         let chart_unit = comparison_unit(state.metric, props.preferences);
-        if elevation {
-            elevation_coverage(ui, props, &totals, &previous_totals);
-        } else if heart_rate {
-            heart_rate_coverage(ui, props.intl, &totals, &previous_totals);
-        } else if power {
-            power_coverage(ui, props.intl, &totals, &previous_totals);
-        } else {
-            comparison_delta(
+        match metric {
+            Metric::Elevation => elevation_coverage(ui, props, &totals, &previous_totals),
+            Metric::AverageHeartRate => {
+                heart_rate_coverage(ui, props.intl, &totals, &previous_totals);
+            }
+            Metric::PeakPower | Metric::AverageCadence => {
+                cycling_measurement_coverage(ui, props.intl, &totals, &previous_totals, metric);
+            }
+            _ => comparison_delta(
                 ui,
                 props.intl,
                 current.last().and_then(|sample| sample.coordinate()),
                 prior.last().and_then(|sample| sample.coordinate()),
                 chart_unit,
-            );
+            ),
         }
         if missing > 0 {
             ui.weak(format_message!(props.intl, default_message: "Known values only; missing measurements leave gaps."));
         }
         if totals.activities == 0 {
             ui.label(format_message!(props.intl, default_message: "No activities recorded in this period"));
-            if !power || previous_totals.power_activities == 0 {
+            if !has_previous_cycling_measurement(metric, &previous_totals) {
                 return;
             }
         }
@@ -1094,7 +1128,7 @@ fn comparison(
                 series: &series,
                 kind,
                 height: plots.height(192.0),
-                integral: state.metric == Metric::Count || power,
+                integral: matches!(metric, Metric::Count | Metric::PeakPower),
                 intl: props.intl,
                 unit: chart_unit,
             },
@@ -1103,11 +1137,33 @@ fn comparison(
     });
 }
 
-fn power_coverage(ui: &mut Ui, intl: &Intl, current: &Totals, prior: &Totals) {
-    ui.weak(format_message!(intl, default_message: "Rides with recorded power · {covered, number}/{total, number} this period · {previous, number}/{prior_total, number} previous period", values: {
-        covered: current.power_activities as u64, total: current.activities as u64,
-        previous: prior.power_activities as u64, prior_total: prior.activities as u64
-    }));
+fn has_previous_cycling_measurement(metric: Metric, totals: &Totals) -> bool {
+    match metric {
+        Metric::PeakPower => totals.peak_power.is_some(),
+        Metric::AverageCadence => totals.cadence.value().is_some(),
+        _ => false,
+    }
+}
+
+fn cycling_measurement_coverage(
+    ui: &mut Ui,
+    intl: &Intl,
+    current: &Totals,
+    prior: &Totals,
+    metric: Metric,
+) {
+    let label = if metric == Metric::AverageCadence {
+        format_message!(intl, default_message: "Rides with recorded cadence · {covered, number}/{total, number} this period · {previous, number}/{prior_total, number} previous period", values: {
+            covered: current.cadence.activities() as u64, total: current.activities as u64,
+            previous: prior.cadence.activities() as u64, prior_total: prior.activities as u64
+        })
+    } else {
+        format_message!(intl, default_message: "Rides with recorded power · {covered, number}/{total, number} this period · {previous, number}/{prior_total, number} previous period", values: {
+            covered: current.power_activities as u64, total: current.activities as u64,
+            previous: prior.power_activities as u64, prior_total: prior.activities as u64
+        })
+    };
+    ui.weak(label);
 }
 
 fn comparison_value(metric: Metric, props: &Props<'_>, totals: &Totals) -> String {
@@ -1132,6 +1188,10 @@ fn comparison_value(metric: Metric, props: &Props<'_>, totals: &Totals) -> Strin
         Metric::PeakPower => totals.peak_power.map_or_else(
             || "—".to_owned(),
             |power| power.format(props.intl.decimal_formatter()),
+        ),
+        Metric::AverageCadence => totals.cadence.value().map_or_else(
+            || "—".to_owned(),
+            |cadence| cadence.format(props.intl.decimal_formatter()),
         ),
         _ => totals.activities.to_string(),
     }
@@ -1184,6 +1244,7 @@ fn comparison_unit(metric: Metric, preferences: ProfilePreferences) -> &'static 
         Metric::Elevation => elevation_unit(preferences).0,
         Metric::AverageHeartRate => HeartRate::SYMBOL,
         Metric::PeakPower => Power::SYMBOL,
+        Metric::AverageCadence => Cadence::SYMBOL,
         _ => "",
     }
 }
@@ -1246,6 +1307,11 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
                 "trends.metric.peak-power",
                 format_message!(intl, default_message: "Peak power"),
             ));
+            metrics.push((
+                Metric::AverageCadence,
+                "trends.metric.average-cadence",
+                format_message!(intl, default_message: "Average cadence"),
+            ));
         }
         let mut selected = metrics
             .iter()
@@ -1270,28 +1336,30 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
 }
 
 fn lower_widgets(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, previous: Range) {
-    if ui.available_width() >= 880.0 {
-        let width = ui.available_width() - 296.0 - 16.0;
+    let activity_width = activity_comparison::MAX_WIDTH + 32.0;
+    let gap = 16.0;
+    let period_width = ui.available_width() - activity_width - gap;
+    if period_width >= 448.0 {
         chart_row(ui, "comparison-row", |ui, plots| {
             ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 16.0;
+                ui.spacing_mut().item_spacing.x = gap;
                 let comparison = ui.allocate_ui_with_layout(
-                    egui::vec2(width, 0.0),
+                    egui::vec2(period_width, 0.0),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| comparison(ui, state, props, range, previous, plots),
                 );
-                let calendar = ui.allocate_ui_with_layout(
-                    egui::vec2(296.0, 0.0),
+                let activities = ui.allocate_ui_with_layout(
+                    egui::vec2(activity_width, 0.0),
                     egui::Layout::top_down(egui::Align::Min),
-                    |ui| calendar(ui, state, props, range),
+                    |ui| activity_comparison::show(ui, state, props, range),
                 );
-                (comparison.response.rect, calendar.response.rect)
+                [comparison.response.rect, activities.response.rect]
             })
             .inner
         });
     } else {
         comparison(ui, state, props, range, previous, &mut RowPlots::default());
-        calendar(ui, state, props, range);
+        activity_comparison::show(ui, state, props, range);
     }
 }
 

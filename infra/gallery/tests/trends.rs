@@ -7,7 +7,7 @@ use egui_kittest::{
     kittest::{By, Queryable as _},
 };
 use garmin_model::{
-    activity::{ActivityDuration, Distance, HeartRate, Power},
+    activity::{ActivityDuration, Cadence, Distance, HeartRate, Power},
     garmin_connect::{
         sync::{Outcome, Revision, Snapshot},
         trends::{History, ImportedMeasurements},
@@ -88,10 +88,26 @@ fn harness() -> Harness<'static, Model> {
 
 #[test]
 fn cycling_plots_fill_their_wide_rows_and_shrink_when_stacked() {
-    use garmin_model::garmin_connect::trends::{Day, Sport, Totals};
+    use garmin_model::garmin_connect::trends::{ActivitySummary, Day, Sport, Totals};
 
     let mut view = harness();
     let history = History {
+        activities: (1..=2)
+            .map(|id| ActivitySummary {
+                id,
+                date: "2026-11-16".parse().expect("fixture date"),
+                sport: Sport::Cycling,
+                name: format!("Ride {id}"),
+                distance: None,
+                duration: None,
+                elevation_gain: None,
+                average_heart_rate: None,
+                local_observation: None,
+                peak_power: None,
+                average_power: None,
+                average_cadence: None,
+            })
+            .collect(),
         days: vec![Day {
             date: "2026-11-16".parse().expect("fixture date"),
             sport: Sport::Cycling,
@@ -123,16 +139,20 @@ fn cycling_plots_fill_their_wide_rows_and_shrink_when_stacked() {
         (cycling, comparison)
     };
     let (wide_distance, wide_comparison) = plots(&view);
-    let edit = view.get_by_label("Edit monthly distance targets").rect();
     let calendar_legend = view.get_by_label("0 min").rect();
+    let activity_picker = |view: &Harness<'_, Model>| {
+        view.get(By::new().predicate(|node| node.author_id() == Some("trends.activity.first")))
+            .rect()
+    };
+    let activities = activity_picker(&view);
+    let calendar = view.get_by_label("Activity calendar").rect();
     assert!(
-        (wide_distance.bottom() - edit.bottom()).abs() < 24.0,
-        "{wide_distance:?} {edit:?}"
+        (wide_distance.bottom() - calendar_legend.bottom()).abs() < 32.0,
+        "{wide_distance:?} {calendar_legend:?}"
     );
-    assert!(
-        (wide_comparison.bottom() - calendar_legend.bottom()).abs() < 64.0,
-        "{wide_comparison:?} {calendar_legend:?}"
-    );
+    assert!(wide_comparison.right() < activities.left());
+    assert!(calendar.left() > wide_distance.right());
+    assert!(calendar.bottom() < wide_comparison.top());
 
     view.set_size(egui::vec2(760.0, 3200.0));
     view.run();
@@ -141,11 +161,10 @@ fn cycling_plots_fill_their_wide_rows_and_shrink_when_stacked() {
         stacked_distance.height() <= 64.0
             && stacked_distance.height() + 32.0 < wide_distance.height()
     );
-    assert!(
-        stacked_comparison.height() <= 192.0
-            && stacked_comparison.height() + 32.0 < wide_comparison.height()
-    );
-    assert!(stacked_comparison.bottom() < view.get_by_label("Activity calendar").rect().top());
+    assert!(stacked_comparison.height() <= 192.0);
+    let activities = activity_picker(&view);
+    assert!(stacked_comparison.bottom() < activities.top());
+    assert!(activities.bottom() < view.get_by_label("Activity calendar").rect().top());
 }
 
 #[test]
@@ -242,7 +261,7 @@ fn activity_comparison_changes_both_selections_when_the_sport_changes() {
     };
     let summaries = [
         activity(4, "Hill ride", Cycling, 16, Some(1800.0)),
-        activity(3, "Flat ride", Cycling, 15, None),
+        activity(3, "Flat ride", Cycling, 16, None),
         activity(2, "Long run", Running, 14, Some(3600.0)),
         activity(1, "Easy run", Running, 13, Some(4200.0)),
     ];
@@ -255,6 +274,7 @@ fn activity_comparison_changes_both_selections_when_the_sport_changes() {
                 average_heart_rate: Some(HeartRate::from_beats_per_minute(144)),
                 peak_power: Some(Power::from_watts(385)),
                 average_power: Some(Power::from_watts(0)),
+                average_cadence: Cadence::from_revolutions_per_minute(86.5).ok(),
             },
         )]),
     );
@@ -265,61 +285,74 @@ fn activity_comparison_changes_both_selections_when_the_sport_changes() {
     view.state_mut().state = State::from_cache(Some(history), Revision::default());
     view.run();
     let initial_reads = view.state().reads;
-    assert!(
-        view.get(first())
-            .value()
-            .is_some_and(|label| label.starts_with("Hill ride ·"))
-    );
-    assert!(
-        view.get(second())
-            .value()
-            .is_some_and(|label| label.starts_with("Flat ride ·"))
-    );
     assert!(view.query_by_label("20.0\u{a0}km/h").is_some());
     assert!(view.query_by_label("420\u{a0}m").is_some());
     assert!(view.query_by_label("144\u{a0}bpm").is_some());
     view.get_by_label("385\u{a0}W");
+    view.get_by_label("86.5\u{a0}rpm");
     view.get_by_label("0\u{a0}W");
+    check_same_day_activity_choices(&mut view);
     view.get(By::new().predicate(|node| node.author_id() == Some("trends.sport.1")))
         .click();
     view.run();
-    view.get(By::new().predicate(|node| node.author_id() == Some("trends.metric")))
-        .click();
-    view.run();
-    view.get(By::new().predicate(|node| node.author_id() == Some("trends.metric.elevation")))
-        .click();
-    view.run();
-    assert!(
-        view.query_by_label("Imported FIT elevation for 1 of 2 activities")
-            .is_some()
-    );
-    view.get(By::new().predicate(|node| node.author_id() == Some("trends.metric")))
-        .click();
-    view.run();
-    view.get(By::new().predicate(|node| node.author_id() == Some("trends.metric.heart-rate")))
-        .click();
-    view.run();
-    assert!(
-        view.query_by_label("Average of imported FIT heart rates from 1 of 2 activities")
-            .is_some()
-    );
+    for (target, coverage) in [
+        (
+            "trends.metric.average-cadence",
+            "Rides with recorded cadence · 1/2 this period · 0/0 previous period",
+        ),
+        (
+            "trends.metric.elevation",
+            "Imported FIT elevation for 1 of 2 activities",
+        ),
+        (
+            "trends.metric.heart-rate",
+            "Average of imported FIT heart rates from 1 of 2 activities",
+        ),
+    ] {
+        view.get(By::new().predicate(|node| node.author_id() == Some("trends.metric")))
+            .click();
+        view.run();
+        view.get(By::new().predicate(|node| node.author_id() == Some(target)))
+            .click();
+        view.run();
+        view.get_by_label(coverage);
+    }
     view.get(first()).click();
     view.run();
     view.get(By::new().predicate(|node| {
         node.label()
-            .is_some_and(|label| label.starts_with("Long run ·"))
+            .is_some_and(|label| label.ends_with(" · Long run"))
     }))
     .click();
     view.run();
     assert!(
         view.get(second())
             .value()
-            .is_some_and(|label| label.starts_with("Easy run ·"))
+            .is_some_and(|label| label.ends_with(" · Easy run"))
     );
     assert!(view.query_by_label("6:00 / km").is_some());
     assert!(view.query_by_label("Average power").is_none());
     assert_eq!(view.state().reads, initial_reads);
     assert_eq!(view.state().syncs, 0);
+}
+
+fn check_same_day_activity_choices(view: &mut Harness<'_, Model>) {
+    use egui::accesskit::Role;
+    let first_label = "November 16, 2026 · Hill ride";
+    let second_label = "November 16, 2026 · Flat ride";
+    let table = view.get(By::new().role(Role::Table).label("Activity comparison"));
+    table.get(By::new().role(Role::ColumnHeader).label(first_label));
+    table.get(By::new().role(Role::ColumnHeader).label(second_label));
+    table.get(By::new().role(Role::RowHeader).label("Average cadence"));
+    let picker =
+        view.get(By::new().predicate(|node| node.author_id() == Some("trends.activity.first")));
+    let trigger_width = picker.rect().width();
+    picker.click();
+    view.run();
+    let option = |label| By::new().role(Role::Button).label(label);
+    assert!(view.get(option(second_label)).rect().width() > trigger_width);
+    view.get(option(first_label)).click();
+    view.run();
 }
 
 #[test]

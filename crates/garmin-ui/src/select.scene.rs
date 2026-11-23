@@ -71,6 +71,27 @@ fn open_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
 }
 
 #[scene]
+fn wide_menu(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage((416, 240)), |ui| {
+        let id = egui::Id::new("wide-menu");
+        egui::Popup::open_id(ui.ctx(), id.with("popup"));
+        let mut selected = 0;
+        let _ = select::show(
+            ui,
+            id,
+            &mut selected,
+            &[
+                select::Choice::new("November 16, 2026 · Morning ride"),
+                select::Choice::new("November 16, 2026 · Evening ride"),
+            ],
+            select::Props::new("Activity")
+                .width(152.0)
+                .menu_width(384.0),
+        );
+    });
+}
+
+#[scene]
 fn leading_images(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let mut selected = ctx.buttons("selected", &["automatic", "english", "czech"], 0);
     let choices = [

@@ -60,6 +60,9 @@ Activity comparison shows the average and peak power recorded in each ride’s F
 highest reported wattage per day or month and counts rides with power in each period. A recorded zero counts as
 measured. Buckets without a measurement stay blank.
 
+Cycling cadence uses the recorded FIT session average. The period chart weights each measured ride equally and reports
+coverage for both periods. A recorded zero counts toward the average and coverage.
+
 ## Activity identity
 
 Trends joins a published Garmin summary to FIT observations through the active account's source and Garmin activity ID.

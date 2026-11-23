@@ -48,6 +48,27 @@ pub fn show<const N: usize>(
     rows: impl IntoIterator<Item = [Cell; N]>,
     total: Option<(&str, &str)>,
 ) {
+    show_table(ui, label, columns, rows, total, true);
+}
+
+/// Draws rows beneath controls that already label the columns.
+pub fn show_body<const N: usize>(
+    ui: &mut Ui,
+    label: &str,
+    columns: [Column<'_>; N],
+    rows: impl IntoIterator<Item = [Cell; N]>,
+) {
+    show_table(ui, label, columns, rows, None, false);
+}
+
+fn show_table<const N: usize>(
+    ui: &mut Ui,
+    label: &str,
+    columns: [Column<'_>; N],
+    rows: impl IntoIterator<Item = [Cell; N]>,
+    total: Option<(&str, &str)>,
+    headings: bool,
+) {
     const {
         assert!(N >= 2, "a summary table needs a label and a value column");
     }
@@ -66,15 +87,39 @@ pub fn show<const N: usize>(
         let shares: f32 = columns.iter().map(|col| f32::from(col.share.max(1))).sum();
         let widths = columns.map(|col| width * f32::from(col.share.max(1)) / shares);
         let layout = std::array::from_fn::<_, N, _>(|i| (widths[i], columns[i].align, 1));
-        let headings = columns.map(|col| Cell::new(typography::semibold(col.label)));
-        row(ui, header_fill, rule, Role::ColumnHeader, layout, headings);
+        if headings {
+            let cells = columns.map(|col| Cell::new(typography::semibold(col.label)));
+            row(
+                ui,
+                header_fill,
+                rule,
+                Role::ColumnHeader,
+                layout,
+                cells,
+                false,
+            );
+        } else {
+            ui.scope(|ui| {
+                ui.ctx()
+                    .accesskit_node_builder(ui.unique_id(), |node| node.set_role(Role::Row));
+                for (index, column) in columns.iter().enumerate() {
+                    ui.scope(|ui| {
+                        ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
+                            node.set_role(Role::ColumnHeader);
+                            node.set_column_index(index);
+                            node.set_label(column.label);
+                        });
+                    });
+                }
+            });
+        }
         for (index, cells) in rows.into_iter().enumerate() {
             let fill = if index % 2 == 1 {
                 stripe
             } else {
                 Color32::TRANSPARENT
             };
-            row(ui, fill, rule, Role::Cell, layout, cells);
+            row(ui, fill, rule, Role::Cell, layout, cells, !headings);
         }
         let Some(total) = total else { return };
         let last = widths[N - 1];
@@ -88,6 +133,7 @@ pub fn show<const N: usize>(
                 Cell::new(typography::semibold(total.0).size(14.0)),
                 Cell::new(typography::semibold(total.1).size(16.0)),
             ],
+            false,
         );
     });
 }
@@ -99,6 +145,7 @@ fn row<const N: usize>(
     role: Role,
     layout: [(f32, Align, usize); N],
     cells: [Cell; N],
+    row_headers: bool,
 ) {
     let mut progress_fills = Vec::new();
     let rect = Frame::NONE
@@ -107,13 +154,20 @@ fn row<const N: usize>(
             ui.horizontal_top(|ui| {
                 ui.ctx()
                     .accesskit_node_builder(ui.unique_id(), |node| node.set_role(Role::Row));
+                let mut column_index = 0;
                 for ((width, align, span), cell) in layout.into_iter().zip(cells) {
                     ui.allocate_ui_with_layout(
                         egui::vec2(width, 0.0),
                         Layout::top_down(align),
                         |ui| {
                             ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
-                                node.set_role(role);
+                                if row_headers && column_index == 0 {
+                                    node.set_label(cell.text.text());
+                                    node.set_role(Role::RowHeader);
+                                } else {
+                                    node.set_role(role);
+                                }
+                                node.set_column_index(column_index);
                                 node.set_column_span(span);
                             });
                             if let Some(fraction) =
@@ -133,6 +187,7 @@ fn row<const N: usize>(
                             });
                         },
                     );
+                    column_index += span;
                 }
             });
         })

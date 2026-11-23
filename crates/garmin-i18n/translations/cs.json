@@ -2410,6 +2410,10 @@
     "source": "Plan: {digest}",
     "translation": "Plán: {digest}"
   },
+  "eegD+kWdeK": {
+    "source": "Rides with recorded cadence · {covered, number}/{total, number} this period · {previous, number}/{prior_total, number} previous period",
+    "translation": "Jízdy se zaznamenanou kadencí · {covered, number}/{total, number} v tomto období · {previous, number}/{prior_total, number} v předchozím období"
+  },
   "ejDyAKabSs": {
     "source": "This recovery applies to the retained simulation. The source device remains unchanged.",
     "translation": "Tato obnova se týká uchované simulace. Zdrojové zařízení zůstane beze změny."
@@ -2986,6 +2990,10 @@
   "q5Xl0MIdUj": {
     "source": "Verify",
     "translation": "Ověření"
+  },
+  "qE1zO3Xcdb": {
+    "source": "Average cadence",
+    "translation": "Průměrná kadence"
   },
   "qKOCNSmJcw": {
     "source": "Contact Garmin?",

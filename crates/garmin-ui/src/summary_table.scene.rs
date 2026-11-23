@@ -4,6 +4,35 @@ use garmin_ui::summary_table::{Cell, Column};
 
 scene_meta! { title: "Components / Content / Summary table" }
 
+#[scene]
+fn externally_labelled(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
+    stage!(ctx, ui, globals.stage(Stage::Fit), |ui| {
+        ui.set_width(384.0);
+        ui.columns(3, |columns| {
+            columns[1].label("First ride");
+            columns[2].label("Second ride");
+        });
+        ui.add_space(8.0);
+        summary_table::show_body(
+            ui,
+            "Ride measurements",
+            [
+                Column::new("", 1, egui::Align::Min),
+                Column::new("First ride", 1, egui::Align::Max),
+                Column::new("Second ride", 1, egui::Align::Max),
+            ],
+            [
+                [
+                    Cell::new("Distance"),
+                    Cell::new("88 km"),
+                    Cell::new("47 km"),
+                ],
+                [Cell::new("Cadence"), Cell::new("—"), Cell::new("79.5 rpm")],
+            ],
+        );
+    });
+}
+
 #[scene(default)]
 fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let width = ctx.slider("width", 480.0, 240.0, 800.0, 8.0);

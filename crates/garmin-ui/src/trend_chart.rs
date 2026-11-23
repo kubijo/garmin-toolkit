@@ -9,13 +9,14 @@
 
 use egui::{Color32, Shape, Stroke, Ui};
 use egui_plot::{Bar, BarChart, GridMark, Line, LineStyle, Plot, Points};
-use garmin_model::activity::{HeartRate, Power};
+use garmin_model::activity::{Cadence, HeartRate, Power};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Sample {
     Value(f64),
     HeartRate(HeartRate),
     Power(Power),
+    Cadence(Cadence),
     Missing,
     Empty,
 }
@@ -26,6 +27,7 @@ impl Sample {
             Self::Value(value) => Some(value),
             Self::HeartRate(rate) => Some(f64::from(rate.as_beats_per_minute())),
             Self::Power(power) => Some(f64::from(power.as_watts())),
+            Self::Cadence(cadence) => Some(cadence.as_revolutions_per_minute()),
             Self::Missing | Self::Empty => None,
         }
     }
@@ -311,6 +313,7 @@ fn hover_label(
     let value = match source.values.get(index)? {
         Sample::HeartRate(rate) => rate.format(intl.decimal_formatter()),
         Sample::Power(power) => power.format(intl.decimal_formatter()),
+        Sample::Cadence(cadence) => cadence.format(intl.decimal_formatter()),
         Sample::Value(value) if unit.is_empty() => format!("{value:.0}"),
         Sample::Value(value) => format!("{value:.2} {unit}"),
         Sample::Missing | Sample::Empty => return None,
@@ -403,29 +406,30 @@ fn paint_series(plot: &mut egui_plot::PlotUi<'_>, series: &[Series<'_>], kind: K
     for (series_index, series) in series.iter().enumerate() {
         match kind {
             Kind::Bars => {
-                let mut zero_power = Vec::new();
+                let mut zero_measurements = Vec::new();
                 let bars = series
                     .values
                     .iter()
                     .enumerate()
                     .filter_map(|(index, value)| {
                         let (center, width) = bar_slot(index, series_index, count);
-                        if *value == Sample::Power(Power::from_watts(0)) {
-                            zero_power.push([center, 0.0]);
+                        let height = value.coordinate()?;
+                        if matches!(value, Sample::Power(_) | Sample::Cadence(_)) && height == 0.0 {
+                            zero_measurements.push([center, height]);
                             return None;
                         }
-                        value.coordinate().map(|height| {
+                        Some(
                             Bar::new(center, height)
                                 .width(width)
                                 .fill(series.color)
-                                .stroke(Stroke::NONE)
-                        })
+                                .stroke(Stroke::NONE),
+                        )
                     })
                     .collect();
                 plot.bar_chart(BarChart::new(series.name, bars).color(series.color));
-                if !zero_power.is_empty() {
+                if !zero_measurements.is_empty() {
                     plot.points(
-                        Points::new(series.name, zero_power)
+                        Points::new(series.name, zero_measurements)
                             .color(series.color)
                             .radius(4.0),
                     );

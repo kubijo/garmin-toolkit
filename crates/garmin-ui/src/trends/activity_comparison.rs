@@ -1,6 +1,6 @@
 //! Compare individual activities from the same published cache and sport.
 
-use egui::Ui;
+use egui::{Align, Ui};
 use garmin_i18n::format_message;
 use garmin_model::{
     activity::{ActivityDuration, Distance, Speed},
@@ -9,13 +9,18 @@ use garmin_model::{
 };
 
 use super::{Props, Range, Sport, State, card, sport_label};
+use crate::summary_table;
+use crate::summary_table::{Cell, Column};
+
+pub(super) const MAX_WIDTH: f32 = 480.0;
 
 pub(super) fn show(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
     let Some(history) = &state.history else {
         return;
     };
     card(ui, "activity-comparison", |ui| {
-        ui.strong(format_message!(props.intl, default_message: "Activity comparison"));
+        let title = format_message!(props.intl, default_message: "Activity comparison");
+        ui.strong(&title);
         let activities = history
             .activities
             .iter()
@@ -34,31 +39,59 @@ pub(super) fn show(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Ran
             ui.weak(format_message!(props.intl, default_message: "Choose a period with at least two activities of the same sport."));
             return;
         }
-        ui.columns(2, |columns| {
-            let (left, right) = columns.split_at_mut(1);
-            let first = picker(
-                &mut left[0],
-                props,
-                &first_choices,
-                &mut state.activity_pair[0],
-                true,
-            );
-            let second_choices = activities
-                .into_iter()
-                .filter(|activity| {
-                    activity.sport == first.sport && activity.identity() != first.identity()
-                })
-                .collect::<Vec<_>>();
-            let second = picker(
-                &mut right[0],
-                props,
-                &second_choices,
-                &mut state.activity_pair[1],
-                false,
-            );
-            measurements(&mut left[0], props, first);
-            measurements(&mut right[0], props, second);
-        });
+        let width = ui.available_width().min(MAX_WIDTH);
+        ui.allocate_ui_with_layout(
+            egui::vec2(width, 0.0),
+            egui::Layout::top_down(Align::Min),
+            |ui| {
+                ui.set_width(width);
+                let ((first, first_label), (second, second_label)) = ui.columns(3, |columns| {
+                    let (first, first_label) = picker(
+                        &mut columns[1],
+                        props,
+                        &first_choices,
+                        &mut state.activity_pair[0],
+                        true,
+                    );
+                    let second_choices = activities
+                        .into_iter()
+                        .filter(|activity| {
+                            activity.sport == first.sport && activity.identity() != first.identity()
+                        })
+                        .collect::<Vec<_>>();
+                    let second = picker(
+                        &mut columns[2],
+                        props,
+                        &second_choices,
+                        &mut state.activity_pair[1],
+                        false,
+                    );
+                    columns[0].weak(sport_label(props.intl, first.sport));
+                    ((first, first_label), second)
+                });
+                ui.add_space(8.0);
+                let rows = measurements(props, first)
+                    .into_iter()
+                    .zip(measurements(props, second))
+                    .map(|((label, first), (_, second))| {
+                        [
+                            Cell::new(label),
+                            Cell::new(first.unwrap_or_else(|| "—".to_owned())),
+                            Cell::new(second.unwrap_or_else(|| "—".to_owned())),
+                        ]
+                    });
+                summary_table::show_body(
+                    ui,
+                    &title,
+                    [
+                        Column::new("", 1, Align::Min),
+                        Column::new(&first_label, 1, Align::Max),
+                        Column::new(&second_label, 1, Align::Max),
+                    ],
+                    rows,
+                );
+            },
+        );
     });
 }
 
@@ -68,7 +101,7 @@ fn picker<'a>(
     activities: &[&'a ActivitySummary],
     selected: &mut Option<ActivityIdentity>,
     first: bool,
-) -> &'a ActivitySummary {
+) -> (&'a ActivitySummary, String) {
     let (target, title) = if first {
         (
             "trends.activity.first",
@@ -80,7 +113,7 @@ fn picker<'a>(
             format_message!(props.intl, default_message: "Second activity"),
         )
     };
-    let labels = activities
+    let mut labels = activities
         .iter()
         .map(|activity| {
             let date = props.intl.dates().date(activity.date);
@@ -97,7 +130,7 @@ fn picker<'a>(
                     }
                 }
             } else {
-                format!("{} · {date}", activity.name)
+                format!("{date} · {}", activity.name)
             }
         })
         .collect::<Vec<_>>();
@@ -114,16 +147,18 @@ fn picker<'a>(
         ui.id().with(target),
         &mut index,
         &choices,
-        crate::select::Props::new(&title).width(ui.available_width().min(480.0)),
+        crate::select::Props::new(&title)
+            .width(ui.available_width().min(480.0))
+            .menu_width(384.0),
     )
     .on_hover_text(&labels[index]);
     crate::semantics::target(ui, &response, target);
     let activity = activities[index];
     *selected = Some(activity.identity());
-    activity
+    (activity, labels.swap_remove(index))
 }
 
-fn measurements(ui: &mut Ui, props: &Props<'_>, activity: &ActivitySummary) {
+fn measurements(props: &Props<'_>, activity: &ActivitySummary) -> Vec<(String, Option<String>)> {
     let units = props.preferences.unit_system();
     let distance = activity
         .distance
@@ -154,12 +189,7 @@ fn measurements(ui: &mut Ui, props: &Props<'_>, activity: &ActivitySummary) {
                 .map(|pace| format!("{} / {pace_unit}", pace.format_clock())),
         )
     };
-    ui.weak(format!(
-        "{} · {}",
-        sport_label(props.intl, activity.sport),
-        props.intl.dates().date(activity.date)
-    ));
-    for (label, value) in [
+    let mut rows = Vec::from([
         (
             format_message!(props.intl, default_message: "Distance"),
             distance,
@@ -179,11 +209,15 @@ fn measurements(ui: &mut Ui, props: &Props<'_>, activity: &ActivitySummary) {
                 .average_heart_rate
                 .map(|rate| rate.format(props.intl.decimal_formatter())),
         ),
-    ] {
-        ui.weak(label);
-        ui.label(value.as_deref().unwrap_or("—"));
-    }
+    ]);
     if activity.sport == Sport::Cycling {
+        let cadence = activity
+            .average_cadence
+            .map(|cadence| cadence.format(props.intl.decimal_formatter()));
+        rows.push((
+            format_message!(props.intl, default_message: "Average cadence"),
+            cadence,
+        ));
         for (label, power) in [
             (
                 format_message!(props.intl, default_message: "Average power"),
@@ -194,9 +228,9 @@ fn measurements(ui: &mut Ui, props: &Props<'_>, activity: &ActivitySummary) {
                 activity.peak_power,
             ),
         ] {
-            ui.weak(label);
             let value = power.map(|power| power.format(props.intl.decimal_formatter()));
-            ui.label(value.as_deref().unwrap_or("—"));
+            rows.push((label, value));
         }
     }
+    rows
 }

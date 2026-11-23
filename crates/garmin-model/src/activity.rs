@@ -359,6 +359,18 @@ impl<'de> serde::Deserialize<'de> for Cadence {
 }
 
 impl Cadence {
+    pub const SYMBOL: &'static str = "rpm";
+
+    #[must_use]
+    pub fn format(self, decimal: impl Fn(f64, usize) -> String) -> String {
+        format!("{}\u{a0}{}", decimal(self.0, 1), Self::SYMBOL)
+    }
+
+    #[must_use]
+    pub(crate) fn interpolate(self, other: Self, weight: f64) -> Self {
+        Self(self.0 + (other.0 - self.0) * weight)
+    }
+
     /// Validates revolutions per minute.
     /// # Errors
     /// [`Error::InvalidCadence`] for a negative or non-finite value.

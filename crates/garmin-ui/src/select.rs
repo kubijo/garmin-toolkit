@@ -68,6 +68,7 @@ pub struct Props<'a> {
     size: Option<Size>,
     disabled: Option<bool>,
     width: Option<f32>,
+    menu_width: Option<f32>,
     outlined: bool,
 }
 
@@ -80,6 +81,7 @@ impl<'a> Props<'a> {
             size: None,
             disabled: None,
             width: None,
+            menu_width: None,
             outlined: false,
         }
     }
@@ -105,6 +107,13 @@ impl<'a> Props<'a> {
     #[must_use]
     pub const fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
+        self
+    }
+
+    /// Gives options more room than the trigger when the viewport permits it.
+    #[must_use]
+    pub const fn menu_width(mut self, width: f32) -> Self {
+        self.menu_width = Some(width);
         self
     }
 
@@ -151,12 +160,17 @@ pub fn show(
         menu_style.spacing.menu_margin = MENU_MARGIN;
         menu_style.spacing.item_spacing.y = MENU_ITEM_GAP;
         menu_style.visuals.menu_corner_radius = MENU_RADIUS;
+        let menu_width = props.menu_width.map_or(response.rect.width(), |width| {
+            width
+                .min(ui.ctx().content_rect().width())
+                .max(response.rect.width())
+        });
         let _ = Popup::menu(&response)
             .id(popup_id)
-            .width(response.rect.width())
+            .width(menu_width)
             .style(menu_style)
             .show(|ui| {
-                ui.set_min_width(response.rect.width());
+                ui.set_min_width(menu_width);
                 ScrollArea::vertical()
                     .max_height(menu_height(choices.len(), row_height))
                     .show(ui, |ui| {
@@ -298,7 +312,7 @@ fn paint_choice(
     choice: Choice<'_>,
     color: egui::Color32,
     trailing: f32,
-) {
+) -> bool {
     let mut label_x = rect.left() + CONTENT_INSET;
     if let Some(image) = choice.image {
         let image_size = image.size_for_height(IMAGE_HEIGHT);
@@ -325,11 +339,13 @@ fn paint_choice(
         width,
         egui::TextStyle::Button,
     );
+    let elided = galley.elided;
     ui.painter().galley(
         egui::pos2(label_x, rect.center().y - galley.size().y / 2.0),
         galley,
         color,
     );
+    elided
 }
 
 const fn height(size: Size) -> f32 {
@@ -374,7 +390,7 @@ fn choice_row(ui: &mut Ui, choice: Choice<'_>, selected: bool, row_height: f32) 
         color32(palette.surfaces().layer(theme::Level::One))
     };
     ui.painter().rect_filled(rect, CHOICE_RADIUS, fill);
-    paint_choice(
+    let elided = paint_choice(
         ui,
         rect,
         choice,
@@ -389,7 +405,11 @@ fn choice_row(ui: &mut Ui, choice: Choice<'_>, selected: bool, row_height: f32) 
             egui::StrokeKind::Inside,
         );
     }
-    response
+    if elided {
+        response.on_hover_text(choice.label)
+    } else {
+        response
+    }
 }
 
 #[cfg(test)]

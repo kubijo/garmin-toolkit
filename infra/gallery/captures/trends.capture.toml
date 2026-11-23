@@ -5,6 +5,13 @@ report = "capture.json"
 settle = false
 
 [[shot]]
+name = "average-cadence"
+scene = "trends::Overview"
+[shot.knobs]
+history = "cycling only"
+"comparison metric" = "average cadence"
+
+[[shot]]
 name = "peak-power"
 scene = "trends::Overview"
 [shot.knobs]
