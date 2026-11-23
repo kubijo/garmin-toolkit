@@ -41,6 +41,9 @@ pub fn inspect(file_name: String, bytes: &[u8]) -> Result<DeviceFitPreview, Stri
                 cue_count: course.cue_count,
             })
         }
+        Err(garmin_fit::ActivityError::UnsupportedFileType(garmin_fit::FileType::WORKOUT)) => {
+            return Err("Workout previews aren’t supported yet.".to_owned());
+        }
         Err(error) => return Err(error.to_string()),
     };
     Ok(DeviceFitPreview { file_name, content })
@@ -74,6 +77,17 @@ mod tests {
         assert!(preview.supports_activity_import());
         assert_eq!(preview.activities().len(), 1);
         Ok(())
+    }
+
+    #[test]
+    fn workout_gets_a_preview_specific_message() {
+        use garmin_fit::fixture::{integrity::Header, workout};
+
+        let bytes = workout::bytes(Header::Checksummed);
+        assert_eq!(
+            inspect("training.fit".to_owned(), &bytes).err().as_deref(),
+            Some("Workout previews aren’t supported yet.")
+        );
     }
 
     #[test]

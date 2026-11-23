@@ -52,6 +52,8 @@ impl FileType {
     pub const COURSE: Self = Self(typedef::File::COURSE.0);
     /// Settings file type.
     pub const SETTINGS: Self = Self(typedef::File::SETTINGS.0);
+    /// Workout file type.
+    pub const WORKOUT: Self = Self(typedef::File::WORKOUT.0);
 
     #[must_use]
     pub const fn from_u8(value: u8) -> Self {
