@@ -141,6 +141,8 @@ fn body(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
     let phase = &state.phase;
     let background = state.inspection.as_ref().map_or(phase, |i| &i.background);
     if let Phase::WriteFailed(reason) | Phase::Failed(reason) = background {
+        let can_retry = state.inspection.is_none() && !state.has_retained_transfer;
+        let retry_clicked = can_retry && check_button(ui, intl, false);
         let title = if matches!(background, Phase::WriteFailed(_)) {
             format_message!(intl, default_message: "Update transfer stopped")
         } else {
@@ -149,6 +151,9 @@ fn body(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
         failure_notice(ui, intl, &title, None, reason);
         if matches!(background, Phase::WriteFailed(_)) {
             transcript::show(ui, intl, &state.transcript, true);
+        }
+        if can_retry {
+            return retry_clicked.then_some(Action::Check);
         }
         ui.add_space(16.0);
     }
@@ -173,36 +178,21 @@ fn body(ui: &mut Ui, intl: &Intl, state: &State) -> Option<Action> {
             ui.label(format_message!(intl, default_message: "The selected device is no longer connected"));
             None
         }
-        Phase::WriteFailed(_) | Phase::Failed(_) => control(
-            ui,
-            &format_message!(intl, default_message: "Check for updates"),
-            icons::ARROWS_CLOCKWISE,
-            true,
-            true,
-        )
-        .then_some(Action::Check),
-        Phase::Consent => {
-            ui.label(if state.simulated {
+        Phase::Consent | Phase::Checking => {
+            let checking = *phase == Phase::Checking;
+            let status = if checking {
+                format_message!(intl, default_message: "Checking device updates…")
+            } else if state.simulated {
                 format_message!(intl, default_message: "Check the connected device against the local firmware simulator.")
             } else {
                 format_message!(intl, default_message: "Checking sends this device’s identity and installed software versions to Garmin.")
-            });
-            ui.add_space(16.0);
-            control(
-                ui,
-                &format_message!(intl, default_message: "Check for updates"),
-                icons::ARROWS_CLOCKWISE,
-                true,
-                true,
-            )
-            .then_some(Action::Check)
+            };
+            check_panel(ui, intl, &status, checking)
         }
-        Phase::Checking => {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(format_message!(intl, default_message: "Checking device updates…"));
-            });
-            None
+        Phase::Available(components) if components.is_empty() => {
+            let status =
+                format_message!(intl, default_message: "No updates were offered for this device.");
+            check_panel(ui, intl, &status, false)
         }
         Phase::Available(components) => catalog(ui, intl, state, components),
         Phase::Staging(progress) => {
@@ -495,20 +485,33 @@ fn receipt_components(ui: &mut Ui, intl: &Intl, observations: &[Observation]) {
     }), None);
 }
 
+fn check_panel(ui: &mut Ui, intl: &Intl, status: &str, checking: bool) -> Option<Action> {
+    let check = check_button(ui, intl, checking);
+    ui.label(status);
+    check.then_some(Action::Check)
+}
+
+fn check_button(ui: &mut Ui, intl: &Intl, checking: bool) -> bool {
+    let check = ui
+        .horizontal(|ui| {
+            let clicked = control(
+                ui,
+                &format_message!(intl, default_message: "Check for updates"),
+                icons::ARROWS_CLOCKWISE,
+                true,
+                !checking,
+            );
+            if checking {
+                ui.add(egui::Spinner::new().size(16.0));
+            }
+            clicked
+        })
+        .inner;
+    ui.add_space(8.0);
+    check
+}
+
 fn catalog(ui: &mut Ui, intl: &Intl, state: &State, components: &[Component]) -> Option<Action> {
-    if components.is_empty() {
-        ui.label(
-            format_message!(intl, default_message: "No updates were offered for this device."),
-        );
-        return control(
-            ui,
-            &format_message!(intl, default_message: "Check for updates"),
-            icons::ARROWS_CLOCKWISE,
-            true,
-            true,
-        )
-        .then_some(Action::Check);
-    }
     let key = ui.id().with(state.catalog_id);
     if let Some(review) = &state.review {
         ui.data_mut(|data| data.insert_temp(key, review.selected.clone()));

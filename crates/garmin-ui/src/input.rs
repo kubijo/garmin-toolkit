@@ -104,6 +104,7 @@ impl<'a> Props<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct NumberProps<'a, N> {
     label: &'a str,
+    unit: Option<(&'a str, f32)>,
     message: Option<Message<'a>>,
     size: Option<Size>,
     min: Option<N>,
@@ -119,6 +120,7 @@ impl<'a, N> NumberProps<'a, N> {
     pub const fn new(label: &'a str) -> Self {
         Self {
             label,
+            unit: None,
             message: None,
             size: None,
             min: None,
@@ -128,6 +130,13 @@ impl<'a, N> NumberProps<'a, N> {
             readonly: None,
             disabled: None,
         }
+    }
+
+    /// Place a unit after the control and limit its width, including steppers.
+    #[must_use]
+    pub const fn with_unit(mut self, unit: &'a str, control_width: f32) -> Self {
+        self.unit = Some((unit, control_width));
+        self
     }
 
     #[must_use]
@@ -282,20 +291,43 @@ pub fn show_number<N: Numeric>(ui: &mut Ui, value: &mut N, props: NumberProps<'_
             subtle_border: false,
         },
         |ui, fill| {
-            number_control(
-                ui,
-                value,
-                NumberControlProps {
-                    size,
-                    min,
-                    max,
-                    step,
-                    steppers,
-                    readonly,
-                    disabled,
-                },
-                fill,
-            )
+            let control = NumberControlProps {
+                size,
+                min,
+                max,
+                step,
+                steppers,
+                readonly,
+                disabled,
+            };
+            let Some((unit, width)) = props.unit else {
+                return number_control(ui, value, control, fill);
+            };
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let unit_text = egui::WidgetText::from(unit).into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Body,
+                );
+                let available =
+                    ui.available_width() - unit_text.size().x - ui.spacing().item_spacing.x;
+                let response = ui
+                    .allocate_ui_with_layout(
+                        egui::vec2(width.min(available).max(0.0), metrics(size).height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| number_control(ui, value, control, fill),
+                    )
+                    .inner;
+                ui.add(egui::Label::new(unit_text).selectable(false));
+                ui.ctx().accesskit_node_builder(response.id, |node| {
+                    node.set_label(props.label);
+                    node.set_description(unit);
+                });
+                response
+            })
+            .inner
         },
     )
 }

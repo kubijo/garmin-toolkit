@@ -279,5 +279,10 @@ In a separate TUI run, the only committed write was Time Zone Map 40.00 → 43.0
 offered system software 32.22 after ejection. The operator declined it, and inspection found a separate
 `Garmin/GUPDATE.gsp` that predated the map transfer.
 
-The [fēnix 8 fixtures](../../infra/fixtures/firmware/README.md) cover component and system offers. Installation on the
-watch remains [unverified](../plans/README.md#hardware-and-owner-access).
+On 2026-11-23 the desktop app staged Mobility and Move Alert Videos and its companion metadata (13.3 MiB total) over
+desktop MTP on a fēnix 8 Solar (47 mm). On reconnect, the receipt confirmed part `006-DB775-00` at 1.00, up from 0.01.
+The initial catalog also showed three ETYP offers. The operator selected only the videos. The catalog shown after
+receipt dismissal was empty. A manual recheck also returned no offers.
+
+The [fēnix 8 fixtures](../../infra/fixtures/firmware/README.md) cover component and system offers. A
+[system software installation on the watch](../plans/README.md#hardware-and-owner-access) remains to be verified.

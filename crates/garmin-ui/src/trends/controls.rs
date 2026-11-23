@@ -331,7 +331,8 @@ fn period_navigation(ui: &mut Ui, state: &mut State, props: &Props<'_>) {
 pub(super) fn targets_dialog(ui: &mut Ui, state: &mut State, props: &Props<'_>) -> Option<Action> {
     let draft = state.target_draft.as_mut()?;
     let title = format_message!(props.intl, default_message: "Edit monthly distance targets");
-    let description = format_message!(props.intl, default_message: "Monthly targets in kilometres. Zero leaves a sport without a target.");
+    let description =
+        format_message!(props.intl, default_message: "Zero leaves a sport without a target.");
     let save = format_message!(props.intl, default_message: "Save targets");
     let cancel = format_message!(props.intl, default_message: "Cancel");
     let output = ui
@@ -371,6 +372,7 @@ pub(super) fn targets_dialog(ui: &mut Ui, state: &mut State, props: &Props<'_>) 
                                 props.intl,
                                 super::Sport::ALL[index],
                             ))
+                            .with_unit("km", 176.0)
                             .min(0)
                             .max(1_000_000)
                             .step(1)

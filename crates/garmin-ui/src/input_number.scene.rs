@@ -36,7 +36,8 @@ fn number_playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globa
         input::show_number(
             ui,
             &mut props.value,
-            input::NumberProps::new("Target distance (km)")
+            input::NumberProps::new("Target distance")
+                .with_unit("km", 176.0)
                 .message(input::Message::Helper("Used to estimate the route length"))
                 .size(props.size)
                 .min(props.min)

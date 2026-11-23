@@ -1,5 +1,8 @@
 //! Both clients render these controls against a host-issued review.
-use egui_kittest::{Harness, kittest::Queryable as _};
+use egui_kittest::{
+    Harness,
+    kittest::{NodeT as _, Queryable as _},
+};
 use garmin_cli_tui::preview::{PreviewScreen, firmware_components};
 use garmin_i18n::{Intl, Language, Translations};
 use garmin_model::value::Timestamp;
@@ -162,6 +165,72 @@ fn review_harness(language: Language, state: State) -> Harness<'static, (State, 
             },
             (state, None),
         )
+}
+
+#[test]
+fn empty_results_and_lookup_failures_keep_the_retry_action_in_place() {
+    let mut harness = review_harness(
+        Language::English,
+        State {
+            phase: Phase::Available(Vec::new()),
+            inspection: None,
+            has_retained_transfer: false,
+            simulated: false,
+            transcript: Transcript::default(),
+            catalog_id: Uuid::nil(),
+            revision: Uuid::nil(),
+            review: None,
+        },
+    );
+    harness.run();
+    let button = "Check for updates";
+    let empty = "No updates were offered for this device.";
+    let button_rect = harness.get_by_label(button).rect();
+    let status_origin = harness.get_by_label(empty).rect().min;
+    harness.get_by_label(button).click();
+    harness.run();
+    assert_eq!(harness.state().1, Some(Action::Check));
+
+    harness.state_mut().0.phase = Phase::Checking;
+    harness.state_mut().1 = None;
+    harness.step();
+    let busy = harness.get_by_label(button);
+    assert_eq!(busy.rect(), button_rect);
+    assert!(busy.accesskit_node().is_disabled());
+    busy.click();
+    harness.step();
+    assert_eq!(harness.state().1, None);
+    assert_eq!(
+        harness.get_by_label("Checking device updates…").rect().min,
+        status_origin
+    );
+
+    harness.state_mut().0.phase = Phase::Available(Vec::new());
+    harness.run();
+    let ready = harness.get_by_label(button);
+    assert_eq!(ready.rect(), button_rect);
+    assert!(!ready.accesskit_node().is_disabled());
+    assert_eq!(harness.get_by_label(empty).rect().min, status_origin);
+
+    for reason in ["Lookup timed out", "Service unavailable"] {
+        harness.state_mut().0.phase = Phase::Failed(reason.to_owned());
+        harness.run();
+        harness.get_by_label("Couldn’t check for updates");
+        assert_eq!(harness.get_by_label(button).rect(), button_rect);
+        if harness.query_by_label(reason).is_none() {
+            harness.get_by_label("Technical details").click();
+            harness.run();
+        }
+        assert!(harness.get_by_label(reason).rect().top() >= button_rect.bottom());
+        harness.state_mut().1 = None;
+        harness.get_by_label(button).click();
+        harness.run();
+        assert_eq!(harness.state().1, Some(Action::Check));
+        harness.state_mut().0.phase = Phase::Checking;
+        harness.step();
+        assert_eq!(harness.get_by_label(button).rect(), button_rect);
+        assert!(harness.get_by_label(button).accesskit_node().is_disabled());
+    }
 }
 
 #[test]

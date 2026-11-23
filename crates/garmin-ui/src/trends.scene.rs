@@ -1,4 +1,3 @@
-use crate::SceneStateKey as _;
 use gallery::prelude::*;
 use garmin_model::{
     activity::{ActivityDuration, ActivitySport, Distance, HeartRate},
@@ -10,10 +9,24 @@ use garmin_model::{
     identity::{MonthlyDistanceTarget, ProfilePreferences},
 };
 use garmin_ui::trends;
+use std::{cell::RefCell, collections::BTreeMap};
 
 scene_meta! { title: "Application / Trends" }
 
-thread_local! { static STATE: crate::SceneState<trends::State, 1536> = const { crate::SceneState::empty() }; }
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct Variant {
+    history: usize,
+    period: usize,
+    status: usize,
+    previous: bool,
+    cumulative: bool,
+    editor: bool,
+    metric: usize,
+}
+
+thread_local! {
+    static STATES: RefCell<BTreeMap<Variant, trends::State>> = const { RefCell::new(BTreeMap::new()) };
+}
 
 #[scene(default)]
 #[expect(
@@ -23,7 +36,11 @@ thread_local! { static STATE: crate::SceneState<trends::State, 1536> = const { c
 fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     let width = ctx.slider("width", 1280.0, 320.0, 1440.0, 1.0);
     let height = ctx.slider("height", 1600.0, 480.0, 4000.0, 1.0);
-    let variant = ctx.buttons("history", &["cached", "empty", "missing", "no cache"], 0);
+    let variant = ctx.buttons(
+        "history",
+        &["cached", "empty", "missing", "no cache", "cycling only"],
+        0,
+    );
     let goals = ctx.toggle("targets", true);
     let partial_goals = ctx.toggle("partial targets", false);
     let period = ctx.buttons("period", &["day", "week", "month", "year"], 2);
@@ -39,97 +56,96 @@ fn overview(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
     );
     let unavailable = ctx.toggle("missing original", false);
     let intl = globals.intl();
-    let history = if variant == 3 {
-        None
-    } else {
-        Some(fixture(variant, previous))
-    };
     stage!(ctx, ui, globals.stage((width, height)), |ui| {
-        STATE.with_scene(
-            variant
-                + 4 * period
-                + 16 * status
-                + 64 * usize::from(previous)
-                + 128 * usize::from(cumulative)
-                + 256 * usize::from(editor)
-                + 512 * metric,
-            || {
-                let mut state = trends::State::from_cache(history, Revision::default())
-                    .with_presentation(garmin_ui::modal::Presentation::Contained)
-                    .with_cumulative(cumulative)
-                    .with_period([Period::Day, Period::Week, Period::Month, Period::Year][period])
-                    .with_comparison_metric(
-                        [
-                            Metric::Distance,
-                            Metric::Elevation,
-                            Metric::AverageHeartRate,
-                        ][metric],
-                    );
-                if status >= 2 {
-                    state.complete(
-                        &Revision::default(),
-                        Err(if status == 3 {
-                            "Connection unavailable"
-                        } else {
-                            "Fixture cache read failed"
-                        }
-                        .to_owned()),
-                    );
-                }
-                if editor {
-                    state.edit_targets([0, 200, 0].map(MonthlyDistanceTarget::from_kilometres));
-                }
-                state
-            },
-            |state| {
-                let preferences = ProfilePreferences::from_parts(
-                    if imperial {
-                        garmin_model::identity::UnitSystem::Imperial
-                    } else {
-                        garmin_model::identity::UnitSystem::Metric
+        STATES.with_borrow_mut(|states| {
+            let state = states
+                .entry(Variant {
+                    history: variant,
+                    period,
+                    status,
+                    previous,
+                    cumulative,
+                    editor,
+                    metric,
+                })
+                .or_insert_with(|| {
+                    let history = (variant != 3).then(|| fixture(variant, previous));
+                    let mut state = trends::State::from_cache(history, Revision::default())
+                        .with_presentation(garmin_ui::modal::Presentation::Contained)
+                        .with_cumulative(cumulative)
+                        .with_period(
+                            [Period::Day, Period::Week, Period::Month, Period::Year][period],
+                        )
+                        .with_comparison_metric(
+                            [
+                                Metric::Distance,
+                                Metric::Elevation,
+                                Metric::AverageHeartRate,
+                            ][metric],
+                        );
+                    if status >= 2 {
+                        state.complete(
+                            &Revision::default(),
+                            Err(if status == 3 {
+                                "Connection unavailable"
+                            } else {
+                                "Fixture cache read failed"
+                            }
+                            .to_owned()),
+                        );
+                    }
+                    if editor {
+                        state.edit_targets([0, 200, 0].map(MonthlyDistanceTarget::from_kilometres));
+                    }
+                    state
+                });
+            let preferences = ProfilePreferences::from_parts(
+                if imperial {
+                    garmin_model::identity::UnitSystem::Imperial
+                } else {
+                    garmin_model::identity::UnitSystem::Metric
+                },
+                garmin_model::identity::LanguagePreference::English,
+                garmin_model::identity::ThemePreference::Auto,
+            )
+            .with_monthly_distance_targets(
+                (if partial_goals {
+                    [0, 200, 0]
+                } else if goals {
+                    [120, 750, 50]
+                } else {
+                    [0; 3]
+                })
+                .map(MonthlyDistanceTarget::from_kilometres),
+            );
+            let mut sync = Snapshot {
+                progress: (status == 1).then_some(
+                    garmin_model::garmin_connect::LoadProgress::Indexing {
+                        discovered: 80,
+                        pages: 4,
                     },
-                    garmin_model::identity::LanguagePreference::English,
-                    garmin_model::identity::ThemePreference::Auto,
-                )
-                .with_monthly_distance_targets(
-                    (if partial_goals {
-                        [0, 200, 0]
-                    } else if goals {
-                        [120, 750, 50]
-                    } else {
-                        [0; 3]
-                    })
-                    .map(MonthlyDistanceTarget::from_kilometres),
-                );
-                let mut sync = Snapshot {
-                    progress: (status == 1).then_some(
-                        garmin_model::garmin_connect::LoadProgress::Indexing {
-                            discovered: 80,
-                            pages: 4,
-                        },
-                    ),
-                    ..Default::default()
-                };
-                if unavailable {
-                    sync.state.outcome =
-                        garmin_model::garmin_connect::sync::Outcome::Complete { unavailable: 1 };
-                }
-                let _ = trends::show(
-                    ui,
-                    state,
-                    &trends::Props {
-                        intl: &intl,
-                        today: "2026-11-16".parse().expect("fixture date"),
-                        preferences,
-                        sync: Some(&sync),
-                        connect_configured: true,
-                        enabled: status != 3,
-                        refreshing: status == 1,
-                        load_progress: None,
-                    },
-                );
-            },
-        );
+                ),
+                ..Default::default()
+            };
+            if unavailable {
+                sync.state.outcome =
+                    garmin_model::garmin_connect::sync::Outcome::Complete { unavailable: 1 };
+            }
+            let _ = trends::show(
+                ui,
+                state,
+                &trends::Props {
+                    intl: &intl,
+                    today: "2026-11-16".parse().expect("fixture date"),
+                    preferences,
+                    sync: Some(&sync),
+                    connect_configured: true,
+                    enabled: status != 3,
+                    refreshing: status == 1,
+                    load_progress: None,
+                },
+            );
+        });
     });
 }
 
@@ -172,6 +188,9 @@ fn fixture(variant: usize, previous: bool) -> History {
                 _ => {}
             }
         }
+    }
+    if variant == 4 {
+        summaries.retain(|summary| summary.activity.sport == Some(ActivitySport::Cycling));
     }
     let imported = summaries
         .iter()

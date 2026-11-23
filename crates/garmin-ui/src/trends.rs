@@ -463,22 +463,60 @@ fn fill_row<const N: usize>(ui: &Ui, slots: [egui::layers::ShapeIdx; N], rects: 
     }
 }
 
-fn top_widgets(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
-    if ui.available_width() < 880.0 {
-        targets(ui, state, props, range);
-        distances(ui, state, props, range);
-        return;
+#[derive(Default)]
+struct RowPlots {
+    extra_per_plot: f32,
+    count: usize,
+}
+
+impl RowPlots {
+    fn height(&mut self, minimum: f32) -> f32 {
+        self.count += 1;
+        minimum + self.extra_per_plot
     }
+}
+
+/// Divide the height left by the neighboring card among the visible plots.
+/// Measuring the whole chart card accounts for wrapped labels, axes and legends.
+fn chart_row(
+    ui: &mut Ui,
+    id: &str,
+    draw: impl FnOnce(&mut Ui, &mut RowPlots) -> (egui::Rect, egui::Rect),
+) {
+    let key = ui.id().with(id);
+    let mut plots = RowPlots {
+        extra_per_plot: ui.data(|data| data.get_temp(key)).unwrap_or_default(),
+        count: 0,
+    };
     let slots = [
         ui.painter().add(egui::Shape::Noop),
         ui.painter().add(egui::Shape::Noop),
     ];
-    let rects = ui.columns(2, |columns| {
-        targets(&mut columns[0], state, props, range);
-        distances(&mut columns[1], state, props, range);
-        [columns[0].min_rect(), columns[1].min_rect()]
+    let (chart, neighbor) = draw(ui, &mut plots);
+    fill_row(ui, slots, [chart, neighbor]);
+    if plots.count > 0 {
+        let remaining = neighbor.height() - chart.height();
+        let extra = (plots.extra_per_plot + remaining / plots.count as f32).max(0.0);
+        if (extra - plots.extra_per_plot).abs() > 0.5 {
+            ui.data_mut(|data| data.insert_temp(key, extra));
+            ui.ctx().request_discard("fit Trends plots to their row");
+        }
+    }
+}
+
+fn top_widgets(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
+    if ui.available_width() < 880.0 {
+        targets(ui, state, props, range);
+        distances(ui, state, props, range, &mut RowPlots::default());
+        return;
+    }
+    chart_row(ui, "distance-row", |ui, plots| {
+        ui.columns(2, |columns| {
+            targets(&mut columns[0], state, props, range);
+            distances(&mut columns[1], state, props, range, plots);
+            (columns[1].min_rect(), columns[0].min_rect())
+        })
     });
-    fill_row(ui, slots, rects);
 }
 
 fn targets(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
@@ -692,7 +730,13 @@ fn ring_path(center: egui::Pos2, radius: f32, progress: f32, color: Color32) -> 
     }
 }
 
-fn distances(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
+fn distances(
+    ui: &mut Ui,
+    state: &mut State,
+    props: &Props<'_>,
+    range: Range,
+    plots: &mut RowPlots,
+) {
     card(ui, "distance-chart", |ui| {
         distance_header(ui, state, props.intl);
         let Some(history) = &state.history else {
@@ -747,7 +791,7 @@ fn distances(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range) {
                     } else {
                         trend_chart::Kind::Bars
                     },
-                    height: 64.0,
+                    height: plots.height(64.0),
                     integral: false,
                     intl: props.intl,
                     unit: unit(props.preferences).0,
@@ -945,7 +989,14 @@ fn time_mix(ui: &mut Ui, history: &History, props: &Props<'_>, range: Range) {
     });
 }
 
-fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, previous: Range) {
+fn comparison(
+    ui: &mut Ui,
+    state: &mut State,
+    props: &Props<'_>,
+    range: Range,
+    previous: Range,
+    plots: &mut RowPlots,
+) {
     state.initialize_comparison(range);
     card(ui, "comparison", |ui| {
         comparison_header(ui, state, props.intl);
@@ -1038,7 +1089,7 @@ fn comparison(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, p
                 } else {
                     trend_chart::Kind::Lines
                 },
-                height: 192.0,
+                height: plots.height(192.0),
                 integral: state.metric == Metric::Count,
                 intl: props.intl,
                 unit: chart_unit,
@@ -1194,30 +1245,25 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
 fn lower_widgets(ui: &mut Ui, state: &mut State, props: &Props<'_>, range: Range, previous: Range) {
     if ui.available_width() >= 880.0 {
         let width = ui.available_width() - 296.0 - 16.0;
-        let slots = [
-            ui.painter().add(egui::Shape::Noop),
-            ui.painter().add(egui::Shape::Noop),
-        ];
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 16.0;
-            let comparison = ui.allocate_ui_with_layout(
-                egui::vec2(width, 0.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| comparison(ui, state, props, range, previous),
-            );
-            let calendar = ui.allocate_ui_with_layout(
-                egui::vec2(296.0, 0.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| calendar(ui, state, props, range),
-            );
-            fill_row(
-                ui,
-                slots,
-                [comparison.response.rect, calendar.response.rect],
-            );
+        chart_row(ui, "comparison-row", |ui, plots| {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 16.0;
+                let comparison = ui.allocate_ui_with_layout(
+                    egui::vec2(width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| comparison(ui, state, props, range, previous, plots),
+                );
+                let calendar = ui.allocate_ui_with_layout(
+                    egui::vec2(296.0, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| calendar(ui, state, props, range),
+                );
+                (comparison.response.rect, calendar.response.rect)
+            })
+            .inner
         });
     } else {
-        comparison(ui, state, props, range, previous);
+        comparison(ui, state, props, range, previous, &mut RowPlots::default());
         calendar(ui, state, props, range);
     }
 }

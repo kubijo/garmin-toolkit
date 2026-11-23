@@ -129,6 +129,15 @@ device = "Edge"
 state = "empty"
 
 [[shot]]
+name = "checking"
+scene = "firmware::Playground"
+settle = false
+frames = 8
+[shot.knobs]
+device = "Edge"
+state = "checking"
+
+[[shot]]
 name = "consent"
 scene = "firmware::Playground"
 [shot.knobs]

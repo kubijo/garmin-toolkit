@@ -29,6 +29,7 @@ fn playground(ctx: &mut SceneCtx<'_>, ui: &mut Ui, globals: &crate::Globals) {
             "previous transfer pending",
             "write failed",
             "reported version differs",
+            "checking",
         ],
         0,
     );
@@ -102,7 +103,7 @@ fn preview_state(device: usize, step: usize) -> State {
                 status: ReceiptStatus::Confirmed,
             },
         ]),
-        10 => Phase::Checking,
+        10 | 13 => Phase::Checking,
         12 => edge_version_mismatch(),
         _ => Phase::Available(components.clone()),
     };
@@ -110,7 +111,7 @@ fn preview_state(device: usize, step: usize) -> State {
         transcript: transfer_transcript(step, total, transferred, &components[selected].name),
         has_retained_transfer: matches!(step, 3 | 4 | 5 | 8..=12),
         simulated: true,
-        revision: Uuid::from_u128((device * 13 + step) as u128),
+        revision: Uuid::from_u128((device * 14 + step) as u128),
         phase,
         review,
         catalog_id: Uuid::from_u128(device as u128),

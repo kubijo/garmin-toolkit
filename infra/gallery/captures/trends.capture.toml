@@ -5,6 +5,13 @@ report = "capture.json"
 settle = false
 
 [[shot]]
+name = "cycling-only"
+scene = "trends::Overview"
+[shot.knobs]
+history = "cycling only"
+"partial targets" = true
+
+[[shot]]
 name = "elevation-coverage"
 scene = "trends::Overview"
 [shot.knobs]

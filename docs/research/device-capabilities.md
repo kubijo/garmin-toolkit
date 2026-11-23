@@ -64,6 +64,7 @@ These rows describe recorded acceptance, not every operation exposed by the adap
 | Device / path         | Verified operations                                                        |
 | --------------------- | -------------------------------------------------------------------------- |
 | fēnix / Linux GVFS    | Manifest, FIT reads/decode, probe create/read/delete, map maintenance      |
+| fēnix / desktop       | MTP video bundle staging and reconnect confirmation at 1.00                |
 | fēnix / raw MTP       | Manifest and complete FIT reads/decode                                     |
 | Edge 1050 / GVFS      | Map update/removal, restart acceptance, interrupted-update rollback        |
 | Edge 1050 / desktop   | MTP staging and reconnect confirmation of Time Zone Map 43.00 and FW 33.22 |

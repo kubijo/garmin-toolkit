@@ -87,6 +87,68 @@ fn harness() -> Harness<'static, Model> {
 }
 
 #[test]
+fn cycling_plots_fill_their_wide_rows_and_shrink_when_stacked() {
+    use garmin_model::garmin_connect::trends::{Day, Sport, Totals};
+
+    let mut view = harness();
+    let history = History {
+        days: vec![Day {
+            date: "2026-11-16".parse().expect("fixture date"),
+            sport: Sport::Cycling,
+            totals: Totals {
+                activities: 1,
+                distance: Distance::try_from_kilometres(20.0).expect("fixture distance"),
+                ..Default::default()
+            },
+        }],
+        ..Default::default()
+    };
+    view.state_mut().state = State::from_cache(Some(history), Revision::default());
+    view.state_mut().preferences = ProfilePreferences::default()
+        .with_monthly_distance_targets([0, 200, 0].map(MonthlyDistanceTarget::from_kilometres));
+    view.set_size(egui::vec2(1200.0, 2400.0));
+    view.run();
+
+    let plots = |view: &Harness<'_, Model>| {
+        let cycling = view
+            .get_all(By::new().label("Cycling"))
+            .map(|item| item.rect())
+            .max_by(|a, b| a.height().total_cmp(&b.height()))
+            .expect("cycling plot");
+        let comparison = view
+            .get_by_label(
+                "November 1, 2026 – November 17, 2026, October 1, 2026 – October 17, 2026",
+            )
+            .rect();
+        (cycling, comparison)
+    };
+    let (wide_distance, wide_comparison) = plots(&view);
+    let edit = view.get_by_label("Edit monthly distance targets").rect();
+    let calendar_legend = view.get_by_label("0 min").rect();
+    assert!(
+        (wide_distance.bottom() - edit.bottom()).abs() < 24.0,
+        "{wide_distance:?} {edit:?}"
+    );
+    assert!(
+        (wide_comparison.bottom() - calendar_legend.bottom()).abs() < 64.0,
+        "{wide_comparison:?} {calendar_legend:?}"
+    );
+
+    view.set_size(egui::vec2(760.0, 3200.0));
+    view.run();
+    let (stacked_distance, stacked_comparison) = plots(&view);
+    assert!(
+        stacked_distance.height() <= 64.0
+            && stacked_distance.height() + 32.0 < wide_distance.height()
+    );
+    assert!(
+        stacked_comparison.height() <= 192.0
+            && stacked_comparison.height() + 32.0 < wide_comparison.height()
+    );
+    assert!(stacked_comparison.bottom() < view.get_by_label("Activity calendar").rect().top());
+}
+
+#[test]
 fn trends_loads_history_without_a_connect_account() {
     let mut view = harness();
     view.state_mut().connect_configured = false;
@@ -278,6 +340,20 @@ fn target_editor_saves_only_on_confirmation_and_cancel_discards_the_draft() {
         .click();
     view.run();
     let running = || By::new().predicate(|node| node.author_id() == Some("trends.target.running"));
+    let units: Vec<_> = view
+        .get_all(By::new().label("km"))
+        .map(|unit| unit.rect())
+        .collect();
+    assert_eq!(units.len(), 3);
+    for (sport, unit) in ["running", "cycling", "swimming"].iter().zip(units) {
+        let id = format!("trends.target.{sport}");
+        let field = view
+            .get(By::new().predicate(|node| node.author_id() == Some(id.as_str())))
+            .rect();
+        assert_eq!(field.width(), 176.0);
+        assert_eq!(unit.left() - field.right(), 8.0);
+        assert!((unit.center().y - field.center().y).abs() <= 1.0);
+    }
     view.get(running()).click();
     view.run();
     view.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);

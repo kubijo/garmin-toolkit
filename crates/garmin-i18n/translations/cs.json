@@ -39,6 +39,10 @@
     "source": "Recommended; enables automatic rollback if the update fails.",
     "translation": "Doporučeno; umožňuje automatický návrat při selhání aktualizace."
   },
+  "+WMXZfKkTX": {
+    "source": "Zero leaves a sport without a target.",
+    "translation": "Nula ponechá sport bez cíle."
+  },
   "+Wgg5BhGvI": {
     "source": "Review selection",
     "translation": "Zkontrolovat výběr"
@@ -1285,10 +1289,6 @@
   "KJmPg4iyKy": {
     "source": "Create verified recovery backups",
     "translation": "Vytvořit ověřené zálohy pro obnovu"
-  },
-  "KUxmIME28e": {
-    "source": "Monthly targets in kilometres. Zero leaves a sport without a target.",
-    "translation": "Měsíční cíle v kilometrech. Nula ponechá sport bez cíle."
   },
   "KX0OMbmhrp": {
     "source": "Scanning selected files",
