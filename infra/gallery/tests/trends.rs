@@ -7,7 +7,7 @@ use egui_kittest::{
     kittest::{By, Queryable as _},
 };
 use garmin_model::{
-    activity::{ActivityDuration, Distance, HeartRate},
+    activity::{ActivityDuration, Distance, HeartRate, Power},
     garmin_connect::{
         sync::{Outcome, Revision, Snapshot},
         trends::{History, ImportedMeasurements},
@@ -253,6 +253,8 @@ fn activity_comparison_changes_both_selections_when_the_sport_changes() {
             ImportedMeasurements {
                 ascent: Some(Distance::from_millimeters(420_000)),
                 average_heart_rate: Some(HeartRate::from_beats_per_minute(144)),
+                peak_power: Some(Power::from_watts(385)),
+                average_power: Some(Power::from_watts(0)),
             },
         )]),
     );
@@ -276,6 +278,8 @@ fn activity_comparison_changes_both_selections_when_the_sport_changes() {
     assert!(view.query_by_label("20.0\u{a0}km/h").is_some());
     assert!(view.query_by_label("420\u{a0}m").is_some());
     assert!(view.query_by_label("144\u{a0}bpm").is_some());
+    view.get_by_label("385\u{a0}W");
+    view.get_by_label("0\u{a0}W");
     view.get(By::new().predicate(|node| node.author_id() == Some("trends.sport.1")))
         .click();
     view.run();
@@ -313,8 +317,51 @@ fn activity_comparison_changes_both_selections_when_the_sport_changes() {
             .is_some_and(|label| label.starts_with("Easy run ·"))
     );
     assert!(view.query_by_label("6:00 / km").is_some());
+    assert!(view.query_by_label("Average power").is_none());
     assert_eq!(view.state().reads, initial_reads);
     assert_eq!(view.state().syncs, 0);
+}
+
+#[test]
+fn cycling_peak_power_shows_zero_and_coverage_and_resets_when_switching_sports() {
+    use garmin_model::garmin_connect::trends::{Day, Sport, Totals};
+
+    let day = |date: &str, watts: Option<u32>| Day {
+        date: date.parse().expect("valid power fixture date"),
+        sport: Sport::Cycling,
+        totals: Totals {
+            activities: 1,
+            peak_power: watts.map(Power::from_watts),
+            power_activities: usize::from(watts.is_some()),
+            ..Default::default()
+        },
+    };
+    let history = History {
+        days: vec![
+            day("2026-10-01", Some(280)),
+            day("2026-11-01", Some(0)),
+            day("2026-11-02", None),
+        ],
+        ..Default::default()
+    };
+    let mut view = harness();
+    view.state_mut().state = State::from_cache(Some(history), Revision::default());
+    let metric = || By::new().predicate(|node| node.author_id() == Some("trends.metric"));
+    let power = || By::new().predicate(|node| node.author_id() == Some("trends.metric.peak-power"));
+    view.run();
+    view.get(metric()).click();
+    view.run();
+    view.get(power()).click();
+    view.run();
+    view.get_by_label("0\u{a0}W");
+    view.get_by_label("Rides with recorded power · 1/2 this period · 1/1 previous period");
+    view.get(By::new().predicate(|node| node.author_id() == Some("trends.sport.0")))
+        .click();
+    view.run();
+    assert_eq!(view.get(metric()).value().as_deref(), Some("Distance"));
+    view.get(metric()).click();
+    view.run();
+    assert!(view.query(power()).is_none());
 }
 
 #[test]

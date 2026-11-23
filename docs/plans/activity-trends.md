@@ -7,14 +7,14 @@ only; aggregation, interaction tests, and maintained captures belong to the Rust
 
 - Read the profile's current credential-bound, published summary-cache generation. A read never starts a network
   request, original-file download, or import. An explicit **Sync activities** action uses the existing cache refresh.
-- Count each remote activity ID once, independently of whether its original FIT is downloaded, unavailable, or imported.
-  Local-only imported activities are not added to these account totals.
-- Bucket by each summary's local date. Do not guess a date from GMT when the local date is absent or invalid; report
-  excluded summaries explicitly.
+- Count each remote activity ID once. Include unmatched imported FIT recordings and merge recordings whose identity
+  matches a published activity, as described under Activity identity.
+- Bucket by the summary’s local date. If it is missing or invalid, use a matched FIT start time in the account’s time
+  zone, with UTC as the fallback. Count undated summaries separately.
 - Retain counts when distance or duration is missing. Known-value totals carry missing-field counts. Unknown chart
   samples have a separate treatment from measured zero; cumulative values remain unknown after a gap.
-- Duration means the duration field supplied by the Garmin activity summary. It is not reconstructed from FIT samples or
-  substituted with a different elapsed/moving-time statistic.
+- Use the published activity duration when available and the imported FIT session timer for local recordings and missing
+  summary durations.
 - Active days count distinct local dates, including multiple activities and different sports on the same date once.
   Preserve running, cycling, swimming, walking, hiking, and uncategorized activities.
 
@@ -56,13 +56,17 @@ Elevation gain and average heart rate come from imported FIT projections. Trends
 and shows coverage for each period. Elevation leaves incomplete buckets unknown. Heart rate gives each measured activity
 equal weight and leaves buckets with no reported heart rate empty.
 
+Activity comparison shows the average and peak power recorded in each ride’s FIT session. The period chart takes the
+highest reported wattage per day or month and counts rides with power in each period. A recorded zero counts as
+measured. Buckets without a measurement stay blank.
+
 ## Activity identity
 
 Trends joins a published Garmin summary to FIT observations through the active account's source and Garmin activity ID.
 Observations with the same versioned semantic fingerprint represent one recording for reporting. The Garmin row supplies
-its name and any available summary measurements. The matched FIT supplies elevation, heart rate, and missing summary
-measurements. When a Garmin ID links to multiple distinct fingerprints, the Garmin row and the recordings remain
-separate. A cloud summary without a linked FIT lacks the evidence for matching a local import.
+its name and any available summary measurements. The matched FIT fills gaps and supplies elevation, heart rate, and peak
+power. When a Garmin ID links to multiple distinct fingerprints, the Garmin row and the recordings remain separate. A
+cloud summary without a linked FIT lacks the evidence for matching a local import.
 
 FIT recordings appear in Trends after import. Unmatched recordings appear alongside published Connect history when
 available. Dates use the Connect cache's account time zone when available and UTC otherwise. Original observations and

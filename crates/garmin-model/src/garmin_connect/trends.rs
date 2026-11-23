@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use jiff::civil::Date;
 
 use super::CachedActivity;
-use crate::activity::{ActivityDuration, ActivitySport, Distance, HeartRate};
+use crate::activity::{ActivityDuration, ActivitySport, Distance, HeartRate, Power};
 use crate::observation::ObservationId;
 
 #[garmin_macros::portable(copy, eq, ord)]
@@ -52,12 +52,18 @@ pub struct Totals {
     pub missing_duration: usize,
     #[serde(default)]
     pub heart_rate: HeartRateAverage,
+    #[serde(default)]
+    pub peak_power: Option<Power>,
+    #[serde(default)]
+    pub power_activities: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, serde::Serialize)]
 pub struct ImportedMeasurements {
     pub ascent: Option<Distance>,
     pub average_heart_rate: Option<HeartRate>,
+    pub peak_power: Option<Power>,
+    pub average_power: Option<Power>,
 }
 
 /// Each activity with a reported average contributes once.
@@ -108,6 +114,10 @@ impl Totals {
         if let Some(rate) = activity.average_heart_rate {
             self.heart_rate.record(rate);
         }
+        if activity.sport == Sport::Cycling && activity.peak_power.is_some() {
+            self.peak_power = self.peak_power.max(activity.peak_power);
+            self.power_activities += 1;
+        }
     }
 
     pub fn add(&mut self, other: &Self) {
@@ -120,6 +130,8 @@ impl Totals {
         self.missing_duration += other.missing_duration;
         self.heart_rate.sum_bpm += other.heart_rate.sum_bpm;
         self.heart_rate.activities += other.heart_rate.activities;
+        self.peak_power = self.peak_power.max(other.peak_power);
+        self.power_activities += other.power_activities;
     }
 }
 
@@ -145,6 +157,10 @@ pub struct ActivitySummary {
     pub average_heart_rate: Option<HeartRate>,
     #[serde(default)]
     pub local_observation: Option<ObservationId>,
+    #[serde(default)]
+    pub peak_power: Option<Power>,
+    #[serde(default)]
+    pub average_power: Option<Power>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -215,6 +231,7 @@ impl History {
                     Metric::AverageHeartRate => {
                         totals.heart_rate.value().map(BucketValue::HeartRate)
                     }
+                    Metric::PeakPower => totals.peak_power.map(BucketValue::Power),
                     _ => None,
                 };
                 Bucket {
@@ -273,6 +290,8 @@ impl History {
                 duration: summary.activity.duration,
                 elevation_gain: measurements.ascent,
                 average_heart_rate: measurements.average_heart_rate,
+                peak_power: measurements.peak_power,
+                average_power: measurements.average_power,
                 local_observation: None,
             });
         }
@@ -338,6 +357,7 @@ pub enum Metric {
     ActiveDays,
     Elevation,
     AverageHeartRate,
+    PeakPower,
 }
 
 #[garmin_macros::portable]
@@ -354,6 +374,7 @@ pub enum BucketValue {
     Duration(ActivityDuration),
     Count(usize),
     HeartRate(HeartRate),
+    Power(Power),
 }
 
 impl BucketValue {

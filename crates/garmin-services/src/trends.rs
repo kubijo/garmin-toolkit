@@ -124,6 +124,8 @@ fn local_recordings<'a>(
                 duration: Some(summary.totals().timer()),
                 elevation_gain: measurements.ascent,
                 average_heart_rate: measurements.average_heart_rate,
+                peak_power: measurements.peak_power,
+                average_power: measurements.average_power,
                 local_observation: Some(recording.observation_id()),
             }
         })
@@ -144,5 +146,7 @@ fn fit_measurements(recording: &StoredActivitySummary) -> ImportedMeasurements {
     ImportedMeasurements {
         ascent: summary.totals().ascent(),
         average_heart_rate: summary.metrics().average_heart_rate(),
+        peak_power: summary.metrics().maximum_power(),
+        average_power: summary.metrics().average_power(),
     }
 }

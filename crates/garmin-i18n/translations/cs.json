@@ -572,6 +572,10 @@
     "source": "Verifying backup",
     "translation": "Ověřování zálohy"
   },
+  "8jqqU2rVzh": {
+    "source": "Rides with recorded power · {covered, number}/{total, number} this period · {previous, number}/{prior_total, number} previous period",
+    "translation": "Jízdy se zaznamenaným výkonem · {covered, number}/{total, number} v tomto období · {previous, number}/{prior_total, number} v předchozím období"
+  },
   "8kH02BBZ9L": {
     "source": "Sending this Course will not pair the device or change its existing pairing.",
     "translation": "Odesláním této trasy se zařízení nespáruje ani se nezmění jeho stávající spárování."
@@ -1489,6 +1493,10 @@
   "Oar0W0lMRX": {
     "source": "Present",
     "translation": "Přítomen"
+  },
+  "OcC/203lxT": {
+    "source": "Average power",
+    "translation": "Průměrný výkon"
   },
   "OfkcOw6CDv": {
     "source": "Course version {version} · {size}",
@@ -3166,6 +3174,10 @@
   "sC7jX5Rlyh": {
     "source": "Update incomplete.",
     "translation": "Aktualizace není dokončena."
+  },
+  "sF1LcHng+A": {
+    "source": "Peak power",
+    "translation": "Maximální výkon"
   },
   "sL9UuYyUn8": {
     "source": "Removal",

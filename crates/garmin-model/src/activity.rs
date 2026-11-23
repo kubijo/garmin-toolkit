@@ -391,6 +391,17 @@ impl fmt::Display for Cadence {
 pub struct Power(u32);
 
 impl Power {
+    pub const SYMBOL: &'static str = "W";
+
+    #[must_use]
+    pub fn format(self, decimal: impl Fn(f64, usize) -> String) -> String {
+        format!(
+            "{}\u{a0}{}",
+            decimal(f64::from(self.as_watts()), 0),
+            Self::SYMBOL
+        )
+    }
+
     #[must_use]
     pub const fn from_watts(watts: u32) -> Self {
         Self(watts)

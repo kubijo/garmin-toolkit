@@ -11,7 +11,7 @@
 use egui::{Color32, RichText, Ui};
 use garmin_i18n::{Intl, format_message};
 use garmin_model::{
-    activity::{Distance, HeartRate},
+    activity::{Distance, HeartRate, Power},
     artifact::ArtifactDigest,
     garmin_connect::{
         sync::{Revision, Snapshot},
@@ -105,6 +105,10 @@ impl State {
 
     #[must_use]
     pub fn with_comparison_metric(mut self, metric: Metric) -> Self {
+        if metric == Metric::PeakPower {
+            self.sport = Sport::Cycling as usize;
+            self.comparison_initialized = true;
+        }
         self.metric = metric;
         self
     }
@@ -352,6 +356,8 @@ fn values(
                 Some(BucketValue::Duration(duration)) => Sample::Value(duration.as_hours()),
                 Some(BucketValue::Count(count)) => Sample::Value(count as f64),
                 Some(BucketValue::HeartRate(rate)) => Sample::HeartRate(rate),
+                Some(BucketValue::Power(power)) => Sample::Power(power),
+                None if metric == Metric::PeakPower => Sample::Empty,
                 None if metric == Metric::AverageHeartRate && !bucket.has_activities => {
                     Sample::Empty
                 }
@@ -1006,26 +1012,24 @@ fn comparison(
         let sport = Sport::ALL[state.sport];
         let elevation = state.metric == Metric::Elevation;
         let heart_rate = state.metric == Metric::AverageHeartRate;
+        let power = state.metric == Metric::PeakPower;
+        let accumulated = !(elevation || heart_rate || power);
         let monthly = state.is_preset(Period::Year);
-        let (labels, current) = values(
-            history,
-            range,
-            Some(sport),
-            state.metric,
-            monthly,
-            !elevation && !heart_rate,
-            props.preferences,
-        );
-        let (prior_dates, prior) = values(
-            history,
-            previous,
-            Some(sport),
-            state.metric,
-            monthly,
-            !elevation && !heart_rate,
-            props.preferences,
-        );
+        let series_for = |period| {
+            values(
+                history,
+                period,
+                Some(sport),
+                state.metric,
+                monthly,
+                accumulated,
+                props.preferences,
+            )
+        };
+        let (labels, current) = series_for(range);
+        let (prior_dates, prior) = series_for(previous);
         let totals = history.totals(range, Some(sport));
+        let previous_totals = history.totals(previous, Some(sport));
         let missing = match state.metric {
             Metric::Distance => totals.missing_distance,
             Metric::Duration => totals.missing_duration,
@@ -1036,14 +1040,11 @@ fn comparison(
         ui.label(RichText::new(value).size(24.0).strong());
         let chart_unit = comparison_unit(state.metric, props.preferences);
         if elevation {
-            elevation_coverage(ui, props, &totals, &history.totals(previous, Some(sport)));
+            elevation_coverage(ui, props, &totals, &previous_totals);
         } else if heart_rate {
-            heart_rate_coverage(
-                ui,
-                props.intl,
-                &totals,
-                &history.totals(previous, Some(sport)),
-            );
+            heart_rate_coverage(ui, props.intl, &totals, &previous_totals);
+        } else if power {
+            power_coverage(ui, props.intl, &totals, &previous_totals);
         } else {
             comparison_delta(
                 ui,
@@ -1058,7 +1059,9 @@ fn comparison(
         }
         if totals.activities == 0 {
             ui.label(format_message!(props.intl, default_message: "No activities recorded in this period"));
-            return;
+            if !power || previous_totals.power_activities == 0 {
+                return;
+            }
         }
         let current_label = range_label(props.intl, range);
         let previous_label = range_label(props.intl, previous);
@@ -1078,25 +1081,33 @@ fn comparison(
                 dates: Some(&prior_dates),
             },
         ];
+        let kind = if !accumulated || range.from == range.through {
+            trend_chart::Kind::Bars
+        } else {
+            trend_chart::Kind::Lines
+        };
         let frame = trend_chart::show(
             ui,
             "comparison-plot",
             trend_chart::Props {
                 labels: &labels,
                 series: &series,
-                kind: if elevation || heart_rate || range.from == range.through {
-                    trend_chart::Kind::Bars
-                } else {
-                    trend_chart::Kind::Lines
-                },
+                kind,
                 height: plots.height(192.0),
-                integral: state.metric == Metric::Count,
+                integral: state.metric == Metric::Count || power,
                 intl: props.intl,
                 unit: chart_unit,
             },
         );
-        trend_chart::legend(ui, frame, &series);
+        trend_chart::legend(ui, frame, &series, kind);
     });
+}
+
+fn power_coverage(ui: &mut Ui, intl: &Intl, current: &Totals, prior: &Totals) {
+    ui.weak(format_message!(intl, default_message: "Rides with recorded power · {covered, number}/{total, number} this period · {previous, number}/{prior_total, number} previous period", values: {
+        covered: current.power_activities as u64, total: current.activities as u64,
+        previous: prior.power_activities as u64, prior_total: prior.activities as u64
+    }));
 }
 
 fn comparison_value(metric: Metric, props: &Props<'_>, totals: &Totals) -> String {
@@ -1117,6 +1128,10 @@ fn comparison_value(metric: Metric, props: &Props<'_>, totals: &Totals) -> Strin
         Metric::AverageHeartRate => totals.heart_rate.value().map_or_else(
             || "—".to_owned(),
             |rate| rate.format(props.intl.decimal_formatter()),
+        ),
+        Metric::PeakPower => totals.peak_power.map_or_else(
+            || "—".to_owned(),
+            |power| power.format(props.intl.decimal_formatter()),
         ),
         _ => totals.activities.to_string(),
     }
@@ -1168,6 +1183,7 @@ fn comparison_unit(metric: Metric, preferences: ProfilePreferences) -> &'static 
         Metric::Duration => "h",
         Metric::Elevation => elevation_unit(preferences).0,
         Metric::AverageHeartRate => HeartRate::SYMBOL,
+        Metric::PeakPower => Power::SYMBOL,
         _ => "",
     }
 }
@@ -1197,30 +1213,47 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
     ui.with_layout(layout, |ui| {
         ui.spacing_mut().item_spacing.x = 16.0;
         segments::show(ui, &mut state.sport, sports, "trends.sport");
-        let metric_labels = [
-            format_message!(intl, default_message: "Distance"),
-            format_message!(intl, default_message: "Activity time"),
-            format_message!(intl, default_message: "Activities"),
-            format_message!(intl, default_message: "Elevation gain"),
-            format_message!(intl, default_message: "Average heart rate"),
-        ];
-        let mut selected = match state.metric {
-            Metric::Duration => 1,
-            Metric::Count => 2,
-            Metric::Elevation => 3,
-            Metric::AverageHeartRate => 4,
-            _ => 0,
-        };
-        let choices = metric_labels
-            .iter()
-            .zip([
+        let mut metrics = Vec::from([
+            (
+                Metric::Distance,
                 "trends.metric.distance",
+                format_message!(intl, default_message: "Distance"),
+            ),
+            (
+                Metric::Duration,
                 "trends.metric.duration",
+                format_message!(intl, default_message: "Activity time"),
+            ),
+            (
+                Metric::Count,
                 "trends.metric.count",
+                format_message!(intl, default_message: "Activities"),
+            ),
+            (
+                Metric::Elevation,
                 "trends.metric.elevation",
+                format_message!(intl, default_message: "Elevation gain"),
+            ),
+            (
+                Metric::AverageHeartRate,
                 "trends.metric.heart-rate",
-            ])
-            .map(|(label, target)| crate::select::Choice::new(label).target(target))
+                format_message!(intl, default_message: "Average heart rate"),
+            ),
+        ]);
+        if Sport::ALL[state.sport] == Sport::Cycling {
+            metrics.push((
+                Metric::PeakPower,
+                "trends.metric.peak-power",
+                format_message!(intl, default_message: "Peak power"),
+            ));
+        }
+        let mut selected = metrics
+            .iter()
+            .position(|(metric, _, _)| *metric == state.metric)
+            .unwrap_or(0);
+        let choices = metrics
+            .iter()
+            .map(|(_, target, label)| crate::select::Choice::new(label).target(target))
             .collect::<Vec<_>>();
         let response = crate::select::show(
             ui,
@@ -1232,13 +1265,7 @@ fn comparison_controls(ui: &mut Ui, state: &mut State, intl: &Intl, sports: &[(u
                 .size(crate::Size::Small),
         );
         crate::semantics::target(ui, &response, "trends.metric");
-        state.metric = [
-            Metric::Distance,
-            Metric::Duration,
-            Metric::Count,
-            Metric::Elevation,
-            Metric::AverageHeartRate,
-        ][selected];
+        state.metric = metrics[selected].0;
     });
 }
 

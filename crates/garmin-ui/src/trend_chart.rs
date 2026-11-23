@@ -9,12 +9,13 @@
 
 use egui::{Color32, Shape, Stroke, Ui};
 use egui_plot::{Bar, BarChart, GridMark, Line, LineStyle, Plot, Points};
-use garmin_model::activity::HeartRate;
+use garmin_model::activity::{HeartRate, Power};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Sample {
     Value(f64),
     HeartRate(HeartRate),
+    Power(Power),
     Missing,
     Empty,
 }
@@ -24,6 +25,7 @@ impl Sample {
         match self {
             Self::Value(value) => Some(value),
             Self::HeartRate(rate) => Some(f64::from(rate.as_beats_per_minute())),
+            Self::Power(power) => Some(f64::from(power.as_watts())),
             Self::Missing | Self::Empty => None,
         }
     }
@@ -150,7 +152,7 @@ pub fn show(ui: &mut Ui, id: impl egui::AsIdSalt, props: Props<'_>) -> egui::Rec
     *plot.transform.frame()
 }
 
-pub fn legend(ui: &mut Ui, frame: egui::Rect, series: &[Series<'_>]) {
+pub fn legend(ui: &mut Ui, frame: egui::Rect, series: &[Series<'_>], kind: Kind) {
     let padding = (frame.left() - ui.max_rect().left()).max(0.0).round() as i32;
     ui.scope(|ui| {
         ui.spacing_mut().interact_size.y = 16.0;
@@ -173,7 +175,13 @@ pub fn legend(ui: &mut Ui, frame: egui::Rect, series: &[Series<'_>]) {
                             let (rect, _) = ui
                                 .allocate_exact_size(egui::vec2(24.0, 12.0), egui::Sense::hover());
                             let points = [rect.left_center(), rect.right_center()];
-                            if entry.dashed {
+                            if matches!(kind, Kind::Bars) {
+                                ui.painter().rect_filled(
+                                    rect.shrink2(egui::vec2(4.0, 2.0)),
+                                    0,
+                                    entry.color,
+                                );
+                            } else if entry.dashed {
                                 ui.painter().extend(Shape::dashed_line(
                                     &points,
                                     Stroke::new(2.0, entry.color),
@@ -302,6 +310,7 @@ fn hover_label(
         .map_or_else(|_| date.clone(), |date| intl.dates().date(date));
     let value = match source.values.get(index)? {
         Sample::HeartRate(rate) => rate.format(intl.decimal_formatter()),
+        Sample::Power(power) => power.format(intl.decimal_formatter()),
         Sample::Value(value) if unit.is_empty() => format!("{value:.0}"),
         Sample::Value(value) => format!("{value:.2} {unit}"),
         Sample::Missing | Sample::Empty => return None,
@@ -394,14 +403,19 @@ fn paint_series(plot: &mut egui_plot::PlotUi<'_>, series: &[Series<'_>], kind: K
     for (series_index, series) in series.iter().enumerate() {
         match kind {
             Kind::Bars => {
+                let mut zero_power = Vec::new();
                 let bars = series
                     .values
                     .iter()
                     .enumerate()
                     .filter_map(|(index, value)| {
                         let (center, width) = bar_slot(index, series_index, count);
-                        value.coordinate().map(|value| {
-                            Bar::new(center, value)
+                        if *value == Sample::Power(Power::from_watts(0)) {
+                            zero_power.push([center, 0.0]);
+                            return None;
+                        }
+                        value.coordinate().map(|height| {
+                            Bar::new(center, height)
                                 .width(width)
                                 .fill(series.color)
                                 .stroke(Stroke::NONE)
@@ -409,6 +423,13 @@ fn paint_series(plot: &mut egui_plot::PlotUi<'_>, series: &[Series<'_>], kind: K
                     })
                     .collect();
                 plot.bar_chart(BarChart::new(series.name, bars).color(series.color));
+                if !zero_power.is_empty() {
+                    plot.points(
+                        Points::new(series.name, zero_power)
+                            .color(series.color)
+                            .radius(4.0),
+                    );
+                }
             }
             Kind::Lines => {
                 let mut points = Vec::new();

@@ -160,6 +160,52 @@ fn heart_rate_counts_only_reported_activities_and_averages_them_across_days() {
 }
 
 #[test]
+fn peak_power_keeps_the_highest_measured_ride_and_counts_zero_watts() {
+    let mut summaries = Vec::new();
+    let mut measurements = BTreeMap::new();
+    for (id, day, sport, watts) in [
+        (1, "2026-11-01", ActivitySport::Cycling, Some(410)),
+        (2, "2026-11-01", ActivitySport::Cycling, Some(230)),
+        (3, "2026-11-02", ActivitySport::Cycling, Some(0)),
+        (4, "2026-11-03", ActivitySport::Cycling, None),
+        (5, "2026-11-03", ActivitySport::Running, Some(600)),
+    ] {
+        let mut ride = summary(id, Some(day), None, None);
+        ride.activity.sport = Some(sport);
+        summaries.push(ride);
+        measurements.insert(
+            id,
+            ImportedMeasurements {
+                peak_power: watts.map(Power::from_watts),
+                ..Default::default()
+            },
+        );
+    }
+    let history = History::from_summaries_with_measurements(&summaries, &measurements);
+    let range = Range {
+        from: date("2026-11-01"),
+        through: date("2026-11-04"),
+    };
+    let cycling = Some(Sport::Cycling);
+    let totals = history.totals(range, cycling);
+    assert_eq!((totals.power_activities, totals.activities), (3, 4));
+    let peak = |watts| Some(BucketValue::Power(Power::from_watts(watts)));
+    let series = |monthly| {
+        history
+            .series(range, cycling, Metric::PeakPower, monthly)
+            .into_iter()
+            .map(|bucket| bucket.value)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(series(false), [peak(410), peak(0), None, None]);
+    assert_eq!(series(true), [peak(410)]);
+    assert_eq!(
+        history.totals(range, None).peak_power,
+        Some(Power::from_watts(410))
+    );
+}
+
+#[test]
 fn comparisons_match_calendar_dates_and_clamp_short_months() {
     let today = date("2026-11-16");
     let (current, previous) = Period::Month.ranges(today, today).expect("month range");

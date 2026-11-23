@@ -183,4 +183,20 @@ fn measurements(ui: &mut Ui, props: &Props<'_>, activity: &ActivitySummary) {
         ui.weak(label);
         ui.label(value.as_deref().unwrap_or("—"));
     }
+    if activity.sport == Sport::Cycling {
+        for (label, power) in [
+            (
+                format_message!(props.intl, default_message: "Average power"),
+                activity.average_power,
+            ),
+            (
+                format_message!(props.intl, default_message: "Peak power"),
+                activity.peak_power,
+            ),
+        ] {
+            ui.weak(label);
+            let value = power.map(|power| power.format(props.intl.decimal_formatter()));
+            ui.label(value.as_deref().unwrap_or("—"));
+        }
+    }
 }

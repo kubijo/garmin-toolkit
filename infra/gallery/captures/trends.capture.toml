@@ -5,6 +5,14 @@ report = "capture.json"
 settle = false
 
 [[shot]]
+name = "peak-power"
+scene = "trends::Overview"
+[shot.knobs]
+history = "cycling only"
+"comparison metric" = "peak power"
+"partial targets" = true
+
+[[shot]]
 name = "cycling-only"
 scene = "trends::Overview"
 [shot.knobs]
@@ -15,7 +23,7 @@ history = "cycling only"
 name = "elevation-coverage"
 scene = "trends::Overview"
 [shot.knobs]
-"elevation comparison" = true
+"comparison metric" = "elevation"
 
 [[shot]]
 name = "partial-targets"

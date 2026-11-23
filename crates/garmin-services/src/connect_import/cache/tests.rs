@@ -501,7 +501,8 @@ async fn trends_merges_a_local_fit_after_connect_proves_its_identity() {
         None,
     );
     let revision = app.connect_trends_import_revision(user).await.unwrap();
-    import_trends_recording(&app, user, &source, garmin_fit::fixture::Sport::Cycling).await;
+    let ride = garmin_fit::fixture::activity(garmin_fit::fixture::Sport::Cycling).unwrap();
+    import_trends_recording(&app, user, &source, &ride).await;
 
     let local = app.connect_trends(user).await.unwrap().unwrap();
     assert_eq!(local.summaries, 1);
@@ -576,7 +577,8 @@ async fn trends_merges_a_local_fit_after_connect_proves_its_identity() {
         "Garmin Connect".parse().unwrap(),
         None,
     );
-    import_trends_recording(&app, user, &connect, garmin_fit::fixture::Sport::Running).await;
+    let run = garmin_fit::fixture::activity(garmin_fit::fixture::Sport::Running).unwrap();
+    import_trends_recording(&app, user, &connect, &run).await;
     let ambiguous = app.connect_trends(user).await.unwrap().unwrap();
     assert_eq!(ambiguous.summaries, 25);
     let cloud = ambiguous
@@ -588,11 +590,40 @@ async fn trends_merges_a_local_fit_after_connect_proves_its_identity() {
     assert_eq!(cloud.elevation_gain, None);
 }
 
+#[tokio::test]
+async fn indoor_ride_fit_supplies_recorded_average_and_peak_power_to_trends() {
+    use garmin_fit::fixture::ActivityCase;
+    use garmin_model::{
+        activity::Power,
+        identity::{Source, SourceId},
+    };
+
+    let root = tempfile::tempdir().unwrap();
+    let (app, user, _) = application(&root.path().join("power.sqlite3")).await;
+    let source = Source::from_parts(
+        SourceId::new_v4(),
+        user.user_id(),
+        "Local FIT".parse().unwrap(),
+        None,
+    );
+    let ride = ActivityCase::IndoorPowerRide.encode().unwrap();
+    import_trends_recording(&app, user, &source, &ride).await;
+    let history = app.connect_trends(user).await.unwrap().unwrap();
+    assert_eq!(
+        history.activities[0].peak_power,
+        Some(Power::from_watts(373))
+    );
+    assert_eq!(
+        history.activities[0].average_power,
+        Some(Power::from_watts(219))
+    );
+}
+
 async fn import_trends_recording(
     app: &Application,
     user: UserContext,
     source: &garmin_model::identity::Source,
-    sport: garmin_fit::fixture::Sport,
+    bytes: &[u8],
 ) {
     use crate::FitImportRequest;
     use garmin_model::{
@@ -600,14 +631,13 @@ async fn import_trends_recording(
         value::Timestamp,
     };
 
-    let bytes = garmin_fit::fixture::activity(sport).unwrap();
     app.import_fit(FitImportRequest::from_parts(
         user,
         source,
         SourceIdentity::from_string("23".to_owned()).unwrap(),
         AcquisitionOperationId::new_v4(),
         Timestamp::from_jiff(jiff::Timestamp::now()),
-        &bytes,
+        bytes,
     ))
     .await
     .unwrap();
